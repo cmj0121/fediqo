@@ -1,5 +1,8 @@
 # Fediqo
 
+<img src="assets/logo.svg" alt="The Fediqo mark: an octopus in front of a machined chassis"
+     width="128" align="right">
+
 [English](README.md) | [繁體中文](README.zh-TW.md)
 
 > One timeline. Every network.
@@ -26,6 +29,17 @@ Follow multiple timelines, manage conversations, and publish content across plat
 | ----------- | ------------------------------------------------------------------ |
 | native      | Swift on Apple platforms — no web view, no cross-platform runtime |
 | open source | AGPL-3.0, buildable from this checkout, so the claim can be checked |
+
+## The mark
+
+An octopus in front of a machined chassis. One creature with its arms in several places at
+once, which is the whole idea; the metal behind it keeps the slots the timeline was drawn as
+before the creature arrived.
+
+The artwork is in [`assets/`](assets/) — `logo.svg` from 64 px up, `logo-small.svg` below
+that, where every metal edge is snapped to the pixel grid and the arms are thickened so they
+survive at 16 px, and `mascot.svg` for where the creature is the subject rather than the icon.
+[`assets/README.md`](assets/README.md) says why each drawing is the way it is.
 
 ## DDD (Dream-Driven Development)
 

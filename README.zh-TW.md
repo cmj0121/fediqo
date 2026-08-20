@@ -1,5 +1,8 @@
 # Fediqo
 
+<img src="assets/logo.svg" alt="Fediqo 的標誌：機械外殼前的一隻章魚"
+     width="128" align="right">
+
 [English](README.md) | [繁體中文](README.zh-TW.md)
 
 > 一條時間軸，所有網路。
@@ -26,6 +29,15 @@ Fediqo 是開放社群網路的統一客戶端，把散在各處的社群網路�
 | ---------- | ------------------------------------------------------- |
 | 原生       | Apple 平台上的 Swift——沒有 web view，沒有跨平台 runtime |
 | 開放原始碼 | AGPL-3.0，可以從這份 checkout 自己建置，宣稱因此可查證  |
+
+## 標誌
+
+機械外殼前的一隻章魚。一隻生物同時把手伸進好幾個地方，這就是整個構想；牠身後的金屬留著開槽，
+那是章魚出現以前，時間軸被畫成的樣子。
+
+圖稿放在 [`assets/`](assets/)——`logo.svg` 用在 64 px 以上，`logo-small.svg` 用在以下，那張把每一道
+金屬邊界對齊像素格線、並且把觸手加粗，才能在 16 px 存活下來，`mascot.svg` 則用在章魚本身就是主體、
+而不是當 icon 的場合。每張為什麼畫成這樣，寫在 [`assets/README.md`](assets/README.md)。
 
 ## DDD (Dream-Driven Development)
 
