@@ -1,0 +1,68 @@
+import Foundation
+import Testing
+@testable import FediqoCore
+
+/// The timeline is the timeline. A server that will not publish one contributes nothing, and
+/// is never topped up with whatever else it was willing to hand over.
+@Suite("The timeline never stands in something else for itself")
+struct TimelineNoFallbackTests {
+    private func makeServer(_ host: String) -> Server {
+        Server(host: host, socialProtocol: .mastodon, title: host)
+    }
+
+    private func stubbedLoader() -> TimelineLoader {
+        TimelineLoader(registry: SourceRegistry(clients: [.mastodon: MastodonClient(session: stubbedSession())]))
+    }
+
+    @Test("A server that refuses the public timeline yields nothing, and trends are not asked for")
+    func refusalIsNotPapered() async {
+        let host = "refuses.test"
+        stubRoutes.on(host, "/api/v1/timelines/public", status: 401)
+        stubRoutes.on(host, "/api/v1/trends/statuses", status: 200, body: oneStatusJSON)
+
+        let result = await stubbedLoader().load(servers: [makeServer(host)], mode: .timeline)
+
+        #expect(result.posts.isEmpty)
+        #expect(result.failures[host] == SourceFailure.needsSignIn(host))
+        #expect(stubRoutes.paths(for: host) == ["/api/v1/timelines/public"])
+    }
+
+    @Test("One server refusing does not silence the ones that did not")
+    func refusalIsPerServer() async {
+        stubRoutes.on("shut.test", "/api/v1/timelines/public", status: 401)
+        stubRoutes.on("open.test", "/api/v1/timelines/public", status: 200, body: oneStatusJSON)
+
+        let result = await stubbedLoader().load(servers: [makeServer("shut.test"), makeServer("open.test")], mode: .timeline)
+
+        #expect(result.posts.map(\.sources) == [["open.test"]])
+        #expect(result.failures.keys.sorted() == ["shut.test"])
+    }
+
+    @Test("Trending asks for trends, and only for trends")
+    func trendingIsItsOwnRequest() async {
+        let host = "trends.test"
+        stubRoutes.on(host, "/api/v1/trends/statuses", status: 200, body: oneStatusJSON)
+
+        let result = await stubbedLoader().load(servers: [makeServer(host)], mode: .trending)
+
+        #expect(result.posts.count == 1)
+        #expect(stubRoutes.paths(for: host) == ["/api/v1/trends/statuses"])
+    }
+
+    @Test("A server that is simply broken says so as itself, not as a refusal")
+    func brokenIsNotRefusal() async {
+        let host = "broken.test"
+        stubRoutes.on(host, "/api/v1/timelines/public", status: 503)
+
+        let result = await stubbedLoader().load(servers: [makeServer(host)], mode: .timeline)
+
+        #expect(result.failures[host] == SourceFailure.http(503))
+    }
+
+    @Test("Asking with no servers asks nothing of anyone")
+    func noServers() async {
+        let result = await stubbedLoader().load(servers: [], mode: .timeline)
+        #expect(result.isEmpty)
+        #expect(result.failures.isEmpty)
+    }
+}
