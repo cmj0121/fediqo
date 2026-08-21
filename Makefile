@@ -8,12 +8,15 @@ all: $(SUBDIR) 		# default action
 
 clean: $(SUBDIR)	# clean-up environment
 	@find . -name '*.sw[po]' -delete
+	@rm -rf .build
 
 test:				# run test
+	swift test
 
 run:				# run in the local environment
 
 build:				# build the binary/library
+	swift build
 
 upgrade:			# upgrade all the necessary packages
 	pre-commit autoupdate
