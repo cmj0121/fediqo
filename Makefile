@@ -1,4 +1,4 @@
-SUBDIR :=
+SUBDIR := Apps
 
 .PHONY: all clean test run build upgrade help $(SUBDIR)
 
@@ -13,7 +13,7 @@ clean: $(SUBDIR)	# clean-up environment
 test:				# run test
 	swift test
 
-run:				# run in the local environment
+run: $(SUBDIR)		# run in the local environment -- the macOS app
 
 build:				# build the binary/library
 	swift build
