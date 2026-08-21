@@ -7,11 +7,11 @@ subject; the metal behind it — silver panel, dark cut, lit chamfer, gun-metal 
 slot cut through the top and bottom edges — is what the mark was before the creature arrived,
 kept because the slots are where the timeline it came from is still legible.
 
-| File              | Drawn for         | What differs                                                          |
-| ----------------- | ----------------- | --------------------------------------------------------------------- |
-| `logo.svg`        | 64 px and up      | Creature at 1.48×, arms drawn thin enough to curl                     |
-| `logo-small.svg`  | 32 px and below   | Every metal edge on the 64-unit grid; creature at 1.30× with fat arms |
-| `mascot.svg`      | Anywhere it is the subject | The same creature at 0.88 on a rounded plate, arms kept inside |
+| File             | Drawn for                  | What differs                                                          |
+| ---------------- | -------------------------- | --------------------------------------------------------------------- |
+| `logo.svg`       | 64 px and up               | Creature at 1.48×, arms drawn thin enough to curl                     |
+| `logo-small.svg` | 32 px and below            | Every metal edge on the 64-unit grid; creature at 1.30× with fat arms |
+| `mascot.svg`     | Anywhere it is the subject | The same creature at 0.88 on a rounded plate, arms kept inside        |
 
 A 1024-unit canvas drawn at 16 px means **64 units to the pixel**. Anything narrower than
 64 units lands mid-pixel and anti-aliasing turns it into grey, which is why `logo-small.svg`
