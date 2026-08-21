@@ -1,1 +1,6 @@
 *.sw[po]
+.build/
+.swiftpm/
+DerivedData/
+*.xcodeproj
+*.xcworkspace

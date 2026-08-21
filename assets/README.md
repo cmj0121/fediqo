@@ -37,5 +37,12 @@ the edge, and a mascot's are meant to be seen. It is artwork in its own right an
 here rather than derived from `logo.svg`.
 
 These three files are the artwork itself. Nothing here is generated, and nothing here needs
-a tool to build — a raster app icon is rendered from `logo.svg` and `logo-small.svg` when
-there is an app to put one in.
+a tool to build. The app's raster icon is rendered from them into
+`Apps/Shared/Assets.xcassets/`, which is where the generated files live.
+
+The two platforms want different things from the same drawing. iOS masks an icon itself, so
+it gets `logo.svg` at full bleed. macOS does not, so its icon carries its own shape: the mark
+inset to 824 of 1024 and cut to a rounded rectangle, which is the grid every other icon on
+that desktop is drawn to. One consequence is worth writing down — the macOS 16 px icon is
+that rounded mark scaled down, not `logo-small.svg`, because the inset leaves 13 px of
+content and there is no pixel grid left to snap to.
