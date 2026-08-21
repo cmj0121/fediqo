@@ -12,22 +12,57 @@ Follow multiple timelines, manage conversations, and publish content across plat
 
 ## The concept
 
-| Principle            | What it means                                                       |
-| -------------------- | ------------------------------------------------------------------- |
-| client-only          | no server of ours — your device talks to your networks, nobody else |
-| open protocols       | any protocol anyone can implement and host — all of them, in time   |
-| merged, not repeated | one post from several places is one row, not several                |
-| timeline first       | one stream in one order — by hashtag, by author, by servers you needn't join |
-| post once            | one composer, several networks, one entry in your own timeline      |
-| manage what is yours | your posts, and your server where it lets you                       |
-| keep it here         | what you keep, and what you wrote, stays here — untold, unrotated   |
-| work it out here     | trends and summaries from what you kept, computed on your device    |
+| Principle            | What it means                                                                 |
+| -------------------- | ----------------------------------------------------------------------------- |
+| client-only          | no server of ours -- your device talks to your networks, nobody else          |
+| open protocols       | any protocol anyone can implement and host -- all of them, in time            |
+| merged, not repeated | one post from several places is one row, not several                          |
+| timeline first       | one stream in one order -- by hashtag, by author, by servers you needn't join |
+| post once            | one composer, several networks, one entry in your own timeline                |
+| manage what is yours | your posts, and your server where it lets you                                 |
+| keep it here         | what you keep, and what you wrote, stays here -- untold, unrotated            |
+| work it out here     | trends and summaries from what you kept, computed on your device              |
+
+## How it works
+
+```text
+     servers you read                                servers you post to
+   several, any protocol,                            the ones you chose,
+   some you never joined                           each told exactly once
+             |                                                ^
+             v                                                |
+  +----------+------------------------------------------------+-----+
+  |  your device, and nothing else                            |     |
+  |         |                                                 |     |
+  |         v                                                 |     |
+  |  one shape --> merge --> your rules --> one timeline      |     |
+  |                  ^                                        |     |
+  |                  |  the same post from two servers is     |     |
+  |                  |  one row; nothing is ranked, only      |     |
+  |                  |  ordered, and only by rules you wrote  |     |
+  |                                                           |     |
+  |  what you keep --> stays here, unrotated --> trends       |     |
+  |                      and digests, worked out here         |     |
+  |                                                           |     |
+  |  what you write --> Composer --> once per server ---------+     |
+  |                                                                 |
+  +-----------------------------------------------------------------+
+```
+
+Everything inside the box happens on your device. There is no Fediqo server for any of it to pass through,
+which is the whole of the privacy claim — no more, and no less.
+
+Several servers go in and one timeline comes out, so a post read from two of them is one row rather than two.
+Nothing is scored or re-ordered on the way: the only thing between what arrived and what you see is a rule you
+wrote. What you keep stops rotating out, and the trends and digests are computed from it here, where it already
+is. What you write goes back out through the same door — once to each network you chose, and the timeline says
+so rather than pretending it was one post.
 
 ## How it is built
 
-| Practice    | What it means                                                     |
-| ----------- | ------------------------------------------------------------------ |
-| native      | Swift on Apple platforms — no web view, no cross-platform runtime |
+| Practice    | What it means                                                       |
+| ----------- | ------------------------------------------------------------------- |
+| native      | Swift on Apple platforms -- no web view, no cross-platform runtime  |
 | open source | AGPL-3.0, buildable from this checkout, so the claim can be checked |
 
 ## The mark
