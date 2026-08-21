@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests and coverage
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show the toolchain
+        run: swift --version
+
+      # The gate is 85% of the lines in Sources/FediqoCore. FediqoUI is excluded on
+      # purpose and the script says why -- it is view bodies this package cannot execute,
+      # so counting them would measure how much of the app is a view, not how well it is
+      # tested. A UI test target gets its own gate rather than being folded into this one.
+      - name: Tests, and the coverage they leave behind
+        run: ./scripts/coverage.sh 85
+
+  build:
+    name: Both apps, from a clean checkout
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      # #10 asks that nothing be needed beyond this checkout and one brew install.
+      # If this line ever grows a second install, that promise has been broken.
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: macOS
+        run: make -C Apps mac
+
+      - name: iOS
+        run: make -C Apps ios
+        env:
+          IOS_DEVICE: iPhone 16
+
+  lint:
+    name: Hooks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pre-commit
+      - run: pre-commit run --all-files --show-diff-on-failure
