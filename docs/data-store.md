@@ -59,14 +59,17 @@ the query whatever holds the value.
 Reading preferences synchronously also means the app survives a database that will not open: **that is a
 screen, not a crash**, and the screen has to be readable in the right language.
 
-## Three layers
+## Four layers
 
 ```text
 network   what a server handed over. A refresh writes; only an authority edits.
-          protocols, servers, accounts, posts, tags, post_tags
+          protocols, servers, accounts, posts, tags, post_tags, server_trends
 
 local     what you decided, and can withdraw. Only you.
           servers.selected_at, servers.position, tags.followed_at, tags.muted_at
+
+record    what was counted here, and kept after the rows it counted are purged.
+          tag_buckets
 
 derived   a droppable index.
           posts_fts
@@ -82,19 +85,24 @@ One arrow per foreign key, pointing at the table it references:
          ├───────────────────────┬───────────────────┐
    ┌─────┴─────┐ server_url ┌────┴─────┐             │
    │  servers  │◄───────────┤ accounts │             │ proto
-   └─────▲─────┘            └────▲─────┘             │
-         │ authority_url         │ author_id         │
-         │ source_url            │ boosted_by        │
-         │                  ┌────┴────┐              │
-         └──────────────────┤  posts  ├──────────────┘
-                            └────▲────┘
-                                 │ merge_key
-                           ┌─────┴─────┐  tag  ┌──────┐
-                           │ post_tags ├──────►│ tags │
-                           └───────────┘       └──────┘
+   └──▲──▲─────┘            └────▲─────┘             │
+      │  │ authority_url         │ author_id         │
+      │  │ source_url            │ boosted_by        │
+      │  │                  ┌────┴────┐              │
+      │  └──────────────────┤  posts  ├──────────────┘
+      │                     └─▲──▲──▲─┘
+      │ source_url   merge_key │  │  │ merge_key
+   ┌──┴───────────────┐        │  │  │        ┌───────────┐  tag  ┌──────┐
+   │  server_trends   ├────────┘  │  └────────┤ post_tags ├──────►│ tags │
+   └──────────────────┘           │           └───────────┘       └──▲───┘
+                                  │ id                               │ tag
+                            ┌─────┴─────┐                    ┌───────┴─────┐
+                            │ posts_fts │  (not a FK)        │ tag_buckets │
+                            └───────────┘                    └─────────────┘
 
    not FKs    posts.in_reply_to_uri ──► posts.uri, matched at read time
               posts_fts.rowid = posts.id, kept in step by the triggers
+              tag_buckets counts post_tags × posts, and keeps the count after a purge
 ```
 
 A local decision is never a column a refresh writes. It does sit on a network table — `servers` carries
@@ -238,6 +246,28 @@ precedent: local columns on a network table, which a refresh writes `display` in
 An authoritative edit replaces the post's whole tag set, the same way it replaces the text. A
 non-authoritative source that disagrees changes nothing — the same rule as every other field.
 
+## Trends are two things
+
+A server can say a post is trending, and the store can count for itself. They are different facts, in
+different layers, and they are kept apart:
+
+| table           | layer   | what a row says                                                        |
+| --------------- | ------- | ---------------------------------------------------------------------- |
+| `server_trends` | network | server `source_url` listed post `merge_key` at `rank`, between `first_seen_at` and `last_seen_at` |
+| `tag_buckets`   | record  | in the hour starting `bucket_at`, `tag` was carried by `posts` posts from `authors` authors |
+
+`server_trends` is what a server handed over, so it obeys the network rules: keyed `(source_url, merge_key)`,
+`first_seen_at` written once, `last_seen_at` touched on every sighting, and `ON DELETE CASCADE` from `posts`
+because a trend for a post that is gone says nothing. The Trending screen is `posts ⋈ server_trends` on
+`server_trends_recent` — `WHERE last_seen_at` is recent, `ORDER BY rank` — and it reads the store, not the
+network, so it works offline and a stale row simply drops off the screen.
+
+`tag_buckets` is the third layer, **record**, and the reason it exists is that it outlives what it counted.
+At the end of each refresh the bucket for the current hour is rewritten from `post_tags` × `posts`, and no
+bucket is touched again after its hour closes. A purge deletes the posts; the bucket keeps the count. A trend
+is then one window summed against the one before it, over `tag_buckets_by_tag`, and `authors` is there
+because one voice posting two hundred times is not a trend.
+
 ## What counts as the same post
 
 Two tiers, first match wins:
@@ -303,8 +333,9 @@ rewritten, the same as every other network field. The timeline reads past it wit
 NULL`, and the partial index `posts_deleted` finds the marked rows without scanning the rest.
 
 Purging a marked row is **the one `DELETE` the store performs**, and it runs only by policy — a routine sweep,
-or the database growing past a size — never as part of a refresh. `post_tags` goes with it by `ON DELETE
-CASCADE`; the trigger takes the row out of `posts_fts`.
+or the database growing past a size — never as part of a refresh. `post_tags` and `server_trends` go with it
+by `ON DELETE CASCADE`; the trigger takes the row out of `posts_fts`. `tag_buckets` is left alone: the count
+was taken while the post was here, and a purge does not unsay it.
 
 After a purge, a server that hands the post over again gets a new row. That is accepted: the store never
 promised to remember what it chose to forget, and a tombstone kept for ever would be the rotation problem in
@@ -404,12 +435,21 @@ is already there.
      replace post_tags for this post if an authority edited it
               │
               ▼
+     UPSERT server_trends ── if H listed it as trending: rank and last_seen_at
+              │               move, first_seen_at does not
+              ▼
      trigger keeps posts_fts in step  ──▶  COMMIT
+              │
+              ▼
+     rewrite tag_buckets for the current hour ── once, after every post of the
+                                                 refresh is in
 ```
 
 One transaction per refresh, not per post. Nothing on the way scans a table: `merge_key` is `UNIQUE`,
 `servers.url`, `accounts.author_id` and `tags.tag` are primary keys, and the reply lookup is
-`posts_by_uri`.
+`posts_by_uri`. The order is fixed by the foreign keys — `protocols` → `servers` → `accounts` → `posts` →
+`tags` → `post_tags` → `server_trends` — and `tag_buckets` comes last because it counts what the refresh
+just wrote.
 
 ## Reading
 
@@ -441,6 +481,16 @@ One transaction per refresh, not per post. Nothing on the way scans a table: `me
 Four filters, four indexes: tags on `post_tags_by_tag`, servers on `posts_by_source`, authors on
 `posts_by_author_time`, keywords on `posts_fts`. The spine is in the middle, and nothing joined to it today
 is anything but what a network handed over.
+
+Trending is two more reads, neither of which touches the network:
+
+```text
+   server said    posts ⋈ server_trends  WHERE last_seen_at > ?  ORDER BY rank
+                  server_trends_recent; a row that stops being seen drops off
+
+   counted here   tag_buckets  WHERE tag = ? AND bucket_at >= ?
+                  tag_buckets_by_tag; this window's posts and authors summed against the last
+```
 
 ## Still open
 

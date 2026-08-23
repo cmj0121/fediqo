@@ -54,14 +54,17 @@ Migration 遵守同一條規則：只增不減。只有 `CREATE`、`ADD COLUMN`�
 
 同步讀偏好也讓 app 撐得過開不起來的資料庫：**那是一個畫面，不是 crash**，而那個畫面得用對的語言寫。
 
-## 三層
+## 四層
 
 ```text
 network   伺服器交過來的。刷新寫入；只有權威方改得動內容。
-          protocols、servers、accounts、posts、tags、post_tags
+          protocols、servers、accounts、posts、tags、post_tags、server_trends
 
 local     你決定的，可以撤回。只有你動得了。
           servers.selected_at、servers.position、tags.followed_at、tags.muted_at
+
+record    在這裡數出來的，而且被數的列清掉之後它還留著。
+          tag_buckets
 
 derived   可以丟掉的索引。
           posts_fts
@@ -77,19 +80,24 @@ derived   可以丟掉的索引。
          ├───────────────────────┬───────────────────┐
    ┌─────┴─────┐ server_url ┌────┴─────┐             │
    │  servers  │◄───────────┤ accounts │             │ proto
-   └─────▲─────┘            └────▲─────┘             │
-         │ authority_url         │ author_id         │
-         │ source_url            │ boosted_by        │
-         │                  ┌────┴────┐              │
-         └──────────────────┤  posts  ├──────────────┘
-                            └────▲────┘
-                                 │ merge_key
-                           ┌─────┴─────┐  tag  ┌──────┐
-                           │ post_tags ├──────►│ tags │
-                           └───────────┘       └──────┘
+   └──▲──▲─────┘            └────▲─────┘             │
+      │  │ authority_url         │ author_id         │
+      │  │ source_url            │ boosted_by        │
+      │  │                  ┌────┴────┐              │
+      │  └──────────────────┤  posts  ├──────────────┘
+      │                     └─▲──▲──▲─┘
+      │ source_url   merge_key │  │  │ merge_key
+   ┌──┴───────────────┐        │  │  │        ┌───────────┐  tag  ┌──────┐
+   │  server_trends   ├────────┘  │  └────────┤ post_tags ├──────►│ tags │
+   └──────────────────┘           │           └───────────┘       └──▲───┘
+                                  │ id                               │ tag
+                            ┌─────┴─────┐                    ┌───────┴─────┐
+                            │ posts_fts │  (not a FK)        │ tag_buckets │
+                            └───────────┘                    └─────────────┘
 
    不是外鍵   posts.in_reply_to_uri ──► posts.uri，讀取時比對
               posts_fts.rowid = posts.id，由 trigger 保持同步
+              tag_buckets 數的是 post_tags × posts，清掉之後數字仍留著
 ```
 
 本地的決定永遠不是刷新會寫的欄位。它確實掛在 network 表上 —— `servers` 帶著 `selected_at` 與 `position`，
@@ -223,6 +231,26 @@ network 表上的本地欄位，刷新只寫 `display`，永遠不碰它們。
 權威方的編輯會把整組 tag 換掉，和換掉內文是同一件事。非權威方而不一致時，什麼都不改 —— 和其他每一個欄位
 同一條規則。
 
+## Trend 是兩件事
+
+伺服器可以說某則貼文正在流行，儲存層也可以自己數。這是兩個不同的事實，在不同的層，刻意分開放：
+
+| 表              | 層      | 一列說的是什麼                                                         |
+| --------------- | ------- | ---------------------------------------------------------------------- |
+| `server_trends` | network | 伺服器 `source_url` 把貼文 `merge_key` 列在第 `rank` 名，從 `first_seen_at` 到 `last_seen_at` |
+| `tag_buckets`   | record  | 從 `bucket_at` 起的那一小時，`tag` 被 `posts` 則貼文帶著，來自 `authors` 個不同作者 |
+
+`server_trends` 是伺服器交過來的，所以遵守 network 的規則：以 `(source_url, merge_key)` 為鍵，
+`first_seen_at` 寫一次，`last_seen_at` 每次看到就更新，並且從 `posts` `ON DELETE CASCADE` —— 貼文已經不在，
+它的 trend 也就什麼都不代表。Trending 畫面是 `posts ⋈ server_trends`，走 `server_trends_recent` ——
+`WHERE last_seen_at` 夠新、`ORDER BY rank` —— 讀的是儲存層不是網路，所以離線也能用，過期的列只是從畫面上
+消失。
+
+`tag_buckets` 是第三層 **record**，它存在的理由就是：它比它數的東西活得久。每次刷新結束時，當前這一小時的
+bucket 會從 `post_tags` × `posts` 重算一遍，而一小時過去之後，那個 bucket 就再也不動。清除會刪掉貼文；bucket
+留著數字。一個 trend 是一個時間窗和前一個時間窗相減，走 `tag_buckets_by_tag`；而 `authors` 之所以在，是因
+為一個人發兩百則不算 trend。
+
 ## 什麼算是同一則貼文
 
 兩層，取第一個成立的：
@@ -286,8 +314,8 @@ network 表上的本地欄位，刷新只寫 `display`，永遠不碰它們。
 其餘的。
 
 清掉做了記號的列是**儲存層唯一會執行的 `DELETE`**，而且只依 policy 跑 —— 例行掃除，或資料庫長過某個大
-小 —— 永遠不在刷新裡發生。`post_tags` 透過 `ON DELETE CASCADE` 一起走；trigger 把那一列從 `posts_fts` 拿
-掉。
+小 —— 永遠不在刷新裡發生。`post_tags` 與 `server_trends` 透過 `ON DELETE CASCADE` 一起走；trigger 把那一列
+從 `posts_fts` 拿掉。`tag_buckets` 不動：數字是貼文還在的時候數的，清除不會把它收回。
 
 清掉之後，若有伺服器再把那則交過來，它會是一列新的。這是可以接受的：儲存層從沒承諾記得它選擇忘掉的東
 西，而一塊永遠留著的墓碑只是換個形狀的 rotation 問題。
@@ -382,11 +410,20 @@ network 表上的本地欄位，刷新只寫 `display`，永遠不碰它們。
      若是權威方的編輯，整組換掉這則的 post_tags
               │
               ▼
+     UPSERT server_trends ── 若 H 把它列為 trending：rank 與 last_seen_at
+              │               會動，first_seen_at 不會
+              ▼
      trigger 讓 posts_fts 跟上  ──▶  COMMIT
+              │
+              ▼
+     重算當前這一小時的 tag_buckets ── 只做一次，在這次刷新的每一則
+                                       都進去之後
 ```
 
 一次刷新一個 transaction，不是一則一個。沿路沒有任何一步掃表：`merge_key` 是 `UNIQUE`，`servers.url`、
-`accounts.author_id` 與 `tags.tag` 是主鍵，查回覆走 `posts_by_uri`。
+`accounts.author_id` 與 `tags.tag` 是主鍵，查回覆走 `posts_by_uri`。順序由外鍵決定 —— `protocols` →
+`servers` → `accounts` → `posts` → `tags` → `post_tags` → `server_trends` —— 而 `tag_buckets` 排最後，因為
+它數的就是這次刷新剛寫進去的東西。
 
 ## 讀取
 
@@ -417,6 +454,16 @@ network 表上的本地欄位，刷新只寫 `display`，永遠不碰它們。
 
 四種篩選、四個索引：tag 走 `post_tags_by_tag`，伺服器走 `posts_by_source`，作者走
 `posts_by_author_time`，關鍵字走 `posts_fts`。主幹在中間，而今天接在它身上的，沒有一樣不是網路交過來的。
+
+Trending 是另外兩種讀取，兩者都不碰網路：
+
+```text
+   伺服器說的   posts ⋈ server_trends  WHERE last_seen_at > ?  ORDER BY rank
+                走 server_trends_recent；不再被看到的列就從畫面上消失
+
+   這裡數的     tag_buckets  WHERE tag = ? AND bucket_at >= ?
+                走 tag_buckets_by_tag；這個時間窗的 posts 與 authors 和上一個相減
+```
 
 ## 還沒定的
 

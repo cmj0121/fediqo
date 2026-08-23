@@ -5,12 +5,15 @@
 --   * every *_at is INTEGER milliseconds; every table has created_at / updated_at and is STRICT
 --   * a set that may grow is a lookup table, not a CHECK
 --   * servers are keyed by normalised endpoint URL (https://…, wss://…), not hostname
---   * writes go protocols -> servers -> accounts -> posts -> tags -> post_tags
+--   * writes go protocols -> servers -> accounts -> posts -> tags -> post_tags -> server_trends,
+--     then tag_buckets once the refresh is done
 --   * PRAGMA foreign_keys = ON
 --   * a column added later is never backfilled, so posts keeps every network field now;
 --     a table added later costs nothing, so everything else waits until it is needed
 --   * a post the remote deletes is marked with deleted_at, never rewritten; purging a marked
 --     row is the one DELETE the store performs, and only by policy (routine or size)
+--   * trends are two things: what a server said (server_trends, network) and what is counted
+--     here (tag_buckets, a record that outlives the posts it counted)
 --   * <undecided>: the FTS tokenizer
 --
 -- ── relations — one arrow per FOREIGN KEY, pointing at the referenced table ────
@@ -22,22 +25,30 @@
 --          ├───────────────────────┬───────────────────┐
 --    ┌─────┴─────┐ server_url ┌────┴─────┐             │
 --    │  servers  │◄───────────┤ accounts │             │ proto
---    └─────▲─────┘            └────▲─────┘             │
---          │ authority_url         │ author_id         │
---          │ source_url            │ boosted_by        │
---          │                  ┌────┴────┐              │
---          └──────────────────┤  posts  ├──────────────┘
---                             └────▲────┘
---                                  │ merge_key
---                            ┌─────┴─────┐  tag  ┌──────┐
---                            │ post_tags ├──────►│ tags │
---                            └───────────┘       └──────┘
+--    └──▲──▲─────┘            └────▲─────┘             │
+--       │  │ authority_url         │ author_id         │
+--       │  │ source_url            │ boosted_by        │
+--       │  │                  ┌────┴────┐              │
+--       │  └──────────────────┤  posts  ├──────────────┘
+--       │                     └─▲──▲──▲─┘
+--       │ source_url   merge_key │  │  │ merge_key
+--    ┌──┴───────────────┐        │  │  │        ┌───────────┐  tag  ┌──────┐
+--    │  server_trends   ├────────┘  │  └────────┤ post_tags ├──────►│ tags │
+--    └──────────────────┘           │           └───────────┘       └──▲───┘
+--                                   │ id                               │ tag
+--                             ┌─────┴─────┐                    ┌───────┴─────┐
+--                             │ posts_fts │  (not a FK)        │ tag_buckets │
+--                             └───────────┘                    └─────────────┘
 --
 --    not FKs    posts.in_reply_to_uri ──► posts.uri, matched at read time
 --               posts_fts.rowid = posts.id, kept in step by the triggers
+--               tag_buckets counts post_tags × posts, and keeps the count after a purge
 --
 --    filters    tags → post_tags_by_tag   servers → posts_by_source
 --               authors → posts_by_author_time   keywords → posts_fts
+--
+--    trends     server said → server_trends ⋈ posts_by_time, stale rows drop off the screen
+--               counted here → tag_buckets, a window summed against the one before it
 --
 --    later      notifications, identities / account_aliases, merge hints and
 --               resolutions, post_divergences: each a new table hung off the spine
@@ -128,6 +139,34 @@ CREATE TABLE post_tags (
     PRIMARY KEY (merge_key, tag)
 ) STRICT;
 CREATE INDEX post_tags_by_tag ON post_tags(tag);
+
+-- A server said this post was trending. The Trending screen reads this, so it works offline.
+CREATE TABLE server_trends (
+    source_url    TEXT    NOT NULL REFERENCES servers(url),
+    merge_key     TEXT    NOT NULL REFERENCES posts(merge_key) ON DELETE CASCADE,
+    rank          INTEGER NOT NULL,                         -- position in the list, as handed over
+    first_seen_at INTEGER NOT NULL,
+    last_seen_at  INTEGER NOT NULL,                         -- stale rows drop off the screen
+    created_at    INTEGER NOT NULL,
+    updated_at    INTEGER,
+    PRIMARY KEY (source_url, merge_key)
+) STRICT;
+CREATE INDEX server_trends_recent ON server_trends(last_seen_at DESC, rank);
+
+-- ── record — counted here, and kept after the rows it counted are purged ────
+
+-- Tag counts per hour, from post_tags × posts, rewritten for the current hour at the end of
+-- each refresh and never touched again. A trend is a window summed against the one before it.
+CREATE TABLE tag_buckets (
+    bucket_at  INTEGER NOT NULL,                            -- hour start, ms
+    tag        TEXT    NOT NULL REFERENCES tags(tag),
+    posts      INTEGER NOT NULL,
+    authors    INTEGER NOT NULL,                            -- distinct author_id; one voice is not a trend
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER,
+    PRIMARY KEY (bucket_at, tag)
+) STRICT;
+CREATE INDEX tag_buckets_by_tag ON tag_buckets(tag, bucket_at DESC);
 
 -- ── derived — droppable ─────────────────────────────────────────────────────
 
