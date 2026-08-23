@@ -62,7 +62,8 @@ let oneStatusJSON = """
   "url": "https://example/@a/1",
   "created_at": "2026-08-21T10:00:00.000Z",
   "content": "<p>hello</p>",
-  "account": { "username": "a", "acct": "a", "display_name": "Ada", "avatar": null },
-  "media_attachments": []
+  "account": { "id": "10", "url": "https://example/@a", "username": "a", "acct": "a", "display_name": "Ada", "avatar": null },
+  "media_attachments": [],
+  "tags": []
 }]
 """
