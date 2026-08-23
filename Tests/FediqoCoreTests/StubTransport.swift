@@ -54,6 +54,16 @@ func stubbedSession() -> URLSession {
     return URLSession(configuration: configuration)
 }
 
+/// A Mastodon server the stub answers for.
+func makeServer(_ host: String) -> Server {
+    Server(host: host, socialProtocol: .mastodon, title: host)
+}
+
+/// A loader that only speaks Mastodon, through the stub.
+func stubbedLoader(store: LocalStore? = nil) -> TimelineLoader {
+    TimelineLoader(registry: SourceRegistry(clients: [.mastodon: MastodonClient(session: stubbedSession())]), store: store)
+}
+
 /// One status, enough to prove a list came back.
 let oneStatusJSON = """
 [{

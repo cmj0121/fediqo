@@ -10,8 +10,6 @@ import GRDB
 /// from it, so the two cannot disagree.
 @MainActor
 public final class SQLiteServerStore: ServerStore {
-    private static let defaultsKey = "fediqo.servers"
-
     private let store: LocalStore
     private var cache: [Server] = []
 
@@ -50,7 +48,7 @@ public final class SQLiteServerStore: ServerStore {
         let url = server.endpoint
         let ms = LocalStore.milliseconds(server.addedAt)
         let title = server.title == server.host ? nil : server.title
-        try LocalStore.upsertServer(db, url: url, proto: server.socialProtocol.storeProto, title: title, now: ms)
+        try LocalStore.upsertServer(db, .init(url: url, proto: server.socialProtocol.storeProto, title: title), now: ms)
         try db.execute(sql: """
             UPDATE servers
             SET selected_at = ?, position = (SELECT coalesce(max(position), -1) + 1 FROM servers)
@@ -58,37 +56,41 @@ public final class SQLiteServerStore: ServerStore {
             """, arguments: [ms, url])
     }
 
-    /// A change that fails is logged and leaves the list as the database has it: the protocol
-    /// cannot throw, and a list that says more than is stored would be the worse answer.
+    /// A change and the list it leaves, in one write. A change that fails is logged and leaves
+    /// the copy as it was: the protocol cannot throw, and a list that says more than is
+    /// stored would be the worse answer.
     private func perform(_ what: String, _ block: (Database) throws -> Void) {
         do {
-            try store.writeSync(block)
+            cache = try store.writeSync { db in
+                try block(db)
+                return try Self.selected(db)
+            }
         } catch {
             LocalStore.log.error("server list: \(what, privacy: .public) failed: \(String(describing: error), privacy: .public)")
         }
-        reload()
     }
 
     private func reload() {
         do {
-            cache = try store.readSync { db in
-                try Row.fetchAll(db, sql: """
-                    SELECT host, proto, title, selected_at FROM servers
-                    WHERE selected_at IS NOT NULL
-                    ORDER BY position, selected_at
-                    """).map { row in
-                    Server(host: row["host"], socialProtocol: SocialProtocol(storeProto: row["proto"]),
-                           title: row["title"] ?? "",
-                           addedAt: Date(timeIntervalSince1970: Double(row["selected_at"] as Int64) / 1000))
-                }
-            }
+            cache = try store.readSync(Self.selected)
         } catch {
             LocalStore.log.error("server list: read failed: \(String(describing: error), privacy: .public)")
         }
     }
 
+    private static func selected(_ db: Database) throws -> [Server] {
+        try Row.fetchAll(db, sql: """
+            SELECT host, proto, title, selected_at FROM servers
+            WHERE selected_at IS NOT NULL
+            ORDER BY position, selected_at
+            """).map { row in
+            Server(host: row["host"], socialProtocol: SocialProtocol(storeProto: row["proto"]),
+                   title: row["title"] ?? "", addedAt: LocalStore.date(row["selected_at"]))
+        }
+    }
+
     private func importFromDefaults(_ defaults: UserDefaults) {
-        guard let data = defaults.data(forKey: Self.defaultsKey) else { return }
+        guard let data = defaults.data(forKey: UserDefaultsServerStore.defaultsKey) else { return }
         do {
             let chosen = try store.readSync { db in
                 try Int.fetchOne(db, sql: "SELECT count(*) FROM servers WHERE selected_at IS NOT NULL") ?? 0
@@ -105,6 +107,6 @@ public final class SQLiteServerStore: ServerStore {
         } catch {
             LocalStore.log.error("server list: import from UserDefaults failed: \(String(describing: error), privacy: .public)")
         }
-        defaults.removeObject(forKey: Self.defaultsKey)
+        defaults.removeObject(forKey: UserDefaultsServerStore.defaultsKey)
     }
 }

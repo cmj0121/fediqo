@@ -12,7 +12,6 @@ final class FeedModel {
     private var loadedFor: [String] = []
 
     private let loader: TimelineLoader
-    private var openedFromStore = false
 
     init(mode: FeedMode, loader: TimelineLoader = TimelineLoader()) {
         self.mode = mode
@@ -20,14 +19,12 @@ final class FeedModel {
     }
 
     /// Reloads only when the set of servers actually changed, so switching rails does not
-    /// re-ask every server every time. The first time, what the store holds is shown before
-    /// any server is asked; a store that cannot be read is simply skipped on the way there.
+    /// re-ask every server every time. Before the first load, what the store holds is shown
+    /// before any server is asked; a store that cannot be read is simply skipped on the way there.
     func loadIfNeeded(servers: [Server]) async {
-        if !openedFromStore {
-            openedFromStore = true
-            if let stored = try? await loader.stored(mode: mode), !stored.isEmpty {
-                result = TimelineResult(posts: stored, failures: [:])
-            }
+        if loadedFor.isEmpty, result.isEmpty,
+           let stored = try? await loader.stored(mode: mode), !stored.isEmpty {
+            result = TimelineResult(posts: stored, failures: [:])
         }
         let signature = servers.map(\.id).sorted()
         guard signature != loadedFor || result.isEmpty else { return }

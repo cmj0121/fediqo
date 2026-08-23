@@ -1,6 +1,5 @@
 import Observation
 import SwiftUI
-import os
 import FediqoCore
 
 enum Route: Hashable {
@@ -89,7 +88,7 @@ public final class AppState {
     private let feeds: [FeedMode: FeedModel]
 
     public convenience init() {
-        self.init(store: Self.openStore(), launch: .fromEnvironment())
+        self.init(store: LocalStore.openDefault(), launch: .fromEnvironment())
     }
 
     init(preferences: Preferences = Preferences(), serverStore: (any ServerStore)? = nil,
@@ -109,25 +108,6 @@ public final class AppState {
         self.composing = launch.composing
         self.holdsLanding = launch.holdsLanding
         L10n.use(preferences.language)
-    }
-
-    /// The database at `<Application Support>/Fediqo/store.sqlite`. The store never blocks the
-    /// screen: a file that is not a database is set aside and replaced; anything else means the
-    /// app runs without a store and simply remembers nothing.
-    private static func openStore() -> LocalStore? {
-        var path = "<Application Support>/Fediqo/store.sqlite"
-        do {
-            let directory = try FileManager.default
-                .url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-                .appending(path: "Fediqo", directoryHint: .isDirectory)
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            path = directory.appending(path: "store.sqlite").path(percentEncoded: false)
-            return try LocalStore.openRecovering(path: path)
-        } catch {
-            Logger(subsystem: "fediqo", category: "store")
-                .error("could not open \(path, privacy: .public): \(String(describing: error), privacy: .public)")
-            return nil
-        }
     }
 
     func feed(for mode: FeedMode) -> FeedModel {

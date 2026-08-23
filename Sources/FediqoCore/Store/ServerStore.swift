@@ -15,13 +15,15 @@ public protocol ServerStore: AnyObject {
 
 @MainActor
 public final class UserDefaultsServerStore: ServerStore {
+    /// The one key, named once: `SQLiteServerStore` reads it to take the list over.
+    static let defaultsKey = "fediqo.servers"
+
     private let defaults: UserDefaults
-    private let key = "fediqo.servers"
     private var cache: [Server]
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        if let data = defaults.data(forKey: key), let decoded = try? JSONDecoder().decode([Server].self, from: data) {
+        if let data = defaults.data(forKey: Self.defaultsKey), let decoded = try? JSONDecoder().decode([Server].self, from: data) {
             cache = decoded
         } else {
             cache = []
@@ -48,6 +50,6 @@ public final class UserDefaultsServerStore: ServerStore {
 
     private func flush() {
         guard let data = try? JSONEncoder().encode(cache) else { return }
-        defaults.set(data, forKey: key)
+        defaults.set(data, forKey: Self.defaultsKey)
     }
 }

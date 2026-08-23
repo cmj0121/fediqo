@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 @testable import FediqoCore
 
 /// A post with only the fields a test cares about filled in. Shared so two suites cannot
@@ -11,6 +12,9 @@ func makePost(
     originURI: String? = nil,
     at seconds: TimeInterval,
     from host: String = "one.example",
+    socialProtocol: SocialProtocol = .mastodon,
+    authorId: String? = nil,
+    text: String = "hello",
     boostedBy: String? = nil,
     tags: [String] = [],
     media: [String] = []
@@ -18,17 +22,29 @@ func makePost(
     Post(
         uri: uri,
         originURI: originURI,
-        socialProtocol: .mastodon,
+        socialProtocol: socialProtocol,
         sourceURL: "https://\(host)",
         createdAt: Date(timeIntervalSince1970: seconds),
-        authorId: "https://\(host)/users/someone",
+        authorId: authorId ?? "https://\(host)/users/someone",
         authorName: "someone",
         authorHandle: "@someone@\(host)",
-        text: "hello",
+        text: text,
         mediaURLs: media.compactMap(URL.init(string:)),
         tags: tags,
         boostedBy: boostedBy,
         boostedById: boostedBy.map { "https://booster.example/users/\($0)" },
         sources: [host]
     )
+}
+
+/// One number out of the store — a count, or any single-column, single-row answer.
+func count(_ store: LocalStore, _ sql: String, _ arguments: StatementArguments = []) async throws -> Int {
+    try await store.read { db in try Int.fetchOne(db, sql: sql, arguments: arguments) ?? 0 }
+}
+
+/// A fresh directory of its own, for a store that has to live in a file.
+func scratchDirectory() throws -> URL {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("fediqo-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    return directory
 }

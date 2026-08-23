@@ -6,20 +6,8 @@ import Testing
 /// What a load hands over, the store keeps — and nothing a server refused to give.
 @Suite("A load leaves its posts in the store")
 struct TimelinePersistenceTests {
-    private func makeServer(_ host: String) -> Server {
-        Server(host: host, socialProtocol: .mastodon, title: host)
-    }
-
-    private func stubbedLoader(store: LocalStore? = nil) -> TimelineLoader {
-        TimelineLoader(registry: SourceRegistry(clients: [.mastodon: MastodonClient(session: stubbedSession())]), store: store)
-    }
-
     private func tableLoader(_ lists: [String: [Post]], store: LocalStore) -> TimelineLoader {
         TimelineLoader(registry: SourceRegistry(clients: [.mastodon: TableClient(lists: lists)]), store: store)
-    }
-
-    private func count(_ store: LocalStore, _ sql: String) async throws -> Int {
-        try await store.read { db in try Int.fetchOne(db, sql: sql) ?? 0 }
     }
 
     @Test("A successful load is read back from the store, and loading again does not double it")
@@ -73,7 +61,7 @@ struct TimelinePersistenceTests {
         let host = "quiet.test"
         let store = try LocalStore.inMemory()
         let posts = [makePost(uri: "https://a.example/2", at: 200, from: host), makePost(uri: "https://a.example/1", at: 100, from: host)]
-        try await store.save(posts, from: makeServer(host), mode: .timeline)
+        try await store.save(posts, from: makeServer(host))
 
         #expect(try await stubbedLoader(store: store).stored(mode: .timeline) == posts)
         #expect(stubRoutes.paths(for: host).isEmpty)
@@ -83,7 +71,7 @@ struct TimelinePersistenceTests {
     func storeFailureIsReported() async throws {
         let store = try LocalStore.inMemory()
         let loader = tableLoader([
-            "nameless.test": [nameless(uri: "https://x.example/1", from: "nameless.test")],
+            "nameless.test": [makePost(uri: "https://x.example/1", at: 50, from: "nameless.test", authorId: "")],
             "fine.test": [makePost(uri: "https://a.example/1", at: 100, from: "fine.test")],
         ], store: store)
 
@@ -123,12 +111,6 @@ struct TimelinePersistenceTests {
         #expect(try await loader.stored(mode: .timeline).isEmpty)
         #expect(try await loader.stored(mode: .trending).isEmpty)
     }
-}
-
-/// A post the store refuses: no author.
-private func nameless(uri: String, from host: String) -> Post {
-    Post(uri: uri, socialProtocol: .mastodon, sourceURL: "https://\(host)", createdAt: Date(timeIntervalSince1970: 50),
-         authorId: "", authorName: "", authorHandle: "", text: "hello", sources: [host])
 }
 
 /// A client that hands each host its own list, for both the timeline and trending.

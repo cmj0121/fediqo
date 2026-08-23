@@ -64,7 +64,7 @@ struct StoreTests {
         let store = SQLiteServerStore(store: local, defaults: scratch("keep-import"))
         let one = Server(host: "one.example", socialProtocol: .mastodon)
         store.add(one)
-        try await local.save([makePost(uri: "https://one.example/1", at: 100)], from: one, mode: .timeline)
+        try await local.save([makePost(uri: "https://one.example/1", at: 100)], from: one)
 
         store.remove(one)
 
@@ -82,7 +82,7 @@ struct StoreTests {
     func postPathDoesNotSelect() async throws {
         let local = try LocalStore.inMemory()
         let one = Server(host: "one.example", socialProtocol: .mastodon, title: "One")
-        try await local.save([makePost(uri: "https://one.example/1", at: 100)], from: one, mode: .timeline)
+        try await local.save([makePost(uri: "https://one.example/1", at: 100)], from: one)
 
         let store = SQLiteServerStore(store: local, defaults: scratch("unselected-import"))
         #expect(store.servers.isEmpty)
@@ -96,7 +96,7 @@ struct StoreTests {
     func titleIsNotClobbered() async throws {
         let local = try LocalStore.inMemory()
         let one = Server(host: "one.example", socialProtocol: .mastodon, title: "One")
-        try await local.save([makePost(uri: "https://one.example/1", at: 100)], from: one, mode: .timeline)
+        try await local.save([makePost(uri: "https://one.example/1", at: 100)], from: one)
         let store = SQLiteServerStore(store: local, defaults: scratch("title-import"))
 
         store.add(Server(host: "one.example", socialProtocol: .mastodon))
@@ -130,7 +130,7 @@ struct StoreTests {
 
         let store = SQLiteServerStore(store: local, defaults: defaults)
         #expect(store.servers.map(\.host) == ["b.test", "a.test"])
-        #expect(defaults.data(forKey: "fediqo.servers") == nil)
+        #expect(defaults.data(forKey: UserDefaultsServerStore.defaultsKey) == nil)
 
         store.remove(Server(host: "b.test", socialProtocol: .mastodon))
         UserDefaultsServerStore(defaults: defaults).add(Server(host: "c.test", socialProtocol: .mastodon))

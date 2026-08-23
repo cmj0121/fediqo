@@ -60,9 +60,7 @@ struct LocalStoreTests {
 
     @Test("Opening the same file twice migrates once")
     func reopeningIsIdempotent() async throws {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("fediqo-store-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dir = try scratchDirectory()
         defer { try? FileManager.default.removeItem(at: dir) }
         let path = dir.appendingPathComponent("fediqo.sqlite").path
 

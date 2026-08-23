@@ -11,10 +11,6 @@ struct PostStoreTests {
     private let t0 = Date(timeIntervalSince1970: 1_000_000)
     private let t1 = Date(timeIntervalSince1970: 1_000_060)
 
-    private func count(_ store: LocalStore, _ sql: String, _ arguments: StatementArguments = []) async throws -> Int {
-        try await store.read { db in try Int.fetchOne(db, sql: sql, arguments: arguments) ?? 0 }
-    }
-
     @Test("A post saved and read back is the post that was saved")
     func roundTrip() async throws {
         let store = try LocalStore.inMemory()
@@ -38,7 +34,7 @@ struct PostStoreTests {
             sources: ["one.example"]
         )
 
-        try await store.save([post], from: one, mode: .timeline, now: t0)
+        try await store.save([post], from: one, now: t0)
         let read = try await store.timeline()
 
         #expect(read == [post])
@@ -47,8 +43,8 @@ struct PostStoreTests {
     @Test("The same post from two servers is one row: the first source stays, last_seen_at moves")
     func twoServersOneRow() async throws {
         let store = try LocalStore.inMemory()
-        try await store.save([makePost(uri: "https://a.example/1", at: 100, from: "one.example")], from: one, mode: .timeline, now: t0)
-        try await store.save([makePost(uri: "https://a.example/1", at: 100, from: "two.example")], from: two, mode: .timeline, now: t1)
+        try await store.save([makePost(uri: "https://a.example/1", at: 100, from: "one.example")], from: one, now: t0)
+        try await store.save([makePost(uri: "https://a.example/1", at: 100, from: "two.example")], from: two, now: t1)
 
         let (source, lastSeen, created) = try await store.read { db -> (String, Int64, Int64) in
             let row = try Row.fetchOne(db, sql: "SELECT source_url, last_seen_at, created_at FROM posts")!
@@ -67,7 +63,7 @@ struct PostStoreTests {
         try await store.save([
             makePost(uri: "https://a.example/1", at: 100),
             makePost(uri: "https://a.example/1", at: 120, boostedBy: "someone else"),
-        ], from: one, mode: .timeline, now: t0)
+        ], from: one, now: t0)
 
         let read = try await store.timeline()
         #expect(read.count == 2)
@@ -80,12 +76,10 @@ struct PostStoreTests {
         let store = try LocalStore.inMemory()
         let origin = "https://one.example/users/someone/statuses/1"
         let first = makePost(uri: "https://one.example/api/v1/statuses/1", originURI: origin, at: 100, from: "one.example", tags: ["a"])
-        try await store.save([first], from: one, mode: .timeline, now: t0)
+        try await store.save([first], from: one, now: t0)
 
-        let edited = Post(uri: first.uri, originURI: origin, socialProtocol: .mastodon, sourceURL: first.sourceURL,
-                          createdAt: first.createdAt, authorId: first.authorId, authorName: first.authorName,
-                          authorHandle: first.authorHandle, text: "edited", tags: ["b"])
-        try await store.save([edited], from: one, mode: .timeline, now: t1)
+        let edited = makePost(uri: first.uri, originURI: origin, at: 100, from: "one.example", text: "edited", tags: ["b"])
+        try await store.save([edited], from: one, now: t1)
 
         let (text, updated) = try await store.read { db -> (String, Int64?) in
             let row = try Row.fetchOne(db, sql: "SELECT text, updated_at FROM posts")!
@@ -95,10 +89,9 @@ struct PostStoreTests {
         #expect(updated == LocalStore.milliseconds(t1))
         #expect(try await store.timeline().first?.tags == ["b"])
 
-        let elsewhere = Post(uri: "https://two.example/api/v1/statuses/9", originURI: origin, socialProtocol: .mastodon,
-                             sourceURL: "https://two.example", createdAt: first.createdAt, authorId: first.authorId,
-                             authorName: first.authorName, authorHandle: first.authorHandle, text: "tampered", tags: ["c"])
-        try await store.save([elsewhere], from: two, mode: .timeline, now: t1)
+        let elsewhere = makePost(uri: "https://two.example/api/v1/statuses/9", originURI: origin, at: 100, from: "two.example",
+                                 authorId: first.authorId, text: "tampered", tags: ["c"])
+        try await store.save([elsewhere], from: two, now: t1)
 
         #expect(try await store.timeline().first?.text == "edited")
         #expect(try await store.timeline().first?.tags == ["b"])
@@ -109,15 +102,15 @@ struct PostStoreTests {
         let store = try LocalStore.inMemory()
         let origin = "https://one.example/users/someone/statuses/1"
         let first = makePost(uri: "https://one.example/api/v1/statuses/1", originURI: origin, at: 100, from: "one.example", tags: ["a"])
-        try await store.save([first], from: one, mode: .timeline, now: t0)
+        try await store.save([first], from: one, now: t0)
 
         let retagged = makePost(uri: first.uri, originURI: origin, at: 100, from: "one.example", tags: ["a", "b"])
-        try await store.save([retagged], from: one, mode: .timeline, now: t1)
+        try await store.save([retagged], from: one, now: t1)
         #expect(try await store.timeline().first?.tags == ["a", "b"])
         #expect(try await store.read { db in try Int64.fetchOne(db, sql: "SELECT updated_at FROM posts") } == LocalStore.milliseconds(t1))
 
         let elsewhere = makePost(uri: "https://two.example/api/v1/statuses/9", originURI: origin, at: 100, from: "two.example", tags: ["c"])
-        try await store.save([elsewhere], from: two, mode: .timeline, now: t1)
+        try await store.save([elsewhere], from: two, now: t1)
         #expect(try await store.timeline().first?.tags == ["a", "b"])
     }
 
@@ -129,7 +122,7 @@ struct PostStoreTests {
             makePost(uri: "https://a.example/1", at: twoHoursAgo, tags: ["swift"]),
             makePost(uri: "https://a.example/2", at: twoHoursAgo + 1, tags: ["swift"]),
         ]
-        try await store.save(posts, from: one, mode: .timeline, now: t0)
+        try await store.save(posts, from: one, now: t0)
 
         let bucket = LocalStore.hourBucket(LocalStore.milliseconds(Date(timeIntervalSince1970: twoHoursAgo)))
         #expect(bucket != LocalStore.hourBucket(LocalStore.milliseconds(t0)))
@@ -138,7 +131,7 @@ struct PostStoreTests {
 
         try await store.markDeleted(mergeKey: posts[0].mergeKey, now: t0)
         try await store.purgeDeleted(olderThan: t1)
-        try await store.save([posts[1]], from: one, mode: .timeline, now: t1)
+        try await store.save([posts[1]], from: one, now: t1)
         #expect(try await count(store, "SELECT posts FROM tag_buckets WHERE tag = 'swift' AND bucket_at = ?", [bucket]) == 2)
         #expect(try await store.read { db in try Int64.fetchOne(db, sql: "SELECT updated_at FROM tag_buckets") } == nil)
     }
@@ -149,12 +142,12 @@ struct PostStoreTests {
         // Seen first as an origin: no title yet.
         let viaTwo = makePost(uri: "https://two.example/api/v1/statuses/1", originURI: "https://one.example/users/someone/statuses/1",
                               at: 100, from: "two.example")
-        try await store.save([viaTwo], from: two, mode: .timeline, now: t0)
+        try await store.save([viaTwo], from: two, now: t0)
         try await store.write { db in try db.execute(sql: "UPDATE servers SET selected_at = 7, position = 3 WHERE url = 'https://one.example'") }
         #expect(try await store.read { db in try String.fetchOne(db, sql: "SELECT title FROM servers WHERE url = 'https://one.example'") } == nil)
 
-        try await store.save([makePost(uri: "https://a.example/2", at: 100)], from: one, mode: .timeline, now: t1)
-        try await store.save([makePost(uri: "https://a.example/3", at: 100)], from: one, mode: .timeline, now: t1)
+        try await store.save([makePost(uri: "https://a.example/2", at: 100)], from: one, now: t1)
+        try await store.save([makePost(uri: "https://a.example/3", at: 100)], from: one, now: t1)
         let (title, selected, position) = try await store.read { db -> (String?, Int64?, Int64?) in
             let row = try Row.fetchOne(db, sql: "SELECT title, selected_at, position FROM servers WHERE url = 'https://one.example'")!
             return (row["title"], row["selected_at"], row["position"])
@@ -167,9 +160,8 @@ struct PostStoreTests {
     @Test("ActivityPub is stored as Mastodon and read back as Mastodon")
     func activityPubIsMastodonToTheStore() async throws {
         let store = try LocalStore.inMemory()
-        let post = Post(uri: "https://ap.example/notes/1", socialProtocol: .activityPub, sourceURL: "https://ap.example",
-                        createdAt: t0, authorId: "https://ap.example/users/a", authorName: "a", authorHandle: "@a@ap.example", text: "x")
-        try await store.save([post], from: Server(host: "ap.example", socialProtocol: .activityPub), mode: .timeline, now: t0)
+        let post = makePost(uri: "https://ap.example/notes/1", at: t0.timeIntervalSince1970, from: "ap.example", socialProtocol: .activityPub)
+        try await store.save([post], from: Server(host: "ap.example", socialProtocol: .activityPub), now: t0)
 
         #expect(try await store.read { db in try String.fetchOne(db, sql: "SELECT proto FROM posts") } == "mastodon")
         #expect(try await store.timeline().first?.socialProtocol == .mastodon)
@@ -179,11 +171,13 @@ struct PostStoreTests {
     func trendUpdatedOnlyOnRankChange() async throws {
         let store = try LocalStore.inMemory()
         let post = makePost(uri: "https://a.example/1", at: 100)
-        try await store.save([post], from: one, mode: .trending, now: t0)
-        try await store.save([post], from: one, mode: .trending, now: t1)
+        let zero = makePost(uri: "https://a.example/0", at: 100)
+        try await store.save([post, zero], from: one, now: t0)
+        try await store.recordTrending([post], from: one, now: t0)
+        try await store.recordTrending([post], from: one, now: t1)
         #expect(try await store.read { db in try Int64.fetchOne(db, sql: "SELECT updated_at FROM server_trends") } == nil)
 
-        try await store.save([makePost(uri: "https://a.example/0", at: 100), post], from: one, mode: .trending, now: t1)
+        try await store.recordTrending([zero, post], from: one, now: t1)
         #expect(try await store.read { db in try Int64.fetchOne(db, sql: "SELECT updated_at FROM server_trends WHERE rank = 1") } == LocalStore.milliseconds(t1))
     }
 
@@ -191,14 +185,11 @@ struct PostStoreTests {
     func tagsAndBuckets() async throws {
         let store = try LocalStore.inMemory()
         let seconds = t0.timeIntervalSince1970
-        let byOther = Post(uri: "https://a.example/3", socialProtocol: .mastodon, sourceURL: "https://one.example",
-                           createdAt: Date(timeIntervalSince1970: seconds + 2), authorId: "https://one.example/users/other",
-                           authorName: "other", authorHandle: "@other@one.example", text: "hi", tags: ["swift"])
         try await store.save([
             makePost(uri: "https://a.example/1", at: seconds, tags: ["Swift", "rust"]),
             makePost(uri: "https://a.example/2", at: seconds + 1, tags: ["swift"]),
-            byOther,
-        ], from: one, mode: .timeline, now: t0)
+            makePost(uri: "https://a.example/3", at: seconds + 2, authorId: "https://one.example/users/other", tags: ["swift"]),
+        ], from: one, now: t0)
 
         let tags = try await store.read { db in try String.fetchAll(db, sql: "SELECT tag FROM tags ORDER BY tag") }
         let buckets = try await store.read { db in
@@ -220,8 +211,9 @@ struct PostStoreTests {
             makePost(uri: "https://a.example/older", at: 100),
             makePost(uri: "https://a.example/newer", at: 200),
         ]
-        try await store.save(posts, from: one, mode: .trending, now: t0)
-        try await store.save(posts.reversed(), from: one, mode: .trending, now: t1)
+        try await store.save(posts, from: one, now: t0)
+        try await store.recordTrending(posts, from: one, now: t0)
+        try await store.recordTrending(posts.reversed(), from: one, now: t1)
 
         let (firstSeen, lastSeen, rank) = try await store.read { db -> (Int64, Int64, Int) in
             let row = try Row.fetchOne(db, sql: "SELECT first_seen_at, last_seen_at, rank FROM server_trends WHERE merge_key = ?",
@@ -239,7 +231,7 @@ struct PostStoreTests {
     @Test("The timeline does not write server_trends")
     func timelineWritesNoTrends() async throws {
         let store = try LocalStore.inMemory()
-        try await store.save([makePost(uri: "https://a.example/1", at: 100)], from: one, mode: .timeline, now: t0)
+        try await store.save([makePost(uri: "https://a.example/1", at: 100)], from: one, now: t0)
         #expect(try await count(store, "SELECT count(*) FROM server_trends") == 0)
     }
 
@@ -247,7 +239,8 @@ struct PostStoreTests {
     func deleteThenPurge() async throws {
         let store = try LocalStore.inMemory()
         let post = makePost(uri: "https://a.example/1", at: t0.timeIntervalSince1970, tags: ["swift"])
-        try await store.save([post], from: one, mode: .trending, now: t0)
+        try await store.save([post], from: one, now: t0)
+        try await store.recordTrending([post], from: one, now: t0)
 
         try await store.markDeleted(mergeKey: post.mergeKey, now: t0)
         try await store.markDeleted(mergeKey: post.mergeKey, now: t1)
@@ -267,7 +260,7 @@ struct PostStoreTests {
     @Test("Full-text search finds what was written")
     func searchFindsText() async throws {
         let store = try LocalStore.inMemory()
-        try await store.save([makePost(uri: "https://a.example/1", at: 100)], from: one, mode: .timeline, now: t0)
+        try await store.save([makePost(uri: "https://a.example/1", at: 100)], from: one, now: t0)
         #expect(try await count(store, "SELECT count(*) FROM posts_fts WHERE posts_fts MATCH 'hello'") == 1)
         #expect(try await count(store, "SELECT count(*) FROM posts_fts WHERE posts_fts MATCH 'goodbye'") == 0)
     }
@@ -275,10 +268,9 @@ struct PostStoreTests {
     @Test("A post without an author is refused, not skipped")
     func emptyAuthorRefused() async throws {
         let store = try LocalStore.inMemory()
-        let post = Post(uri: "u", socialProtocol: .mastodon, sourceURL: "https://one.example", createdAt: t0,
-                        authorId: "", authorName: "", authorHandle: "", text: "")
+        let post = makePost(uri: "u", at: 100, authorId: "")
         await #expect(throws: PostStoreError.missingAuthor(uri: "u")) {
-            try await store.save([post], from: one, mode: .timeline, now: t0)
+            try await store.save([post], from: one, now: t0)
         }
         #expect(try await count(store, "SELECT count(*) FROM posts") == 0)
     }

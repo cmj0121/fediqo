@@ -84,7 +84,8 @@ public struct TimelineLoader: Sendable {
                         return (server.host, [], .transport(error.localizedDescription))
                     }
                     do {
-                        try await store?.save(posts, from: server, mode: mode)
+                        try await store?.save(posts, from: server)
+                        if mode == .trending { try await store?.recordTrending(posts, from: server) }
                     } catch {
                         // What SQLite said, in full, is for the log; the screen gets the message.
                         LocalStore.log.error("save failed for \(server.host, privacy: .public): \(String(describing: error), privacy: .public)")
@@ -111,24 +112,18 @@ public struct TimelineLoader: Sendable {
     /// list, a post on several lists takes its best rank and keeps every source, and the
     /// rest of the order (newest first, then `mergeKey`) only breaks ties the servers did not.
     static func mergedByRank(_ lists: [[Post]]) -> [Post] {
-        var merged: [String: (post: Post, rank: Int)] = [:]
+        var ranks: [String: Int] = [:]
         for list in lists {
             for (rank, post) in list.enumerated() {
-                let key = post.mergeKey
-                if var existing = merged[key] {
-                    for host in post.sources { existing.post.addSource(host) }
-                    existing.rank = min(existing.rank, rank)
-                    merged[key] = existing
-                } else {
-                    merged[key] = (post, rank)
-                }
+                ranks[post.mergeKey] = min(ranks[post.mergeKey] ?? rank, rank)
             }
         }
-        return merged.values.sorted {
-            if $0.rank != $1.rank { return $0.rank < $1.rank }
-            if $0.post.createdAt != $1.post.createdAt { return $0.post.createdAt > $1.post.createdAt }
-            return $0.post.mergeKey < $1.post.mergeKey
-        }.map(\.post)
+        return lists.flatMap { $0 }.merged(orderedBy: {
+            let (a, b) = (ranks[$0.mergeKey]!, ranks[$1.mergeKey]!)
+            if a != b { return a < b }
+            if $0.createdAt != $1.createdAt { return $0.createdAt > $1.createdAt }
+            return $0.mergeKey < $1.mergeKey
+        })
     }
 
     /// The only thing between what arrived and what you see. It adds and removes; it never moves.

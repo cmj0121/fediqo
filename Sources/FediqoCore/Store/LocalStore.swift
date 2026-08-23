@@ -15,13 +15,41 @@ public final class LocalStore: Sendable {
     private let queue: DatabaseQueue
 
     /// Opens (and migrates) the database at `path`, creating it on first use.
-    public init(path: String) throws {
-        queue = try DatabaseQueue(path: path, configuration: Self.configuration())
+    public convenience init(path: String) throws {
+        let queue = try DatabaseQueue(path: path, configuration: Self.configuration())
         // WAL lets a read proceed while a refresh writes. Set outside any transaction, once;
         // SQLite remembers it in the file.
         try queue.writeWithoutTransaction { db in try db.execute(sql: "PRAGMA journal_mode = WAL") }
+        try self.init(queue: queue, path: path)
+    }
+
+    /// A store that lives only as long as this object. For tests and previews.
+    public static func inMemory() throws -> LocalStore {
+        try LocalStore(queue: DatabaseQueue(configuration: configuration()), path: ":memory:")
+    }
+
+    private init(queue: DatabaseQueue, path: String) throws {
+        self.queue = queue
         let migrated = try Self.migrate(queue)
         Self.log.info("opened \(path, privacy: .public), migrations run: \(migrated, privacy: .public)")
+    }
+
+    /// The app's database, at `<Application Support>/Fediqo/store.sqlite`. The store never
+    /// blocks the screen: a file that is not a database is set aside and replaced; anything
+    /// else is logged, and the app runs without a store and simply remembers nothing.
+    public static func openDefault() -> LocalStore? {
+        var path = "<Application Support>/Fediqo/store.sqlite"
+        do {
+            let directory = try FileManager.default
+                .url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+                .appending(path: "Fediqo", directoryHint: .isDirectory)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            path = directory.appending(path: "store.sqlite").path(percentEncoded: false)
+            return try openRecovering(path: path)
+        } catch {
+            log.error("could not open \(path, privacy: .public): \(String(describing: error), privacy: .public)")
+            return nil
+        }
     }
 
     /// `init(path:)`, and — if the file there is not a database SQLite can read — the file is
@@ -39,16 +67,6 @@ public final class LocalStore: Sendable {
             }
             return try LocalStore(path: path)
         }
-    }
-
-    private init(queue: DatabaseQueue) throws {
-        self.queue = queue
-        try Self.migrate(queue)
-    }
-
-    /// A store that lives only as long as this object. For tests and previews.
-    public static func inMemory() throws -> LocalStore {
-        try LocalStore(queue: DatabaseQueue(configuration: configuration()))
     }
 
     public func read<T: Sendable>(_ block: @escaping @Sendable (Database) throws -> T) async throws -> T {
@@ -98,8 +116,7 @@ public final class LocalStore: Sendable {
         migrator.registerMigration("001") { db in
             try db.execute(sql: schema())
             // The file seeds created_at = 0; the migration is what knows when it ran.
-            let now = Int64(Date().timeIntervalSince1970 * 1000)
-            try db.execute(sql: "UPDATE protocols SET created_at = ?", arguments: [now])
+            try db.execute(sql: "UPDATE protocols SET created_at = ?", arguments: [milliseconds(Date())])
         }
         return migrator
     }

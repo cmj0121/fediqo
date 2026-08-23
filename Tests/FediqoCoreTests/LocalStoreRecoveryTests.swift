@@ -6,12 +6,6 @@ import Testing
 /// A file that is not a database is set aside, not fought with.
 @Suite("Recovering the local store")
 struct LocalStoreRecoveryTests {
-    private func scratchDirectory() throws -> URL {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("fediqo-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return directory
-    }
-
     @Test("Garbage where the store should be is moved aside and a fresh store opened")
     func garbageIsSetAside() async throws {
         let directory = try scratchDirectory()

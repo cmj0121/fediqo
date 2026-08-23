@@ -115,6 +115,12 @@ public extension Array where Element == Post {
     /// sharing a timestamp are common. Without it, equal-time rows would shuffle between
     /// refreshes for no reason a reader could see.
     func merged() -> [Post] {
+        merged(orderedBy: { $0.createdAt > $1.createdAt })
+    }
+
+    /// The fold itself: collapse on `mergeKey`, keep every source, then sort by `areInOrder`
+    /// from first-seen order.
+    internal func merged(orderedBy areInOrder: (Post, Post) -> Bool) -> [Post] {
         var order: [String] = []
         var merged: [String: Post] = [:]
         for post in self {
@@ -127,6 +133,6 @@ public extension Array where Element == Post {
                 merged[key] = post
             }
         }
-        return order.compactMap { merged[$0] }.sorted { $0.createdAt > $1.createdAt }
+        return order.compactMap { merged[$0] }.sorted(by: areInOrder)
     }
 }

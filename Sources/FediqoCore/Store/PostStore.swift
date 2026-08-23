@@ -20,11 +20,11 @@ public enum PostStoreError: Error, Equatable, LocalizedError {
 extension LocalStore {
     // MARK: Writing
 
-    /// One refresh, one transaction: servers, accounts and tags first (the foreign keys say
-    /// so), then each post — inserted if new, otherwise touched, and rewritten only when the
-    /// server it came from is the authority for it. `.trending` also records the server's
-    /// ranking. Every hour these posts were written in gets its `tag_buckets` recounted last.
-    public func save(_ posts: [Post], from server: Server, mode: FeedMode, now: Date = Date()) async throws {
+    /// One refresh, one transaction: servers and accounts first (the foreign keys say so),
+    /// each once however many posts name them; then each post — inserted if new, otherwise
+    /// touched, and rewritten only when the server it came from is the authority for it.
+    /// Every hour these posts were posted in gets its `tag_buckets` recounted last.
+    public func save(_ posts: [Post], from server: Server, now: Date = Date()) async throws {
         for post in posts {
             if post.authorId.isEmpty { throw PostStoreError.missingAuthor(uri: post.uri) }
             if post.sourceURL.isEmpty { throw PostStoreError.missingSource(uri: post.uri) }
@@ -35,48 +35,36 @@ extension LocalStore {
         let serverTitle = server.title
         let ms = Self.milliseconds(now)
 
+        let (servers, accounts) = Self.references(in: posts, serverURL: serverURL, serverTitle: serverTitle)
+
         try await write { db in
-            for (index, post) in posts.enumerated() {
-                let proto = post.socialProtocol.storeProto
-                let authorityURL = Self.authorityURL(of: post)
-                let authorServerURL = Self.endpoint(ofHost: post.authorId)
-                let boosterServerURL = post.boostedById.flatMap(Self.endpoint(ofHost:))
+            for row in servers { try Self.upsertServer(db, row, now: ms) }
+            for row in accounts { try Self.upsertAccount(db, row, now: ms) }
 
-                try Self.upsertServer(db, url: post.sourceURL, proto: proto,
-                                      title: post.sourceURL == serverURL ? serverTitle : nil, now: ms)
-                for url in [authorityURL, authorServerURL, boosterServerURL].compactMap({ $0 }) where url != post.sourceURL {
-                    try Self.upsertServer(db, url: url, proto: proto, title: nil, now: ms)
-                }
-
-                try Self.upsertAccount(db, id: post.authorId, proto: proto, serverURL: authorServerURL,
-                                       handle: post.authorHandle, displayName: post.authorName,
-                                       avatarURL: post.authorAvatarURL?.absoluteString, now: ms)
-                if let boostedById = post.boostedById {
-                    try Self.upsertAccount(db, id: boostedById, proto: proto, serverURL: boosterServerURL,
-                                           handle: nil, displayName: post.boostedBy, avatarURL: nil, now: ms)
-                }
-
-                // display is the lowercased tag today: Post.normalisedTags drops the casing. Once Post
-                // keeps the spelling it saw, a DO UPDATE here recovers it for every tag.
-                for tag in post.tags {
-                    try db.execute(sql: "INSERT OR IGNORE INTO tags (tag, display, created_at) VALUES (?, ?, ?)",
-                                   arguments: [tag, tag, ms])
-                }
-
-                try Self.writePost(db, post, authorityURL: authorityURL, now: ms)
-
-                if mode == .trending {
-                    try db.execute(sql: """
-                        INSERT INTO server_trends (source_url, merge_key, rank, first_seen_at, last_seen_at, created_at)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                        ON CONFLICT (source_url, merge_key) DO UPDATE SET
-                            rank = excluded.rank, last_seen_at = excluded.last_seen_at,
-                            updated_at = CASE WHEN rank = excluded.rank THEN updated_at ELSE excluded.created_at END
-                        """, arguments: [post.sourceURL, post.mergeKey, index, ms, ms, ms])
-                }
+            var hours: Set<Int64> = []
+            for post in posts {
+                let postedAt = try Self.writePost(db, post, authorityURL: Self.authorityURL(of: post), now: ms)
+                hours.insert(Self.hourBucket(postedAt))
             }
+            try Self.rewriteTagBuckets(db, hours: hours, now: ms)
+        }
+    }
 
-            try Self.rewriteTagBuckets(db, hours: Set(posts.map { Self.hourBucket(Self.milliseconds($0.createdAt)) }), now: ms)
+    /// The server's ranking of posts already saved: a post's rank is its place in the list the
+    /// server handed over. Seen again at the same rank, the row is touched, not updated.
+    public func recordTrending(_ posts: [Post], from server: Server, now: Date = Date()) async throws {
+        let ms = Self.milliseconds(now)
+        try await write { db in
+            let insert = try db.cachedStatement(sql: """
+                INSERT INTO server_trends (source_url, merge_key, rank, first_seen_at, last_seen_at, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT (source_url, merge_key) DO UPDATE SET
+                    rank = excluded.rank, last_seen_at = excluded.last_seen_at,
+                    \(Self.touchClause(unchanged: "rank = excluded.rank"))
+                """)
+            for (index, post) in posts.enumerated() {
+                try insert.execute(arguments: [post.sourceURL, post.mergeKey, index, ms, ms, ms])
+            }
         }
     }
 
@@ -143,6 +131,9 @@ extension LocalStore {
         LEFT JOIN accounts b ON b.author_id = p.boosted_by
         """
 
+    private static let encoder = JSONEncoder()
+    private static let decoder = JSONDecoder()
+
     private static func posts(from rows: [Row], _ db: Database) throws -> [Post] {
         guard !rows.isEmpty else { return [] }
         let keys = rows.map { $0["merge_key"] as String }
@@ -157,7 +148,7 @@ extension LocalStore {
 
     private static func post(from row: Row, tags: [String]) -> Post {
         let mediaJSON: String? = row["media_urls"]
-        let media = mediaJSON.flatMap { try? JSONDecoder().decode([String].self, from: Data($0.utf8)) } ?? []
+        let media = mediaJSON.flatMap { try? decoder.decode([String].self, from: Data($0.utf8)) } ?? []
         let sourceURL: String = row["source_url"]
         return Post(
             uri: row["uri"],
@@ -176,28 +167,76 @@ extension LocalStore {
             tags: tags,
             boostedBy: row["booster_name"],
             boostedById: row["boosted_by"],
-            sources: [URL(string: sourceURL)?.host ?? sourceURL]
+            sources: [host(of: sourceURL)]
         )
     }
 
     // MARK: - Writes
 
-    static func upsertServer(_ db: Database, url: String, proto: String, title: String?, now: Int64) throws {
-        let host = URL(string: url)?.host ?? url
+    /// A `servers` row as one refresh sees it. `title` is what it learned, if anything.
+    struct ServerRow: Sendable {
+        let url: String
+        let proto: String
+        var title: String?
+    }
+
+    /// An `accounts` row as one refresh sees it. A booster arrives with a name only.
+    fileprivate struct AccountRow: Sendable {
+        let id: String
+        let proto: String
+        let serverURL: String?
+        var handle: String?
+        var displayName: String?
+        var avatarURL: String?
+    }
+
+    /// Every server and account `posts` name, each once, in first-seen order — so the writes
+    /// land the same way on every refresh. A later sighting only fills in what an earlier one
+    /// left blank.
+    private static func references(in posts: [Post], serverURL: String, serverTitle: String)
+        -> (servers: [ServerRow], accounts: [AccountRow]) {
+        var servers: [ServerRow] = []
+        var accounts: [AccountRow] = []
+        for post in posts {
+            let proto = post.socialProtocol.storeProto
+            let authorServerURL = endpoint(ofHost: post.authorId)
+            let boosterServerURL = post.boostedById.flatMap(endpoint(ofHost:))
+
+            servers.note(ServerRow(url: post.sourceURL, proto: proto,
+                                   title: post.sourceURL == serverURL ? serverTitle : nil))
+            for url in [authorityURL(of: post), authorServerURL, boosterServerURL].compactMap({ $0 }) {
+                servers.note(ServerRow(url: url, proto: proto, title: nil))
+            }
+            accounts.note(AccountRow(id: post.authorId, proto: proto, serverURL: authorServerURL,
+                                     handle: post.authorHandle, displayName: post.authorName,
+                                     avatarURL: post.authorAvatarURL?.absoluteString))
+            if let boostedById = post.boostedById {
+                accounts.note(AccountRow(id: boostedById, proto: proto, serverURL: boosterServerURL,
+                                         handle: nil, displayName: post.boostedBy, avatarURL: nil))
+            }
+        }
+        return (servers, accounts)
+    }
+
+    /// `updated_at = CASE …`: it moves only when something actually changed, and `unchanged`
+    /// says — in terms of the row and `excluded` — when nothing did.
+    private static func touchClause(unchanged: String) -> String {
+        "updated_at = CASE WHEN \(unchanged) THEN updated_at ELSE excluded.created_at END"
+    }
+
+    static func upsertServer(_ db: Database, _ server: ServerRow, now: Int64) throws {
         // A title fills in once known and is never blanked; selected_at and position are local
         // and never touched here.
         try db.execute(sql: """
             INSERT INTO servers (url, host, proto, title, created_at) VALUES (?, ?, ?, ?, ?)
             ON CONFLICT (url) DO UPDATE SET
-                title      = coalesce(excluded.title, title),
-                updated_at = CASE WHEN coalesce(excluded.title, title) IS title THEN updated_at ELSE excluded.created_at END
-            """, arguments: [url, host, proto, title, now])
+                title = coalesce(excluded.title, title),
+                \(touchClause(unchanged: "coalesce(excluded.title, title) IS title"))
+            """, arguments: [server.url, host(of: server.url), server.proto, server.title, now])
     }
 
-    private static func upsertAccount(_ db: Database, id: String, proto: String, serverURL: String?,
-                                      handle: String?, displayName: String?, avatarURL: String?, now: Int64) throws {
-        // A NULL never erases what a fuller sighting wrote (a booster arrives with a name only);
-        // updated_at moves only when something actually changed.
+    private static func upsertAccount(_ db: Database, _ account: AccountRow, now: Int64) throws {
+        // A NULL never erases what a fuller sighting wrote.
         try db.execute(sql: """
             INSERT INTO accounts (author_id, proto, server_url, handle, display_name, avatar_url, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -205,59 +244,71 @@ extension LocalStore {
                 handle       = coalesce(excluded.handle, handle),
                 display_name = coalesce(excluded.display_name, display_name),
                 avatar_url   = coalesce(excluded.avatar_url, avatar_url),
-                updated_at   = CASE WHEN coalesce(excluded.handle, handle) IS handle
-                                     AND coalesce(excluded.display_name, display_name) IS display_name
-                                     AND coalesce(excluded.avatar_url, avatar_url) IS avatar_url
-                                    THEN updated_at ELSE excluded.created_at END
-            """, arguments: [id, proto, serverURL, handle, displayName, avatarURL, now])
+                \(touchClause(unchanged: """
+                    coalesce(excluded.handle, handle) IS handle
+                    AND coalesce(excluded.display_name, display_name) IS display_name
+                    AND coalesce(excluded.avatar_url, avatar_url) IS avatar_url
+                    """))
+            """, arguments: [account.id, account.proto, account.serverURL, account.handle,
+                             account.displayName, account.avatarURL, now])
     }
 
-    private static func writePost(_ db: Database, _ post: Post, authorityURL: String?, now: Int64) throws {
+    /// Writes one post and says when it was posted, so the caller can recount that hour. The
+    /// statements are cached on the connection: a refresh prepares each of them once.
+    private static func writePost(_ db: Database, _ post: Post, authorityURL: String?, now: Int64) throws -> Int64 {
         let key = post.mergeKey
+        let postedAt = milliseconds(post.createdAt)
         let media = post.mediaURLs.map(\.absoluteString)
-        let mediaJSON = String(decoding: try JSONEncoder().encode(media), as: UTF8.self)
+        let mediaJSON = String(decoding: try encoder.encode(media), as: UTF8.self)
         let webURL = post.webURL?.absoluteString
 
-        guard let existing = try Row.fetchOne(db, sql: "SELECT text, media_urls, web_url, authority_url FROM posts WHERE merge_key = ?",
-                                              arguments: [key]) else {
-            try db.execute(sql: """
+        let find = try db.cachedStatement(sql: "SELECT text, media_urls, web_url, authority_url FROM posts WHERE merge_key = ?")
+        guard let existing = try Row.fetchOne(find, arguments: [key]) else {
+            try db.cachedStatement(sql: """
                 INSERT INTO posts (merge_key, proto, origin_uri, uri, authority_url, source_url, posted_at, author_id,
                                    text, media_urls, web_url, in_reply_to_uri, boosted_by, extras, deleted_at,
                                    last_seen_at, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, NULL)
-                """, arguments: [key, post.socialProtocol.storeProto, post.originURI, post.uri, authorityURL,
-                                 post.sourceURL, milliseconds(post.createdAt), post.authorId,
-                                 post.text, mediaJSON, webURL, post.inReplyToURI, post.boostedById, now, now])
+                """).execute(arguments: [key, post.socialProtocol.storeProto, post.originURI, post.uri, authorityURL,
+                                         post.sourceURL, postedAt, post.authorId,
+                                         post.text, mediaJSON, webURL, post.inReplyToURI, post.boostedById, now, now])
             try insertTags(db, post.tags, for: key, now: now)
-            return
+            return postedAt
         }
 
-        try db.execute(sql: "UPDATE posts SET last_seen_at = ? WHERE merge_key = ?", arguments: [now, key])
+        try db.cachedStatement(sql: "UPDATE posts SET last_seen_at = ? WHERE merge_key = ?").execute(arguments: [now, key])
 
-        guard (existing["authority_url"] as String?) == post.sourceURL else { return }
+        guard (existing["authority_url"] as String?) == post.sourceURL else { return postedAt }
 
         let contentChanged = (existing["text"] as String) != post.text
             || (existing["media_urls"] as String?) != mediaJSON
             || (existing["web_url"] as String?) != webURL
-        let storedTags = try String.fetchAll(db, sql: "SELECT tag FROM post_tags WHERE merge_key = ? ORDER BY rowid", arguments: [key])
+        let storedTags = try String.fetchAll(db.cachedStatement(sql: "SELECT tag FROM post_tags WHERE merge_key = ? ORDER BY rowid"),
+                                             arguments: [key])
         let tagsChanged = storedTags != post.tags
-        guard contentChanged || tagsChanged else { return }
+        guard contentChanged || tagsChanged else { return postedAt }
 
-        try db.execute(sql: "UPDATE posts SET updated_at = ? WHERE merge_key = ?", arguments: [now, key])
+        try db.cachedStatement(sql: "UPDATE posts SET updated_at = ? WHERE merge_key = ?").execute(arguments: [now, key])
         if contentChanged {
-            try db.execute(sql: "UPDATE posts SET text = ?, media_urls = ?, web_url = ? WHERE merge_key = ?",
-                           arguments: [post.text, mediaJSON, webURL, key])
+            try db.cachedStatement(sql: "UPDATE posts SET text = ?, media_urls = ?, web_url = ? WHERE merge_key = ?")
+                .execute(arguments: [post.text, mediaJSON, webURL, key])
         }
         if tagsChanged {
-            try db.execute(sql: "DELETE FROM post_tags WHERE merge_key = ?", arguments: [key])
+            try db.cachedStatement(sql: "DELETE FROM post_tags WHERE merge_key = ?").execute(arguments: [key])
             try insertTags(db, post.tags, for: key, now: now)
         }
+        return postedAt
     }
 
+    /// The post's tags: into `tags` if not yet known, and into `post_tags` for this post.
+    /// display is the lowercased tag today: Post.normalisedTags drops the casing. Once Post
+    /// keeps the spelling it saw, a DO UPDATE here recovers it for every tag.
     private static func insertTags(_ db: Database, _ tags: [String], for key: String, now: Int64) throws {
-        for tag in tags {
-            try db.execute(sql: "INSERT OR IGNORE INTO post_tags (merge_key, tag, created_at) VALUES (?, ?, ?)",
-                           arguments: [key, tag, now])
+        let tag = try db.cachedStatement(sql: "INSERT OR IGNORE INTO tags (tag, display, created_at) VALUES (?, ?, ?)")
+        let postTag = try db.cachedStatement(sql: "INSERT OR IGNORE INTO post_tags (merge_key, tag, created_at) VALUES (?, ?, ?)")
+        for name in tags {
+            try tag.execute(arguments: [name, name, now])
+            try postTag.execute(arguments: [key, name, now])
         }
     }
 
@@ -278,8 +329,7 @@ extension LocalStore {
                 ON CONFLICT (bucket_at, tag) DO UPDATE SET
                     posts      = max(posts, excluded.posts),
                     authors    = max(authors, excluded.authors),
-                    updated_at = CASE WHEN posts >= excluded.posts AND authors >= excluded.authors
-                                      THEN updated_at ELSE excluded.created_at END
+                    \(touchClause(unchanged: "posts >= excluded.posts AND authors >= excluded.authors"))
                 """, arguments: [bucket, now, bucket, bucket + hour])
         }
     }
@@ -302,8 +352,34 @@ extension LocalStore {
         Int64((date.timeIntervalSince1970 * 1000).rounded())
     }
 
-    private static func date(_ ms: Int64) -> Date {
+    static func date(_ ms: Int64) -> Date {
         Date(timeIntervalSince1970: Double(ms) / 1000)
+    }
+
+    /// The host of a URL, or the string itself when it has none.
+    static func host(of url: String) -> String {
+        URL(string: url)?.host ?? url
+    }
+}
+
+private extension Array where Element == LocalStore.ServerRow {
+    /// Once per url, in first-seen order; a title learned later fills in.
+    mutating func note(_ row: Element) {
+        if let index = firstIndex(where: { $0.url == row.url }) {
+            if self[index].title == nil { self[index].title = row.title }
+        } else {
+            append(row)
+        }
+    }
+}
+
+private extension Array where Element == LocalStore.AccountRow {
+    /// Once per id, in first-seen order; a fuller sighting fills in what a thinner one left.
+    mutating func note(_ row: Element) {
+        guard let index = firstIndex(where: { $0.id == row.id }) else { return append(row) }
+        if self[index].handle == nil { self[index].handle = row.handle }
+        if self[index].displayName == nil { self[index].displayName = row.displayName }
+        if self[index].avatarURL == nil { self[index].avatarURL = row.avatarURL }
     }
 }
 
