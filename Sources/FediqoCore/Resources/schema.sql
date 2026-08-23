@@ -155,8 +155,9 @@ CREATE INDEX server_trends_recent ON server_trends(last_seen_at DESC, rank);
 
 -- ── record — counted here, and kept after the rows it counted are purged ────
 
--- Tag counts per hour, from post_tags × posts, rewritten for the current hour at the end of
--- each refresh and never touched again. A trend is a window summed against the one before it.
+-- Tag counts per hour of posted_at, from post_tags × posts, recounted after each refresh for
+-- every hour it wrote into; posts and authors only ever go up (max on conflict), and nothing
+-- here is deleted. A trend is a window summed against the one before it.
 CREATE TABLE tag_buckets (
     bucket_at  INTEGER NOT NULL,                            -- hour start, ms
     tag        TEXT    NOT NULL REFERENCES tags(tag),

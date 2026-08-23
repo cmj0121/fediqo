@@ -263,8 +263,10 @@ because a trend for a post that is gone says nothing. The Trending screen is `po
 network, so it works offline and a stale row simply drops off the screen.
 
 `tag_buckets` is the third layer, **record**, and the reason it exists is that it outlives what it counted.
-At the end of each refresh the bucket for the current hour is rewritten from `post_tags` × `posts`, and no
-bucket is touched again after its hour closes. A purge deletes the posts; the bucket keeps the count. A trend
+A bucket is an hour of `posted_at`. After each refresh, every hour a post of that refresh falls into is
+recounted from `post_tags` × `posts`, and a bucket only ever goes up — `posts` and `authors` take the `max`
+on conflict, and there is no `DELETE`. A purge deletes the posts; the bucket keeps the count, and a post
+that arrives late for an hour already purged cannot pull it back down. A trend
 is then one window summed against the one before it, over `tag_buckets_by_tag`, and `authors` is there
 because one voice posting two hundred times is not a trend.
 
@@ -335,7 +337,8 @@ NULL`, and the partial index `posts_deleted` finds the marked rows without scann
 Purging a marked row is **the one `DELETE` the store performs**, and it runs only by policy — a routine sweep,
 or the database growing past a size — never as part of a refresh. `post_tags` and `server_trends` go with it
 by `ON DELETE CASCADE`; the trigger takes the row out of `posts_fts`. `tag_buckets` is left alone: the count
-was taken while the post was here, and a purge does not unsay it.
+was taken while the post was here, a purge does not unsay it, and a bucket never goes down — not even when a
+late post recounts an hour that has already been purged.
 
 After a purge, a server that hands the post over again gets a new row. That is accepted: the store never
 promised to remember what it chose to forget, and a tombstone kept for ever would be the rotation problem in
@@ -399,8 +402,10 @@ is already there.
    the client emits origin_uri (or nothing), the uri it answered on, and a stable author_id
              │
              ▼
-   UPSERT servers ── H, and the endpoint origin_uri names, if either is new
-             │       proto and title only; selected_at is yours
+   UPSERT servers ── H, and the endpoint origin_uri names, if either is new;
+             │       the author's and the booster's host too, title unknown
+             │       proto and title only, and a title once known is never
+             │       blanked; selected_at is yours
              ▼
    UPSERT accounts ── names change, ids do not
              │
@@ -441,15 +446,16 @@ is already there.
      trigger keeps posts_fts in step  ──▶  COMMIT
               │
               ▼
-     rewrite tag_buckets for the current hour ── once, after every post of the
-                                                 refresh is in
+     recount tag_buckets for every hour ── once, after every post of the
+     a post of the refresh was posted in    refresh is in; a count only goes up
 ```
 
 One transaction per refresh, not per post. Nothing on the way scans a table: `merge_key` is `UNIQUE`,
 `servers.url`, `accounts.author_id` and `tags.tag` are primary keys, and the reply lookup is
 `posts_by_uri`. The order is fixed by the foreign keys — `protocols` → `servers` → `accounts` → `posts` →
 `tags` → `post_tags` → `server_trends` — and `tag_buckets` comes last because it counts what the refresh
-just wrote.
+just wrote. A bucket is keyed by the hour a post was posted in, not the hour it arrived, and it is monotone:
+`posts` and `authors` take the `max` of the old count and the new one, and nothing deletes a row.
 
 ## Reading
 

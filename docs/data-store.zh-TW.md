@@ -246,9 +246,10 @@ network 表上的本地欄位，刷新只寫 `display`，永遠不碰它們。
 `WHERE last_seen_at` 夠新、`ORDER BY rank` —— 讀的是儲存層不是網路，所以離線也能用，過期的列只是從畫面上
 消失。
 
-`tag_buckets` 是第三層 **record**，它存在的理由就是：它比它數的東西活得久。每次刷新結束時，當前這一小時的
-bucket 會從 `post_tags` × `posts` 重算一遍，而一小時過去之後，那個 bucket 就再也不動。清除會刪掉貼文；bucket
-留著數字。一個 trend 是一個時間窗和前一個時間窗相減，走 `tag_buckets_by_tag`；而 `authors` 之所以在，是因
+`tag_buckets` 是第三層 **record**，它存在的理由就是：它比它數的東西活得久。一個 bucket 是 `posted_at` 的一小時。
+每次刷新之後，這次刷新的貼文所落在的每一小時都會從 `post_tags` × `posts` 重算一遍，而 bucket 只會往上 ——
+`posts` 與 `authors` 衝突時取 `max`，沒有 `DELETE`。清除會刪掉貼文；bucket 留著數字，一則遲到的貼文落進已經
+清掉的那一小時，也拉不低它。一個 trend 是一個時間窗和前一個時間窗相減，走 `tag_buckets_by_tag`；而 `authors` 之所以在，是因
 為一個人發兩百則不算 trend。
 
 ## 什麼算是同一則貼文
@@ -315,7 +316,8 @@ bucket 會從 `post_tags` × `posts` 重算一遍，而一小時過去之後，�
 
 清掉做了記號的列是**儲存層唯一會執行的 `DELETE`**，而且只依 policy 跑 —— 例行掃除，或資料庫長過某個大
 小 —— 永遠不在刷新裡發生。`post_tags` 與 `server_trends` 透過 `ON DELETE CASCADE` 一起走；trigger 把那一列
-從 `posts_fts` 拿掉。`tag_buckets` 不動：數字是貼文還在的時候數的，清除不會把它收回。
+從 `posts_fts` 拿掉。`tag_buckets` 不動：數字是貼文還在的時候數的，清除不會把它收回，而 bucket 從不往下 —— 就算一則遲到的貼文
+重算了已經清掉的那一小時也一樣。
 
 清掉之後，若有伺服器再把那則交過來，它會是一列新的。這是可以接受的：儲存層從沒承諾記得它選擇忘掉的東
 西，而一塊永遠留著的墓碑只是換個形狀的 rotation 問題。
@@ -375,8 +377,10 @@ bucket 會從 `post_tags` × `posts` 重算一遍，而一小時過去之後，�
    client 產出 origin_uri（或什麼都沒有）、它回應的 uri，以及穩定的 author_id
              │
              ▼
-   UPSERT servers ── H，以及 origin_uri 指名的那個端點，若是新的
-             │       只寫 proto 與 title；selected_at 是你的
+   UPSERT servers ── H，以及 origin_uri 指名的那個端點，若是新的；
+             │       作者與轉發者的 host 也是，title 未知
+             │       只寫 proto 與 title，而 title 一旦知道就不會被清空；
+             │       selected_at 是你的
              ▼
    UPSERT accounts ── 名字會變，id 不會
              │
@@ -416,14 +420,15 @@ bucket 會從 `post_tags` × `posts` 重算一遍，而一小時過去之後，�
      trigger 讓 posts_fts 跟上  ──▶  COMMIT
               │
               ▼
-     重算當前這一小時的 tag_buckets ── 只做一次，在這次刷新的每一則
-                                       都進去之後
+     重算這次刷新的貼文所落在的每一小時的 tag_buckets ── 只做一次，在每一則
+                                                     都進去之後；數字只會往上
 ```
 
 一次刷新一個 transaction，不是一則一個。沿路沒有任何一步掃表：`merge_key` 是 `UNIQUE`，`servers.url`、
 `accounts.author_id` 與 `tags.tag` 是主鍵，查回覆走 `posts_by_uri`。順序由外鍵決定 —— `protocols` →
 `servers` → `accounts` → `posts` → `tags` → `post_tags` → `server_trends` —— 而 `tag_buckets` 排最後，因為
-它數的就是這次刷新剛寫進去的東西。
+它數的就是這次刷新剛寫進去的東西。bucket 的鍵是貼文發出的那一小時，不是它抵達的那一小時；而且它是單調的：
+`posts` 與 `authors` 取舊數字與新數字的 `max`，沒有任何東西會刪掉一列。
 
 ## 讀取
 
