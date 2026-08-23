@@ -1,7 +1,9 @@
 import Foundation
+import GRDB
 
 /// Which stream a screen is asking for. They are two different things and neither stands in
-/// for the other: the timeline is the timeline, and trending is a place you go to.
+/// for the other: the timeline is the timeline, ordered by time; trending is a place you go
+/// to, in the order the servers put it. Nothing is ranked by us — a server's ranking is kept.
 ///
 /// The raw values name the screens too, so a mode carries its own titles rather than having
 /// them handed to it.
@@ -11,7 +13,8 @@ public enum FeedMode: String, Sendable {
 }
 
 public struct TimelineResult: Sendable {
-    /// One row per post, in timestamp order. Never ranked, never re-ordered.
+    /// One row per post. The timeline is in timestamp order; trending is in the servers' own
+    /// rank order. Nothing here is ranked by us, and nothing is re-ordered after the fact.
     public let posts: [Post]
     /// Servers that gave nothing, and why. Reported rather than substituted for.
     public let failures: [String: SourceFailure]
@@ -28,48 +31,104 @@ public struct TimelineResult: Sendable {
 ///
 /// It knows about `SourceClient`, never about a protocol. A source this build cannot yet read
 /// is a reported failure, not a quiet omission — the same rule the rest of the file follows.
+///
+/// The timeline is merged by time. A trending list is the server's own order, kept: a post's
+/// rank is its place in the list the server handed over, and across servers the best rank
+/// wins — the same order the store reads trends back in, so the page that opened from the
+/// store and the page that just refreshed do not trade places.
 public struct TimelineLoader: Sendable {
     private let registry: SourceRegistry
     private let limit: Int
+    private let store: LocalStore?
 
-    public init(registry: SourceRegistry = .standard(), limit: Int = 40) {
+    /// With a `store`, what each server hands over is kept before it is merged; without one,
+    /// nothing is remembered between loads.
+    public init(registry: SourceRegistry = .standard(), limit: Int = 40, store: LocalStore? = nil) {
         self.registry = registry
         self.limit = limit
+        self.store = store
+    }
+
+    /// What the store already holds for `mode`, newest first — the screen before any server
+    /// answers. Trending is what servers listed in the last day. Nothing without a store.
+    public func stored(mode: FeedMode, now: Date = Date()) async throws -> [Post] {
+        guard let store else { return [] }
+        return switch mode {
+        case .timeline: try await store.timeline()
+        case .trending: try await store.trending(since: now.addingTimeInterval(-24 * 60 * 60))
+        }
     }
 
     public func load(servers: [Server], mode: FeedMode) async -> TimelineResult {
         var failures: [String: SourceFailure] = [:]
-        var collected: [Post] = []
+        var collected: [[Post]] = []
 
-        await withTaskGroup(of: (String, Result<[Post], SourceFailure>).self) { group in
+        // Each task answers with what arrived and, separately, what went wrong — a store that
+        // would not keep the posts is a failure worth reporting, but the posts still arrived.
+        await withTaskGroup(of: (host: String, posts: [Post], failure: SourceFailure?).self) { group in
             for server in servers {
                 guard let client = registry.client(for: server.socialProtocol) else {
                     failures[server.host] = .unsupported(server.socialProtocol)
                     continue
                 }
                 group.addTask {
+                    let posts: [Post]
                     do {
-                        let posts = switch mode {
+                        posts = switch mode {
                         case .timeline: try await client.timeline(host: server.host, limit: limit)
                         case .trending: try await client.trending(host: server.host, limit: limit)
                         }
-                        return (server.host, .success(posts))
                     } catch let failure as SourceFailure {
-                        return (server.host, .failure(failure))
+                        return (server.host, [], failure)
                     } catch {
-                        return (server.host, .failure(.transport(error.localizedDescription)))
+                        return (server.host, [], .transport(error.localizedDescription))
                     }
+                    do {
+                        try await store?.save(posts, from: server, mode: mode)
+                    } catch {
+                        // What SQLite said, in full, is for the log; the screen gets the message.
+                        LocalStore.log.error("save failed for \(server.host, privacy: .public): \(String(describing: error), privacy: .public)")
+                        let reason = (error as? DatabaseError)?.message ?? error.localizedDescription
+                        return (server.host, posts, .store(reason))
+                    }
+                    return (server.host, posts, nil)
                 }
             }
-            for await (host, result) in group {
-                switch result {
-                case .success(let posts): collected.append(contentsOf: posts)
-                case .failure(let failure): failures[host] = failure
-                }
+            for await (host, posts, failure) in group {
+                if !posts.isEmpty { collected.append(posts) }
+                if let failure { failures[host] = failure }
             }
         }
 
-        return TimelineResult(posts: collected.merged(), failures: failures)
+        let posts = switch mode {
+        case .timeline: collected.flatMap { $0 }.merged()
+        case .trending: Self.mergedByRank(collected)
+        }
+        return TimelineResult(posts: posts, failures: failures)
+    }
+
+    /// Several servers' trending lists as one: a post's rank is its index in its server's
+    /// list, a post on several lists takes its best rank and keeps every source, and the
+    /// rest of the order (newest first, then `mergeKey`) only breaks ties the servers did not.
+    static func mergedByRank(_ lists: [[Post]]) -> [Post] {
+        var merged: [String: (post: Post, rank: Int)] = [:]
+        for list in lists {
+            for (rank, post) in list.enumerated() {
+                let key = post.mergeKey
+                if var existing = merged[key] {
+                    for host in post.sources { existing.post.addSource(host) }
+                    existing.rank = min(existing.rank, rank)
+                    merged[key] = existing
+                } else {
+                    merged[key] = (post, rank)
+                }
+            }
+        }
+        return merged.values.sorted {
+            if $0.rank != $1.rank { return $0.rank < $1.rank }
+            if $0.post.createdAt != $1.post.createdAt { return $0.post.createdAt > $1.post.createdAt }
+            return $0.post.mergeKey < $1.post.mergeKey
+        }.map(\.post)
     }
 
     /// The only thing between what arrived and what you see. It adds and removes; it never moves.

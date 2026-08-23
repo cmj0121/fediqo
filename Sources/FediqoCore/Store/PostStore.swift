@@ -2,9 +2,16 @@ import Foundation
 import GRDB
 
 /// A post the store will not write, because a column it may never backfill would be empty.
-public enum PostStoreError: Error, Equatable {
+public enum PostStoreError: Error, Equatable, LocalizedError {
     case missingAuthor(uri: String)
     case missingSource(uri: String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .missingAuthor(let uri): "\(uri) names no author."
+        case .missingSource(let uri): "\(uri) names no source."
+        }
+    }
 }
 
 /// Posts in and out of the store, as the "Writing" and "Reading" diagrams in
@@ -108,7 +115,8 @@ extension LocalStore {
     }
 
     /// What the servers said was trending, as of their last sighting on or after `since`.
-    /// A post several servers list once, at its best rank.
+    /// A post several servers list once, at its best rank; ties break the way
+    /// `TimelineLoader` breaks them, so a refresh lands in the same order the store showed.
     public func trending(since: Date, limit: Int = 100) async throws -> [Post] {
         let ms = Self.milliseconds(since)
         return try await read { db in
@@ -117,7 +125,7 @@ extension LocalStore {
                 JOIN server_trends t ON t.merge_key = p.merge_key
                 WHERE t.last_seen_at >= ? AND p.deleted_at IS NULL
                 GROUP BY p.merge_key
-                ORDER BY min(t.rank), max(t.last_seen_at) DESC
+                ORDER BY min(t.rank), p.posted_at DESC, p.merge_key
                 LIMIT ?
                 """, arguments: [ms, limit])
             return try Self.posts(from: rows, db)

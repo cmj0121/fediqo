@@ -1,5 +1,6 @@
 import Observation
 import SwiftUI
+import os
 import FediqoCore
 
 enum Route: Hashable {
@@ -85,25 +86,46 @@ public final class AppState {
     /// The feeds outlive the screens that show them. `AppShell` swaps its detail with a
     /// `switch`, which destroys the previous view and everything it held — so a feed owned by
     /// the screen would re-ask every server on every trip to Settings and back.
-    private let feeds: [FeedMode: FeedModel] = [
-        .timeline: FeedModel(mode: .timeline),
-        .trending: FeedModel(mode: .trending),
-    ]
+    private let feeds: [FeedMode: FeedModel]
 
     public convenience init() {
-        self.init(launch: .fromEnvironment())
+        self.init(store: Self.openStore(), launch: .fromEnvironment())
     }
 
-    init(preferences: Preferences = Preferences(), serverStore: (any ServerStore)? = nil, launch: LaunchOptions = .none) {
-        let store = serverStore ?? UserDefaultsServerStore()
+    init(preferences: Preferences = Preferences(), serverStore: (any ServerStore)? = nil,
+         store: LocalStore? = nil, launch: LaunchOptions = .none) {
+        let servers = serverStore ?? UserDefaultsServerStore()
         self.preferences = preferences
-        self.serverStore = store
-        self.servers = store.servers
+        self.serverStore = servers
+        self.feeds = [
+            .timeline: FeedModel(mode: .timeline, loader: TimelineLoader(store: store)),
+            .trending: FeedModel(mode: .trending, loader: TimelineLoader(store: store)),
+        ]
+        self.servers = servers.servers
         self.route = launch.route ?? .landing
         self.railItem = launch.railItem ?? .timeline
         self.composing = launch.composing
         self.holdsLanding = launch.holdsLanding
         L10n.use(preferences.language)
+    }
+
+    /// The database at `<Application Support>/Fediqo/store.sqlite`. The store never blocks the
+    /// screen: a file that is not a database is set aside and replaced; anything else means the
+    /// app runs without a store and simply remembers nothing.
+    private static func openStore() -> LocalStore? {
+        var path = "<Application Support>/Fediqo/store.sqlite"
+        do {
+            let directory = try FileManager.default
+                .url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+                .appending(path: "Fediqo", directoryHint: .isDirectory)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            path = directory.appending(path: "store.sqlite").path(percentEncoded: false)
+            return try LocalStore.openRecovering(path: path)
+        } catch {
+            Logger(subsystem: "fediqo", category: "store")
+                .error("could not open \(path, privacy: .public): \(String(describing: error), privacy: .public)")
+            return nil
+        }
     }
 
     func feed(for mode: FeedMode) -> FeedModel {

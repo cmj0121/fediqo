@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import os
 
 /// The one SQLite database everything Fediqo remembers lives in.
 ///
@@ -8,6 +9,9 @@ import GRDB
 /// `DatabaseQueue` already serialises access, so this is a thin `Sendable` wrapper rather than
 /// an actor — a second lock around the first would only add waiting.
 public final class LocalStore: Sendable {
+    /// Where the store talks about itself. Never a post, never a row — paths, errors, counts.
+    static let log = Logger(subsystem: "fediqo", category: "store")
+
     private let queue: DatabaseQueue
 
     /// Opens (and migrates) the database at `path`, creating it on first use.
@@ -16,12 +20,30 @@ public final class LocalStore: Sendable {
         // WAL lets a read proceed while a refresh writes. Set outside any transaction, once;
         // SQLite remembers it in the file.
         try queue.writeWithoutTransaction { db in try db.execute(sql: "PRAGMA journal_mode = WAL") }
-        try Self.migrator().migrate(queue)
+        let migrated = try Self.migrate(queue)
+        Self.log.info("opened \(path, privacy: .public), migrations run: \(migrated, privacy: .public)")
+    }
+
+    /// `init(path:)`, and — if the file there is not a database SQLite can read — the file is
+    /// set aside as `store.sqlite.corrupt-<seconds>` and a fresh one opened in its place. A
+    /// store that cannot be read is worth less than an empty one; the old bytes stay on disk
+    /// for whoever wants to look. Any other failure is thrown as it is.
+    public static func openRecovering(path: String, now: Date = Date()) throws -> LocalStore {
+        do {
+            return try LocalStore(path: path)
+        } catch let error as DatabaseError where error.resultCode == .SQLITE_CORRUPT || error.resultCode == .SQLITE_NOTADB {
+            let aside = "\(path).corrupt-\(Int(now.timeIntervalSince1970))"
+            log.error("\(path, privacy: .public) is not a database (\(error.resultCode.rawValue)); setting it aside as \(aside, privacy: .public)")
+            for suffix in ["", "-wal", "-shm"] where FileManager.default.fileExists(atPath: path + suffix) {
+                try FileManager.default.moveItem(atPath: path + suffix, toPath: aside + suffix)
+            }
+            return try LocalStore(path: path)
+        }
     }
 
     private init(queue: DatabaseQueue) throws {
         self.queue = queue
-        try Self.migrator().migrate(queue)
+        try Self.migrate(queue)
     }
 
     /// A store that lives only as long as this object. For tests and previews.
@@ -42,6 +64,21 @@ public final class LocalStore: Sendable {
         // GRDB's default, but the schema says it out loud, so the code does too.
         config.foreignKeysEnabled = true
         return config
+    }
+
+    /// Runs what has not run yet and says how many that was. A migration that fails is logged
+    /// here, where the path and the version are known, and thrown to whoever opened the store.
+    @discardableResult
+    private static func migrate(_ queue: DatabaseQueue) throws -> Int {
+        let migrator = migrator()
+        do {
+            let pending = try queue.read { db in try migrator.completedMigrations(db) }
+            try migrator.migrate(queue)
+            return migrator.migrations.count - pending.count
+        } catch {
+            log.error("migration failed: \(String(describing: error), privacy: .public)")
+            throw error
+        }
     }
 
     private static func migrator() -> DatabaseMigrator {
