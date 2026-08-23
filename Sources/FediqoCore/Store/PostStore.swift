@@ -29,7 +29,9 @@ extension LocalStore {
             if post.authorId.isEmpty { throw PostStoreError.missingAuthor(uri: post.uri) }
             if post.sourceURL.isEmpty { throw PostStoreError.missingSource(uri: post.uri) }
         }
-        let serverURL = "https://\(server.host)"
+        // The Mastodon client stamps posts with `https://<host>`, which is `server.endpoint`
+        // for it; a client for another protocol has to agree with its own scheme.
+        let serverURL = server.endpoint
         let serverTitle = server.title
         let ms = Self.milliseconds(now)
 
@@ -180,7 +182,7 @@ extension LocalStore {
 
     // MARK: - Writes
 
-    private static func upsertServer(_ db: Database, url: String, proto: String, title: String?, now: Int64) throws {
+    static func upsertServer(_ db: Database, url: String, proto: String, title: String?, now: Int64) throws {
         let host = URL(string: url)?.host ?? url
         // A title fills in once known and is never blanked; selected_at and position are local
         // and never touched here.

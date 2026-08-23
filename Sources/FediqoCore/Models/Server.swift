@@ -10,6 +10,16 @@ public struct Server: Codable, Sendable, Hashable, Identifiable {
 
     public var id: String { "\(socialProtocol.rawValue)://\(host)" }
 
+    /// The `servers.url` this server is filed under: the scheme-qualified endpoint a client
+    /// for its protocol talks to. A post's `source_url` must name the same address, so a client
+    /// for another protocol owns its own scheme here and in the posts it hands over.
+    public var endpoint: String {
+        switch socialProtocol {
+        case .mastodon, .activityPub, .atProto: "https://\(host)"
+        case .nostr: "wss://\(host)"
+        }
+    }
+
     public init(host: String, socialProtocol: SocialProtocol, title: String = "", addedAt: Date = Date()) {
         self.host = Server.normalise(host)
         self.socialProtocol = socialProtocol

@@ -59,6 +59,18 @@ public final class LocalStore: Sendable {
         try await queue.write(block)
     }
 
+    /// `read` / `write` without the hop. `ServerStore` is a synchronous `@MainActor` protocol
+    /// — the screens read `servers` as a plain property — so its SQLite implementation needs
+    /// the queue's blocking entry. Reserved for the server list's few one-row statements;
+    /// posts keep going through the async pair.
+    func readSync<T>(_ block: (Database) throws -> T) throws -> T {
+        try queue.read(block)
+    }
+
+    func writeSync<T>(_ block: (Database) throws -> T) throws -> T {
+        try queue.write(block)
+    }
+
     private static func configuration() -> Configuration {
         var config = Configuration()
         // GRDB's default, but the schema says it out loud, so the code does too.

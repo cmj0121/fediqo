@@ -94,7 +94,9 @@ public final class AppState {
 
     init(preferences: Preferences = Preferences(), serverStore: (any ServerStore)? = nil,
          store: LocalStore? = nil, launch: LaunchOptions = .none) {
-        let servers = serverStore ?? UserDefaultsServerStore()
+        // The chosen servers live in the store when there is one; without it the app falls
+        // back to the list it kept before the store existed, and keeps remembering there.
+        let servers = serverStore ?? store.map { SQLiteServerStore(store: $0) } ?? UserDefaultsServerStore()
         self.preferences = preferences
         self.serverStore = servers
         self.feeds = [
