@@ -18,7 +18,7 @@ func rotated<T: Equatable>(_ items: [T], from current: T, by steps: Int) -> T? {
 /// What a key press means. Written in plain values rather than SwiftUI's `KeyPress`, which
 /// has no initialiser: the decision of what a key means is the part worth testing, so it is
 /// the part kept away from the event type.
-enum KeyCommand: Equatable {
+enum KeyCommand: Hashable, CaseIterable {
     case refreshNow
     case cycleRefreshInterval
     case compose
@@ -28,6 +28,7 @@ enum KeyCommand: Equatable {
     case nextPost, previousPost
     case openPost
     case backToTop
+    case showShortcuts
 
     /// The command a press means, or nothing when the key is not one of ours.
     ///
@@ -35,12 +36,14 @@ enum KeyCommand: Equatable {
     /// field has the keyboard", so the app derives one and every letter asks it here, in one
     /// place, rather than each shortcut remembering to.
     ///
-    /// Only the letters ask it. `Escape` and `Tab` are not characters a draft has any use
-    /// for — one is how you leave the field, the other is a move — so they are decided
-    /// before the gate rather than behind it. For `Tab` that is not a nicety: a `Tab` we say
-    /// nothing about is a `Tab` handed back to AppKit, which spends it on window tabs this
-    /// app does not have, folding the window into a tab set where the reader cannot find it.
-    /// A key we recognise is answered whatever else is going on.
+    /// `Escape` is the one key decided before the gate. It is not a character a draft has any
+    /// use for — it is how you leave the field — so it has to answer from inside one.
+    ///
+    /// `Tab` is not a character a draft wants either, but it is not a way out: it is a move,
+    /// and turning the page out from under somebody mid-sentence is not what a press of it
+    /// can have meant. So while a draft has the keyboard `Tab` means nothing here. It is
+    /// still never handed back — `swallowed(_:typing:)` is where that is said and why — it
+    /// simply does not navigate.
     static func from(_ character: Character, modifiers: EventModifiers, typing: Bool) -> KeyCommand? {
         // The ⌘ forms belong to the menu bar, which is where a Mac user reads them. Claiming
         // them here as well would mean two owners for one key.
@@ -55,8 +58,10 @@ enum KeyCommand: Equatable {
         let shift = modifiers.contains(.shift)
         // Tab rotates the pages, ⌃Tab the tabs inside one — the bare key for the bigger
         // move. ⌘Tab is the app switcher and belongs to the system on both platforms, so
-        // it is not asked for, and the guard above has already turned it away.
+        // it is not asked for, and the guard above has already turned it away. A draft has
+        // the moves off it entirely, in either form.
         if character == KeyEquivalent.tab.character {
+            guard !typing else { return nil }
             return modifiers.contains(.control)
                 ? (shift ? .previousTab : .nextTab)
                 : (shift ? .previousPage : .nextPage)
@@ -79,6 +84,12 @@ enum KeyCommand: Equatable {
         case "k", KeyEquivalent.upArrow.character: return shift ? nil : .previousPost
         case "g": return shift ? nil : .backToTop
         case KeyEquivalent.return.character: return shift ? nil : .openPost
+        // `?` is shift-slash, and which of the two the keyboard layer hands over depends on
+        // the layer: AppKit's `charactersIgnoringModifiers` keeps Shift and types the
+        // question mark, SwiftUI's `KeyPress` can arrive as the unshifted slash with the flag
+        // still on. Both spellings are the same key, the same way `R` and `⇧r` are.
+        case "?": return .showShortcuts
+        case "/": return shift ? .showShortcuts : nil
         default: return nil
         }
     }
@@ -93,7 +104,9 @@ enum KeyCommand: Equatable {
     /// row of beeps.
     ///
     /// `Tab` is deliberately not here. It is the focus key in every other app, and this one
-    /// takes it anyway: a `Tab` handed back is a `Tab` AppKit spends on window tabs.
+    /// takes it anyway: the screens it moves between have no traversal order worth keeping,
+    /// and a rotation that worked on some pages and moved the focus ring on others would be
+    /// two keys wearing one cap.
     static let sharedWithControls: Set<Character> = [
         KeyEquivalent.upArrow.character,
         KeyEquivalent.downArrow.character,
@@ -103,6 +116,66 @@ enum KeyCommand: Equatable {
     /// The keys worth listening for at all. Naming them keeps every other keystroke — the
     /// ones a text field, a menu or the focus system owns — out of our handler entirely.
     static let listened: Set<KeyEquivalent> = [
-        .tab, .escape, .return, .upArrow, .downArrow, "r", "R", "c", "j", "k", "g",
+        .tab, .escape, .return, .upArrow, .downArrow, "r", "R", "c", "j", "k", "g", "?", "/",
+    ]
+
+    /// A press we keep although it means nothing — neither a command nor anybody else's key.
+    ///
+    /// One key, one situation: `Tab` while a draft has the keyboard. There is nothing to
+    /// traverse to — the composer is a single field — so handing the press back would buy
+    /// the writer no move; what it would buy is AppKit's focus loop taking the keyboard off
+    /// the field they are typing into. Swallowing it costs the draft nothing and keeps it.
+    static func swallowed(_ character: Character, typing: Bool) -> Bool {
+        typing && character == KeyEquivalent.tab.character
+    }
+}
+
+// MARK: - The list of them
+
+extension KeyCommand {
+    /// The three questions the list answers, in the order a reader asks them: where am I
+    /// going, what am I doing, and how do I get out of this.
+    enum ShortcutGroup: String, CaseIterable, Identifiable {
+        case moving, doing, leaving
+
+        var id: String { rawValue }
+        var titleKey: String { "shortcut.group.\(rawValue)" }
+    }
+
+    /// One line of the written-down list: the caps to press, and what pressing them does.
+    ///
+    /// A line can stand for more than one command, because `Tab` and `⇧Tab` are one thing to
+    /// a reader and two to the app. `commands` is what keeps the list honest — every case of
+    /// `KeyCommand` has to appear in exactly one line, and a test says so, so a key added
+    /// later and left undescribed fails the build rather than quietly going unmentioned.
+    struct Shortcut: Identifiable {
+        let group: ShortcutGroup
+        /// What is printed on the keys, and deliberately not translated: a keyboard is
+        /// labelled in the same characters whatever language the reader speaks.
+        let keys: [String]
+        let name: String
+        let commands: [KeyCommand]
+
+        var id: String { name }
+        var detailKey: String { "shortcut.\(name)" }
+    }
+
+    /// Every key this app answers, written down once. The `?` overlay and the card in
+    /// Settings both draw this — there is one list, and it is the same list the commands
+    /// above are decided from.
+    static let shortcuts: [Shortcut] = [
+        Shortcut(group: .moving, keys: ["Tab", "⇧Tab"], name: "pages",
+                 commands: [.nextPage, .previousPage]),
+        Shortcut(group: .moving, keys: ["⌃Tab", "⌃⇧Tab"], name: "tabs",
+                 commands: [.nextTab, .previousTab]),
+        Shortcut(group: .moving, keys: ["j", "k", "↓", "↑"], name: "posts",
+                 commands: [.nextPost, .previousPost]),
+        Shortcut(group: .moving, keys: ["g"], name: "top", commands: [.backToTop]),
+        Shortcut(group: .doing, keys: ["r"], name: "readAgain", commands: [.refreshNow]),
+        Shortcut(group: .doing, keys: ["R"], name: "interval", commands: [.cycleRefreshInterval]),
+        Shortcut(group: .doing, keys: ["c"], name: "compose", commands: [.compose]),
+        Shortcut(group: .doing, keys: ["Return"], name: "open", commands: [.openPost]),
+        Shortcut(group: .doing, keys: ["?"], name: "list", commands: [.showShortcuts]),
+        Shortcut(group: .leaving, keys: ["Escape"], name: "dismiss", commands: [.dismiss]),
     ]
 }

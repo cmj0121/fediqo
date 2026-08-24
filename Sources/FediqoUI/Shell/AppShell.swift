@@ -35,6 +35,10 @@ struct AppShell: View {
         // goes away — so there is never a second one, and never one left running for a feed
         // nobody is looking at.
         layout
+            // The keys, written down, over everything the shell draws — including the
+            // composer, so `?` with a draft open puts the list in front of it rather than
+            // behind it.
+            .shortcutsOverlay()
             // SwiftUI delivers a press to whatever holds the keyboard, so the shell holds it
             // when nothing else wants it. This is the whole of the keyboard on iOS; macOS
             // takes the same keys from AppKit below, and does not depend on any of it.
@@ -61,11 +65,7 @@ struct AppShell: View {
                 focused = true
             }
             .onKeyPress(keys: KeyCommand.listened, phases: .down) { press in
-                guard let command = KeyCommand.from(press.key.character,
-                                                    modifiers: press.modifiers,
-                                                    typing: app.isTyping),
-                      app.consumes(command, spelledWith: press.key.character) else { return .ignored }
-                return .handled
+                app.handles(press.key.character, modifiers: press.modifiers) ? .handled : .ignored
             }
             .shellKeyCommands()
             .task(id: app.refreshKey) { await app.refreshWhileVisible() }

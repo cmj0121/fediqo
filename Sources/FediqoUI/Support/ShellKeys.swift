@@ -60,8 +60,8 @@ func shellKey(keyCode: UInt16, typed: Character?) -> Character? {
 /// is not a shortcut.
 ///
 /// So the shell listens where AppKit listens, and nothing about the keys depends on where
-/// the keyboard happens to be. What decides is the same thing it always was:
-/// `KeyCommand.from` — nothing while text is being typed except `Escape`, nothing that a
+/// the keyboard happens to be. What decides is the same thing it always was: `AppState`'s
+/// own `handles` — nothing while text is being typed except `Escape`, nothing that a
 /// modifier makes the menu bar's, and nothing on a page that has nothing to do with it. Any
 /// press that is not ours is handed straight back untouched.
 ///
@@ -91,10 +91,7 @@ private struct ShellKeyMonitor: ViewModifier {
                     // there, and answering with a `Bool` keeps the event itself out of the
                     // hop, since an `NSEvent` cannot cross one.
                     let handled = MainActor.assumeIsolated {
-                        guard let command = KeyCommand.from(character,
-                                                            modifiers: modifiers,
-                                                            typing: app.isTyping) else { return false }
-                        return app.consumes(command, spelledWith: character)
+                        app.handles(character, modifiers: modifiers)
                     }
                     return handled ? nil : event
                 }

@@ -139,6 +139,10 @@ public final class AppState {
     /// from outside the screen that draws them. The drawing stays where it was.
     var addingSource = false
     var showingNotifications = false
+    /// Whether the written-down list of keys is up. It sits over everything the shell draws
+    /// rather than in a sheet, so it lives here beside `composing` for the same reason: the
+    /// key that opens it is answered outside the view that draws it.
+    var showingShortcuts = false
     /// How the app opens a link, handed over by the shell.
     ///
     /// `openURL` is an environment value and this is not a view, but the key that opens a
@@ -320,6 +324,12 @@ public final class AppState {
         setComposing(!composing)
     }
 
+    /// One owner for the list of keys, so the `?` key, the scrim behind it and its own Close
+    /// button all move it the same way.
+    func setShowingShortcuts(_ open: Bool) {
+        withAnimation(.easeOut(duration: 0.15)) { showingShortcuts = open }
+    }
+
     /// Told by the one editor in the app, each time it takes or gives back the keyboard.
     func setTyping(_ typing: Bool) {
         isTyping = typing
@@ -327,12 +337,22 @@ public final class AppState {
 
     // MARK: - Commands
 
+    /// The whole of what a key press does: what it means, what it did, and whether the app
+    /// keeps it. Both listeners — SwiftUI's on iOS, AppKit's on macOS — ask this and nothing
+    /// else, so the two cannot come to answer the same press differently.
+    func handles(_ character: Character, modifiers: EventModifiers) -> Bool {
+        guard let command = KeyCommand.from(character, modifiers: modifiers, typing: isTyping)
+        else { return KeyCommand.swallowed(character, typing: isTyping) }
+        return consumes(command, spelledWith: character)
+    }
+
     /// Does what a press asked for, and says whether the press was ours to keep.
     ///
     /// A key we understand is ours whether or not it had anything to do. Handing one back
     /// because it changed nothing is worse than swallowing it: `⌃Tab` on a page with no tabs
-    /// went on to AppKit, which spends it on window tabs this app does not have, and the
-    /// window it was pressed in was folded into a set and lost.
+    /// would go on to the focus system, which has its own use for the key and would move the
+    /// ring somewhere the reader did not ask to be — a press that meant one thing on the
+    /// Timeline meaning another on Settings.
     ///
     /// Two kinds of press are handed back, for two different reasons.
     ///
@@ -374,6 +394,7 @@ public final class AppState {
         case .previousPost: return moveSelection(by: -1)
         case .openPost: return openSelectedPost()
         case .backToTop: return goToTop()
+        case .showShortcuts: setShowingShortcuts(true); return true
         }
     }
 
@@ -459,6 +480,14 @@ public final class AppState {
     /// dismissing two things.
     @discardableResult
     func dismissFront() -> Bool {
+        // In front of the composer, because it is drawn over it. The two are up together
+        // whenever the reader has let go of the field: `?` is a character while the field
+        // holds the keyboard, so the list can only have been asked for from a draft nobody
+        // is typing into — and the press that closes it must not take that draft with it.
+        if showingShortcuts {
+            setShowingShortcuts(false)
+            return true
+        }
         guard composing else { return false }
         setComposing(false)
         return true
@@ -473,5 +502,17 @@ extension View {
         environment(app)
             .environment(\.fediqoTextScale, app.preferences.textScale.factor)
             .environment(\.locale, app.preferences.language.locale ?? .autoupdatingCurrent)
+            // No scrollbar, anywhere. It is pointer furniture, and this app is steered
+            // without one: where the reader is in a timeline is said by the ring on the post
+            // they are on, and how far down they have come by the back-to-top button
+            // appearing. SwiftUI offers no narrower bar, only none.
+            //
+            // Said here rather than at each `ScrollView`, for the reason this whole modifier
+            // exists: the decision has one owner, and one line to change if it is ever
+            // revisited. Not one it cannot escape — a new top-level presentation that
+            // forgets `fediqoChrome` loses the scrollbar rule exactly as it loses the locale
+            // and the text scale, and the answer to that is the same as it is for those two:
+            // a presentation applies this, and the environment carries it down from there.
+            .scrollIndicators(.hidden)
     }
 }

@@ -563,6 +563,23 @@
         }
       }
     },
+    "menu.shortcuts": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keyboard Shortcuts"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "鍵盤快速鍵"
+          }
+        }
+      }
+    },
     "onboarding.server.add": {
       "extractionState": "manual",
       "localizations": {
@@ -1341,6 +1358,261 @@
           "stringUnit": {
             "state": "translated",
             "value": "設定"
+          }
+        }
+      }
+    },
+    "shortcut.compose": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New post"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "發新文"
+          }
+        }
+      }
+    },
+    "shortcut.dismiss": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Close the composer, or whatever is in front of you"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "關閉編輯器，或關掉眼前的東西"
+          }
+        }
+      }
+    },
+    "shortcut.group.doing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Doing things"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "動作"
+          }
+        }
+      }
+    },
+    "shortcut.group.leaving": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Getting out"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "離開"
+          }
+        }
+      }
+    },
+    "shortcut.group.moving": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Moving about"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移動"
+          }
+        }
+      }
+    },
+    "shortcut.interval": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cycle how often it reads on its own"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "輪替自動重新讀取的間隔"
+          }
+        }
+      }
+    },
+    "shortcut.list": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show this list"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "顯示這份清單"
+          }
+        }
+      }
+    },
+    "shortcut.note": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "These are keyboard shortcuts. They need a keyboard — on a phone with none attached there is nothing here to press."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這些是鍵盤快速鍵，需要鍵盤才能用。手機沒有接鍵盤時，這裡沒有東西可以按。"
+          }
+        }
+      }
+    },
+    "shortcut.open": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open the post you are on"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "開啟目前所在的貼文"
+          }
+        }
+      }
+    },
+    "shortcut.pages": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Next / previous page"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下一個頁面 / 上一個頁面"
+          }
+        }
+      }
+    },
+    "shortcut.posts": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Next / previous post"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下一則 / 上一則貼文"
+          }
+        }
+      }
+    },
+    "shortcut.readAgain": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Read this feed again, now"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "立刻重新讀取這個時間軸"
+          }
+        }
+      }
+    },
+    "shortcut.tabs": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Next / previous tab within the page"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "頁面內的下一個 / 上一個分頁"
+          }
+        }
+      }
+    },
+    "shortcut.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keyboard shortcuts"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "鍵盤快速鍵"
+          }
+        }
+      }
+    },
+    "shortcut.top": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Back to the top"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "回到最上面"
           }
         }
       }

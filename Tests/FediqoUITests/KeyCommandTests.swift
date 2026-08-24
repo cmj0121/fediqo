@@ -69,15 +69,22 @@ struct KeyCommandMeaningTests {
         #expect(KeyCommand.from(character, modifiers: [], typing: true) == nil)
     }
 
-    /// A Tab we decline is a Tab AppKit takes instead, and AppKit spends it on window tabs
-    /// this app does not have — the window is folded into a tab set and the reader has lost
-    /// it. Nothing in a draft wants a Tab, so nothing is given up by answering it.
-    @Test("Tab is still a move while typing — it is not a letter the draft is waiting for")
-    func tabSurvivesTyping() {
-        #expect(KeyCommand.from(tab, modifiers: [], typing: true) == .nextPage)
-        #expect(KeyCommand.from(tab, modifiers: [.shift], typing: true) == .previousPage)
-        #expect(KeyCommand.from(tab, modifiers: [.control], typing: true) == .nextTab)
-        #expect(KeyCommand.from(tab, modifiers: [.control, .shift], typing: true) == .previousTab)
+    /// Turning the page out from under somebody in the middle of a sentence is not what a
+    /// press of Tab can have meant, so mid-draft it means nothing — in either form.
+    @Test("While text is being typed, Tab is not a move either",
+          arguments: [EventModifiers(), .shift, .control, [.control, .shift]])
+    func tabIsDeadWhileTyping(modifiers: EventModifiers) {
+        #expect(KeyCommand.from(tab, modifiers: modifiers, typing: true) == nil)
+    }
+
+    /// Meaning nothing is not the same as belonging to somebody else. The composer is a
+    /// single field, so a Tab handed back would find nothing to traverse to and take the
+    /// keyboard off the draft on its way past.
+    @Test("A Tab meaning nothing is still not handed back",
+          arguments: [tab, escape, "j", "?"] as [Character])
+    func onlyTabIsSwallowedWhileTyping(character: Character) {
+        #expect(KeyCommand.swallowed(character, typing: true) == (character == tab))
+        #expect(KeyCommand.swallowed(character, typing: false) == false)
     }
 
     @Test("Escape is the one key that survives typing: it is how you leave what you are in")
@@ -203,8 +210,9 @@ struct CommandTests {
         #expect(app.perform(.refreshNow) == false)
     }
 
-    /// Handing a key we understand back to the platform is worse than swallowing it: AppKit
-    /// spends ⌃Tab on window tabs this app does not have.
+    /// Handing a key we understand back to the platform is worse than swallowing it: the
+    /// focus system has its own use for ⌃Tab and would move the ring on a press that, one
+    /// page over, means something else entirely.
     @Test("A key we understand is ours even when it had nothing to do",
           arguments: [RailItem.kept, .statistics, .settings])
     func recognisedKeysAreKept(page: RailItem) {
@@ -245,6 +253,40 @@ struct CommandTests {
         app.setTyping(true)
         app.setComposing(false)
         #expect(app.isTyping == false)
+    }
+
+    /// The whole of the Tab rule, through the one door both listeners use: mid-draft the
+    /// press is kept and the reader stays on the page they were writing from.
+    @Test("Tab mid-draft is kept and changes nothing", arguments: [
+        EventModifiers(), .shift, .control, [.control, .shift],
+    ] as [EventModifiers])
+    func tabMidDraftDoesNothing(modifiers: EventModifiers) {
+        let app = freshApp("tab-mid-draft")
+        app.railItem = .timeline
+        app.feedTab = .timeline
+        app.setComposing(true)
+        app.setTyping(true)
+        #expect(app.handles(tab, modifiers: modifiers))
+        #expect(app.railItem == .timeline)
+        #expect(app.feedTab == .timeline)
+    }
+
+    @Test("With no draft open, the same press moves the page")
+    func tabMovesWhenNobodyIsTyping() {
+        let app = freshApp("tab-moves")
+        app.railItem = .timeline
+        #expect(app.handles(tab, modifiers: []))
+        #expect(app.railItem != .timeline)
+    }
+
+    /// A key that was never ours is handed back whether or not a draft is open — the door
+    /// swallows Tab, not everything that reaches it.
+    @Test("A key that is nobody's is still handed back")
+    func unknownKeysAreHandedBack() {
+        let app = freshApp("unknown-handed-back")
+        app.setTyping(true)
+        #expect(app.handles("x", modifiers: []) == false)
+        #expect(app.handles("j", modifiers: []) == false)
     }
 }
 

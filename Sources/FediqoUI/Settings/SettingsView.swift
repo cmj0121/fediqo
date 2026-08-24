@@ -37,6 +37,10 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+
+                // The same list `?` puts up, in the one place a reader who has never
+                // pressed `?` would go looking. One view, so the two cannot drift apart.
+                section(t("shortcut.title")) { ShortcutList() }
             }
             .frame(maxWidth: 620, alignment: .leading)
             .padding(22)
