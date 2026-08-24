@@ -134,6 +134,18 @@ public final class AppState {
     /// Whether the composer is open. It belongs here rather than to the bar because the
     /// panel is drawn by the shell, over everything, and the bar only asks for it.
     var composing: Bool
+    /// The two sheets the timeline puts up. They live here rather than in the screen for the
+    /// same reason `composing` does: a menu item and a key have to be able to ask for them
+    /// from outside the screen that draws them. The drawing stays where it was.
+    var addingSource = false
+    var showingNotifications = false
+    /// Whether a text field somewhere has the keyboard.
+    ///
+    /// SwiftUI has no such signal to read, so the app keeps one: the editor says when it
+    /// takes the keyboard and when it gives it back, and every single-key shortcut asks
+    /// here before doing anything. Without it `r` typed into a draft would refresh the
+    /// timeline instead of writing a letter.
+    private(set) var isTyping = false
     let holdsLanding: Bool
 
     private(set) var servers: [Server]
@@ -291,10 +303,100 @@ public final class AppState {
     /// the panel itself cannot disagree about how it moves.
     func setComposing(_ open: Bool) {
         withAnimation(.easeOut(duration: 0.15)) { composing = open }
+        // The editor goes away with the panel, and it cannot report losing a keyboard it is
+        // no longer there to hold. A signal left standing would leave every single key dead.
+        if !open { isTyping = false }
     }
 
     func toggleComposer() {
         setComposing(!composing)
+    }
+
+    /// Told by the one editor in the app, each time it takes or gives back the keyboard.
+    func setTyping(_ typing: Bool) {
+        isTyping = typing
+    }
+
+    // MARK: - Commands
+
+    /// Does what a press asked for, and says whether the press was ours to keep.
+    ///
+    /// A key we understand is ours whether or not it had anything to do. Handing one back
+    /// because it changed nothing is worse than swallowing it: `⌃Tab` on a page with no tabs
+    /// went on to AppKit, which spends it on window tabs this app does not have, and the
+    /// window it was pressed in was folded into a set and lost.
+    ///
+    /// `Escape` is the exception, and the reason the distinction is worth keeping. With
+    /// nothing in front of you it was never ours — the platform may still have a use for it,
+    /// and a press that dismissed nothing must not be reported as a dismissal.
+    func consumes(_ command: KeyCommand) -> Bool {
+        let did = perform(command)
+        return command == .dismiss ? did : true
+    }
+
+    /// Does what a key or a menu item asked for, and says whether there was anything to do.
+    ///
+    /// The answer matters for one key: ⌃Tab asks for the next tab, and a page with no
+    /// tabs has none to give — so this returns `false` and the shell lets the press through
+    /// rather than swallowing a key that did nothing.
+    @discardableResult
+    func perform(_ command: KeyCommand) -> Bool {
+        switch command {
+        case .refreshNow: return refreshNow()
+        case .cycleRefreshInterval: cycleRefreshInterval(); return true
+        case .compose: setComposing(true); return true
+        case .dismiss: return dismissFront()
+        case .nextTab: return rotateTab(by: 1)
+        case .previousTab: return rotateTab(by: -1)
+        case .nextPage: rotatePage(by: 1); return true
+        case .previousPage: rotatePage(by: -1); return true
+        }
+    }
+
+    /// The page `steps` along the rail, wrapping at both ends.
+    func rotatePage(by steps: Int) {
+        railItem = rotated(RailItem.allCases, from: railItem, by: steps) ?? railItem
+    }
+
+    /// The tab `steps` along inside the page being looked at, wrapping at both ends. A page
+    /// with no tabs has nothing to rotate and says so.
+    @discardableResult
+    func rotateTab(by steps: Int) -> Bool {
+        let tabs = railItem.tabs
+        guard let next = rotated(tabs, from: feedTab, by: steps) else { return false }
+        feedTab = next
+        return true
+    }
+
+    /// Reads the feed being looked at again, now. The reader asked, so every server is asked
+    /// whatever it did last time — that is what `.manual` means, and it is the default.
+    /// A page with no feed has nothing to read again.
+    @discardableResult
+    func refreshNow() -> Bool {
+        guard let mode = feedMode else { return false }
+        let feed = feed(for: mode)
+        Task { await feed.load(servers: servers) }
+        return true
+    }
+
+    /// Off → 15s → 30s → 60s → 5min → Off, which is the order the cases are written in and
+    /// the order the preferences screen shows them in.
+    func cycleRefreshInterval() {
+        preferences.refreshInterval =
+            rotated(RefreshInterval.allCases, from: preferences.refreshInterval, by: 1) ?? .off
+    }
+
+    /// What `Escape` does: the thing in front of you goes away, and nothing else happens —
+    /// it never takes you somewhere else.
+    ///
+    /// The sheets are not listed here on purpose. They are the platform's own presentations
+    /// and it closes them on `Escape` itself; closing them here as well would be one press
+    /// dismissing two things.
+    @discardableResult
+    func dismissFront() -> Bool {
+        guard composing else { return false }
+        setComposing(false)
+        return true
     }
 }
 

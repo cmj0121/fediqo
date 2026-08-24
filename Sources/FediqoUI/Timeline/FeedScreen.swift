@@ -17,8 +17,6 @@ struct FeedScreen: View {
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
-    @State private var addingSource = false
-    @State private var showingNotifications = false
     /// Whether the reader has gone far enough down that going back up is a journey. The
     /// button to do it in one move only exists while that is true — an arrow pointing at
     /// where you already are is a button that does nothing.
@@ -45,8 +43,12 @@ struct FeedScreen: View {
     /// to look, so it carries none of them.
     private var showsTimelineControls: Bool { mode == .timeline }
 
+    /// The sheets are still drawn here, over the screen they belong to. What moved is only
+    /// the fact of whether they are up: a menu item and a key have to be able to ask for
+    /// one from outside this screen, and a `@State` inside it can be reached by nothing.
     var body: some View {
-        ScrollViewReader { proxy in
+        @Bindable var app = app
+        return ScrollViewReader { proxy in
             VStack(spacing: 0) {
                 header(proxy)
                 Hairline()
@@ -54,12 +56,12 @@ struct FeedScreen: View {
             }
         }
         .task(id: app.servers) { await model.loadIfNeeded(servers: app.servers) }
-        .sheet(isPresented: $addingSource) {
-            ServerPickerView(socialProtocol: .mastodon) { addingSource = false }
+        .sheet(isPresented: $app.addingSource) {
+            ServerPickerView(socialProtocol: .mastodon) { app.addingSource = false }
                 .fediqoChrome(app)
         }
-        .sheet(isPresented: $showingNotifications) {
-            NotificationsSheet { showingNotifications = false }
+        .sheet(isPresented: $app.showingNotifications) {
+            NotificationsSheet { app.showingNotifications = false }
                 .fediqoChrome(app)
         }
     }
@@ -142,7 +144,7 @@ struct FeedScreen: View {
                 .transition(.opacity)
             }
             if showsTimelineControls {
-                IconButton(symbol: "bell", labelKey: "timeline.notifications") { showingNotifications = true }
+                IconButton(symbol: "bell", labelKey: "timeline.notifications") { app.showingNotifications = true }
                 filterMenu
                 sourcesMenu
             }
@@ -180,7 +182,7 @@ struct FeedScreen: View {
     private var sourcesMenu: some View {
         let failures = model.failures
         return Menu {
-            Button(t("timeline.addSource")) { addingSource = true }
+            Button(t("timeline.addSource")) { app.addingSource = true }
             Divider()
             ForEach(app.servers) { server in
                 Menu {
@@ -243,7 +245,7 @@ struct FeedScreen: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                 if showsTimelineControls {
-                    Button(t("timeline.addSource")) { addingSource = true }
+                    Button(t("timeline.addSource")) { app.addingSource = true }
                         .buttonStyle(.borderedProminent)
                         .tint(Palette.accent)
                         .fediqoFont(12)

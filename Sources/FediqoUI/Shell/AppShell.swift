@@ -16,6 +16,11 @@ struct AppShell: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
 
+    /// Somewhere for the keyboard to be when it is nowhere in particular. `onKeyPress` is
+    /// delivered to whatever has focus and bubbles up from there, so without a focus of its
+    /// own the shell would hear nothing until the reader had clicked on a control.
+    @FocusState private var focused: Bool
+
     private var railWidth: CGFloat {
         app.preferences.railExpanded ? RailView.expandedWidth : RailView.collapsedWidth
     }
@@ -26,7 +31,38 @@ struct AppShell: View {
         // and starts the new one on every change, and cancels it altogether when the shell
         // goes away — so there is never a second one, and never one left running for a feed
         // nobody is looking at.
-        layout.task(id: app.refreshKey) { await app.refreshWhileVisible() }
+        layout
+            // SwiftUI delivers a press to whatever holds the keyboard, so the shell holds it
+            // when nothing else wants it. This is the whole of the keyboard on iOS; macOS
+            // takes the same keys from AppKit below, and does not depend on any of it.
+            .focusable()
+            .focusEffectDisabled()
+            .focused($focused)
+            .onAppear { focused = true }
+            // The composer takes the keyboard when it opens, so the shell asks for it back
+            // once the panel has finished leaving — asking sooner asks over a field that is
+            // still there and still holds it. On macOS this changes nothing either way.
+            //
+            // `.task(id:)` rather than a `Task` of its own, because the wait has to be
+            // undone as readily as it is started: opening the composer again inside those
+            // few tenths would otherwise have the shell take the keyboard back off the field
+            // the reader is already typing into. Changing the id cancels the wait, and so
+            // does the shell going away.
+            .task(id: app.composing) {
+                guard !app.composing else { return }
+                try? await Task.sleep(for: .seconds(0.25))
+                guard !Task.isCancelled else { return }
+                focused = true
+            }
+            .onKeyPress(keys: KeyCommand.listened, phases: .down) { press in
+                guard let command = KeyCommand.from(press.key.character,
+                                                    modifiers: press.modifiers,
+                                                    typing: app.isTyping),
+                      app.consumes(command) else { return .ignored }
+                return .handled
+            }
+            .shellKeyCommands()
+            .task(id: app.refreshKey) { await app.refreshWhileVisible() }
     }
 
     @ViewBuilder
