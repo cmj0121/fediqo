@@ -7,39 +7,41 @@ import Testing
 /// the one the document describes.
 @Suite("Opening the local store")
 struct LocalStoreTests {
-    /// `docs/schema.sql`, found by walking up from this file to the package root.
-    private var documentedSchema: URL {
+    /// `docs/<name>.sql`, found by walking up from this file to the package root.
+    private func documentedSchema(_ name: String) -> URL {
         var dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         while !FileManager.default.fileExists(atPath: dir.appendingPathComponent("Package.swift").path) {
             dir.deleteLastPathComponent()
         }
-        return dir.appendingPathComponent("docs/schema.sql")
+        return dir.appendingPathComponent("docs/\(name).sql")
     }
 
-    @Test("The bundled schema is docs/schema.sql, byte for byte")
-    func bundledSchemaMatchesDocs() throws {
-        let bundled = try Data(contentsOf: Bundle.module.url(forResource: "schema", withExtension: "sql")!)
-        #expect(bundled == (try Data(contentsOf: documentedSchema)))
+    @Test("Each bundled schema is its docs copy, byte for byte", arguments: ["schema", "schema-002"])
+    func bundledSchemaMatchesDocs(name: String) throws {
+        let bundled = try Data(contentsOf: Bundle.module.url(forResource: name, withExtension: "sql")!)
+        #expect(bundled == (try Data(contentsOf: documentedSchema(name))))
     }
 
     @Test("A fresh store has every table, the triggers, and the three protocols")
     func freshStoreMatchesSchema() async throws {
         let store = try LocalStore.inMemory()
-        let (tables, triggers, protocols) = try await store.read { db in
+        let (tables, triggers, protocols, migrations) = try await store.read { db in
             let tables = try String.fetchSet(db, sql: """
                 SELECT name FROM sqlite_master WHERE type = 'table'
                 AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'posts_fts_%' AND name != 'grdb_migrations'
                 """)
             let triggers = try String.fetchSet(db, sql: "SELECT name FROM sqlite_master WHERE type = 'trigger'")
             let rows = try Row.fetchAll(db, sql: "SELECT proto, created_at FROM protocols ORDER BY proto")
-            return (tables, triggers, rows.map { ($0["proto"] as String, $0["created_at"] as Int64) })
+            let migrations = try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations ORDER BY identifier")
+            return (tables, triggers, rows.map { ($0["proto"] as String, $0["created_at"] as Int64) }, migrations)
         }
 
         #expect(tables == ["protocols", "servers", "accounts", "posts", "tags", "post_tags",
-                           "server_trends", "tag_buckets", "posts_fts"])
+                           "server_trends", "tag_buckets", "posts_fts", "owned_accounts"])
         #expect(triggers == ["posts_fts_insert", "posts_fts_delete", "posts_fts_update"])
         #expect(protocols.map(\.0) == ["atproto", "mastodon", "nostr"])
         #expect(protocols.allSatisfy { $0.1 > 0 })
+        #expect(migrations == ["001", "002"])
     }
 
     @Test("Foreign keys are on, so a post without its server is refused")
@@ -76,6 +78,63 @@ struct LocalStoreTests {
 
         #expect(again.0 == first)
         #expect(again.1 == "wal")
-        #expect(again.2 == 1)
+        #expect(again.2 == 2)
+    }
+
+    @Test("A 001 store upgrades in place: owned_accounts appears, what was there stays")
+    func upgradingFrom001KeepsPriorData() async throws {
+        let dir = try scratchDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let path = dir.appendingPathComponent("fediqo.sqlite").path
+
+        do {  // yesterday's app: migrated to 001 only, with a server, an account, and a post
+            let old = try LocalStore(path: path, upTo: "001")
+            try old.writeSync { db in
+                try db.execute(sql: """
+                    INSERT INTO servers (url, host, proto, created_at)
+                    VALUES ('https://a.test', 'a.test', 'mastodon', 0)
+                    """)
+                try db.execute(sql: """
+                    INSERT INTO accounts (author_id, proto, server_url, created_at)
+                    VALUES ('https://a.test/users/a', 'mastodon', 'https://a.test', 0)
+                    """)
+                try db.execute(sql: """
+                    INSERT INTO posts (merge_key, proto, uri, source_url, posted_at, author_id,
+                                       last_seen_at, created_at)
+                    VALUES ('k', 'mastodon', 'u', 'https://a.test', 0, 'https://a.test/users/a', 0, 0)
+                    """)
+            }
+            #expect(try old.readSync { db in
+                try Bool.fetchOne(db, sql: "SELECT count(*) > 0 FROM sqlite_master WHERE name = 'owned_accounts'")
+            } == false)
+        }
+
+        let (hasTable, posts, migrations) = try await LocalStore(path: path).read { db in
+            (try Bool.fetchOne(db, sql: "SELECT count(*) > 0 FROM sqlite_master WHERE name = 'owned_accounts'")!,
+             try Int.fetchOne(db, sql: "SELECT count(*) FROM posts")!,
+             try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations ORDER BY identifier"))
+        }
+        #expect(hasTable)
+        #expect(posts == 1)
+        #expect(migrations == ["001", "002"])
+    }
+
+    @Test("owned_accounts records a fact about an account we have; a ghost is refused")
+    func ownedAccountWithoutAccountIsRefused() async throws {
+        let store = try LocalStore.inMemory()
+        try await store.write { db in
+            try db.execute(sql: """
+                INSERT INTO servers (url, host, proto, created_at)
+                VALUES ('https://a.test', 'a.test', 'mastodon', 0)
+                """)
+        }
+        await #expect(throws: DatabaseError.self) {
+            try await store.write { db in
+                try db.execute(sql: """
+                    INSERT INTO owned_accounts (author_id, server_url, created_at)
+                    VALUES ('https://a.test/users/ghost', 'https://a.test', 0)
+                    """)
+            }
+        }
     }
 }

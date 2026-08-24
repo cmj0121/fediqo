@@ -52,6 +52,7 @@ one.
 | theme, text size, language, rail          | `UserDefaults` | the first frame needs them before the store opens   |
 | posts, accounts, servers, and their links | SQLite         | social data                                         |
 | timeline filters                          | `UserDefaults` | stored there, but applied as bind parameters in SQL |
+| the fact of being signed in               | SQLite         | the credential lives in the Keychain, never here    |
 
 A filter applied in Swift after a page is read gives every page a different length, so filtering belongs in
 the query whatever holds the value.
@@ -66,7 +67,7 @@ network   what a server handed over. A refresh writes; only an authority edits.
           protocols, servers, accounts, posts, tags, post_tags, server_trends
 
 local     what you decided, and can withdraw. Only you.
-          servers.selected_at, servers.position, tags.followed_at, tags.muted_at
+          servers.selected_at, servers.position, tags.followed_at, tags.muted_at, owned_accounts
 
 record    what was counted here, and kept after the rows it counted are purged.
           tag_buckets
@@ -121,6 +122,11 @@ ON CONFLICT(url) DO UPDATE SET
 `servers` is a catalogue of every host we have met, not a list of the ones you chose; choosing is
 `selected_at`, and removing a server sets it back to `NULL`. **The row is never deleted**, so a server you
 drop takes nothing with it and every post it ever handed you still shows.
+
+Signing in is the same kind of decision, big enough for a table of its own: migration 002 adds
+`owned_accounts`, one row per account that is yours. The token lives in the Keychain, keyed by
+`author_id`; the row records only the fact. Signing out deletes the row — the account and every post it
+handed over stay.
 
 ## Time
 
@@ -384,7 +390,6 @@ is lost by waiting, so these wait until a screen needs them:
 | waits                                     | for                                                        |
 | ----------------------------------------- | ---------------------------------------------------------- |
 | notifications, and their kinds            | an account of your own; a public timeline needs none       |
-| owned accounts                            | the same — the credential stays in the Keychain either way |
 | identities and account aliases            | people who move servers; a claim, never a rewrite          |
 | composition posts                         | a published post recognised as one of several              |
 | merge hints, reasons and resolutions      | pairs no id can decide, and what you said about them       |

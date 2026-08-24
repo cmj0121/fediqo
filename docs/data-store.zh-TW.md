@@ -49,6 +49,7 @@ Migration 遵守同一條規則：只增不減。只有 `CREATE`、`ADD COLUMN`�
 | 主題、字級、語言、側邊欄      | `UserDefaults` | 第一個 frame 在儲存層開起來之前就需要它們    |
 | 貼文、帳號、伺服器，與其關聯  | SQLite         | 社交資料                                     |
 | 時間軸篩選                    | `UserDefaults` | 值存這裡，但當成 bind parameter 在 SQL 生效  |
+| 你登入了這件事                | SQLite         | 憑證放在 Keychain，永遠不在這裡              |
 
 讀完一頁再用 Swift 篩，每一頁的長度都會不一樣，所以不論值存在哪裡，篩選都屬於查詢。
 
@@ -61,7 +62,7 @@ network   伺服器交過來的。刷新寫入；只有權威方改得動內容�
           protocols、servers、accounts、posts、tags、post_tags、server_trends
 
 local     你決定的，可以撤回。只有你動得了。
-          servers.selected_at、servers.position、tags.followed_at、tags.muted_at
+          servers.selected_at、servers.position、tags.followed_at、tags.muted_at、owned_accounts
 
 record    在這裡數出來的，而且被數的列清掉之後它還留著。
           tag_buckets
@@ -115,6 +116,10 @@ ON CONFLICT(url) DO UPDATE SET
 `servers` 是「我們遇過的每一個 host」的目錄，不是「你選的那幾台」的清單；選擇是 `selected_at`，移除一台
 伺服器只是把它設回 `NULL`。**那一列永遠不刪**，所以你移掉一台，它什麼都不會帶走，它交給過你的每一則貼文
 照樣顯示。
+
+登入是同一種決定，而且大到值得自己的一張表：migration 002 加了 `owned_accounts`，屬於你的帳號一列一筆。
+token 放在 Keychain，以 `author_id` 為鍵；這一列記的只有事實本身。登出就是刪掉那一列 —— 帳號和它交給過
+你的每一則貼文都留著。
 
 ## 時間
 
@@ -360,7 +365,6 @@ network 表上的本地欄位，刷新只寫 `display`，永遠不碰它們。
 | 等的是                       | 等什麼                                               |
 | ---------------------------- | ---------------------------------------------------- |
 | 通知，以及通知的種類         | 你自己的帳號；公開時間軸不需要                       |
-| 自有帳號                     | 同上 —— 憑證無論如何都留在 Keychain                  |
 | identity 與帳號 alias        | 會搬伺服器的人；是一個宣稱，永遠不是改寫             |
 | 同一稿的多則貼文             | 發布出去、之後才被認出是同一稿的貼文                 |
 | 合併提示、reason 與決定      | id 判不出來的那些對，以及你對它們說了什麼            |

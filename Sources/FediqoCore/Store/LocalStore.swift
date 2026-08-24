@@ -5,7 +5,8 @@ import os
 /// The one SQLite database everything Fediqo remembers lives in.
 ///
 /// The schema is `docs/schema.sql`, shipped as a resource and executed verbatim by migration
-/// `001`; a test holds the two copies identical so the document never drifts from the code.
+/// `001`; each later migration is a `docs/schema-<version>.sql` run the same way. A test holds
+/// every pair of copies identical so the documents never drift from the code.
 /// `DatabaseQueue` already serialises access, so this is a thin `Sendable` wrapper rather than
 /// an actor — a second lock around the first would only add waiting.
 public final class LocalStore: Sendable {
@@ -32,6 +33,13 @@ public final class LocalStore: Sendable {
         self.queue = queue
         let migrated = try Self.migrate(queue)
         Self.log.info("opened \(path, privacy: .public), migrations run: \(migrated, privacy: .public)")
+    }
+
+    /// Yesterday's database: migrated up to `version` and no further. A test hook, so an
+    /// upgrade test can build the store an older app left behind before reopening it here.
+    init(path: String, upTo version: String) throws {
+        self.queue = try DatabaseQueue(path: path, configuration: Self.configuration())
+        try Self.migrator().migrate(queue, upTo: version)
     }
 
     /// The app's database, at `<Application Support>/Fediqo/store.sqlite`. The store never
@@ -114,16 +122,19 @@ public final class LocalStore: Sendable {
     private static func migrator() -> DatabaseMigrator {
         var migrator = DatabaseMigrator()
         migrator.registerMigration("001") { db in
-            try db.execute(sql: schema())
+            try db.execute(sql: schema(named: "schema"))
             // The file seeds created_at = 0; the migration is what knows when it ran.
             try db.execute(sql: "UPDATE protocols SET created_at = ?", arguments: [milliseconds(Date())])
+        }
+        migrator.registerMigration("002") { db in
+            try db.execute(sql: schema(named: "schema-002"))
         }
         return migrator
     }
 
-    /// The bundled copy of `docs/schema.sql`. Missing means a broken build, not a runtime case.
-    static func schema() throws -> String {
-        let url = Bundle.module.url(forResource: "schema", withExtension: "sql")!
+    /// The bundled copy of `docs/<name>.sql`. Missing means a broken build, not a runtime case.
+    static func schema(named name: String) throws -> String {
+        let url = Bundle.module.url(forResource: name, withExtension: "sql")!
         return try String(contentsOf: url, encoding: .utf8)
     }
 }

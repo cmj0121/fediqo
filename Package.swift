@@ -20,7 +20,7 @@ let package = Package(
         .target(
             name: "FediqoCore",
             dependencies: [.product(name: "GRDB", package: "GRDB.swift")],
-            resources: [.copy("Resources/schema.sql")],
+            resources: [.copy("Resources/schema.sql"), .copy("Resources/schema-002.sql")],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(
