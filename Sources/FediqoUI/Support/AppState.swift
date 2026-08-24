@@ -13,7 +13,7 @@ enum Route: Hashable {
 /// something you do from wherever you already are, so it is the last button on the bar
 /// rather than one of its destinations.
 enum RailItem: String, CaseIterable, Identifiable, Hashable {
-    case timeline, trending, kept, settings
+    case timeline, trending, kept, statistics, settings
 
     var id: String { rawValue }
 
@@ -24,17 +24,21 @@ enum RailItem: String, CaseIterable, Identifiable, Hashable {
         case .timeline: "list.bullet.rectangle"
         case .trending: "chart.line.uptrend.xyaxis"
         case .kept: "bookmark"
+        // The rising line is Trending's, and it means "what is happening out there". This
+        // screen is the other kind of chart: bars of what is already here.
+        case .statistics: "chart.bar.xaxis"
         case .settings: "gearshape"
         }
     }
 
-    /// Which feed is on this page, where there is one. Kept reads the store and Settings
-    /// reads nobody, so neither is a page a clock has anything to refresh.
+    /// Which feed is on this page, where there is one. Kept reads the store, Statistics reads
+    /// the store and the ledger, and Settings reads nobody, so none of the three is a page a
+    /// clock has anything to refresh.
     var feedMode: FeedMode? {
         switch self {
         case .timeline: .timeline
         case .trending: .trending
-        case .kept, .settings: nil
+        case .kept, .statistics, .settings: nil
         }
     }
 }
@@ -90,6 +94,10 @@ struct LaunchOptions {
 public final class AppState {
     public let preferences: Preferences
     let serverStore: any ServerStore
+    /// The store itself, for the one screen that asks about the store rather than through
+    /// it. Nothing else here reads it: posts go in and out via the feeds. `nil` when the
+    /// app is running without one, and the screen says so instead of showing zeroes.
+    let store: LocalStore?
     /// Signing in needs the store to remember the fact; without one the buttons are absent.
     let signIn: SignInModel?
 
@@ -127,6 +135,7 @@ public final class AppState {
         let signIn = store.map { SignInModel(store: $0, secrets: secrets, tokens: tokens) }
         self.preferences = preferences
         self.serverStore = servers
+        self.store = store
         self.signIn = signIn
         self.feeds = [
             .timeline: FeedModel(mode: .timeline, loader: TimelineLoader(store: store, secrets: secrets, tokens: tokens)),

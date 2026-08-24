@@ -99,6 +99,7 @@ struct AppShell: View {
         case .timeline: FeedScreen(mode: .timeline)
         case .trending: FeedScreen(mode: .trending)
         case .kept: KeptView()
+        case .statistics: StatisticsView()
         case .settings: SettingsView()
         }
     }
