@@ -12,6 +12,22 @@ public enum FeedMode: String, Sendable {
     case trending
 }
 
+/// Who asked for a load, which is the whole of what a backoff is for.
+///
+/// A reader who asked is answered at once, because they asked. A clock that asked is a guest
+/// on other people's machines: it leaves alone whatever could not answer last time, and
+/// lengthens that wait every time nothing arrives.
+public enum Refresh: Sendable {
+    /// The reader asked. Every server is asked, whatever it did last time, and a server that
+    /// still cannot answer is not punished for it — only the clock's own failures lengthen
+    /// the clock's own wait. An answer here still forgives, so pulling to refresh is how a
+    /// backed-off server comes back at once.
+    case manual
+    /// The clock asked, every `every`. A server still inside its wait is not asked at all,
+    /// and one that gives nothing waits twice as long next time, starting at `every`.
+    case automatic(every: Duration)
+}
+
 public struct TimelineResult: Sendable {
     /// One row per post. The timeline is in timestamp order; trending is in the servers' own
     /// rank order. Nothing here is ranked by us, and nothing is re-ordered after the fact.
@@ -47,17 +63,27 @@ public struct TimelineLoader: Sendable {
     private let registry: SourceRegistry
     private let limit: Int
     private let store: LocalStore?
-    private let secrets: any SecretStore
+    /// Who each server is read as. Nil without a store: nobody is signed in anywhere, so
+    /// there is nothing to resolve and the Keychain is never opened.
+    private let tokenSource: TokenSource?
+    /// How long each server is to be left alone. One per loader, so a timeline that could
+    /// not be had says nothing about the same server's trending list.
+    private let backoff = ServerBackoff()
 
     /// With a `store`, what each server hands over is kept before it is merged; without one,
     /// nothing is remembered between loads — and nobody is signed in either, so a loader
     /// without a store reads every server as a stranger and never opens `secrets`.
+    ///
+    /// Pass `tokens` to share one resolver with everything else that needs to know who is
+    /// signed in — the launch check, in practice, and the other feed. Without one the loader
+    /// keeps its own, which is right for a preview and for a test and for nothing else.
     public init(registry: SourceRegistry = .standard(), limit: Int = 40, store: LocalStore? = nil,
-                secrets: any SecretStore = KeychainSecretStore()) {
+                secrets: any SecretStore = KeychainSecretStore(),
+                tokens: TokenSource? = nil) {
         self.registry = registry
         self.limit = limit
         self.store = store
-        self.secrets = secrets
+        self.tokenSource = tokens ?? store.map { TokenSource(store: $0, secrets: secrets) }
     }
 
     /// What the store already holds for `mode`, newest first — the screen before any server
@@ -70,22 +96,37 @@ public struct TimelineLoader: Sendable {
         }
     }
 
-    public func load(servers: [Server], mode: FeedMode) async -> TimelineResult {
+    /// Every server asked at once, merged into one stream in one order.
+    ///
+    /// `refresh` says who asked, and the default is the reader — so a caller that has no
+    /// clock asks everyone, which is what every caller did before there was one.
+    public func load(servers: [Server], mode: FeedMode,
+                     refresh: Refresh = .manual, now: Date = Date()) async -> TimelineResult {
         var failures: [String: SourceFailure] = [:]
         var collected: [[Post]] = []
+        // A server still inside its wait is not asked, and is not reported either: it is not
+        // failing now, it is being left alone, and it has nothing on the screen to lose —
+        // the load that started the wait is the load it already gave nothing to.
+        let asked = await askable(servers, refresh: refresh, now: now)
         // Once per load, not once per server: the rows and the Keychain are asked before
         // anything is asked of the network, and only about the servers being read.
-        let tokens = await tokensByEndpoint(for: servers)
+        let tokens = await tokensByEndpoint(for: asked)
+        // Which servers a request actually went to, so the bookkeeping below judges only
+        // the ones that were given a chance to answer.
+        var reached: Set<String> = []
 
         // Each task answers with what arrived and, separately, what went wrong — a store that
         // would not keep the posts is a failure worth reporting, but the posts still arrived.
         await withTaskGroup(of: (endpoint: String, answer: Answer).self) { group in
-            for server in servers {
+            for server in asked {
                 guard let client = registry.client(for: server.socialProtocol) else {
+                    // Nothing was sent anywhere, so there is nothing to back off from: a
+                    // protocol this build cannot read will not start speaking it in a minute.
                     failures[server.endpoint] = .unsupported(server.socialProtocol)
                     continue
                 }
                 let token = tokens[server.endpoint]
+                reached.insert(server.endpoint)
                 group.addTask {
                     (server.endpoint, await ask(client, server, mode: mode, token: token))
                 }
@@ -95,6 +136,7 @@ public struct TimelineLoader: Sendable {
                 if let failure = answer.failure { failures[endpoint] = failure }
             }
         }
+        await record(failures, from: reached, refresh: refresh, now: now)
 
         let posts = switch mode {
         case .timeline: collected.flatMap { $0 }.merged()
@@ -122,8 +164,8 @@ public struct TimelineLoader: Sendable {
         // A retry that read fine but would not store replaces `.tokenRejected` with `.store`,
         // and the account goes unmarked this round. That is the trade taken knowingly: one
         // host can only carry one reason, and the store failing is the newer news. It heals
-        // by itself — the next load asks as the account again and is rejected again, and the
-        // launch check marks it regardless of what any load reported.
+        // by itself — nothing was reported, so nothing told `TokenSource` to stop sending the
+        // credential, and the next load carries it again and is rejected again.
         guard anonymous.failure == nil else { return anonymous }
         return (anonymous.posts, signedIn.failure)
     }
@@ -153,12 +195,49 @@ public struct TimelineLoader: Sendable {
         return (posts, nil)
     }
 
-    /// The access token to read each of `servers` as. The store answers who is signed in and
-    /// what proves it; a read with no token here goes out as a stranger, which is what it did
-    /// before anyone signed in.
+    /// Which of `servers` this load is allowed to ask. Everyone, where the reader asked;
+    /// everyone not still inside a wait, where the clock did — which is also everyone,
+    /// almost always, so the healthy load does no work to find that out.
+    private func askable(_ servers: [Server], refresh: Refresh, now: Date) async -> [Server] {
+        guard case .automatic = refresh else { return servers }
+        let blocked = await backoff.blocked(at: now)
+        guard !blocked.isEmpty else { return servers }
+        return servers.filter { !blocked.contains($0.endpoint) }
+    }
+
+    /// What this load's answers do to how long each server is left alone next time.
+    ///
+    /// Whether an answer arrived at all is `SourceFailure.arrivedAnyway`'s to say, so the
+    /// rule lives with the cases rather than here. Silence is what a wait is for; anything
+    /// that arrived forgives whatever wait had been building.
+    ///
+    /// Only the clock lengthens the clock's wait. A reader who asked and got nothing has not
+    /// made a schedule for anybody — but their answer still forgives, so pulling to refresh
+    /// brings a server back at once.
+    private func record(_ failures: [String: SourceFailure], from reached: Set<String>,
+                        refresh: Refresh, now: Date) async {
+        var answered: Set<String> = []
+        var silent: Set<String> = []
+        for endpoint in reached {
+            guard let failure = failures[endpoint] else { answered.insert(endpoint); continue }
+            if case .tokenRejected = failure {
+                // The credential is spent; sending it again every refresh is asking a server
+                // to say no on a timer. The read still goes out, as a stranger.
+                await tokenSource?.markRejected(endpoint)
+            }
+            if failure.arrivedAnyway { answered.insert(endpoint) } else { silent.insert(endpoint) }
+        }
+        if !answered.isEmpty { await backoff.answered(answered) }
+        guard case .automatic(let every) = refresh, !silent.isEmpty else { return }
+        await backoff.failed(silent, base: every, at: now)
+    }
+
+    /// The access token to read each of `servers` as. `TokenSource` answers who is signed in
+    /// and what proves it; a read with no token here goes out as a stranger, which is what
+    /// it did before anyone signed in.
     private func tokensByEndpoint(for servers: [Server]) async -> [String: String] {
-        guard let store else { return [:] }
-        return await store.tokens(using: secrets, for: servers).mapValues(\.accessToken)
+        guard let tokenSource else { return [:] }
+        return await tokenSource.tokens(for: servers).mapValues(\.accessToken)
     }
 
     /// Several servers' trending lists as one: a post's rank is its index in its server's

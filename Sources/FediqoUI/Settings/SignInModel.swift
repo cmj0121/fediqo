@@ -25,11 +25,13 @@ final class SignInModel {
     /// retries on the reader's behalf; the set empties only by signing in again or out.
     private var rejected: Set<String> = []
 
+    /// `tokens` is the one resolver the feeds read through as well — signing in or out here
+    /// has to invalidate what they cached, which only works if it is the same actor.
     init(store: LocalStore, registry: SourceRegistry = .standard(),
-         secrets: any SecretStore = KeychainSecretStore()) {
+         secrets: any SecretStore = KeychainSecretStore(), tokens: TokenSource? = nil) {
         self.store = store
         self.registry = registry
-        self.coordinator = SignInCoordinator(store: store, secrets: secrets)
+        self.coordinator = SignInCoordinator(store: store, secrets: secrets, tokens: tokens)
     }
 
     /// Whether this build can sign in to this server at all. No client, no button.

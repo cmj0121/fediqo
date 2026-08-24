@@ -11,10 +11,14 @@ import GRDB
 public struct SignInCoordinator: Sendable {
     private let store: LocalStore
     private let secrets: any SecretStore
+    /// Who is signed in where, shared with whoever else asks. The launch check reads through
+    /// it so one walk of the rows and the Keychain serves both it and the first load.
+    private let tokens: TokenSource
 
-    public init(store: LocalStore, secrets: any SecretStore) {
+    public init(store: LocalStore, secrets: any SecretStore, tokens: TokenSource? = nil) {
         self.store = store
         self.secrets = secrets
+        self.tokens = tokens ?? TokenSource(store: store, secrets: secrets)
     }
 
     /// The whole flow: app credentials from the Keychain or a fresh registration; PKCE and
@@ -81,6 +85,9 @@ public struct SignInCoordinator: Sendable {
             }
             await attempt("sign-in: displaced token removal") { try secrets.removeToken(for: authorId) }
         }
+        // Who is signed in has just changed, so whatever was resolved is no longer true —
+        // and a server that has just accepted a credential is not one that refuses it.
+        await tokens.invalidate()
         return account
     }
 
@@ -132,6 +139,8 @@ public struct SignInCoordinator: Sendable {
                 try db.execute(sql: "DELETE FROM owned_accounts WHERE author_id = ?", arguments: [authorId])
             }
         }
+        // The next read must not go out as somebody who has just left.
+        await tokens.invalidate()
     }
 
     /// Which signed-in servers have stopped accepting the credential they issued.
@@ -143,10 +152,10 @@ public struct SignInCoordinator: Sendable {
     /// answer, held for as long as the app runs and never longer.
     public func rejectedEndpoints(among servers: [Server],
                                  using auth: (SocialProtocol) -> (any AuthClient)?) async -> Set<String> {
-        let tokens = await store.tokens(using: secrets, for: servers)
+        let tokens = await self.tokens.tokens(for: servers)
         guard !tokens.isEmpty else { return [] }
 
-        return await withTaskGroup(of: String?.self) { group in
+        let rejected = await withTaskGroup(of: String?.self) { group in
             for server in servers {
                 guard let token = tokens[server.endpoint],
                       let auth = auth(server.socialProtocol) else { continue }
@@ -163,10 +172,14 @@ public struct SignInCoordinator: Sendable {
                     }
                 }
             }
-            return await group.reduce(into: []) { rejected, endpoint in
+            return await group.reduce(into: Set<String>()) { rejected, endpoint in
                 if let endpoint { rejected.insert(endpoint) }
             }
         }
+        // A credential this server has just refused is not sent again on the next refresh:
+        // the read goes out as a stranger instead, until somebody signs in again.
+        for endpoint in rejected { await self.tokens.markRejected(endpoint) }
+        return rejected
     }
 
     /// Best effort, logged: sign-out promises its local half completes even when a step fails.

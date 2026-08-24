@@ -95,16 +95,24 @@ public final class AppState {
 
     init(preferences: Preferences = Preferences(), serverStore: (any ServerStore)? = nil,
          store: LocalStore? = nil, launch: LaunchOptions = .none) {
+        // Counting starts when the app does, so that "since" is a moment the screen can name
+        // rather than whichever request happened to be sent first.
+        _ = APILedger.shared
         // The chosen servers live in the store when there is one; without it the app falls
         // back to the list it kept before the store existed, and keeps remembering there.
         let servers = serverStore ?? store.map { SQLiteServerStore(store: $0) } ?? UserDefaultsServerStore()
-        let signIn = store.map { SignInModel(store: $0) }
+        // One answer to who we are, shared by everything that asks: both feeds and the launch
+        // check. One each would mean a sign-in invalidating only its own — the other two would
+        // go on reading as a stranger from a cache that says nobody is signed in, until relaunch.
+        let secrets = KeychainSecretStore()
+        let tokens = store.map { TokenSource(store: $0, secrets: secrets) }
+        let signIn = store.map { SignInModel(store: $0, secrets: secrets, tokens: tokens) }
         self.preferences = preferences
         self.serverStore = servers
         self.signIn = signIn
         self.feeds = [
-            .timeline: FeedModel(mode: .timeline, loader: TimelineLoader(store: store)),
-            .trending: FeedModel(mode: .trending, loader: TimelineLoader(store: store)),
+            .timeline: FeedModel(mode: .timeline, loader: TimelineLoader(store: store, secrets: secrets, tokens: tokens)),
+            .trending: FeedModel(mode: .trending, loader: TimelineLoader(store: store, secrets: secrets, tokens: tokens)),
         ]
         self.servers = servers.servers
         self.route = launch.route ?? .landing

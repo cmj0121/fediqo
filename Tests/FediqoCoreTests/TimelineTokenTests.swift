@@ -15,21 +15,9 @@ private struct Owned {
         loader = stubbedLoader(store: store, secrets: secrets)
     }
 
-    /// One account signed in to `server`, written the way `SignInCoordinator` writes it: the
-    /// token in the secret store, the fact in `owned_accounts`, and the rows it depends on.
+    /// One account signed in to `server`, without the handshake — see `signInRows`.
     func signIn(_ token: String, to server: Server) async throws {
-        let authorId = "\(server.endpoint)/@ada"
-        try secrets.setToken(OAuthToken(accessToken: token, scope: "read", createdAt: Date()), for: authorId)
-        let serverRow = LocalStore.serverRow(server)
-        let accountRow = LocalStore.AccountRow(id: authorId, proto: serverRow.proto, serverURL: serverRow.url,
-                                               handle: "@ada@\(server.host)", displayName: "Ada", avatarURL: nil)
-        let ms = LocalStore.milliseconds(Date())
-        try await store.write { db in
-            try LocalStore.upsertServer(db, serverRow, now: ms)
-            try LocalStore.upsertAccount(db, accountRow, now: ms)
-            try db.execute(sql: "INSERT INTO owned_accounts (author_id, server_url, created_at) VALUES (?, ?, ?)",
-                           arguments: [authorId, serverRow.url, ms])
-        }
+        try await signInRows(token, to: server, store: store, secrets: secrets)
     }
 }
 
