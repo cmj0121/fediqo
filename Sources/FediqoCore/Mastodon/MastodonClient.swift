@@ -97,19 +97,21 @@ public struct MastodonClient: SourceClient {
         components.path = path
         components.queryItems = query.isEmpty ? nil : query
         guard let url = components.url else { throw SourceFailure.badHost(host) }
-        return try await JSONTransport.get(url, on: session, authorization: token.map { "Bearer \($0)" })
+        return try await JSONTransport.get(url, on: session, bearer: token)
     }
 }
 
 /// One request, one status check. Shared so that everything asking a server for JSON tells
 /// refusal apart from breakage the same way.
 enum JSONTransport {
-    static func get(_ url: URL, on session: URLSession, authorization: String? = nil, timeout: TimeInterval = 15) async throws -> Data {
+    /// `bearer` is the access token itself, not a header value: the one place that knows how
+    /// an OAuth token is spelled into a request is here.
+    static func get(_ url: URL, on session: URLSession, bearer: String? = nil, timeout: TimeInterval = 15) async throws -> Data {
         var request = URLRequest(url: url)
         request.timeoutInterval = timeout
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        if let authorization {
-            request.setValue(authorization, forHTTPHeaderField: "Authorization")
+        if let bearer {
+            request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
         }
 
         let (data, status) = try await perform(request, on: session)
@@ -123,7 +125,7 @@ enum JSONTransport {
             // and the account has to act; anything else is a stranger being told to sign in.
             // 422 stays a refusal of the request, not a verdict on who asked.
             let host = url.host() ?? url.absoluteString
-            if authorization != nil, status != 422 { throw SourceFailure.tokenRejected(host) }
+            if bearer != nil, status != 422 { throw SourceFailure.tokenRejected(host) }
             throw SourceFailure.needsSignIn(host)
         default:
             throw SourceFailure.http(status, data)

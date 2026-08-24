@@ -23,7 +23,7 @@ final class SignInModel {
     /// whatever a read has since run into. In memory only, never written down: whether a
     /// token works is the server's answer, and it is asked again next launch. Nothing here
     /// retries on the reader's behalf; the set empties only by signing in again or out.
-    private(set) var rejected: Set<String> = []
+    private var rejected: Set<String> = []
 
     init(store: LocalStore, registry: SourceRegistry = .standard(),
          secrets: any SecretStore = KeychainSecretStore()) {
@@ -58,7 +58,7 @@ final class SignInModel {
     /// Asks every signed-in server, once, whether its credential still works. Meant for
     /// launch: nothing waits on it, and a server that cannot answer marks nothing.
     func checkTokens(on servers: [Server]) async {
-        rejected.formUnion(await coordinator.rejectedEndpoints(among: servers, using: registry))
+        rejected.formUnion(await coordinator.rejectedEndpoints(among: servers, using: registry.authClient(for:)))
     }
 
     /// Re-reads who is signed in. Two of these can be in flight at once — forgetting every

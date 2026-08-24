@@ -111,16 +111,16 @@ struct TimelineTokenTests {
         #expect(try await owned.store.timeline().count == 1)
     }
 
-    @Test("A stranger turned away is not a rejected token, and nothing is asked twice")
-    func refusedStrangerIsNotARejectedToken() async throws {
+    @Test("A stranger turned away is asked once: there was no token for the retry to drop")
+    func refusedStrangerIsNotAskedTwice() async throws {
+        // What that refusal is called is `TimelineNoFallbackTests`' business; here it is only
+        // whether the anonymous retry fires for a read that was already anonymous.
         let host = "shut-out.test"
         stubRoutes.on(host, publicTimeline, status: 401)
         let owned = try Owned()
 
-        let result = await owned.loader.load(servers: [makeServer(host)], mode: .timeline)
+        _ = await owned.loader.load(servers: [makeServer(host)], mode: .timeline)
 
-        #expect(result.posts.isEmpty)
-        #expect(result.failures["https://\(host)"] == SourceFailure.needsSignIn(host))
         #expect(stubRoutes.requests(for: host, publicTimeline).count == 1)
     }
 

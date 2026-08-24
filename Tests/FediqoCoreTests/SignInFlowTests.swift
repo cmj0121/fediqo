@@ -84,44 +84,6 @@ final class ScriptedAuthClient: AuthClient, @unchecked Sendable {
     }
 }
 
-/// The browser, boiled down: reads the `state` off the consent URL and comes straight back
-/// approved. What the real one does through ASWebAuthenticationSession, minus the person.
-@Sendable private func approving(_ consent: URL, _ scheme: String) async throws -> URL {
-    let query = URLComponents(url: consent, resolvingAgainstBaseURL: false)?.queryItems ?? []
-    let state = query.first { $0.name == "state" }?.value ?? ""
-    return URL(string: "\(scheme)://oauth?code=c0de&state=\(state)")!
-}
-
-/// Everything one sign-in test stands on, built fresh per test.
-private struct Harness {
-    let store: LocalStore
-    let secrets = InMemorySecretStore()
-    let auth: ScriptedAuthClient
-    let coordinator: SignInCoordinator
-
-    init(answering account: SignedInAccount) throws {
-        store = try LocalStore.inMemory()
-        auth = ScriptedAuthClient(account: account)
-        coordinator = SignInCoordinator(store: store, secrets: secrets)
-    }
-
-    @discardableResult
-    func signIn(to server: Server,
-                authenticate: @Sendable (URL, String) async throws -> URL = approving) async throws -> SignedInAccount {
-        try await coordinator.signIn(server: server, using: auth, authenticate: authenticate)
-    }
-
-    func signOut(_ authorId: String) async {
-        await coordinator.signOut(authorId: authorId, using: auth)
-    }
-
-    func ownedRows() async throws -> [String] {
-        try await store.read { db in
-            try String.fetchAll(db, sql: "SELECT author_id FROM owned_accounts ORDER BY author_id")
-        }
-    }
-}
-
 @Suite("Signing in, as the store remembers it")
 struct SignInFlowTests {
     private let server = makeServer("owned.test")

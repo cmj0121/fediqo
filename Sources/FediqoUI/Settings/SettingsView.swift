@@ -116,24 +116,29 @@ struct SettingsView: View {
     /// build can sign in to — and only with a store behind them, since without one there is
     /// no `signIn` at all. Stopping reading is always offered.
     private func sourceRow(_ server: Server) -> some View {
-        let signIn = app.signIn.flatMap { $0.canSignIn(to: server) ? $0 : nil }
-        return HStack(spacing: 8) {
+        HStack(spacing: 8) {
             Image(systemName: server.socialProtocol.symbolName).foregroundStyle(.secondary).frame(width: 18)
             VStack(alignment: .leading, spacing: 1) {
                 Text(server.title).fediqoFont(13, weight: .medium).lineLimit(1)
                 Text(server.host).fediqoFont(10).foregroundStyle(.secondary)
             }
             Spacer()
-            if let account = signIn?.account(on: server) {
-                // A handle the server no longer answers to reads as the warning it is,
-                // rather than as a quiet claim to be signed in.
-                Text(account.handle)
-                    .fediqoFont(11)
-                    .foregroundStyle(signIn?.isRejected(server) == true ? Color.orange : Color.secondary)
-                    .lineLimit(1)
-            }
+            // The handle and the controls are one group so the model behind them is unwrapped
+            // once; the handle keeps its own gap, since only the buttons sit shoulder to
+            // shoulder.
             HStack(spacing: 0) {
-                if let signIn { accountControl(signIn, for: server) }
+                if let signIn = app.signIn, signIn.canSignIn(to: server) {
+                    if let account = signIn.account(on: server) {
+                        // A handle the server no longer answers to reads as the warning it
+                        // is, rather than as a quiet claim to be signed in.
+                        Text(account.handle)
+                            .fediqoFont(11)
+                            .foregroundStyle(signIn.isRejected(server) ? Color.orange : Color.secondary)
+                            .lineLimit(1)
+                            .padding(.trailing, 8)
+                    }
+                    accountControl(signIn, for: server)
+                }
                 IconButton(symbol: "xmark.circle", labelKey: "timeline.remove", tint: .red) { app.remove(server) }
             }
         }

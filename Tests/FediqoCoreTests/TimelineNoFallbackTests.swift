@@ -9,25 +9,28 @@ struct TimelineNoFallbackTests {
     @Test("A server that refuses the public timeline yields nothing, and trends are not asked for")
     func refusalIsNotPapered() async {
         let host = "refuses.test"
+        let server = makeServer(host)
         stubRoutes.on(host, "/api/v1/timelines/public", status: 401)
         stubRoutes.on(host, "/api/v1/trends/statuses", status: 200, body: oneStatusJSON)
 
-        let result = await stubbedLoader().load(servers: [makeServer(host)], mode: .timeline)
+        let result = await stubbedLoader().load(servers: [server], mode: .timeline)
 
         #expect(result.posts.isEmpty)
-        #expect(result.failures["https://\(host)"] == SourceFailure.needsSignIn(host))
+        #expect(result.failures[server.endpoint] == SourceFailure.needsSignIn(host))
         #expect(stubRoutes.paths(for: host) == ["/api/v1/timelines/public"])
     }
 
     @Test("One server refusing does not silence the ones that did not")
     func refusalIsPerServer() async {
-        stubRoutes.on("shut.test", "/api/v1/timelines/public", status: 401)
-        stubRoutes.on("open.test", "/api/v1/timelines/public", status: 200, body: oneStatusJSON)
+        let shut = makeServer("shut.test")
+        let open = makeServer("open.test")
+        stubRoutes.on(shut.host, "/api/v1/timelines/public", status: 401)
+        stubRoutes.on(open.host, "/api/v1/timelines/public", status: 200, body: oneStatusJSON)
 
-        let result = await stubbedLoader().load(servers: [makeServer("shut.test"), makeServer("open.test")], mode: .timeline)
+        let result = await stubbedLoader().load(servers: [shut, open], mode: .timeline)
 
-        #expect(result.posts.map(\.sources) == [["open.test"]])
-        #expect(result.failures.keys.sorted() == ["https://shut.test"])
+        #expect(result.posts.map(\.sources) == [[open.host]])
+        #expect(result.failures.keys.sorted() == [shut.endpoint])
     }
 
     @Test("Trending asks for trends, and only for trends")
@@ -43,12 +46,12 @@ struct TimelineNoFallbackTests {
 
     @Test("A server that is simply broken says so as itself, not as a refusal")
     func brokenIsNotRefusal() async {
-        let host = "broken.test"
-        stubRoutes.on(host, "/api/v1/timelines/public", status: 503, body: "gateway wept")
+        let server = makeServer("broken.test")
+        stubRoutes.on(server.host, "/api/v1/timelines/public", status: 503, body: "gateway wept")
 
-        let result = await stubbedLoader().load(servers: [makeServer(host)], mode: .timeline)
+        let result = await stubbedLoader().load(servers: [server], mode: .timeline)
 
-        #expect(result.failures["https://\(host)"] == SourceFailure.http(503, Data("gateway wept".utf8)))
+        #expect(result.failures[server.endpoint] == SourceFailure.http(503, Data("gateway wept".utf8)))
     }
 
     @Test("Asking with no servers asks nothing of anyone")

@@ -121,12 +121,18 @@ public final class AppState {
             for feed in self.feeds.values {
                 feed.onTokenRejected = { signIn.markRejected($0) }
             }
-            // Launch is the second: every signed-in server is asked once whether its
-            // credential still works, in the background, with nothing waiting on it. No
-            // store means no `signIn` at all, and so no check.
-            let chosen = self.servers
-            Task { await signIn.checkTokens(on: chosen) }
         }
+    }
+
+    /// The other place a rejected token is noticed: every signed-in server is asked once,
+    /// at launch, whether its credential still works. No store means no `signIn` at all,
+    /// and so no check.
+    ///
+    /// It is the root view that calls this, not `init`, so that building an `AppState` —
+    /// in a preview, in a test — is not itself a round of network requests.
+    func onLaunch() async {
+        guard let signIn else { return }
+        await signIn.checkTokens(on: servers)
     }
 
     func feed(for mode: FeedMode) -> FeedModel {

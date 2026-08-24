@@ -17,6 +17,9 @@ public struct FediqoRootView: View {
             // Strings are read through a bundle chosen at runtime, so a language change has
             // to rebuild the tree rather than merely redraw it.
             .id(app.preferences.language)
+            // Outside the `.id`, so that changing the language redraws the app rather than
+            // asking every signed-in server about its credential all over again.
+            .task { await app.onLaunch() }
     }
 
     @ViewBuilder

@@ -66,7 +66,7 @@ public struct MastodonAuthClient: AuthClient {
         let data = try await JSONTransport.get(
             endpoint(host, "/api/v1/accounts/verify_credentials"),
             on: session,
-            authorization: "Bearer \(token.accessToken)"
+            bearer: token.accessToken
         )
         // The same DTO and the same derivations the timeline uses: whoever signed in is
         // keyed exactly as their posts are, never by a second derivation.

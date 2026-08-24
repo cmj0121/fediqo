@@ -141,29 +141,15 @@ public struct SignInCoordinator: Sendable {
     /// a Keychain that would not open — names nothing, because a server that cannot answer
     /// has not answered *no*. Nothing here writes: whether a token works is the server's
     /// answer, held for as long as the app runs and never longer.
-    public func rejectedEndpoints(among servers: [Server], using registry: SourceRegistry) async -> Set<String> {
-        let accounts: [String: SignedInAccount]
-        do {
-            accounts = try await store.signedInByServer()
-        } catch {
-            LocalStore.log.error("token check: signed-in lookup failed: \(String(describing: error), privacy: .public)")
-            return []
-        }
-        guard !accounts.isEmpty else { return [] }
+    public func rejectedEndpoints(among servers: [Server],
+                                 using auth: (SocialProtocol) -> (any AuthClient)?) async -> Set<String> {
+        let tokens = await store.tokens(using: secrets, for: servers)
+        guard !tokens.isEmpty else { return [] }
 
         return await withTaskGroup(of: String?.self) { group in
             for server in servers {
-                guard let account = accounts[server.endpoint],
-                      let auth = registry.authClient(for: server.socialProtocol) else { continue }
-                let token: OAuthToken?
-                do {
-                    token = try secrets.token(for: account.authorId)
-                } catch {
-                    let why = String(describing: error)
-                    LocalStore.log.error("token check: \(server.host, privacy: .public) has no readable token: \(why, privacy: .public)")
-                    continue
-                }
-                guard let token else { continue }
+                guard let token = tokens[server.endpoint],
+                      let auth = auth(server.socialProtocol) else { continue }
                 group.addTask {
                     do {
                         _ = try await auth.verifyCredentials(host: server.host, token: token)
@@ -224,6 +210,42 @@ extension LocalStore {
                     displayName: row["display_name"] ?? "",
                     avatarURL: (row["avatar_url"] as String?).flatMap(URL.init(string:))
                 )
+            }
+        }
+    }
+
+    /// The token each of `servers` is read as, keyed by the endpoint that owns the account —
+    /// the rows say who is signed in where, `secrets` says what proves it. Only the servers
+    /// asked about are resolved: nobody else's Keychain item is opened to answer.
+    ///
+    /// A store that cannot be read, or a secret that cannot be fetched, costs that one token
+    /// and nothing else — an endpoint missing here is one nobody is signed in to, which is
+    /// what every server was before anyone signed in anywhere.
+    ///
+    /// The reads are independent of each other, so they go at once: a cold Keychain can
+    /// block on each of them.
+    public func tokens(using secrets: any SecretStore, for servers: [Server]) async -> [String: OAuthToken] {
+        let accounts: [String: SignedInAccount]
+        do {
+            accounts = try await signedInByServer()
+        } catch {
+            LocalStore.log.error("signed-in lookup failed: \(String(describing: error), privacy: .public)")
+            return [:]
+        }
+        let asked = Set(servers.map(\.endpoint))
+        return await withTaskGroup(of: (String, OAuthToken)?.self) { group in
+            for (endpoint, account) in accounts where asked.contains(endpoint) {
+                group.addTask {
+                    do {
+                        return try secrets.token(for: account.authorId).map { (endpoint, $0) }
+                    } catch {
+                        LocalStore.log.error("token lookup failed for \(endpoint, privacy: .public): \(String(describing: error), privacy: .public)")
+                        return nil
+                    }
+                }
+            }
+            return await group.reduce(into: [:]) { tokens, found in
+                if let found { tokens[found.0] = found.1 }
             }
         }
     }

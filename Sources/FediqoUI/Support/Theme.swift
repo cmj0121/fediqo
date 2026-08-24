@@ -146,13 +146,20 @@ struct IconButton: View {
     var tint: Color = .secondary
     var action: () -> Void
 
+    /// What the glyph has to be worth hitting, which is not the same size for a finger as
+    /// for a cursor: 44 is Apple's touch minimum, 28 is enough to aim at with a pointer.
+    /// Every icon button in the app is one of these — the feed header as much as a Settings
+    /// row — so the size is decided here rather than at each of them.
+    #if os(iOS)
+    private static let target: CGFloat = 44
+    #else
+    private static let target: CGFloat = 28
+    #endif
+
     var body: some View {
         Button(action: action) {
-            // The glyph stays 24pt; what a finger has to find is 44, which is Apple's
-            // minimum and the difference between signing out and dropping the server.
             Image(systemName: symbol)
-                .frame(width: 24, height: 24)
-                .frame(width: 44, height: 44)
+                .frame(width: Self.target, height: Self.target)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
