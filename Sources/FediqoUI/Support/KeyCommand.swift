@@ -25,6 +25,9 @@ enum KeyCommand: Equatable {
     case dismiss
     case nextTab, previousTab
     case nextPage, previousPage
+    case nextPost, previousPost
+    case openPost
+    case backToTop
 
     /// The command a press means, or nothing when the key is not one of ours.
     ///
@@ -68,11 +71,38 @@ enum KeyCommand: Equatable {
         case "r": return shift ? .cycleRefreshInterval : .refreshNow
         case "R": return .cycleRefreshInterval
         case "c": return shift ? nil : .compose
+        // Moving through the posts, in both spellings: the letters a reader who has met vi
+        // reaches for, and the arrows everybody else does. `Return` opens the one you are on
+        // and `g` goes back to the top — all of them behind the gate, because in a draft an
+        // arrow moves the caret, `Return` starts a paragraph and `j` is a letter.
+        case "j", KeyEquivalent.downArrow.character: return shift ? nil : .nextPost
+        case "k", KeyEquivalent.upArrow.character: return shift ? nil : .previousPost
+        case "g": return shift ? nil : .backToTop
+        case KeyEquivalent.return.character: return shift ? nil : .openPost
         default: return nil
         }
     }
 
+    /// The keys a control on the screen might also want.
+    ///
+    /// A picker is moved with the arrows and a button is pressed with `Return`, so a press of
+    /// one of them that this app had nothing to do with is handed back to the focus system it
+    /// belongs to. The letters are shared with nobody: no control anywhere wants a bare `j`,
+    /// so a letter is kept whether or not it moved anything — which is what makes holding `j`
+    /// at the bottom of a list, or pressing `g` on a page with no posts, silent rather than a
+    /// row of beeps.
+    ///
+    /// `Tab` is deliberately not here. It is the focus key in every other app, and this one
+    /// takes it anyway: a `Tab` handed back is a `Tab` AppKit spends on window tabs.
+    static let sharedWithControls: Set<Character> = [
+        KeyEquivalent.upArrow.character,
+        KeyEquivalent.downArrow.character,
+        KeyEquivalent.return.character,
+    ]
+
     /// The keys worth listening for at all. Naming them keeps every other keystroke — the
     /// ones a text field, a menu or the focus system owns — out of our handler entirely.
-    static let listened: Set<KeyEquivalent> = [.tab, .escape, "r", "R", "c"]
+    static let listened: Set<KeyEquivalent> = [
+        .tab, .escape, .return, .upArrow, .downArrow, "r", "R", "c", "j", "k", "g",
+    ]
 }

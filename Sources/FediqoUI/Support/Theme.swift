@@ -62,6 +62,14 @@ enum Palette {
     static func hairline(_ scheme: ColorScheme) -> Color {
         scheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.08)
     }
+
+    /// The accent at the weight a mark needs to hold the page it is drawn on. The pale blue
+    /// was chosen against a dark surface and it reads there; on white it is a whisper, and a
+    /// mark saying where the reader is cannot be a whisper. Same hue either way — this is
+    /// still the accent, not a second colour with a second meaning.
+    static func focus(_ scheme: ColorScheme) -> Color {
+        scheme == .dark ? accent : Color(red: 0.13, green: 0.42, blue: 0.66)
+    }
 }
 
 // MARK: - Chrome
@@ -110,9 +118,47 @@ private struct Pill: ViewModifier {
     }
 }
 
+/// Where the reader is, for somebody steering by the keys rather than with a pointer.
+///
+/// Two marks and only one of them is a colour. The accent traces the whole card, and a bar
+/// stands at its leading edge — and the bar is the one that does not ask anybody to tell
+/// blue from grey: it is either there or it is not, at any contrast, in either scheme, and
+/// on a screen showing a hundred cards it is the mark the eye finds first. That it is the
+/// accent and not orange or red is deliberate: those two already mean a server is unwell
+/// and a thing is about to be taken away, and where you are is neither a warning nor a
+/// threat. And the row says as much to a screen reader, which cannot see either mark.
+private struct FocusRing: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    let selected: Bool
+    let radius: CGFloat
+
+    private var ring: some View {
+        let colour = Palette.focus(colorScheme)
+        return RoundedRectangle(cornerRadius: radius, style: .continuous)
+            .strokeBorder(colour, lineWidth: 2)
+            .overlay(alignment: .leading) {
+                Capsule()
+                    .fill(colour)
+                    .frame(width: 4)
+                    .padding(.vertical, 12)
+                    .padding(.leading, 6)
+            }
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .overlay { if selected { ring } }
+            .accessibilityAddTraits(selected ? [.isSelected] : [])
+    }
+}
+
 extension View {
     func fediqoCard(radius: CGFloat = 10, raised: Bool = true, shadow: Bool = false) -> some View {
         modifier(Card(radius: radius, raised: raised, shadow: shadow))
+    }
+
+    func fediqoFocusRing(_ selected: Bool, radius: CGFloat = 10) -> some View {
+        modifier(FocusRing(selected: selected, radius: radius))
     }
 
     func fediqoPill() -> some View {

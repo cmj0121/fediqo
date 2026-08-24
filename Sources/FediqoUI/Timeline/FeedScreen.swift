@@ -50,9 +50,27 @@ struct FeedScreen: View {
         @Bindable var app = app
         return ScrollViewReader { proxy in
             VStack(spacing: 0) {
-                header(proxy)
+                header
                 Hairline()
                 body(for: model.visible(preferences: app.preferences))
+            }
+            // The ring is moved by a key, and a key can move it past the bottom of the
+            // screen — which is most of what holding `j` is for. Without an anchor the list
+            // moves the least it can to bring the row into view, so stepping between two
+            // rows that are both already on the screen does not throw the page about.
+            //
+            // Only when the ring moves, so coming back to a tab does not scroll to the ring
+            // that tab still holds: the list is built again at the top, the way every other
+            // trip between pages and tabs already leaves it.
+            .onChange(of: model.selection) { _, key in
+                guard let key else { return }
+                proxy.scrollTo(key)
+            }
+            // Back to the top, however it was asked for — the key or the button — and with
+            // no animation on the way: a reader a thousand posts down asked to be at the
+            // top, not to watch the thousand go past.
+            .onChange(of: model.topRequests) { _, _ in
+                proxy.scrollTo(Self.top, anchor: .top)
             }
         }
         .task(id: app.servers) { await model.loadIfNeeded(servers: app.servers) }
@@ -68,13 +86,13 @@ struct FeedScreen: View {
 
     // MARK: - Header
 
-    private func header(_ proxy: ScrollViewProxy) -> some View {
+    private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(t(app.railItem.titleKey)).fediqoFont(20, weight: .semibold).lineLimit(1)
                 if model.loading { ProgressView().controlSize(.small) }
                 Spacer(minLength: 4)
-                controls(proxy)
+                controls
             }
             tabsAndSubtitle
         }
@@ -131,17 +149,15 @@ struct FeedScreen: View {
     }
 
     @ViewBuilder
-    private func controls(_ proxy: ScrollViewProxy) -> some View {
+    private var controls: some View {
         HStack(spacing: 2) {
-            // Back to the top in one move, and no animation on the way: a reader who has
-            // gone a thousand posts down asked to be at the top, not to watch the thousand
-            // go past. It lives with the other controls rather than floating over the posts,
-            // where the composer already is on the narrow layout.
+            // Back to the top in one move. It lives with the other controls rather than
+            // floating over the posts, where the composer already is on the narrow layout.
+            // It asks the app rather than scrolling the list itself, so that the button and
+            // `g` are one thing: both let the ring go, and both land in the same place.
             if scrolledAway {
-                IconButton(symbol: "arrow.up", labelKey: "timeline.top") {
-                    proxy.scrollTo(Self.top, anchor: .top)
-                }
-                .transition(.opacity)
+                IconButton(symbol: "arrow.up", labelKey: "timeline.top") { app.goToTop() }
+                    .transition(.opacity)
             }
             if showsTimelineControls {
                 IconButton(symbol: "bell", labelKey: "timeline.notifications") { app.showingNotifications = true }
@@ -217,7 +233,13 @@ struct FeedScreen: View {
             ScrollView {
                 LazyVStack(spacing: 8) {
                     Color.clear.frame(height: 0).id(Self.top)
-                    ForEach(posts) { PostRow(post: $0) }
+                    // The id `ForEach` gives a row is the post's own `mergeKey`, and that is
+                    // what the selection is written in — so scrolling to the ring is
+                    // scrolling to that id, and there is no second identity to keep in step
+                    // with the first.
+                    ForEach(posts) { post in
+                        PostRow(post: post, selected: post.mergeKey == model.selection)
+                    }
                 }
                 .padding(12)
             }

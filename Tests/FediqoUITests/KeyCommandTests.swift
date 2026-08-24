@@ -3,9 +3,6 @@ import Testing
 import FediqoCore
 @testable import FediqoUI
 
-private let escape = KeyEquivalent.escape.character
-private let tab = KeyEquivalent.tab.character
-
 /// What a key press means, decided before anything is done about it.
 @Suite("What a key means")
 struct KeyCommandMeaningTests {
@@ -31,6 +28,25 @@ struct KeyCommandMeaningTests {
         #expect(KeyCommand.from(tab, modifiers: [.control, .shift], typing: false) == .previousTab)
     }
 
+    /// Both spellings of the same four moves: the letters for a reader who has met vi, the
+    /// arrows for everybody else.
+    @Test("Moving through the posts, in letters and in arrows", arguments: [
+        (Character("j"), KeyCommand.nextPost), (down, .nextPost),
+        (Character("k"), .previousPost), (up, .previousPost),
+        (Character("g"), .backToTop), (enter, .openPost),
+    ] as [(Character, KeyCommand)])
+    func postKeys(character: Character, command: KeyCommand) {
+        #expect(KeyCommand.from(character, modifiers: [], typing: false) == command)
+    }
+
+    /// ⇧↓ selects text and `J` is a letter this app has no use for: neither is the small
+    /// step the bare key asks for, so neither is answered.
+    @Test("Held with Shift, none of the post keys are ours",
+          arguments: ["j", "k", "g", enter, up, down] as [Character])
+    func shiftedPostKeys(character: Character) {
+        #expect(KeyCommand.from(character, modifiers: [.shift], typing: false) == nil)
+    }
+
     @Test("A key that is not one of ours means nothing", arguments: ["x", "1", "C", " "] as [Character])
     func unknownKeys(character: Character) {
         #expect(KeyCommand.from(character, modifiers: [], typing: false) == nil)
@@ -44,8 +60,11 @@ struct KeyCommandMeaningTests {
 
     // MARK: - The typing signal
 
+    /// The arrows and `Return` are in here for a plainer reason than the letters: in a draft
+    /// an arrow moves the caret and `Return` starts a paragraph. A composer that jumped down
+    /// the timeline every time somebody finished a line would be unusable.
     @Test("While text is being typed, every single key is dead",
-          arguments: ["r", "R", "c"] as [Character])
+          arguments: ["r", "R", "c", "j", "k", "g", enter, up, down] as [Character])
     func singleKeysAreDeadWhileTyping(character: Character) {
         #expect(KeyCommand.from(character, modifiers: [], typing: true) == nil)
     }
@@ -192,16 +211,16 @@ struct CommandTests {
         let app = freshApp("recognised-keys-kept")
         app.railItem = page
         #expect(app.perform(.nextTab) == false)
-        #expect(app.consumes(.nextTab))
-        #expect(app.consumes(.refreshNow))
+        #expect(app.consumes(.nextTab, spelledWith: tab))
+        #expect(app.consumes(.refreshNow, spelledWith: "r"))
     }
 
     @Test("Escape is the exception: with nothing in front of you it was never ours")
     func escapeIsHandedBack() {
         let app = freshApp("escape-handed-back")
-        #expect(app.consumes(.dismiss) == false)
+        #expect(app.consumes(.dismiss, spelledWith: escape) == false)
         app.setComposing(true)
-        #expect(app.consumes(.dismiss))
+        #expect(app.consumes(.dismiss, spelledWith: escape))
         #expect(app.composing == false)
     }
 
@@ -231,6 +250,42 @@ struct CommandTests {
 
 #if os(macOS)
 import AppKit
+
+/// Which key AppKit says was pressed, read the way the commands are written.
+@Suite("Which key was pressed")
+struct KeyCodeTests {
+    /// Read by number rather than by what they typed. The character handed in here is the
+    /// one the numeric pad's Enter really types — a control character no command is written
+    /// in — so a table that fell through to it would be visible as a wrong answer.
+    @Test("The keys AppKit numbers are read as the key, not as what they typed", arguments: [
+        (UInt16(48), KeyEquivalent.tab.character),
+        (UInt16(53), KeyEquivalent.escape.character),
+        (UInt16(126), KeyEquivalent.upArrow.character),
+        (UInt16(125), KeyEquivalent.downArrow.character),
+        (UInt16(76), KeyEquivalent.return.character),
+    ] as [(UInt16, Character)])
+    func readByNumber(keyCode: UInt16, expected: Character) {
+        #expect(shellKey(keyCode: keyCode, typed: "\u{3}") == expected)
+    }
+
+    /// Every other key is what it typed, and a key that typed nothing at all — a bare
+    /// modifier — is nothing to answer.
+    @Test("Everything else is read as what it typed")
+    func readByWhatItTyped() {
+        #expect(shellKey(keyCode: 38, typed: "j") == "j")
+        #expect(shellKey(keyCode: 56, typed: nil) == nil)
+    }
+
+    /// The whole reason the pad's Enter is in the table. It types U+0003 where the Return
+    /// above it types U+000D: one key to the reader, and read by what it typed it would be a
+    /// key that opened nothing.
+    @Test("The numeric pad's Enter opens a post, the same as the Return above it")
+    func keypadEnterOpensAPost() throws {
+        let character = try #require(shellKey(keyCode: 76, typed: "\u{3}"))
+        #expect(character == enter)
+        #expect(KeyCommand.from(character, modifiers: [], typing: false) == .openPost)
+    }
+}
 
 /// The one place AppKit's spelling of a held key meets SwiftUI's. Everything above is
 /// written in `EventModifiers`, and on a Mac every press arrives in the other spelling, so

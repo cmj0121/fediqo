@@ -139,6 +139,14 @@ public final class AppState {
     /// from outside the screen that draws them. The drawing stays where it was.
     var addingSource = false
     var showingNotifications = false
+    /// How the app opens a link, handed over by the shell.
+    ///
+    /// `openURL` is an environment value and this is not a view, but the key that opens a
+    /// post is answered here, away from the row that draws it. So the shell lends its own —
+    /// the same action the row's context menu uses — rather than this reaching for a way to
+    /// open a URL of its own, which would be a second answer to a question the app has
+    /// already answered.
+    var openLink: ((URL) -> Void)?
     /// Whether a text field somewhere has the keyboard.
     ///
     /// SwiftUI has no such signal to read, so the app keeps one: the editor says when it
@@ -326,12 +334,24 @@ public final class AppState {
     /// went on to AppKit, which spends it on window tabs this app does not have, and the
     /// window it was pressed in was folded into a set and lost.
     ///
-    /// `Escape` is the exception, and the reason the distinction is worth keeping. With
-    /// nothing in front of you it was never ours — the platform may still have a use for it,
-    /// and a press that dismissed nothing must not be reported as a dismissal.
-    func consumes(_ command: KeyCommand) -> Bool {
+    /// Two kinds of press are handed back, for two different reasons.
+    ///
+    /// `Escape` with nothing in front of you was never ours — the platform may still have a
+    /// use for it, and a press that dismissed nothing must not be reported as a dismissal.
+    ///
+    /// And a key a control might also want goes back when there was nothing here to do with
+    /// it: `↑`, `↓` and `Return` are how every screen in the app is steered by somebody not
+    /// using a pointer, and swallowing them on a page with no timeline would leave the
+    /// pickers in Settings unmovable and its buttons unpressable.
+    ///
+    /// Which key was pressed decides that second one, never which command it meant — `j` and
+    /// `↓` ask for the same move and are not the same key. A letter is ours alone, so it is
+    /// kept whatever it did; handing it back would have AppKit find nothing that wanted it
+    /// and beep, once for every press of `j` held at the bottom of a list.
+    func consumes(_ command: KeyCommand, spelledWith key: Character) -> Bool {
         let did = perform(command)
-        return command == .dismiss ? did : true
+        if command == .dismiss { return did }
+        return KeyCommand.sharedWithControls.contains(key) ? did : true
     }
 
     /// Does what a key or a menu item asked for, and says whether there was anything to do.
@@ -350,7 +370,52 @@ public final class AppState {
         case .previousTab: return rotateTab(by: -1)
         case .nextPage: rotatePage(by: 1); return true
         case .previousPage: rotatePage(by: -1); return true
+        case .nextPost: return moveSelection(by: 1)
+        case .previousPost: return moveSelection(by: -1)
+        case .openPost: return openSelectedPost()
+        case .backToTop: return goToTop()
         }
+    }
+
+    /// Moves the ring one post along the feed being read, and says whether it moved. A page
+    /// with no feed has no posts to move through, and neither has a feed at the end the
+    /// press was pointing at.
+    @discardableResult
+    func moveSelection(by steps: Int) -> Bool {
+        guard let mode = feedMode else { return false }
+        let feed = feed(for: mode)
+        return feed.moveSelection(by: steps, in: feed.visible(preferences: preferences))
+    }
+
+    /// Opens the post the ring is on, the way the row's own menu opens it, and says whether
+    /// there was a post to open.
+    ///
+    /// A post whose server gave no web address has nothing to open, and this says nothing
+    /// about it: there is no fault to report — the post simply is not a page anywhere — and
+    /// a warning for it would be the app complaining about somebody else's server every
+    /// time the reader pressed `Return` on the wrong row. The press is handed back instead,
+    /// so the answer is at least visible to the focus system rather than swallowed.
+    ///
+    /// The answer is about the post and nothing else. Whether the shell has lent its way of
+    /// opening a link is a different question, and answering both with one `false` would
+    /// have `Return` mean "there was nothing there" when what happened was that we could not
+    /// open it — so the loan is asked for at the point of opening, where it is used.
+    @discardableResult
+    func openSelectedPost() -> Bool {
+        guard let mode = feedMode else { return false }
+        let feed = feed(for: mode)
+        guard let url = feed.selectedURL(in: feed.visible(preferences: preferences)) else { return false }
+        openLink?(url)
+        return true
+    }
+
+    /// Back to the top of the feed being read. The screen does the scrolling; what happens
+    /// here is that the ring is let go, so the reader is not told they are in two places.
+    @discardableResult
+    func goToTop() -> Bool {
+        guard let mode = feedMode else { return false }
+        feed(for: mode).goToTop()
+        return true
     }
 
     /// The page `steps` along the rail, wrapping at both ends.

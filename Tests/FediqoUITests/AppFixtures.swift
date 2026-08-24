@@ -1,6 +1,16 @@
 import Foundation
+import SwiftUI
 import FediqoCore
 @testable import FediqoUI
+
+/// The keys that are not letters, in the spelling the commands are written in. Shared,
+/// because the keys are asked about in more than one place: what a press means, and whether
+/// the app keeps it.
+let escape = KeyEquivalent.escape.character
+let tab = KeyEquivalent.tab.character
+let enter = KeyEquivalent.return.character
+let up = KeyEquivalent.upArrow.character
+let down = KeyEquivalent.downArrow.character
 
 /// A place of its own to write preferences into, so a test says the same thing on every
 /// machine rather than whatever this one was last left set to.

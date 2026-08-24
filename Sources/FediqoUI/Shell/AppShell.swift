@@ -11,6 +11,9 @@ import FediqoCore
 struct AppShell: View {
     @Environment(AppState.self) private var app
     @Environment(\.colorScheme) private var colorScheme
+    /// The one way this app opens a link, lent to the app so that the key which opens a post
+    /// and the menu item on the row itself are the same act.
+    @Environment(\.openURL) private var openURL
 
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -38,7 +41,10 @@ struct AppShell: View {
             .focusable()
             .focusEffectDisabled()
             .focused($focused)
-            .onAppear { focused = true }
+            .onAppear {
+                focused = true
+                app.openLink = { openURL($0) }
+            }
             // The composer takes the keyboard when it opens, so the shell asks for it back
             // once the panel has finished leaving — asking sooner asks over a field that is
             // still there and still holds it. On macOS this changes nothing either way.
@@ -58,7 +64,7 @@ struct AppShell: View {
                 guard let command = KeyCommand.from(press.key.character,
                                                     modifiers: press.modifiers,
                                                     typing: app.isTyping),
-                      app.consumes(command) else { return .ignored }
+                      app.consumes(command, spelledWith: press.key.character) else { return .ignored }
                 return .handled
             }
             .shellKeyCommands()

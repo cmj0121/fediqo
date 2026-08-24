@@ -15,6 +15,40 @@ extension View {
 }
 
 #if os(macOS)
+/// The keys AppKit numbers for us, because what they type is not one thing.
+private enum KeyCode {
+    static let tab: UInt16 = 48
+    static let escape: UInt16 = 53
+    static let downArrow: UInt16 = 125
+    static let upArrow: UInt16 = 126
+    /// The Enter on the numeric pad. It types U+0003 where the Return above it types
+    /// U+000D — one key to the reader, two characters to the keyboard layer, and only one
+    /// of them is the character the commands are written in.
+    static let keypadEnter: UInt16 = 76
+}
+
+/// Which key was pressed, in the spelling `KeyCommand` reads.
+///
+/// The keys named by number are the ones whose typed character is not one thing: ⇧Tab arrives
+/// as backtab rather than as a tab with a flag on it, a modifier turns the rest into control
+/// characters, an arrow types a private-use character no keyboard has a cap for, and the
+/// numeric pad's Enter types a different character from the Return above it. The key pressed
+/// is the same key either way, and that is what the commands are written in. Everything else
+/// is simply what it typed.
+///
+/// Internal, and written in plain numbers rather than in an `NSEvent`, so the table can be
+/// checked on its own — the same reason `eventModifiers` below is not private.
+func shellKey(keyCode: UInt16, typed: Character?) -> Character? {
+    switch keyCode {
+    case KeyCode.tab: KeyEquivalent.tab.character
+    case KeyCode.escape: KeyEquivalent.escape.character
+    case KeyCode.upArrow: KeyEquivalent.upArrow.character
+    case KeyCode.downArrow: KeyEquivalent.downArrow.character
+    case KeyCode.keypadEnter: KeyEquivalent.return.character
+    default: typed
+    }
+}
+
 /// The single keys, taken from AppKit rather than from SwiftUI.
 ///
 /// Two things forced this, and either alone would have. `Tab` never reaches `onKeyPress` at
@@ -37,14 +71,6 @@ private struct ShellKeyMonitor: ViewModifier {
     @Environment(AppState.self) private var app
     @State private var monitor: Any?
 
-    /// Tab and Escape, as AppKit numbers the keys. They are read by number rather than by
-    /// what they type, because what they type is not one thing: ⇧Tab arrives as backtab, not
-    /// as a tab with a flag on it, and a modifier turns the rest into control characters.
-    /// The key pressed is the same key either way, and that is what the commands are written
-    /// in.
-    private static let tabKeyCode: UInt16 = 48
-    private static let escapeKeyCode: UInt16 = 53
-
     func body(content: Content) -> some View {
         content
             .onAppear {
@@ -57,7 +83,9 @@ private struct ShellKeyMonitor: ViewModifier {
                 let app = app
                 monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
                     guard event.window?.isSheet != true,
-                          let character = Self.character(for: event) else { return event }
+                          let character = shellKey(keyCode: event.keyCode,
+                                                   typed: event.charactersIgnoringModifiers?.first)
+                    else { return event }
                     let modifiers = event.modifierFlags.eventModifiers
                     // AppKit calls this on the main thread; the app is only ever touched
                     // there, and answering with a `Bool` keeps the event itself out of the
@@ -66,7 +94,7 @@ private struct ShellKeyMonitor: ViewModifier {
                         guard let command = KeyCommand.from(character,
                                                             modifiers: modifiers,
                                                             typing: app.isTyping) else { return false }
-                        return app.consumes(command)
+                        return app.consumes(command, spelledWith: character)
                     }
                     return handled ? nil : event
                 }
@@ -75,15 +103,6 @@ private struct ShellKeyMonitor: ViewModifier {
                 if let monitor { NSEvent.removeMonitor(monitor) }
                 monitor = nil
             }
-    }
-
-    /// Which key was pressed, in the spelling `KeyCommand` reads.
-    private static func character(for event: NSEvent) -> Character? {
-        switch event.keyCode {
-        case tabKeyCode: KeyEquivalent.tab.character
-        case escapeKeyCode: KeyEquivalent.escape.character
-        default: event.charactersIgnoringModifiers?.first
-        }
     }
 }
 
