@@ -155,6 +155,23 @@
         }
       }
     },
+    "error.notItsPost": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ is not a status on this server."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 不是這台伺服器上的貼文。"
+          }
+        }
+      }
+    },
     "error.notThatKind": {
       "extractionState": "manual",
       "localizations": {

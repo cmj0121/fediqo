@@ -222,7 +222,7 @@ public struct TimelineLoader: Sendable {
         let posts: [Post]
         do {
             posts = switch mode {
-            case .timeline: try await client.timeline(host: server.host, limit: limit, token: token)
+            case .timeline: try await client.timeline(host: server.host, limit: limit, before: nil, token: token)
             case .trending: try await client.trending(host: server.host, limit: limit, token: token)
             }
         } catch let failure as SourceFailure {

@@ -75,22 +75,45 @@ public struct MastodonClient: SourceClient {
         throw SourceFailure.notThatKind(.mastodon, host)
     }
 
-    public func timeline(host: String, limit: Int, token: String?) async throws -> [Post] {
-        try await posts(host: host, path: "/api/v1/timelines/public", limit: limit, token: token)
+    public func timeline(host: String, limit: Int, before: Post?, token: String?) async throws -> [Post] {
+        try await posts(host: host, path: "/api/v1/timelines/public", limit: limit, before: before, token: token)
     }
 
     public func trending(host: String, limit: Int, token: String?) async throws -> [Post] {
-        try await posts(host: host, path: "/api/v1/trends/statuses", limit: limit, token: token)
+        try await posts(host: host, path: "/api/v1/trends/statuses", limit: limit, before: nil, token: token)
     }
 
     // MARK: - Transport
 
-    private func posts(host rawHost: String, path: String, limit: Int, token: String?) async throws -> [Post] {
+    private func posts(host rawHost: String, path: String, limit: Int,
+                       before: Post?, token: String?) async throws -> [Post] {
         let host = Server.normalise(rawHost)
-        let data = try await get(host: host, path: path, query: [
-            URLQueryItem(name: "limit", value: String(limit)),
-        ], token: token)
+        var query = [URLQueryItem(name: "limit", value: String(limit))]
+        // `max_id` is Mastodon's word for "older than", and it is spoken here and nowhere
+        // else. A cursor this server cannot be asked about stops the request rather than
+        // quietly dropping the parameter, which would fetch the newest page all over again.
+        if let before {
+            query.append(URLQueryItem(name: "max_id", value: try Self.statusId(of: before, on: host)))
+        }
+        let data = try await get(host: host, path: path, query: query, token: token)
         return try Self.decoder.decode([MastodonDTO.Status].self, from: data).map { $0.asPost(from: host) }
+    }
+
+    /// The server's own number for a post, read back out of the address it handed over.
+    ///
+    /// `asPost` writes every row's `uri` as `https://<host>/api/v1/statuses/<id>` — a boost
+    /// included, which carries the reblog wrapper's own id and so pages like any other row —
+    /// so the number is already there and is not stored a second time to fall out of step.
+    ///
+    /// Anything else is not this server's status: a post that arrived by another protocol,
+    /// or one handed over by a different Mastodon server, whose numbers mean nothing here.
+    /// Either is refused, because a `max_id` from elsewhere is a page nobody asked for.
+    static func statusId(of post: Post, on host: String) throws -> String {
+        guard let url = URL(string: post.uri), url.host() == host,
+              case let parts = url.pathComponents, parts.count == 5,
+              parts[1] == "api", parts[2] == "v1", parts[3] == "statuses"
+        else { throw SourceFailure.notItsPost(post.uri) }
+        return parts[4]
     }
 
     /// The one door to the network here. A token becomes the bearer header and nothing else

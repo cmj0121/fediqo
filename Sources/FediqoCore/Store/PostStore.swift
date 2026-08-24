@@ -92,14 +92,37 @@ extension LocalStore {
 
     /// The timeline: what is stored, newest first, `merge_key` breaking ties so a page lands in
     /// the same place on every refresh.
-    public func timeline(limit: Int = 200) async throws -> [Post] {
-        try await read { db in
+    ///
+    /// `before` is a post already read, and what comes back is the page that follows it in
+    /// that same order. The cursor is the pair the order is made of — `(posted_at, merge_key)`
+    /// — and the page is cut with `posted_at < it, or the same instant and a later merge_key`,
+    /// which `posts_by_time` answers in its own order. Two posts posted in the same
+    /// millisecond are ordinary, so the tiebreak is in the cut and not only in the sort: with
+    /// the timestamp alone, a boundary falling between them would either repeat the first or
+    /// skip the second. Never OFFSET — a page written in between would shift every count under
+    /// it — so nothing is skipped and nothing arrives twice.
+    ///
+    /// SQLite walks the index down from the newest and drops what is above the cut rather than
+    /// seeking to it: a mixed order cannot be asked for as one comparison, since `(a, b) < (?, ?)`
+    /// wants both columns going the same way and these do not. It costs a walk over the pages
+    /// already read, which is the price of the tiebreak. Worth knowing: this plan holds because
+    /// nothing here runs ANALYZE. With statistics gathered, SQLite prefers a multi-index OR and
+    /// sorts the result, which throws the LIMIT away — so if `PRAGMA optimize` is ever added,
+    /// read this plan again before believing it.
+    public func timeline(limit: Int = 200, before: Post? = nil) async throws -> [Post] {
+        let cursor = before.map { (postedAt: Self.milliseconds($0.createdAt), key: $0.mergeKey) }
+        let keyset = cursor == nil ? "" : "AND (p.posted_at < ? OR (p.posted_at = ? AND p.merge_key > ?))"
+        return try await read { db in
+            var arguments: [any DatabaseValueConvertible] = []
+            if let cursor { arguments += [cursor.postedAt, cursor.postedAt, cursor.key] }
+            arguments.append(limit)
             let rows = try Row.fetchAll(db, sql: """
                 \(Self.postSelect)
                 WHERE p.deleted_at IS NULL
+                \(keyset)
                 ORDER BY p.posted_at DESC, p.merge_key
                 LIMIT ?
-                """, arguments: [limit])
+                """, arguments: StatementArguments(arguments))
             return try Self.posts(from: rows, db)
         }
     }

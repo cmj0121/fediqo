@@ -26,10 +26,20 @@ final class StubRoutes: @unchecked Sendable {
     func answer(for url: URL, method: String, body: Data, authorization: String?) -> (status: Int, body: Data) {
         let key = "\(url.host() ?? "")|\(url.path())"
         return lock.withLock {
-            log.append((key, CapturedRequest(method: method, body: String(decoding: body, as: UTF8.self), authorization: authorization)))
+            log.append((key, CapturedRequest(method: method, query: Self.query(of: url),
+                                             body: String(decoding: body, as: UTF8.self),
+                                             authorization: authorization)))
             if authorization != nil, let authorized = authorizedRoutes[key] { return authorized }
             return routes[key] ?? (404, Data("{}".utf8))
         }
+    }
+
+    /// A request's query as a dictionary — what a GET actually asked for, which is where a
+    /// page's cursor is spelled.
+    private static func query(of url: URL) -> [String: String] {
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        return Dictionary(items.compactMap { item in item.value.map { (item.name, $0) } },
+                          uniquingKeysWith: { _, last in last })
     }
 
     /// The paths asked of one host, in the order they were asked.
@@ -48,6 +58,8 @@ final class StubRoutes: @unchecked Sendable {
 /// One request as the stub saw it, body and all.
 struct CapturedRequest: Sendable {
     let method: String
+    /// What the URL asked for, by name — `limit`, and `max_id` where a page was asked for.
+    let query: [String: String]
     let body: String
     let authorization: String?
 

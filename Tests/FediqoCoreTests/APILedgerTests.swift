@@ -106,9 +106,9 @@ struct APILedgerTests {
         stubRoutes.on("ledger-b.test", "/api/v1/timelines/public", status: 500)
         let client = MastodonClient(session: stubbedSession(), ledger: ledger)
 
-        _ = try await client.timeline(host: "ledger-a.test", limit: 5, token: nil)
+        _ = try await client.timeline(host: "ledger-a.test", limit: 5, before: nil, token: nil)
         await #expect(throws: SourceFailure.self) {
-            _ = try await client.timeline(host: "ledger-b.test", limit: 5, token: nil)
+            _ = try await client.timeline(host: "ledger-b.test", limit: 5, before: nil, token: nil)
         }
 
         let accounting = ledger.accounting()

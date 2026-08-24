@@ -124,6 +124,6 @@ private struct TableClient: SourceClient {
     let lists: [String: [Post]]
 
     func instance(host: String) async throws -> InstanceInfo { throw SourceFailure.badHost(host) }
-    func timeline(host: String, limit: Int, token: String?) async throws -> [Post] { lists[host] ?? [] }
+    func timeline(host: String, limit: Int, before: Post?, token: String?) async throws -> [Post] { lists[host] ?? [] }
     func trending(host: String, limit: Int, token: String?) async throws -> [Post] { lists[host] ?? [] }
 }
