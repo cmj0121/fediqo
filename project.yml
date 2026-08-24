@@ -35,6 +35,10 @@ targets:
         product: FediqoUI
     info:
       path: Apps/macOS/Info.plist
+      properties:
+        CFBundleURLTypes:
+          - CFBundleURLName: tw.cmj.fediqo
+            CFBundleURLSchemes: [fediqo]
     entitlements:
       path: Apps/macOS/Fediqo.entitlements
     settings:
@@ -58,6 +62,10 @@ targets:
         product: FediqoUI
     info:
       path: Apps/iOS/Info.plist
+      properties:
+        CFBundleURLTypes:
+          - CFBundleURLName: tw.cmj.fediqo
+            CFBundleURLSchemes: [fediqo]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: tw.cmj.fediqo

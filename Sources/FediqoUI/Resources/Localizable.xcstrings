@@ -172,6 +172,23 @@
         }
       }
     },
+    "error.signInFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Signing in failed: %@"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "登入失敗：%@"
+          }
+        }
+      }
+    },
     "error.unsupported": {
       "extractionState": "manual",
       "localizations": {
@@ -865,6 +882,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "用你選的大小寫一句話，讓這個選擇在留下之前先被看見。"
+          }
+        }
+      }
+    },
+    "settings.signIn": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign in"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "登入"
+          }
+        }
+      }
+    },
+    "settings.signOut": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign out"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "登出"
           }
         }
       }

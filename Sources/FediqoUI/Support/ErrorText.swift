@@ -14,6 +14,7 @@ func message(for failure: SourceFailure) -> String {
     case .unsupported(let socialProtocol): t("error.unsupported", t("onboarding.protocol.\(socialProtocol.rawValue)"))
     case .badHost(let host): t("error.badHost", host)
     case .http(let code): t("error.http", String(code))
-    case .transport(let reason), .store(let reason), .signInFailed(let reason): reason
+    case .signInFailed(let reason): t("error.signInFailed", reason)
+    case .transport(let reason), .store(let reason): reason
     }
 }

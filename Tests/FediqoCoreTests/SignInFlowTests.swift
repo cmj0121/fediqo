@@ -247,6 +247,16 @@ struct SignInFlowTests {
         #expect(h.auth.networkCalls == callsBefore)
     }
 
+    @Test("signedInByServer() keys each account by the endpoint that owns it")
+    func signedInByServerKeysByEndpoint() async throws {
+        let h = try Harness(answering: ada)
+        try await h.signIn(to: server)
+
+        let accounts = try await h.store.signedInByServer()
+
+        #expect(accounts == [server.endpoint: ada])
+    }
+
     @Test("The fact never lands alone: the account and server rows are in the same transaction")
     func foreignKeysHold() async throws {
         let h = try Harness(answering: ada)

@@ -146,14 +146,31 @@ extension LocalStore {
                 FROM owned_accounts o
                 JOIN accounts a ON a.author_id = o.author_id
                 ORDER BY o.created_at, o.author_id
-                """).map { row in
-                SignedInAccount(
-                    authorId: row["author_id"],
-                    handle: row["handle"] ?? "",
-                    displayName: row["display_name"] ?? "",
-                    avatarURL: (row["avatar_url"] as String?).flatMap(URL.init(string:))
-                )
+                """).map(Self.signedInAccount)
+        }
+    }
+
+    /// The same facts, keyed by the `servers.url` that owns each account. One account per
+    /// server is policy (decision 9), so the endpoint is a key here, not a grouping.
+    public func signedInByServer() async throws -> [String: SignedInAccount] {
+        try await read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT o.server_url, o.author_id, a.handle, a.display_name, a.avatar_url
+                FROM owned_accounts o
+                JOIN accounts a ON a.author_id = o.author_id
+                """).reduce(into: [:]) { accounts, row in
+                accounts[row["server_url"]] = Self.signedInAccount(row)
             }
         }
+    }
+
+    /// One reading of the joined row, shared by both queries so they cannot drift.
+    private static func signedInAccount(_ row: Row) -> SignedInAccount {
+        SignedInAccount(
+            authorId: row["author_id"],
+            handle: row["handle"] ?? "",
+            displayName: row["display_name"] ?? "",
+            avatarURL: (row["avatar_url"] as String?).flatMap(URL.init(string:))
+        )
     }
 }
