@@ -48,15 +48,18 @@ struct FeedScreen: View {
             }
             // The ring is moved by a key, and a key can move it past the bottom of the
             // screen — which is most of what holding `j` is for. Without an anchor the list
-            // moves the least it can to bring the row into view, so stepping between two
-            // rows that are both already on the screen does not throw the page about.
+            // brings it to the middle, so what you are reading has its own context above and
+            // below it rather than sitting against an edge with the next post already gone.
+            // Near either end there is not enough list to centre against and it settles for
+            // as close as it can get, which is what a reader at the top or bottom expects
+            // anyway.
             //
             // Only when the ring moves, so coming back to a tab does not scroll to the ring
             // that tab still holds: the list is built again at the top, the way every other
             // trip between pages and tabs already leaves it.
             .onChange(of: model.selection) { _, key in
                 guard let key else { return }
-                proxy.scrollTo(key)
+                proxy.scrollTo(key, anchor: .center)
             }
             // Back to the top, however it was asked for — the key or the button — and with
             // no animation on the way: a reader a thousand posts down asked to be at the
