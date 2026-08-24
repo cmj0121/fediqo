@@ -276,4 +276,26 @@ struct StandingFailureTests {
         #expect(result.failures(carrying: known, of: [server])[server.endpoint]
                 == SourceFailure.http(404, Data("[]".utf8)))
     }
+    @Test("A refresh that brought nothing leaves the rows that were already there")
+    func nothingNewLeavesWhatIsThere() async {
+        let host = "gone.test"
+        let server = makeServer(host)
+        stubRoutes.on(host, "/api/v1/timelines/public", status: 503, body: "")
+        let shown = [makePost(uri: "kept", at: 100, from: host)]
+
+        let failed = await stubbedLoader().load(servers: [server], mode: .timeline)
+
+        // The server is unreachable, not empty — and the store still holds what it held.
+        #expect(failed.posts.isEmpty)
+        #expect(failed.posts(carrying: shown, asked: [server]).map(\.uri) == ["kept"])
+    }
+
+    @Test("With no sources left there is nobody whose rows those were")
+    func noSourcesClearsTheScreen() async {
+        let shown = [makePost(uri: "orphan", at: 100, from: "gone.test")]
+        let empty = await stubbedLoader().load(servers: [], mode: .timeline)
+
+        #expect(empty.posts(carrying: shown, asked: []).isEmpty)
+    }
+
 }

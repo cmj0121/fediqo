@@ -73,6 +73,21 @@ public struct TimelineResult: Sendable {
         }
         return standing
     }
+
+    /// What the screen should show, given what it was already showing.
+    ///
+    /// A refresh that came back with nothing has not emptied anything: the store still holds
+    /// what it held, and the promise this app makes is that a server being down leaves every
+    /// existing row where it was and simply adds nothing. Replacing the screen with a refresh
+    /// that failed would make an unreachable server look like an empty one, which is the one
+    /// thing an empty screen is supposed to mean.
+    ///
+    /// Asking nobody is different from asking and being told nothing: with no sources left
+    /// there is nothing whose rows these would be, so they go.
+    public func posts(carrying shown: [Post], asked servers: [Server]) -> [Post] {
+        if !posts.isEmpty || servers.isEmpty { return posts }
+        return shown
+    }
 }
 
 /// Reads every server at once and hands back one stream in one order.

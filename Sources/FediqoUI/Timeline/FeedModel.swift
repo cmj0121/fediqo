@@ -49,7 +49,8 @@ final class FeedModel {
     func load(servers: [Server], refresh: Refresh = .manual) async {
         loading = true
         let loaded = await loader.load(servers: servers, mode: mode, refresh: refresh)
-        result = loaded
+        result = TimelineResult(posts: loaded.posts(carrying: result.posts, asked: servers),
+                                failures: loaded.failures)
         failures = loaded.failures(carrying: failures, of: servers)
         // Only what this load was told, not the standing answer: a credential is turned down
         // once and marked once, rather than again on every tick that skips the server.
