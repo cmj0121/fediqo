@@ -5,9 +5,14 @@ import Foundation
 /// anything" — and where a server declines, that is reported rather than substituted for.
 public struct MastodonClient: SourceClient {
     private let session: URLSession
+    /// What every request from this client is counted against. Injected rather than reached
+    /// for, so a caller wanting its own count — a test, above all — is not touched by anybody
+    /// else's requests.
+    private let ledger: APILedger
 
-    public init(session: URLSession = .shared) {
+    public init(session: URLSession = .shared, ledger: APILedger = .shared) {
         self.session = session
+        self.ledger = ledger
     }
 
     /// The decoder every Mastodon payload goes through, including in tests: date handling is
@@ -97,7 +102,7 @@ public struct MastodonClient: SourceClient {
         components.path = path
         components.queryItems = query.isEmpty ? nil : query
         guard let url = components.url else { throw SourceFailure.badHost(host) }
-        return try await JSONTransport.get(url, on: session, bearer: token)
+        return try await JSONTransport.get(url, on: session, bearer: token, ledger: ledger)
     }
 }
 
@@ -106,7 +111,8 @@ public struct MastodonClient: SourceClient {
 enum JSONTransport {
     /// `bearer` is the access token itself, not a header value: the one place that knows how
     /// an OAuth token is spelled into a request is here.
-    static func get(_ url: URL, on session: URLSession, bearer: String? = nil, timeout: TimeInterval = 15) async throws -> Data {
+    static func get(_ url: URL, on session: URLSession, bearer: String? = nil, timeout: TimeInterval = 15,
+                    ledger: APILedger = .shared) async throws -> Data {
         var request = URLRequest(url: url)
         request.timeoutInterval = timeout
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -114,28 +120,31 @@ enum JSONTransport {
             request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
         }
 
-        let (data, status) = try await perform(request, on: session)
-        switch status {
-        case 200..<300:
-            return data
-        case 401, 403, 422:
-            // The endpoint is there and is refusing, which is a different thing from the
-            // server being broken. Who was refused depends on what was sent: an outright no
-            // to a request that carried a credential is that credential being turned down,
-            // and the account has to act; anything else is a stranger being told to sign in.
-            // 422 stays a refusal of the request, not a verdict on who asked.
-            let host = url.host() ?? url.absoluteString
-            if bearer != nil, status != 422 { throw SourceFailure.tokenRejected(host) }
-            throw SourceFailure.needsSignIn(host)
-        default:
-            throw SourceFailure.http(status, data)
+        return try await counted(url, in: ledger) {
+            let (data, status) = try await perform(request, on: session)
+            switch status {
+            case 200..<300:
+                return data
+            case 401, 403, 422:
+                // The endpoint is there and is refusing, which is a different thing from the
+                // server being broken. Who was refused depends on what was sent: an outright no
+                // to a request that carried a credential is that credential being turned down,
+                // and the account has to act; anything else is a stranger being told to sign in.
+                // 422 stays a refusal of the request, not a verdict on who asked.
+                let host = url.host() ?? url.absoluteString
+                if bearer != nil, status != 422 { throw SourceFailure.tokenRejected(host) }
+                throw SourceFailure.needsSignIn(host)
+            default:
+                throw SourceFailure.http(status, data)
+            }
         }
     }
 
     /// A form-encoded POST, as the OAuth endpoints expect. Neutral like `get`, minus the
     /// `needsSignIn` reading — mid-handshake there is no signed-out stranger — so what a
     /// refusal means is the caller's to say, and the body travels with the status for it.
-    static func postForm(_ url: URL, fields: [String: String], on session: URLSession, timeout: TimeInterval = 15) async throws -> Data {
+    static func postForm(_ url: URL, fields: [String: String], on session: URLSession, timeout: TimeInterval = 15,
+                         ledger: APILedger = .shared) async throws -> Data {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.timeoutInterval = timeout
@@ -143,9 +152,28 @@ enum JSONTransport {
         request.setValue("application/x-www-form-urlencoded; charset=utf-8", forHTTPHeaderField: "Content-Type")
         request.httpBody = formEncode(fields)
 
-        let (data, status) = try await perform(request, on: session)
-        guard (200..<300).contains(status) else { throw SourceFailure.http(status, data) }
-        return data
+        return try await counted(url, in: ledger) {
+            let (data, status) = try await perform(request, on: session)
+            guard (200..<300).contains(status) else { throw SourceFailure.http(status, data) }
+            return data
+        }
+    }
+
+    /// Every request this app makes passes through `get` or `postForm`, so this is where one
+    /// is counted: one call against the server it was asked of, and a failure wherever
+    /// nothing usable came back. A refusal counts as much as a broken connection — we asked
+    /// either way — and a request that throws counts before the throw carries on.
+    private static func counted(_ url: URL, in ledger: APILedger,
+                                _ send: () async throws -> Data) async throws -> Data {
+        let endpoint = Server.endpoint(of: url)
+        do {
+            let data = try await send()
+            ledger.record(endpoint: endpoint, failed: false)
+            return data
+        } catch {
+            ledger.record(endpoint: endpoint, failed: true)
+            throw error
+        }
     }
 
     /// Sorted so the same fields make the same bytes, and escaped by hand: URLComponents

@@ -88,10 +88,12 @@ public struct SourceRegistry: Sendable {
         self.authClients = authClients
     }
 
-    public static func standard(session: URLSession = .shared) -> SourceRegistry {
+    /// `ledger` reaches every client this builds, so what the app asks of other people's
+    /// servers is counted whoever assembled the registry.
+    public static func standard(session: URLSession = .shared, ledger: APILedger = .shared) -> SourceRegistry {
         SourceRegistry(
-            clients: [.mastodon: MastodonClient(session: session)],
-            authClients: [.mastodon: MastodonAuthClient(session: session)]
+            clients: [.mastodon: MastodonClient(session: session, ledger: ledger)],
+            authClients: [.mastodon: MastodonAuthClient(session: session, ledger: ledger)]
         )
     }
 
