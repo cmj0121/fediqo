@@ -7,6 +7,10 @@ import Foundation
 /// enters Core: the app does that and hands the code back in. Everything here is a plain
 /// request, so all of it runs against a stubbed transport in tests.
 public protocol AuthClient: Sendable {
+    /// Where the browser comes back to — the promise made to the server at registration,
+    /// and the URL whose scheme the sign-in session watches for.
+    var redirectURI: URL { get }
+
     /// Registers this app with the server; the credentials come back for keeping.
     func registerApp(host: String) async throws -> AppCredentials
 
@@ -73,7 +77,7 @@ public struct PKCE: Sendable, Hashable {
 
     /// 32 random bytes, spelt base64url — 43 characters of the allowed alphabet.
     public init() {
-        self.init(verifier: Data((0..<32).map { _ in UInt8.random(in: .min ... .max) }).base64URL)
+        self.init(verifier: Data.random(32).base64URL)
     }
 
     /// The challenge is derived, never chosen: S256 over the ASCII verifier.
@@ -84,6 +88,12 @@ public struct PKCE: Sendable, Hashable {
 }
 
 extension Data {
+    /// `count` bytes from the system generator — the one recipe every secret of the flow
+    /// (verifier, `state`) is made from.
+    static func random(_ count: Int) -> Data {
+        Data((0..<count).map { _ in UInt8.random(in: .min ... .max) })
+    }
+
     /// base64 as RFC 7636 spells it: `-` and `_` for the two odd characters, no padding.
     var base64URL: String {
         base64EncodedString()

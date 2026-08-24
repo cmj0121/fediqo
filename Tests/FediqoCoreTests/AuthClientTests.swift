@@ -139,6 +139,12 @@ struct AuthClientTests {
         #expect(account.displayName == "bee")
     }
 
+    @Test("The redirect the client hands the session is the promise it registers")
+    func redirectURI() {
+        #expect(client.redirectURI.absoluteString == MastodonAuthClient.redirectURI)
+        #expect(client.redirectURI.scheme == "fediqo")
+    }
+
     @Test("The RFC 7636 vector: verifier to S256 challenge")
     func pkceVector() {
         #expect(PKCE(verifier: rfcVerifier).challenge == rfcChallenge)

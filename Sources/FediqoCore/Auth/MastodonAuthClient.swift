@@ -8,6 +8,8 @@ public struct MastodonAuthClient: AuthClient {
     /// promises it to the server, and the promise must match at every step.
     public static let redirectURI = "fediqo://oauth"
 
+    public var redirectURI: URL { URL(string: Self.redirectURI)! }
+
     /// Registered and authorized alike: consent shows write once, posting later needs nothing.
     static let scope = "read write"
 
