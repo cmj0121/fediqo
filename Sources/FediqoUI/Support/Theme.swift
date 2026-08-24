@@ -141,16 +141,29 @@ struct Hairline: View {
 struct IconButton: View {
     let symbol: String
     let labelKey: String
+    /// What the glyph is worth saying in: grey for the ordinary, the accent for the one
+    /// thing a row invites, red for the one that takes something away.
+    var tint: Color = .secondary
     var action: () -> Void
+
+    /// What the glyph has to be worth hitting, which is not the same size for a finger as
+    /// for a cursor: 44 is Apple's touch minimum, 28 is enough to aim at with a pointer.
+    /// Every icon button in the app is one of these — the feed header as much as a Settings
+    /// row — so the size is decided here rather than at each of them.
+    #if os(iOS)
+    private static let target: CGFloat = 44
+    #else
+    private static let target: CGFloat = 28
+    #endif
 
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .frame(width: 24, height: 24)
+                .frame(width: Self.target, height: Self.target)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(tint)
         .help(t(labelKey))
         .accessibilityLabel(Text(t(labelKey)))
     }

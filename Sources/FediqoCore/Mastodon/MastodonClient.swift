@@ -70,44 +70,48 @@ public struct MastodonClient: SourceClient {
         throw SourceFailure.notThatKind(.mastodon, host)
     }
 
-    public func timeline(host: String, limit: Int) async throws -> [Post] {
-        try await posts(host: host, path: "/api/v1/timelines/public", limit: limit)
+    public func timeline(host: String, limit: Int, token: String?) async throws -> [Post] {
+        try await posts(host: host, path: "/api/v1/timelines/public", limit: limit, token: token)
     }
 
-    public func trending(host: String, limit: Int) async throws -> [Post] {
-        try await posts(host: host, path: "/api/v1/trends/statuses", limit: limit)
+    public func trending(host: String, limit: Int, token: String?) async throws -> [Post] {
+        try await posts(host: host, path: "/api/v1/trends/statuses", limit: limit, token: token)
     }
 
     // MARK: - Transport
 
-    private func posts(host rawHost: String, path: String, limit: Int) async throws -> [Post] {
+    private func posts(host rawHost: String, path: String, limit: Int, token: String?) async throws -> [Post] {
         let host = Server.normalise(rawHost)
         let data = try await get(host: host, path: path, query: [
             URLQueryItem(name: "limit", value: String(limit)),
-        ])
+        ], token: token)
         return try Self.decoder.decode([MastodonDTO.Status].self, from: data).map { $0.asPost(from: host) }
     }
 
-    private func get(host: String, path: String, query: [URLQueryItem]) async throws -> Data {
+    /// The one door to the network here. A token becomes the bearer header and nothing else
+    /// changes: the same URL, the same endpoint, asked for as somebody rather than as anybody.
+    private func get(host: String, path: String, query: [URLQueryItem], token: String? = nil) async throws -> Data {
         var components = URLComponents()
         components.scheme = "https"
         components.host = host
         components.path = path
         components.queryItems = query.isEmpty ? nil : query
         guard let url = components.url else { throw SourceFailure.badHost(host) }
-        return try await JSONTransport.get(url, on: session)
+        return try await JSONTransport.get(url, on: session, bearer: token)
     }
 }
 
 /// One request, one status check. Shared so that everything asking a server for JSON tells
 /// refusal apart from breakage the same way.
 enum JSONTransport {
-    static func get(_ url: URL, on session: URLSession, authorization: String? = nil, timeout: TimeInterval = 15) async throws -> Data {
+    /// `bearer` is the access token itself, not a header value: the one place that knows how
+    /// an OAuth token is spelled into a request is here.
+    static func get(_ url: URL, on session: URLSession, bearer: String? = nil, timeout: TimeInterval = 15) async throws -> Data {
         var request = URLRequest(url: url)
         request.timeoutInterval = timeout
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        if let authorization {
-            request.setValue(authorization, forHTTPHeaderField: "Authorization")
+        if let bearer {
+            request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
         }
 
         let (data, status) = try await perform(request, on: session)
@@ -115,9 +119,14 @@ enum JSONTransport {
         case 200..<300:
             return data
         case 401, 403, 422:
-            // The endpoint is there and is refusing a stranger, which is a different
-            // thing from the server being broken and is worth saying differently.
-            throw SourceFailure.needsSignIn(url.host() ?? url.absoluteString)
+            // The endpoint is there and is refusing, which is a different thing from the
+            // server being broken. Who was refused depends on what was sent: an outright no
+            // to a request that carried a credential is that credential being turned down,
+            // and the account has to act; anything else is a stranger being told to sign in.
+            // 422 stays a refusal of the request, not a verdict on who asked.
+            let host = url.host() ?? url.absoluteString
+            if bearer != nil, status != 422 { throw SourceFailure.tokenRejected(host) }
+            throw SourceFailure.needsSignIn(host)
         default:
             throw SourceFailure.http(status, data)
         }

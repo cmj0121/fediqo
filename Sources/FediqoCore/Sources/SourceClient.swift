@@ -16,6 +16,13 @@ public enum SourceFailure: Error, Sendable, Equatable, LocalizedError {
     /// The sign-in handshake itself was refused — a spent code, a revoked app. A different
     /// fact from `needsSignIn`, which is a stranger being turned away.
     case signInFailed(String)
+    /// A read was sent as somebody and the server turned that somebody down — an expired or
+    /// revoked token. Three refusals, three facts: `needsSignIn` is a stranger turned away,
+    /// `signInFailed` is a handshake refused, and this is a credential that stopped working.
+    /// The read is tried again as a stranger, so this reported alongside posts from the same
+    /// host means the anonymous read did arrive — the account is what needs attention, not
+    /// the column.
+    case tokenRejected(String)
     /// The server answered outside 2xx; the body rides along for whoever can read a
     /// reason out of it.
     case http(Int, Data)
@@ -31,6 +38,7 @@ public enum SourceFailure: Error, Sendable, Equatable, LocalizedError {
         case .unsupported(let socialProtocol): "\(socialProtocol.rawValue) is not spoken yet."
         case .needsSignIn(let host): "\(host) does not hand this over without signing in."
         case .signInFailed(let reason): "Signing in failed: \(reason)"
+        case .tokenRejected(let host): "\(host) no longer accepts the account signed in to it."
         case .http(let code, _): "The server answered \(code)."
         case .transport(let reason): reason
         case .store(let reason): "The local store could not keep what arrived: \(reason)"
@@ -44,13 +52,15 @@ public enum SourceFailure: Error, Sendable, Equatable, LocalizedError {
 /// them, so it is written once against this and never against a particular protocol.
 public protocol SourceClient: Sendable {
     /// Confirms a hostname is the kind of server it is taken for, before it is written down.
+    /// Tokenless on purpose: a server is asked this before anyone owns an account on it.
     func instance(host: String) async throws -> InstanceInfo
 
-    /// What the server publishes to anyone. Never substituted for by anything else.
-    func timeline(host: String, limit: Int) async throws -> [Post]
+    /// What the server publishes to anyone — asked for as `token`'s owner where there is one,
+    /// which is still the public timeline and never substituted for by anything else.
+    func timeline(host: String, limit: Int, token: String?) async throws -> [Post]
 
     /// What the server says is trending. A separate thing, asked for separately.
-    func trending(host: String, limit: Int) async throws -> [Post]
+    func trending(host: String, limit: Int, token: String?) async throws -> [Post]
 }
 
 public struct InstanceInfo: Sendable, Hashable {

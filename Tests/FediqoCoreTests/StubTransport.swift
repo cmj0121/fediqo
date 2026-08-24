@@ -8,6 +8,8 @@ import Foundation
 final class StubRoutes: @unchecked Sendable {
     private let lock = NSLock()
     private var routes: [String: (status: Int, body: Data)] = [:]
+    /// What an endpoint answers a request that carries a credential, where that differs.
+    private var authorizedRoutes: [String: (status: Int, body: Data)] = [:]
     /// Every request in the order it arrived — the one log both views below read from.
     private var log: [(key: String, request: CapturedRequest)] = []
 
@@ -15,10 +17,17 @@ final class StubRoutes: @unchecked Sendable {
         lock.withLock { routes["\(host)|\(path)"] = (status, Data(body.utf8)) }
     }
 
+    /// What this endpoint answers a request bearing a credential — a server with a stale
+    /// token, in practice, which turns the token down and still publishes to strangers.
+    func onAuthorized(_ host: String, _ path: String, status: Int, body: String = "[]") {
+        lock.withLock { authorizedRoutes["\(host)|\(path)"] = (status, Data(body.utf8)) }
+    }
+
     func answer(for url: URL, method: String, body: Data, authorization: String?) -> (status: Int, body: Data) {
         let key = "\(url.host() ?? "")|\(url.path())"
         return lock.withLock {
             log.append((key, CapturedRequest(method: method, body: String(decoding: body, as: UTF8.self), authorization: authorization)))
+            if authorization != nil, let authorized = authorizedRoutes[key] { return authorized }
             return routes[key] ?? (404, Data("{}".utf8))
         }
     }
@@ -106,9 +115,59 @@ func makeServer(_ host: String) -> Server {
     Server(host: host, socialProtocol: .mastodon, title: host)
 }
 
-/// A loader that only speaks Mastodon, through the stub.
-func stubbedLoader(store: LocalStore? = nil) -> TimelineLoader {
-    TimelineLoader(registry: SourceRegistry(clients: [.mastodon: MastodonClient(session: stubbedSession())]), store: store)
+/// A loader that only speaks Mastodon, through the stub. `secrets` is in-memory by default so
+/// no test ever reaches the real Keychain, whatever a loader is handed a store.
+func stubbedLoader(store: LocalStore? = nil, secrets: any SecretStore = InMemorySecretStore()) -> TimelineLoader {
+    TimelineLoader(registry: SourceRegistry(clients: [.mastodon: MastodonClient(session: stubbedSession())]),
+                   store: store, secrets: secrets)
+}
+
+/// The browser, boiled down: reads the `state` off the consent URL and comes straight back
+/// approved. What the real one does through ASWebAuthenticationSession, minus the person.
+@Sendable func approving(_ consent: URL, _ scheme: String) async throws -> URL {
+    let query = URLComponents(url: consent, resolvingAgainstBaseURL: false)?.queryItems ?? []
+    let state = query.first { $0.name == "state" }?.value ?? ""
+    return URL(string: "\(scheme)://oauth?code=c0de&state=\(state)")!
+}
+
+/// Everything a sign-in test stands on, built fresh per test: the store, the scripted server,
+/// and the coordinator between them. The secret store is in-memory, so no test using this
+/// goes near the real Keychain.
+struct Harness {
+    let store: LocalStore
+    let secrets = InMemorySecretStore()
+    let auth: ScriptedAuthClient
+    let coordinator: SignInCoordinator
+
+    init(answering account: SignedInAccount) throws {
+        store = try LocalStore.inMemory()
+        auth = ScriptedAuthClient(account: account)
+        coordinator = SignInCoordinator(store: store, secrets: secrets)
+    }
+
+    /// Signed in for real through the coordinator, so the rows and the token are exactly what
+    /// the app would have left behind.
+    @discardableResult
+    func signIn(to server: Server,
+                authenticate: @Sendable (URL, String) async throws -> URL = approving) async throws -> SignedInAccount {
+        try await coordinator.signIn(server: server, using: auth, authenticate: authenticate)
+    }
+
+    func signOut(_ authorId: String) async {
+        await coordinator.signOut(authorId: authorId, using: auth)
+    }
+
+    /// What the launch check makes of the accounts signed in here. One scripted client
+    /// answers for every protocol — it is the only server these tests have.
+    func rejected(among servers: [Server]) async -> Set<String> {
+        await coordinator.rejectedEndpoints(among: servers) { _ in auth }
+    }
+
+    func ownedRows() async throws -> [String] {
+        try await store.read { db in
+            try String.fetchAll(db, sql: "SELECT author_id FROM owned_accounts ORDER BY author_id")
+        }
+    }
 }
 
 /// One status, enough to prove a list came back.

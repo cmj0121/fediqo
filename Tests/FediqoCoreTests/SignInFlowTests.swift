@@ -5,10 +5,11 @@ import Testing
 
 /// An `AuthClient` that answers from fixtures and writes down what was asked of it — the
 /// seam's tests care about what reaches the store and the secret store, not about HTTP.
-private final class ScriptedAuthClient: AuthClient, @unchecked Sendable {
+final class ScriptedAuthClient: AuthClient, @unchecked Sendable {
     private let lock = NSLock()
     private var account: SignedInAccount
     private var revokeError: Error?
+    private var verifyError: Error?
     private(set) var registeredHosts: [String] = []
     private(set) var exchangedCodes: [String] = []
     private(set) var revokedTokens: [String] = []
@@ -26,6 +27,10 @@ private final class ScriptedAuthClient: AuthClient, @unchecked Sendable {
 
     func refusesRevoke(with error: Error) {
         lock.withLock { revokeError = error }
+    }
+
+    func refusesVerify(with error: Error) {
+        lock.withLock { verifyError = error }
     }
 
     func registerApp(host: String) async throws -> AppCredentials {
@@ -70,48 +75,12 @@ private final class ScriptedAuthClient: AuthClient, @unchecked Sendable {
     }
 
     func verifyCredentials(host: String, token: OAuthToken) async throws -> SignedInAccount {
-        lock.withLock {
+        let (refused, account) = lock.withLock {
             networkCalls += 1
-            return account
+            return (verifyError, self.account)
         }
-    }
-}
-
-/// The browser, boiled down: reads the `state` off the consent URL and comes straight back
-/// approved. What the real one does through ASWebAuthenticationSession, minus the person.
-@Sendable private func approving(_ consent: URL, _ scheme: String) async throws -> URL {
-    let query = URLComponents(url: consent, resolvingAgainstBaseURL: false)?.queryItems ?? []
-    let state = query.first { $0.name == "state" }?.value ?? ""
-    return URL(string: "\(scheme)://oauth?code=c0de&state=\(state)")!
-}
-
-/// Everything one sign-in test stands on, built fresh per test.
-private struct Harness {
-    let store: LocalStore
-    let secrets = InMemorySecretStore()
-    let auth: ScriptedAuthClient
-    let coordinator: SignInCoordinator
-
-    init(answering account: SignedInAccount) throws {
-        store = try LocalStore.inMemory()
-        auth = ScriptedAuthClient(account: account)
-        coordinator = SignInCoordinator(store: store, secrets: secrets)
-    }
-
-    @discardableResult
-    func signIn(to server: Server,
-                authenticate: @Sendable (URL, String) async throws -> URL = approving) async throws -> SignedInAccount {
-        try await coordinator.signIn(server: server, using: auth, authenticate: authenticate)
-    }
-
-    func signOut(_ authorId: String) async {
-        await coordinator.signOut(authorId: authorId, using: auth)
-    }
-
-    func ownedRows() async throws -> [String] {
-        try await store.read { db in
-            try String.fetchAll(db, sql: "SELECT author_id FROM owned_accounts ORDER BY author_id")
-        }
+        if let refused { throw refused }
+        return account
     }
 }
 
@@ -186,6 +155,21 @@ struct SignInFlowTests {
         #expect(try h.secrets.token(for: ada.authorId) == nil)
         #expect(try h.secrets.token(for: bee.authorId) != nil)
         #expect(try await h.ownedRows() == [bee.authorId])
+    }
+
+    @Test("A token refused the moment it was issued is a failed sign-in, not a token to mark")
+    func verifyRefusingTheNewTokenEndsTheFlow() async throws {
+        let h = try Harness(answering: ada)
+        // What `MastodonAuthClient.verifyCredentials` throws on a 401: it sends a bearer, so
+        // the transport reads the refusal as the credential's. Mid-handshake it is not.
+        h.auth.refusesVerify(with: SourceFailure.tokenRejected("owned.test"))
+
+        await #expect(throws: SourceFailure.signInFailed("the server refused the credential it had just issued")) {
+            try await h.signIn(to: server)
+        }
+
+        #expect(try h.secrets.token(for: ada.authorId) == nil)
+        #expect(try await h.ownedRows().isEmpty)
     }
 
     @Test("The app is registered once; a second sign-in reuses the kept credentials")

@@ -61,7 +61,7 @@ struct MastodonClientTests {
     func everyFailureSpeaks() {
         let failures: [SourceFailure] = [
             .badHost("a.test"), .notThatKind(.mastodon, "a.test"), .unsupported(.nostr), .needsSignIn("a.test"),
-            .http(503, Data()), .transport("offline"),
+            .tokenRejected("a.test"), .http(503, Data()), .transport("offline"),
         ]
         #expect(failures.allSatisfy { !($0.errorDescription ?? "").isEmpty })
     }

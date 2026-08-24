@@ -13,6 +13,11 @@ final class FeedModel {
 
     private let loader: TimelineLoader
 
+    /// Told, by `Server.endpoint`, when a server turned down the token a read carried. The
+    /// posts still arrived — the loader asked again as a stranger — so this marks the
+    /// account and never the column.
+    var onTokenRejected: (@MainActor (String) -> Void)?
+
     init(mode: FeedMode, loader: TimelineLoader = TimelineLoader()) {
         self.mode = mode
         self.loader = loader
@@ -34,6 +39,9 @@ final class FeedModel {
     func load(servers: [Server]) async {
         loading = true
         result = await loader.load(servers: servers, mode: mode)
+        for (endpoint, failure) in result.failures {
+            if case .tokenRejected = failure { onTokenRejected?(endpoint) }
+        }
         loadedFor = servers.map(\.id).sorted()
         loading = false
     }

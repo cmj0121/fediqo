@@ -89,22 +89,7 @@ struct SettingsView: View {
             Text(t("settings.sources.empty")).fediqoFont(12).foregroundStyle(.secondary)
         } else {
             ForEach(app.servers) { server in
-                HStack(spacing: 8) {
-                    Image(systemName: server.socialProtocol.symbolName).foregroundStyle(.secondary).frame(width: 18)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(server.title).fediqoFont(13, weight: .medium).lineLimit(1)
-                        Text(server.host).fediqoFont(10).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    if let signIn = app.signIn, signIn.canSignIn(to: server) {
-                        accountControls(signIn, for: server)
-                    }
-                    Button(t("timeline.remove"), role: .destructive) { app.remove(server) }
-                        .buttonStyle(.plain)
-                        .fediqoFont(11)
-                        .foregroundStyle(.red)
-                }
-                .padding(.vertical, 3)
+                sourceRow(server)
             }
 
             if let failure = app.signIn?.failure {
@@ -126,35 +111,80 @@ struct SettingsView: View {
         }
     }
 
-    /// The signed-in state of one row: the handle and Sign out, or Sign in alone. The
-    /// browser session is handed to the model here because only a view can read it.
+    /// One server: what it is on the left, and on the right everything that can be done to
+    /// it, as icons in one group. Sign in and sign out are only there for a protocol this
+    /// build can sign in to — and only with a store behind them, since without one there is
+    /// no `signIn` at all. Stopping reading is always offered.
+    private func sourceRow(_ server: Server) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: server.socialProtocol.symbolName).foregroundStyle(.secondary).frame(width: 18)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(server.title).fediqoFont(13, weight: .medium).lineLimit(1)
+                Text(server.host).fediqoFont(10).foregroundStyle(.secondary)
+            }
+            Spacer()
+            // The handle and the controls are one group so the model behind them is unwrapped
+            // once; the handle keeps its own gap, since only the buttons sit shoulder to
+            // shoulder.
+            HStack(spacing: 0) {
+                if let signIn = app.signIn, signIn.canSignIn(to: server) {
+                    if let account = signIn.account(on: server) {
+                        // A handle the server no longer answers to reads as the warning it
+                        // is, rather than as a quiet claim to be signed in.
+                        Text(account.handle)
+                            .fediqoFont(11)
+                            .foregroundStyle(signIn.isRejected(server) ? Color.orange : Color.secondary)
+                            .lineLimit(1)
+                            .padding(.trailing, 8)
+                    }
+                    accountControl(signIn, for: server)
+                }
+                IconButton(symbol: "xmark.circle", labelKey: "timeline.remove", tint: .red) { app.remove(server) }
+            }
+        }
+        .padding(.vertical, 3)
+    }
+
+    /// The signed-in state of one row, as the icons it is worth: sign out when there is an
+    /// account, sign in when there is not — and both when the server has stopped accepting
+    /// the account, since those are the only two ways out (nothing retries for you). No
+    /// fourth control: it is the same Sign in, wearing what happened.
     @ViewBuilder
-    private func accountControls(_ signIn: SignInModel, for server: Server) -> some View {
-        if let account = signIn.account(on: server) {
-            Text(account.handle).fediqoFont(11).foregroundStyle(.secondary).lineLimit(1)
-            Button(t("settings.signOut")) { Task { await signIn.signOut(of: server) } }
-                .buttonStyle(.plain)
-                .fediqoFont(11)
-                .foregroundStyle(.secondary)
+    private func accountControl(_ signIn: SignInModel, for server: Server) -> some View {
+        if signIn.account(on: server) != nil {
+            if signIn.isRejected(server) {
+                signInButton(signIn, for: server, symbol: "person.crop.circle.badge.exclamationmark",
+                             labelKey: "settings.signInAgain", tint: .orange)
+            }
+            IconButton(symbol: "rectangle.portrait.and.arrow.right", labelKey: "settings.signOut") {
+                Task { await signIn.signOut(of: server) }
+            }
         } else {
-            Button(t("settings.signIn")) {
-                let session = webSession
-                Task {
-                    await signIn.signIn(to: server) { consent, scheme in
-                        do {
-                            return try await session.authenticate(using: consent, callbackURLScheme: scheme,
-                                                                  preferredBrowserSession: .shared)
-                        } catch let closed as ASWebAuthenticationSessionError where closed.code == .canceledLogin {
-                            // Closing the browser is a decision, not a failure — said here so
-                            // the model never has to speak AuthenticationServices.
-                            throw CancellationError()
-                        }
+            // The system accent rather than `Palette.accent`: this glyph is drawn on the card
+            // itself, and the house blue is too pale against a light one to read.
+            signInButton(signIn, for: server, symbol: "person.crop.circle.badge.plus",
+                         labelKey: "settings.signIn", tint: .accentColor)
+        }
+    }
+
+    /// The one sign-in button, whatever it is called this time. The browser session is handed
+    /// to the model here because only a view can read it.
+    private func signInButton(_ signIn: SignInModel, for server: Server,
+                              symbol: String, labelKey: String, tint: Color) -> some View {
+        IconButton(symbol: symbol, labelKey: labelKey, tint: tint) {
+            let session = webSession
+            Task {
+                await signIn.signIn(to: server) { consent, scheme in
+                    do {
+                        return try await session.authenticate(using: consent, callbackURLScheme: scheme,
+                                                              preferredBrowserSession: .shared)
+                    } catch let closed as ASWebAuthenticationSessionError where closed.code == .canceledLogin {
+                        // Closing the browser is a decision, not a failure — said here so
+                        // the model never has to speak AuthenticationServices.
+                        throw CancellationError()
                     }
                 }
             }
-            .buttonStyle(.plain)
-            .fediqoFont(11)
-            .foregroundStyle(.tint)
         }
     }
 

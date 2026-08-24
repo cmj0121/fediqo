@@ -10,6 +10,7 @@ import FediqoCore
 func message(for failure: SourceFailure) -> String {
     switch failure {
     case .needsSignIn(let host): t("error.needsSignIn", host)
+    case .tokenRejected(let host): t("error.tokenRejected", host)
     case .notThatKind(let socialProtocol, let host): t("error.notThatKind", host, t("onboarding.protocol.\(socialProtocol.rawValue)"))
     case .unsupported(let socialProtocol): t("error.unsupported", t("onboarding.protocol.\(socialProtocol.rawValue)"))
     case .badHost(let host): t("error.badHost", host)

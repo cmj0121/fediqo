@@ -16,7 +16,14 @@ public struct TimelineResult: Sendable {
     /// One row per post. The timeline is in timestamp order; trending is in the servers' own
     /// rank order. Nothing here is ranked by us, and nothing is re-ordered after the fact.
     public let posts: [Post]
-    /// Servers that gave nothing, and why. Reported rather than substituted for.
+    /// Why a server gave what it gave, at most one reason per server — keyed by
+    /// `Server.endpoint`, not by hostname: one host can be a source twice under two
+    /// protocols, and their fates are not the same fact. The reason inside still names the
+    /// bare host, because that is what a screen says to the reader.
+    ///
+    /// Every case but `.tokenRejected` and `.store` means that server gave nothing; those
+    /// two ride alongside posts that did arrive, so a caller reading a server's fate reads
+    /// `posts` for whether anything came and `failures` for whether anything needs attention.
     public let failures: [String: SourceFailure]
 
     public init(posts: [Post], failures: [String: SourceFailure]) {
@@ -40,13 +47,17 @@ public struct TimelineLoader: Sendable {
     private let registry: SourceRegistry
     private let limit: Int
     private let store: LocalStore?
+    private let secrets: any SecretStore
 
     /// With a `store`, what each server hands over is kept before it is merged; without one,
-    /// nothing is remembered between loads.
-    public init(registry: SourceRegistry = .standard(), limit: Int = 40, store: LocalStore? = nil) {
+    /// nothing is remembered between loads — and nobody is signed in either, so a loader
+    /// without a store reads every server as a stranger and never opens `secrets`.
+    public init(registry: SourceRegistry = .standard(), limit: Int = 40, store: LocalStore? = nil,
+                secrets: any SecretStore = KeychainSecretStore()) {
         self.registry = registry
         self.limit = limit
         self.store = store
+        self.secrets = secrets
     }
 
     /// What the store already holds for `mode`, newest first — the screen before any server
@@ -62,42 +73,26 @@ public struct TimelineLoader: Sendable {
     public func load(servers: [Server], mode: FeedMode) async -> TimelineResult {
         var failures: [String: SourceFailure] = [:]
         var collected: [[Post]] = []
+        // Once per load, not once per server: the rows and the Keychain are asked before
+        // anything is asked of the network, and only about the servers being read.
+        let tokens = await tokensByEndpoint(for: servers)
 
         // Each task answers with what arrived and, separately, what went wrong — a store that
         // would not keep the posts is a failure worth reporting, but the posts still arrived.
-        await withTaskGroup(of: (host: String, posts: [Post], failure: SourceFailure?).self) { group in
+        await withTaskGroup(of: (endpoint: String, answer: Answer).self) { group in
             for server in servers {
                 guard let client = registry.client(for: server.socialProtocol) else {
-                    failures[server.host] = .unsupported(server.socialProtocol)
+                    failures[server.endpoint] = .unsupported(server.socialProtocol)
                     continue
                 }
+                let token = tokens[server.endpoint]
                 group.addTask {
-                    let posts: [Post]
-                    do {
-                        posts = switch mode {
-                        case .timeline: try await client.timeline(host: server.host, limit: limit)
-                        case .trending: try await client.trending(host: server.host, limit: limit)
-                        }
-                    } catch let failure as SourceFailure {
-                        return (server.host, [], failure)
-                    } catch {
-                        return (server.host, [], .transport(error.localizedDescription))
-                    }
-                    do {
-                        try await store?.save(posts, from: server)
-                        if mode == .trending { try await store?.recordTrending(posts, from: server) }
-                    } catch {
-                        // What SQLite said, in full, is for the log; the screen gets the message.
-                        LocalStore.log.error("save failed for \(server.host, privacy: .public): \(String(describing: error), privacy: .public)")
-                        let reason = (error as? DatabaseError)?.message ?? error.localizedDescription
-                        return (server.host, posts, .store(reason))
-                    }
-                    return (server.host, posts, nil)
+                    (server.endpoint, await ask(client, server, mode: mode, token: token))
                 }
             }
-            for await (host, posts, failure) in group {
-                if !posts.isEmpty { collected.append(posts) }
-                if let failure { failures[host] = failure }
+            for await (endpoint, answer) in group {
+                if !answer.posts.isEmpty { collected.append(answer.posts) }
+                if let failure = answer.failure { failures[endpoint] = failure }
             }
         }
 
@@ -106,6 +101,64 @@ public struct TimelineLoader: Sendable {
         case .trending: Self.mergedByRank(collected)
         }
         return TimelineResult(posts: posts, failures: failures)
+    }
+
+    /// What one server handed over, and separately what went wrong — a store that would not
+    /// keep the posts is a failure worth reporting, but the posts still arrived.
+    private typealias Answer = (posts: [Post], failure: SourceFailure?)
+
+    /// How one server is asked: as `token`'s owner, and — where that is turned down — once
+    /// more as nobody. The whole of the retry policy is here, so the fan-out above only has
+    /// to name the servers and collect what each one answered.
+    private func ask(_ client: any SourceClient, _ server: Server, mode: FeedMode, token: String?) async -> Answer {
+        let signedIn = await read(client, server, mode: mode, token: token)
+        // A token the server turned down is the account's problem, not the server's, so the
+        // same read goes out once more as a stranger and the column shows whatever anyone
+        // would see. What is reported stays `.tokenRejected`, so the screen marks the account
+        // rather than the server — and stays one failure for this server on this load, so a
+        // backoff counting failures per server never counts the retry as a second.
+        guard case .tokenRejected? = signedIn.failure else { return signedIn }
+        let anonymous = await read(client, server, mode: mode, token: nil)
+        // A retry that read fine but would not store replaces `.tokenRejected` with `.store`,
+        // and the account goes unmarked this round. That is the trade taken knowingly: one
+        // host can only carry one reason, and the store failing is the newer news. It heals
+        // by itself — the next load asks as the account again and is rejected again, and the
+        // launch check marks it regardless of what any load reported.
+        guard anonymous.failure == nil else { return anonymous }
+        return (anonymous.posts, signedIn.failure)
+    }
+
+    /// One request to one server as `token`'s owner, and what it handed over kept.
+    private func read(_ client: any SourceClient, _ server: Server, mode: FeedMode, token: String?) async -> Answer {
+        let posts: [Post]
+        do {
+            posts = switch mode {
+            case .timeline: try await client.timeline(host: server.host, limit: limit, token: token)
+            case .trending: try await client.trending(host: server.host, limit: limit, token: token)
+            }
+        } catch let failure as SourceFailure {
+            return ([], failure)
+        } catch {
+            return ([], .transport(error.localizedDescription))
+        }
+        do {
+            try await store?.save(posts, from: server)
+            if mode == .trending { try await store?.recordTrending(posts, from: server) }
+        } catch {
+            // What SQLite said, in full, is for the log; the screen gets the message.
+            LocalStore.log.error("save failed for \(server.host, privacy: .public): \(String(describing: error), privacy: .public)")
+            let reason = (error as? DatabaseError)?.message ?? error.localizedDescription
+            return (posts, .store(reason))
+        }
+        return (posts, nil)
+    }
+
+    /// The access token to read each of `servers` as. The store answers who is signed in and
+    /// what proves it; a read with no token here goes out as a stranger, which is what it did
+    /// before anyone signed in.
+    private func tokensByEndpoint(for servers: [Server]) async -> [String: String] {
+        guard let store else { return [:] }
+        return await store.tokens(using: secrets, for: servers).mapValues(\.accessToken)
     }
 
     /// Several servers' trending lists as one: a post's rank is its index in its server's

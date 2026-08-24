@@ -42,7 +42,16 @@ public struct SignInCoordinator: Sendable {
         let code = try Self.code(in: callback, expecting: state)
 
         let token = try await auth.exchangeCode(host: server.host, app: app, code: code, pkce: pkce)
-        let account = try await auth.verifyCredentials(host: server.host, token: token)
+        // `verifyCredentials` sends the token, so a refusal comes back as `.tokenRejected` —
+        // the right reading for the launch health check, the wrong one here. Mid-handshake
+        // there is no account to mark and no anonymous read to fall back on: a credential
+        // issued seconds ago and already refused is the handshake failing, so it says so.
+        let account: SignedInAccount
+        do {
+            account = try await auth.verifyCredentials(host: server.host, token: token)
+        } catch SourceFailure.tokenRejected {
+            throw SourceFailure.signInFailed("the server refused the credential it had just issued")
+        }
 
         try secrets.setToken(token, for: account.authorId)
 
@@ -125,6 +134,41 @@ public struct SignInCoordinator: Sendable {
         }
     }
 
+    /// Which signed-in servers have stopped accepting the credential they issued.
+    ///
+    /// One `verify_credentials` per owned account, all at once, and only the server's own
+    /// refusal counts: `.tokenRejected` names an endpoint, everything else — offline, a 500,
+    /// a Keychain that would not open — names nothing, because a server that cannot answer
+    /// has not answered *no*. Nothing here writes: whether a token works is the server's
+    /// answer, held for as long as the app runs and never longer.
+    public func rejectedEndpoints(among servers: [Server],
+                                 using auth: (SocialProtocol) -> (any AuthClient)?) async -> Set<String> {
+        let tokens = await store.tokens(using: secrets, for: servers)
+        guard !tokens.isEmpty else { return [] }
+
+        return await withTaskGroup(of: String?.self) { group in
+            for server in servers {
+                guard let token = tokens[server.endpoint],
+                      let auth = auth(server.socialProtocol) else { continue }
+                group.addTask {
+                    do {
+                        _ = try await auth.verifyCredentials(host: server.host, token: token)
+                        return nil
+                    } catch SourceFailure.tokenRejected {
+                        return server.endpoint
+                    } catch {
+                        let why = String(describing: error)
+                        LocalStore.log.error("token check: \(server.host, privacy: .public) could not answer: \(why, privacy: .public)")
+                        return nil
+                    }
+                }
+            }
+            return await group.reduce(into: []) { rejected, endpoint in
+                if let endpoint { rejected.insert(endpoint) }
+            }
+        }
+    }
+
     /// Best effort, logged: sign-out promises its local half completes even when a step fails.
     private func attempt(_ what: String, _ body: () async throws -> Void) async {
         do {
@@ -166,6 +210,42 @@ extension LocalStore {
                     displayName: row["display_name"] ?? "",
                     avatarURL: (row["avatar_url"] as String?).flatMap(URL.init(string:))
                 )
+            }
+        }
+    }
+
+    /// The token each of `servers` is read as, keyed by the endpoint that owns the account —
+    /// the rows say who is signed in where, `secrets` says what proves it. Only the servers
+    /// asked about are resolved: nobody else's Keychain item is opened to answer.
+    ///
+    /// A store that cannot be read, or a secret that cannot be fetched, costs that one token
+    /// and nothing else — an endpoint missing here is one nobody is signed in to, which is
+    /// what every server was before anyone signed in anywhere.
+    ///
+    /// The reads are independent of each other, so they go at once: a cold Keychain can
+    /// block on each of them.
+    public func tokens(using secrets: any SecretStore, for servers: [Server]) async -> [String: OAuthToken] {
+        let accounts: [String: SignedInAccount]
+        do {
+            accounts = try await signedInByServer()
+        } catch {
+            LocalStore.log.error("signed-in lookup failed: \(String(describing: error), privacy: .public)")
+            return [:]
+        }
+        let asked = Set(servers.map(\.endpoint))
+        return await withTaskGroup(of: (String, OAuthToken)?.self) { group in
+            for (endpoint, account) in accounts where asked.contains(endpoint) {
+                group.addTask {
+                    do {
+                        return try secrets.token(for: account.authorId).map { (endpoint, $0) }
+                    } catch {
+                        LocalStore.log.error("token lookup failed for \(endpoint, privacy: .public): \(String(describing: error), privacy: .public)")
+                        return nil
+                    }
+                }
+            }
+            return await group.reduce(into: [:]) { tokens, found in
+                if let found { tokens[found.0] = found.1 }
             }
         }
     }
