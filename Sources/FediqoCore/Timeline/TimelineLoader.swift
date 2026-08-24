@@ -41,13 +41,38 @@ public struct TimelineResult: Sendable {
     /// two ride alongside posts that did arrive, so a caller reading a server's fate reads
     /// `posts` for whether anything came and `failures` for whether anything needs attention.
     public let failures: [String: SourceFailure]
+    /// The servers this load did not ask at all, by `Server.endpoint`, because they were
+    /// still inside a wait. They are not failing now and they are not answering either, so
+    /// they are in neither `posts` nor `failures` — and a caller that draws a server's fate
+    /// needs to be told the difference between a server that had nothing to say and one
+    /// that was never asked.
+    public let skipped: Set<String>
 
-    public init(posts: [Post], failures: [String: SourceFailure]) {
+    public init(posts: [Post], failures: [String: SourceFailure], skipped: Set<String> = []) {
         self.posts = posts
         self.failures = failures
+        self.skipped = skipped
     }
 
     public var isEmpty: Bool { posts.isEmpty }
+
+    /// Every server's standing reason: what `known` already said, carried through this load.
+    ///
+    /// A server inside its wait is absent from `failures` because it was not asked, so
+    /// taking a load's failures alone would strike its reason off the screen and put it
+    /// back a tick later, though nothing about the server changed. Here a skipped server
+    /// keeps whatever was already known about it; a server that was asked is judged by this
+    /// load alone, so answering clears its line; and a server no longer among `servers` is
+    /// forgotten, since it is nobody's source now.
+    public func failures(carrying known: [String: SourceFailure],
+                         of servers: [Server]) -> [String: SourceFailure] {
+        let ours = Set(servers.map(\.endpoint))
+        var standing = known.filter { ours.contains($0.key) && skipped.contains($0.key) }
+        for (endpoint, failure) in self.failures where ours.contains(endpoint) {
+            standing[endpoint] = failure
+        }
+        return standing
+    }
 }
 
 /// Reads every server at once and hands back one stream in one order.
@@ -105,9 +130,10 @@ public struct TimelineLoader: Sendable {
         var failures: [String: SourceFailure] = [:]
         var collected: [[Post]] = []
         // A server still inside its wait is not asked, and is not reported either: it is not
-        // failing now, it is being left alone, and it has nothing on the screen to lose —
-        // the load that started the wait is the load it already gave nothing to.
-        let asked = await askable(servers, refresh: refresh, now: now)
+        // failing now, it is being left alone. What it said last time is not lost with it —
+        // it comes back named in `skipped`, so a screen can keep showing the reason rather
+        // than blinking it off and on as the server enters and leaves its wait.
+        let (asked, skipped) = await askable(servers, refresh: refresh, now: now)
         // Once per load, not once per server: the rows and the Keychain are asked before
         // anything is asked of the network, and only about the servers being read.
         let tokens = await tokensByEndpoint(for: asked)
@@ -142,7 +168,7 @@ public struct TimelineLoader: Sendable {
         case .timeline: collected.flatMap { $0 }.merged()
         case .trending: Self.mergedByRank(collected)
         }
-        return TimelineResult(posts: posts, failures: failures)
+        return TimelineResult(posts: posts, failures: failures, skipped: skipped)
     }
 
     /// What one server handed over, and separately what went wrong — a store that would not
@@ -195,14 +221,17 @@ public struct TimelineLoader: Sendable {
         return (posts, nil)
     }
 
-    /// Which of `servers` this load is allowed to ask. Everyone, where the reader asked;
-    /// everyone not still inside a wait, where the clock did — which is also everyone,
-    /// almost always, so the healthy load does no work to find that out.
-    private func askable(_ servers: [Server], refresh: Refresh, now: Date) async -> [Server] {
-        guard case .automatic = refresh else { return servers }
+    /// Which of `servers` this load is allowed to ask, and which of them it is leaving
+    /// alone. Everyone is asked where the reader asked; everyone not still inside a wait
+    /// where the clock did — which is also everyone, almost always, so the healthy load
+    /// does no work, and allocates nothing, to find that out.
+    private func askable(_ servers: [Server], refresh: Refresh,
+                         now: Date) async -> (asked: [Server], skipped: Set<String>) {
+        guard case .automatic = refresh else { return (servers, []) }
         let blocked = await backoff.blocked(at: now)
-        guard !blocked.isEmpty else { return servers }
-        return servers.filter { !blocked.contains($0.endpoint) }
+        guard !blocked.isEmpty else { return (servers, []) }
+        return (servers.filter { !blocked.contains($0.endpoint) },
+                blocked.intersection(servers.map(\.endpoint)))
     }
 
     /// What this load's answers do to how long each server is left alone next time.

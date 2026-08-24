@@ -27,6 +27,24 @@ enum RailItem: String, CaseIterable, Identifiable, Hashable {
         case .settings: "gearshape"
         }
     }
+
+    /// Which feed is on this page, where there is one. Kept reads the store and Settings
+    /// reads nobody, so neither is a page a clock has anything to refresh.
+    var feedMode: FeedMode? {
+        switch self {
+        case .timeline: .timeline
+        case .trending: .trending
+        case .kept, .settings: nil
+        }
+    }
+}
+
+/// What the refreshing clock is keyed to: the page it is refreshing and how often. Change
+/// either and the old clock is thrown away and a new one started, which is the whole of how
+/// the refresh follows the reader and how turning it off stops it.
+struct RefreshKey: Hashable {
+    var page: RailItem
+    var interval: RefreshInterval
 }
 
 /// A way to open the app somewhere other than the beginning, so each screen can be looked at
@@ -145,6 +163,37 @@ public final class AppState {
 
     func feed(for mode: FeedMode) -> FeedModel {
         feeds[mode]!
+    }
+
+    var refreshKey: RefreshKey { RefreshKey(page: railItem, interval: preferences.refreshInterval) }
+
+    /// Reads the page you are looking at again, every so often, for as long as it is the
+    /// page you are looking at. Fediqo is a guest on other people's machines: a timeline
+    /// nobody is watching costs nobody's server anything, so this refreshes one feed and no
+    /// other, and stops the moment the reader goes somewhere else.
+    ///
+    /// The shell holds it in a `.task` keyed to the page and the interval, so changing
+    /// either cancels this and starts the next — there is only ever one, and none at all on
+    /// a page without a feed or with the clock turned off. It sleeps before it does
+    /// anything, so the screen's own first load always goes first.
+    func refreshWhileVisible() async {
+        guard let interval = preferences.refreshInterval.duration,
+              let mode = railItem.feedMode else { return }
+        let feed = feed(for: mode)
+        while !Task.isCancelled {
+            do {
+                try await Task.sleep(for: interval)
+            } catch {
+                return
+            }
+            // A tick that lands while the last load is still out is dropped rather than
+            // queued: a server slower than the interval must not collect a queue of readers
+            // waiting on it, and the load already running is about to say the same thing.
+            // With no sources there is nothing to ask, and a spinner every interval would be
+            // the only thing that happened.
+            guard !feed.loading, !servers.isEmpty else { continue }
+            await feed.load(servers: servers, refresh: .automatic(every: interval))
+        }
     }
 
     /// Where the landing screen hands over to: a fresh install has to choose a source, an

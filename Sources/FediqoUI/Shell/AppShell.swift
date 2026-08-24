@@ -21,6 +21,15 @@ struct AppShell: View {
     }
 
     var body: some View {
+        // One clock for the whole shell, keyed to the page being read and how often it is to
+        // be read. `.task(id:)` cancels the old one and starts the new one on every change,
+        // and cancels it altogether when the shell goes away — so there is never a second
+        // one, and never one left running for a page nobody is looking at.
+        layout.task(id: app.refreshKey) { await app.refreshWhileVisible() }
+    }
+
+    @ViewBuilder
+    private var layout: some View {
         #if os(iOS)
         if sizeClass == .compact {
             tabbed

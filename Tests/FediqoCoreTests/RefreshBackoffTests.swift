@@ -172,4 +172,108 @@ struct RefreshBackoffTests {
         #expect(second.failures.isEmpty)
         #expect(stubRoutes.requests(for: host, publicTimeline).map(\.authorization) == ["Bearer expired", nil, nil])
     }
+
+    @Test("A wait that has run out is still remembered, so the next silence is twice as long")
+    func anExpiredWaitStillDoubles() async {
+        let backoff = ServerBackoff()
+        let endpoint = "https://remembered.test"
+        await backoff.failed([endpoint], base: .seconds(30), at: t0)
+
+        // The tick that finds the wait up asks the server, and is given nothing again.
+        let asking = t0.addingTimeInterval(30)
+        #expect(await backoff.blocked(at: asking).isEmpty)
+        await backoff.failed([endpoint], base: .seconds(30), at: asking)
+
+        #expect(await backoff.blocked(at: asking.addingTimeInterval(59)) == [endpoint])
+        #expect(await backoff.blocked(at: asking.addingTimeInterval(60)).isEmpty)
+    }
+
+    @Test("A server nobody asked for a whole ceiling is forgotten rather than kept forever")
+    func aLongIgnoredWaitIsDropped() async {
+        let backoff = ServerBackoff()
+        let endpoint = "https://left-the-list.test"
+        await backoff.failed([endpoint], base: .seconds(30), at: t0)
+
+        // The wait ran out at t0 + 30 and nothing asked in the quarter of an hour that
+        // followed. That is a server which left the list, not one being left alone, so
+        // looking here drops it — and the ladder starts at the bottom if it ever comes back.
+        let muchLater = t0.addingTimeInterval(30 + ServerBackoff.ceiling.seconds + 1)
+        #expect(await backoff.blocked(at: muchLater).isEmpty)
+
+        await backoff.failed([endpoint], base: .seconds(30), at: muchLater)
+        #expect(await backoff.blocked(at: muchLater.addingTimeInterval(29)) == [endpoint])
+        #expect(await backoff.blocked(at: muchLater.addingTimeInterval(30)).isEmpty)
+    }
+}
+
+/// A server inside its wait is in no load's failures, because no load asked it. Left at that,
+/// a screen would take its reason down and put it back up every cycle while nothing about the
+/// server changed — so the reason is carried across the loads that skipped it, and only an
+/// answer, or leaving the list, takes it away.
+@Suite("A broken server goes on saying so, even on the loads that leave it alone")
+struct StandingFailureTests {
+    private let publicTimeline = "/api/v1/timelines/public"
+    private let t0 = Date(timeIntervalSince1970: 1_770_000_000)
+    private let every30 = Refresh.automatic(every: .seconds(30))
+
+    @Test("A load that skipped a server keeps saying what was already known about it")
+    func aSkippedServerKeepsItsReason() async {
+        let server = makeServer("still-broken.test")
+        stubRoutes.on(server.host, publicTimeline, status: 503)
+        let loader = stubbedLoader()
+
+        let failing = await loader.load(servers: [server], mode: .timeline, refresh: every30, now: t0)
+        let standing = failing.failures(carrying: [:], of: [server])
+        #expect(standing[server.endpoint] == SourceFailure.http(503, Data("[]".utf8)))
+
+        let skipped = await loader.load(servers: [server], mode: .timeline, refresh: every30,
+                                        now: t0.addingTimeInterval(10))
+
+        #expect(skipped.skipped == [server.endpoint])
+        #expect(skipped.failures.isEmpty)
+        #expect(skipped.failures(carrying: standing, of: [server]) == standing)
+    }
+
+    @Test("A server that answers loses its line, however long it had been carrying one")
+    func anAnswerClearsTheLine() async {
+        let server = makeServer("mended.test")
+        stubRoutes.on(server.host, publicTimeline, status: 503)
+        let loader = stubbedLoader()
+        let failing = await loader.load(servers: [server], mode: .timeline, refresh: every30, now: t0)
+        let standing = failing.failures(carrying: [:], of: [server])
+        #expect(!standing.isEmpty)
+
+        stubRoutes.on(server.host, publicTimeline, status: 200, body: oneStatusJSON)
+        let answered = await loader.load(servers: [server], mode: .timeline, refresh: every30,
+                                         now: t0.addingTimeInterval(30))
+
+        #expect(answered.skipped.isEmpty)
+        #expect(answered.failures(carrying: standing, of: [server]).isEmpty)
+    }
+
+    @Test("A server that is nobody's source now is forgotten rather than carried")
+    func aRemovedServerIsForgotten() async {
+        let leaving = makeServer("no-longer-mine.test")
+        let staying = makeServer("still-mine.test")
+        stubRoutes.on(staying.host, publicTimeline, status: 200, body: oneStatusJSON)
+        let loader = stubbedLoader()
+        let known = [leaving.endpoint: SourceFailure.badHost(leaving.host)]
+
+        let result = await loader.load(servers: [staying], mode: .timeline, refresh: every30, now: t0)
+
+        #expect(result.failures(carrying: known, of: [staying]).isEmpty)
+    }
+
+    @Test("What a server said this time is the newer news, and replaces what was known")
+    func thisLoadOverridesWhatWasKnown() async {
+        let server = makeServer("newer-news.test")
+        stubRoutes.on(server.host, publicTimeline, status: 404)
+        let loader = stubbedLoader()
+        let known = [server.endpoint: SourceFailure.http(503, Data("[]".utf8))]
+
+        let result = await loader.load(servers: [server], mode: .timeline, refresh: every30, now: t0)
+
+        #expect(result.failures(carrying: known, of: [server])[server.endpoint]
+                == SourceFailure.http(404, Data("[]".utf8)))
+    }
 }

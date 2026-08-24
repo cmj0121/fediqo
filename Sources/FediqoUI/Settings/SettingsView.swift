@@ -21,6 +21,8 @@ struct SettingsView: View {
                     Divider().opacity(0.4)
                     languageRow
                     Divider().opacity(0.4)
+                    choiceRow("settings.refresh", keyPrefix: "settings.refresh", selection: $preferences.refreshInterval)
+                    Divider().opacity(0.4)
                     Text(t("settings.sample"))
                         .fediqoFont(13)
                         .foregroundStyle(.secondary)

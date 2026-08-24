@@ -31,6 +31,12 @@ actor ServerBackoff {
     /// One hop per load, not one per server: a fan-out asks this once and filters itself.
     func blocked(at now: Date) -> Set<String> {
         guard !waits.isEmpty else { return [] }
+        // A wait that has run out is kept, because the next silence is meant to be twice
+        // this one. A wait that ran out a whole ceiling ago is not: nothing has asked that
+        // endpoint in all the time it was free to, so it left the list rather than
+        // recovered, and this is where the map stops growing with the servers it outlived.
+        let forgotten = now.addingTimeInterval(-Self.ceiling.seconds)
+        waits = waits.filter { forgotten < $0.value.until }
         return Set(waits.filter { now < $0.value.until }.keys)
     }
 

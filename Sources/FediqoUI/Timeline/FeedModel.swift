@@ -8,6 +8,14 @@ final class FeedModel {
     let mode: FeedMode
 
     private(set) var result = TimelineResult(posts: [], failures: [:])
+    /// What is still wrong with each server, by `Server.endpoint`, kept across loads.
+    ///
+    /// `result` is replaced whole every time, and a server inside its wait is not in it at
+    /// all — so a screen reading the last load alone would take a broken server's line down
+    /// and put it back up every cycle, though nothing about the server changed. This is the
+    /// standing answer instead: it survives the loads that did not ask, and it clears the
+    /// moment the server answers one that did, or stops being one of ours.
+    private(set) var failures: [String: SourceFailure] = [:]
     private(set) var loading = false
     private var loadedFor: [String] = []
 
@@ -36,10 +44,16 @@ final class FeedModel {
         await load(servers: servers)
     }
 
-    func load(servers: [Server]) async {
+    /// `refresh` says who asked. The reader by default — the refresh button, and the first
+    /// load of a screen — so that everything is asked at once, whatever it did last time.
+    func load(servers: [Server], refresh: Refresh = .manual) async {
         loading = true
-        result = await loader.load(servers: servers, mode: mode)
-        for (endpoint, failure) in result.failures {
+        let loaded = await loader.load(servers: servers, mode: mode, refresh: refresh)
+        result = loaded
+        failures = loaded.failures(carrying: failures, of: servers)
+        // Only what this load was told, not the standing answer: a credential is turned down
+        // once and marked once, rather than again on every tick that skips the server.
+        for (endpoint, failure) in loaded.failures {
             if case .tokenRejected = failure { onTokenRejected?(endpoint) }
         }
         loadedFor = servers.map(\.id).sorted()
