@@ -16,7 +16,9 @@ public enum SourceFailure: Error, Sendable, Equatable, LocalizedError {
     /// The sign-in handshake itself was refused — a spent code, a revoked app. A different
     /// fact from `needsSignIn`, which is a stranger being turned away.
     case signInFailed(String)
-    case http(Int)
+    /// The server answered outside 2xx; the body rides along for whoever can read a
+    /// reason out of it.
+    case http(Int, Data)
     case transport(String)
     /// The posts arrived and are on the screen, but the local store would not keep them.
     case store(String)
@@ -29,7 +31,7 @@ public enum SourceFailure: Error, Sendable, Equatable, LocalizedError {
         case .unsupported(let socialProtocol): "\(socialProtocol.rawValue) is not spoken yet."
         case .needsSignIn(let host): "\(host) does not hand this over without signing in."
         case .signInFailed(let reason): "Signing in failed: \(reason)"
-        case .http(let code): "The server answered \(code)."
+        case .http(let code, _): "The server answered \(code)."
         case .transport(let reason): reason
         case .store(let reason): "The local store could not keep what arrived: \(reason)"
         }

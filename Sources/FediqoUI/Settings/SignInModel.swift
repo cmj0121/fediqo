@@ -1,4 +1,3 @@
-import AuthenticationServices
 import Foundation
 import Observation
 import FediqoCore
@@ -12,7 +11,6 @@ import FediqoCore
 final class SignInModel {
     private let store: LocalStore
     private let registry: SourceRegistry
-    private let secrets: any SecretStore
     private let coordinator: SignInCoordinator
 
     /// Who is signed in, keyed by `Server.endpoint` — one account per server (decision 9).
@@ -25,11 +23,13 @@ final class SignInModel {
          secrets: any SecretStore = KeychainSecretStore()) {
         self.store = store
         self.registry = registry
-        self.secrets = secrets
-        self.coordinator = SignInCoordinator(store: store)
+        self.coordinator = SignInCoordinator(store: store, secrets: secrets)
     }
 
     /// Whether this build can sign in to this server at all. No client, no button.
+    /// Counts the reads, so a slow one cannot overwrite a newer one. See `refresh()`.
+    private var generation = 0
+
     func canSignIn(to server: Server) -> Bool {
         registry.authClient(for: server.socialProtocol) != nil
     }
@@ -38,19 +38,28 @@ final class SignInModel {
         accounts[server.endpoint]
     }
 
+    /// Re-reads who is signed in. Two of these can be in flight at once — forgetting every
+    /// server signs each out concurrently — and the one that started last has read the
+    /// truest answer, so an older read that comes back afterwards is dropped rather than
+    /// allowed to reinstate an account that has since gone.
     func refresh() async {
-        accounts = (try? await store.signedInByServer()) ?? [:]
+        generation += 1
+        let mine = generation
+        let latest = (try? await store.signedInByServer()) ?? [:]
+        guard mine == generation else { return }
+        if latest != accounts { accounts = latest }
     }
 
     func signIn(to server: Server, authenticate: @escaping @Sendable (URL, String) async throws -> URL) async {
         guard let auth = registry.authClient(for: server.socialProtocol) else { return }
         failure = nil
         do {
-            accounts[server.endpoint] = try await coordinator.signIn(
-                server: server, using: auth, secrets: secrets, authenticate: authenticate)
+            _ = try await coordinator.signIn(server: server, using: auth, authenticate: authenticate)
+            // What is shown is always what the store remembers, re-read rather than patched.
+            await refresh()
         } catch let refused as SourceFailure {
             failure = refused
-        } catch let closed as ASWebAuthenticationSessionError where closed.code == .canceledLogin {
+        } catch is CancellationError {
             // Closing the browser is a decision, not a failure.
         } catch {
             failure = .signInFailed(error.localizedDescription)
@@ -59,10 +68,12 @@ final class SignInModel {
 
     /// Signs out every owned account on the server. One account per server is policy
     /// (decision 9), so this is the row's Sign out too — and what removing a server, or
-    /// forgetting them all, calls per server (decision 8).
+    /// forgetting them all, calls per server (decision 8). The row empties at once; the
+    /// revoke keeps its background, best-effort manner.
     func signOut(of server: Server) async {
         guard let auth = registry.authClient(for: server.socialProtocol) else { return }
-        await coordinator.signOutAll(for: server.endpoint, using: auth, secrets: secrets)
         accounts[server.endpoint] = nil
+        await coordinator.signOutAll(for: server.endpoint, using: auth)
+        await refresh()
     }
 }

@@ -46,8 +46,7 @@ public struct MastodonClient: SourceClient {
     // MARK: - SourceClient
 
     public func instance(host rawHost: String) async throws -> InstanceInfo {
-        let host = Server.normalise(rawHost)
-        guard Server.looksLikeHost(host) else { throw SourceFailure.badHost(rawHost) }
+        let host = try Server.validated(rawHost)
 
         // v2 is the current shape and v1 the old one. A server that cannot be reached at all
         // says nothing about which, so a transport failure stops here rather than spending a
@@ -120,13 +119,13 @@ enum JSONTransport {
             // thing from the server being broken and is worth saying differently.
             throw SourceFailure.needsSignIn(url.host() ?? url.absoluteString)
         default:
-            throw SourceFailure.http(status)
+            throw SourceFailure.http(status, data)
         }
     }
 
-    /// A form-encoded POST, as the OAuth endpoints expect. A refusal here is never
-    /// `needsSignIn` — the caller was in the middle of signing in, and the server said no
-    /// to the handshake itself — so it surfaces as `signInFailed`, with the server's reason.
+    /// A form-encoded POST, as the OAuth endpoints expect. Neutral like `get`, minus the
+    /// `needsSignIn` reading — mid-handshake there is no signed-out stranger — so what a
+    /// refusal means is the caller's to say, and the body travels with the status for it.
     static func postForm(_ url: URL, fields: [String: String], on session: URLSession, timeout: TimeInterval = 15) async throws -> Data {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -136,14 +135,8 @@ enum JSONTransport {
         request.httpBody = formEncode(fields)
 
         let (data, status) = try await perform(request, on: session)
-        switch status {
-        case 200..<300:
-            return data
-        case 400, 401, 403, 422:
-            throw SourceFailure.signInFailed(refusalReason(in: data) ?? "The server answered \(status).")
-        default:
-            throw SourceFailure.http(status)
-        }
+        guard (200..<300).contains(status) else { throw SourceFailure.http(status, data) }
+        return data
     }
 
     /// Sorted so the same fields make the same bytes, and escaped by hand: URLComponents
@@ -161,18 +154,6 @@ enum JSONTransport {
 
     private static func formEscape(_ value: String) -> String {
         value.addingPercentEncoding(withAllowedCharacters: formAllowed) ?? value
-    }
-
-    /// OAuth refusals arrive as `{"error": …, "error_description": …}`, either half optional.
-    private static func refusalReason(in data: Data) -> String? {
-        struct Refusal: Decodable {
-            let error: String?
-            let errorDescription: String?
-        }
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        let refusal = try? decoder.decode(Refusal.self, from: data)
-        return refusal?.errorDescription ?? refusal?.error
     }
 
     private static func perform(_ request: URLRequest, on session: URLSession) async throws -> (Data, Int) {

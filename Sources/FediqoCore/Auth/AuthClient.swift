@@ -7,9 +7,9 @@ import Foundation
 /// enters Core: the app does that and hands the code back in. Everything here is a plain
 /// request, so all of it runs against a stubbed transport in tests.
 public protocol AuthClient: Sendable {
-    /// Where the browser comes back to — the promise made to the server at registration,
-    /// and the URL whose scheme the sign-in session watches for.
-    var redirectURI: URL { get }
+    /// The scheme the sign-in session watches the browser for — the scheme of the redirect
+    /// promised to the server at registration.
+    var callbackScheme: String { get }
 
     /// Registers this app with the server; the credentials come back for keeping.
     func registerApp(host: String) async throws -> AppCredentials
@@ -85,6 +85,17 @@ public struct PKCE: Sendable, Hashable {
         self.verifier = verifier
         challenge = Data(SHA256.hash(data: Data(verifier.utf8))).base64URL
     }
+}
+
+extension JSONDecoder {
+    /// How OAuth-shaped JSON reads, on the wire and in the Keychain alike: snake_case keys,
+    /// dates as whole epoch seconds — the same shapes the server itself used.
+    static let snakeCaseSeconds: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        decoder.dateDecodingStrategy = .secondsSince1970
+        return decoder
+    }()
 }
 
 extension Data {

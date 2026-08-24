@@ -90,6 +90,31 @@ struct AuthClientTests {
         }
     }
 
+    @Test("A server that will not register us says so as a sign-in failure")
+    func registerRefused() async {
+        let host = "auth-noapps.test"
+        stubRoutes.on(host, "/api/v1/apps", status: 422, body: """
+        {"error": "Validation failed: Redirect URI is invalid"}
+        """)
+
+        await #expect(throws: SourceFailure.signInFailed("Validation failed: Redirect URI is invalid")) {
+            _ = try await client.registerApp(host: host)
+        }
+    }
+
+    @Test("A server that broke mid-handshake is broken, not refusing")
+    func brokenIsNotRefusal() async {
+        let host = "auth-broken.test"
+        stubRoutes.on(host, "/oauth/token", status: 502, body: "<html>bad gateway</html>")
+
+        // 5xx is the server falling over: it never reaches the OAuth reading of a refusal,
+        // so it stays the plain HTTP failure every other request would report.
+        let thrown = await #expect(throws: SourceFailure.self) {
+            _ = try await client.exchangeCode(host: host, app: app, code: "c0de", pkce: PKCE())
+        }
+        if case .signInFailed = thrown { Issue.record("502 was read as a refused credential") }
+    }
+
     @Test("Revoking posts the token with the app's credentials")
     func revoke() async throws {
         let host = "auth-revoke.test"
@@ -139,10 +164,10 @@ struct AuthClientTests {
         #expect(account.displayName == "bee")
     }
 
-    @Test("The redirect the client hands the session is the promise it registers")
-    func redirectURI() {
-        #expect(client.redirectURI.absoluteString == MastodonAuthClient.redirectURI)
-        #expect(client.redirectURI.scheme == "fediqo")
+    @Test("The scheme the client hands the session is the one its registered redirect promises")
+    func callbackScheme() {
+        #expect(client.callbackScheme == "fediqo")
+        #expect(MastodonAuthClient.redirectURI.hasPrefix("\(client.callbackScheme)://"))
     }
 
     @Test("The RFC 7636 vector: verifier to S256 challenge")

@@ -8,7 +8,8 @@ public struct MastodonAuthClient: AuthClient {
     /// promises it to the server, and the promise must match at every step.
     public static let redirectURI = "fediqo://oauth"
 
-    public var redirectURI: URL { URL(string: Self.redirectURI)! }
+    /// The scheme of that promise — what the sign-in session watches the browser for.
+    public var callbackScheme: String { URL(string: Self.redirectURI)!.scheme! }
 
     /// Registered and authorized alike: consent shows write once, posting later needs nothing.
     static let scope = "read write"
@@ -19,32 +20,17 @@ public struct MastodonAuthClient: AuthClient {
         self.session = session
     }
 
-    /// Token answers carry `created_at` as whole epoch seconds, unlike statuses, so the
-    /// auth path has a decoder of its own.
-    static let decoder: JSONDecoder = {
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        decoder.dateDecodingStrategy = .secondsSince1970
-        return decoder
-    }()
-
     public func registerApp(host rawHost: String) async throws -> AppCredentials {
-        let host = try normalised(rawHost)
-        let data = try await JSONTransport.postForm(endpoint(host, "/api/v1/apps"), fields: [
+        let data = try await postForm(endpoint(rawHost, "/api/v1/apps"), fields: [
             "client_name": "Fediqo",
             "redirect_uris": Self.redirectURI,
             "scopes": Self.scope,
-        ], on: session)
-        return try Self.decoder.decode(AppCredentials.self, from: data)
+        ])
+        return try JSONDecoder.snakeCaseSeconds.decode(AppCredentials.self, from: data)
     }
 
     public func authorizationURL(host rawHost: String, app: AppCredentials, pkce: PKCE, state: String) throws -> URL {
-        let host = try normalised(rawHost)
-        var components = URLComponents()
-        components.scheme = "https"
-        components.host = host
-        components.path = "/oauth/authorize"
-        components.queryItems = [
+        try endpoint(rawHost, "/oauth/authorize", query: [
             URLQueryItem(name: "response_type", value: "code"),
             URLQueryItem(name: "client_id", value: app.clientId),
             URLQueryItem(name: "redirect_uri", value: Self.redirectURI),
@@ -52,35 +38,31 @@ public struct MastodonAuthClient: AuthClient {
             URLQueryItem(name: "state", value: state),
             URLQueryItem(name: "code_challenge", value: pkce.challenge),
             URLQueryItem(name: "code_challenge_method", value: "S256"),
-        ]
-        guard let url = components.url else { throw SourceFailure.badHost(rawHost) }
-        return url
+        ])
     }
 
     public func exchangeCode(host rawHost: String, app: AppCredentials, code: String, pkce: PKCE) async throws -> OAuthToken {
-        let host = try normalised(rawHost)
-        let data = try await JSONTransport.postForm(endpoint(host, "/oauth/token"), fields: [
+        let data = try await postForm(endpoint(rawHost, "/oauth/token"), fields: [
             "grant_type": "authorization_code",
             "client_id": app.clientId,
             "client_secret": app.clientSecret,
             "redirect_uri": Self.redirectURI,
             "code": code,
             "code_verifier": pkce.verifier,
-        ], on: session)
-        return try Self.decoder.decode(OAuthToken.self, from: data)
+        ])
+        return try JSONDecoder.snakeCaseSeconds.decode(OAuthToken.self, from: data)
     }
 
     public func revoke(host rawHost: String, app: AppCredentials, token: OAuthToken) async throws {
-        let host = try normalised(rawHost)
-        _ = try await JSONTransport.postForm(endpoint(host, "/oauth/revoke"), fields: [
+        _ = try await postForm(endpoint(rawHost, "/oauth/revoke"), fields: [
             "client_id": app.clientId,
             "client_secret": app.clientSecret,
             "token": token.accessToken,
-        ], on: session)
+        ])
     }
 
     public func verifyCredentials(host rawHost: String, token: OAuthToken) async throws -> SignedInAccount {
-        let host = try normalised(rawHost)
+        let host = try Server.validated(rawHost)
         let data = try await JSONTransport.get(
             endpoint(host, "/api/v1/accounts/verify_credentials"),
             on: session,
@@ -97,19 +79,36 @@ public struct MastodonAuthClient: AuthClient {
         )
     }
 
-    /// The same gate `MastodonClient` keeps: nothing that is not a hostname reaches the network.
-    private func normalised(_ rawHost: String) throws -> String {
-        let host = Server.normalise(rawHost)
-        guard Server.looksLikeHost(host) else { throw SourceFailure.badHost(rawHost) }
-        return host
-    }
-
-    /// A normalised host always assembles: the guard above already refused anything that would not.
-    private func endpoint(_ host: String, _ path: String) -> URL {
+    /// Every URL asked of the server: the gate `MastodonClient` keeps — nothing that is not
+    /// a hostname reaches the network — and then assembly, which says so rather than
+    /// stopping if a validated host still refuses to make a URL.
+    private func endpoint(_ rawHost: String, _ path: String, query: [URLQueryItem] = []) throws -> URL {
         var components = URLComponents()
         components.scheme = "https"
-        components.host = host
+        components.host = try Server.validated(rawHost)
         components.path = path
-        return components.url!
+        components.queryItems = query.isEmpty ? nil : query
+        guard let url = components.url else { throw SourceFailure.badHost(rawHost) }
+        return url
+    }
+
+    /// A refusal mid-handshake is `signInFailed`, never a stranger being turned away: the
+    /// transport stays neutral, and the OAuth reading of its refusals lives here.
+    private func postForm(_ url: URL, fields: [String: String]) async throws -> Data {
+        do {
+            return try await JSONTransport.postForm(url, fields: fields, on: session)
+        } catch SourceFailure.http(let status, let body) where [400, 401, 403, 422].contains(status) {
+            throw SourceFailure.signInFailed(Self.refusalReason(in: body) ?? "The server answered \(status).")
+        }
+    }
+
+    /// OAuth refusals arrive as `{"error": …, "error_description": …}`, either half optional.
+    private static func refusalReason(in data: Data) -> String? {
+        struct Refusal: Decodable {
+            let error: String?
+            let errorDescription: String?
+        }
+        let refusal = try? JSONDecoder.snakeCaseSeconds.decode(Refusal.self, from: data)
+        return refusal?.errorDescription ?? refusal?.error
     }
 }

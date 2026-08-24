@@ -8,8 +8,8 @@ import Foundation
 final class StubRoutes: @unchecked Sendable {
     private let lock = NSLock()
     private var routes: [String: (status: Int, body: Data)] = [:]
-    private var asked: [String] = []
-    private var captured: [String: [CapturedRequest]] = [:]
+    /// Every request in the order it arrived — the one log both views below read from.
+    private var log: [(key: String, request: CapturedRequest)] = []
 
     func on(_ host: String, _ path: String, status: Int, body: String = "[]") {
         lock.withLock { routes["\(host)|\(path)"] = (status, Data(body.utf8)) }
@@ -18,10 +18,7 @@ final class StubRoutes: @unchecked Sendable {
     func answer(for url: URL, method: String, body: Data, authorization: String?) -> (status: Int, body: Data) {
         let key = "\(url.host() ?? "")|\(url.path())"
         return lock.withLock {
-            asked.append(key)
-            captured[key, default: []].append(
-                CapturedRequest(method: method, body: String(decoding: body, as: UTF8.self), authorization: authorization)
-            )
+            log.append((key, CapturedRequest(method: method, body: String(decoding: body, as: UTF8.self), authorization: authorization)))
             return routes[key] ?? (404, Data("{}".utf8))
         }
     }
@@ -29,13 +26,13 @@ final class StubRoutes: @unchecked Sendable {
     /// The paths asked of one host, in the order they were asked.
     func paths(for host: String) -> [String] {
         lock.withLock {
-            asked.filter { $0.hasPrefix("\(host)|") }.map { String($0.dropFirst(host.count + 1)) }
+            log.map(\.key).filter { $0.hasPrefix("\(host)|") }.map { String($0.dropFirst(host.count + 1)) }
         }
     }
 
     /// What was actually sent to one endpoint, in the order it was sent.
     func requests(for host: String, _ path: String) -> [CapturedRequest] {
-        lock.withLock { captured["\(host)|\(path)"] ?? [] }
+        lock.withLock { log.filter { $0.key == "\(host)|\(path)" }.map(\.request) }
     }
 }
 

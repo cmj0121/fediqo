@@ -44,11 +44,11 @@ struct TimelineNoFallbackTests {
     @Test("A server that is simply broken says so as itself, not as a refusal")
     func brokenIsNotRefusal() async {
         let host = "broken.test"
-        stubRoutes.on(host, "/api/v1/timelines/public", status: 503)
+        stubRoutes.on(host, "/api/v1/timelines/public", status: 503, body: "gateway wept")
 
         let result = await stubbedLoader().load(servers: [makeServer(host)], mode: .timeline)
 
-        #expect(result.failures[host] == SourceFailure.http(503))
+        #expect(result.failures[host] == SourceFailure.http(503, Data("gateway wept".utf8)))
     }
 
     @Test("Asking with no servers asks nothing of anyone")

@@ -5,7 +5,7 @@
 -- withdraw. The credential never comes here: the token lives in the Keychain, keyed by
 -- author_id. Signing out deletes the row; the account and every post it handed over stay.
 --
--- No UNIQUE(server_url): one account per server is UI policy, not schema.
+-- No UNIQUE(server_url): one account per server is policy, enforced by SignInCoordinator, not schema.
 
 CREATE TABLE owned_accounts (
     author_id  TEXT    NOT NULL PRIMARY KEY REFERENCES accounts(author_id),

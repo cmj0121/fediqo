@@ -18,7 +18,7 @@ private final class ScriptedAuthClient: AuthClient, @unchecked Sendable {
         self.account = account
     }
 
-    var redirectURI: URL { URL(string: "fediqo://oauth")! }
+    var callbackScheme: String { "fediqo" }
 
     func answers(as account: SignedInAccount) {
         lock.withLock { self.account = account }
@@ -95,17 +95,17 @@ private struct Harness {
     init(answering account: SignedInAccount) throws {
         store = try LocalStore.inMemory()
         auth = ScriptedAuthClient(account: account)
-        coordinator = SignInCoordinator(store: store)
+        coordinator = SignInCoordinator(store: store, secrets: secrets)
     }
 
     @discardableResult
     func signIn(to server: Server,
                 authenticate: @Sendable (URL, String) async throws -> URL = approving) async throws -> SignedInAccount {
-        try await coordinator.signIn(server: server, using: auth, secrets: secrets, authenticate: authenticate)
+        try await coordinator.signIn(server: server, using: auth, authenticate: authenticate)
     }
 
     func signOut(_ authorId: String) async {
-        await coordinator.signOut(authorId: authorId, using: auth, secrets: secrets)
+        await coordinator.signOut(authorId: authorId, using: auth)
     }
 
     func ownedRows() async throws -> [String] {
@@ -229,21 +229,21 @@ struct SignInFlowTests {
         let h = try Harness(answering: ada)
         try await h.signIn(to: server)
 
-        await h.coordinator.signOutAll(for: server.endpoint, using: h.auth, secrets: h.secrets)
+        await h.coordinator.signOutAll(for: server.endpoint, using: h.auth)
 
         #expect(try h.secrets.token(for: ada.authorId) == nil)
         #expect(try await h.ownedRows().isEmpty)
     }
 
-    @Test("signedIn() answers from the rows alone: handle, name, avatar, and no network")
+    @Test("signedInByServer() answers from the rows alone: handle, name, avatar, and no network")
     func signedInRoundTrips() async throws {
         let h = try Harness(answering: ada)
         try await h.signIn(to: server)
         let callsBefore = h.auth.networkCalls
 
-        let accounts = try await h.store.signedIn()
+        let accounts = try await h.store.signedInByServer()
 
-        #expect(accounts == [ada])
+        #expect(accounts == [server.endpoint: ada])
         #expect(h.auth.networkCalls == callsBefore)
     }
 

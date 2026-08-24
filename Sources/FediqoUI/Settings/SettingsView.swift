@@ -141,8 +141,14 @@ struct SettingsView: View {
                 let session = webSession
                 Task {
                     await signIn.signIn(to: server) { consent, scheme in
-                        try await session.authenticate(using: consent, callbackURLScheme: scheme,
-                                                       preferredBrowserSession: .shared)
+                        do {
+                            return try await session.authenticate(using: consent, callbackURLScheme: scheme,
+                                                                  preferredBrowserSession: .shared)
+                        } catch let closed as ASWebAuthenticationSessionError where closed.code == .canceledLogin {
+                            // Closing the browser is a decision, not a failure — said here so
+                            // the model never has to speak AuthenticationServices.
+                            throw CancellationError()
+                        }
                     }
                 }
             }

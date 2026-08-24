@@ -20,15 +20,11 @@ public protocol SecretStore: Sendable {
 /// same shapes the server itself used.
 public extension SecretStore {
     func appCredentials(for endpoint: String) throws -> AppCredentials? {
-        try read(AppCredentials.self, for: "app:\(endpoint)")
+        try read(AppCredentials.self, for: appKey(endpoint))
     }
 
     func setAppCredentials(_ credentials: AppCredentials, for endpoint: String) throws {
-        try write(credentials, for: "app:\(endpoint)")
-    }
-
-    func removeAppCredentials(for endpoint: String) throws {
-        try removeSecret(for: "app:\(endpoint)")
+        try write(credentials, for: appKey(endpoint))
     }
 
     func token(for authorId: String) throws -> OAuthToken? {
@@ -45,9 +41,14 @@ public extension SecretStore {
 }
 
 private extension SecretStore {
+    /// The one spelling of the app-credentials namespace, so the key cannot drift.
+    func appKey(_ endpoint: String) -> String {
+        "app:\(endpoint)"
+    }
+
     func read<Value: Decodable>(_ type: Value.Type, for account: String) throws -> Value? {
         guard let data = try secret(for: account) else { return nil }
-        return try SecretJSON.decoder.decode(type, from: data)
+        return try JSONDecoder.snakeCaseSeconds.decode(type, from: data)
     }
 
     func write<Value: Encodable>(_ value: Value, for account: String) throws {
@@ -56,19 +57,14 @@ private extension SecretStore {
 }
 
 enum SecretJSON {
+    /// Writes what `JSONDecoder.snakeCaseSeconds` reads, plus sorted keys so the same
+    /// secret always makes the same bytes.
     static let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.keyEncodingStrategy = .convertToSnakeCase
         encoder.dateEncodingStrategy = .secondsSince1970
         encoder.outputFormatting = [.sortedKeys]
         return encoder
-    }()
-
-    static let decoder: JSONDecoder = {
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        decoder.dateDecodingStrategy = .secondsSince1970
-        return decoder
     }()
 }
 

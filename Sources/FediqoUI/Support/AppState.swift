@@ -143,10 +143,17 @@ public final class AppState {
     }
 
     /// Leaving a server signs its accounts out first (decision 8); the revoke is
-    /// best-effort (decision 6), so the list itself never waits on a server answering.
+    /// best-effort (decision 6), so the list itself never waits on a server answering —
+    /// and each server's revoke is independent of the others, so they run concurrently.
     private func signOutInBackground(_ leaving: [Server]) {
         guard let signIn else { return }
-        Task { for server in leaving { await signIn.signOut(of: server) } }
+        Task {
+            await withTaskGroup(of: Void.self) { group in
+                for server in leaving {
+                    group.addTask { await signIn.signOut(of: server) }
+                }
+            }
+        }
     }
 
     func apply(language: AppLanguage) {
