@@ -59,7 +59,7 @@ struct PostRow: View {
     }
 
     private var media: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        ScrollView(.horizontal) {
             HStack(spacing: 6) {
                 ForEach(post.mediaURLs, id: \.self) { url in
                     RemoteImage(url: url, width: 132, height: 88)
