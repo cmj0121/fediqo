@@ -77,16 +77,6 @@ struct KeyCommandMeaningTests {
         #expect(KeyCommand.from(tab, modifiers: modifiers, typing: true) == nil)
     }
 
-    /// Meaning nothing is not the same as belonging to somebody else. The composer is a
-    /// single field, so a Tab handed back would find nothing to traverse to and take the
-    /// keyboard off the draft on its way past.
-    @Test("A Tab meaning nothing is still not handed back",
-          arguments: [tab, escape, "j", "?"] as [Character])
-    func onlyTabIsSwallowedWhileTyping(character: Character) {
-        #expect(KeyCommand.swallowed(character, typing: true) == (character == tab))
-        #expect(KeyCommand.swallowed(character, typing: false) == false)
-    }
-
     @Test("Escape is the one key that survives typing: it is how you leave what you are in")
     func escapeSurvivesTyping() {
         #expect(KeyCommand.from(escape, modifiers: [], typing: true) == .dismiss)
@@ -101,24 +91,68 @@ struct KeyCommandMeaningTests {
         #expect(KeyCommand.from(escape, modifiers: modifiers, typing: false) == nil)
         #expect(KeyCommand.from(escape, modifiers: modifiers, typing: true) == nil)
     }
+
+    /// Every key that is answered has to be a key that is heard: on iOS nothing reaches the
+    /// app at all unless it is named in `listened`, and on macOS the monitor turns away
+    /// anything that is not. A letter added to one and forgotten in the other is a shortcut
+    /// that is silently dead, which is why this asks rather than trusting two lists to agree.
+    @Test("Every key the app answers for is a key it listens for")
+    func everyAnsweredKeyIsListenedFor() {
+        let printable = (UInt8(32)...UInt8(126)).map { Character(UnicodeScalar($0)) }
+        let held: [EventModifiers] = [[], .shift, .control, [.control, .shift]]
+        for character in printable + [escape, tab, enter, up, down] {
+            for modifiers in held where KeyCommand.from(character, modifiers: modifiers, typing: false) != nil {
+                #expect(KeyCommand.listenedCharacters.contains(character),
+                        "\(character) is answered but not listened for")
+            }
+        }
+    }
 }
 
-/// The rule every rotation in the app shares.
-@Suite("Going round a list")
-struct RotationTests {
-    @Test("Forwards from the last is the first, backwards from the first is the last")
-    func wrapsBothWays() {
-        let items = ["a", "b", "c"]
-        #expect(rotated(items, from: "a", by: 1) == "b")
-        #expect(rotated(items, from: "c", by: 1) == "a")
-        #expect(rotated(items, from: "a", by: -1) == "c")
-        #expect(rotated(items, from: "c", by: -1) == "b")
+/// Whether a press is ours to keep, which is decided from the key and from whether there was
+/// anything to do with it — never from what the app happens to be showing. So the app is
+/// stood in for here by the only thing this asks of it: what it did.
+@Suite("Whether a press is ours")
+struct KeyOwnershipTests {
+    private func pressing(_ character: Character, modifiers: EventModifiers = [],
+                          typing: Bool = false, did: Bool) -> Bool {
+        KeyCommand.handles(character, modifiers: modifiers, typing: typing) { _ in did }
     }
 
-    @Test("A list with nowhere to start has no answer")
-    func nowhereToStart() {
-        #expect(rotated(["a", "b"], from: "z", by: 1) == nil)
-        #expect(rotated([String](), from: "a", by: 1) == nil)
+    /// No control anywhere wants a bare `j`, so a letter is kept whether or not it moved
+    /// anything — which is what makes holding `j` at the bottom of a list silent rather than
+    /// a row of beeps. `Tab` is taken from the focus system on purpose.
+    @Test("A key of ours alone is kept whatever it did",
+          arguments: ["r", "R", "c", "j", "k", "g", "?", tab] as [Character])
+    func ourOwnKeysAreAlwaysKept(character: Character) {
+        #expect(pressing(character, did: false))
+        #expect(pressing(character, did: true))
+    }
+
+    /// A picker is moved with the arrows and a button is pressed with `Return`; `Escape` is
+    /// how you leave what you are in. All four are the platform's before they are ours, so a
+    /// press that did nothing here goes back to it.
+    @Test("A key the platform may want goes back where there was nothing to do",
+          arguments: [up, down, enter, escape] as [Character])
+    func sharedKeysFollowWhatHappened(character: Character) {
+        #expect(pressing(character, did: false) == false)
+        #expect(pressing(character, did: true))
+    }
+
+    @Test("A key that is nobody's is handed back, draft or no draft",
+          arguments: ["x", "1", " "] as [Character])
+    func unknownKeysAreNobodys(character: Character) {
+        #expect(pressing(character, did: true) == false)
+        #expect(pressing(character, typing: true, did: true) == false)
+    }
+
+    /// Meaning nothing is not the same as belonging to somebody else. The composer is a
+    /// single field, so a Tab handed back would find nothing to traverse to and take the
+    /// keyboard off the draft on its way past.
+    @Test("A Tab meaning nothing is still not handed back",
+          arguments: [tab, escape, "j", "?"] as [Character])
+    func onlyTabIsSwallowedWhileTyping(character: Character) {
+        #expect(pressing(character, typing: true, did: false) == (character == tab))
     }
 }
 
@@ -163,8 +197,7 @@ struct CommandTests {
 
     /// The one place the answer matters: a `false` here is the shell letting the press
     /// through rather than swallowing a key that did nothing.
-    @Test("On a page with no tabs, ⌃Tab does nothing and says so",
-          arguments: [RailItem.kept, .statistics, .settings])
+    @Test("On a page with no tabs, ⌃Tab does nothing and says so", arguments: pagesWithoutTabs)
     func tabDoesNothingWithoutTabs(page: RailItem) {
         let app = freshApp("tab-without-tabs")
         app.railItem = page
@@ -202,8 +235,7 @@ struct CommandTests {
         #expect(app.railItem == .statistics)
     }
 
-    @Test("Reading again asks for nothing on a page that has no feed",
-          arguments: [RailItem.kept, .statistics, .settings])
+    @Test("Reading again asks for nothing on a page that has no feed", arguments: pagesWithoutTabs)
     func refreshNeedsAFeed(page: RailItem) {
         let app = freshApp("refresh-needs-a-feed")
         app.railItem = page
@@ -213,22 +245,22 @@ struct CommandTests {
     /// Handing a key we understand back to the platform is worse than swallowing it: the
     /// focus system has its own use for ⌃Tab and would move the ring on a press that, one
     /// page over, means something else entirely.
-    @Test("A key we understand is ours even when it had nothing to do",
-          arguments: [RailItem.kept, .statistics, .settings])
+    @Test("A key we understand is ours even when it had nothing to do", arguments: pagesWithoutTabs)
     func recognisedKeysAreKept(page: RailItem) {
         let app = freshApp("recognised-keys-kept")
         app.railItem = page
         #expect(app.perform(.nextTab) == false)
-        #expect(app.consumes(.nextTab, spelledWith: tab))
-        #expect(app.consumes(.refreshNow, spelledWith: "r"))
+        #expect(app.presses(tab, modifiers: .control))
+        #expect(app.presses("r"))
+        #expect(app.railItem == page)
     }
 
     @Test("Escape is the exception: with nothing in front of you it was never ours")
     func escapeIsHandedBack() {
         let app = freshApp("escape-handed-back")
-        #expect(app.consumes(.dismiss, spelledWith: escape) == false)
+        #expect(app.presses(escape) == false)
         app.setComposing(true)
-        #expect(app.consumes(.dismiss, spelledWith: escape))
+        #expect(app.presses(escape))
         #expect(app.composing == false)
     }
 
@@ -266,7 +298,7 @@ struct CommandTests {
         app.feedTab = .timeline
         app.setComposing(true)
         app.setTyping(true)
-        #expect(app.handles(tab, modifiers: modifiers))
+        #expect(app.presses(tab, modifiers: modifiers))
         #expect(app.railItem == .timeline)
         #expect(app.feedTab == .timeline)
     }
@@ -275,7 +307,7 @@ struct CommandTests {
     func tabMovesWhenNobodyIsTyping() {
         let app = freshApp("tab-moves")
         app.railItem = .timeline
-        #expect(app.handles(tab, modifiers: []))
+        #expect(app.presses(tab))
         #expect(app.railItem != .timeline)
     }
 
@@ -285,8 +317,8 @@ struct CommandTests {
     func unknownKeysAreHandedBack() {
         let app = freshApp("unknown-handed-back")
         app.setTyping(true)
-        #expect(app.handles("x", modifiers: []) == false)
-        #expect(app.handles("j", modifiers: []) == false)
+        #expect(app.presses("x") == false)
+        #expect(app.presses("j") == false)
     }
 }
 

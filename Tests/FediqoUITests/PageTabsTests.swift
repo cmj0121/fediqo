@@ -11,17 +11,6 @@ struct PageTabsTests {
         #expect(RailItem.allCases == [.timeline, .kept, .statistics, .settings])
     }
 
-    @Test("The Timeline page's tabs are its two feeds, in reading order")
-    func timelineTabs() {
-        #expect(RailItem.timeline.tabs == [.timeline, .trending])
-    }
-
-    @Test("Every other page is one screen with nothing to choose between",
-          arguments: [RailItem.kept, .statistics, .settings])
-    func pagesWithoutTabs(page: RailItem) {
-        #expect(page.tabs.isEmpty)
-    }
-
     @Test("The feed being read is the visible tab of the visible page")
     func feedFollowsTheTab() {
         let app = freshApp("feed-follows-tab")
@@ -32,7 +21,7 @@ struct PageTabsTests {
     }
 
     @Test("A page with no tabs reads no feed, whichever tab was last chosen",
-          arguments: [RailItem.kept, .statistics, .settings])
+          arguments: pagesWithoutTabs)
     func noFeedWithoutTabs(page: RailItem) {
         let app = freshApp("no-feed-without-tabs")
         app.feedTab = .trending

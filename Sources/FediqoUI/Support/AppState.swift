@@ -32,25 +32,6 @@ enum RailItem: String, CaseIterable, Identifiable, Hashable {
         case .settings: "gearshape"
         }
     }
-
-    /// The sub-categories inside this page, in the order the reader meets them. Only the
-    /// Timeline page has any, and its two are the two feeds themselves — `FeedMode` already
-    /// says which stream is being asked for, so a tab is one of those rather than a second
-    /// enum saying the same thing beside it.
-    ///
-    /// So the type says more than the concept does: a tab is a sub-category, and it is only
-    /// because the one page that has tabs divides itself by feed that `[FeedMode]` can stand
-    /// for the list. A page whose tabs are not feeds would need a wider type — and there is
-    /// no such page, so there is no such type until there is.
-    ///
-    /// Kept reads the store, Statistics reads the store and the ledger, and Settings reads
-    /// nobody: one screen each, and no feed on any of them.
-    var tabs: [FeedMode] {
-        switch self {
-        case .timeline: FeedMode.allCases
-        case .kept, .statistics, .settings: []
-        }
-    }
 }
 
 /// What the refreshing clock is keyed to: the feed being read, on the page it is being read
@@ -190,8 +171,10 @@ public final class AppState {
         self.store = store
         self.signIn = signIn
         self.feeds = [
-            .timeline: FeedModel(mode: .timeline, loader: TimelineLoader(store: store, secrets: secrets, tokens: tokens)),
-            .trending: FeedModel(mode: .trending, loader: TimelineLoader(store: store, secrets: secrets, tokens: tokens)),
+            .timeline: FeedModel(mode: .timeline, preferences: preferences,
+                                 loader: TimelineLoader(store: store, secrets: secrets, tokens: tokens)),
+            .trending: FeedModel(mode: .trending, preferences: preferences,
+                                 loader: TimelineLoader(store: store, secrets: secrets, tokens: tokens)),
         ]
         self.servers = servers.servers
         self.route = launch.route ?? .landing
@@ -230,8 +213,18 @@ public final class AppState {
     /// The feed the reader is actually looking at: the visible tab of the visible page, and
     /// nothing at all on a page that has no tabs. Everything that asks "which feed is this"
     /// asks here, so the answer cannot be the page's and the tab's at once.
+    ///
+    /// Timeline is the one page divided by feed, and the tabs it is divided into are the
+    /// feeds themselves. Kept reads the store, Statistics reads the store and the ledger, and
+    /// Settings reads nobody: one screen each, and no feed on any of them.
     var feedMode: FeedMode? {
-        railItem.tabs.contains(feedTab) ? feedTab : nil
+        railItem == .timeline ? feedTab : nil
+    }
+
+    /// The feed being read, ready to be asked something. Every key that moves through a
+    /// timeline starts here, so "which feed" is answered once rather than four times.
+    private var readingFeed: FeedModel? {
+        feedMode.map { feed(for: $0) }
     }
 
     var refreshKey: RefreshKey {
@@ -249,8 +242,7 @@ public final class AppState {
     /// does anything, so the screen's own first load always goes first.
     func refreshWhileVisible() async {
         guard let interval = preferences.refreshInterval.duration,
-              let mode = feedMode else { return }
-        let feed = feed(for: mode)
+              let feed = readingFeed else { return }
         while !Task.isCancelled {
             do {
                 try await Task.sleep(for: interval)
@@ -314,7 +306,7 @@ public final class AppState {
     /// One owner for opening and closing the composer, so the bar, the floating button and
     /// the panel itself cannot disagree about how it moves.
     func setComposing(_ open: Bool) {
-        withAnimation(.easeOut(duration: 0.15)) { composing = open }
+        withAnimation(Motion.appearing) { composing = open }
         // The editor goes away with the panel, and it cannot report losing a keyboard it is
         // no longer there to hold. A signal left standing would leave every single key dead.
         if !open { isTyping = false }
@@ -327,7 +319,7 @@ public final class AppState {
     /// One owner for the list of keys, so the `?` key, the scrim behind it and its own Close
     /// button all move it the same way.
     func setShowingShortcuts(_ open: Bool) {
-        withAnimation(.easeOut(duration: 0.15)) { showingShortcuts = open }
+        withAnimation(Motion.appearing) { showingShortcuts = open }
     }
 
     /// Told by the one editor in the app, each time it takes or gives back the keyboard.
@@ -336,43 +328,6 @@ public final class AppState {
     }
 
     // MARK: - Commands
-
-    /// The whole of what a key press does: what it means, what it did, and whether the app
-    /// keeps it. Both listeners — SwiftUI's on iOS, AppKit's on macOS — ask this and nothing
-    /// else, so the two cannot come to answer the same press differently.
-    func handles(_ character: Character, modifiers: EventModifiers) -> Bool {
-        guard let command = KeyCommand.from(character, modifiers: modifiers, typing: isTyping)
-        else { return KeyCommand.swallowed(character, typing: isTyping) }
-        return consumes(command, spelledWith: character)
-    }
-
-    /// Does what a press asked for, and says whether the press was ours to keep.
-    ///
-    /// A key we understand is ours whether or not it had anything to do. Handing one back
-    /// because it changed nothing is worse than swallowing it: `⌃Tab` on a page with no tabs
-    /// would go on to the focus system, which has its own use for the key and would move the
-    /// ring somewhere the reader did not ask to be — a press that meant one thing on the
-    /// Timeline meaning another on Settings.
-    ///
-    /// Two kinds of press are handed back, for two different reasons.
-    ///
-    /// `Escape` with nothing in front of you was never ours — the platform may still have a
-    /// use for it, and a press that dismissed nothing must not be reported as a dismissal.
-    ///
-    /// And a key a control might also want goes back when there was nothing here to do with
-    /// it: `↑`, `↓` and `Return` are how every screen in the app is steered by somebody not
-    /// using a pointer, and swallowing them on a page with no timeline would leave the
-    /// pickers in Settings unmovable and its buttons unpressable.
-    ///
-    /// Which key was pressed decides that second one, never which command it meant — `j` and
-    /// `↓` ask for the same move and are not the same key. A letter is ours alone, so it is
-    /// kept whatever it did; handing it back would have AppKit find nothing that wanted it
-    /// and beep, once for every press of `j` held at the bottom of a list.
-    func consumes(_ command: KeyCommand, spelledWith key: Character) -> Bool {
-        let did = perform(command)
-        if command == .dismiss { return did }
-        return KeyCommand.sharedWithControls.contains(key) ? did : true
-    }
 
     /// Does what a key or a menu item asked for, and says whether there was anything to do.
     ///
@@ -401,11 +356,8 @@ public final class AppState {
     /// Moves the ring one post along the feed being read, and says whether it moved. A page
     /// with no feed has no posts to move through, and neither has a feed at the end the
     /// press was pointing at.
-    @discardableResult
-    func moveSelection(by steps: Int) -> Bool {
-        guard let mode = feedMode else { return false }
-        let feed = feed(for: mode)
-        return feed.moveSelection(by: steps, in: feed.visible(preferences: preferences))
+    private func moveSelection(by steps: Int) -> Bool {
+        readingFeed?.moveSelection(by: steps) ?? false
     }
 
     /// Opens the post the ring is on, the way the row's own menu opens it, and says whether
@@ -421,21 +373,17 @@ public final class AppState {
     /// opening a link is a different question, and answering both with one `false` would
     /// have `Return` mean "there was nothing there" when what happened was that we could not
     /// open it — so the loan is asked for at the point of opening, where it is used.
-    @discardableResult
-    func openSelectedPost() -> Bool {
-        guard let mode = feedMode else { return false }
-        let feed = feed(for: mode)
-        guard let url = feed.selectedURL(in: feed.visible(preferences: preferences)) else { return false }
+    private func openSelectedPost() -> Bool {
+        guard let url = readingFeed?.selectedURL else { return false }
         openLink?(url)
         return true
     }
 
     /// Back to the top of the feed being read. The screen does the scrolling; what happens
     /// here is that the ring is let go, so the reader is not told they are in two places.
-    @discardableResult
-    func goToTop() -> Bool {
-        guard let mode = feedMode else { return false }
-        feed(for: mode).goToTop()
+    private func goToTop() -> Bool {
+        guard let feed = readingFeed else { return false }
+        feed.goToTop()
         return true
     }
 
@@ -448,8 +396,8 @@ public final class AppState {
     /// with no tabs has nothing to rotate and says so.
     @discardableResult
     func rotateTab(by steps: Int) -> Bool {
-        let tabs = railItem.tabs
-        guard let next = rotated(tabs, from: feedTab, by: steps) else { return false }
+        guard railItem == .timeline,
+              let next = rotated(FeedMode.allCases, from: feedTab, by: steps) else { return false }
         feedTab = next
         return true
     }
@@ -457,10 +405,8 @@ public final class AppState {
     /// Reads the feed being looked at again, now. The reader asked, so every server is asked
     /// whatever it did last time — that is what `.manual` means, and it is the default.
     /// A page with no feed has nothing to read again.
-    @discardableResult
-    func refreshNow() -> Bool {
-        guard let mode = feedMode else { return false }
-        let feed = feed(for: mode)
+    private func refreshNow() -> Bool {
+        guard let feed = readingFeed else { return false }
         Task { await feed.load(servers: servers) }
         return true
     }

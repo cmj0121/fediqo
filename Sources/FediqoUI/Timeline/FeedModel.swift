@@ -7,7 +7,12 @@ import FediqoCore
 final class FeedModel {
     let mode: FeedMode
 
-    private(set) var result = TimelineResult(posts: [], failures: [:])
+    private(set) var result = TimelineResult(posts: [], failures: [:]) {
+        // Which list is being shown, counted rather than compared: telling two lists of posts
+        // apart costs what filtering them costs, and not paying that on every keystroke is the
+        // whole of why the filtered list is kept at all.
+        didSet { generation += 1 }
+    }
     /// What is still wrong with each server, by `Server.endpoint`, kept across loads.
     ///
     /// `result` is replaced whole every time, and a server inside its wait is not in it at
@@ -40,6 +45,24 @@ final class FeedModel {
     /// sources loads nothing, and that load counts, so "never asked" needs its own value.
     private var loadedFor: [String]?
 
+    @ObservationIgnored private var generation = 0
+    @ObservationIgnored private var filtered: Filtered?
+
+    /// The rules applied, and everything applying them gave: the list the reader is looking
+    /// at, and where each post in it sits. The two are thrown away together because they are
+    /// worked out from the same three things — the posts, and the two rules.
+    ///
+    /// The index is derived and rebuilt with the list; it is never stored across loads, which
+    /// is why the ring itself is still a `mergeKey` rather than one of these numbers.
+    private struct Filtered {
+        let generation: Int
+        let showBoosts: Bool
+        let mediaOnly: Bool
+        let posts: [Post]
+        let index: [String: Int]
+    }
+
+    private let preferences: Preferences
     private let loader: TimelineLoader
 
     /// Told, by `Server.endpoint`, when a server turned down the token a read carried. The
@@ -47,8 +70,9 @@ final class FeedModel {
     /// account and never the column.
     var onTokenRejected: (@MainActor (String) -> Void)?
 
-    init(mode: FeedMode, loader: TimelineLoader = TimelineLoader()) {
+    init(mode: FeedMode, preferences: Preferences, loader: TimelineLoader = TimelineLoader()) {
         self.mode = mode
+        self.preferences = preferences
         self.loader = loader
     }
 
@@ -97,8 +121,34 @@ final class FeedModel {
     }
 
     /// The rules, applied. They add and remove; they never move.
-    func visible(preferences: Preferences) -> [Post] {
-        TimelineLoader.apply(showBoosts: preferences.showBoosts, mediaOnly: preferences.showMediaOnly, to: result.posts)
+    ///
+    /// Worked out once per list and once per change of rule rather than once per pass of a
+    /// screen's body: a key that moves the ring redraws the timeline, and filtering every
+    /// post again on every press of `j` is a cost paid for nothing.
+    var visible: [Post] { rules().posts }
+
+    private func rules() -> Filtered {
+        // Read before the cache is asked rather than after, so that a screen reading `visible`
+        // still depends on the posts and on the two rules. A hit that touched neither would
+        // leave the list standing through the load that replaced it.
+        let posts = result.posts
+        let showBoosts = preferences.showBoosts
+        let mediaOnly = preferences.showMediaOnly
+        if let filtered, filtered.generation == generation,
+           filtered.showBoosts == showBoosts, filtered.mediaOnly == mediaOnly {
+            return filtered
+        }
+        let shown = TimelineLoader.apply(showBoosts: showBoosts, mediaOnly: mediaOnly, to: posts)
+        var index: [String: Int] = [:]
+        index.reserveCapacity(shown.count)
+        // The first of a repeated key wins, which is what walking the list to find one did.
+        for (position, post) in shown.enumerated() where index[post.mergeKey] == nil {
+            index[post.mergeKey] = position
+        }
+        let answer = Filtered(generation: generation, showBoosts: showBoosts, mediaOnly: mediaOnly,
+                              posts: shown, index: index)
+        filtered = answer
+        return answer
     }
 
     // MARK: - Where the reader is
@@ -110,15 +160,14 @@ final class FeedModel {
     /// the post come back — a filter turned off again, a later load carrying it — the ring
     /// comes back with it, which is what a reader who turned a filter on and off again
     /// would expect. What does not happen either way is the list moving under them.
-    func selectedPost(in posts: [Post]) -> Post? {
-        selection.flatMap { key in posts.first { $0.mergeKey == key } }
+    var selectedPost: Post? {
+        let shown = rules()
+        return selection.flatMap { shown.index[$0] }.map { shown.posts[$0] }
     }
 
     /// Where `Return` would take the reader, and nothing when there is nowhere: no ring, a
     /// ring on a post this list no longer has, or a post the server gave no address for.
-    func selectedURL(in posts: [Post]) -> URL? {
-        selectedPost(in: posts)?.webURL
-    }
+    var selectedURL: URL? { selectedPost?.webURL }
 
     /// Moves the ring `steps` along the list, and says whether it moved.
     ///
@@ -133,15 +182,16 @@ final class FeedModel {
     /// first press starts at the first post, whichever direction it asked for. There is no
     /// "where you were" to step from, and the top of the list is where the reader is.
     @discardableResult
-    func moveSelection(by steps: Int, in posts: [Post]) -> Bool {
-        guard !posts.isEmpty else { return false }
+    func moveSelection(by steps: Int) -> Bool {
+        let shown = rules()
+        guard !shown.posts.isEmpty else { return false }
         let landing: Int
-        if let here = posts.firstIndex(where: { $0.mergeKey == selection }) {
-            landing = min(max(here + steps, 0), posts.count - 1)
+        if let here = selection.flatMap({ shown.index[$0] }) {
+            landing = min(max(here + steps, 0), shown.posts.count - 1)
         } else {
             landing = 0
         }
-        let key = posts[landing].mergeKey
+        let key = shown.posts[landing].mergeKey
         guard key != selection else { return false }
         selection = key
         return true

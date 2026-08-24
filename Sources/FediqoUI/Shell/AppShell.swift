@@ -19,13 +19,19 @@ struct AppShell: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
 
-    /// Somewhere for the keyboard to be when it is nowhere in particular. `onKeyPress` is
-    /// delivered to whatever has focus and bubbles up from there, so without a focus of its
-    /// own the shell would hear nothing until the reader had clicked on a control.
-    @FocusState private var focused: Bool
-
     private var railWidth: CGFloat {
         app.preferences.railExpanded ? RailView.expandedWidth : RailView.collapsedWidth
+    }
+
+    /// How much room there is, decided once and handed down. A size class only exists on iOS,
+    /// so this is where the platform is asked and every screen below reads the answer out of
+    /// the environment instead.
+    private var compact: Bool {
+        #if os(iOS)
+        sizeClass == .compact
+        #else
+        false
+        #endif
     }
 
     var body: some View {
@@ -35,38 +41,13 @@ struct AppShell: View {
         // goes away — so there is never a second one, and never one left running for a feed
         // nobody is looking at.
         layout
+            .environment(\.fediqoCompact, compact)
             // The keys, written down, over everything the shell draws — including the
             // composer, so `?` with a draft open puts the list in front of it rather than
             // behind it.
             .shortcutsOverlay()
-            // SwiftUI delivers a press to whatever holds the keyboard, so the shell holds it
-            // when nothing else wants it. This is the whole of the keyboard on iOS; macOS
-            // takes the same keys from AppKit below, and does not depend on any of it.
-            .focusable()
-            .focusEffectDisabled()
-            .focused($focused)
-            .onAppear {
-                focused = true
-                app.openLink = { openURL($0) }
-            }
-            // The composer takes the keyboard when it opens, so the shell asks for it back
-            // once the panel has finished leaving — asking sooner asks over a field that is
-            // still there and still holds it. On macOS this changes nothing either way.
-            //
-            // `.task(id:)` rather than a `Task` of its own, because the wait has to be
-            // undone as readily as it is started: opening the composer again inside those
-            // few tenths would otherwise have the shell take the keyboard back off the field
-            // the reader is already typing into. Changing the id cancels the wait, and so
-            // does the shell going away.
-            .task(id: app.composing) {
-                guard !app.composing else { return }
-                try? await Task.sleep(for: .seconds(0.25))
-                guard !Task.isCancelled else { return }
-                focused = true
-            }
-            .onKeyPress(keys: KeyCommand.listened, phases: .down) { press in
-                app.handles(press.key.character, modifiers: press.modifiers) ? .handled : .ignored
-            }
+            .onAppear { app.openLink = { openURL($0) } }
+            .shellKeyPresses()
             .shellKeyCommands()
             .task(id: app.refreshKey) { await app.refreshWhileVisible() }
     }
@@ -74,7 +55,7 @@ struct AppShell: View {
     @ViewBuilder
     private var layout: some View {
         #if os(iOS)
-        if sizeClass == .compact {
+        if compact {
             tabbed
         } else {
             columns

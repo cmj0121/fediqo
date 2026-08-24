@@ -32,7 +32,7 @@ struct ShortcutList: View {
                             .padding(.top, group == groups.first ? 0 : 6)
                             .gridCellColumns(2)
                     }
-                    ForEach(KeyCommand.shortcuts.filter { $0.group == group }) { shortcut in
+                    ForEach(KeyCommand.byGroup[group] ?? []) { shortcut in
                         GridRow {
                             keys(of: shortcut)
                             Text(t(shortcut.detailKey))

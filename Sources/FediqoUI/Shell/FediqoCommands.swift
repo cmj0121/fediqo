@@ -55,7 +55,7 @@ public struct FediqoCommands: Commands {
         @Bindable var preferences = app.preferences
         let reading = app.feedMode == .timeline
         return Group {
-            Button(t("menu.readAgain")) { app.refreshNow() }
+            Button(t("menu.readAgain")) { app.perform(.refreshNow) }
                 .keyboardShortcut("r")
                 .disabled(app.feedMode == nil)
             Button(t("timeline.notifications")) { app.showingNotifications = true }

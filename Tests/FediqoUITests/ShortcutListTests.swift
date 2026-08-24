@@ -29,6 +29,29 @@ struct ShortcutListTests {
         #expect(Set(KeyCommand.shortcuts.map(\.name)).count == KeyCommand.shortcuts.count)
     }
 
+    /// That every command is described is not the same as its being described with the key
+    /// that works: a key remapped in `from` and left alone here would leave a list that looks
+    /// right and is wrong. So each cap is pressed, and has to mean one of the commands the
+    /// line it is printed on claims.
+    ///
+    /// One cap at a time, so the caps that name a modifier — `⌃Tab` and its like — are left
+    /// out: they are prose for the reader, and there is no single character to press.
+    @Test("Every cap on the list is a key that means what the list says it means")
+    func everyCapMeansItsLine() {
+        // What the keyboard sends for a cap that is drawn rather than typed. The arrows are
+        // printed as the glyph on the key and arrive as a character no keyboard has a cap for.
+        let sent: [String: Character] = ["↑": KeyEquivalent.upArrow.character,
+                                         "↓": KeyEquivalent.downArrow.character]
+        for shortcut in KeyCommand.shortcuts {
+            for cap in shortcut.keys {
+                guard let character = sent[cap] ?? (cap.count == 1 ? cap.first : nil) else { continue }
+                let meant = KeyCommand.from(character, modifiers: [], typing: false)
+                #expect(meant.map(shortcut.commands.contains) == true,
+                        "\(cap) is written down under \(shortcut.name) and means \(String(describing: meant))")
+            }
+        }
+    }
+
     // MARK: - The strings behind it
 
     /// A label whose key is missing from the catalogue draws the key itself — `shortcut.top`
@@ -136,6 +159,7 @@ struct ShortcutStateTests {
     @Test("The press is kept rather than handed back")
     func theKeyIsKept() {
         let app = freshApp("shortcuts-key-kept")
-        #expect(app.consumes(.showShortcuts, spelledWith: "?"))
+        #expect(app.presses("?"))
+        #expect(app.showingShortcuts)
     }
 }

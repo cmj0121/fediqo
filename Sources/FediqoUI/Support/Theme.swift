@@ -72,6 +72,31 @@ enum Palette {
     }
 }
 
+/// How a thing in this app arrives and how it leaves: one short ease-out, so the composer,
+/// the written-down keys and the button back to the top are the same movement rather than
+/// three guesses at it.
+enum Motion {
+    static let appearing = Animation.easeOut(duration: 0.15)
+}
+
+// MARK: - The room the screen has
+
+/// A phone held upright, where a header has one column's worth of room and not two.
+///
+/// The shell is the one place that asks the platform how much room there is — a size class
+/// only exists on iOS — and every screen below it reads the answer here rather than working
+/// it out again from an environment value half of them cannot see.
+private struct CompactKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var fediqoCompact: Bool {
+        get { self[CompactKey.self] }
+        set { self[CompactKey.self] = newValue }
+    }
+}
+
 // MARK: - Chrome
 
 /// A raised panel with a hairline edge — a post, a settings group, a picker row, the
@@ -130,11 +155,10 @@ private struct Pill: ViewModifier {
 private struct FocusRing: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
     let selected: Bool
-    let radius: CGFloat
 
     private var ring: some View {
         let colour = Palette.focus(colorScheme)
-        return RoundedRectangle(cornerRadius: radius, style: .continuous)
+        return RoundedRectangle(cornerRadius: 10, style: .continuous)
             .strokeBorder(colour, lineWidth: 2)
             .overlay(alignment: .leading) {
                 Capsule()
@@ -157,12 +181,41 @@ extension View {
         modifier(Card(radius: radius, raised: raised, shadow: shadow))
     }
 
-    func fediqoFocusRing(_ selected: Bool, radius: CGFloat = 10) -> some View {
-        modifier(FocusRing(selected: selected, radius: radius))
+    func fediqoFocusRing(_ selected: Bool) -> some View {
+        modifier(FocusRing(selected: selected))
     }
 
     func fediqoPill() -> some View {
         modifier(Pill())
+    }
+}
+
+/// One row of named choices where exactly one is true: the tabs of a page, and every
+/// appearance preference. Both are the same control over the same shape of enum — a case per
+/// segment, named by a string key derived from the case itself — so it is written once.
+///
+/// The options are handed in rather than taken from `allCases`, because a page's tabs are a
+/// list the page decides and a preference's choices are the whole enum.
+struct SegmentedChoice<Option>: View
+where Option: Identifiable & Hashable & RawRepresentable, Option.RawValue == String {
+    let options: [Option]
+    let keyPrefix: String
+    @Binding var selection: Option
+
+    init(_ options: [Option], keyPrefix: String, selection: Binding<Option>) {
+        self.options = options
+        self.keyPrefix = keyPrefix
+        self._selection = selection
+    }
+
+    var body: some View {
+        Picker("", selection: $selection) {
+            ForEach(options) { option in
+                Text(t("\(keyPrefix).\(option.rawValue)")).tag(option)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
     }
 }
 

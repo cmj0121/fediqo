@@ -16,19 +16,22 @@ private let abc = [post("a"), post("b"), post("c")]
 @Suite("The post you are on")
 @MainActor
 struct PostFocusTests {
-    private func feedOnB() -> FeedModel {
-        let feed = FeedModel(mode: .timeline)
-        feed.moveSelection(by: 1, in: abc)
-        feed.moveSelection(by: 1, in: abc)
+    /// A feed showing the three posts, with the ring on the middle one.
+    private func feedOnB(_ name: String) -> FeedModel {
+        let feed = freshFeed(name)
+        feed.show(abc)
+        feed.moveSelection(by: 1)
+        feed.moveSelection(by: 1)
         #expect(feed.selection == "b")
         return feed
     }
 
     @Test("Nothing is selected until something is")
     func nothingAtFirst() {
-        let feed = FeedModel(mode: .timeline)
+        let feed = freshFeed("focus-nothing-at-first")
+        feed.show(abc)
         #expect(feed.selection == nil)
-        #expect(feed.selectedPost(in: abc) == nil)
+        #expect(feed.selectedPost == nil)
     }
 
     /// There is no "where you were" to step from, so both keys mean the same thing once:
@@ -36,35 +39,37 @@ struct PostFocusTests {
     @Test("With nothing selected, the first press starts at the first post",
           arguments: [1, -1])
     func firstPressStartsAtTheTop(steps: Int) {
-        let feed = FeedModel(mode: .timeline)
-        #expect(feed.moveSelection(by: steps, in: abc))
+        let feed = freshFeed("focus-first-press-\(steps)")
+        feed.show(abc)
+        #expect(feed.moveSelection(by: steps))
         #expect(feed.selection == "a")
     }
 
     @Test("j walks down the list and stops at the bottom rather than coming round again")
     func stopsAtTheBottom() {
-        let feed = FeedModel(mode: .timeline)
+        let feed = freshFeed("focus-stops-at-bottom")
+        feed.show(abc)
         for name in ["a", "b", "c"] {
-            #expect(feed.moveSelection(by: 1, in: abc))
+            #expect(feed.moveSelection(by: 1))
             #expect(feed.selection == name)
         }
-        #expect(feed.moveSelection(by: 1, in: abc) == false)
+        #expect(feed.moveSelection(by: 1) == false)
         #expect(feed.selection == "c")
     }
 
     @Test("k walks back up and stops at the top rather than coming round again")
     func stopsAtTheTop() {
-        let feed = feedOnB()
-        #expect(feed.moveSelection(by: -1, in: abc))
+        let feed = feedOnB("focus-stops-at-top")
+        #expect(feed.moveSelection(by: -1))
         #expect(feed.selection == "a")
-        #expect(feed.moveSelection(by: -1, in: abc) == false)
+        #expect(feed.moveSelection(by: -1) == false)
         #expect(feed.selection == "a")
     }
 
     @Test("A list with no posts in it has nowhere to go")
     func emptyList() {
-        let feed = FeedModel(mode: .timeline)
-        #expect(feed.moveSelection(by: 1, in: []) == false)
+        let feed = freshFeed("focus-empty-list")
+        #expect(feed.moveSelection(by: 1) == false)
         #expect(feed.selection == nil)
     }
 
@@ -75,19 +80,19 @@ struct PostFocusTests {
     /// ring ten posts down with it.
     @Test("New posts above do not move the ring off the post it is on")
     func survivesARefresh() {
-        let feed = feedOnB()
-        let refreshed = [post("x"), post("y")] + abc
-        #expect(feed.selectedPost(in: refreshed)?.mergeKey == "b")
-        #expect(feed.moveSelection(by: 1, in: refreshed))
+        let feed = feedOnB("focus-survives-refresh")
+        feed.show([post("x"), post("y")] + abc)
+        #expect(feed.selectedPost?.mergeKey == "b")
+        #expect(feed.moveSelection(by: 1))
         #expect(feed.selection == "c")
     }
 
     @Test("The ring is on the post, so it goes where the post goes")
     func survivesAReorder() {
-        let feed = feedOnB()
-        let reordered = [post("c"), post("b"), post("a")]
-        #expect(feed.selectedPost(in: reordered)?.mergeKey == "b")
-        #expect(feed.moveSelection(by: 1, in: reordered))
+        let feed = feedOnB("focus-survives-reorder")
+        feed.show([post("c"), post("b"), post("a")])
+        #expect(feed.selectedPost?.mergeKey == "b")
+        #expect(feed.moveSelection(by: 1))
         #expect(feed.selection == "a")
     }
 
@@ -96,11 +101,11 @@ struct PostFocusTests {
     /// at the top rather than guessing at where the post used to be.
     @Test("A selected post that is gone leaves no ring and nothing to open")
     func selectedPostDisappears() {
-        let feed = feedOnB()
-        let without = [post("a"), post("c")]
-        #expect(feed.selectedPost(in: without) == nil)
-        #expect(feed.selectedURL(in: without) == nil)
-        #expect(feed.moveSelection(by: 1, in: without))
+        let feed = feedOnB("focus-selected-disappears")
+        feed.show([post("a"), post("c")])
+        #expect(feed.selectedPost == nil)
+        #expect(feed.selectedURL == nil)
+        #expect(feed.moveSelection(by: 1))
         #expect(feed.selection == "a")
     }
 
@@ -108,17 +113,19 @@ struct PostFocusTests {
     /// back to it, and the reader who turned it off wants to be where they were.
     @Test("A post that comes back brings the ring back with it")
     func selectedPostReturns() {
-        let feed = feedOnB()
-        #expect(feed.selectedPost(in: [post("a")]) == nil)
-        #expect(feed.selectedPost(in: abc)?.mergeKey == "b")
+        let feed = feedOnB("focus-selected-returns")
+        feed.show([post("a")])
+        #expect(feed.selectedPost == nil)
+        feed.show(abc)
+        #expect(feed.selectedPost?.mergeKey == "b")
     }
 
     // MARK: - Opening, and going back to the top
 
     @Test("Return opens the address of the post the ring is on")
     func opensTheSelectedPost() {
-        let feed = feedOnB()
-        #expect(feed.selectedURL(in: abc)?.absoluteString == "https://example.social/@a/1")
+        let feed = feedOnB("focus-opens-selected")
+        #expect(feed.selectedURL?.absoluteString == "https://example.social/@a/1")
     }
 
     /// Silent, and on purpose: there is no fault to report — the post is not a page
@@ -126,17 +133,17 @@ struct PostFocusTests {
     /// every time the reader pressed `Return` on the wrong row.
     @Test("A post the server gave no address for has nothing to open, and says nothing")
     func openingAPostWithNoAddress() {
-        let feed = FeedModel(mode: .timeline)
-        let posts = [post("a", web: nil)]
-        #expect(feed.moveSelection(by: 1, in: posts))
-        #expect(feed.selectedURL(in: posts) == nil)
+        let feed = freshFeed("focus-no-address")
+        feed.show([post("a", web: nil)])
+        #expect(feed.moveSelection(by: 1))
+        #expect(feed.selectedURL == nil)
     }
 
     /// Being taken to the top with the ring still on a post a thousand rows down would be
     /// telling the reader they are in two places.
     @Test("Going to the top lets the ring go, and means it again every time it is asked")
     func goingToTheTop() {
-        let feed = feedOnB()
+        let feed = feedOnB("focus-going-to-top")
         feed.goToTop()
         #expect(feed.selection == nil)
         #expect(feed.topRequests == 1)
@@ -150,7 +157,7 @@ struct PostFocusTests {
 @MainActor
 struct PostCommandTests {
     @Test("On a page with no posts, none of the post keys has anything to do",
-          arguments: [RailItem.kept, .statistics, .settings])
+          arguments: pagesWithoutTabs)
     func nothingToDoWithoutAFeed(page: RailItem) {
         let app = freshApp("post-keys-without-a-feed")
         app.railItem = page
@@ -163,26 +170,22 @@ struct PostCommandTests {
     /// the app. A page with no timeline must hand them back, or the pickers in Settings
     /// cannot be moved and its buttons cannot be pressed.
     @Test("A key a control might want is given back where there was nothing to do with it",
-          arguments: [(down, KeyCommand.nextPost), (up, .previousPost), (enter, .openPost)]
-            as [(Character, KeyCommand)],
-          [RailItem.kept, .statistics, .settings])
-    func sharedKeysAreHandedBack(press: (key: Character, command: KeyCommand), page: RailItem) {
+          arguments: [down, up, enter] as [Character], pagesWithoutTabs)
+    func sharedKeysAreHandedBack(key: Character, page: RailItem) {
         let app = freshApp("post-keys-shared-handed-back")
         app.railItem = page
-        #expect(app.consumes(press.command, spelledWith: press.key) == false)
+        #expect(app.presses(key) == false)
     }
 
     /// A letter is ours alone: nothing on any screen wants a bare `g`, so handing one back
     /// only has AppKit find nobody who wanted it and beep at a reader pressing a key the app
     /// documents.
     @Test("A letter is kept even where there is nothing for it to do",
-          arguments: [(Character("j"), KeyCommand.nextPost), ("k", .previousPost), ("g", .backToTop)]
-            as [(Character, KeyCommand)],
-          [RailItem.kept, .statistics, .settings])
-    func lettersAreAlwaysKept(press: (key: Character, command: KeyCommand), page: RailItem) {
+          arguments: ["j", "k", "g"] as [Character], pagesWithoutTabs)
+    func lettersAreAlwaysKept(key: Character, page: RailItem) {
         let app = freshApp("post-keys-letters-kept")
         app.railItem = page
-        #expect(app.consumes(press.command, spelledWith: press.key))
+        #expect(app.presses(key))
     }
 
     @Test("A timeline with nothing in it yet has nothing to move through")
@@ -298,8 +301,8 @@ struct WiredPostKeyTests {
     func atTheBottomOfTheList() {
         let app = timeline("wired-bottom")
         while app.perform(.nextPost) {}
-        #expect(app.consumes(.nextPost, spelledWith: "j"))
-        #expect(app.consumes(.nextPost, spelledWith: down) == false)
+        #expect(app.presses("j"))
+        #expect(app.presses(down) == false)
     }
 
     /// The ring follows the rules the reader set: a post the filters take out of the list is
@@ -310,5 +313,17 @@ struct WiredPostKeyTests {
         app.preferences.showMediaOnly = true
         #expect(app.perform(.nextPost) == false)
         #expect(app.feed(for: .timeline).selection == nil)
+    }
+
+    /// The shown list is worked out once and kept, so that a key does not filter the whole
+    /// timeline again on every press. A rule changed after that has to throw it away, or the
+    /// reader would go on stepping through the posts they just asked to hide.
+    @Test("A rule turned on after the list was worked out still empties it")
+    func rulesChangeAfterTheListWasRead() {
+        let app = timeline("wired-filtered-later")
+        #expect(app.perform(.nextPost))
+        app.preferences.showMediaOnly = true
+        #expect(app.perform(.nextPost) == false)
+        #expect(app.feed(for: .timeline).selectedURL == nil)
     }
 }

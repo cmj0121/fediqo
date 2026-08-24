@@ -12,7 +12,59 @@ extension View {
         self
         #endif
     }
+
+    /// The single keys, on the platform where SwiftUI is the only one delivering them.
+    ///
+    /// Nothing on macOS: the monitor above sees every press before the view tree does and
+    /// keeps everything `handles` claims, so a focus on the shell would decide nothing there
+    /// — it would only be one more stop on the Tab loop, on the platform whose Tab key this
+    /// app has taken for itself.
+    func shellKeyPresses() -> some View {
+        #if os(iOS)
+        modifier(ShellKeyPresses())
+        #else
+        self
+        #endif
+    }
 }
+
+#if os(iOS)
+/// Somewhere for the keyboard to be when it is nowhere in particular. `onKeyPress` is
+/// delivered to whatever has focus and bubbles up from there, so without a focus of its own
+/// the shell would hear nothing until the reader had tapped a control.
+private struct ShellKeyPresses: ViewModifier {
+    @Environment(AppState.self) private var app
+    @FocusState private var focused: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .focusable()
+            .focusEffectDisabled()
+            .focused($focused)
+            .onAppear { focused = true }
+            // The composer takes the keyboard when it opens, so the shell asks for it back
+            // once the panel has finished leaving — asking sooner asks over a field that is
+            // still there and still holds it.
+            //
+            // `.task(id:)` rather than a `Task` of its own, because the wait has to be
+            // undone as readily as it is started: opening the composer again inside those
+            // few tenths would otherwise have the shell take the keyboard back off the field
+            // the reader is already typing into. Changing the id cancels the wait, and so
+            // does the shell going away.
+            .task(id: app.composing) {
+                guard !app.composing else { return }
+                try? await Task.sleep(for: .seconds(0.25))
+                guard !Task.isCancelled else { return }
+                focused = true
+            }
+            .onKeyPress(keys: KeyCommand.listened, phases: .down) { press in
+                let handled = KeyCommand.handles(press.key.character, modifiers: press.modifiers,
+                                                 typing: app.isTyping) { app.perform($0) }
+                return handled ? .handled : .ignored
+            }
+    }
+}
+#endif
 
 #if os(macOS)
 /// The keys AppKit numbers for us, because what they type is not one thing.
@@ -25,6 +77,10 @@ private enum KeyCode {
     /// U+000D — one key to the reader, two characters to the keyboard layer, and only one
     /// of them is the character the commands are written in.
     static let keypadEnter: UInt16 = 76
+
+    /// The five above. Asked first, so a press that is one of them never has its characters
+    /// read at all.
+    static let named: Set<UInt16> = [tab, escape, downArrow, upArrow, keypadEnter]
 }
 
 /// Which key was pressed, in the spelling `KeyCommand` reads.
@@ -67,6 +123,19 @@ func shellKey(keyCode: UInt16, typed: Character?) -> Character? {
 ///
 /// A sheet is its own window and keeps its own keyboard entirely: the pickers and their
 /// fields live there, and this steps aside for them.
+/// Which of the keys this app listens for a press is, and nothing at all when it is none of
+/// them. The numbered keys are asked about first, so a press that is one of them never has
+/// its characters read; everything else has to be a key `listened` covers before `shellKey`
+/// is troubled with it.
+private func listenedKey(of event: NSEvent) -> Character? {
+    if KeyCode.named.contains(event.keyCode) {
+        return shellKey(keyCode: event.keyCode, typed: nil)
+    }
+    guard let typed = event.charactersIgnoringModifiers?.first,
+          KeyCommand.listenedCharacters.contains(typed) else { return nil }
+    return shellKey(keyCode: event.keyCode, typed: typed)
+}
+
 private struct ShellKeyMonitor: ViewModifier {
     @Environment(AppState.self) private var app
     @State private var monitor: Any?
@@ -82,16 +151,21 @@ private struct ShellKeyMonitor: ViewModifier {
                 guard monitor == nil else { return }
                 let app = app
                 monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                    // Every keystroke in the app arrives here, including every letter typed
+                    // into a draft, so what is none of ours goes back before anything is
+                    // allocated for it: a sheet keeps its own keyboard, the ⌘ forms belong to
+                    // the menu bar, and a key nobody listens for is nobody's business.
                     guard event.window?.isSheet != true,
-                          let character = shellKey(keyCode: event.keyCode,
-                                                   typed: event.charactersIgnoringModifiers?.first)
+                          !event.modifierFlags.contains(.command),
+                          let character = listenedKey(of: event)
                     else { return event }
                     let modifiers = event.modifierFlags.eventModifiers
                     // AppKit calls this on the main thread; the app is only ever touched
                     // there, and answering with a `Bool` keeps the event itself out of the
                     // hop, since an `NSEvent` cannot cross one.
                     let handled = MainActor.assumeIsolated {
-                        app.handles(character, modifiers: modifiers)
+                        KeyCommand.handles(character, modifiers: modifiers,
+                                           typing: app.isTyping) { app.perform($0) }
                     }
                     return handled ? nil : event
                 }

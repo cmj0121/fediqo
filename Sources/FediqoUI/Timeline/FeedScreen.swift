@@ -14,9 +14,10 @@ struct FeedScreen: View {
     let mode: FeedMode
 
     @Environment(AppState.self) private var app
-    #if os(iOS)
-    @Environment(\.horizontalSizeClass) private var sizeClass
-    #endif
+    /// Whether there is one column's worth of room here rather than two. The shell decides
+    /// it — it is the one place that knows what the platform will say — and this reads the
+    /// answer rather than asking the platform a second time.
+    @Environment(\.fediqoCompact) private var compact
     /// Whether the reader has gone far enough down that going back up is a journey. The
     /// button to do it in one move only exists while that is true — an arrow pointing at
     /// where you already are is a button that does nothing.
@@ -29,15 +30,6 @@ struct FeedScreen: View {
 
     private var model: FeedModel { app.feed(for: mode) }
     private var subtitleKey: String { "\(mode.rawValue).subtitle" }
-
-    /// A phone held upright, where the header has one column's worth of room and not two.
-    private var compact: Bool {
-        #if os(iOS)
-        sizeClass == .compact
-        #else
-        false
-        #endif
-    }
 
     /// Sources, filter and notifications belong to the timeline. Trending is a place you go
     /// to look, so it carries none of them.
@@ -52,7 +44,7 @@ struct FeedScreen: View {
             VStack(spacing: 0) {
                 header
                 Hairline()
-                body(for: model.visible(preferences: app.preferences))
+                body(for: model.visible)
             }
             // The ring is moved by a key, and a key can move it past the bottom of the
             // screen — which is most of what holding `j` is for. Without an anchor the list
@@ -123,18 +115,12 @@ struct FeedScreen: View {
     }
 
     /// The page's sub-categories, in the same segmented control the preferences use — one
-    /// row of named choices where exactly one is true, which is what this is. It asks the
-    /// page which tabs it has rather than naming them, so there is one list of them and it
-    /// is the one the rest of the app steers by.
+    /// row of named choices where exactly one is true, which is what this is. The two feeds
+    /// are the two tabs, in the order `FeedMode` lists them, which is the order the rest of
+    /// the app rotates through them in.
     private var tabs: some View {
         @Bindable var app = app
-        return Picker("", selection: $app.feedTab) {
-            ForEach(app.railItem.tabs) { tab in
-                Text(t("tab.\(tab.rawValue)")).tag(tab)
-            }
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
+        return SegmentedChoice(FeedMode.allCases, keyPrefix: "tab", selection: $app.feedTab)
     }
 
     /// Beside the control it is given whatever is left of the row, so it is held to two
@@ -156,7 +142,7 @@ struct FeedScreen: View {
             // It asks the app rather than scrolling the list itself, so that the button and
             // `g` are one thing: both let the ring go, and both land in the same place.
             if scrolledAway {
-                IconButton(symbol: "arrow.up", labelKey: "timeline.top") { app.goToTop() }
+                IconButton(symbol: "arrow.up", labelKey: "timeline.top") { app.perform(.backToTop) }
                     .transition(.opacity)
             }
             if showsTimelineControls {
@@ -248,7 +234,7 @@ struct FeedScreen: View {
             .onScrollGeometryChange(for: Bool.self) { geometry in
                 geometry.contentOffset.y > geometry.containerSize.height / 2
             } action: { _, away in
-                withAnimation(.easeOut(duration: 0.15)) { scrolledAway = away }
+                withAnimation(Motion.appearing) { scrolledAway = away }
             }
         }
     }
