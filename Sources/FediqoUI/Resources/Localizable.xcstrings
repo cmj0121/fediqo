@@ -1957,6 +1957,23 @@
         }
       }
     },
+    "timeline.top": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Back to the top"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "回到最上面"
+          }
+        }
+      }
+    },
     "timeline.remove": {
       "extractionState": "manual",
       "localizations": {
