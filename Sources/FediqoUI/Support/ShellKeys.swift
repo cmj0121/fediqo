@@ -17,8 +17,8 @@ extension View {
     ///
     /// Nothing on macOS: the monitor above sees every press before the view tree does and
     /// keeps everything `handles` claims, so a focus on the shell would decide nothing there
-    /// — it would only be one more stop on the Tab loop, on the platform whose Tab key this
-    /// app has taken for itself.
+    /// — it would only be one more stop on the Tab loop, which on the pages that have no
+    /// tabs of their own is exactly the loop this app hands the key back to.
     func shellKeyPresses() -> some View {
         #if os(iOS)
         modifier(ShellKeyPresses())
@@ -143,10 +143,12 @@ private struct ShellKeyMonitor: ViewModifier {
     func body(content: Content) -> some View {
         content
             .onAppear {
-                // Belt and braces beside the monitor below. The monitor is what keeps a Tab
-                // we recognise away from AppKit; this says the app has no window tabs at all,
-                // so no press of any kind can fold a window into a set — and the Window menu
-                // stops offering to. Nothing in Fediqo puts two windows side by side.
+                // What makes handing a Tab back safe. The press AppKit spends on window tabs
+                // is ⌃Tab, and that one rotates the pages — there are always four, so it
+                // always moved something and the monitor below always keeps it. This is the
+                // second lock: the app says it has no window tabs at all, so no press of any
+                // kind can fold a window into a set — and the Window menu stops offering to.
+                // Nothing in Fediqo puts two windows side by side.
                 NSWindow.allowsAutomaticWindowTabbing = false
                 guard monitor == nil else { return }
                 let app = app

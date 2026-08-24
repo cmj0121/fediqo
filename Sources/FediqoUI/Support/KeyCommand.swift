@@ -25,10 +25,11 @@ enum KeyCommand: Hashable, CaseIterable {
     /// use for — it is how you leave the field — so it has to answer from inside one.
     ///
     /// `Tab` is not a character a draft wants either, but it is not a way out: it is a move,
-    /// and turning the page out from under somebody mid-sentence is not what a press of it
-    /// can have meant. So while a draft has the keyboard `Tab` means nothing here. It is
-    /// still never handed back — `handles(_:modifiers:typing:perform:)` is where that is said
-    /// and why — it simply does not navigate.
+    /// and moving somebody off what they are writing mid-sentence is not what a press of it
+    /// can have meant. So while a draft has the keyboard `Tab` means nothing here. Mid-draft
+    /// it is still never handed back — `handles(_:modifiers:typing:perform:)` is where that
+    /// is said and why — it simply does not navigate. With no draft open it is an ordinary
+    /// key of the shared kind, kept where it moved something and given back where it did not.
     static func from(_ character: Character, modifiers: EventModifiers, typing: Bool) -> KeyCommand? {
         // The ⌘ forms belong to the menu bar, which is where a Mac user reads them. Claiming
         // them here as well would mean two owners for one key.
@@ -41,15 +42,16 @@ enum KeyCommand: Hashable, CaseIterable {
         }
 
         let shift = modifiers.contains(.shift)
-        // Tab rotates the pages, ⌃Tab the tabs inside one — the bare key for the bigger
-        // move. ⌘Tab is the app switcher and belongs to the system on both platforms, so
-        // it is not asked for, and the guard above has already turned it away. A draft has
-        // the moves off it entirely, in either form.
+        // Tab moves between the tabs inside a page, ⌃Tab rotates the pages — the bare key
+        // for the smaller move, which is what leaves it free to go back to the focus system
+        // on the three pages that have no tabs. ⌘Tab is the app switcher and belongs to the
+        // system on both platforms, so it is not asked for, and the guard above has already
+        // turned it away. A draft has the moves off it entirely, in either form.
         if character == KeyEquivalent.tab.character {
             guard !typing else { return nil }
             return modifiers.contains(.control)
-                ? (shift ? .previousTab : .nextTab)
-                : (shift ? .previousPage : .nextPage)
+                ? (shift ? .previousPage : .nextPage)
+                : (shift ? .previousTab : .nextTab)
         }
 
         // What is left is letters, and letters are what the gate is for: while a draft has
@@ -102,15 +104,23 @@ enum KeyCommand: Hashable, CaseIterable {
     /// bottom of a list, or pressing `g` on a page with no posts, silent rather than a row of
     /// beeps.
     ///
-    /// `Tab` is deliberately not here. It is the focus key in every other app, and this one
-    /// takes it anyway: the screens it moves between have no traversal order worth keeping,
-    /// and a rotation that worked on some pages and moved the focus ring on others would be
-    /// two keys wearing one cap.
+    /// `Tab` is here for the plainest version of the same reason: it is the focus key in
+    /// every other app, and on three of the four pages this one has nothing to spend it on.
+    /// Only the Timeline has tabs, so only there does a press of it move anything; on Kept,
+    /// Statistics and Settings it goes back to AppKit, and the pickers and buttons in
+    /// Settings stay reachable by somebody not using a pointer.
+    ///
+    /// Handing one back is safe, which it was not under the other assignment. `⌃Tab` is the
+    /// press AppKit spends on window tabs, and `⌃Tab` now rotates the pages — there are
+    /// always four, so it always moved something and is always kept; AppKit never sees it.
+    /// And `ShellKeys` sets `NSWindow.allowsAutomaticWindowTabbing = false` when the shell
+    /// appears, so there is no tab set for any press to fold this window into anyway.
     static let sharedWithControls: Set<Character> = [
         KeyEquivalent.upArrow.character,
         KeyEquivalent.downArrow.character,
         KeyEquivalent.return.character,
         KeyEquivalent.escape.character,
+        KeyEquivalent.tab.character,
     ]
 
     /// The keys worth listening for at all. Naming them keeps every other keystroke — the
@@ -144,17 +154,16 @@ enum KeyCommand: Hashable, CaseIterable {
 
     /// Whether a press we understood is ours to keep, given whether it had anything to do.
     ///
-    /// A key we understand is ours whether or not it did anything. Handing one back because
-    /// it changed nothing is worse than swallowing it: `⌃Tab` on a page with no tabs would go
-    /// on to the focus system, which has its own use for the key and would move the ring
-    /// somewhere the reader did not ask to be — a press that meant one thing on the Timeline
-    /// meaning another on Settings.
+    /// A key that is ours alone is ours whether or not it did anything. Handing one back
+    /// because it changed nothing is worse than swallowing it: AppKit would find nobody who
+    /// wanted a bare `r` and beep, on a page where the app itself says the key does nothing.
     ///
     /// The exception is a key the platform might also want, which goes back when there was
     /// nothing here to do with it: `↑`, `↓` and `Return` are how every screen in the app is
     /// steered by somebody not using a pointer, and swallowing them on a page with no
-    /// timeline would leave the pickers in Settings unmovable and its buttons unpressable —
-    /// and `Escape` with nothing in front of you was never ours at all.
+    /// timeline would leave the pickers in Settings unmovable and its buttons unpressable.
+    /// `Escape` with nothing in front of you was never ours at all, and `Tab` on a page with
+    /// no tabs to move between is simply the focus key, doing what it does everywhere else.
     ///
     /// Which key was pressed is the whole of what decides it, never which command it meant —
     /// `j` and `↓` ask for the same move and are not the same key, which is why no command is
@@ -200,9 +209,9 @@ extension KeyCommand {
     /// Settings both draw this — there is one list, and it is the same list the commands
     /// above are decided from.
     static let shortcuts: [Shortcut] = [
-        Shortcut(group: .moving, keys: ["Tab", "⇧Tab"], name: "pages",
+        Shortcut(group: .moving, keys: ["⌃Tab", "⌃⇧Tab"], name: "pages",
                  commands: [.nextPage, .previousPage]),
-        Shortcut(group: .moving, keys: ["⌃Tab", "⌃⇧Tab"], name: "tabs",
+        Shortcut(group: .moving, keys: ["Tab", "⇧Tab"], name: "tabs",
                  commands: [.nextTab, .previousTab]),
         Shortcut(group: .moving, keys: ["j", "k", "↓", "↑"], name: "posts",
                  commands: [.nextPost, .previousPost]),

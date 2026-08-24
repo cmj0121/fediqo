@@ -20,12 +20,12 @@ struct KeyCommandMeaningTests {
         #expect(KeyCommand.from("R", modifiers: [], typing: false) == .cycleRefreshInterval)
     }
 
-    @Test("Tab moves between pages; holding Control moves between the tabs inside one")
+    @Test("Tab moves between the tabs inside a page; holding Control rotates the pages")
     func tabAndControlTab() {
-        #expect(KeyCommand.from(tab, modifiers: [], typing: false) == .nextPage)
-        #expect(KeyCommand.from(tab, modifiers: [.shift], typing: false) == .previousPage)
-        #expect(KeyCommand.from(tab, modifiers: [.control], typing: false) == .nextTab)
-        #expect(KeyCommand.from(tab, modifiers: [.control, .shift], typing: false) == .previousTab)
+        #expect(KeyCommand.from(tab, modifiers: [], typing: false) == .nextTab)
+        #expect(KeyCommand.from(tab, modifiers: [.shift], typing: false) == .previousTab)
+        #expect(KeyCommand.from(tab, modifiers: [.control], typing: false) == .nextPage)
+        #expect(KeyCommand.from(tab, modifiers: [.control, .shift], typing: false) == .previousPage)
     }
 
     /// Both spellings of the same four moves: the letters for a reader who has met vi, the
@@ -69,7 +69,7 @@ struct KeyCommandMeaningTests {
         #expect(KeyCommand.from(character, modifiers: [], typing: true) == nil)
     }
 
-    /// Turning the page out from under somebody in the middle of a sentence is not what a
+    /// Moving somebody off what they are writing in the middle of a sentence is not what a
     /// press of Tab can have meant, so mid-draft it means nothing — in either form.
     @Test("While text is being typed, Tab is not a move either",
           arguments: [EventModifiers(), .shift, .control, [.control, .shift]])
@@ -121,19 +121,20 @@ struct KeyOwnershipTests {
 
     /// No control anywhere wants a bare `j`, so a letter is kept whether or not it moved
     /// anything — which is what makes holding `j` at the bottom of a list silent rather than
-    /// a row of beeps. `Tab` is taken from the focus system on purpose.
+    /// a row of beeps.
     @Test("A key of ours alone is kept whatever it did",
-          arguments: ["r", "R", "c", "j", "k", "g", "?", tab] as [Character])
+          arguments: ["r", "R", "c", "j", "k", "g", "?"] as [Character])
     func ourOwnKeysAreAlwaysKept(character: Character) {
         #expect(pressing(character, did: false))
         #expect(pressing(character, did: true))
     }
 
     /// A picker is moved with the arrows and a button is pressed with `Return`; `Escape` is
-    /// how you leave what you are in. All four are the platform's before they are ours, so a
-    /// press that did nothing here goes back to it.
+    /// how you leave what you are in; and `Tab` is the focus key in every other app. All five
+    /// are the platform's before they are ours, so a press that did nothing here goes back
+    /// to it.
     @Test("A key the platform may want goes back where there was nothing to do",
-          arguments: [up, down, enter, escape] as [Character])
+          arguments: [up, down, enter, escape, tab] as [Character])
     func sharedKeysFollowWhatHappened(character: Character) {
         #expect(pressing(character, did: false) == false)
         #expect(pressing(character, did: true))
@@ -160,7 +161,7 @@ struct KeyOwnershipTests {
 @Suite("Steering the app from the keyboard")
 @MainActor
 struct CommandTests {
-    @Test("Tab goes round the four pages and comes back to where it started")
+    @Test("⌃Tab goes round the four pages and comes back to where it started")
     func pagesRotateForwards() {
         let app = freshApp("pages-forwards")
         app.railItem = .timeline
@@ -170,7 +171,7 @@ struct CommandTests {
         }
     }
 
-    @Test("⇧Tab goes the other way, and wraps at the beginning")
+    @Test("⌃⇧Tab goes the other way, and wraps at the beginning")
     func pagesRotateBackwards() {
         let app = freshApp("pages-backwards")
         app.railItem = .timeline
@@ -180,7 +181,7 @@ struct CommandTests {
         }
     }
 
-    @Test("⌃Tab goes round the tabs of the Timeline page, both ways, wrapping at both ends")
+    @Test("Tab goes round the tabs of the Timeline page, both ways, wrapping at both ends")
     func tabsRotate() {
         let app = freshApp("tabs-rotate")
         app.railItem = .timeline
@@ -197,7 +198,7 @@ struct CommandTests {
 
     /// The one place the answer matters: a `false` here is the shell letting the press
     /// through rather than swallowing a key that did nothing.
-    @Test("On a page with no tabs, ⌃Tab does nothing and says so", arguments: pagesWithoutTabs)
+    @Test("On a page with no tabs, Tab does nothing and says so", arguments: pagesWithoutTabs)
     func tabDoesNothingWithoutTabs(page: RailItem) {
         let app = freshApp("tab-without-tabs")
         app.railItem = page
@@ -242,17 +243,41 @@ struct CommandTests {
         #expect(app.perform(.refreshNow) == false)
     }
 
-    /// Handing a key we understand back to the platform is worse than swallowing it: the
-    /// focus system has its own use for ⌃Tab and would move the ring on a press that, one
-    /// page over, means something else entirely.
-    @Test("A key we understand is ours even when it had nothing to do", arguments: pagesWithoutTabs)
+    /// Handing a letter back to the platform is worse than swallowing it: AppKit would find
+    /// nobody who wanted a bare `r` and beep, on a page where the app itself says the key
+    /// does nothing.
+    @Test("A letter we understand is ours even when it had nothing to do",
+          arguments: pagesWithoutTabs)
     func recognisedKeysAreKept(page: RailItem) {
         let app = freshApp("recognised-keys-kept")
         app.railItem = page
-        #expect(app.perform(.nextTab) == false)
-        #expect(app.presses(tab, modifiers: .control))
+        #expect(app.perform(.refreshNow) == false)
         #expect(app.presses("r"))
         #expect(app.railItem == page)
+    }
+
+    /// The whole point of the bare key being the smaller move. Only the Timeline has tabs, so
+    /// on the other three `Tab` has nothing to do and goes back to AppKit — which is how the
+    /// pickers and buttons in Settings stay reachable without a pointer.
+    @Test("On a page with no tabs, Tab is handed back to the focus system",
+          arguments: pagesWithoutTabs)
+    func tabIsHandedBackWithoutTabs(page: RailItem) {
+        let app = freshApp("tab-handed-back")
+        app.railItem = page
+        #expect(app.presses(tab) == false)
+        #expect(app.presses(tab, modifiers: .shift) == false)
+        #expect(app.railItem == page)
+    }
+
+    /// There are always four pages, so ⌃Tab always has somewhere to go: it is kept on every
+    /// page, and the press AppKit would spend on window tabs never reaches it.
+    @Test("⌃Tab rotates the pages and is kept on every one of them",
+          arguments: RailItem.allCases, [EventModifiers.control, [.control, .shift]])
+    func controlTabIsAlwaysKept(page: RailItem, modifiers: EventModifiers) {
+        let app = freshApp("control-tab-kept")
+        app.railItem = page
+        #expect(app.presses(tab, modifiers: modifiers))
+        #expect(app.railItem != page)
     }
 
     @Test("Escape is the exception: with nothing in front of you it was never ours")
@@ -303,12 +328,14 @@ struct CommandTests {
         #expect(app.feedTab == .timeline)
     }
 
-    @Test("With no draft open, the same press moves the page")
+    @Test("With no draft open, the same press moves the tab and is kept")
     func tabMovesWhenNobodyIsTyping() {
         let app = freshApp("tab-moves")
         app.railItem = .timeline
+        app.feedTab = .timeline
         #expect(app.presses(tab))
-        #expect(app.railItem != .timeline)
+        #expect(app.feedTab == .trending)
+        #expect(app.railItem == .timeline)
     }
 
     /// A key that was never ours is handed back whether or not a draft is open — the door

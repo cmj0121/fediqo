@@ -331,9 +331,9 @@ public final class AppState {
 
     /// Does what a key or a menu item asked for, and says whether there was anything to do.
     ///
-    /// The answer matters for one key: ⌃Tab asks for the next tab, and a page with no
-    /// tabs has none to give — so this returns `false` and the shell lets the press through
-    /// rather than swallowing a key that did nothing.
+    /// The answer matters most for one key: `Tab` asks for the next tab, and a page with no
+    /// tabs has none to give — so this returns `false` and the shell hands the press back to
+    /// the focus system, which is what `Tab` is for everywhere else.
     @discardableResult
     func perform(_ command: KeyCommand) -> Bool {
         switch command {
