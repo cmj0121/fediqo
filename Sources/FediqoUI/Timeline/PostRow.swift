@@ -4,6 +4,9 @@ import FediqoCore
 /// One row. It can always say which server handed it over, and whether it is a boost.
 struct PostRow: View {
     let post: Post
+    /// Whether this is the row the reader is on. The row is told rather than asking: which
+    /// post the ring is on belongs to the feed, and a row knows nothing but itself.
+    var selected = false
 
     @Environment(\.openURL) private var openURL
 
@@ -47,6 +50,7 @@ struct PostRow: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .fediqoCard()
+        .fediqoFocusRing(selected)
         .contextMenu {
             if let url = post.webURL {
                 Button(t("timeline.open")) { openURL(url) }
@@ -55,7 +59,7 @@ struct PostRow: View {
     }
 
     private var media: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        ScrollView(.horizontal) {
             HStack(spacing: 6) {
                 ForEach(post.mediaURLs, id: \.self) { url in
                     RemoteImage(url: url, width: 132, height: 88)

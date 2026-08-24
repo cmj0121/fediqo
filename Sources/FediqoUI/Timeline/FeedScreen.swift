@@ -1,19 +1,23 @@
 import SwiftUI
 import FediqoCore
 
-/// The right-hand column. Timeline and Trending are the same screen in a different mode, and
-/// that is all they share: neither ever stands in for the other. A server that publishes no
-/// public timeline contributes nothing to the timeline and says why, rather than being
-/// quietly topped up with whatever else it was willing to hand over.
+/// The Timeline page, showing one of its two tabs. Public and Trending are the same screen
+/// in a different mode, and that is all they share: neither ever stands in for the other. A
+/// server that publishes no public timeline contributes nothing to the timeline and says
+/// why, rather than being quietly topped up with whatever else it was willing to hand over.
 ///
-/// Everything the screen needs follows from the mode, so there is nothing to pass that could
-/// disagree with it.
+/// `mode` says which feed is being read, and everything about the feed follows from it: its
+/// posts, the line describing it, and which of the header controls belong to it. What a feed
+/// cannot say is where it sits — so the heading, which names the page, and the list of tabs
+/// beside it both come from `app.railItem` instead. A tab does not know its own page.
 struct FeedScreen: View {
     let mode: FeedMode
 
     @Environment(AppState.self) private var app
-    @State private var addingSource = false
-    @State private var showingNotifications = false
+    /// Whether there is one column's worth of room here rather than two. The shell decides
+    /// it — it is the one place that knows what the platform will say — and this reads the
+    /// answer rather than asking the platform a second time.
+    @Environment(\.fediqoCompact) private var compact
     /// Whether the reader has gone far enough down that going back up is a journey. The
     /// button to do it in one move only exists while that is true — an arrow pointing at
     /// where you already are is a button that does nothing.
@@ -25,43 +29,67 @@ struct FeedScreen: View {
     private static let top = "feed.top"
 
     private var model: FeedModel { app.feed(for: mode) }
-    private var titleKey: String { "\(mode.rawValue).title" }
     private var subtitleKey: String { "\(mode.rawValue).subtitle" }
 
     /// Sources, filter and notifications belong to the timeline. Trending is a place you go
     /// to look, so it carries none of them.
     private var showsTimelineControls: Bool { mode == .timeline }
 
+    /// The sheets are still drawn here, over the screen they belong to. What moved is only
+    /// the fact of whether they are up: a menu item and a key have to be able to ask for
+    /// one from outside this screen, and a `@State` inside it can be reached by nothing.
     var body: some View {
-        ScrollViewReader { proxy in
+        @Bindable var app = app
+        return ScrollViewReader { proxy in
             VStack(spacing: 0) {
-                header(proxy)
+                header
                 Hairline()
-                body(for: model.visible(preferences: app.preferences))
+                body(for: model.visible)
+            }
+            // The ring is moved by a key, and a key can move it past the bottom of the
+            // screen — which is most of what holding `j` is for. Without an anchor the list
+            // brings it to the middle, so what you are reading has its own context above and
+            // below it rather than sitting against an edge with the next post already gone.
+            // Near either end there is not enough list to centre against and it settles for
+            // as close as it can get, which is what a reader at the top or bottom expects
+            // anyway.
+            //
+            // Only when the ring moves, so coming back to a tab does not scroll to the ring
+            // that tab still holds: the list is built again at the top, the way every other
+            // trip between pages and tabs already leaves it.
+            .onChange(of: model.selection) { _, key in
+                guard let key else { return }
+                proxy.scrollTo(key, anchor: .center)
+            }
+            // Back to the top, however it was asked for — the key or the button — and with
+            // no animation on the way: a reader a thousand posts down asked to be at the
+            // top, not to watch the thousand go past.
+            .onChange(of: model.topRequests) { _, _ in
+                proxy.scrollTo(Self.top, anchor: .top)
             }
         }
         .task(id: app.servers) { await model.loadIfNeeded(servers: app.servers) }
-        .sheet(isPresented: $addingSource) {
-            ServerPickerView(socialProtocol: .mastodon) { addingSource = false }
+        .sheet(isPresented: $app.addingSource) {
+            ServerPickerView(socialProtocol: .mastodon) { app.addingSource = false }
                 .fediqoChrome(app)
         }
-        .sheet(isPresented: $showingNotifications) {
-            NotificationsSheet { showingNotifications = false }
+        .sheet(isPresented: $app.showingNotifications) {
+            NotificationsSheet { app.showingNotifications = false }
                 .fediqoChrome(app)
         }
     }
 
     // MARK: - Header
 
-    private func header(_ proxy: ScrollViewProxy) -> some View {
+    private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(t(titleKey)).fediqoFont(20, weight: .semibold).lineLimit(1)
+                Text(t(app.railItem.titleKey)).fediqoFont(20, weight: .semibold).lineLimit(1)
                 if model.loading { ProgressView().controlSize(.small) }
                 Spacer(minLength: 4)
-                controls(proxy)
+                controls
             }
-            Text(t(subtitleKey)).fediqoFont(11).foregroundStyle(.secondary)
+            tabsAndSubtitle
         }
         .padding(.horizontal, 14)
         .padding(.top, 14)
@@ -69,21 +97,59 @@ struct FeedScreen: View {
         .background(HeaderBackground())
     }
 
+    /// Which tab is showing, and the line saying what that tab is.
+    ///
+    /// Given a window's width they sit on one line, the control no wider than its two words
+    /// need. A phone has no such width: the control there would take what it was given and
+    /// leave the description a couple of characters, so the two go one above the other and
+    /// the control spreads across the row, which is how a segmented control looks on iOS
+    /// anyway.
     @ViewBuilder
-    private func controls(_ proxy: ScrollViewProxy) -> some View {
+    private var tabsAndSubtitle: some View {
+        if compact {
+            tabs
+            subtitle
+        } else {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                tabs.fixedSize()
+                subtitle
+            }
+        }
+    }
+
+    /// The page's sub-categories, in the same segmented control the preferences use — one
+    /// row of named choices where exactly one is true, which is what this is. The two feeds
+    /// are the two tabs, in the order `FeedMode` lists them, which is the order the rest of
+    /// the app rotates through them in.
+    private var tabs: some View {
+        @Bindable var app = app
+        return SegmentedChoice(FeedMode.allCases, keyPrefix: "tab", selection: $app.feedTab)
+    }
+
+    /// Beside the control it is given whatever is left of the row, so it is held to two
+    /// lines rather than pushing the header down. On its own row it has the width to say the
+    /// whole sentence, and a sentence cut off mid-word reads as a fault rather than a note.
+    private var subtitle: some View {
+        Text(t(subtitleKey))
+            .fediqoFont(11)
+            .foregroundStyle(.secondary)
+            .lineLimit(compact ? nil : 2)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder
+    private var controls: some View {
         HStack(spacing: 2) {
-            // Back to the top in one move, and no animation on the way: a reader who has
-            // gone a thousand posts down asked to be at the top, not to watch the thousand
-            // go past. It lives with the other controls rather than floating over the posts,
-            // where the composer already is on the narrow layout.
+            // Back to the top in one move. It lives with the other controls rather than
+            // floating over the posts, where the composer already is on the narrow layout.
+            // It asks the app rather than scrolling the list itself, so that the button and
+            // `g` are one thing: both let the ring go, and both land in the same place.
             if scrolledAway {
-                IconButton(symbol: "arrow.up", labelKey: "timeline.top") {
-                    proxy.scrollTo(Self.top, anchor: .top)
-                }
-                .transition(.opacity)
+                IconButton(symbol: "arrow.up", labelKey: "timeline.top") { app.perform(.backToTop) }
+                    .transition(.opacity)
             }
             if showsTimelineControls {
-                IconButton(symbol: "bell", labelKey: "timeline.notifications") { showingNotifications = true }
+                IconButton(symbol: "bell", labelKey: "timeline.notifications") { app.showingNotifications = true }
                 filterMenu
                 sourcesMenu
             }
@@ -121,7 +187,7 @@ struct FeedScreen: View {
     private var sourcesMenu: some View {
         let failures = model.failures
         return Menu {
-            Button(t("timeline.addSource")) { addingSource = true }
+            Button(t("timeline.addSource")) { app.addingSource = true }
             Divider()
             ForEach(app.servers) { server in
                 Menu {
@@ -156,7 +222,13 @@ struct FeedScreen: View {
             ScrollView {
                 LazyVStack(spacing: 8) {
                     Color.clear.frame(height: 0).id(Self.top)
-                    ForEach(posts) { PostRow(post: $0) }
+                    // The id `ForEach` gives a row is the post's own `mergeKey`, and that is
+                    // what the selection is written in — so scrolling to the ring is
+                    // scrolling to that id, and there is no second identity to keep in step
+                    // with the first.
+                    ForEach(posts) { post in
+                        PostRow(post: post, selected: post.mergeKey == model.selection)
+                    }
                 }
                 .padding(12)
             }
@@ -165,7 +237,7 @@ struct FeedScreen: View {
             .onScrollGeometryChange(for: Bool.self) { geometry in
                 geometry.contentOffset.y > geometry.containerSize.height / 2
             } action: { _, away in
-                withAnimation(.easeOut(duration: 0.15)) { scrolledAway = away }
+                withAnimation(Motion.appearing) { scrolledAway = away }
             }
         }
     }
@@ -184,7 +256,7 @@ struct FeedScreen: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                 if showsTimelineControls {
-                    Button(t("timeline.addSource")) { addingSource = true }
+                    Button(t("timeline.addSource")) { app.addingSource = true }
                         .buttonStyle(.borderedProminent)
                         .tint(Palette.accent)
                         .fediqoFont(12)

@@ -7,9 +7,15 @@ import GRDB
 ///
 /// The raw values name the screens too, so a mode carries its own titles rather than having
 /// them handed to it.
-public enum FeedMode: String, Sendable {
+///
+/// Being two of a kind rather than two unrelated things, they are also the sub-categories —
+/// the tabs — of the one page that reads a feed, and `allCases` is the order they sit in:
+/// the public timeline first, because that is what the page is for, trending beside it.
+public enum FeedMode: String, Sendable, CaseIterable, Identifiable {
     case timeline
     case trending
+
+    public var id: String { rawValue }
 }
 
 /// Who asked for a load, which is the whole of what a backoff is for.

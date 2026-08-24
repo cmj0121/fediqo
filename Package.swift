@@ -34,5 +34,13 @@ let package = Package(
             dependencies: ["FediqoCore"],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
+        // The UI layer's own reasoning — which pages have which tabs, which feed a screen is
+        // reading, what the refreshing clock is keyed to, where a launch variable lands. No
+        // view is built here: these are the decisions taken before anything is drawn.
+        .testTarget(
+            name: "FediqoUITests",
+            dependencies: ["FediqoUI"],
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
     ]
 )

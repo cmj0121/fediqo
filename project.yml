@@ -63,6 +63,11 @@ targets:
     info:
       path: Apps/iOS/Info.plist
       properties:
+        # Without this, iOS runs the app in the compatibility mode it keeps for apps written
+        # before the modern screen sizes: letterboxed, scaled, with the tab bar floating
+        # somewhere above the bottom of the glass. An empty dictionary is the whole of what
+        # a SwiftUI app needs to say it was written for the screen it is on.
+        UILaunchScreen: {}
         CFBundleURLTypes:
           - CFBundleURLName: tw.cmj.fediqo
             CFBundleURLSchemes: [fediqo]

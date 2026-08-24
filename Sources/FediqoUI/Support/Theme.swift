@@ -62,6 +62,39 @@ enum Palette {
     static func hairline(_ scheme: ColorScheme) -> Color {
         scheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.08)
     }
+
+    /// The accent at the weight a mark needs to hold the page it is drawn on. The pale blue
+    /// was chosen against a dark surface and it reads there; on white it is a whisper, and a
+    /// mark saying where the reader is cannot be a whisper. Same hue either way — this is
+    /// still the accent, not a second colour with a second meaning.
+    static func focus(_ scheme: ColorScheme) -> Color {
+        scheme == .dark ? accent : Color(red: 0.13, green: 0.42, blue: 0.66)
+    }
+}
+
+/// How a thing in this app arrives and how it leaves: one short ease-out, so the composer,
+/// the written-down keys and the button back to the top are the same movement rather than
+/// three guesses at it.
+enum Motion {
+    static let appearing = Animation.easeOut(duration: 0.15)
+}
+
+// MARK: - The room the screen has
+
+/// A phone held upright, where a header has one column's worth of room and not two.
+///
+/// The shell is the one place that asks the platform how much room there is — a size class
+/// only exists on iOS — and every screen below it reads the answer here rather than working
+/// it out again from an environment value half of them cannot see.
+private struct CompactKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var fediqoCompact: Bool {
+        get { self[CompactKey.self] }
+        set { self[CompactKey.self] = newValue }
+    }
 }
 
 // MARK: - Chrome
@@ -110,13 +143,79 @@ private struct Pill: ViewModifier {
     }
 }
 
+/// Where the reader is, for somebody steering by the keys rather than with a pointer.
+///
+/// Two marks and only one of them is a colour. The accent traces the whole card, and a bar
+/// stands at its leading edge — and the bar is the one that does not ask anybody to tell
+/// blue from grey: it is either there or it is not, at any contrast, in either scheme, and
+/// on a screen showing a hundred cards it is the mark the eye finds first. That it is the
+/// accent and not orange or red is deliberate: those two already mean a server is unwell
+/// and a thing is about to be taken away, and where you are is neither a warning nor a
+/// threat. And the row says as much to a screen reader, which cannot see either mark.
+private struct FocusRing: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    let selected: Bool
+
+    private var ring: some View {
+        let colour = Palette.focus(colorScheme)
+        return RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .strokeBorder(colour, lineWidth: 2)
+            .overlay(alignment: .leading) {
+                Capsule()
+                    .fill(colour)
+                    .frame(width: 4)
+                    .padding(.vertical, 12)
+                    .padding(.leading, 6)
+            }
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .overlay { if selected { ring } }
+            .accessibilityAddTraits(selected ? [.isSelected] : [])
+    }
+}
+
 extension View {
     func fediqoCard(radius: CGFloat = 10, raised: Bool = true, shadow: Bool = false) -> some View {
         modifier(Card(radius: radius, raised: raised, shadow: shadow))
     }
 
+    func fediqoFocusRing(_ selected: Bool) -> some View {
+        modifier(FocusRing(selected: selected))
+    }
+
     func fediqoPill() -> some View {
         modifier(Pill())
+    }
+}
+
+/// One row of named choices where exactly one is true: the tabs of a page, and every
+/// appearance preference. Both are the same control over the same shape of enum — a case per
+/// segment, named by a string key derived from the case itself — so it is written once.
+///
+/// The options are handed in rather than taken from `allCases`, because a page's tabs are a
+/// list the page decides and a preference's choices are the whole enum.
+struct SegmentedChoice<Option>: View
+where Option: Identifiable & Hashable & RawRepresentable, Option.RawValue == String {
+    let options: [Option]
+    let keyPrefix: String
+    @Binding var selection: Option
+
+    init(_ options: [Option], keyPrefix: String, selection: Binding<Option>) {
+        self.options = options
+        self.keyPrefix = keyPrefix
+        self._selection = selection
+    }
+
+    var body: some View {
+        Picker("", selection: $selection) {
+            ForEach(options) { option in
+                Text(t("\(keyPrefix).\(option.rawValue)")).tag(option)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
     }
 }
 

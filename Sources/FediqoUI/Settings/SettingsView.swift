@@ -37,6 +37,10 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+
+                // The same list `?` puts up, in the one place a reader who has never
+                // pressed `?` would go looking. One view, so the two cannot drift apart.
+                section(t("shortcut.title")) { ShortcutList() }
             }
             .frame(maxWidth: 620, alignment: .leading)
             .padding(22)
@@ -47,19 +51,14 @@ struct SettingsView: View {
 
     // MARK: - Rows
 
-    /// Every appearance choice is the same row: a label, and one segment per case, named by
-    /// a string key derived from the case itself.
+    /// Every appearance choice is the same row: a label, and the control every choice in the
+    /// app is made with — here over the whole enum, since a preference has no case the
+    /// reader is not offered.
     private func choiceRow<T>(_ titleKey: String, keyPrefix: String, selection: Binding<T>) -> some View
-    where T: CaseIterable & Identifiable & Hashable & RawRepresentable, T.RawValue == String, T.AllCases: RandomAccessCollection {
+    where T: CaseIterable & Identifiable & Hashable & RawRepresentable, T.RawValue == String {
         LabeledContent {
-            Picker("", selection: selection) {
-                ForEach(T.allCases) { option in
-                    Text(t("\(keyPrefix).\(option.rawValue)")).tag(option)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
+            SegmentedChoice(Array(T.allCases), keyPrefix: keyPrefix, selection: selection)
+                .fixedSize()
         } label: {
             Text(t(titleKey)).fediqoFont(13)
         }
