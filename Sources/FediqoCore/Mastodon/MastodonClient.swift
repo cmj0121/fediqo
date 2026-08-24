@@ -103,24 +103,83 @@ public struct MastodonClient: SourceClient {
 /// One request, one status check. Shared so that everything asking a server for JSON tells
 /// refusal apart from breakage the same way.
 enum JSONTransport {
-    static func get(_ url: URL, on session: URLSession, timeout: TimeInterval = 15) async throws -> Data {
+    static func get(_ url: URL, on session: URLSession, authorization: String? = nil, timeout: TimeInterval = 15) async throws -> Data {
         var request = URLRequest(url: url)
         request.timeoutInterval = timeout
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let authorization {
+            request.setValue(authorization, forHTTPHeaderField: "Authorization")
+        }
 
+        let (data, status) = try await perform(request, on: session)
+        switch status {
+        case 200..<300:
+            return data
+        case 401, 403, 422:
+            // The endpoint is there and is refusing a stranger, which is a different
+            // thing from the server being broken and is worth saying differently.
+            throw SourceFailure.needsSignIn(url.host() ?? url.absoluteString)
+        default:
+            throw SourceFailure.http(status)
+        }
+    }
+
+    /// A form-encoded POST, as the OAuth endpoints expect. A refusal here is never
+    /// `needsSignIn` — the caller was in the middle of signing in, and the server said no
+    /// to the handshake itself — so it surfaces as `signInFailed`, with the server's reason.
+    static func postForm(_ url: URL, fields: [String: String], on session: URLSession, timeout: TimeInterval = 15) async throws -> Data {
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = timeout
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("application/x-www-form-urlencoded; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        request.httpBody = formEncode(fields)
+
+        let (data, status) = try await perform(request, on: session)
+        switch status {
+        case 200..<300:
+            return data
+        case 400, 401, 403, 422:
+            throw SourceFailure.signInFailed(refusalReason(in: data) ?? "The server answered \(status).")
+        default:
+            throw SourceFailure.http(status)
+        }
+    }
+
+    /// Sorted so the same fields make the same bytes, and escaped by hand: URLComponents
+    /// leaves `+` alone, which a form reader would take for a space.
+    static func formEncode(_ fields: [String: String]) -> Data {
+        let body = fields.sorted { $0.key < $1.key }
+            .map { "\(formEscape($0.key))=\(formEscape($0.value))" }
+            .joined(separator: "&")
+        return Data(body.utf8)
+    }
+
+    private static let formAllowed = CharacterSet(
+        charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+    )
+
+    private static func formEscape(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: formAllowed) ?? value
+    }
+
+    /// OAuth refusals arrive as `{"error": …, "error_description": …}`, either half optional.
+    private static func refusalReason(in data: Data) -> String? {
+        struct Refusal: Decodable {
+            let error: String?
+            let errorDescription: String?
+        }
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let refusal = try? decoder.decode(Refusal.self, from: data)
+        return refusal?.errorDescription ?? refusal?.error
+    }
+
+    private static func perform(_ request: URLRequest, on session: URLSession) async throws -> (Data, Int) {
         do {
             let (data, response) = try await session.data(for: request)
-            guard let http = response as? HTTPURLResponse else { return data }
-            switch http.statusCode {
-            case 200..<300:
-                return data
-            case 401, 403, 422:
-                // The endpoint is there and is refusing a stranger, which is a different
-                // thing from the server being broken and is worth saying differently.
-                throw SourceFailure.needsSignIn(url.host() ?? url.absoluteString)
-            default:
-                throw SourceFailure.http(http.statusCode)
-            }
+            guard let http = response as? HTTPURLResponse else { return (data, 200) }
+            return (data, http.statusCode)
         } catch let failure as SourceFailure {
             throw failure
         } catch {
