@@ -189,6 +189,23 @@
         }
       }
     },
+    "error.tokenRejected": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ has stopped accepting that sign-in — sign in again, or sign out. The posts below are what it shows a stranger."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 已不再接受這個登入，請重新登入或登出。下面的貼文是它給陌生人看的版本。"
+          }
+        }
+      }
+    },
     "error.unsupported": {
       "extractionState": "manual",
       "localizations": {

@@ -89,22 +89,7 @@ struct SettingsView: View {
             Text(t("settings.sources.empty")).fediqoFont(12).foregroundStyle(.secondary)
         } else {
             ForEach(app.servers) { server in
-                HStack(spacing: 8) {
-                    Image(systemName: server.socialProtocol.symbolName).foregroundStyle(.secondary).frame(width: 18)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(server.title).fediqoFont(13, weight: .medium).lineLimit(1)
-                        Text(server.host).fediqoFont(10).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    if let signIn = app.signIn, signIn.canSignIn(to: server) {
-                        accountControls(signIn, for: server)
-                    }
-                    Button(t("timeline.remove"), role: .destructive) { app.remove(server) }
-                        .buttonStyle(.plain)
-                        .fediqoFont(11)
-                        .foregroundStyle(.red)
-                }
-                .padding(.vertical, 3)
+                sourceRow(server)
             }
 
             if let failure = app.signIn?.failure {
@@ -126,18 +111,43 @@ struct SettingsView: View {
         }
     }
 
-    /// The signed-in state of one row: the handle and Sign out, or Sign in alone. The
-    /// browser session is handed to the model here because only a view can read it.
+    /// One server: what it is on the left, and on the right everything that can be done to
+    /// it, as icons in one group. Sign in and sign out are only there for a protocol this
+    /// build can sign in to — and only with a store behind them, since without one there is
+    /// no `signIn` at all. Stopping reading is always offered.
+    private func sourceRow(_ server: Server) -> some View {
+        let signIn = app.signIn.flatMap { $0.canSignIn(to: server) ? $0 : nil }
+        return HStack(spacing: 8) {
+            Image(systemName: server.socialProtocol.symbolName).foregroundStyle(.secondary).frame(width: 18)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(server.title).fediqoFont(13, weight: .medium).lineLimit(1)
+                Text(server.host).fediqoFont(10).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if let account = signIn?.account(on: server) {
+                Text(account.handle).fediqoFont(11).foregroundStyle(.secondary).lineLimit(1)
+            }
+            HStack(spacing: 0) {
+                if let signIn { accountControl(signIn, for: server) }
+                IconButton(symbol: "xmark.circle", labelKey: "timeline.remove", tint: .red) { app.remove(server) }
+            }
+        }
+        .padding(.vertical, 3)
+    }
+
+    /// The signed-in state of one row, as the single icon it is worth: sign out when there is
+    /// an account, sign in when there is not. The browser session is handed to the model here
+    /// because only a view can read it.
     @ViewBuilder
-    private func accountControls(_ signIn: SignInModel, for server: Server) -> some View {
-        if let account = signIn.account(on: server) {
-            Text(account.handle).fediqoFont(11).foregroundStyle(.secondary).lineLimit(1)
-            Button(t("settings.signOut")) { Task { await signIn.signOut(of: server) } }
-                .buttonStyle(.plain)
-                .fediqoFont(11)
-                .foregroundStyle(.secondary)
+    private func accountControl(_ signIn: SignInModel, for server: Server) -> some View {
+        if signIn.account(on: server) != nil {
+            IconButton(symbol: "rectangle.portrait.and.arrow.right", labelKey: "settings.signOut") {
+                Task { await signIn.signOut(of: server) }
+            }
         } else {
-            Button(t("settings.signIn")) {
+            // The system accent rather than `Palette.accent`: this glyph is drawn on the card
+            // itself, and the house blue is too pale against a light one to read.
+            IconButton(symbol: "person.crop.circle.badge.plus", labelKey: "settings.signIn", tint: .accentColor) {
                 let session = webSession
                 Task {
                     await signIn.signIn(to: server) { consent, scheme in
@@ -152,9 +162,6 @@ struct SettingsView: View {
                     }
                 }
             }
-            .buttonStyle(.plain)
-            .fediqoFont(11)
-            .foregroundStyle(.tint)
         }
     }
 

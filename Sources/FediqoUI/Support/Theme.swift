@@ -141,16 +141,22 @@ struct Hairline: View {
 struct IconButton: View {
     let symbol: String
     let labelKey: String
+    /// What the glyph is worth saying in: grey for the ordinary, the accent for the one
+    /// thing a row invites, red for the one that takes something away.
+    var tint: Color = .secondary
     var action: () -> Void
 
     var body: some View {
         Button(action: action) {
+            // The glyph stays 24pt; what a finger has to find is 44, which is Apple's
+            // minimum and the difference between signing out and dropping the server.
             Image(systemName: symbol)
                 .frame(width: 24, height: 24)
+                .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(tint)
         .help(t(labelKey))
         .accessibilityLabel(Text(t(labelKey)))
     }
