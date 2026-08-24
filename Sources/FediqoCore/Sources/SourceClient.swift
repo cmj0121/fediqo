@@ -13,7 +13,12 @@ public enum SourceFailure: Error, Sendable, Equatable, LocalizedError {
     case unsupported(SocialProtocol)
     /// The endpoint is there and is refusing a stranger. Most servers are this one.
     case needsSignIn(String)
-    case http(Int)
+    /// The sign-in handshake itself was refused — a spent code, a revoked app. A different
+    /// fact from `needsSignIn`, which is a stranger being turned away.
+    case signInFailed(String)
+    /// The server answered outside 2xx; the body rides along for whoever can read a
+    /// reason out of it.
+    case http(Int, Data)
     case transport(String)
     /// The posts arrived and are on the screen, but the local store would not keep them.
     case store(String)
@@ -25,7 +30,8 @@ public enum SourceFailure: Error, Sendable, Equatable, LocalizedError {
         case .notThatKind(let socialProtocol, let host): "\(host) did not answer as a \(socialProtocol.rawValue) server."
         case .unsupported(let socialProtocol): "\(socialProtocol.rawValue) is not spoken yet."
         case .needsSignIn(let host): "\(host) does not hand this over without signing in."
-        case .http(let code): "The server answered \(code)."
+        case .signInFailed(let reason): "Signing in failed: \(reason)"
+        case .http(let code, _): "The server answered \(code)."
         case .transport(let reason): reason
         case .store(let reason): "The local store could not keep what arrived: \(reason)"
         }
@@ -65,13 +71,18 @@ public struct InstanceInfo: Sendable, Hashable {
 /// not a screen — learns the name of a new one.
 public struct SourceRegistry: Sendable {
     private let clients: [SocialProtocol: any SourceClient]
+    private let authClients: [SocialProtocol: any AuthClient]
 
-    public init(clients: [SocialProtocol: any SourceClient]) {
+    public init(clients: [SocialProtocol: any SourceClient], authClients: [SocialProtocol: any AuthClient] = [:]) {
         self.clients = clients
+        self.authClients = authClients
     }
 
     public static func standard(session: URLSession = .shared) -> SourceRegistry {
-        SourceRegistry(clients: [.mastodon: MastodonClient(session: session)])
+        SourceRegistry(
+            clients: [.mastodon: MastodonClient(session: session)],
+            authClients: [.mastodon: MastodonAuthClient(session: session)]
+        )
     }
 
     /// The protocols a standard registry can read. What the picker greys out follows from
@@ -80,5 +91,11 @@ public struct SourceRegistry: Sendable {
 
     public func client(for socialProtocol: SocialProtocol) -> (any SourceClient)? {
         clients[socialProtocol]
+    }
+
+    /// Reading a protocol and signing in to it are separate abilities: a client can exist
+    /// without an auth client, and a screen greys out Sign in from this, not from a list.
+    public func authClient(for socialProtocol: SocialProtocol) -> (any AuthClient)? {
+        authClients[socialProtocol]
     }
 }

@@ -49,4 +49,12 @@ public struct Server: Codable, Sendable, Hashable, Identifiable {
         guard host.count >= 4, host.contains("."), !host.hasPrefix("."), !host.contains(" ") else { return false }
         return host.unicodeScalars.allSatisfy { hostCharacters.contains($0) }
     }
+
+    /// The one gate to the network: whatever was typed, normalised, or `badHost` where no
+    /// hostname could be read out of it. Every client builds its URLs through here.
+    public static func validated(_ raw: String) throws -> String {
+        let host = normalise(raw)
+        guard looksLikeHost(host) else { throw SourceFailure.badHost(raw) }
+        return host
+    }
 }

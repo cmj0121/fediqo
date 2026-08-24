@@ -41,14 +41,11 @@ public final class SQLiteServerStore: ServerStore {
     }
 
     /// Upserts the row the way the post path does and marks it chosen — once: a server already
-    /// chosen keeps its `selected_at` and its place. A title that is only the host (what
-    /// `Server.init` fills in when none was given) is not written, so a title the network
-    /// taught the row stays.
+    /// chosen keeps its `selected_at` and its place.
     private static func select(_ db: Database, _ server: Server) throws {
         let url = server.endpoint
         let ms = LocalStore.milliseconds(server.addedAt)
-        let title = server.title == server.host ? nil : server.title
-        try LocalStore.upsertServer(db, .init(url: url, proto: server.socialProtocol.storeProto, title: title), now: ms)
+        try LocalStore.upsertServer(db, LocalStore.serverRow(server), now: ms)
         try db.execute(sql: """
             UPDATE servers
             SET selected_at = ?, position = (SELECT coalesce(max(position), -1) + 1 FROM servers)

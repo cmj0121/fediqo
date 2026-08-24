@@ -1,9 +1,11 @@
+import AuthenticationServices
 import SwiftUI
 import FediqoCore
 
 /// The general preferences: how it looks, what language it speaks, and what it reads.
 struct SettingsView: View {
     @Environment(AppState.self) private var app
+    @Environment(\.webAuthenticationSession) private var webSession
     @State private var confirmingForget = false
 
     var body: some View {
@@ -38,6 +40,7 @@ struct SettingsView: View {
             .padding(22)
         }
         .frame(maxWidth: .infinity)
+        .task { await app.signIn?.refresh() }
     }
 
     // MARK: - Rows
@@ -93,12 +96,22 @@ struct SettingsView: View {
                         Text(server.host).fediqoFont(10).foregroundStyle(.secondary)
                     }
                     Spacer()
+                    if let signIn = app.signIn, signIn.canSignIn(to: server) {
+                        accountControls(signIn, for: server)
+                    }
                     Button(t("timeline.remove"), role: .destructive) { app.remove(server) }
                         .buttonStyle(.plain)
                         .fediqoFont(11)
                         .foregroundStyle(.red)
                 }
                 .padding(.vertical, 3)
+            }
+
+            if let failure = app.signIn?.failure {
+                Label(message(for: failure), systemImage: "exclamationmark.triangle")
+                    .fediqoFont(11)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Button(t("settings.sources.forget"), role: .destructive) { confirmingForget = true }
@@ -110,6 +123,38 @@ struct SettingsView: View {
                     Button(t("settings.sources.forget"), role: .destructive) { app.forgetAllServers() }
                     Button(t("common.cancel"), role: .cancel) {}
                 }
+        }
+    }
+
+    /// The signed-in state of one row: the handle and Sign out, or Sign in alone. The
+    /// browser session is handed to the model here because only a view can read it.
+    @ViewBuilder
+    private func accountControls(_ signIn: SignInModel, for server: Server) -> some View {
+        if let account = signIn.account(on: server) {
+            Text(account.handle).fediqoFont(11).foregroundStyle(.secondary).lineLimit(1)
+            Button(t("settings.signOut")) { Task { await signIn.signOut(of: server) } }
+                .buttonStyle(.plain)
+                .fediqoFont(11)
+                .foregroundStyle(.secondary)
+        } else {
+            Button(t("settings.signIn")) {
+                let session = webSession
+                Task {
+                    await signIn.signIn(to: server) { consent, scheme in
+                        do {
+                            return try await session.authenticate(using: consent, callbackURLScheme: scheme,
+                                                                  preferredBrowserSession: .shared)
+                        } catch let closed as ASWebAuthenticationSessionError where closed.code == .canceledLogin {
+                            // Closing the browser is a decision, not a failure — said here so
+                            // the model never has to speak AuthenticationServices.
+                            throw CancellationError()
+                        }
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            .fediqoFont(11)
+            .foregroundStyle(.tint)
         }
     }
 

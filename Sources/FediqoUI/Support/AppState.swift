@@ -72,6 +72,8 @@ struct LaunchOptions {
 public final class AppState {
     public let preferences: Preferences
     let serverStore: any ServerStore
+    /// Signing in needs the store to remember the fact; without one the buttons are absent.
+    let signIn: SignInModel?
 
     var route: Route
     var railItem: RailItem
@@ -98,6 +100,7 @@ public final class AppState {
         let servers = serverStore ?? store.map { SQLiteServerStore(store: $0) } ?? UserDefaultsServerStore()
         self.preferences = preferences
         self.serverStore = servers
+        self.signIn = store.map { SignInModel(store: $0) }
         self.feeds = [
             .timeline: FeedModel(mode: .timeline, loader: TimelineLoader(store: store)),
             .trending: FeedModel(mode: .trending, loader: TimelineLoader(store: store)),
@@ -126,15 +129,31 @@ public final class AppState {
     }
 
     func remove(_ server: Server) {
+        signOutInBackground([server])
         serverStore.remove(server)
         servers = serverStore.servers
         if servers.isEmpty { route = .protocolPicker }
     }
 
     func forgetAllServers() {
+        signOutInBackground(servers)
         serverStore.removeAll()
         servers = serverStore.servers
         route = .protocolPicker
+    }
+
+    /// Leaving a server signs its accounts out first (decision 8); the revoke is
+    /// best-effort (decision 6), so the list itself never waits on a server answering —
+    /// and each server's revoke is independent of the others, so they run concurrently.
+    private func signOutInBackground(_ leaving: [Server]) {
+        guard let signIn else { return }
+        Task {
+            await withTaskGroup(of: Void.self) { group in
+                for server in leaving {
+                    group.addTask { await signIn.signOut(of: server) }
+                }
+            }
+        }
     }
 
     func apply(language: AppLanguage) {

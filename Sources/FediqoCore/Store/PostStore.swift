@@ -181,7 +181,7 @@ extension LocalStore {
     }
 
     /// An `accounts` row as one refresh sees it. A booster arrives with a name only.
-    fileprivate struct AccountRow: Sendable {
+    struct AccountRow: Sendable {
         let id: String
         let proto: String
         let serverURL: String?
@@ -218,6 +218,14 @@ extension LocalStore {
         return (servers, accounts)
     }
 
+    /// The row a chosen or signed-in server writes. A title that is only the host (what
+    /// `Server.init` fills in when none was given) is no title, and must not blank one the
+    /// network taught the row.
+    static func serverRow(_ server: Server) -> ServerRow {
+        ServerRow(url: server.endpoint, proto: server.socialProtocol.storeProto,
+                  title: server.title == server.host ? nil : server.title)
+    }
+
     /// `updated_at = CASE …`: it moves only when something actually changed, and `unchanged`
     /// says — in terms of the row and `excluded` — when nothing did.
     private static func touchClause(unchanged: String) -> String {
@@ -235,7 +243,7 @@ extension LocalStore {
             """, arguments: [server.url, host(of: server.url), server.proto, server.title, now])
     }
 
-    private static func upsertAccount(_ db: Database, _ account: AccountRow, now: Int64) throws {
+    static func upsertAccount(_ db: Database, _ account: AccountRow, now: Int64) throws {
         // A NULL never erases what a fuller sighting wrote.
         try db.execute(sql: """
             INSERT INTO accounts (author_id, proto, server_url, handle, display_name, avatar_url, created_at)
