@@ -14,6 +14,15 @@ struct FeedScreen: View {
     @Environment(AppState.self) private var app
     @State private var addingSource = false
     @State private var showingNotifications = false
+    /// Whether the reader has gone far enough down that going back up is a journey. The
+    /// button to do it in one move only exists while that is true — an arrow pointing at
+    /// where you already are is a button that does nothing.
+    @State private var scrolledAway = false
+
+    /// The nothing at the top of the list, so there is something to scroll back to. The
+    /// first post cannot serve: it is replaced by every refresh, and the padding above it
+    /// would be left off the top of the screen.
+    private static let top = "feed.top"
 
     private var model: FeedModel { app.feed(for: mode) }
     private var titleKey: String { "\(mode.rawValue).title" }
@@ -24,10 +33,12 @@ struct FeedScreen: View {
     private var showsTimelineControls: Bool { mode == .timeline }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Hairline()
-            body(for: model.visible(preferences: app.preferences))
+        ScrollViewReader { proxy in
+            VStack(spacing: 0) {
+                header(proxy)
+                Hairline()
+                body(for: model.visible(preferences: app.preferences))
+            }
         }
         .task(id: app.servers) { await model.loadIfNeeded(servers: app.servers) }
         .sheet(isPresented: $addingSource) {
@@ -42,13 +53,13 @@ struct FeedScreen: View {
 
     // MARK: - Header
 
-    private var header: some View {
+    private func header(_ proxy: ScrollViewProxy) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(t(titleKey)).fediqoFont(20, weight: .semibold).lineLimit(1)
                 if model.loading { ProgressView().controlSize(.small) }
                 Spacer(minLength: 4)
-                controls
+                controls(proxy)
             }
             Text(t(subtitleKey)).fediqoFont(11).foregroundStyle(.secondary)
         }
@@ -59,8 +70,18 @@ struct FeedScreen: View {
     }
 
     @ViewBuilder
-    private var controls: some View {
+    private func controls(_ proxy: ScrollViewProxy) -> some View {
         HStack(spacing: 2) {
+            // Back to the top in one move, and no animation on the way: a reader who has
+            // gone a thousand posts down asked to be at the top, not to watch the thousand
+            // go past. It lives with the other controls rather than floating over the posts,
+            // where the composer already is on the narrow layout.
+            if scrolledAway {
+                IconButton(symbol: "arrow.up", labelKey: "timeline.top") {
+                    proxy.scrollTo(Self.top, anchor: .top)
+                }
+                .transition(.opacity)
+            }
             if showsTimelineControls {
                 IconButton(symbol: "bell", labelKey: "timeline.notifications") { showingNotifications = true }
                 filterMenu
@@ -134,9 +155,17 @@ struct FeedScreen: View {
         } else {
             ScrollView {
                 LazyVStack(spacing: 8) {
+                    Color.clear.frame(height: 0).id(Self.top)
                     ForEach(posts) { PostRow(post: $0) }
                 }
                 .padding(12)
+            }
+            // Half a screen, rather than a number of points: what counts as far enough to
+            // want a way back depends on how much of the list you can see at once.
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.contentOffset.y > geometry.containerSize.height / 2
+            } action: { _, away in
+                withAnimation(.easeOut(duration: 0.15)) { scrolledAway = away }
             }
         }
     }
