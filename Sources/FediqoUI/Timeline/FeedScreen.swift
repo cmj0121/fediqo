@@ -1,17 +1,22 @@
 import SwiftUI
 import FediqoCore
 
-/// The right-hand column. Timeline and Trending are the same screen in a different mode, and
-/// that is all they share: neither ever stands in for the other. A server that publishes no
-/// public timeline contributes nothing to the timeline and says why, rather than being
-/// quietly topped up with whatever else it was willing to hand over.
+/// The Timeline page, showing one of its two tabs. Public and Trending are the same screen
+/// in a different mode, and that is all they share: neither ever stands in for the other. A
+/// server that publishes no public timeline contributes nothing to the timeline and says
+/// why, rather than being quietly topped up with whatever else it was willing to hand over.
 ///
-/// Everything the screen needs follows from the mode, so there is nothing to pass that could
-/// disagree with it.
+/// `mode` says which feed is being read, and everything about the feed follows from it: its
+/// posts, the line describing it, and which of the header controls belong to it. What a feed
+/// cannot say is where it sits — so the heading, which names the page, and the list of tabs
+/// beside it both come from `app.railItem` instead. A tab does not know its own page.
 struct FeedScreen: View {
     let mode: FeedMode
 
     @Environment(AppState.self) private var app
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    #endif
     @State private var addingSource = false
     @State private var showingNotifications = false
     /// Whether the reader has gone far enough down that going back up is a journey. The
@@ -25,8 +30,16 @@ struct FeedScreen: View {
     private static let top = "feed.top"
 
     private var model: FeedModel { app.feed(for: mode) }
-    private var titleKey: String { "\(mode.rawValue).title" }
     private var subtitleKey: String { "\(mode.rawValue).subtitle" }
+
+    /// A phone held upright, where the header has one column's worth of room and not two.
+    private var compact: Bool {
+        #if os(iOS)
+        sizeClass == .compact
+        #else
+        false
+        #endif
+    }
 
     /// Sources, filter and notifications belong to the timeline. Trending is a place you go
     /// to look, so it carries none of them.
@@ -56,17 +69,63 @@ struct FeedScreen: View {
     private func header(_ proxy: ScrollViewProxy) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(t(titleKey)).fediqoFont(20, weight: .semibold).lineLimit(1)
+                Text(t(app.railItem.titleKey)).fediqoFont(20, weight: .semibold).lineLimit(1)
                 if model.loading { ProgressView().controlSize(.small) }
                 Spacer(minLength: 4)
                 controls(proxy)
             }
-            Text(t(subtitleKey)).fediqoFont(11).foregroundStyle(.secondary)
+            tabsAndSubtitle
         }
         .padding(.horizontal, 14)
         .padding(.top, 14)
         .padding(.bottom, 10)
         .background(HeaderBackground())
+    }
+
+    /// Which tab is showing, and the line saying what that tab is.
+    ///
+    /// Given a window's width they sit on one line, the control no wider than its two words
+    /// need. A phone has no such width: the control there would take what it was given and
+    /// leave the description a couple of characters, so the two go one above the other and
+    /// the control spreads across the row, which is how a segmented control looks on iOS
+    /// anyway.
+    @ViewBuilder
+    private var tabsAndSubtitle: some View {
+        if compact {
+            tabs
+            subtitle
+        } else {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                tabs.fixedSize()
+                subtitle
+            }
+        }
+    }
+
+    /// The page's sub-categories, in the same segmented control the preferences use — one
+    /// row of named choices where exactly one is true, which is what this is. It asks the
+    /// page which tabs it has rather than naming them, so there is one list of them and it
+    /// is the one the rest of the app steers by.
+    private var tabs: some View {
+        @Bindable var app = app
+        return Picker("", selection: $app.feedTab) {
+            ForEach(app.railItem.tabs) { tab in
+                Text(t("tab.\(tab.rawValue)")).tag(tab)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+    }
+
+    /// Beside the control it is given whatever is left of the row, so it is held to two
+    /// lines rather than pushing the header down. On its own row it has the width to say the
+    /// whole sentence, and a sentence cut off mid-word reads as a fault rather than a note.
+    private var subtitle: some View {
+        Text(t(subtitleKey))
+            .fediqoFont(11)
+            .foregroundStyle(.secondary)
+            .lineLimit(compact ? nil : 2)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     @ViewBuilder

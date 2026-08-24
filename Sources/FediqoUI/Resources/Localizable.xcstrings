@@ -801,23 +801,6 @@
         }
       }
     },
-    "rail.trending": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Trending"
-          }
-        },
-        "zh-TW": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "熱門"
-          }
-        }
-      }
-    },
     "settings.appearance": {
       "extractionState": "manual",
       "localizations": {
@@ -1719,6 +1702,40 @@
         }
       }
     },
+    "tab.timeline": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Public"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "公開"
+          }
+        }
+      }
+    },
+    "tab.trending": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Trending"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "熱門"
+          }
+        }
+      }
+    },
     "timeline.addSource": {
       "extractionState": "manual",
       "localizations": {
@@ -2025,23 +2042,6 @@
         }
       }
     },
-    "timeline.title": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Timeline"
-          }
-        },
-        "zh-TW": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "時間軸"
-          }
-        }
-      }
-    },
     "timeline.via": {
       "extractionState": "manual",
       "localizations": {
@@ -2072,23 +2072,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "各伺服器自己標示的熱門內容。這是你自己走過來的地方，不是被重新排列的時間軸。"
-          }
-        }
-      }
-    },
-    "trending.title": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Trending"
-          }
-        },
-        "zh-TW": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "熱門"
           }
         }
       }

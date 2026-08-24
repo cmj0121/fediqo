@@ -17,7 +17,10 @@ final class FeedModel {
     /// moment the server answers one that did, or stops being one of ours.
     private(set) var failures: [String: SourceFailure] = [:]
     private(set) var loading = false
-    private var loadedFor: [String] = []
+    /// The servers the last load asked, by `Server.id`, sorted — and `nil` until there has
+    /// been one. An empty list is an answer rather than the absence of one: an app with no
+    /// sources loads nothing, and that load counts, so "never asked" needs its own value.
+    private var loadedFor: [String]?
 
     private let loader: TimelineLoader
 
@@ -31,16 +34,20 @@ final class FeedModel {
         self.loader = loader
     }
 
-    /// Reloads only when the set of servers actually changed, so switching rails does not
-    /// re-ask every server every time. Before the first load, what the store holds is shown
-    /// before any server is asked; a store that cannot be read is simply skipped on the way there.
+    /// Reloads only when the set of servers actually changed, so leaving this feed and
+    /// coming back to it — another tab, another page — does not re-ask every server every
+    /// time. What decides is whether the servers differ from the ones the last load asked,
+    /// never whether that load found anything: a feed that legitimately came back empty has
+    /// still been read, and asking again on every visit would punish the quiet server rather
+    /// than the changed one. Before the first load, what the store holds is shown before any
+    /// server is asked; a store that cannot be read is simply skipped on the way there.
     func loadIfNeeded(servers: [Server]) async {
-        if loadedFor.isEmpty, result.isEmpty,
+        if loadedFor == nil, result.isEmpty,
            let stored = try? await loader.stored(mode: mode), !stored.isEmpty {
             result = TimelineResult(posts: stored, failures: [:])
         }
         let signature = servers.map(\.id).sorted()
-        guard signature != loadedFor || result.isEmpty else { return }
+        guard signature != loadedFor else { return }
         await load(servers: servers)
     }
 

@@ -21,10 +21,11 @@ struct AppShell: View {
     }
 
     var body: some View {
-        // One clock for the whole shell, keyed to the page being read and how often it is to
-        // be read. `.task(id:)` cancels the old one and starts the new one on every change,
-        // and cancels it altogether when the shell goes away — so there is never a second
-        // one, and never one left running for a page nobody is looking at.
+        // One clock for the whole shell, keyed to the feed being read — the page, and the
+        // tab within it — and how often it is to be read. `.task(id:)` cancels the old one
+        // and starts the new one on every change, and cancels it altogether when the shell
+        // goes away — so there is never a second one, and never one left running for a feed
+        // nobody is looking at.
         layout.task(id: app.refreshKey) { await app.refreshWhileVisible() }
     }
 
@@ -96,8 +97,18 @@ struct AppShell: View {
     @ViewBuilder
     private func view(for item: RailItem) -> some View {
         switch item {
-        case .timeline: FeedScreen(mode: .timeline)
-        case .trending: FeedScreen(mode: .trending)
+        // A tab is its own screen, not the same screen handed different posts: the identity
+        // is the tab's, so neither feed inherits the other's scroll position or its open
+        // menus. What outlives the swap is what should — the two `FeedModel`s, which the app
+        // holds rather than the screen, so nothing is re-asked and nothing is thrown away.
+        //
+        // The price is paid in both directions, and it is the price we chose. Going back to
+        // a tab builds it afresh: its `.task` runs again — which asks the model nothing it
+        // has already been asked — and the scroll position and any open sheet are gone.
+        // Remembering where each tab was left is not something anybody asked for, and it
+        // would cost the clean swap above; if it is ever wanted, it is state to hold beside
+        // the feeds rather than a reason to drop this `.id`.
+        case .timeline: FeedScreen(mode: app.feedTab).id(app.feedTab)
         case .kept: KeptView()
         case .statistics: StatisticsView()
         case .settings: SettingsView()

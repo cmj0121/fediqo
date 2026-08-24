@@ -9,11 +9,14 @@ enum Route: Hashable {
     case shell
 }
 
-/// The places the action bar can take you. New Post is not among them: composing is
-/// something you do from wherever you already are, so it is the last button on the bar
-/// rather than one of its destinations.
+/// A page: one of the main categories, and the places the action bar can take you. New Post
+/// is not among them: composing is something you do from wherever you already are, so it is
+/// the last button on the bar rather than one of its destinations.
+///
+/// Trending is not here. It was never a category of its own — it is another timeline, so it
+/// is a tab inside the Timeline page rather than a fifth thing in the rail.
 enum RailItem: String, CaseIterable, Identifiable, Hashable {
-    case timeline, trending, kept, statistics, settings
+    case timeline, kept, statistics, settings
 
     var id: String { rawValue }
 
@@ -22,32 +25,42 @@ enum RailItem: String, CaseIterable, Identifiable, Hashable {
     var symbolName: String {
         switch self {
         case .timeline: "list.bullet.rectangle"
-        case .trending: "chart.line.uptrend.xyaxis"
         case .kept: "bookmark"
-        // The rising line is Trending's, and it means "what is happening out there". This
-        // screen is the other kind of chart: bars of what is already here.
+        // The rising line belongs to the Trending tab, and it means "what is happening out
+        // there". This page is the other kind of chart: bars of what is already here.
         case .statistics: "chart.bar.xaxis"
         case .settings: "gearshape"
         }
     }
 
-    /// Which feed is on this page, where there is one. Kept reads the store, Statistics reads
-    /// the store and the ledger, and Settings reads nobody, so none of the three is a page a
-    /// clock has anything to refresh.
-    var feedMode: FeedMode? {
+    /// The sub-categories inside this page, in the order the reader meets them. Only the
+    /// Timeline page has any, and its two are the two feeds themselves — `FeedMode` already
+    /// says which stream is being asked for, so a tab is one of those rather than a second
+    /// enum saying the same thing beside it.
+    ///
+    /// So the type says more than the concept does: a tab is a sub-category, and it is only
+    /// because the one page that has tabs divides itself by feed that `[FeedMode]` can stand
+    /// for the list. A page whose tabs are not feeds would need a wider type — and there is
+    /// no such page, so there is no such type until there is.
+    ///
+    /// Kept reads the store, Statistics reads the store and the ledger, and Settings reads
+    /// nobody: one screen each, and no feed on any of them.
+    var tabs: [FeedMode] {
         switch self {
-        case .timeline: .timeline
-        case .trending: .trending
-        case .kept, .statistics, .settings: nil
+        case .timeline: FeedMode.allCases
+        case .kept, .statistics, .settings: []
         }
     }
 }
 
-/// What the refreshing clock is keyed to: the page it is refreshing and how often. Change
-/// either and the old clock is thrown away and a new one started, which is the whole of how
-/// the refresh follows the reader and how turning it off stops it.
+/// What the refreshing clock is keyed to: the feed being read, on the page it is being read
+/// on, and how often. Change any of the three and the old clock is thrown away and a new one
+/// started, which is the whole of how the refresh follows the reader and how turning it off
+/// stops it. `tab` is `nil` on a page with no feed, so choosing a tab you cannot see — from
+/// the Settings page, say — does not disturb a clock that is not running anyway.
 struct RefreshKey: Hashable {
     var page: RailItem
+    var tab: FeedMode?
     var interval: RefreshInterval
 }
 
@@ -60,6 +73,7 @@ struct RefreshKey: Hashable {
 struct LaunchOptions {
     var route: Route?
     var railItem: RailItem?
+    var feedTab: FeedMode?
     var composing = false
     /// Whether the landing screen should sit still instead of handing over on its own.
     var holdsLanding = false
@@ -78,7 +92,16 @@ struct LaunchOptions {
         case "shell": options.route = .shell
         default: break
         }
-        options.railItem = environment["FEDIQO_RAIL"].flatMap(RailItem.init(rawValue:))
+        // `trending` no longer names a page, but it is what everything that opens this app at
+        // a screen — the screenshot workflow above all — already asks for, and it still names
+        // exactly one thing to look at. So it keeps working, and means the Timeline page on
+        // its Trending tab. There is no second variable: one name, one screen.
+        if environment["FEDIQO_RAIL"] == FeedMode.trending.rawValue {
+            options.railItem = .timeline
+            options.feedTab = .trending
+        } else {
+            options.railItem = environment["FEDIQO_RAIL"].flatMap(RailItem.init(rawValue:))
+        }
         options.composing = environment["FEDIQO_COMPOSE"] == "1"
         return options
         #else
@@ -103,6 +126,11 @@ public final class AppState {
 
     var route: Route
     var railItem: RailItem
+    /// Which tab of the Timeline page is showing. It lives here rather than in the screen so
+    /// that leaving the page and coming back returns you to the feed you were reading, the
+    /// same way `railItem` remembers the page — and, like the page, it is remembered for as
+    /// long as the app is open rather than written down for the next launch.
+    var feedTab: FeedMode
     /// Whether the composer is open. It belongs here rather than to the bar because the
     /// panel is drawn by the shell, over everything, and the bar only asks for it.
     var composing: Bool
@@ -144,6 +172,7 @@ public final class AppState {
         self.servers = servers.servers
         self.route = launch.route ?? .landing
         self.railItem = launch.railItem ?? .timeline
+        self.feedTab = launch.feedTab ?? .timeline
         self.composing = launch.composing
         self.holdsLanding = launch.holdsLanding
         L10n.use(preferences.language)
@@ -174,20 +203,29 @@ public final class AppState {
         feeds[mode]!
     }
 
-    var refreshKey: RefreshKey { RefreshKey(page: railItem, interval: preferences.refreshInterval) }
+    /// The feed the reader is actually looking at: the visible tab of the visible page, and
+    /// nothing at all on a page that has no tabs. Everything that asks "which feed is this"
+    /// asks here, so the answer cannot be the page's and the tab's at once.
+    var feedMode: FeedMode? {
+        railItem.tabs.contains(feedTab) ? feedTab : nil
+    }
+
+    var refreshKey: RefreshKey {
+        RefreshKey(page: railItem, tab: feedMode, interval: preferences.refreshInterval)
+    }
 
     /// Reads the page you are looking at again, every so often, for as long as it is the
     /// page you are looking at. Fediqo is a guest on other people's machines: a timeline
     /// nobody is watching costs nobody's server anything, so this refreshes one feed and no
     /// other, and stops the moment the reader goes somewhere else.
     ///
-    /// The shell holds it in a `.task` keyed to the page and the interval, so changing
-    /// either cancels this and starts the next — there is only ever one, and none at all on
-    /// a page without a feed or with the clock turned off. It sleeps before it does
-    /// anything, so the screen's own first load always goes first.
+    /// The shell holds it in a `.task` keyed to the page, the tab and the interval, so
+    /// changing any of them cancels this and starts the next — there is only ever one, and
+    /// none at all on a page without a feed or with the clock turned off. It sleeps before it
+    /// does anything, so the screen's own first load always goes first.
     func refreshWhileVisible() async {
         guard let interval = preferences.refreshInterval.duration,
-              let mode = railItem.feedMode else { return }
+              let mode = feedMode else { return }
         let feed = feed(for: mode)
         while !Task.isCancelled {
             do {
