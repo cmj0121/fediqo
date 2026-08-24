@@ -767,6 +767,23 @@
         }
       }
     },
+    "rail.statistics": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Statistics"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "統計"
+          }
+        }
+      }
+    },
     "rail.timeline": {
       "extractionState": "manual",
       "localizations": {
@@ -882,6 +899,108 @@
           "stringUnit": {
             "state": "translated",
             "value": "Fediqo 沒有伺服器。這些畫面上的一切都在這台裝置上發生；唯一送往你沒選過的地方的請求，是伺服器挑選頁上的建議清單。"
+          }
+        }
+      }
+    },
+    "settings.refresh": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refresh"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自動更新"
+          }
+        }
+      }
+    },
+    "settings.refresh.off": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Off"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "關閉"
+          }
+        }
+      }
+    },
+    "settings.refresh.seconds15": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "15s"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "15 秒"
+          }
+        }
+      }
+    },
+    "settings.refresh.seconds30": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "30s"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "30 秒"
+          }
+        }
+      }
+    },
+    "settings.refresh.seconds300": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "5 min"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "5 分鐘"
+          }
+        }
+      }
+    },
+    "settings.refresh.seconds60": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "60s"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "60 秒"
           }
         }
       }
@@ -1171,6 +1290,431 @@
           "stringUnit": {
             "state": "translated",
             "value": "設定"
+          }
+        }
+      }
+    },
+    "stats.counting": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Counting"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "計數起點"
+          }
+        }
+      }
+    },
+    "stats.counting.note": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Request counts are kept in memory only and start again with the app, so that what we take from somebody else's server never becomes a record of it. Nothing above goes further back than the moment named here."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "請求次數只存在記憶體裡，程式重開就重新算起——我們向別人的伺服器要了什麼，不該變成一份留存的紀錄。上面的數字都不會早於這裡寫的時刻。"
+          }
+        }
+      }
+    },
+    "stats.counting.since": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Counting since"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自何時起算"
+          }
+        }
+      }
+    },
+    "stats.disk": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disk"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "磁碟空間"
+          }
+        }
+      }
+    },
+    "stats.disk.bySource": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Split by source (estimated)"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "各來源估計佔比"
+          }
+        }
+      }
+    },
+    "stats.disk.empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing stored yet, so there is nothing to split."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "還沒存下任何東西，沒有可分的份量。"
+          }
+        }
+      }
+    },
+    "stats.disk.estimate": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "An estimate, not a measurement. SQLite keeps one file, not one per server, and files nothing by who sent it — so the file is divided in the same proportion as the text each source's posts carry. Indexes and search data belong to no one source and are simply carried by whoever brought the most."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這是估計值，不是量出來的。SQLite 只有一個檔案，不會按來源分開，也沒有記錄誰送來哪一段——所以是依各來源貼文所帶的文字份量，照同樣的比例去分這個檔案。索引與搜尋資料不屬於任何單一來源，只是被份量最重的那個一併扛著。"
+          }
+        }
+      }
+    },
+    "stats.disk.total": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This store on disk"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本機資料庫佔用"
+          }
+        }
+      }
+    },
+    "stats.failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The store could not be read."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法讀取本機資料庫。"
+          }
+        }
+      }
+    },
+    "stats.noStore": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This build is running without a local store, so there is nothing kept to count."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這次執行沒有本機資料庫，因此沒有存下任何可計數的東西。"
+          }
+        }
+      }
+    },
+    "stats.requests": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Requests"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "對外請求"
+          }
+        }
+      }
+    },
+    "stats.requests.answered": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Answered"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "回應成功"
+          }
+        }
+      }
+    },
+    "stats.requests.calls": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Calls"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "次數"
+          }
+        }
+      }
+    },
+    "stats.requests.mine": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your servers"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你的伺服器"
+          }
+        }
+      }
+    },
+    "stats.requests.none": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nobody has been asked anything yet."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "還沒有向任何人請求過。"
+          }
+        }
+      }
+    },
+    "stats.requests.note": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Counted one request at a time, not one server at a time: a token turned down and the page then read as a stranger is two requests here, one of them failed — and one timeline that loaded fine. A failure counted here is not a source the timeline could not show."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這裡是一筆請求算一筆，不是一台伺服器算一筆：憑證被拒、接著以陌生人身分再讀一次，在這裡是兩筆請求、其中一筆失敗——而時間軸其實好好地讀出來了。這裡算到的失敗，不等於時間軸讀不到的來源。"
+          }
+        }
+      }
+    },
+    "stats.requests.others": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Other addresses we asked"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "其他被詢問過的位址"
+          }
+        }
+      }
+    },
+    "stats.requests.others.note": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Machines this app spoke to on your behalf but you never added: the suggested-server directory, and hostnames typed into the picker and left there. They are not sources you chose, and they hand over nothing you keep."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這些是本程式代你詢問過、但你並沒有加入的機器：建議伺服器名錄，以及在挑選畫面輸入後又沒留下的主機名稱。它們不是你選的來源，也沒有交出任何被留下來的東西。"
+          }
+        }
+      }
+    },
+    "stats.requests.perMinute": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Per minute"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每分鐘"
+          }
+        }
+      }
+    },
+    "stats.requests.source": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Address"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "位址"
+          }
+        }
+      }
+    },
+    "stats.requests.window": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Per minute is averaged over the last %d minutes. Everything else here is the whole of this count."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「每分鐘」是最近 %d 分鐘的平均；其餘數字都是這次計數的全部。"
+          }
+        }
+      }
+    },
+    "stats.stored": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stored"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已存下的"
+          }
+        }
+      }
+    },
+    "stats.stored.oldest": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oldest post"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最舊的一則"
+          }
+        }
+      }
+    },
+    "stats.stored.posts": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Posts"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "貼文則數"
+          }
+        }
+      }
+    },
+    "stats.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Statistics"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "統計"
           }
         }
       }

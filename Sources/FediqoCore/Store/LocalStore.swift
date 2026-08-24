@@ -15,6 +15,11 @@ public final class LocalStore: Sendable {
 
     private let queue: DatabaseQueue
 
+    /// Where the database is, as it was opened. Kept because a file has a size and the
+    /// statistics screen asks for it; `:memory:` for a store that has no file, which
+    /// `FileManager` reads as "not there" without anyone having to test for it.
+    let path: String
+
     /// Opens (and migrates) the database at `path`, creating it on first use.
     public convenience init(path: String) throws {
         let queue = try DatabaseQueue(path: path, configuration: Self.configuration())
@@ -31,6 +36,7 @@ public final class LocalStore: Sendable {
 
     private init(queue: DatabaseQueue, path: String) throws {
         self.queue = queue
+        self.path = path
         let migrated = try Self.migrate(queue)
         Self.log.info("opened \(path, privacy: .public), migrations run: \(migrated, privacy: .public)")
     }
@@ -39,6 +45,7 @@ public final class LocalStore: Sendable {
     /// upgrade test can build the store an older app left behind before reopening it here.
     init(path: String, upTo version: String) throws {
         self.queue = try DatabaseQueue(path: path, configuration: Self.configuration())
+        self.path = path
         try Self.migrator().migrate(queue, upTo: version)
     }
 

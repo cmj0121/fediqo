@@ -13,7 +13,7 @@ enum Route: Hashable {
 /// something you do from wherever you already are, so it is the last button on the bar
 /// rather than one of its destinations.
 enum RailItem: String, CaseIterable, Identifiable, Hashable {
-    case timeline, trending, kept, settings
+    case timeline, trending, kept, statistics, settings
 
     var id: String { rawValue }
 
@@ -24,9 +24,31 @@ enum RailItem: String, CaseIterable, Identifiable, Hashable {
         case .timeline: "list.bullet.rectangle"
         case .trending: "chart.line.uptrend.xyaxis"
         case .kept: "bookmark"
+        // The rising line is Trending's, and it means "what is happening out there". This
+        // screen is the other kind of chart: bars of what is already here.
+        case .statistics: "chart.bar.xaxis"
         case .settings: "gearshape"
         }
     }
+
+    /// Which feed is on this page, where there is one. Kept reads the store, Statistics reads
+    /// the store and the ledger, and Settings reads nobody, so none of the three is a page a
+    /// clock has anything to refresh.
+    var feedMode: FeedMode? {
+        switch self {
+        case .timeline: .timeline
+        case .trending: .trending
+        case .kept, .statistics, .settings: nil
+        }
+    }
+}
+
+/// What the refreshing clock is keyed to: the page it is refreshing and how often. Change
+/// either and the old clock is thrown away and a new one started, which is the whole of how
+/// the refresh follows the reader and how turning it off stops it.
+struct RefreshKey: Hashable {
+    var page: RailItem
+    var interval: RefreshInterval
 }
 
 /// A way to open the app somewhere other than the beginning, so each screen can be looked at
@@ -72,6 +94,10 @@ struct LaunchOptions {
 public final class AppState {
     public let preferences: Preferences
     let serverStore: any ServerStore
+    /// The store itself, for the one screen that asks about the store rather than through
+    /// it. Nothing else here reads it: posts go in and out via the feeds. `nil` when the
+    /// app is running without one, and the screen says so instead of showing zeroes.
+    let store: LocalStore?
     /// Signing in needs the store to remember the fact; without one the buttons are absent.
     let signIn: SignInModel?
 
@@ -95,16 +121,25 @@ public final class AppState {
 
     init(preferences: Preferences = Preferences(), serverStore: (any ServerStore)? = nil,
          store: LocalStore? = nil, launch: LaunchOptions = .none) {
+        // Counting starts when the app does, so that "since" is a moment the screen can name
+        // rather than whichever request happened to be sent first.
+        _ = APILedger.shared
         // The chosen servers live in the store when there is one; without it the app falls
         // back to the list it kept before the store existed, and keeps remembering there.
         let servers = serverStore ?? store.map { SQLiteServerStore(store: $0) } ?? UserDefaultsServerStore()
-        let signIn = store.map { SignInModel(store: $0) }
+        // One answer to who we are, shared by everything that asks: both feeds and the launch
+        // check. One each would mean a sign-in invalidating only its own — the other two would
+        // go on reading as a stranger from a cache that says nobody is signed in, until relaunch.
+        let secrets = KeychainSecretStore()
+        let tokens = store.map { TokenSource(store: $0, secrets: secrets) }
+        let signIn = store.map { SignInModel(store: $0, secrets: secrets, tokens: tokens) }
         self.preferences = preferences
         self.serverStore = servers
+        self.store = store
         self.signIn = signIn
         self.feeds = [
-            .timeline: FeedModel(mode: .timeline, loader: TimelineLoader(store: store)),
-            .trending: FeedModel(mode: .trending, loader: TimelineLoader(store: store)),
+            .timeline: FeedModel(mode: .timeline, loader: TimelineLoader(store: store, secrets: secrets, tokens: tokens)),
+            .trending: FeedModel(mode: .trending, loader: TimelineLoader(store: store, secrets: secrets, tokens: tokens)),
         ]
         self.servers = servers.servers
         self.route = launch.route ?? .landing
@@ -137,6 +172,37 @@ public final class AppState {
 
     func feed(for mode: FeedMode) -> FeedModel {
         feeds[mode]!
+    }
+
+    var refreshKey: RefreshKey { RefreshKey(page: railItem, interval: preferences.refreshInterval) }
+
+    /// Reads the page you are looking at again, every so often, for as long as it is the
+    /// page you are looking at. Fediqo is a guest on other people's machines: a timeline
+    /// nobody is watching costs nobody's server anything, so this refreshes one feed and no
+    /// other, and stops the moment the reader goes somewhere else.
+    ///
+    /// The shell holds it in a `.task` keyed to the page and the interval, so changing
+    /// either cancels this and starts the next — there is only ever one, and none at all on
+    /// a page without a feed or with the clock turned off. It sleeps before it does
+    /// anything, so the screen's own first load always goes first.
+    func refreshWhileVisible() async {
+        guard let interval = preferences.refreshInterval.duration,
+              let mode = railItem.feedMode else { return }
+        let feed = feed(for: mode)
+        while !Task.isCancelled {
+            do {
+                try await Task.sleep(for: interval)
+            } catch {
+                return
+            }
+            // A tick that lands while the last load is still out is dropped rather than
+            // queued: a server slower than the interval must not collect a queue of readers
+            // waiting on it, and the load already running is about to say the same thing.
+            // With no sources there is nothing to ask, and a spinner every interval would be
+            // the only thing that happened.
+            guard !feed.loading, !servers.isEmpty else { continue }
+            await feed.load(servers: servers, refresh: .automatic(every: interval))
+        }
     }
 
     /// Where the landing screen hands over to: a fresh install has to choose a source, an

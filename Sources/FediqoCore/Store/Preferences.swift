@@ -38,6 +38,30 @@ public enum AppLanguage: String, Codable, Sendable, CaseIterable, Identifiable {
     }
 }
 
+/// How often the page you are looking at asks its servers again. Off is a real answer: a
+/// timeline nobody is watching costs nobody's server anything, and neither does one whose
+/// reader would rather ask themselves.
+public enum RefreshInterval: String, Codable, Sendable, CaseIterable, Identifiable {
+    case off
+    case seconds15
+    case seconds30
+    case seconds60
+    case seconds300
+
+    public var id: String { rawValue }
+
+    /// How long between two refreshes, or nothing at all where the reader turned it off.
+    public var duration: Duration? {
+        switch self {
+        case .off: nil
+        case .seconds15: .seconds(15)
+        case .seconds30: .seconds(30)
+        case .seconds60: .seconds(60)
+        case .seconds300: .seconds(300)
+        }
+    }
+}
+
 /// Everything the general preferences screen changes. Backed by `UserDefaults` for now,
 /// for the same reason as `ServerStore`: #2 owns the real store, and this must not
 /// pre-empt its schema.
@@ -52,6 +76,7 @@ public final class Preferences {
     public var railExpanded: Bool { didSet { defaults.set(railExpanded, forKey: Keys.railExpanded) } }
     public var showBoosts: Bool { didSet { defaults.set(showBoosts, forKey: Keys.showBoosts) } }
     public var showMediaOnly: Bool { didSet { defaults.set(showMediaOnly, forKey: Keys.showMediaOnly) } }
+    public var refreshInterval: RefreshInterval { didSet { defaults.set(refreshInterval.rawValue, forKey: Keys.refreshInterval) } }
 
     private enum Keys {
         static let theme = "fediqo.theme"
@@ -60,6 +85,7 @@ public final class Preferences {
         static let railExpanded = "fediqo.railExpanded"
         static let showBoosts = "fediqo.showBoosts"
         static let showMediaOnly = "fediqo.showMediaOnly"
+        static let refreshInterval = "fediqo.refreshInterval"
     }
 
     public init(defaults: UserDefaults = .standard) {
@@ -71,5 +97,6 @@ public final class Preferences {
         railExpanded = defaults.object(forKey: Keys.railExpanded) as? Bool ?? false
         showBoosts = defaults.object(forKey: Keys.showBoosts) as? Bool ?? true
         showMediaOnly = defaults.object(forKey: Keys.showMediaOnly) as? Bool ?? false
+        refreshInterval = defaults.string(forKey: Keys.refreshInterval).flatMap(RefreshInterval.init(rawValue:)) ?? .seconds30
     }
 }

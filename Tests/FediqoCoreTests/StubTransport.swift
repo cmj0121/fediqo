@@ -117,9 +117,30 @@ func makeServer(_ host: String) -> Server {
 
 /// A loader that only speaks Mastodon, through the stub. `secrets` is in-memory by default so
 /// no test ever reaches the real Keychain, whatever a loader is handed a store.
-func stubbedLoader(store: LocalStore? = nil, secrets: any SecretStore = InMemorySecretStore()) -> TimelineLoader {
+func stubbedLoader(store: LocalStore? = nil, secrets: any SecretStore = InMemorySecretStore(),
+                   tokens: TokenSource? = nil) -> TimelineLoader {
     TimelineLoader(registry: SourceRegistry(clients: [.mastodon: MastodonClient(session: stubbedSession())]),
-                   store: store, secrets: secrets)
+                   store: store, secrets: secrets, tokens: tokens)
+}
+
+/// One account signed in to `server`, written the way `SignInCoordinator` writes it: the
+/// token in the secret store, the fact in `owned_accounts`, and the rows it depends on.
+/// Nothing here goes near the network, so a suite can start from signed-in without a
+/// handshake it is not testing.
+func signInRows(_ token: String, to server: Server,
+                store: LocalStore, secrets: any SecretStore) async throws {
+    let authorId = "\(server.endpoint)/@ada"
+    try secrets.setToken(OAuthToken(accessToken: token, scope: "read", createdAt: Date()), for: authorId)
+    let serverRow = LocalStore.serverRow(server)
+    let accountRow = LocalStore.AccountRow(id: authorId, proto: serverRow.proto, serverURL: serverRow.url,
+                                           handle: "@ada@\(server.host)", displayName: "Ada", avatarURL: nil)
+    let ms = LocalStore.milliseconds(Date())
+    try await store.write { db in
+        try LocalStore.upsertServer(db, serverRow, now: ms)
+        try LocalStore.upsertAccount(db, accountRow, now: ms)
+        try db.execute(sql: "INSERT INTO owned_accounts (author_id, server_url, created_at) VALUES (?, ?, ?)",
+                       arguments: [authorId, serverRow.url, ms])
+    }
 }
 
 /// The browser, boiled down: reads the `state` off the consent URL and comes straight back

@@ -20,6 +20,14 @@ public struct Server: Codable, Sendable, Hashable, Identifiable {
         }
     }
 
+    /// The same address read back off a request already on its way out. A request counted
+    /// against a server has to key exactly as that server's rows do, so the spelling is not
+    /// re-derived elsewhere — it is written here once and read here once.
+    public static func endpoint(of url: URL) -> String {
+        guard let scheme = url.scheme, let host = url.host() else { return url.absoluteString }
+        return "\(scheme.lowercased())://\(normalise(host))"
+    }
+
     public init(host: String, socialProtocol: SocialProtocol, title: String = "", addedAt: Date = Date()) {
         self.host = Server.normalise(host)
         self.socialProtocol = socialProtocol

@@ -87,6 +87,10 @@ struct FeedScreen: View {
 
     /// The sources, and what each one had to say for itself.
     ///
+    /// A reason stays up until the server answers or stops being one of ours, rather than
+    /// only for the loads that asked it — a server inside its backoff is a server still
+    /// wanting attention, not one that quietly fixed itself for a cycle.
+    ///
     /// Most reasons mean that server handed nothing over. `.tokenRejected` and `.store` are
     /// the two that arrive alongside posts that did make it: they say the account, or the
     /// local store, wants attention — not that the column is empty. Either way it is a fact
@@ -94,7 +98,7 @@ struct FeedScreen: View {
     /// everything. The button carries a mark when there is something to read here, because
     /// an empty timeline and no clue where to look is indistinguishable from a broken one.
     private var sourcesMenu: some View {
-        let failures = model.result.failures
+        let failures = model.failures
         return Menu {
             Button(t("timeline.addSource")) { addingSource = true }
             Divider()

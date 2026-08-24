@@ -146,6 +146,7 @@ struct StoreTests {
         #expect(preferences.railExpanded == false)
         #expect(preferences.showBoosts)
         #expect(preferences.showMediaOnly == false)
+        #expect(preferences.refreshInterval == .seconds30)
     }
 
     @Test("Every preference survives a relaunch")
@@ -158,6 +159,7 @@ struct StoreTests {
         first.railExpanded = true
         first.showBoosts = false
         first.showMediaOnly = true
+        first.refreshInterval = .off
 
         let second = Preferences(defaults: defaults)
         #expect(second.theme == .light)
@@ -166,6 +168,13 @@ struct StoreTests {
         #expect(second.railExpanded)
         #expect(second.showBoosts == false)
         #expect(second.showMediaOnly)
+        #expect(second.refreshInterval == .off)
+    }
+
+    @Test("Off is the one interval that is no interval, and the rest say how long they are")
+    func refreshIntervals() {
+        #expect(RefreshInterval.allCases.filter { $0.duration == nil } == [.off])
+        #expect(RefreshInterval.allCases.compactMap(\.duration) == [.seconds(15), .seconds(30), .seconds(60), .seconds(300)])
     }
 
     @Test("The text sizes only ever go up")

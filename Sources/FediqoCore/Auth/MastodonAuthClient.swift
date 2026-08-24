@@ -15,9 +15,13 @@ public struct MastodonAuthClient: AuthClient {
     static let scope = "read write"
 
     private let session: URLSession
+    /// Signing in is still something asked of somebody else's machine, so it is counted the
+    /// same way a read is.
+    private let ledger: APILedger
 
-    public init(session: URLSession = .shared) {
+    public init(session: URLSession = .shared, ledger: APILedger = .shared) {
         self.session = session
+        self.ledger = ledger
     }
 
     public func registerApp(host rawHost: String) async throws -> AppCredentials {
@@ -66,7 +70,8 @@ public struct MastodonAuthClient: AuthClient {
         let data = try await JSONTransport.get(
             endpoint(host, "/api/v1/accounts/verify_credentials"),
             on: session,
-            bearer: token.accessToken
+            bearer: token.accessToken,
+            ledger: ledger
         )
         // The same DTO and the same derivations the timeline uses: whoever signed in is
         // keyed exactly as their posts are, never by a second derivation.
@@ -96,7 +101,7 @@ public struct MastodonAuthClient: AuthClient {
     /// transport stays neutral, and the OAuth reading of its refusals lives here.
     private func postForm(_ url: URL, fields: [String: String]) async throws -> Data {
         do {
-            return try await JSONTransport.postForm(url, fields: fields, on: session)
+            return try await JSONTransport.postForm(url, fields: fields, on: session, ledger: ledger)
         } catch SourceFailure.http(let status, let body) where [400, 401, 403, 422].contains(status) {
             throw SourceFailure.signInFailed(Self.refusalReason(in: body) ?? "The server answered \(status).")
         }

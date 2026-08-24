@@ -30,6 +30,22 @@ public enum SourceFailure: Error, Sendable, Equatable, LocalizedError {
     /// The posts arrived and are on the screen, but the local store would not keep them.
     case store(String)
 
+    /// Whether the server answered at all, in spite of this.
+    ///
+    /// Two of these ride alongside posts that did arrive. `.tokenRejected` is a server
+    /// saying *no* to a credential — it answered, and the read went out again as a stranger.
+    /// `.store` is our own database refusing to keep what arrived, which is not their
+    /// machine's doing at all. Everything else is silence.
+    ///
+    /// This is what a backoff is decided on, and the switch is exhaustive on purpose: a new
+    /// case has to say which kind it is rather than falling into the quiet one.
+    public var arrivedAnyway: Bool {
+        switch self {
+        case .tokenRejected, .store: true
+        case .badHost, .notThatKind, .unsupported, .needsSignIn, .signInFailed, .http, .transport: false
+        }
+    }
+
     /// The last resort, for anywhere that is not a screen. Screens localise the case instead.
     public var errorDescription: String? {
         switch self {
@@ -88,10 +104,12 @@ public struct SourceRegistry: Sendable {
         self.authClients = authClients
     }
 
-    public static func standard(session: URLSession = .shared) -> SourceRegistry {
+    /// `ledger` reaches every client this builds, so what the app asks of other people's
+    /// servers is counted whoever assembled the registry.
+    public static func standard(session: URLSession = .shared, ledger: APILedger = .shared) -> SourceRegistry {
         SourceRegistry(
-            clients: [.mastodon: MastodonClient(session: session)],
-            authClients: [.mastodon: MastodonAuthClient(session: session)]
+            clients: [.mastodon: MastodonClient(session: session, ledger: ledger)],
+            authClients: [.mastodon: MastodonAuthClient(session: session, ledger: ledger)]
         )
     }
 
