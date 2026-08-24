@@ -42,7 +42,16 @@ public struct SignInCoordinator: Sendable {
         let code = try Self.code(in: callback, expecting: state)
 
         let token = try await auth.exchangeCode(host: server.host, app: app, code: code, pkce: pkce)
-        let account = try await auth.verifyCredentials(host: server.host, token: token)
+        // `verifyCredentials` sends the token, so a refusal comes back as `.tokenRejected` —
+        // the right reading for the launch health check, the wrong one here. Mid-handshake
+        // there is no account to mark and no anonymous read to fall back on: a credential
+        // issued seconds ago and already refused is the handshake failing, so it says so.
+        let account: SignedInAccount
+        do {
+            account = try await auth.verifyCredentials(host: server.host, token: token)
+        } catch SourceFailure.tokenRejected {
+            throw SourceFailure.signInFailed("the server refused the credential it had just issued")
+        }
 
         try secrets.setToken(token, for: account.authorId)
 

@@ -7,7 +7,10 @@ import Testing
 @Suite("A load leaves its posts in the store")
 struct TimelinePersistenceTests {
     private func tableLoader(_ lists: [String: [Post]], store: LocalStore) -> TimelineLoader {
-        TimelineLoader(registry: SourceRegistry(clients: [.mastodon: TableClient(lists: lists)]), store: store)
+        // The secret store is named even though nobody is signed in here: a test must never
+        // be one owned account away from reaching the real Keychain.
+        TimelineLoader(registry: SourceRegistry(clients: [.mastodon: TableClient(lists: lists)]),
+                       store: store, secrets: InMemorySecretStore())
     }
 
     @Test("A successful load is read back from the store, and loading again does not double it")
@@ -118,6 +121,6 @@ private struct TableClient: SourceClient {
     let lists: [String: [Post]]
 
     func instance(host: String) async throws -> InstanceInfo { throw SourceFailure.badHost(host) }
-    func timeline(host: String, limit: Int) async throws -> [Post] { lists[host] ?? [] }
-    func trending(host: String, limit: Int) async throws -> [Post] { lists[host] ?? [] }
+    func timeline(host: String, limit: Int, token: String?) async throws -> [Post] { lists[host] ?? [] }
+    func trending(host: String, limit: Int, token: String?) async throws -> [Post] { lists[host] ?? [] }
 }

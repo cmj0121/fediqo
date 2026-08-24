@@ -9,6 +9,7 @@ private final class ScriptedAuthClient: AuthClient, @unchecked Sendable {
     private let lock = NSLock()
     private var account: SignedInAccount
     private var revokeError: Error?
+    private var verifyError: Error?
     private(set) var registeredHosts: [String] = []
     private(set) var exchangedCodes: [String] = []
     private(set) var revokedTokens: [String] = []
@@ -26,6 +27,10 @@ private final class ScriptedAuthClient: AuthClient, @unchecked Sendable {
 
     func refusesRevoke(with error: Error) {
         lock.withLock { revokeError = error }
+    }
+
+    func refusesVerify(with error: Error) {
+        lock.withLock { verifyError = error }
     }
 
     func registerApp(host: String) async throws -> AppCredentials {
@@ -70,10 +75,12 @@ private final class ScriptedAuthClient: AuthClient, @unchecked Sendable {
     }
 
     func verifyCredentials(host: String, token: OAuthToken) async throws -> SignedInAccount {
-        lock.withLock {
+        let (refused, account) = lock.withLock {
             networkCalls += 1
-            return account
+            return (verifyError, self.account)
         }
+        if let refused { throw refused }
+        return account
     }
 }
 
@@ -186,6 +193,21 @@ struct SignInFlowTests {
         #expect(try h.secrets.token(for: ada.authorId) == nil)
         #expect(try h.secrets.token(for: bee.authorId) != nil)
         #expect(try await h.ownedRows() == [bee.authorId])
+    }
+
+    @Test("A token refused the moment it was issued is a failed sign-in, not a token to mark")
+    func verifyRefusingTheNewTokenEndsTheFlow() async throws {
+        let h = try Harness(answering: ada)
+        // What `MastodonAuthClient.verifyCredentials` throws on a 401: it sends a bearer, so
+        // the transport reads the refusal as the credential's. Mid-handshake it is not.
+        h.auth.refusesVerify(with: SourceFailure.tokenRejected("owned.test"))
+
+        await #expect(throws: SourceFailure.signInFailed("the server refused the credential it had just issued")) {
+            try await h.signIn(to: server)
+        }
+
+        #expect(try h.secrets.token(for: ada.authorId) == nil)
+        #expect(try await h.ownedRows().isEmpty)
     }
 
     @Test("The app is registered once; a second sign-in reuses the kept credentials")

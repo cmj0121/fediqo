@@ -8,6 +8,8 @@ import Foundation
 final class StubRoutes: @unchecked Sendable {
     private let lock = NSLock()
     private var routes: [String: (status: Int, body: Data)] = [:]
+    /// What an endpoint answers a request that carries a credential, where that differs.
+    private var authorizedRoutes: [String: (status: Int, body: Data)] = [:]
     /// Every request in the order it arrived — the one log both views below read from.
     private var log: [(key: String, request: CapturedRequest)] = []
 
@@ -15,10 +17,17 @@ final class StubRoutes: @unchecked Sendable {
         lock.withLock { routes["\(host)|\(path)"] = (status, Data(body.utf8)) }
     }
 
+    /// What this endpoint answers a request bearing a credential — a server with a stale
+    /// token, in practice, which turns the token down and still publishes to strangers.
+    func onAuthorized(_ host: String, _ path: String, status: Int, body: String = "[]") {
+        lock.withLock { authorizedRoutes["\(host)|\(path)"] = (status, Data(body.utf8)) }
+    }
+
     func answer(for url: URL, method: String, body: Data, authorization: String?) -> (status: Int, body: Data) {
         let key = "\(url.host() ?? "")|\(url.path())"
         return lock.withLock {
             log.append((key, CapturedRequest(method: method, body: String(decoding: body, as: UTF8.self), authorization: authorization)))
+            if authorization != nil, let authorized = authorizedRoutes[key] { return authorized }
             return routes[key] ?? (404, Data("{}".utf8))
         }
     }
@@ -106,9 +115,11 @@ func makeServer(_ host: String) -> Server {
     Server(host: host, socialProtocol: .mastodon, title: host)
 }
 
-/// A loader that only speaks Mastodon, through the stub.
-func stubbedLoader(store: LocalStore? = nil) -> TimelineLoader {
-    TimelineLoader(registry: SourceRegistry(clients: [.mastodon: MastodonClient(session: stubbedSession())]), store: store)
+/// A loader that only speaks Mastodon, through the stub. `secrets` is in-memory by default so
+/// no test ever reaches the real Keychain, whatever a loader is handed a store.
+func stubbedLoader(store: LocalStore? = nil, secrets: any SecretStore = InMemorySecretStore()) -> TimelineLoader {
+    TimelineLoader(registry: SourceRegistry(clients: [.mastodon: MastodonClient(session: stubbedSession())]),
+                   store: store, secrets: secrets)
 }
 
 /// One status, enough to prove a list came back.

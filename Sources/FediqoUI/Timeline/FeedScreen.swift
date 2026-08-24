@@ -85,12 +85,14 @@ struct FeedScreen: View {
         .modifier(HeaderMenuChrome(labelKey: "timeline.filter", warning: false))
     }
 
-    /// The sources, and — for the ones that gave nothing — why.
+    /// The sources, and what each one had to say for itself.
     ///
-    /// Why a server handed nothing over is a fact about that server, so it is said next to
-    /// that server rather than across the top of everything. The button carries a mark when
-    /// there is something to read here, because an empty timeline and no clue where to look
-    /// is indistinguishable from a broken one.
+    /// Most reasons mean that server handed nothing over. `.tokenRejected` and `.store` are
+    /// the two that arrive alongside posts that did make it: they say the account, or the
+    /// local store, wants attention — not that the column is empty. Either way it is a fact
+    /// about one server, so it is said next to that server rather than across the top of
+    /// everything. The button carries a mark when there is something to read here, because
+    /// an empty timeline and no clue where to look is indistinguishable from a broken one.
     private var sourcesMenu: some View {
         let failures = model.result.failures
         return Menu {
