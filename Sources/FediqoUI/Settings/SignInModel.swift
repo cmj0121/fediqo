@@ -19,6 +19,12 @@ final class SignInModel {
     /// Why the last sign-in gave nothing. Cleared when it is retried.
     private(set) var failure: SourceFailure?
 
+    /// The endpoints whose token a server has turned down — the launch check's answer, and
+    /// whatever a read has since run into. In memory only, never written down: whether a
+    /// token works is the server's answer, and it is asked again next launch. Nothing here
+    /// retries on the reader's behalf; the set empties only by signing in again or out.
+    private(set) var rejected: Set<String> = []
+
     init(store: LocalStore, registry: SourceRegistry = .standard(),
          secrets: any SecretStore = KeychainSecretStore()) {
         self.store = store
@@ -38,6 +44,23 @@ final class SignInModel {
         accounts[server.endpoint]
     }
 
+    /// Whether this server has stopped accepting the account signed in to it.
+    func isRejected(_ server: Server) -> Bool {
+        rejected.contains(server.endpoint)
+    }
+
+    /// A server said no to the credential — from the launch check, or from a read that
+    /// carried the token and was turned down. Said once; saying it again changes nothing.
+    func markRejected(_ endpoint: String) {
+        rejected.insert(endpoint)
+    }
+
+    /// Asks every signed-in server, once, whether its credential still works. Meant for
+    /// launch: nothing waits on it, and a server that cannot answer marks nothing.
+    func checkTokens(on servers: [Server]) async {
+        rejected.formUnion(await coordinator.rejectedEndpoints(among: servers, using: registry))
+    }
+
     /// Re-reads who is signed in. Two of these can be in flight at once — forgetting every
     /// server signs each out concurrently — and the one that started last has read the
     /// truest answer, so an older read that comes back afterwards is dropped rather than
@@ -55,6 +78,8 @@ final class SignInModel {
         failure = nil
         do {
             _ = try await coordinator.signIn(server: server, using: auth, authenticate: authenticate)
+            // A credential the server has just accepted is not a rejected one.
+            rejected.remove(server.endpoint)
             // What is shown is always what the store remembers, re-read rather than patched.
             await refresh()
         } catch let refused as SourceFailure {
@@ -73,6 +98,7 @@ final class SignInModel {
     func signOut(of server: Server) async {
         guard let auth = registry.authClient(for: server.socialProtocol) else { return }
         accounts[server.endpoint] = nil
+        rejected.remove(server.endpoint)
         await coordinator.signOutAll(for: server.endpoint, using: auth)
         await refresh()
     }

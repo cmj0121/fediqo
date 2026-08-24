@@ -920,6 +920,23 @@
         }
       }
     },
+    "settings.signInAgain": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign in again"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新登入"
+          }
+        }
+      }
+    },
     "settings.signOut": {
       "extractionState": "manual",
       "localizations": {

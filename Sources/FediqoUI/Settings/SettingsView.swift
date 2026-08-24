@@ -125,7 +125,12 @@ struct SettingsView: View {
             }
             Spacer()
             if let account = signIn?.account(on: server) {
-                Text(account.handle).fediqoFont(11).foregroundStyle(.secondary).lineLimit(1)
+                // A handle the server no longer answers to reads as the warning it is,
+                // rather than as a quiet claim to be signed in.
+                Text(account.handle)
+                    .fediqoFont(11)
+                    .foregroundStyle(signIn?.isRejected(server) == true ? Color.orange : Color.secondary)
+                    .lineLimit(1)
             }
             HStack(spacing: 0) {
                 if let signIn { accountControl(signIn, for: server) }
@@ -135,30 +140,43 @@ struct SettingsView: View {
         .padding(.vertical, 3)
     }
 
-    /// The signed-in state of one row, as the single icon it is worth: sign out when there is
-    /// an account, sign in when there is not. The browser session is handed to the model here
-    /// because only a view can read it.
+    /// The signed-in state of one row, as the icons it is worth: sign out when there is an
+    /// account, sign in when there is not — and both when the server has stopped accepting
+    /// the account, since those are the only two ways out (nothing retries for you). No
+    /// fourth control: it is the same Sign in, wearing what happened.
     @ViewBuilder
     private func accountControl(_ signIn: SignInModel, for server: Server) -> some View {
         if signIn.account(on: server) != nil {
+            if signIn.isRejected(server) {
+                signInButton(signIn, for: server, symbol: "person.crop.circle.badge.exclamationmark",
+                             labelKey: "settings.signInAgain", tint: .orange)
+            }
             IconButton(symbol: "rectangle.portrait.and.arrow.right", labelKey: "settings.signOut") {
                 Task { await signIn.signOut(of: server) }
             }
         } else {
             // The system accent rather than `Palette.accent`: this glyph is drawn on the card
             // itself, and the house blue is too pale against a light one to read.
-            IconButton(symbol: "person.crop.circle.badge.plus", labelKey: "settings.signIn", tint: .accentColor) {
-                let session = webSession
-                Task {
-                    await signIn.signIn(to: server) { consent, scheme in
-                        do {
-                            return try await session.authenticate(using: consent, callbackURLScheme: scheme,
-                                                                  preferredBrowserSession: .shared)
-                        } catch let closed as ASWebAuthenticationSessionError where closed.code == .canceledLogin {
-                            // Closing the browser is a decision, not a failure — said here so
-                            // the model never has to speak AuthenticationServices.
-                            throw CancellationError()
-                        }
+            signInButton(signIn, for: server, symbol: "person.crop.circle.badge.plus",
+                         labelKey: "settings.signIn", tint: .accentColor)
+        }
+    }
+
+    /// The one sign-in button, whatever it is called this time. The browser session is handed
+    /// to the model here because only a view can read it.
+    private func signInButton(_ signIn: SignInModel, for server: Server,
+                              symbol: String, labelKey: String, tint: Color) -> some View {
+        IconButton(symbol: symbol, labelKey: labelKey, tint: tint) {
+            let session = webSession
+            Task {
+                await signIn.signIn(to: server) { consent, scheme in
+                    do {
+                        return try await session.authenticate(using: consent, callbackURLScheme: scheme,
+                                                              preferredBrowserSession: .shared)
+                    } catch let closed as ASWebAuthenticationSessionError where closed.code == .canceledLogin {
+                        // Closing the browser is a decision, not a failure — said here so
+                        // the model never has to speak AuthenticationServices.
+                        throw CancellationError()
                     }
                 }
             }

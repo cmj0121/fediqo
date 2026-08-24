@@ -134,6 +134,55 @@ public struct SignInCoordinator: Sendable {
         }
     }
 
+    /// Which signed-in servers have stopped accepting the credential they issued.
+    ///
+    /// One `verify_credentials` per owned account, all at once, and only the server's own
+    /// refusal counts: `.tokenRejected` names an endpoint, everything else — offline, a 500,
+    /// a Keychain that would not open — names nothing, because a server that cannot answer
+    /// has not answered *no*. Nothing here writes: whether a token works is the server's
+    /// answer, held for as long as the app runs and never longer.
+    public func rejectedEndpoints(among servers: [Server], using registry: SourceRegistry) async -> Set<String> {
+        let accounts: [String: SignedInAccount]
+        do {
+            accounts = try await store.signedInByServer()
+        } catch {
+            LocalStore.log.error("token check: signed-in lookup failed: \(String(describing: error), privacy: .public)")
+            return []
+        }
+        guard !accounts.isEmpty else { return [] }
+
+        return await withTaskGroup(of: String?.self) { group in
+            for server in servers {
+                guard let account = accounts[server.endpoint],
+                      let auth = registry.authClient(for: server.socialProtocol) else { continue }
+                let token: OAuthToken?
+                do {
+                    token = try secrets.token(for: account.authorId)
+                } catch {
+                    let why = String(describing: error)
+                    LocalStore.log.error("token check: \(server.host, privacy: .public) has no readable token: \(why, privacy: .public)")
+                    continue
+                }
+                guard let token else { continue }
+                group.addTask {
+                    do {
+                        _ = try await auth.verifyCredentials(host: server.host, token: token)
+                        return nil
+                    } catch SourceFailure.tokenRejected {
+                        return server.endpoint
+                    } catch {
+                        let why = String(describing: error)
+                        LocalStore.log.error("token check: \(server.host, privacy: .public) could not answer: \(why, privacy: .public)")
+                        return nil
+                    }
+                }
+            }
+            return await group.reduce(into: []) { rejected, endpoint in
+                if let endpoint { rejected.insert(endpoint) }
+            }
+        }
+    }
+
     /// Best effort, logged: sign-out promises its local half completes even when a step fails.
     private func attempt(_ what: String, _ body: () async throws -> Void) async {
         do {

@@ -98,9 +98,10 @@ public final class AppState {
         // The chosen servers live in the store when there is one; without it the app falls
         // back to the list it kept before the store existed, and keeps remembering there.
         let servers = serverStore ?? store.map { SQLiteServerStore(store: $0) } ?? UserDefaultsServerStore()
+        let signIn = store.map { SignInModel(store: $0) }
         self.preferences = preferences
         self.serverStore = servers
-        self.signIn = store.map { SignInModel(store: $0) }
+        self.signIn = signIn
         self.feeds = [
             .timeline: FeedModel(mode: .timeline, loader: TimelineLoader(store: store)),
             .trending: FeedModel(mode: .trending, loader: TimelineLoader(store: store)),
@@ -111,6 +112,21 @@ public final class AppState {
         self.composing = launch.composing
         self.holdsLanding = launch.holdsLanding
         L10n.use(preferences.language)
+
+        // A rejected token is noticed in two places, and both end in the same set. Reading
+        // is the first: a server that turns a read's token down says so alongside the posts
+        // it gave a stranger, and the row hears about it. One direction only — nothing here
+        // asks the feed anything, and nothing polls.
+        if let signIn {
+            for feed in self.feeds.values {
+                feed.onTokenRejected = { signIn.markRejected($0) }
+            }
+            // Launch is the second: every signed-in server is asked once whether its
+            // credential still works, in the background, with nothing waiting on it. No
+            // store means no `signIn` at all, and so no check.
+            let chosen = self.servers
+            Task { await signIn.checkTokens(on: chosen) }
+        }
     }
 
     func feed(for mode: FeedMode) -> FeedModel {

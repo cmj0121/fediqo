@@ -15,7 +15,7 @@ struct TimelineNoFallbackTests {
         let result = await stubbedLoader().load(servers: [makeServer(host)], mode: .timeline)
 
         #expect(result.posts.isEmpty)
-        #expect(result.failures[host] == SourceFailure.needsSignIn(host))
+        #expect(result.failures["https://\(host)"] == SourceFailure.needsSignIn(host))
         #expect(stubRoutes.paths(for: host) == ["/api/v1/timelines/public"])
     }
 
@@ -27,7 +27,7 @@ struct TimelineNoFallbackTests {
         let result = await stubbedLoader().load(servers: [makeServer("shut.test"), makeServer("open.test")], mode: .timeline)
 
         #expect(result.posts.map(\.sources) == [["open.test"]])
-        #expect(result.failures.keys.sorted() == ["shut.test"])
+        #expect(result.failures.keys.sorted() == ["https://shut.test"])
     }
 
     @Test("Trending asks for trends, and only for trends")
@@ -48,7 +48,7 @@ struct TimelineNoFallbackTests {
 
         let result = await stubbedLoader().load(servers: [makeServer(host)], mode: .timeline)
 
-        #expect(result.failures[host] == SourceFailure.http(503, Data("gateway wept".utf8)))
+        #expect(result.failures["https://\(host)"] == SourceFailure.http(503, Data("gateway wept".utf8)))
     }
 
     @Test("Asking with no servers asks nothing of anyone")

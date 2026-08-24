@@ -107,7 +107,7 @@ struct TimelineTokenTests {
         // screen marks the account while showing the posts that did arrive.
         #expect(stubRoutes.requests(for: host, publicTimeline).map(\.authorization) == ["Bearer expired", nil])
         #expect(result.posts.map(\.sources) == [[host]])
-        #expect(result.failures[host] == SourceFailure.tokenRejected(host))
+        #expect(result.failures[server.endpoint] == SourceFailure.tokenRejected(host))
         #expect(try await owned.store.timeline().count == 1)
     }
 
@@ -120,7 +120,7 @@ struct TimelineTokenTests {
         let result = await owned.loader.load(servers: [makeServer(host)], mode: .timeline)
 
         #expect(result.posts.isEmpty)
-        #expect(result.failures[host] == SourceFailure.needsSignIn(host))
+        #expect(result.failures["https://\(host)"] == SourceFailure.needsSignIn(host))
         #expect(stubRoutes.requests(for: host, publicTimeline).count == 1)
     }
 
@@ -135,7 +135,7 @@ struct TimelineTokenTests {
         let result = await owned.loader.load(servers: [server], mode: .timeline)
 
         // Nothing about the credential was said, so nothing is retried and no account is marked.
-        #expect(result.failures[host] == SourceFailure.needsSignIn(host))
+        #expect(result.failures[server.endpoint] == SourceFailure.needsSignIn(host))
         #expect(stubRoutes.requests(for: host, publicTimeline).map(\.authorization) == ["Bearer t0ken"])
     }
 
@@ -151,8 +151,34 @@ struct TimelineTokenTests {
         let result = await owned.loader.load(servers: [server], mode: .timeline)
 
         #expect(result.posts.isEmpty)
-        #expect(result.failures[host] == SourceFailure.needsSignIn(host))
+        #expect(result.failures[server.endpoint] == SourceFailure.needsSignIn(host))
         #expect(stubRoutes.requests(for: host, publicTimeline).count == 2)
+    }
+
+    @Test("One hostname, two protocols: the rejection lands on the endpoint that earned it")
+    func rejectionIsPerEndpointNotPerHost() async throws {
+        let host = "both-ways.test"
+        let signedIn = Server(host: host, socialProtocol: .mastodon, title: host)
+        // The same hostname, taken as a second kind of source. Its endpoint is `wss://`, so
+        // it is a different server — nobody is signed in to it and nothing rejected it.
+        let alsoNostr = Server(host: host, socialProtocol: .nostr, title: host)
+        stubRoutes.on(host, publicTimeline, status: 200, body: oneStatusJSON)
+        stubRoutes.onAuthorized(host, publicTimeline, status: 401)
+        let owned = try Owned()
+        try await owned.signIn("expired", to: signedIn)
+        // One client, two protocols, so both rows actually read rather than one of them
+        // failing as `.unsupported` and muddying what `failures` is being asked to prove.
+        let client = MastodonClient(session: stubbedSession())
+        let loader = TimelineLoader(registry: SourceRegistry(clients: [.mastodon: client, .nostr: client]),
+                                    store: owned.store, secrets: owned.secrets)
+
+        let result = await loader.load(servers: [signedIn, alsoNostr], mode: .timeline)
+
+        // Keyed by endpoint, the two fates stay apart: only the Mastodon row is marked, and
+        // the Nostr row on the same hostname is left alone.
+        #expect(result.failures.keys.sorted() == [signedIn.endpoint])
+        #expect(result.failures[signedIn.endpoint] == SourceFailure.tokenRejected(host))
+        #expect(result.failures[alsoNostr.endpoint] == nil)
     }
 
     @Test("One server's stale token neither silences nor infects another server")
@@ -167,7 +193,7 @@ struct TimelineTokenTests {
 
         let result = await owned.loader.load(servers: [stale, open], mode: .timeline)
 
-        #expect(result.failures.keys.sorted() == [stale.host])
+        #expect(result.failures.keys.sorted() == [stale.endpoint])
         #expect(stubRoutes.requests(for: open.host, publicTimeline).map(\.authorization) == [nil])
     }
 }

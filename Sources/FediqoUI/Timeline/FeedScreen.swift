@@ -100,13 +100,13 @@ struct FeedScreen: View {
             Divider()
             ForEach(app.servers) { server in
                 Menu {
-                    if let failure = failures[server.host] {
+                    if let failure = failures[server.endpoint] {
                         Text(message(for: failure))
                         Divider()
                     }
                     Button(t("timeline.remove"), role: .destructive) { app.remove(server) }
                 } label: {
-                    if failures[server.host] == nil {
+                    if failures[server.endpoint] == nil {
                         Text(server.host)
                     } else {
                         Label(server.host, systemImage: "exclamationmark.triangle")

@@ -5,7 +5,7 @@ import Testing
 
 /// An `AuthClient` that answers from fixtures and writes down what was asked of it — the
 /// seam's tests care about what reaches the store and the secret store, not about HTTP.
-private final class ScriptedAuthClient: AuthClient, @unchecked Sendable {
+final class ScriptedAuthClient: AuthClient, @unchecked Sendable {
     private let lock = NSLock()
     private var account: SignedInAccount
     private var revokeError: Error?

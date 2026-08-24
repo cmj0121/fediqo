@@ -16,10 +16,14 @@ public struct TimelineResult: Sendable {
     /// One row per post. The timeline is in timestamp order; trending is in the servers' own
     /// rank order. Nothing here is ranked by us, and nothing is re-ordered after the fact.
     public let posts: [Post]
-    /// Why a server gave what it gave, at most one reason per host. Every case but
-    /// `.tokenRejected` and `.store` means that host gave nothing; those two ride alongside
-    /// posts that did arrive, so a caller reading a host's fate reads `posts` for whether
-    /// anything came and `failures` for whether anything needs attention.
+    /// Why a server gave what it gave, at most one reason per server — keyed by
+    /// `Server.endpoint`, not by hostname: one host can be a source twice under two
+    /// protocols, and their fates are not the same fact. The reason inside still names the
+    /// bare host, because that is what a screen says to the reader.
+    ///
+    /// Every case but `.tokenRejected` and `.store` means that server gave nothing; those
+    /// two ride alongside posts that did arrive, so a caller reading a server's fate reads
+    /// `posts` for whether anything came and `failures` for whether anything needs attention.
     public let failures: [String: SourceFailure]
 
     public init(posts: [Post], failures: [String: SourceFailure]) {
@@ -78,7 +82,7 @@ public struct TimelineLoader: Sendable {
         await withTaskGroup(of: Turn.self) { group in
             for server in servers {
                 guard let client = registry.client(for: server.socialProtocol) else {
-                    failures[server.host] = .unsupported(server.socialProtocol)
+                    failures[server.endpoint] = .unsupported(server.socialProtocol)
                     continue
                 }
                 let token = tokens[server.endpoint]
@@ -88,8 +92,8 @@ public struct TimelineLoader: Sendable {
                     // server's, so the same read goes out once more as a stranger and the
                     // column shows whatever anyone would see. What is reported stays
                     // `.tokenRejected`, so the screen marks the account rather than the
-                    // server — and stays one failure for this host on this load, so a
-                    // backoff counting failures per host never counts the retry as a second.
+                    // server — and stays one failure for this server on this load, so a
+                    // backoff counting failures per server never counts the retry as a second.
                     guard case .tokenRejected? = signedIn.failure else { return signedIn }
                     let anonymous = await ask(client, server, mode: mode, token: nil)
                     // A retry that read fine but would not store replaces `.tokenRejected`
@@ -99,12 +103,12 @@ public struct TimelineLoader: Sendable {
                     // asks as the account again and is rejected again, and the launch check
                     // marks it regardless of what any load reported.
                     guard anonymous.failure == nil else { return anonymous }
-                    return (server.host, anonymous.posts, signedIn.failure)
+                    return (server.endpoint, anonymous.posts, signedIn.failure)
                 }
             }
-            for await (host, posts, failure) in group {
+            for await (endpoint, posts, failure) in group {
                 if !posts.isEmpty { collected.append(posts) }
-                if let failure { failures[host] = failure }
+                if let failure { failures[endpoint] = failure }
             }
         }
 
@@ -115,8 +119,9 @@ public struct TimelineLoader: Sendable {
         return TimelineResult(posts: posts, failures: failures)
     }
 
-    /// One server's turn: what arrived from it, and separately what went wrong.
-    private typealias Turn = (host: String, posts: [Post], failure: SourceFailure?)
+    /// One server's turn: what arrived from it, and separately what went wrong. Named by
+    /// its endpoint, so two protocols on one hostname stay two servers.
+    private typealias Turn = (endpoint: String, posts: [Post], failure: SourceFailure?)
 
     /// Read one server as `token`'s owner, then keep what it handed over. Written apart from
     /// the task above because a rejected token asks it a second time, as nobody.
@@ -128,9 +133,9 @@ public struct TimelineLoader: Sendable {
             case .trending: try await client.trending(host: server.host, limit: limit, token: token)
             }
         } catch let failure as SourceFailure {
-            return (server.host, [], failure)
+            return (server.endpoint, [], failure)
         } catch {
-            return (server.host, [], .transport(error.localizedDescription))
+            return (server.endpoint, [], .transport(error.localizedDescription))
         }
         do {
             try await store?.save(posts, from: server)
@@ -139,9 +144,9 @@ public struct TimelineLoader: Sendable {
             // What SQLite said, in full, is for the log; the screen gets the message.
             LocalStore.log.error("save failed for \(server.host, privacy: .public): \(String(describing: error), privacy: .public)")
             let reason = (error as? DatabaseError)?.message ?? error.localizedDescription
-            return (server.host, posts, .store(reason))
+            return (server.endpoint, posts, .store(reason))
         }
-        return (server.host, posts, nil)
+        return (server.endpoint, posts, nil)
     }
 
     /// The token to read each server as, keyed by the endpoint that owns the account — the

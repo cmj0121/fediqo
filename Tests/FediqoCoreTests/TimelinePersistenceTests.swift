@@ -54,7 +54,7 @@ struct TimelinePersistenceTests {
         let result = await stubbedLoader(store: store).load(servers: [makeServer(host)], mode: .timeline)
 
         #expect(result.posts.isEmpty)
-        #expect(result.failures[host] == SourceFailure.needsSignIn(host))
+        #expect(result.failures["https://\(host)"] == SourceFailure.needsSignIn(host))
         #expect(try await count(store, "SELECT count(*) FROM posts") == 0)
         #expect(try await count(store, "SELECT count(*) FROM servers WHERE host = '\(host)'") == 0)
     }
@@ -81,9 +81,9 @@ struct TimelinePersistenceTests {
         let result = await loader.load(servers: [makeServer("nameless.test"), makeServer("fine.test")], mode: .timeline)
 
         #expect(result.posts.map(\.uri).sorted() == ["https://a.example/1", "https://x.example/1"])
-        #expect(result.failures["fine.test"] == nil)
-        guard case .store(let reason)? = result.failures["nameless.test"] else {
-            Issue.record("expected a .store failure, got \(String(describing: result.failures["nameless.test"]))")
+        #expect(result.failures["https://fine.test"] == nil)
+        guard case .store(let reason)? = result.failures["https://nameless.test"] else {
+            Issue.record("expected a .store failure, got \(String(describing: result.failures["https://nameless.test"]))")
             return
         }
         #expect(!reason.contains("INSERT"))
