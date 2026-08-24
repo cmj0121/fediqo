@@ -1,9 +1,11 @@
 import Foundation
 
-/// The slice of Mastodon's API this build reads. Anything not needed to draw a row is left
-/// out, and the decoder converts snake_case, so nothing here spells a key twice.
+/// The slice of Mastodon's API this build reads. Anything not needed to draw a row or to
+/// keep one is left out, and the decoder converts snake_case, so nothing here spells a key
+/// twice.
 enum MastodonDTO {
     struct Status: Decodable, Sendable {
+        let id: String
         let uri: String
         let url: String?
         let createdAt: Date
@@ -11,9 +13,15 @@ enum MastodonDTO {
         let account: Account
         let mediaAttachments: [MediaAttachment]
         let reblog: Box<Status>?
+        let inReplyToId: String?
+        /// Absent on the odd server; one strange status must never fail the whole page.
+        let tags: [Tag]?
     }
 
     struct Account: Decodable, Sendable {
+        let id: String
+        /// The actor URI — the one name for an account that survives a rename.
+        let url: String?
         let username: String
         let acct: String
         let displayName: String
@@ -25,6 +33,20 @@ enum MastodonDTO {
         func handle(on host: String) -> String {
             acct.contains("@") ? "@\(acct)" : "@\(acct)@\(host)"
         }
+
+        /// The id the store keys on. A server that sends no actor URI still told us where
+        /// the account lives, so the profile address on that server stands in — stable
+        /// enough to key on, and never the bare handle.
+        func authorId(on host: String) -> String {
+            if let url { return url }
+            let parts = acct.split(separator: "@", maxSplits: 1)
+            let domain = parts.count == 2 ? String(parts[1]) : host
+            return "https://\(domain)/@\(parts[0])"
+        }
+    }
+
+    struct Tag: Decodable, Sendable {
+        let name: String
     }
 
     struct MediaAttachment: Decodable, Sendable {
@@ -53,11 +75,20 @@ extension MastodonDTO.Status {
     ///
     /// A boost keeps the original's identity and words, but takes its own timestamp: the row
     /// says "X boosted Y", and when that happened is when X boosted, not when Y wrote.
+    ///
+    /// Mastodon's `uri` is already the canonical id, so it is the origin. The address we
+    /// were handed is this host's local number for the row — the boost's own for a boost —
+    /// so a reply's `inReplyToURI`, built the same way from `in_reply_to_id`, is the `uri`
+    /// of some row on this host and a thread is a join on it.
     func asPost(from host: String) -> Post {
         let subject = reblog?.value ?? self
         return Post(
-            uri: subject.uri,
+            uri: "https://\(host)/api/v1/statuses/\(id)",
+            originURI: subject.uri,
+            socialProtocol: .mastodon,
+            sourceURL: "https://\(host)",
             createdAt: createdAt,
+            authorId: subject.account.authorId(on: host),
             authorName: subject.account.name,
             authorHandle: subject.account.handle(on: host),
             authorAvatarURL: subject.account.avatar.flatMap(URL.init(string:)),
@@ -66,7 +97,10 @@ extension MastodonDTO.Status {
                 (attachment.previewUrl ?? attachment.url).flatMap(URL.init(string:))
             },
             webURL: subject.url.flatMap(URL.init(string:)),
+            inReplyToURI: subject.inReplyToId.map { "https://\(host)/api/v1/statuses/\($0)" },
+            tags: (subject.tags ?? []).map(\.name),
             boostedBy: reblog == nil ? nil : account.name,
+            boostedById: reblog == nil ? nil : account.authorId(on: host),
             sources: [host]
         )
     }

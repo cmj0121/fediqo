@@ -85,20 +85,24 @@ public final class AppState {
     /// The feeds outlive the screens that show them. `AppShell` swaps its detail with a
     /// `switch`, which destroys the previous view and everything it held — so a feed owned by
     /// the screen would re-ask every server on every trip to Settings and back.
-    private let feeds: [FeedMode: FeedModel] = [
-        .timeline: FeedModel(mode: .timeline),
-        .trending: FeedModel(mode: .trending),
-    ]
+    private let feeds: [FeedMode: FeedModel]
 
     public convenience init() {
-        self.init(launch: .fromEnvironment())
+        self.init(store: LocalStore.openDefault(), launch: .fromEnvironment())
     }
 
-    init(preferences: Preferences = Preferences(), serverStore: (any ServerStore)? = nil, launch: LaunchOptions = .none) {
-        let store = serverStore ?? UserDefaultsServerStore()
+    init(preferences: Preferences = Preferences(), serverStore: (any ServerStore)? = nil,
+         store: LocalStore? = nil, launch: LaunchOptions = .none) {
+        // The chosen servers live in the store when there is one; without it the app falls
+        // back to the list it kept before the store existed, and keeps remembering there.
+        let servers = serverStore ?? store.map { SQLiteServerStore(store: $0) } ?? UserDefaultsServerStore()
         self.preferences = preferences
-        self.serverStore = store
-        self.servers = store.servers
+        self.serverStore = servers
+        self.feeds = [
+            .timeline: FeedModel(mode: .timeline, loader: TimelineLoader(store: store)),
+            .trending: FeedModel(mode: .trending, loader: TimelineLoader(store: store)),
+        ]
+        self.servers = servers.servers
         self.route = launch.route ?? .landing
         self.railItem = launch.railItem ?? .timeline
         self.composing = launch.composing

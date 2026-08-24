@@ -6,14 +6,6 @@ import Testing
 /// is never topped up with whatever else it was willing to hand over.
 @Suite("The timeline never stands in something else for itself")
 struct TimelineNoFallbackTests {
-    private func makeServer(_ host: String) -> Server {
-        Server(host: host, socialProtocol: .mastodon, title: host)
-    }
-
-    private func stubbedLoader() -> TimelineLoader {
-        TimelineLoader(registry: SourceRegistry(clients: [.mastodon: MastodonClient(session: stubbedSession())]))
-    }
-
     @Test("A server that refuses the public timeline yields nothing, and trends are not asked for")
     func refusalIsNotPapered() async {
         let host = "refuses.test"

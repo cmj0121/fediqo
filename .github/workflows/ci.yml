@@ -19,6 +19,16 @@ jobs:
       - name: Show the toolchain
         run: swift --version
 
+      # GRDB is fetched from the network once per Package.resolved, not once per run.
+      - name: Cache the package build
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/Library/Caches/org.swift.swiftpm
+          key: spm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
+          restore-keys: spm-${{ runner.os }}-
+
       # The gate is 85% of the lines in Sources/FediqoCore. FediqoUI is excluded on
       # purpose and the script says why -- it is view bodies this package cannot execute,
       # so counting them would measure how much of the app is a view, not how well it is
@@ -36,6 +46,14 @@ jobs:
       # If this line ever grows a second install, that promise has been broken.
       - name: Install XcodeGen
         run: brew install xcodegen
+
+      # Xcode resolves the same packages into .build/xcode; the same key keeps them.
+      - name: Cache the Xcode build
+        uses: actions/cache@v4
+        with:
+          path: .build/xcode/SourcePackages
+          key: xcode-spm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
+          restore-keys: xcode-spm-${{ runner.os }}-
 
       - name: macOS
         run: make -C Apps mac

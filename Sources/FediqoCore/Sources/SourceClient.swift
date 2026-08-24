@@ -15,6 +15,8 @@ public enum SourceFailure: Error, Sendable, Equatable, LocalizedError {
     case needsSignIn(String)
     case http(Int)
     case transport(String)
+    /// The posts arrived and are on the screen, but the local store would not keep them.
+    case store(String)
 
     /// The last resort, for anywhere that is not a screen. Screens localise the case instead.
     public var errorDescription: String? {
@@ -25,6 +27,7 @@ public enum SourceFailure: Error, Sendable, Equatable, LocalizedError {
         case .needsSignIn(let host): "\(host) does not hand this over without signing in."
         case .http(let code): "The server answered \(code)."
         case .transport(let reason): reason
+        case .store(let reason): "The local store could not keep what arrived: \(reason)"
         }
     }
 }

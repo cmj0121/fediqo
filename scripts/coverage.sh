@@ -16,7 +16,8 @@ MEASURED="${COVERAGE_PATH:-Sources/FediqoCore}"
 
 cd "$(dirname "$0")/.."
 
-swift test --enable-code-coverage
+# Only what Package.resolved pins: a run never quietly resolves a newer GRDB.
+swift test --enable-code-coverage --only-use-versions-from-resolved-file
 
 BIN_PATH="$(swift build --show-bin-path)"
 BINARY="$BIN_PATH/FediqoPackageTests.xctest/Contents/MacOS/FediqoPackageTests"
