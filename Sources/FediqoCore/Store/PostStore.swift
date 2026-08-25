@@ -14,6 +14,24 @@ public enum PostStoreError: Error, Equatable, LocalizedError {
     }
 }
 
+/// A post the store holds, and the server whose word on it is final — `posts.authority_url`,
+/// derived once from the post's own canonical address and written when the row was.
+///
+/// The pair travels together because neither is any use alone for the one job it exists for:
+/// asking whether a post is still there. The post says what to ask about, and the authority
+/// says who to ask — never whoever handed it over, because a server that has stopped
+/// carrying somebody else's post has said nothing about whether that post is still there.
+public struct PostAuthority: Sendable, Equatable {
+    public let post: Post
+    /// `posts.authority_url` — a `servers.url` endpoint, `https://<host>` for Mastodon.
+    public let authorityURL: String
+
+    public init(post: Post, authorityURL: String) {
+        self.post = post
+        self.authorityURL = authorityURL
+    }
+}
+
 /// Posts in and out of the store, as the "Writing" and "Reading" diagrams in
 /// `docs/data-store.md` draw them. Raw SQL against the schema: the schema is the contract,
 /// and there is no second description of it in Swift to drift.
@@ -142,6 +160,39 @@ extension LocalStore {
                 LIMIT ?
                 """, arguments: [ms, limit])
             return try Self.posts(from: rows, db)
+        }
+    }
+
+    /// What this server first handed over inside `postedIn`, each with the server whose word
+    /// on it is final — the rows a page from that server covering that stretch should have
+    /// contained, so that whatever the page left out can be *asked* about.
+    ///
+    /// Nothing here is evidence of anything on its own. A row this hands back and a page did
+    /// not contain is a suspect, never a verdict: a server takes blocked accounts and
+    /// filtered posts out of a range it has already chosen, so absence is as much a fact
+    /// about the reader's settings as about the post. Only an answer from the authority
+    /// writes `deleted_at`.
+    ///
+    /// Three things are left out, and each for its own reason. `source_url` is only the
+    /// **first** server to hand a post over, so this is narrower than "every post that server
+    /// carries" and deliberately so — a post credited to somebody else is not evidence about
+    /// this server's page. Rows already marked are past being suspected. And rows with no
+    /// `authority_url` — Nostr's, and anything whose canonical address named no server — have
+    /// nobody who could be asked, so suspecting one would only ever hold a place in a queue
+    /// that never empties.
+    public func posts(from sourceURL: String, postedIn range: ClosedRange<Date>) async throws -> [PostAuthority] {
+        let (from, to) = (Self.milliseconds(range.lowerBound), Self.milliseconds(range.upperBound))
+        return try await read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                \(Self.postSelect)
+                WHERE p.source_url = ? AND p.posted_at >= ? AND p.posted_at <= ?
+                  AND p.deleted_at IS NULL AND p.authority_url IS NOT NULL
+                ORDER BY p.posted_at DESC, p.merge_key
+                """, arguments: [sourceURL, from, to])
+            // `posts(from:_:)` maps the rows in order, so the two line up pair for pair.
+            return zip(try Self.posts(from: rows, db), rows).map {
+                PostAuthority(post: $0, authorityURL: $1["authority_url"])
+            }
         }
     }
 

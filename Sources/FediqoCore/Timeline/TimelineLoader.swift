@@ -118,6 +118,22 @@ public struct TimelineLoader: Sendable {
     /// Where each server has got to reading backwards. One per loader, beside the backoff and
     /// for the same reason: the two feeds page independently, and trending does not page at all.
     private let paging = ServerPaging()
+    /// The posts a page should have contained and did not, waiting to be asked about. Beside
+    /// the other two and for their reasons; only a timeline can leave a post out, so trending
+    /// never puts anything here.
+    private let reconciler = Reconciler()
+
+    /// How many suspects one pass is allowed to ask about, and why there is a number at all:
+    /// a filter turned on can make a whole page absent at once, and forty single-post requests
+    /// fired at other people's servers because a reader changed a setting is not a reasonable
+    /// thing to do to them.
+    ///
+    /// Eight, because that keeps a pass the same order of magnitude as the page fetch it rides
+    /// beside — a chosen list is a handful of servers, so reaching the bottom already costs a
+    /// handful of requests — while still working a suspected page of forty off in five passes,
+    /// which is a few seconds of reading. Smaller would leave a real backlog crawling behind
+    /// the reader; larger would turn one changed setting into a burst.
+    static let confirmationsPerPass = 8
 
     /// With a `store`, what each server hands over is kept before it is merged; without one,
     /// nothing is remembered between loads — and nobody is signed in either, so a loader
@@ -240,6 +256,178 @@ public struct TimelineLoader: Sendable {
         await paging.reachedTheEnd(of: servers)
     }
 
+    /// One bounded pass at the suspects: posts a page should have contained and did not, each
+    /// asked about by name — of the server whose word on it is final, never of whoever handed
+    /// it over, because a server that has stopped carrying somebody else's post has said
+    /// nothing about whether that post is still there. A relay's silence is not evidence.
+    ///
+    /// What an authority answers is the only thing that writes anything. It will not hand the
+    /// post over any more, and `deleted_at` is set; it will, and the suspicion is dropped.
+    /// Anything that is not an answer — offline, a 5xx, a timeout — decides nothing at all:
+    /// the post stays suspected and is asked about again another time, because "we could not
+    /// reach them" and "we checked" are different facts and only one of them is true.
+    ///
+    /// **What `deleted_at` then means.** Not "the author deleted it" — only that the authority
+    /// will not hand the post over any more. The measurement behind reading 404 and 410 as one
+    /// answer is written out once, on `SourceClient.stillHas`, and for the reader in
+    /// `docs/data-store.md`.
+    ///
+    /// The asking is anonymous, which is part of why the mark claims so little: the authority
+    /// is usually not a server anybody here is signed in to — it is wherever the post was
+    /// written — so there is generally no credential to send it.
+    ///
+    /// At most `confirmationsPerPass` are asked about, and an authority inside its wait is not
+    /// asked at all — the same wait a timeline page respects, kept in the same place. Whatever
+    /// is left over waits for the next pass; nothing unasked is counted as checked.
+    ///
+    /// Hands back the merge keys of the posts confirmed gone, so a screen showing one can stop.
+    @discardableResult
+    public func reconcile(every: Duration = .seconds(30), now: Date = Date()) async -> Set<String> {
+        let blocked = await backoff.blocked(at: now)
+        let asking = await reconciler.take(Self.confirmationsPerPass, avoiding: blocked)
+        guard !asking.isEmpty else { return [] }
+
+        var failures: [String: SourceFailure] = [:]
+        // The authorities that said something, whatever it was. Kept apart from `failures`
+        // because one authority can be asked about several posts at once and answer for only
+        // some of them, and having answered for any it is not silent.
+        var answered: Set<String> = []
+        // The merge keys the authority will not hand over any more, waiting to be written.
+        var gone: [String] = []
+        // What this pass learned about each post it asked about — see `Reconciler.Verdict`.
+        // Every subject taken gets an entry, so the queue can tell apart the ones it may
+        // close from the ones it must hand back.
+        var verdicts: [String: Reconciler.Verdict] = [:]
+
+        await withTaskGroup(of: (PostAuthority, Result<Bool, SourceFailure>).self) { group in
+            for subject in asking {
+                guard let client = registry.client(for: subject.post.socialProtocol) else {
+                    // Nothing in this build can ever answer for it — and it will not start
+                    // speaking that protocol in a minute, so this is not a question worth
+                    // keeping. Nothing was sent, so no server is judged for it either.
+                    verdicts[subject.post.mergeKey] = .unanswerable
+                    continue
+                }
+                group.addTask { (subject, await Self.stillThere(client, subject)) }
+            }
+            for await (subject, verdict) in group {
+                switch verdict {
+                case .success(let stillThere):
+                    answered.insert(subject.authorityURL)
+                    // A post found gone is only settled once the mark is actually written, so
+                    // it starts here as nothing learned and is upgraded below.
+                    verdicts[subject.post.mergeKey] = stillThere ? .settled : .unknown
+                    if !stillThere { gone.append(subject.post.mergeKey) }
+                case .failure(.notItsPost):
+                    // The client could not name this post on that server, so nothing was
+                    // sent: the authority has not been asked anything, and so is recorded
+                    // nowhere here — no answer, no failure, no wait. That is decision 8's
+                    // rule, that our own wiring never reaches anybody wearing a server's
+                    // fault. The question is dropped for good rather than left to spend a
+                    // slot of the bound on every pass for the rest of the run.
+                    verdicts[subject.post.mergeKey] = .unanswerable
+                case .failure(.needsSignIn):
+                    // The server answered at once and declined to discuss this post with a
+                    // stranger. That is an answer, so it starts no wait — and it decides
+                    // nothing about the post, which is asked about again another time.
+                    //
+                    // Counting it as silence would be actively harmful rather than merely
+                    // wrong. `arrivedAnyway` calls `.needsSignIn` a non-arrival because for a
+                    // timeline read it means no posts came; here it means the opposite. And
+                    // the wait is keyed by endpoint and shared with the chosen servers, so an
+                    // anonymous probe being refused would put a server's own signed-in
+                    // timeline into a wait it never earned.
+                    //
+                    // It decides nothing about the post, so the post is asked about again —
+                    // but not for ever. A standing refusal is a standing answer, and after
+                    // `Reconciler.refusalsBeforeSettingAside` of them the question is set
+                    // aside so that a handful of private posts cannot hold slots the bound
+                    // was meant to spend on suspects that can actually be settled.
+                    answered.insert(subject.authorityURL)
+                    verdicts[subject.post.mergeKey] = .refused
+                case .failure(let failure):
+                    failures[subject.authorityURL] = failure
+                    verdicts[subject.post.mergeKey] = .unknown
+                }
+            }
+        }
+        // An authority that answered for any of its posts is not silent about the rest, so its
+        // failures are struck out rather than allowed to start a wait for a server that is
+        // plainly talking to us. What is left is silence, and everything asked at all is the
+        // two together — there is no third set to keep in step.
+        for endpoint in answered { failures[endpoint] = nil }
+
+        var marked: Set<String> = []
+        for key in gone {
+            do {
+                try await store?.markDeleted(mergeKey: key)
+                marked.insert(key)
+            } catch {
+                // The authority answered and its answer stands; only the writing of it failed.
+                // So the suspicion is kept, and the post is asked about again another time.
+                LocalStore.log.error("""
+                    marking \(key, privacy: .public) deleted failed: \
+                    \(String(describing: error), privacy: .public)
+                    """)
+            }
+        }
+        for key in marked { verdicts[key] = .settled }
+
+        await reconciler.settle(verdicts)
+        await record(failures, from: answered.union(failures.keys),
+                     refresh: .automatic(every: every), now: now)
+        return marked
+    }
+
+    /// What a page that came back did not contain, of the posts the store holds from that
+    /// server inside the stretch the page covered.
+    ///
+    /// The stretch is what arrived, not what was asked for. A page of forty that came back
+    /// with three covers those three and no more: a server takes blocked accounts and filtered
+    /// posts out of a range it has already chosen, so the rest of the range it was asked for
+    /// is not this page's to speak for.
+    ///
+    /// **An empty page covers no stretch at all**, and so leaves nothing out. It is an end —
+    /// the server saying it has nothing older — and reading it as a page that omitted
+    /// everything would suspect the entire timeline every time a reader reached the bottom.
+    ///
+    /// Every timeline page runs through here, a refresh's as much as a reach-down's: which of
+    /// them asked says nothing about what the page is evidence of. The volume stays small by
+    /// construction rather than by policy — only posts inside the returned page's own range
+    /// can be suspected, and a refresh's range is a narrow one.
+    ///
+    /// Nothing is written here, and nothing is asked. Absence raises a question; `reconcile`
+    /// is what asks it, and only an answer writes anything.
+    private func suspectMissing(_ page: [Post], from endpoint: String) async {
+        guard let store, let oldest = page.map(\.createdAt).min(),
+              let newest = page.map(\.createdAt).max() else { return }
+        let handed = Set(page.map(\.mergeKey))
+        do {
+            let covered = try await store.posts(from: endpoint, postedIn: oldest...newest)
+            await reconciler.suspect(covered.filter { !handed.contains($0.post.mergeKey) })
+        } catch {
+            // Not being able to read our own store says nothing about anybody's post, so it
+            // goes in the log and this page simply raises no questions.
+            LocalStore.log.error("""
+                reading \(endpoint, privacy: .public) back to reconcile it failed: \
+                \(String(describing: error), privacy: .public)
+                """)
+        }
+    }
+
+    /// One post asked about, and what came back. A failure is not `false`: the two are exactly
+    /// the difference between a server saying no and a server saying nothing.
+    private static func stillThere(_ client: any SourceClient,
+                                   _ subject: PostAuthority) async -> Result<Bool, SourceFailure> {
+        do {
+            return .success(try await client.stillHas(subject.post,
+                                                      host: LocalStore.host(of: subject.authorityURL),
+                                                      token: nil))
+        } catch {
+            return .failure(SourceFailure.of(error))
+        }
+    }
+
     /// What one server handed over, and separately what went wrong — a store that would not
     /// keep the posts is a failure worth reporting, but the posts still arrived.
     private typealias Answer = (posts: [Post], failure: SourceFailure?)
@@ -286,6 +474,13 @@ public struct TimelineLoader: Sendable {
             for await (endpoint, answer) in group {
                 if !answer.posts.isEmpty { collected.append(answer.posts) }
                 if let failure = answer.failure { failures[endpoint] = failure }
+                // A page is the same evidence whoever asked for it, so this is here rather
+                // than in `loadOlder`. A refresh's newest page covers the top of the timeline,
+                // which is exactly where a post pulled down moments after it went up sits —
+                // and it is the one stretch paging never revisits, because paging only ever
+                // walks away from it. Trending is not a stretch of time at all and cannot
+                // leave anything out of one, so it raises no questions.
+                if mode == .timeline { await suspectMissing(answer.posts, from: endpoint) }
                 await answered(endpoint, answer)
             }
         }
@@ -352,10 +547,8 @@ public struct TimelineLoader: Sendable {
                                                       before: before, token: token)
             case .trending: try await client.trending(host: server.host, limit: limit, token: token)
             }
-        } catch let failure as SourceFailure {
-            return ([], failure)
         } catch {
-            return ([], .transport(error.localizedDescription))
+            return ([], SourceFailure.of(error))
         }
         do {
             try await store?.save(posts, from: server)

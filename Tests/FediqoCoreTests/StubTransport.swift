@@ -206,14 +206,26 @@ struct Harness {
 /// A page of statuses as `host` would hand it over, `ids` in the order given. One spelling of
 /// the Mastodon status shape for every suite, so a change to what the decoder reads breaks all
 /// of them at once rather than one of them quietly.
-func statusesJSON(_ ids: [String], from host: String) -> String {
-    let statuses = ids.map { id in
-        """
+///
+/// `authority` is the server each status's canonical `uri` names — `host` itself by default,
+/// which is what a post written there looks like. Naming another is what a post this server is
+/// only carrying looks like, and it is what `posts.authority_url` is read out of, so it is how
+/// a test arranges for the relay and the authority to be two different machines.
+///
+/// `at` gives each id its own instant, in the order of `ids`, for a test that needs the page to
+/// cover a stretch of time rather than to sit on one. Without it every status shares one
+/// instant, which is all a test about anything else needs.
+func statusesJSON(_ ids: [String], from host: String, authority: String? = nil,
+                  at seconds: [TimeInterval] = []) -> String {
+    let origin = authority ?? host
+    let statuses = ids.enumerated().map { index, id in
+        let postedAt = index < seconds.count ? isoDate(seconds[index]) : "2026-08-21T10:00:00.000Z"
+        return """
         {
           "id": "\(id)",
-          "uri": "https://\(host)/users/a/statuses/\(id)",
+          "uri": "https://\(origin)/users/a/statuses/\(id)",
           "url": "https://\(host)/@a/\(id)",
-          "created_at": "2026-08-21T10:00:00.000Z",
+          "created_at": "\(postedAt)",
           "content": "<p>hello</p>",
           "account": { "id": "10", "url": "https://\(host)/@a", "username": "a", "acct": "a",
                        "display_name": "Ada", "avatar": null },
@@ -225,11 +237,28 @@ func statusesJSON(_ ids: [String], from host: String) -> String {
     return "[\(statuses.joined(separator: ","))]"
 }
 
+/// An instant as a server spells one, so a page's `created_at` and a stored post's `at:` can be
+/// asked to mean the same moment.
+func isoDate(_ seconds: TimeInterval) -> String {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    formatter.timeZone = TimeZone(identifier: "UTC")
+    return formatter.string(from: Date(timeIntervalSince1970: seconds))
+}
+
 /// One status, enough to prove a list came back.
 let oneStatusJSON = statusesJSON(["1"], from: "example")
 
 /// A post as `host` would have handed it over — the address `MastodonDTO.asPost` writes, and
 /// so the only shape a cursor for `host` can take.
-func handedOver(_ id: String, from host: String, at seconds: TimeInterval = 100) -> Post {
-    makePost(uri: "https://\(host)/api/v1/statuses/\(id)", at: seconds, from: host)
+///
+/// `authority` is the server whose canonical address the post carries, spelled the way
+/// Mastodon spells one. Without it the post has no canonical address at all, which is what a
+/// paging cursor needs and all any cursor test ever wanted; with it the post is one that can
+/// also be asked about by name, which is what reconciling needs.
+func handedOver(_ id: String, from host: String, authority: String? = nil,
+                at seconds: TimeInterval = 100) -> Post {
+    makePost(uri: "https://\(host)/api/v1/statuses/\(id)",
+             originURI: authority.map { "https://\($0)/users/a/statuses/\(id)" },
+             at: seconds, from: host)
 }

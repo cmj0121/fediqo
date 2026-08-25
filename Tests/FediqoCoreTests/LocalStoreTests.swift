@@ -16,7 +16,7 @@ struct LocalStoreTests {
         return dir.appendingPathComponent("docs/\(name).sql")
     }
 
-    @Test("Each bundled schema is its docs copy, byte for byte", arguments: ["schema", "schema-002"])
+    @Test("Each bundled schema is its docs copy, byte for byte", arguments: ["schema", "schema-002", "schema-003"])
     func bundledSchemaMatchesDocs(name: String) throws {
         let bundled = try Data(contentsOf: Bundle.module.url(forResource: name, withExtension: "sql")!)
         #expect(bundled == (try Data(contentsOf: documentedSchema(name))))
@@ -41,7 +41,7 @@ struct LocalStoreTests {
         #expect(triggers == ["posts_fts_insert", "posts_fts_delete", "posts_fts_update"])
         #expect(protocols.map(\.0) == ["atproto", "mastodon", "nostr"])
         #expect(protocols.allSatisfy { $0.1 > 0 })
-        #expect(migrations == ["001", "002"])
+        #expect(migrations == ["001", "002", "003"])
     }
 
     @Test("Foreign keys are on, so a post without its server is refused")
@@ -78,7 +78,7 @@ struct LocalStoreTests {
 
         #expect(again.0 == first)
         #expect(again.1 == "wal")
-        #expect(again.2 == 2)
+        #expect(again.2 == 3)
     }
 
     @Test("A 001 store upgrades in place: owned_accounts appears, what was there stays")
@@ -116,7 +116,7 @@ struct LocalStoreTests {
         }
         #expect(hasTable)
         #expect(posts == 1)
-        #expect(migrations == ["001", "002"])
+        #expect(migrations == ["001", "002", "003"])
     }
 
     @Test("owned_accounts records a fact about an account we have; a ghost is refused")

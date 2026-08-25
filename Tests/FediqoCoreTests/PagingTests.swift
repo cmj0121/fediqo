@@ -397,6 +397,10 @@ actor HeldClient: SourceClient {
 
     func trending(host: String, limit: Int, token: String?) async throws -> [Post] { [] }
 
+    /// Nothing in this suite reconciles, and a double that answered "gone" would mark posts
+    /// no test asked it to. Still there is the answer that decides nothing.
+    func stillHas(_ post: Post, host: String, token: String?) async throws -> Bool { true }
+
     func timeline(host: String, limit: Int, before: Post?, token: String?) async throws -> [Post] {
         cursors.append(before)
         arrival?.resume()
@@ -433,6 +437,10 @@ actor StrayCursorClient: SourceClient {
 
     func trending(host: String, limit: Int, token: String?) async throws -> [Post] { [] }
 
+    /// Nothing in this suite reconciles, and a double that answered "gone" would mark posts
+    /// no test asked it to. Still there is the answer that decides nothing.
+    func stillHas(_ post: Post, host: String, token: String?) async throws -> Bool { true }
+
     func timeline(host: String, limit: Int, before: Post?, token: String?) async throws -> [Post] {
         cursors.append(before)
         // Refused by the real rule rather than a copy of it, so the belt in `TimelineLoader`
@@ -458,6 +466,10 @@ actor RejectingStrayCursorClient: SourceClient {
     }
 
     func trending(host: String, limit: Int, token: String?) async throws -> [Post] { [] }
+
+    /// Nothing in this suite reconciles, and a double that answered "gone" would mark posts
+    /// no test asked it to. Still there is the answer that decides nothing.
+    func stillHas(_ post: Post, host: String, token: String?) async throws -> Bool { true }
 
     func timeline(host: String, limit: Int, before: Post?, token: String?) async throws -> [Post] {
         cursors.append(before)
