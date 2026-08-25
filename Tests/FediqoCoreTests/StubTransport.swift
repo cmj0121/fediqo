@@ -122,6 +122,33 @@ func stubbedSession() -> URLSession {
     return URLSession(configuration: configuration)
 }
 
+/// A `SourceClient` written for one question, with sensible nothings for the other three.
+///
+/// The doubles in these suites each exist to watch one thing — what cursor was sent, what a
+/// held request does to the next reach, which host got which list — and each was carrying three
+/// identical stubbed methods to get there. This is that boilerplate, once.
+///
+/// A **marker**: the defaults are on this and never on `SourceClient` itself. Put there they
+/// would reach `MastodonClient` too, and a real client that lost a method would quietly compile
+/// against a stub that answers "" and `[]` and `true` instead of failing to build — which is
+/// the one thing a protocol with four requirements is there to prevent. A double opts in by
+/// name; anything that wants its own answer just writes one, and it wins.
+protocol StubClient: SourceClient {}
+
+extension StubClient {
+    func instance(host: String) async throws -> InstanceInfo {
+        InstanceInfo(host: host, title: host, summary: "")
+    }
+
+    /// These suites read timelines. A double that invented a trending list would put posts on
+    /// a screen no test asked for them on.
+    func trending(host: String, limit: Int, token: String?) async throws -> [Post] { [] }
+
+    /// Nothing in these suites reconciles, and a double that answered "gone" would mark posts
+    /// no test asked it to. Still there is the answer that decides nothing.
+    func stillHas(_ post: Post, host: String, token: String?) async throws -> Bool { true }
+}
+
 /// A Mastodon server the stub answers for.
 func makeServer(_ host: String) -> Server {
     Server(host: host, socialProtocol: .mastodon, title: host)

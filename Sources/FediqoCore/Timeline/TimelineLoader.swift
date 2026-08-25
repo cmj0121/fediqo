@@ -411,6 +411,10 @@ public struct TimelineLoader: Sendable {
             do {
                 try await store?.markDeleted(mergeKey: key)
                 marked.insert(key)
+                // The verdict is written here because this is where it becomes true: a post
+                // found gone is settled by the mark going down, not by the answer that
+                // prompted it, which is why it started as `.unknown` above.
+                verdicts[key] = .settled
             } catch {
                 // The authority answered and its answer stands; only the writing of it failed.
                 // So the suspicion is kept, and the post is asked about again another time.
@@ -420,7 +424,6 @@ public struct TimelineLoader: Sendable {
                     """)
             }
         }
-        for key in marked { verdicts[key] = .settled }
 
         await reconciler.settle(verdicts)
         await record(failures, from: answered.union(failures.keys),
@@ -447,13 +450,29 @@ public struct TimelineLoader: Sendable {
     ///
     /// Nothing is written here, and nothing is asked. Absence raises a question; `reconcile`
     /// is what asks it, and only an answer writes anything.
+    ///
+    /// The healthy page is the one this is written for, because it is nearly every page: the
+    /// server handed over everything the store had in the stretch, and there is nothing to
+    /// suspect. So the store is asked for names rather than posts, the diff is done on those,
+    /// and a post is built only for what the diff leaves standing — which on that page is
+    /// nothing at all, and used to be a page's worth of rows joined, tagged and thrown away.
     private func suspectMissing(_ page: [Post], from endpoint: String) async {
-        guard let store, let oldest = page.map(\.createdAt).min(),
-              let newest = page.map(\.createdAt).max() else { return }
-        let handed = Set(page.map(\.mergeKey))
+        guard let store, let first = page.first else { return }
+        // One pass for all three: the stretch the page covers, and the keys it covered it with.
+        var oldest = first.createdAt
+        var newest = first.createdAt
+        var handed: Set<String> = [first.mergeKey]
+        handed.reserveCapacity(page.count)
+        for post in page.dropFirst() {
+            if post.createdAt < oldest { oldest = post.createdAt }
+            if post.createdAt > newest { newest = post.createdAt }
+            handed.insert(post.mergeKey)
+        }
         do {
-            let covered = try await store.posts(from: endpoint, postedIn: oldest...newest)
-            await reconciler.suspect(covered.filter { !handed.contains($0.post.mergeKey) })
+            let covered = try await store.postKeys(from: endpoint, postedIn: oldest...newest)
+            let missing = covered.filter { !handed.contains($0) }
+            guard !missing.isEmpty else { return }
+            await reconciler.suspect(try await store.posts(named: missing))
         } catch {
             // Not being able to read our own store says nothing about anybody's post, so it
             // goes in the log and this page simply raises no questions.
@@ -541,7 +560,7 @@ public struct TimelineLoader: Sendable {
     /// retry policy is here, so the fan-outs above only have to name the servers and collect
     /// what each one answered.
     private func ask(_ client: any SourceClient, _ server: Server, mode: FeedMode,
-                     token: String?, before: Post? = nil) async -> Answer {
+                     token: String?, before: Post?) async -> Answer {
         let answer = await attempt(client, server, mode: mode, token: token, before: before)
         // A cursor a server cannot be asked about is our wiring, not their machine: per-server
         // cursors mean a post from somewhere else can never become one, so this is the belt.

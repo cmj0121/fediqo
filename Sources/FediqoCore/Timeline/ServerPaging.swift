@@ -80,11 +80,15 @@ actor ServerPaging {
     /// where it is the last one still going, the screen tells the reader they have finished
     /// reading when they have not.
     func gave(_ page: [Post], _ endpoint: String) {
-        var place = places[endpoint] ?? Place()
-        place.inFlight = false
-        if let last = page.last { place.cursor = last }
-        if page.isEmpty { place.exhausted = true }
-        places[endpoint] = place
+        // The page is back whatever it carried, so this is the write that must land even for a
+        // server nothing has claimed yet — hence the default. After it there is a place here,
+        // and the two below reach it the way `gaveNothing` and `forget` reach theirs.
+        places[endpoint, default: Place()].inFlight = false
+        if let last = page.last {
+            places[endpoint]?.cursor = last
+        } else {
+            places[endpoint]?.exhausted = true
+        }
     }
 
     /// Nothing arrived from this server: it failed, or the request never left. The page is

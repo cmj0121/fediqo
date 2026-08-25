@@ -42,11 +42,14 @@ public struct Post: Sendable, Hashable, Identifiable {
     /// boosted it is part of the key. Merging those two would be exactly the silent
     /// collapse #5 forbids. The booster is named by id rather than display name, because
     /// names change and two people may share one.
-    public var mergeKey: String {
-        let identity = originURI ?? uri
-        guard let boostedById else { return identity }
-        return "boost:\(boostedById)|\(identity)"
-    }
+    ///
+    /// Worked out once, in `init`, and kept — because it is asked for constantly and computing
+    /// it allocates a string for every boost, every time. A merged page asks it of every post,
+    /// so does the sort under it, so does the reconciler's diff, and a screen asks it once per
+    /// row per pass of its body. Nothing it is made of can change after `init`: `uri`,
+    /// `originURI` and `boostedById` are all `let`, and `sources` — the one field that moves —
+    /// is no part of identity.
+    public let mergeKey: String
 
     public var id: String { mergeKey }
 
@@ -86,6 +89,8 @@ public struct Post: Sendable, Hashable, Identifiable {
         self.boostedBy = boostedBy
         self.boostedById = boostedById
         self.sources = sources
+        let identity = originURI ?? uri
+        self.mergeKey = boostedById.map { "boost:\($0)|\(identity)" } ?? identity
     }
 
     public mutating func addSource(_ host: String) {

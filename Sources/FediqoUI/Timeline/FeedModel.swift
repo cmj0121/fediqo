@@ -275,15 +275,15 @@ final class FeedModel {
         guard let foot = result.posts.last else { return }
         let page = await loader.storedOlder(than: foot)
         storeFailure = page.failure
-        guard page.posts.isEmpty else {
-            append(page.posts)
-            return await askServers(servers, rounds: 1)
-        }
-        // A store that would not answer is not a store that has run out, and only the second
-        // is the cold-start cliff eight rounds are the answer to. Paying that burst at other
-        // people's servers for our own database's bad moment would be charging them for it, so
-        // this asks exactly what a reach the store did answer asks.
-        await askServers(servers, rounds: page.failure == nil ? Self.roundsPerReach : 1)
+        if !page.posts.isEmpty { append(page.posts) }
+        // Eight rounds are the answer to one thing only: the store having run out, which is the
+        // cold-start cliff. A store that answered the page has already given the reader
+        // something, and a store that would not answer has not run out — it had a bad moment,
+        // and paying a burst at other people's servers for our own database's bad moment would
+        // be charging them for it. So both of those ask exactly one round, and only an empty
+        // page from a store that was working asks for the rest.
+        let spent = page.posts.isEmpty && page.failure == nil
+        await askServers(servers, rounds: spent ? Self.roundsPerReach : 1)
     }
 
     /// The servers asked for what came before, round after round until a page lands below the

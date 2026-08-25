@@ -448,20 +448,10 @@ struct ServerPagingTests {
 /// expectation that fails in milliseconds, where holding it too would leave a continuation
 /// nobody resumes and a suite that never finishes. The time limit on the test is the backstop
 /// — it marks the test red after a minute, but the run stays stuck behind the held request.
-actor HeldClient: SourceClient {
+actor HeldClient: StubClient {
     private(set) var cursors: [Post?] = []
     private var release: CheckedContinuation<Void, Never>?
     private var arrival: CheckedContinuation<Void, Never>?
-
-    func instance(host: String) async throws -> InstanceInfo {
-        InstanceInfo(host: host, title: host, summary: "")
-    }
-
-    func trending(host: String, limit: Int, token: String?) async throws -> [Post] { [] }
-
-    /// Nothing in this suite reconciles, and a double that answered "gone" would mark posts
-    /// no test asked it to. Still there is the answer that decides nothing.
-    func stillHas(_ post: Post, host: String, token: String?) async throws -> Bool { true }
 
     func timeline(host: String, limit: Int, before: Post?, token: String?) async throws -> [Post] {
         cursors.append(before)
@@ -487,21 +477,11 @@ actor HeldClient: SourceClient {
 /// A client that hands over a post belonging to another server, and then refuses to be asked
 /// what came before it — the wiring mistake per-server cursors make impossible, staged so the
 /// belt underneath them can be tested at all.
-actor StrayCursorClient: SourceClient {
+actor StrayCursorClient: StubClient {
     private(set) var cursors: [Post?] = []
     private var pages: [[Post]]
 
     init(pages: [[Post]]) { self.pages = pages }
-
-    func instance(host: String) async throws -> InstanceInfo {
-        InstanceInfo(host: host, title: host, summary: "")
-    }
-
-    func trending(host: String, limit: Int, token: String?) async throws -> [Post] { [] }
-
-    /// Nothing in this suite reconciles, and a double that answered "gone" would mark posts
-    /// no test asked it to. Still there is the answer that decides nothing.
-    func stillHas(_ post: Post, host: String, token: String?) async throws -> Bool { true }
 
     func timeline(host: String, limit: Int, before: Post?, token: String?) async throws -> [Post] {
         cursors.append(before)
@@ -516,22 +496,12 @@ actor StrayCursorClient: SourceClient {
 /// the read as whoever is signed in, `.notItsPost` to the same read as a stranger. No real
 /// client answers this pair — it is what a mis-wired one would, and decision 8 is that our
 /// wiring never reaches the reader wearing a server's fault.
-actor RejectingStrayCursorClient: SourceClient {
+actor RejectingStrayCursorClient: StubClient {
     private(set) var cursors: [Post?] = []
     private let page: [Post]
     private var refusals = 2
 
     init(page: [Post]) { self.page = page }
-
-    func instance(host: String) async throws -> InstanceInfo {
-        InstanceInfo(host: host, title: host, summary: "")
-    }
-
-    func trending(host: String, limit: Int, token: String?) async throws -> [Post] { [] }
-
-    /// Nothing in this suite reconciles, and a double that answered "gone" would mark posts
-    /// no test asked it to. Still there is the answer that decides nothing.
-    func stillHas(_ post: Post, host: String, token: String?) async throws -> Bool { true }
 
     func timeline(host: String, limit: Int, before: Post?, token: String?) async throws -> [Post] {
         cursors.append(before)
