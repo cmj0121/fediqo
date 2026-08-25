@@ -462,10 +462,8 @@ extension View {
         environment(app)
             .environment(\.fediqoTextScale, app.preferences.textScale.factor)
             .environment(\.locale, app.preferences.language.locale ?? .autoupdatingCurrent)
-            // No scrollbar, anywhere. It is pointer furniture, and this app is steered
-            // without one: where the reader is in a timeline is said by the ring on the post
-            // they are on, and how far down they have come by the back-to-top button
-            // appearing. SwiftUI offers no narrower bar, only none.
+            // No scrollbar, anywhere — see `fediqoWithoutScrollbars`, which is where the two
+            // platforms' answers to that are kept.
             //
             // Said here rather than at each `ScrollView`, for the reason this whole modifier
             // exists: the decision has one owner, and one line to change if it is ever
@@ -473,6 +471,6 @@ extension View {
             // forgets `fediqoChrome` loses the scrollbar rule exactly as it loses the locale
             // and the text scale, and the answer to that is the same as it is for those two:
             // a presentation applies this, and the environment carries it down from there.
-            .scrollIndicators(.hidden)
+            .fediqoWithoutScrollbars()
     }
 }
