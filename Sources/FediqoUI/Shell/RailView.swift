@@ -41,8 +41,8 @@ struct RailView: View {
             }
         } label: {
             Image(systemName: expanded ? "sidebar.leading" : "sidebar.trailing")
-                .font(.system(size: 13, weight: .medium))
-                .frame(width: 30, height: 28)
+                .font(.system(size: 16, weight: .medium))
+                .frame(width: 34, height: 30)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -95,8 +95,12 @@ struct RailView: View {
     private func rowLabel(symbol: String, titleKey: String, expanded: Bool, weight: Font.Weight) -> some View {
         HStack(spacing: 9) {
             Image(systemName: symbol)
-                .font(.system(size: 14, weight: weight))
-                .frame(width: 20)
+                // The bar is icons and nothing else when it is closed, so the icon is the
+                // whole of what a reader has to aim at and to recognise. Drawn at the size a
+                // toolbar icon is rather than the size a word is: it is not sitting beside
+                // text here, it is standing in for it.
+                .font(.system(size: 18, weight: weight))
+                .frame(width: 24)
             if expanded {
                 Text(t(titleKey))
                     .fediqoFont(13, weight: weight)
@@ -104,8 +108,8 @@ struct RailView: View {
                     .minimumScaleFactor(0.7)
             }
         }
-        .frame(width: expanded ? Self.expandedWidth - 28 : 30, alignment: expanded ? .leading : .center)
-        .padding(.vertical, 7)
+        .frame(width: expanded ? Self.expandedWidth - 28 : 34, alignment: expanded ? .leading : .center)
+        .padding(.vertical, 8)
         .padding(.horizontal, expanded ? 7 : 0)
         .contentShape(Rectangle())
     }
