@@ -129,10 +129,10 @@ func makeServer(_ host: String) -> Server {
 
 /// A loader that only speaks Mastodon, through the stub. `secrets` is in-memory by default so
 /// no test ever reaches the real Keychain, whatever a loader is handed a store.
-func stubbedLoader(store: LocalStore? = nil, secrets: any SecretStore = InMemorySecretStore(),
+func stubbedLoader(limit: Int = 40, store: LocalStore? = nil, secrets: any SecretStore = InMemorySecretStore(),
                    tokens: TokenSource? = nil) -> TimelineLoader {
     TimelineLoader(registry: SourceRegistry(clients: [.mastodon: MastodonClient(session: stubbedSession())]),
-                   store: store, secrets: secrets, tokens: tokens)
+                   limit: limit, store: store, secrets: secrets, tokens: tokens)
 }
 
 /// One account signed in to `server`, written the way `SignInCoordinator` writes it: the
@@ -203,16 +203,33 @@ struct Harness {
     }
 }
 
+/// A page of statuses as `host` would hand it over, `ids` in the order given. One spelling of
+/// the Mastodon status shape for every suite, so a change to what the decoder reads breaks all
+/// of them at once rather than one of them quietly.
+func statusesJSON(_ ids: [String], from host: String) -> String {
+    let statuses = ids.map { id in
+        """
+        {
+          "id": "\(id)",
+          "uri": "https://\(host)/users/a/statuses/\(id)",
+          "url": "https://\(host)/@a/\(id)",
+          "created_at": "2026-08-21T10:00:00.000Z",
+          "content": "<p>hello</p>",
+          "account": { "id": "10", "url": "https://\(host)/@a", "username": "a", "acct": "a",
+                       "display_name": "Ada", "avatar": null },
+          "media_attachments": [],
+          "tags": []
+        }
+        """
+    }
+    return "[\(statuses.joined(separator: ","))]"
+}
+
 /// One status, enough to prove a list came back.
-let oneStatusJSON = """
-[{
-  "id": "1",
-  "uri": "https://example/users/a/statuses/1",
-  "url": "https://example/@a/1",
-  "created_at": "2026-08-21T10:00:00.000Z",
-  "content": "<p>hello</p>",
-  "account": { "id": "10", "url": "https://example/@a", "username": "a", "acct": "a", "display_name": "Ada", "avatar": null },
-  "media_attachments": [],
-  "tags": []
-}]
-"""
+let oneStatusJSON = statusesJSON(["1"], from: "example")
+
+/// A post as `host` would have handed it over — the address `MastodonDTO.asPost` writes, and
+/// so the only shape a cursor for `host` can take.
+func handedOver(_ id: String, from host: String, at seconds: TimeInterval = 100) -> Post {
+    makePost(uri: "https://\(host)/api/v1/statuses/\(id)", at: seconds, from: host)
+}
