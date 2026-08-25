@@ -2297,6 +2297,23 @@
         }
       }
     },
+    "timeline.older": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reading further back\u2026"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "\u6b63\u5728\u8b80\u53d6\u66f4\u65e9\u7684\u2026"
+          }
+        }
+      }
+    },
     "timeline.open": {
       "extractionState": "manual",
       "localizations": {
@@ -2378,6 +2395,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "來源"
+          }
+        }
+      }
+    },
+    "timeline.store.unreadable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The stored timeline could not be read: %@"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "\u7121\u6cd5\u8b80\u53d6\u672c\u6a5f\u6642\u9593\u8ef8\uff1a%@"
           }
         }
       }

@@ -356,8 +356,22 @@ public final class AppState {
     /// Moves the ring one post along the feed being read, and says whether it moved. A page
     /// with no feed has no posts to move through, and neither has a feed at the end the
     /// press was pointing at.
+    ///
+    /// The bottom is the one end that asks for something. `j` on the last post has nowhere to
+    /// step to, so the servers are asked for what came before and the ring lands on the first
+    /// post that arrives — the feed is what knows it is waiting, this is what has the servers.
+    /// The press still answers `false`, because nothing moved: `↓` at the bottom of a list is
+    /// still the scroll view's to answer.
     private func moveSelection(by steps: Int) -> Bool {
-        readingFeed?.moveSelection(by: steps) ?? false
+        guard let feed = readingFeed else { return false }
+        let moved = feed.moveSelection(by: steps)
+        // Held down, `j` repeats twenty times a second against a ring that is still at the
+        // end, and the reach already out would turn every one of those into nothing. Asking
+        // the feed here rather than a task later is what keeps the repeat free.
+        if feed.awaitingOlder, !feed.loadingOlder {
+            Task { [servers] in await feed.loadOlder(servers: servers) }
+        }
+        return moved
     }
 
     /// Opens the post the ring is on, the way the row's own menu opens it, and says whether

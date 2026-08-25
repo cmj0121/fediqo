@@ -290,6 +290,27 @@ struct StandingFailureTests {
         #expect(failed.posts(carrying: shown, asked: [server]).map(\.uri) == ["kept"])
     }
 
+    /// A refresh asks every server for its newest page, so it speaks for the top of the
+    /// timeline and for nothing under it. A reader who has read down five pages must not have
+    /// four of them taken away every time the clock ticks.
+    @Test("A refresh replaces the stretch it covers and leaves what was read below it")
+    func aRefreshKeepsWhatWasReadBelowIt() async {
+        let host = "deep.test"
+        let server = makeServer(host)
+        stubRoutes.on(host, "/api/v1/timelines/public", status: 200,
+                      body: statusesJSON(["5", "4"], from: host, authority: host, at: [500, 400]))
+        let shown = ["4", "3", "2"].enumerated().map {
+            handedOver($1, from: host, authority: host, at: 400 - TimeInterval($0) * 100)
+        }
+
+        let refreshed = await stubbedLoader(limit: 2).load(servers: [server], mode: .timeline)
+
+        // The page's own rows, then the tail below them — and the row the page and the screen
+        // both had is the page's, once.
+        #expect(refreshed.posts(carrying: shown, asked: [server]).map(\.uri)
+                == ["5", "4", "3", "2"].map { "https://\(host)/api/v1/statuses/\($0)" })
+    }
+
     @Test("With no sources left there is nobody whose rows those were")
     func noSourcesClearsTheScreen() async {
         let shown = [makePost(uri: "orphan", at: 100, from: "gone.test")]

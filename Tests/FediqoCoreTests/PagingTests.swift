@@ -124,6 +124,42 @@ struct StorePagingTests {
         #expect(second.map(\.uri) == [uri("3b"), uri("2"), uri("1")])
     }
 
+    /// What a reach for the bottom actually calls, rather than the store underneath it: the
+    /// store's page comes back the size a server's page is, so the list grows by the same step
+    /// whichever answered and a reader cannot tell from its length where it came from.
+    @Test("The loader reads the store's page before a post, a server's page-worth at a time")
+    func theLoaderReadsTheStoreBackwards() async throws {
+        let store = try await stocked()
+        let loader = TimelineLoader(limit: 2, store: store, secrets: InMemorySecretStore())
+        let head = try await loader.stored(mode: .timeline)
+
+        let page = await loader.storedOlder(than: head[1])
+
+        #expect(page.posts.map(\.uri) == [uri("3a"), uri("3b")])
+        #expect(page.failure == nil)
+        // Nothing older, which is the store spent — and not the same answer as a store that
+        // would not say, which is what the reach has to be able to tell apart.
+        let past = await loader.storedOlder(than: head.last!)
+        #expect(past.posts.isEmpty)
+        #expect(past.failure == nil)
+    }
+
+    /// The order is written three times — as the store's cut, as its `ORDER BY`, and as
+    /// `Post.isOlder` for whoever joins one page to the page before it. Two of them
+    /// disagreeing is a post falling between the pages and never being read, so the three are
+    /// pinned to each other here rather than kept in step by hand.
+    @Test("The store's pages and Post.isOlder are the one order, tiebreak and all")
+    func oneOrderInThreeSpellings() async throws {
+        let store = try await stocked()
+
+        let whole = try await store.timeline()
+
+        #expect(zip(whole, whole.dropFirst()).allSatisfy { Post.isOlder($1, than: $0) })
+        // And the fold every merged page goes through lands in that same order, so a page
+        // from the network and a page from disk cannot disagree about where one ends.
+        #expect(whole.shuffled().merged() == whole)
+    }
+
     @Test("Before the oldest post there is nothing, and it says so rather than starting again")
     func pastTheEndIsEmpty() async throws {
         let store = try await stocked()
@@ -209,6 +245,32 @@ struct ServerPagingTests {
         #expect(cursors(spent.host).count == 1)
         #expect(cursors(going.host) == [nil, "7"])
         #expect(second.posts.allSatisfy { $0.sources == [going.host] })
+    }
+
+    /// A server that has run out was not asked, and a round that asked nothing about it has
+    /// nothing to say about it. Leaving it out of `skipped` as well as out of `failures` is
+    /// the round claiming otherwise, and `failures(carrying:of:)` reads that claim as good
+    /// news: the reason the server was carrying is struck off the screen until the next
+    /// refresh. `.tokenRejected` is the case that reaches it — it counts as having arrived,
+    /// so it starts no wait, so nothing else was keeping the server out of a round.
+    @Test("A server that has run out is still a server this round never asked")
+    func aSpentServerIsUnaskedRatherThanCleared() async {
+        let spent = makeServer("spent-standing.downward.test")
+        let going = makeServer("going-standing.downward.test")
+        stubRoutes.on(spent.host, path, status: 200, body: "[]")
+        stubRoutes.on(going.host, path, status: 200, body: statusesJSON(["8", "7"], from: going.host))
+        let loader = stubbedLoader(limit: 2)
+        let standing = [spent.endpoint: SourceFailure.tokenRejected(spent.host)]
+
+        _ = await loader.loadOlder(servers: [spent, going], now: t0)
+        let second = await loader.loadOlder(servers: [spent, going], now: t0.addingTimeInterval(1))
+
+        #expect(second.skipped.contains(spent.endpoint))
+        #expect(second.failures[spent.endpoint] == nil)
+        #expect(second.failures(carrying: standing, of: [spent, going])[spent.endpoint]
+                    == .tokenRejected(spent.host))
+        // The one that was asked is judged by this round alone, exactly as it always was.
+        #expect(second.skipped.contains(going.endpoint) == false)
     }
 
     @Test("Only when every server has said so is the reading over")

@@ -184,11 +184,21 @@ struct FeedScreen: View {
     /// about one server, so it is said next to that server rather than across the top of
     /// everything. The button carries a mark when there is something to read here, because
     /// an empty timeline and no clue where to look is indistinguishable from a broken one.
+    ///
+    /// The stored timeline is the one line here that belongs to no server. A reach for the
+    /// bottom reads it before anybody is asked, so a store that will not answer is a reason
+    /// posts are not arriving — which is what this menu is for — and it is said on its own
+    /// rather than pinned on whichever server was about to be asked next.
     private var sourcesMenu: some View {
         let failures = model.failures
+        let storeFailure = model.storeFailure
         return Menu {
             Button(t("timeline.addSource")) { app.addingSource = true }
             Divider()
+            if let storeFailure {
+                Text(t("timeline.store.unreadable", message(for: storeFailure)))
+                Divider()
+            }
             ForEach(app.servers) { server in
                 Menu {
                     if let failure = failures[server.endpoint] {
@@ -209,7 +219,8 @@ struct FeedScreen: View {
         } label: {
             Image(systemName: "server.rack")
         }
-        .modifier(HeaderMenuChrome(labelKey: "timeline.sources", warning: !failures.isEmpty))
+        .modifier(HeaderMenuChrome(labelKey: "timeline.sources",
+                                   warning: !failures.isEmpty || storeFailure != nil))
     }
 
     // MARK: - Body
@@ -229,6 +240,7 @@ struct FeedScreen: View {
                     ForEach(posts) { post in
                         PostRow(post: post, selected: post.mergeKey == model.selection)
                     }
+                    if model.loadingOlder { readingOn }
                 }
                 .padding(12)
             }
@@ -239,7 +251,32 @@ struct FeedScreen: View {
             } action: { _, away in
                 withAnimation(Motion.appearing) { scrolledAway = away }
             }
+            // Nearing the bottom asks for what came before, without the reader asking. Half a
+            // screen again, and for the same reason the other one is: how near the bottom
+            // counts as near depends on how much of the list you can see at once. Crossing it
+            // once a frame is not a burst — the feed's own guard turns every crossing after
+            // the first into nothing until the page it started comes back.
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.contentOffset.y + geometry.containerSize.height
+                    > geometry.contentSize.height - geometry.containerSize.height / 2
+            } action: { _, nearing in
+                guard nearing else { return }
+                Task { await model.loadOlder(servers: app.servers) }
+            }
         }
+    }
+
+    /// That the reach for the bottom is still working. A cold start can take several rounds
+    /// before a page lands below the reader, and a bottom that merely sits there is
+    /// indistinguishable from one that is finished — which is a different sentence, and not
+    /// this one's to say.
+    private var readingOn: some View {
+        HStack(spacing: 8) {
+            ProgressView().controlSize(.small)
+            Text(t("timeline.older")).fediqoFont(11).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
     }
 
     @ViewBuilder

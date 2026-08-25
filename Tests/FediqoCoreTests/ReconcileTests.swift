@@ -530,6 +530,57 @@ struct ReconcilerTests {
         #expect(await queue.take(10, avoiding: []).isEmpty)
     }
 
+    /// Silence decides nothing about a post, and no number of silences ever will — but a
+    /// question that can never be answered still has to stop holding a place, or an authority
+    /// that is simply gone takes the queue with it.
+    @Test("An authority that only ever goes quiet stops holding a place in the queue")
+    func aStandingSilenceIsSetAside() async {
+        let queue = Reconciler()
+        let unreachable = subject("1")
+        await queue.suspect([unreachable])
+
+        // Under the threshold nothing is given up: silence is not an answer, and the post is
+        // asked about again the next pass, exactly as it always was.
+        for _ in 1..<Reconciler.silencesBeforeSettingAside {
+            let asked = await queue.take(10, avoiding: [])
+            #expect(asked.count == 1)
+            await queue.settle(all(asked, .unknown))
+            #expect(await queue.suspected == [unreachable.post.mergeKey])
+        }
+
+        let last = await queue.take(10, avoiding: [])
+        await queue.settle(all(last, .unknown))
+
+        // Set aside, not settled: nothing was marked and nothing was written, and the post is
+        // still on the screen and in the store. It has only stopped being a question.
+        #expect(await queue.suspected.isEmpty)
+        await queue.suspect([unreachable])
+        #expect(await queue.suspected.isEmpty)
+        #expect(await queue.take(10, avoiding: []).isEmpty)
+    }
+
+    /// The failure this is really for. An authority that is permanently unreachable, with a
+    /// round's worth of its posts suspected, fills `questionsAtOnce` — and if silence never
+    /// frees a place, `suspect` turns every later page away for the rest of the run and
+    /// reconcile is deaf. That is the permanently-full queue that dropping the oldest was
+    /// rejected for causing, arriving by the other road.
+    @Test("A dead authority's suspects do not shut the queue for the rest of the run")
+    func aDeadAuthorityDoesNotShutTheQueue() async {
+        let queue = Reconciler()
+        await queue.suspect((1...Reconciler.questionsAtOnce).map { subject(String($0)) })
+        #expect(await queue.suspected.count == Reconciler.questionsAtOnce)
+
+        for _ in 1...Reconciler.silencesBeforeSettingAside {
+            let asked = await queue.take(Reconciler.questionsAtOnce, avoiding: [])
+            await queue.settle(all(asked, .unknown))
+        }
+
+        // The queue is open again, and the next page's question is taken rather than dropped.
+        let live = subject("live")
+        await queue.suspect([live])
+        #expect(await queue.suspected == [live.post.mergeKey])
+    }
+
     @Test("Refusals counted for one post say nothing about another")
     func refusalsAreCountedPerPost() async {
         let queue = Reconciler()
@@ -544,6 +595,39 @@ struct ReconcilerTests {
 
         // One went quiet; the other is still a live question, having only ever met silence.
         #expect(await queue.suspected == [other.post.mergeKey])
+    }
+
+    /// The bound at the point of asking does not bound the remembering: a pass spends eight
+    /// and one round of pages can raise a great many more than eight, so without a ceiling
+    /// here the queue grows faster than it drains and every entry holds a whole `Post`.
+    @Test("A queue at its ceiling stops taking questions on rather than growing without end")
+    func theQueueHasACeiling() async {
+        let queue = Reconciler()
+
+        await queue.suspect((1...(Reconciler.questionsAtOnce + 50)).map { subject(String($0)) })
+
+        #expect(await queue.suspected.count == Reconciler.questionsAtOnce)
+    }
+
+    /// The newest is what is dropped, never the oldest: the oldest are the ones being worked
+    /// off, and dropping those would leave a queue permanently full and permanently
+    /// unfinished. What is dropped is a question deferred, not a question answered — the next
+    /// page covering that post raises it again.
+    @Test("Over the ceiling it is the newest question that is left for later, not the oldest")
+    func theCeilingKeepsTheFrontOfTheQueue() async {
+        let queue = Reconciler()
+        await queue.suspect((1...Reconciler.questionsAtOnce).map { subject(String($0)) })
+
+        let late = subject("late")
+        await queue.suspect([late])
+        #expect(await queue.suspected.contains(late.post.mergeKey) == false)
+
+        // The front is untouched, and room made at it is room the deferred question can have.
+        let front = await queue.take(1, avoiding: [])
+        #expect(ids(front) == ["1"])
+        await queue.settle(all(front, .settled))
+        await queue.suspect([late])
+        #expect(await queue.suspected.contains(late.post.mergeKey))
     }
 
     @Test("The oldest question is asked first, so a backlog does not starve its front")

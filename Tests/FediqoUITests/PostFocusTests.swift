@@ -3,11 +3,10 @@ import Testing
 import FediqoCore
 @testable import FediqoUI
 
-/// A post whose `mergeKey` is the name given here, so a test can say which row it means.
+/// A post whose `mergeKey` is the name given here, so a test can say which row it means —
+/// the shared fixture with the one address this suite opens by default.
 private func post(_ name: String, web: URL? = URL(string: "https://example.social/@a/1")) -> Post {
-    Post(uri: name, socialProtocol: .mastodon, sourceURL: "https://example.social",
-         createdAt: Date(timeIntervalSince1970: 0), authorId: "a", authorName: "A",
-         authorHandle: "@a", text: name, webURL: web)
+    makePost(name, web: web)
 }
 
 private let abc = [post("a"), post("b"), post("c")]

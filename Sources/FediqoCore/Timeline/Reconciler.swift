@@ -51,6 +51,45 @@ actor Reconciler {
     /// whose answer is already known.
     static let refusalsBeforeSettingAside = 3
 
+    /// How many passes of silence before a question is set aside.
+    ///
+    /// Silence decides nothing about a post, and that stays true however often it is met —
+    /// but a question that can never be answered still has to stop holding a place, or an
+    /// authority that is simply gone takes the queue down with it. Two hundred of its
+    /// suspects fill `questionsAtOnce`, `suspect` starts turning every new page away, and
+    /// reconcile is deaf for the rest of the run: exactly the permanently-full queue that
+    /// dropping the oldest was rejected for causing.
+    ///
+    /// Five, where a refusal gets three, because silence is the weaker evidence of the two: a
+    /// refusal is the authority answering, and this is only that we could not reach it. It is
+    /// not five passes in five seconds either — an authority that says nothing goes into the
+    /// same wait a server does, doubling from thirty seconds, so `take` passes over it until
+    /// the wait runs out and the fifth silence is a good seven minutes past the first. Long
+    /// enough that "down for a moment" has become "not answering us", short enough that a
+    /// dead authority cannot outlive one reading with the queue shut behind it.
+    ///
+    /// What brings one back is a relaunch, as it is for every other thing set aside: all of
+    /// this lives in memory and dies with the app, and the next run raises the question
+    /// afresh against whatever the authority says then.
+    static let silencesBeforeSettingAside = 5
+
+    /// How many questions may be open at once.
+    ///
+    /// There is a bound at the point of asking already, and it is not enough on its own: a
+    /// pass spends eight and a round of pages can raise a great many more than eight, so
+    /// without a ceiling here the queue grows faster than it drains and every `PostAuthority`
+    /// in it holds a whole `Post`. What is unbounded is not the asking but the remembering.
+    ///
+    /// Two hundred is the largest honest single round — a page is forty and a chosen list is
+    /// a handful of servers, and a filter turned on makes every post of every page absent at
+    /// once, which is the burst this is sized for. It drains in twenty-five passes.
+    ///
+    /// Over the ceiling the *newest* suspicion is dropped, never the oldest. The oldest are
+    /// the ones being worked off; dropping those would leave a queue permanently full and
+    /// permanently unfinished. And a dropped question is not an answered one — the next page
+    /// covering that post raises it again, which is what every relaunch does anyway.
+    static let questionsAtOnce = 200
+
     /// One post nobody has seen in a page that covered it, and how it has been going.
     private struct Suspicion {
         let subject: PostAuthority
@@ -60,6 +99,8 @@ actor Reconciler {
         var asking = false
         /// How many times the authority has declined to discuss it with a stranger.
         var refusals = 0
+        /// How many passes have asked about it and learned nothing at all.
+        var silences = 0
     }
 
     private var suspicions: [Suspicion] = []
@@ -70,9 +111,10 @@ actor Reconciler {
     /// pages keep arriving — so the rebuild would be slowest in the one case it has to be fast.
     private var queued: Set<String> = []
 
-    /// Questions this run will not raise again, for either of the two reasons a question is
-    /// worth stopping: nobody could ever put it into words, or the authority has given the
-    /// same non-answer often enough that asking again is only spending the bound.
+    /// Questions this run will not raise again, for any of the three reasons a question is
+    /// worth stopping: nobody could ever put it into words, the authority has refused it often
+    /// enough that asking again is only spending the bound, or it has been asked and met
+    /// nothing but silence that many times over.
     ///
     /// Set aside is neither settled nor forgotten. Nothing is marked, nothing is written, and
     /// the post stays exactly where it is on the screen and in the store — it has simply
@@ -85,10 +127,12 @@ actor Reconciler {
     private var setAside: Set<String> = []
 
     /// These were absent from a page that covered them, so they are now questions. Writes
-    /// nothing and decides nothing; a post already suspected is not suspected twice, and one
-    /// already set aside is not suspected at all.
+    /// nothing and decides nothing; a post already suspected is not suspected twice, one
+    /// already set aside is not suspected at all, and past `questionsAtOnce` the rest of this
+    /// page is left for a later page to raise.
     func suspect(_ subjects: [PostAuthority]) {
         for subject in subjects {
+            guard suspicions.count < Self.questionsAtOnce else { return }
             let key = subject.post.mergeKey
             guard !queued.contains(key), !setAside.contains(key) else { continue }
             queued.insert(key)
@@ -130,6 +174,13 @@ actor Reconciler {
     /// nothing: a server that could not be reached has said no more about a post than a server
     /// nobody asked. Freeing rather than dropping is the difference between "we do not know
     /// yet" and "we checked", and only one of those is true.
+    ///
+    /// Freed, but not for ever. After `silencesBeforeSettingAside` passes that learned nothing
+    /// the question is set aside too — still not answered, still nothing written, simply no
+    /// longer holding one of two hundred places on behalf of an authority that is never going
+    /// to answer. A store that will not keep the mark reaches this by the same road, and for
+    /// the same reason: a database we cannot write to must not be able to shut the queue
+    /// either.
     func settle(_ verdicts: [String: Verdict]) {
         var closing: Set<String> = []
         for index in suspicions.indices {
@@ -150,7 +201,10 @@ actor Reconciler {
                 closing.insert(key)
                 setAside.insert(key)
             case .unknown:
-                continue
+                suspicions[index].silences += 1
+                guard suspicions[index].silences >= Self.silencesBeforeSettingAside else { continue }
+                closing.insert(key)
+                setAside.insert(key)
             }
         }
         suspicions.removeAll { closing.contains($0.subject.post.mergeKey) }

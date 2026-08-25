@@ -47,11 +47,12 @@ public struct TimelineResult: Sendable {
     /// two ride alongside posts that did arrive, so a caller reading a server's fate reads
     /// `posts` for whether anything came and `failures` for whether anything needs attention.
     public let failures: [String: SourceFailure]
-    /// The servers this load did not ask at all, by `Server.endpoint`, because they were
-    /// still inside a wait. They are not failing now and they are not answering either, so
-    /// they are in neither `posts` nor `failures` — and a caller that draws a server's fate
-    /// needs to be told the difference between a server that had nothing to say and one
-    /// that was never asked.
+    /// The servers this load did not ask at all, by `Server.endpoint`. A refresh leaves out
+    /// whoever is still inside a wait; a reach for the bottom leaves out those and whoever
+    /// has run out of history or has a page still in flight. They are not failing now and
+    /// they are not answering either, so they are in neither `posts` nor `failures` — and a
+    /// caller that draws a server's fate needs to be told the difference between a server
+    /// that had nothing to say and one that was never asked.
     public let skipped: Set<String>
 
     public init(posts: [Post], failures: [String: SourceFailure], skipped: Set<String> = []) {
@@ -90,9 +91,18 @@ public struct TimelineResult: Sendable {
     ///
     /// Asking nobody is different from asking and being told nothing: with no sources left
     /// there is nothing whose rows these would be, so they go.
+    ///
+    /// And a refresh speaks for the top of the timeline and for nothing under it — it asked
+    /// every server for its newest page, which is what a refresh is. So whatever the reader
+    /// had already read down to below that page stays where it is: replacing the whole list
+    /// would snap it back to one page under them every time the clock ticked, undoing the
+    /// reading rather than adding to it.
     public func posts(carrying shown: [Post], asked servers: [Server]) -> [Post] {
-        if !posts.isEmpty || servers.isEmpty { return posts }
-        return shown
+        guard let cut = posts.last else { return servers.isEmpty ? posts : shown }
+        let covered = Set(posts.map(\.mergeKey))
+        return posts + shown.filter {
+            Post.isOlder($0, than: cut) && !covered.contains($0.mergeKey)
+        }
     }
 }
 
@@ -161,6 +171,35 @@ public struct TimelineLoader: Sendable {
         }
     }
 
+    /// The store's page before `post` — what the reader's next page down is already here,
+    /// before anybody's server is asked for it — and, separately, what went wrong. The shape
+    /// a read from a server comes back in, because it is the same kind of answer.
+    ///
+    /// Three answers and not two. A page. Nothing older, which is the store spent and the
+    /// reader's cue to go to the network in earnest. And a store that would not say, which is
+    /// neither of those: it is our own database having a bad moment, and reading it as the
+    /// second buys a burst of somebody else's bandwidth with it. A `try?` at the call site is
+    /// exactly what collapses those two, so the difference is kept here instead.
+    ///
+    /// A page the size a server is asked for, so the list grows by the same step whichever
+    /// answered it and a reader cannot tell from the length of the page where it came from.
+    /// The cursor is a post, the way it is for a server, so the two cannot disagree about
+    /// where the last page ended. Nothing without a store, which is what a preview has.
+    public func storedOlder(than post: Post) async -> (posts: [Post], failure: SourceFailure?) {
+        guard let store else { return ([], nil) }
+        do {
+            return (try await store.timeline(limit: limit, before: post), nil)
+        } catch {
+            // What SQLite said, in full, is for the log; the caller gets the reason to show.
+            LocalStore.log.error("""
+                reading the page before \(post.mergeKey, privacy: .public) failed: \
+                \(String(describing: error), privacy: .public)
+                """)
+            let reason = (error as? DatabaseError)?.message ?? error.localizedDescription
+            return ([], .store(reason))
+        }
+    }
+
     /// Every server asked at once, merged into one stream in one order.
     ///
     /// `refresh` says who asked, and the default is the reader — so a caller that has no
@@ -193,8 +232,9 @@ public struct TimelineLoader: Sendable {
     ///
     /// Three kinds of server go unasked, and they are three different facts. One that has said
     /// it has nothing older has reached its end; one whose page is still out is being waited
-    /// for, however hard the reader scrolls; one inside its wait is being left alone, and comes
-    /// back in `skipped` so a screen can keep saying why. The rest carry on without them.
+    /// for, however hard the reader scrolls; one inside its wait is being left alone. The rest
+    /// carry on without them — and all three come back in `skipped`, because whichever of the
+    /// three it was, this round asked them nothing and so has nothing to say about them.
     ///
     /// Whether that was the last page anyone had is `reachedTheEnd(of:)`'s to say, because it
     /// is a standing fact about the servers rather than something this page brought back.
@@ -206,7 +246,7 @@ public struct TimelineLoader: Sendable {
         // Unlike a refresh, nobody here is saying "ask anyway". Reaching the bottom is the
         // scroll's doing, and a scroll is as tireless as a clock, so a server inside its wait
         // is left alone whoever's finger started this — which is what `.automatic` means.
-        let (notWaiting, skipped) = await askable(servers, refresh: .automatic(every: every), now: now)
+        let (notWaiting, _) = await askable(servers, refresh: .automatic(every: every), now: now)
         // Cold start — the store holds posts but nobody has asked a server for a page yet, so
         // every cursor here is nil and the first page each server gives is its newest. That
         // page sits above the foot the reader has read down to, not below it, and two things
@@ -230,6 +270,15 @@ public struct TimelineLoader: Sendable {
         // again rather than passed over as spent (decision 9).
         await paging.forget(everyoneBut: servers)
         let claimed = await paging.claim(notWaiting)
+        // Everyone this round did not ask, whichever of the three reasons kept them out of it —
+        // which is why it is taken from the chosen list against what was claimed rather than
+        // from the wait alone. A spent server and one whose page is still out went unasked as
+        // surely as one inside its wait, and a round that leaves them out of `skipped` as well
+        // as out of `failures` is a round claiming it judged them and found nothing wrong.
+        // `failures(carrying:of:)` would then strike their standing reason off the screen —
+        // and `.tokenRejected` reaches exactly here, since it counts as having arrived, starts
+        // no wait, and so is the one reason a server carries all the way to running out.
+        let unasked = Set(servers.map(\.endpoint)).subtracting(claimed.map(\.server.endpoint))
         // Every claim is given back here and nowhere else. Silence says nothing about where a
         // server had got to, so its cursor stands and it is not counted as having run out;
         // anything that arrived — posts, or posts the store would not keep — moves the cursor
@@ -245,7 +294,7 @@ public struct TimelineLoader: Sendable {
                      refresh: .automatic(every: every), now: now)
 
         return TimelineResult(posts: round.collected.flatMap { $0 }.merged(),
-                              failures: round.failures, skipped: skipped)
+                              failures: round.failures, skipped: unasked)
     }
 
     /// Every one of `servers` has said it has nothing older, so there is nothing left to reach
@@ -611,8 +660,13 @@ public struct TimelineLoader: Sendable {
     }
 
     /// Several servers' trending lists as one: a post's rank is its index in its server's
-    /// list, a post on several lists takes its best rank and keeps every source, and the
-    /// rest of the order (newest first, then `mergeKey`) only breaks ties the servers did not.
+    /// list, a post on several lists takes its best rank and keeps every source, and where
+    /// the servers ranked two posts the same the timeline's own order breaks the tie.
+    ///
+    /// That tail is `Post.isOlder` and not a fourth spelling of it. Rank is this list's own
+    /// idea and nothing else has one; the order underneath it is the same order the store
+    /// reads a page back in and the same one a merged timeline is in, so it is asked for
+    /// rather than written out again.
     static func mergedByRank(_ lists: [[Post]]) -> [Post] {
         var ranks: [String: Int] = [:]
         for list in lists {
@@ -622,9 +676,7 @@ public struct TimelineLoader: Sendable {
         }
         return lists.flatMap { $0 }.merged(orderedBy: {
             let (a, b) = (ranks[$0.mergeKey]!, ranks[$1.mergeKey]!)
-            if a != b { return a < b }
-            if $0.createdAt != $1.createdAt { return $0.createdAt > $1.createdAt }
-            return $0.mergeKey < $1.mergeKey
+            return a == b ? Post.isOlder($1, than: $0) : a < b
         })
     }
 
