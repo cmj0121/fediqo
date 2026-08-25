@@ -16,7 +16,7 @@ struct LocalStoreTests {
         return dir.appendingPathComponent("docs/\(name).sql")
     }
 
-    @Test("Each bundled schema is its docs copy, byte for byte", arguments: ["schema", "schema-002", "schema-003"])
+    @Test("Each bundled schema is its docs copy, byte for byte", arguments: ["schema", "schema-002", "schema-003", "schema-004"])
     func bundledSchemaMatchesDocs(name: String) throws {
         let bundled = try Data(contentsOf: Bundle.module.url(forResource: name, withExtension: "sql")!)
         #expect(bundled == (try Data(contentsOf: documentedSchema(name))))
@@ -25,7 +25,7 @@ struct LocalStoreTests {
     @Test("A fresh store has every table, the triggers, and the three protocols")
     func freshStoreMatchesSchema() async throws {
         let store = try LocalStore.inMemory()
-        let (tables, triggers, protocols, migrations) = try await store.read { db in
+        let (tables, triggers, protocols, migrations, feeds, seeded) = try await store.read { db in
             let tables = try String.fetchSet(db, sql: """
                 SELECT name FROM sqlite_master WHERE type = 'table'
                 AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'posts_fts_%' AND name != 'grdb_migrations'
@@ -33,15 +33,25 @@ struct LocalStoreTests {
             let triggers = try String.fetchSet(db, sql: "SELECT name FROM sqlite_master WHERE type = 'trigger'")
             let rows = try Row.fetchAll(db, sql: "SELECT proto, created_at FROM protocols ORDER BY proto")
             let migrations = try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations ORDER BY identifier")
-            return (tables, triggers, rows.map { ($0["proto"] as String, $0["created_at"] as Int64) }, migrations)
+            let feedRows = try Row.fetchAll(db, sql: "SELECT feed, ranked, created_at FROM feeds ORDER BY feed")
+            let seeded = try Bool.fetchOne(db, sql: "SELECT min(created_at) > 0 FROM filter_kinds")!
+            return (tables, triggers, rows.map { ($0["proto"] as String, $0["created_at"] as Int64) }, migrations,
+                    feedRows.map { ($0["feed"] as String, ($0["ranked"] as Int) == 1, $0["created_at"] as Int64) },
+                    seeded)
         }
 
         #expect(tables == ["protocols", "servers", "accounts", "posts", "tags", "post_tags",
-                           "server_trends", "tag_buckets", "posts_fts", "owned_accounts"])
+                           "server_trends", "tag_buckets", "posts_fts", "owned_accounts",
+                           "feeds", "post_origins", "post_mentions", "timelines", "filter_kinds",
+                           "timeline_filters"])
         #expect(triggers == ["posts_fts_insert", "posts_fts_delete", "posts_fts_update"])
         #expect(protocols.map(\.0) == ["atproto", "mastodon", "nostr"])
         #expect(protocols.allSatisfy { $0.1 > 0 })
-        #expect(migrations == ["001", "002", "003"])
+        #expect(migrations == ["001", "002", "003", "004"])
+        #expect(feeds.map(\.0) == ["home", "public", "trend"])
+        // Order is the base source's: only trending is handed over already ranked.
+        #expect(feeds.filter { $0.1 }.map(\.0) == ["trend"])
+        #expect(seeded)
     }
 
     @Test("Foreign keys are on, so a post without its server is refused")
@@ -78,7 +88,7 @@ struct LocalStoreTests {
 
         #expect(again.0 == first)
         #expect(again.1 == "wal")
-        #expect(again.2 == 3)
+        #expect(again.2 == 4)
     }
 
     @Test("A 001 store upgrades in place: owned_accounts appears, what was there stays")
@@ -116,7 +126,7 @@ struct LocalStoreTests {
         }
         #expect(hasTable)
         #expect(posts == 1)
-        #expect(migrations == ["001", "002", "003"])
+        #expect(migrations == ["001", "002", "003", "004"])
     }
 
     @Test("owned_accounts records a fact about an account we have; a ghost is refused")
