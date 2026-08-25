@@ -1,8 +1,10 @@
 import Foundation
 
-/// Reads a Mastodon server without signing in to it. Everything here is a public,
-/// unauthenticated endpoint — #4's "a public timeline is readable before signing in to
-/// anything" — and where a server declines, that is reported rather than substituted for.
+/// Reads a Mastodon server. Everything here but `home` is a public, unauthenticated endpoint
+/// — #4's "a public timeline is readable before signing in to anything" — read as whoever is
+/// signed in where there is somebody; and where a server declines, that is reported rather
+/// than substituted for. `home` is the one endpoint that cannot be asked without a credential,
+/// and it is never stood in for by one that can.
 public struct MastodonClient: SourceClient {
     private let session: URLSession
     /// What every request from this client is counted against. Injected rather than reached
@@ -77,6 +79,10 @@ public struct MastodonClient: SourceClient {
 
     public func timeline(host: String, limit: Int, before: Post?, token: String?) async throws -> [Post] {
         try await posts(host: host, path: "/api/v1/timelines/public", limit: limit, before: before, token: token)
+    }
+
+    public func home(host: String, limit: Int, before: Post?, token: String) async throws -> [Post] {
+        try await posts(host: host, path: "/api/v1/timelines/home", limit: limit, before: before, token: token)
     }
 
     public func trending(host: String, limit: Int, token: String?) async throws -> [Post] {

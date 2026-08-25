@@ -14,12 +14,31 @@ struct PageHeader<Tabs: View, Controls: View>: View {
     let titleKey: String
     /// The line describing the tab being shown. A page with tabs always has one, because the
     /// tabs are named in two words and two words are not an explanation.
-    let subtitleKey: String
+    ///
+    /// Words rather than a key, because on the Timeline page it is the reader's own sentence
+    /// about a timeline they made. Every other page hands in a key and this resolves it —
+    /// the difference is which of the two wrote the line, not how it is drawn.
+    let subtitle: String
     /// Whether the page is waiting for something. A spinner beside the title, where the
     /// reader is already looking, rather than over the content they are still reading.
     var loading = false
     @ViewBuilder var tabs: Tabs
     @ViewBuilder var controls: Controls
+
+    init(titleKey: String, subtitleKey: String, loading: Bool = false,
+         @ViewBuilder tabs: () -> Tabs, @ViewBuilder controls: () -> Controls) {
+        self.init(titleKey: titleKey, subtitle: t(subtitleKey), loading: loading,
+                  tabs: tabs, controls: controls)
+    }
+
+    init(titleKey: String, subtitle: String, loading: Bool = false,
+         @ViewBuilder tabs: () -> Tabs, @ViewBuilder controls: () -> Controls) {
+        self.titleKey = titleKey
+        self.subtitle = subtitle
+        self.loading = loading
+        self.tabs = tabs()
+        self.controls = controls()
+    }
 
     /// Whether there is one column's worth of room here rather than two. The shell decides
     /// it — it is the one place that knows what the platform will say — and this reads the
@@ -52,24 +71,31 @@ struct PageHeader<Tabs: View, Controls: View>: View {
     private var tabsAndSubtitle: some View {
         if compact {
             tabs
-            subtitle
+            subtitleLine
         } else {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 tabs.fixedSize()
-                subtitle
+                subtitleLine
             }
         }
     }
 
-    /// Beside the control it is given whatever is left of the row, so it is held to two lines
-    /// rather than pushing the header down. On its own row it has the width to say the whole
-    /// sentence, and a sentence cut off mid-word reads as a fault rather than a note.
-    private var subtitle: some View {
-        Text(t(subtitleKey))
+    /// It wraps. Beside the tabs it is given whatever is left of the row and takes as many as
+    /// three lines of it before it gives up, which is enough for the sentence a reader writes
+    /// about a timeline they made; on its own row it has the width to say the whole thing.
+    ///
+    /// Where it does run out, the whole of it is a hover away. A description a reader wrote
+    /// and cannot read back is worse than no description, and the tooltip costs a line.
+    private var subtitleLine: some View {
+        Text(subtitle)
             .fediqoFont(11)
             .foregroundStyle(.secondary)
-            .lineLimit(compact ? nil : 2)
+            .lineLimit(compact ? nil : 3)
+            .multilineTextAlignment(.leading)
             .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .help(subtitle)
+            .accessibilityLabel(Text(subtitle))
     }
 }
 

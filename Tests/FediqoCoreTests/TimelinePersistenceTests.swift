@@ -20,12 +20,12 @@ struct TimelinePersistenceTests {
         let store = try LocalStore.inMemory()
         let loader = stubbedLoader(store: store)
 
-        let first = await loader.load(servers: [makeServer(host)], mode: .timeline)
+        let first = await loader.load(servers: [makeServer(host)], query: .publicPosts)
         #expect(first.failures.isEmpty)
         #expect(try await store.timeline() == first.posts)
-        #expect(try await loader.stored(mode: .timeline) == first.posts)
+        #expect(try await loader.stored(.publicPosts) == first.posts)
 
-        let second = await loader.load(servers: [makeServer(host)], mode: .timeline)
+        let second = await loader.load(servers: [makeServer(host)], query: .publicPosts)
         #expect(second.posts == first.posts)
         #expect(try await count(store, "SELECT count(*) FROM posts") == 1)
         #expect(try await count(store, "SELECT count(*) FROM server_trends") == 0)
@@ -38,11 +38,11 @@ struct TimelinePersistenceTests {
         let store = try LocalStore.inMemory()
         let loader = stubbedLoader(store: store)
 
-        let result = await loader.load(servers: [makeServer(host)], mode: .trending)
+        let result = await loader.load(servers: [makeServer(host)], query: .trending)
 
         #expect(result.posts.count == 1)
         #expect(try await count(store, "SELECT count(*) FROM server_trends WHERE source_url = 'https://\(host)'") == 1)
-        #expect(try await loader.stored(mode: .trending) == result.posts)
+        #expect(try await loader.stored(.trending) == result.posts)
     }
 
     @Test("A server that refuses leaves nothing behind and is still reported as a refusal")
@@ -52,7 +52,7 @@ struct TimelinePersistenceTests {
         stubRoutes.on(host, "/api/v1/timelines/public", status: 403)
         let store = try LocalStore.inMemory()
 
-        let result = await stubbedLoader(store: store).load(servers: [server], mode: .timeline)
+        let result = await stubbedLoader(store: store).load(servers: [server], query: .publicPosts)
 
         #expect(result.posts.isEmpty)
         #expect(result.failures[server.endpoint] == SourceFailure.needsSignIn(host))
@@ -67,7 +67,7 @@ struct TimelinePersistenceTests {
         let posts = [makePost(uri: "https://a.example/2", at: 200, from: host), makePost(uri: "https://a.example/1", at: 100, from: host)]
         try await store.save(posts, from: makeServer(host))
 
-        #expect(try await stubbedLoader(store: store).stored(mode: .timeline) == posts)
+        #expect(try await stubbedLoader(store: store).stored(.publicPosts) == posts)
         #expect(stubRoutes.paths(for: host).isEmpty)
     }
 
@@ -81,7 +81,7 @@ struct TimelinePersistenceTests {
             fine.host: [makePost(uri: "https://a.example/1", at: 100, from: fine.host)],
         ], store: store)
 
-        let result = await loader.load(servers: [nameless, fine], mode: .timeline)
+        let result = await loader.load(servers: [nameless, fine], query: .publicPosts)
 
         #expect(result.posts.map(\.uri).sorted() == ["https://a.example/1", "https://x.example/1"])
         #expect(result.failures[fine.endpoint] == nil)
@@ -103,19 +103,19 @@ struct TimelinePersistenceTests {
                           makePost(uri: "https://b.example/b1", at: 300, from: "beta.test")],
         ], store: store)
 
-        let result = await loader.load(servers: [makeServer("alpha.test"), makeServer("beta.test")], mode: .trending)
+        let result = await loader.load(servers: [makeServer("alpha.test"), makeServer("beta.test")], query: .trending)
 
         // Rank 0 first (the newer of the two breaks the tie), then rank 1 — never 400, 300, 200, 100.
         let byRank = ["https://b.example/b0", "https://a.example/a0", "https://a.example/a1", "https://b.example/b1"]
         #expect(result.posts.map(\.uri) == byRank)
-        #expect(try await loader.stored(mode: .trending).map(\.uri) == byRank)
+        #expect(try await loader.stored(.trending).map(\.uri) == byRank)
     }
 
     @Test("Without a store there is nothing stored")
     func noStore() async throws {
         let loader = stubbedLoader()
-        #expect(try await loader.stored(mode: .timeline).isEmpty)
-        #expect(try await loader.stored(mode: .trending).isEmpty)
+        #expect(try await loader.stored(.publicPosts).isEmpty)
+        #expect(try await loader.stored(.trending).isEmpty)
     }
 }
 

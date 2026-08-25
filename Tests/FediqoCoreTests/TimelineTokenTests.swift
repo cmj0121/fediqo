@@ -36,7 +36,7 @@ struct TimelineTokenTests {
         let owned = try Owned()
         try await owned.signIn("t0ken", to: server)
 
-        let result = await owned.loader.load(servers: [server], mode: .timeline)
+        let result = await owned.loader.load(servers: [server], query: .publicPosts)
 
         #expect(result.posts.count == 1)
         #expect(result.failures.isEmpty)
@@ -51,7 +51,7 @@ struct TimelineTokenTests {
         let owned = try Owned()
         try await owned.signIn("t0ken", to: server)
 
-        let result = await owned.loader.load(servers: [server], mode: .trending)
+        let result = await owned.loader.load(servers: [server], query: .trending)
 
         #expect(result.posts.count == 1)
         #expect(stubRoutes.requests(for: host, trends).map(\.authorization) == ["Bearer t0ken"])
@@ -63,7 +63,7 @@ struct TimelineTokenTests {
         stubRoutes.on(host, publicTimeline, status: 200, body: oneStatusJSON)
         let owned = try Owned()
 
-        let result = await owned.loader.load(servers: [makeServer(host)], mode: .timeline)
+        let result = await owned.loader.load(servers: [makeServer(host)], query: .publicPosts)
 
         #expect(result.posts.count == 1)
         #expect(stubRoutes.requests(for: host, publicTimeline).map(\.authorization) == [nil])
@@ -74,7 +74,7 @@ struct TimelineTokenTests {
         let host = "storeless.test"
         stubRoutes.on(host, publicTimeline, status: 200, body: oneStatusJSON)
 
-        let result = await stubbedLoader().load(servers: [makeServer(host)], mode: .timeline)
+        let result = await stubbedLoader().load(servers: [makeServer(host)], query: .publicPosts)
 
         #expect(result.posts.count == 1)
         #expect(stubRoutes.requests(for: host, publicTimeline).map(\.authorization) == [nil])
@@ -89,7 +89,7 @@ struct TimelineTokenTests {
         let owned = try Owned()
         try await owned.signIn("expired", to: server)
 
-        let result = await owned.loader.load(servers: [server], mode: .timeline)
+        let result = await owned.loader.load(servers: [server], query: .publicPosts)
 
         // Two requests, the second as nobody — and the failure still names the token, so a
         // screen marks the account while showing the posts that did arrive.
@@ -107,7 +107,7 @@ struct TimelineTokenTests {
         stubRoutes.on(host, publicTimeline, status: 401)
         let owned = try Owned()
 
-        _ = await owned.loader.load(servers: [makeServer(host)], mode: .timeline)
+        _ = await owned.loader.load(servers: [makeServer(host)], query: .publicPosts)
 
         #expect(stubRoutes.requests(for: host, publicTimeline).count == 1)
     }
@@ -120,7 +120,7 @@ struct TimelineTokenTests {
         let owned = try Owned()
         try await owned.signIn("t0ken", to: server)
 
-        let result = await owned.loader.load(servers: [server], mode: .timeline)
+        let result = await owned.loader.load(servers: [server], query: .publicPosts)
 
         // Nothing about the credential was said, so nothing is retried and no account is marked.
         #expect(result.failures[server.endpoint] == SourceFailure.needsSignIn(host))
@@ -136,7 +136,7 @@ struct TimelineTokenTests {
         let owned = try Owned()
         try await owned.signIn("expired", to: server)
 
-        let result = await owned.loader.load(servers: [server], mode: .timeline)
+        let result = await owned.loader.load(servers: [server], query: .publicPosts)
 
         #expect(result.posts.isEmpty)
         #expect(result.failures[server.endpoint] == SourceFailure.needsSignIn(host))
@@ -160,7 +160,7 @@ struct TimelineTokenTests {
         let loader = TimelineLoader(registry: SourceRegistry(clients: [.mastodon: client, .nostr: client]),
                                     store: owned.store, secrets: owned.secrets)
 
-        let result = await loader.load(servers: [signedIn, alsoNostr], mode: .timeline)
+        let result = await loader.load(servers: [signedIn, alsoNostr], query: .publicPosts)
 
         // Keyed by endpoint, the two fates stay apart: only the Mastodon row is marked, and
         // the Nostr row on the same hostname is left alone.
@@ -179,7 +179,7 @@ struct TimelineTokenTests {
         let owned = try Owned()
         try await owned.signIn("expired", to: stale)
 
-        let result = await owned.loader.load(servers: [stale, open], mode: .timeline)
+        let result = await owned.loader.load(servers: [stale, open], query: .publicPosts)
 
         #expect(result.failures.keys.sorted() == [stale.endpoint])
         #expect(stubRoutes.requests(for: open.host, publicTimeline).map(\.authorization) == [nil])

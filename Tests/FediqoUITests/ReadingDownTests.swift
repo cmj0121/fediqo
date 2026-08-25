@@ -77,7 +77,7 @@ struct ReadingDownTests {
     @Test("Trending does not page: what came before a snapshot is not a question")
     func trendingNeverPages() async throws {
         let client = PagedClient(Self.all)
-        let feed = freshFeed("down-trending", mode: .trending, client: client,
+        let feed = freshFeed("down-trending", timeline: .trendingFixture, client: client,
                              store: try await stocked())
         feed.show(Array(Self.all.prefix(2)))
 
@@ -331,8 +331,8 @@ struct ReadingDownKeyTests {
     func theLastPressAsks() {
         let app = freshApp("down-key-asks")
         app.railItem = .timeline
-        app.feedTab = .timeline
-        let feed = app.feed(for: .timeline)
+        app.currentTimeline = "public"
+        let feed = app.feed(for: .publicFixture)
         feed.show(Self.posts)
 
         while app.perform(.nextPost) {}
@@ -347,8 +347,8 @@ struct ReadingDownKeyTests {
     func theFirstPressAsksForNothing() {
         let app = freshApp("down-key-top")
         app.railItem = .timeline
-        app.feedTab = .timeline
-        let feed = app.feed(for: .timeline)
+        app.currentTimeline = "public"
+        let feed = app.feed(for: .publicFixture)
         feed.show(Self.posts)
 
         #expect(app.perform(.previousPost))
@@ -500,7 +500,7 @@ struct TheEndTests {
     @Test("Trending shows neither the marker nor the toast")
     func trendingHasNoEnd() async {
         let client = PagedClient([])
-        let feed = freshFeed("end-trending", mode: .trending, client: client)
+        let feed = freshFeed("end-trending", timeline: .trendingFixture, client: client)
         feed.show(Array(Self.all.prefix(2)))
 
         await feed.loadOlder(servers: [server])

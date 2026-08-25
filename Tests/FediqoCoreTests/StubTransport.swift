@@ -140,6 +140,11 @@ extension StubClient {
         InstanceInfo(host: host, title: host, summary: "")
     }
 
+    /// These suites read the public timeline. A double that answered somebody's home timeline
+    /// would put reading on a screen no test asked for it on — and would hide the one thing
+    /// worth watching, which is that a home read is only ever sent where there is a credential.
+    func home(host: String, limit: Int, before: Post?, token: String) async throws -> [Post] { [] }
+
     /// These suites read timelines. A double that invented a trending list would put posts on
     /// a screen no test asked for them on.
     func trending(host: String, limit: Int, token: String?) async throws -> [Post] { [] }
@@ -288,4 +293,16 @@ func handedOver(_ id: String, from host: String, authority: String? = nil,
     makePost(uri: "https://\(host)/api/v1/statuses/\(id)",
              originURI: authority.map { "https://\($0)/users/a/statuses/\(id)" },
              at: seconds, from: host)
+}
+
+/// The readings these suites ask for, named once.
+///
+/// Nearly every suite here reads the public timeline with no rules on it, which is what the
+/// app read before a timeline was something a reader could make. Naming them keeps that fact
+/// visible: a test asking for `.publicPosts` is a test about paging or backoff or tokens,
+/// not about rules.
+extension TimelineQuery {
+    static let publicPosts = TimelineQuery(source: .public)
+    static let home = TimelineQuery(source: .home)
+    static let trending = TimelineQuery(source: .trend)
 }

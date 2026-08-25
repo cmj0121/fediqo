@@ -48,16 +48,17 @@ public struct FediqoCommands: Commands {
         }
     }
 
-    /// What can be done to the feed being read. Every one of these belongs to the public
-    /// timeline and is drawn by its header, so on any other page they are shown as what they
-    /// are there: unavailable, rather than absent or silently doing nothing.
+    /// What can be done to the feed being read. Every one of these belongs to a timeline that
+    /// is a thread of time and is drawn by its header, so on any other page — and on a ranked
+    /// list, which is a place you go to look — they are shown as what they are there:
+    /// unavailable, rather than absent or silently doing nothing.
     private var timelineItems: some View {
         @Bindable var preferences = app.preferences
-        let reading = app.feedMode == .timeline
+        let reading = app.readingTimeline?.source.isThreadOfTime ?? false
         return Group {
             Button(t("menu.readAgain")) { app.perform(.refreshNow) }
                 .keyboardShortcut("r")
-                .disabled(app.feedMode == nil)
+                .disabled(app.readingTimeline == nil)
             Button(t("timeline.notifications")) { app.showingNotifications = true }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
                 .disabled(!reading)

@@ -16,6 +16,23 @@ enum MastodonDTO {
         let inReplyToId: String?
         /// Absent on the odd server; one strange status must never fail the whole page.
         let tags: [Tag]?
+        /// Who the status names. Absent on the odd server, for the same reason as `tags`.
+        let mentions: [Mention]?
+    }
+
+    /// One account a status names. `url` is the actor URI — the same name the account itself
+    /// is keyed by — and `acct` is how this server spells the handle.
+    struct Mention: Decodable, Sendable {
+        let url: String?
+        let username: String
+        let acct: String
+
+        func asMention(on host: String) -> FediqoCore.Mention? {
+            let uri = url ?? Account(id: "", url: nil, username: username, acct: acct,
+                                     displayName: "", avatar: nil).authorId(on: host)
+            let handle = acct.contains("@") ? "@\(acct)" : "@\(acct)@\(host)"
+            return uri.isEmpty ? nil : FediqoCore.Mention(uri: uri, handle: handle)
+        }
     }
 
     struct Account: Decodable, Sendable {
@@ -99,6 +116,7 @@ extension MastodonDTO.Status {
             webURL: subject.url.flatMap(URL.init(string:)),
             inReplyToURI: subject.inReplyToId.map { "https://\(host)/api/v1/statuses/\($0)" },
             tags: (subject.tags ?? []).map(\.name),
+            mentions: (subject.mentions ?? []).compactMap { $0.asMention(on: host) },
             boostedBy: reblog == nil ? nil : account.name,
             boostedById: reblog == nil ? nil : account.authorId(on: host),
             sources: [host]

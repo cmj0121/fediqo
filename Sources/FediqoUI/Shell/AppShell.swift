@@ -131,7 +131,15 @@ struct AppShell: View {
         // Remembering where each tab was left is not something anybody asked for, and it
         // would cost the clean swap above; if it is ever wanted, it is state to hold beside
         // the feeds rather than a reason to drop this `.id`.
-        case .timeline: FeedScreen(mode: app.feedTab).id(app.feedTab)
+        case .timeline:
+            if let timeline = app.readingTimeline {
+                FeedScreen(timeline: timeline).id(timeline.id)
+            } else {
+                // Every timeline deleted. The page offers to make one rather than sitting
+                // empty: an empty list of timelines is a state a reader can reach on purpose,
+                // and the way back has to be on the page they reached it from.
+                NoTimelinesView()
+            }
         case .kept: KeptView()
         case .statistics: StatisticsView()
         case .settings: SettingsView()

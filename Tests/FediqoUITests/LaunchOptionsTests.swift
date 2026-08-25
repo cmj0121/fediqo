@@ -10,7 +10,7 @@ struct LaunchOptionsTests {
     func trendingIsATabNow() {
         let options = LaunchOptions.fromEnvironment(["FEDIQO_RAIL": "trending"])
         #expect(options.railItem == .timeline)
-        #expect(options.feedTab == .trending)
+        #expect(options.timeline == "trend")
     }
 
     @Test("A page names itself and leaves the tab alone", arguments: [
@@ -19,14 +19,14 @@ struct LaunchOptionsTests {
     func pagesOpenThemselves(name: String, page: RailItem) {
         let options = LaunchOptions.fromEnvironment(["FEDIQO_RAIL": name])
         #expect(options.railItem == page)
-        #expect(options.feedTab == nil)
+        #expect(options.timeline == nil)
     }
 
     @Test("A name that is neither a page nor a tab opens nothing in particular")
     func unknownNamesAreIgnored() {
         let options = LaunchOptions.fromEnvironment(["FEDIQO_RAIL": "elsewhere"])
         #expect(options.railItem == nil)
-        #expect(options.feedTab == nil)
+        #expect(options.timeline == nil)
     }
 
     @Test("Asked for nothing, it asks for nothing")
@@ -34,7 +34,7 @@ struct LaunchOptionsTests {
         let options = LaunchOptions.fromEnvironment([:])
         #expect(options.route == nil)
         #expect(options.railItem == nil)
-        #expect(options.feedTab == nil)
+        #expect(options.timeline == nil)
         #expect(options.composing == false)
     }
 }

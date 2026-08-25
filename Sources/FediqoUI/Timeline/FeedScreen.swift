@@ -1,17 +1,17 @@
 import SwiftUI
 import FediqoCore
 
-/// The Timeline page, showing one of its two tabs. Public and Trending are the same screen
-/// in a different mode, and that is all they share: neither ever stands in for the other. A
-/// server that publishes no public timeline contributes nothing to the timeline and says
-/// why, rather than being quietly topped up with whatever else it was willing to hand over.
+/// The Timeline page, showing one of the reader's timelines. Every one of them is this same
+/// screen asking a different question, and no two ever stand in for one another: a server
+/// that publishes no public timeline contributes nothing and says why, rather than being
+/// quietly topped up with whatever else it was willing to hand over.
 ///
-/// `mode` says which feed is being read, and everything about the feed follows from it: its
-/// posts, the line describing it, and which of the header controls belong to it. What a feed
-/// cannot say is where it sits — so the heading, which names the page, and the list of tabs
-/// beside it both come from `app.railItem` instead. A tab does not know its own page.
+/// `timeline` says what is being read, and everything about the page follows from it: its
+/// posts, its order, the line under its name, and which of the header controls belong to it.
+/// What a timeline cannot say is where it sits — so the heading, which names the page, comes
+/// from `app.railItem` instead. A timeline does not know its own page.
 struct FeedScreen: View {
-    let mode: FeedMode
+    let timeline: Timeline
 
     @Environment(AppState.self) private var app
     /// Whether the reader has gone far enough down that going back up is a journey. The
@@ -21,6 +21,7 @@ struct FeedScreen: View {
     /// Whether the toast is up. The feed decides *that* the end was reached; how long a passing
     /// message stays and how it goes are the screen's, the way the scrolling already is.
     @State private var announcing = false
+    @State private var editing: TimelineEditor.Subject?
     /// The colour scheme, for the two marks drawn by hand at the foot of the list. Everything
     /// else here is `fediqoCard` or `Hairline`, which read it themselves.
     @Environment(\.colorScheme) private var colorScheme
@@ -30,6 +31,13 @@ struct FeedScreen: View {
     /// A reader who asked for less movement. The toast still comes and still goes — it is the
     /// fade that is the decoration, not the message.
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// What a load is of: these servers, asked this question. Two of them being equal is the
+    /// whole of "nothing has changed, do not read it again".
+    private struct Reading: Equatable {
+        let servers: [Server]
+        let query: TimelineQuery
+    }
 
     /// The nothing at the top of the list, so there is something to scroll back to. The
     /// first post cannot serve: it is replaced by every refresh, and the padding above it
@@ -42,12 +50,16 @@ struct FeedScreen: View {
 
     private var fading: Animation? { reduceMotion ? nil : Motion.appearing }
 
-    private var model: FeedModel { app.feed(for: mode) }
-    private var subtitleKey: String { "\(mode.rawValue).subtitle" }
+    private var model: FeedModel { app.feed(for: timeline) }
 
-    /// Sources, filter and notifications belong to the timeline. Trending is a place you go
-    /// to look, so it carries none of them.
-    private var showsTimelineControls: Bool { mode == .timeline }
+    /// Sources, filter and notifications belong to a timeline that is a thread of time. A
+    /// ranked list is a place you go to look at what a server put in order, so it carries
+    /// none of them.
+    private var showsTimelineControls: Bool { timeline.source.isThreadOfTime }
+
+    /// Which timeline the editor is open on, and whether it is open at all. It belongs to the
+    /// screen rather than to the app: nothing outside this page asks for it, and a key that
+    /// wanted it would be asking for a sheet over a page it is not on.
 
     /// The sheets are still drawn here, over the screen they belong to. What moved is only
     /// the fact of whether they are up: a menu item and a key have to be able to ask for
@@ -82,13 +94,22 @@ struct FeedScreen: View {
                 proxy.scrollTo(Self.top, anchor: .top)
             }
         }
-        .task(id: app.servers) { await model.loadIfNeeded(servers: app.servers) }
+        // Keyed to the reading as well as to the servers: editing a timeline's rules is a
+        // different question, and the answer on screen is still the old one until somebody
+        // asks the new one.
+        .task(id: Reading(servers: app.servers, query: timeline.query)) {
+            await model.loadIfNeeded(servers: app.servers)
+        }
         .sheet(isPresented: $app.addingSource) {
             ServerPickerView(socialProtocol: .mastodon) { app.addingSource = false }
                 .fediqoChrome(app)
         }
         .sheet(isPresented: $app.showingNotifications) {
             NotificationsSheet { app.showingNotifications = false }
+                .fediqoChrome(app)
+        }
+        .sheet(item: $editing) { subject in
+            TimelineEditor(subject: subject) { editing = nil }
                 .fediqoChrome(app)
         }
     }
@@ -98,10 +119,14 @@ struct FeedScreen: View {
     /// The heading names the page, and the tabs beside it are the page's — so both come from
     /// `app.railItem` rather than from the feed. A tab does not know its own page.
     private var header: some View {
-        @Bindable var app = app
-        return PageHeader(titleKey: app.railItem.titleKey, subtitleKey: subtitleKey,
-                          loading: model.loading) {
-            SegmentedChoice(FeedMode.allCases, keyPrefix: "tab", selection: $app.feedTab)
+        // The reader's own sentence, and the template's where they have not written one. A
+        // page with tabs always has this line — two words of name are not an explanation —
+        // and a timeline made in a hurry should not leave it blank.
+        PageHeader(titleKey: app.railItem.titleKey,
+                   subtitle: timeline.displaySummary.isEmpty ? t("timeline.noDescription")
+                                                             : timeline.displaySummary,
+                   loading: model.loading) {
+            TimelineChips(editing: $editing)
         } controls: {
             controls
         }
@@ -341,13 +366,19 @@ struct FeedScreen: View {
     @ViewBuilder
     private var emptyState: some View {
         let hiddenByRules = !model.result.posts.isEmpty
-        VStack(spacing: 10) {
+        // A home timeline on a device nobody is signed in on is not an empty timeline: there
+        // is nothing wrong and nothing to wait for, and "no posts" would have the reader
+        // looking for a fault. It says what is missing instead.
+        let needsAccount = !app.isReadable(timeline)
+        return VStack(spacing: 10) {
             if model.loading {
                 ProgressView()
                 Text(t("timeline.loading")).fediqoFont(12).foregroundStyle(.secondary)
             } else {
-                Image(systemName: "tray").font(.system(size: 26, weight: .light)).foregroundStyle(.tertiary)
-                Text(t(hiddenByRules ? "timeline.empty.filtered" : "timeline.empty"))
+                Image(systemName: needsAccount ? "person.crop.circle.badge.questionmark" : "tray")
+                    .font(.system(size: 26, weight: .light)).foregroundStyle(.tertiary)
+                Text(t(needsAccount ? "timeline.empty.needsAccount"
+                                    : hiddenByRules ? "timeline.empty.filtered" : "timeline.empty"))
                     .fediqoFont(12)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -366,7 +397,10 @@ struct FeedScreen: View {
 
 /// A menu button dressed as one of the plain icon buttons beside it — without this the
 /// platform paints it in the accent colour and it reads as the only live control there.
-private struct HeaderMenuChrome: ViewModifier {
+///
+/// Shared with the row of timelines, whose overflow menu sits in the same header and has to
+/// be the same button as the two beside it.
+struct HeaderMenuChrome: ViewModifier {
     let labelKey: String
     let warning: Bool
 

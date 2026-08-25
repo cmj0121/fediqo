@@ -65,7 +65,7 @@ enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
 /// the Settings page, say — does not disturb a clock that is not running anyway.
 struct RefreshKey: Hashable {
     var page: RailItem
-    var tab: FeedMode?
+    var timeline: String?
     var interval: RefreshInterval
 }
 
@@ -78,7 +78,9 @@ struct RefreshKey: Hashable {
 struct LaunchOptions {
     var route: Route?
     var railItem: RailItem?
-    var feedTab: FeedMode?
+    /// Which timeline to open on, by id. The three a fresh install ships with are keyed by
+    /// their template's name, so `trend` names one without anybody having to look it up.
+    var timeline: String?
     var composing = false
     /// Whether the landing screen should sit still instead of handing over on its own.
     var holdsLanding = false
@@ -101,9 +103,13 @@ struct LaunchOptions {
         // a screen — the screenshot workflow above all — already asks for, and it still names
         // exactly one thing to look at. So it keeps working, and means the Timeline page on
         // its Trending tab. There is no second variable: one name, one screen.
-        if environment["FEDIQO_RAIL"] == FeedMode.trending.rawValue {
+        // `trending` never named a page, and now it does not name a tab either — the tabs are
+        // whatever timelines the reader has made. It still names exactly one screen, though,
+        // and it is what everything that opens this app at one already asks for, so it keeps
+        // working: the Timeline page, on the timeline seeded from the `trend` template.
+        if ["trending", BaseSource.trend.rawValue].contains(environment["FEDIQO_RAIL"]) {
             options.railItem = .timeline
-            options.feedTab = .trending
+            options.timeline = BaseSource.trend.rawValue
         } else {
             options.railItem = environment["FEDIQO_RAIL"].flatMap(RailItem.init(rawValue:))
         }
@@ -139,7 +145,9 @@ public final class AppState {
     /// One property per page rather than one table keyed by page: a page's tabs are its own
     /// list and nothing else's, and a table would have to be read back out as a string and
     /// hoped into the right type.
-    var feedTab: FeedMode
+    /// Which timeline the Timeline page is showing, by id. A string rather than a case,
+    /// because the list is the reader's now: they make them, name them and delete them.
+    var currentTimeline: String
     var statisticsTab: StatisticsTab = .storage
     var settingsTab: SettingsTab = .appearance
     /// Whether the composer is open. It belongs here rather than to the bar because the
@@ -173,10 +181,24 @@ public final class AppState {
 
     private(set) var servers: [Server]
 
+    /// The reader's timelines, left to right. Seeded on first run from the templates that
+    /// ship, read back from the store on every launch after that, and the reader's own from
+    /// the moment they exist — renameable, movable and deletable like anything else here.
+    private(set) var timelines: [Timeline]
+
     /// The feeds outlive the screens that show them. `AppShell` swaps its detail with a
     /// `switch`, which destroys the previous view and everything it held — so a feed owned by
     /// the screen would re-ask every server on every trip to Settings and back.
-    private let feeds: [FeedMode: FeedModel]
+    ///
+    /// Built as they are first read rather than all at once: a reader with a dozen timelines
+    /// is looking at one of them, and eleven loaders sitting ready is eleven sets of paging
+    /// and backoff state kept for pages nobody has opened.
+    private var feeds: [String: FeedModel] = [:]
+    /// The chain of writes waiting on the store — see `write(_:)`.
+    @ObservationIgnored private var writes: Task<Void, Never>?
+    /// What every feed is built with, kept because the feeds are built later than this.
+    private let secrets: any SecretStore
+    private let tokens: TokenSource?
 
     public convenience init() {
         self.init(store: LocalStore.openDefault(), launch: .fromEnvironment())
@@ -200,28 +222,102 @@ public final class AppState {
         self.serverStore = servers
         self.store = store
         self.signIn = signIn
-        self.feeds = [
-            .timeline: FeedModel(mode: .timeline, preferences: preferences,
-                                 loader: TimelineLoader(store: store, secrets: secrets, tokens: tokens)),
-            .trending: FeedModel(mode: .trending, preferences: preferences,
-                                 loader: TimelineLoader(store: store, secrets: secrets, tokens: tokens)),
-        ]
+        self.secrets = secrets
+        self.tokens = tokens
+        // What a fresh install has before the store has answered — and, without a store, what
+        // it has for good. The names are words in the reader's language, so they are made here
+        // rather than in Core, which has none.
+        self.timelines = Self.shipped()
         self.servers = servers.servers
         self.route = launch.route ?? .landing
         self.railItem = launch.railItem ?? .timeline
-        self.feedTab = launch.feedTab ?? .timeline
+        self.currentTimeline = launch.timeline ?? BaseSource.public.rawValue
         self.composing = launch.composing
         self.holdsLanding = launch.holdsLanding
         L10n.use(preferences.language)
+    }
 
-        // A rejected token is noticed in two places, and both end in the same set. Reading
-        // is the first: a server that turns a read's token down says so alongside the posts
-        // it gave a stranger, and the row hears about it. One direction only — nothing here
-        // asks the feed anything, and nothing polls.
-        if let signIn {
-            for feed in self.feeds.values {
-                feed.onTokenRejected = { signIn.markRejected($0) }
+    /// The timelines a fresh install starts with: the public timeline, and what the servers
+    /// say is rising. Their ids are their templates' names, so that they are nameable from
+    /// outside — a launch variable, a test — without anybody looking one up.
+    ///
+    /// **Home is not among them.** A device nobody is signed in on anywhere has no home to
+    /// read, and a page that can only ever be empty is not something to hand a reader on
+    /// their first launch. It arrives with the first account instead — once, and never again
+    /// if they delete it.
+    private static func shipped() -> [Timeline] {
+        TimelineTemplate.shipped
+            .filter { TimelineTemplate.named($0)?.source.needsAccount == false }
+            .enumerated()
+            .compactMap { position, name in made(from: name, position: position) }
+    }
+
+    /// One timeline from a template, carrying no words of its own.
+    ///
+    /// The name and the line under it are left empty on purpose: a timeline that ships with the
+    /// app takes them from its template each time it is drawn, so Public and Trending are said
+    /// in the language the reader has chosen rather than in whichever one happened to be on the
+    /// day the row was written. The moment somebody types a name, the row keeps theirs.
+    private static func made(from name: String, position: Int) -> Timeline? {
+        guard let template = TimelineTemplate.named(name) else { return nil }
+        return Timeline(id: name, name: "", summary: "", source: template.source,
+                        template: name, position: position)
+    }
+
+    /// There is an account somewhere, so there is a home to read. If nobody has ever been
+    /// offered a home timeline, this is the moment.
+    ///
+    /// Asked at launch as well as after a sign-in, because "somebody signed in" is a state and
+    /// not only an event: a reader who signed in before this feature existed never had the
+    /// moment, and would otherwise have to sign out and in again to be given a home.
+    ///
+    /// Offered once in the life of the app and marked as offered whether or not it is still
+    /// there afterwards — a reader who deletes it has decided, and an app that put it back on
+    /// the next launch would be arguing with them, once a launch, for ever.
+    ///
+    /// The rows are what is asked, not `SignInModel`: they are the store's own answer to who
+    /// is signed in, they need neither the Keychain nor the network, and at launch they are
+    /// there before anything has thought to read them.
+    func offerHomeTimeline() async {
+        guard !preferences.offeredHomeTimeline, let store else { return }
+        let signedIn = (try? await store.signedInByServer())?.isEmpty == false
+        guard signedIn, let home = Self.made(from: BaseSource.home.rawValue, position: timelines.count)
+        else { return }
+        preferences.offeredHomeTimeline = true
+        // Where the three that ship sit relative to each other, not the end of the row.
+        insert(home, at: TimelineTemplate.shipped.firstIndex(of: home.template) ?? timelines.count,
+               opening: false)
+    }
+
+    /// The reader's timelines as the store has them, seeded on the first run that finds none.
+    ///
+    /// Called by the root view rather than `init`, for the reason `onLaunch` is: building an
+    /// `AppState` — in a preview, in a test — must not be a round of database work.
+    func openTimelines() async {
+        guard let store else { return }
+        do {
+            try await store.seedTimelines(Self.shipped())
+            // A store written by an older build has the app's own words in the rows it seeded,
+            // in whichever language was on at the time. Cleared once, so those tabs follow the
+            // language again; every seeded row afterwards is written with none.
+            if !preferences.clearedSeededWording {
+                try await store.clearSeededWording()
+                preferences.clearedSeededWording = true
             }
+            let kept = try await store.timelines()
+            guard !kept.isEmpty else { return }
+            timelines = kept
+            // Before the reader is shown anything: an account that was signed in long before
+            // there were timelines to make is still an account with a home behind it.
+            await offerHomeTimeline()
+            // The page the reader was on, if it is still one of them. A timeline deleted from
+            // under the launch variable leaves the reader on the first one rather than on a
+            // page that does not exist.
+            if !kept.contains(where: { $0.id == currentTimeline }) {
+                currentTimeline = kept[0].id
+            }
+        } catch {
+            LocalStore.log.error("reading the timelines failed: \(String(describing: error), privacy: .public)")
         }
     }
 
@@ -232,12 +328,155 @@ public final class AppState {
     /// It is the root view that calls this, not `init`, so that building an `AppState` —
     /// in a preview, in a test — is not itself a round of network requests.
     func onLaunch() async {
+        // Who is signed in, first of all: the timelines are drawn from the first frame, and one
+        // of them is readable only where there is an account. Rows only — no Keychain, no
+        // network — so this costs a statement, and without it the Home tab would sit greyed out
+        // on a device that has been signed in for months, until somebody opened Settings.
+        await signIn?.refresh()
+        // Then the timelines, because they are the tabs of the page about to be looked at.
+        await openTimelines()
         guard let signIn else { return }
         await signIn.checkTokens(on: servers)
     }
 
-    func feed(for mode: FeedMode) -> FeedModel {
-        feeds[mode]!
+    /// The feed reading `timeline`, built the first time it is asked for and kept afterwards.
+    ///
+    /// A timeline the reader has edited hands its new question to the feed that was already
+    /// reading it, rather than starting a second one: the model is the page, and the page
+    /// is still theirs — it is what it shows that changes.
+    func feed(for timeline: Timeline) -> FeedModel {
+        if let feed = feeds[timeline.id] {
+            feed.timeline = timeline
+            return feed
+        }
+        let feed = FeedModel(timeline: timeline, preferences: preferences,
+                             loader: TimelineLoader(store: store, secrets: secrets, tokens: tokens))
+        // A rejected token is noticed in two places, and both end in the same set. Reading is
+        // the first: a server that turns a read's token down says so alongside the posts it
+        // gave a stranger, and the row hears about it. One direction only — nothing here asks
+        // the feed anything, and nothing polls.
+        if let signIn { feed.onTokenRejected = { signIn.markRejected($0) } }
+        feeds[timeline.id] = feed
+        return feed
+    }
+
+    /// One of the reader's timelines by id, or nothing where the id names none.
+    func timeline(_ id: String) -> Timeline? {
+        timelines.first { $0.id == id }
+    }
+
+    // MARK: - The reader's timelines
+
+    /// A timeline the reader made, put at the end of the row and opened.
+    func add(_ timeline: Timeline) {
+        insert(timeline, at: timelines.count)
+    }
+
+    /// A timeline put somewhere in particular, and opened. The row is renumbered so that what
+    /// is on the screen and what is in the store are the same order.
+    ///
+    /// Home arrives through here rather than through `add`, because it is one of the three that
+    /// ship and they have an order: the public timeline, then home, then what is rising. Home
+    /// appears later than the other two — there is nothing to read until somebody signs in —
+    /// and arriving late is no reason to sit at the end of a row it belongs in the middle of.
+    /// `opening` is whether the reader is taken to it. They are where somebody asked to make
+    /// one; they are not where a home timeline appears at launch because an account exists —
+    /// arriving somewhere you did not ask to be is the app moving you, and a tab appearing in
+    /// the row is enough of an announcement.
+    func insert(_ timeline: Timeline, at index: Int, opening: Bool = true) {
+        timelines.insert(timeline, at: min(max(index, 0), timelines.count))
+        for position in timelines.indices { timelines[position].position = position }
+        if opening { currentTimeline = timeline.id }
+        // The renumbered one, not the argument: `position` is part of the row.
+        if let made = timelines.first(where: { $0.id == timeline.id }) { persist(made) }
+        persistOrder()
+    }
+
+    /// A timeline the reader edited. The feed reading it is handed the new question at the
+    /// same moment, so a rule taken off changes the page rather than the next launch.
+    func update(_ timeline: Timeline) {
+        guard let at = timelines.firstIndex(where: { $0.id == timeline.id }) else { return }
+        timelines[at] = timeline
+        feeds[timeline.id]?.timeline = timeline
+        persist(timeline)
+    }
+
+    /// A timeline the reader deleted, and the reading that was kept for it. Nothing else goes:
+    /// a timeline was never where the posts were.
+    func delete(_ id: String) {
+        timelines.removeAll { $0.id == id }
+        feeds[id] = nil
+        if currentTimeline == id { currentTimeline = timelines.first?.id ?? "" }
+        write { store in
+            do { try await store.deleteTimeline(id) } catch {
+                LocalStore.log.error("deleting a timeline failed: \(String(describing: error), privacy: .public)")
+            }
+        }
+    }
+
+    /// This timeline again under another name, and nothing shared with the one it came from:
+    /// a copy is a copy, and editing it must not reach back into the original.
+    func duplicate(_ timeline: Timeline) -> Timeline {
+        // The copy is named after what the original is called on the screen, and keeps that
+        // name: it is a timeline the reader made, and their copy of Public does not rename
+        // itself when they change the app's language.
+        let copy = Timeline(name: t("timeline.copy", timeline.displayName), summary: timeline.displaySummary,
+                            source: timeline.source, account: timeline.account,
+                            template: timeline.template, filters: timeline.filters)
+        add(copy)
+        return copy
+    }
+
+    /// The order the reader dragged them into.
+    func move(_ id: String, to index: Int) {
+        guard let from = timelines.firstIndex(where: { $0.id == id }) else { return }
+        let moved = timelines.remove(at: from)
+        timelines.insert(moved, at: min(max(index, 0), timelines.count))
+        for position in timelines.indices { timelines[position].position = position }
+        persistOrder()
+    }
+
+    /// The row's order, written down in one transaction so a list half reordered never reaches
+    /// the next launch.
+    private func persistOrder() {
+        let order = timelines.map(\.id)
+        write { store in
+            do { try await store.reorderTimelines(order) } catch {
+                LocalStore.log.error("reordering the timelines failed: \(String(describing: error), privacy: .public)")
+            }
+        }
+    }
+
+    /// Written down, where there is anywhere to write it. Without a store the reader's
+    /// timelines live as long as the app is open, the same way the servers did before #2.
+    private func persist(_ timeline: Timeline) {
+        write { store in
+            do { try await store.save(timeline) } catch {
+                LocalStore.log.error("saving a timeline failed: \(String(describing: error), privacy: .public)")
+            }
+        }
+    }
+
+    /// One write after another, in the order the reader made them, off the screen's own time.
+    ///
+    /// A chain rather than a task each. Making a timeline is two writes — the row, then the
+    /// row's place in the order — and two independent tasks can land the second first, which
+    /// writes an order for a row that is not there yet. Chaining also gives `startAgain`
+    /// something to wait for: a save still in flight when the store is emptied would land in
+    /// the fresh database and put a timeline back that the reader had just erased.
+    private func write(_ work: @escaping @Sendable (LocalStore) async -> Void) {
+        guard let store else { return }
+        let queued = writes
+        writes = Task { [store] in
+            await queued?.value
+            await work(store)
+        }
+    }
+
+    /// Everything queued for the store, done. The reset waits on it; so does a test that means
+    /// to read back what the screen has just changed.
+    func settled() async {
+        await writes?.value
     }
 
     /// The feed the reader is actually looking at: the visible tab of the visible page, and
@@ -247,18 +486,29 @@ public final class AppState {
     /// Timeline is the one page divided by feed, and the tabs it is divided into are the
     /// feeds themselves. Kept reads the store, Statistics reads the store and the ledger, and
     /// Settings reads nobody: one screen each, and no feed on any of them.
-    var feedMode: FeedMode? {
-        railItem == .timeline ? feedTab : nil
+    var readingTimeline: Timeline? {
+        railItem == .timeline ? (timeline(currentTimeline) ?? timelines.first) : nil
     }
 
     /// The feed being read, ready to be asked something. Every key that moves through a
     /// timeline starts here, so "which feed" is answered once rather than four times.
     private var readingFeed: FeedModel? {
-        feedMode.map { feed(for: $0) }
+        readingTimeline.map { feed(for: $0) }
+    }
+
+    /// Whether anybody is signed in anywhere. What makes a home timeline readable, and so what
+    /// says whether its tab is a place the reader can go at all.
+    var signedInAnywhere: Bool { !(signIn?.accounts.isEmpty ?? true) }
+
+    /// Whether this timeline has anywhere to read from as things stand. A home nobody is signed
+    /// in to is not empty, it is unreachable — and a tab that can only ever be blank is worse
+    /// than one that says why it is not available.
+    func isReadable(_ timeline: Timeline) -> Bool {
+        !timeline.source.needsAccount || signedInAnywhere
     }
 
     var refreshKey: RefreshKey {
-        RefreshKey(page: railItem, tab: feedMode, interval: preferences.refreshInterval)
+        RefreshKey(page: railItem, timeline: readingTimeline?.id, interval: preferences.refreshInterval)
     }
 
     /// Reads the page you are looking at again, every so often, for as long as it is the
@@ -326,6 +576,58 @@ public final class AppState {
                 }
             }
         }
+    }
+
+    // MARK: - Starting again
+
+    /// This device, as it was before Fediqo was ever opened.
+    ///
+    /// Every account signed out where a server will still take the revoke, every credential and
+    /// app registration out of the Keychain, every row of the store gone and its schema built
+    /// again, every preference back to its first-launch value, and the reader put back on the
+    /// landing screen with the two timelines a fresh install ships with.
+    ///
+    /// The order is deliberate. Signing out first is the only step that needs the network and
+    /// the rows at the same time — after the store is emptied there is nothing left to say who
+    /// was signed in where, so a revoke attempted afterwards could not be addressed. Everything
+    /// after it is local and cannot fail in a way worth stopping for: a server that will not
+    /// take a revoke must not be able to keep somebody from clearing their own device.
+    func startAgain() async {
+        let leaving = servers
+        if let signIn {
+            await withTaskGroup(of: Void.self) { group in
+                for server in leaving {
+                    group.addTask { await signIn.signOut(of: server) }
+                }
+            }
+        }
+        for server in leaving {
+            try? secrets.removeAppCredentials(for: server.endpoint)
+        }
+        serverStore.removeAll()
+        servers = serverStore.servers
+        // Whatever the screen has asked to be written, written — before the tables go. A save
+        // still in flight would otherwise land in the fresh database.
+        await settled()
+        do {
+            try await store?.eraseEverything()
+        } catch {
+            LocalStore.log.error("erasing the store failed: \(String(describing: error), privacy: .public)")
+        }
+        preferences.resetToDefaults()
+        L10n.use(preferences.language)
+        // Nothing kept from the reading that was: a feed holds posts, a place in them, and
+        // where each server had got to, and none of that survives the store it came from.
+        feeds = [:]
+        await tokens?.invalidate()
+        await signIn?.refresh()
+        timelines = Self.shipped()
+        currentTimeline = timelines.first?.id ?? ""
+        railItem = .timeline
+        // Written into the empty store, so the next launch finds them there rather than
+        // seeding a second time.
+        await openTimelines()
+        route = .landing
     }
 
     func apply(language: AppLanguage) {
@@ -446,11 +748,24 @@ public final class AppState {
     @discardableResult
     func rotateTab(by steps: Int) -> Bool {
         switch railItem {
-        case .timeline: rotate(&feedTab, by: steps)
+        case .timeline: rotateTimeline(by: steps)
         case .statistics: rotate(&statisticsTab, by: steps)
         case .settings: rotate(&settingsTab, by: steps)
         case .kept: false
         }
+    }
+
+    /// The timeline `steps` along the row, wrapping at both ends. Not `rotate` below, because
+    /// the row is a list the reader built rather than a type's `allCases` — and a row of one
+    /// has nowhere to go, which is what says `false` and hands `Tab` back to the focus system.
+    private func rotateTimeline(by steps: Int) -> Bool {
+        // Only the ones there is something to read in. A tab the row draws as unavailable is
+        // not a place `Tab` should be able to land on either.
+        let reachable = timelines.filter { isReadable($0) || $0.id == currentTimeline }
+        guard reachable.count > 1 else { return false }
+        guard let next = rotated(reachable.map(\.id), from: currentTimeline, by: steps) else { return false }
+        currentTimeline = next
+        return true
     }
 
     /// One rotation, whichever page's tabs it is over. `rotated` is the app's one rule for

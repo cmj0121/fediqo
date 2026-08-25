@@ -59,17 +59,17 @@ struct RefreshBackoffTests {
         stubRoutes.on(host, publicTimeline, status: 503, body: "gateway wept")
         let loader = stubbedLoader()
 
-        _ = await loader.load(servers: [server], mode: .timeline, refresh: every30, now: t0)
+        _ = await loader.load(servers: [server], query: .publicPosts, refresh: every30, now: t0)
         #expect(stubRoutes.requests(for: host, publicTimeline).count == 1)
 
         // Ten seconds later the clock ticks again. The server is not asked, and it is not
         // reported either — it is being left alone, not failing.
-        let skipped = await loader.load(servers: [server], mode: .timeline, refresh: every30,
+        let skipped = await loader.load(servers: [server], query: .publicPosts, refresh: every30,
                                         now: t0.addingTimeInterval(10))
         #expect(stubRoutes.requests(for: host, publicTimeline).count == 1)
         #expect(skipped.failures.isEmpty)
 
-        let asked = await loader.load(servers: [server], mode: .timeline, refresh: every30,
+        let asked = await loader.load(servers: [server], query: .publicPosts, refresh: every30,
                                       now: t0.addingTimeInterval(30))
         #expect(stubRoutes.requests(for: host, publicTimeline).count == 2)
         #expect(asked.failures[server.endpoint] == SourceFailure.http(503, Data("gateway wept".utf8)))
@@ -83,8 +83,8 @@ struct RefreshBackoffTests {
         stubRoutes.on(open.host, publicTimeline, status: 200, body: oneStatusJSON)
         let loader = stubbedLoader()
 
-        _ = await loader.load(servers: [silent, open], mode: .timeline, refresh: every30, now: t0)
-        let second = await loader.load(servers: [silent, open], mode: .timeline, refresh: every30,
+        _ = await loader.load(servers: [silent, open], query: .publicPosts, refresh: every30, now: t0)
+        let second = await loader.load(servers: [silent, open], query: .publicPosts, refresh: every30,
                                        now: t0.addingTimeInterval(10))
 
         #expect(stubRoutes.requests(for: silent.host, publicTimeline).count == 1)
@@ -99,8 +99,8 @@ struct RefreshBackoffTests {
         stubRoutes.on(host, publicTimeline, status: 503)
         let loader = stubbedLoader()
 
-        _ = await loader.load(servers: [server], mode: .timeline, refresh: every30, now: t0)
-        _ = await loader.load(servers: [server], mode: .timeline, now: t0.addingTimeInterval(1))
+        _ = await loader.load(servers: [server], query: .publicPosts, refresh: every30, now: t0)
+        _ = await loader.load(servers: [server], query: .publicPosts, now: t0.addingTimeInterval(1))
 
         #expect(stubRoutes.requests(for: host, publicTimeline).count == 2)
     }
@@ -111,13 +111,13 @@ struct RefreshBackoffTests {
         let server = makeServer(host)
         stubRoutes.on(host, publicTimeline, status: 503)
         let loader = stubbedLoader()
-        _ = await loader.load(servers: [server], mode: .timeline, refresh: every30, now: t0)
+        _ = await loader.load(servers: [server], query: .publicPosts, refresh: every30, now: t0)
 
         stubRoutes.on(host, publicTimeline, status: 200, body: oneStatusJSON)
-        _ = await loader.load(servers: [server], mode: .timeline, now: t0.addingTimeInterval(1))
+        _ = await loader.load(servers: [server], query: .publicPosts, now: t0.addingTimeInterval(1))
 
         // The wait was forgiven by the answer, so the very next tick asks rather than skips.
-        let ticked = await loader.load(servers: [server], mode: .timeline, refresh: every30,
+        let ticked = await loader.load(servers: [server], query: .publicPosts, refresh: every30,
                                        now: t0.addingTimeInterval(2))
         #expect(stubRoutes.requests(for: host, publicTimeline).count == 3)
         #expect(ticked.posts.count == 1)
@@ -130,8 +130,8 @@ struct RefreshBackoffTests {
         stubRoutes.on(host, publicTimeline, status: 503)
         let loader = stubbedLoader()
 
-        _ = await loader.load(servers: [server], mode: .timeline, now: t0)
-        _ = await loader.load(servers: [server], mode: .timeline, refresh: every30, now: t0)
+        _ = await loader.load(servers: [server], query: .publicPosts, now: t0)
+        _ = await loader.load(servers: [server], query: .publicPosts, refresh: every30, now: t0)
 
         #expect(stubRoutes.requests(for: host, publicTimeline).count == 2)
     }
@@ -141,8 +141,8 @@ struct RefreshBackoffTests {
         let server = Server(host: "nostr-only.test", socialProtocol: .nostr, title: "nostr-only.test")
         let loader = stubbedLoader()
 
-        _ = await loader.load(servers: [server], mode: .timeline, refresh: every30, now: t0)
-        let second = await loader.load(servers: [server], mode: .timeline, refresh: every30, now: t0)
+        _ = await loader.load(servers: [server], query: .publicPosts, refresh: every30, now: t0)
+        let second = await loader.load(servers: [server], query: .publicPosts, refresh: every30, now: t0)
 
         // Nothing was sent anywhere, so the row keeps saying why rather than falling silent.
         #expect(second.failures[server.endpoint] == SourceFailure.unsupported(.nostr))
@@ -159,10 +159,10 @@ struct RefreshBackoffTests {
         try await signInRows("expired", to: server, store: store, secrets: secrets)
         let loader = stubbedLoader(store: store, secrets: secrets)
 
-        let first = await loader.load(servers: [server], mode: .timeline, refresh: every30, now: t0)
+        let first = await loader.load(servers: [server], query: .publicPosts, refresh: every30, now: t0)
         #expect(first.failures[server.endpoint] == SourceFailure.tokenRejected(host))
 
-        let second = await loader.load(servers: [server], mode: .timeline, refresh: every30,
+        let second = await loader.load(servers: [server], query: .publicPosts, refresh: every30,
                                        now: t0.addingTimeInterval(1))
 
         // Asked again a second later — no wait was started. And the spent credential is not
@@ -222,11 +222,11 @@ struct StandingFailureTests {
         stubRoutes.on(server.host, publicTimeline, status: 503)
         let loader = stubbedLoader()
 
-        let failing = await loader.load(servers: [server], mode: .timeline, refresh: every30, now: t0)
+        let failing = await loader.load(servers: [server], query: .publicPosts, refresh: every30, now: t0)
         let standing = failing.failures(carrying: [:], of: [server])
         #expect(standing[server.endpoint] == SourceFailure.http(503, Data("[]".utf8)))
 
-        let skipped = await loader.load(servers: [server], mode: .timeline, refresh: every30,
+        let skipped = await loader.load(servers: [server], query: .publicPosts, refresh: every30,
                                         now: t0.addingTimeInterval(10))
 
         #expect(skipped.skipped == [server.endpoint])
@@ -239,12 +239,12 @@ struct StandingFailureTests {
         let server = makeServer("mended.test")
         stubRoutes.on(server.host, publicTimeline, status: 503)
         let loader = stubbedLoader()
-        let failing = await loader.load(servers: [server], mode: .timeline, refresh: every30, now: t0)
+        let failing = await loader.load(servers: [server], query: .publicPosts, refresh: every30, now: t0)
         let standing = failing.failures(carrying: [:], of: [server])
         #expect(!standing.isEmpty)
 
         stubRoutes.on(server.host, publicTimeline, status: 200, body: oneStatusJSON)
-        let answered = await loader.load(servers: [server], mode: .timeline, refresh: every30,
+        let answered = await loader.load(servers: [server], query: .publicPosts, refresh: every30,
                                          now: t0.addingTimeInterval(30))
 
         #expect(answered.skipped.isEmpty)
@@ -259,7 +259,7 @@ struct StandingFailureTests {
         let loader = stubbedLoader()
         let known = [leaving.endpoint: SourceFailure.badHost(leaving.host)]
 
-        let result = await loader.load(servers: [staying], mode: .timeline, refresh: every30, now: t0)
+        let result = await loader.load(servers: [staying], query: .publicPosts, refresh: every30, now: t0)
 
         #expect(result.failures(carrying: known, of: [staying]).isEmpty)
     }
@@ -271,7 +271,7 @@ struct StandingFailureTests {
         let loader = stubbedLoader()
         let known = [server.endpoint: SourceFailure.http(503, Data("[]".utf8))]
 
-        let result = await loader.load(servers: [server], mode: .timeline, refresh: every30, now: t0)
+        let result = await loader.load(servers: [server], query: .publicPosts, refresh: every30, now: t0)
 
         #expect(result.failures(carrying: known, of: [server])[server.endpoint]
                 == SourceFailure.http(404, Data("[]".utf8)))
@@ -283,7 +283,7 @@ struct StandingFailureTests {
         stubRoutes.on(host, "/api/v1/timelines/public", status: 503, body: "")
         let shown = [makePost(uri: "kept", at: 100, from: host)]
 
-        let failed = await stubbedLoader().load(servers: [server], mode: .timeline)
+        let failed = await stubbedLoader().load(servers: [server], query: .publicPosts)
 
         // The server is unreachable, not empty — and the store still holds what it held.
         #expect(failed.posts.isEmpty)
@@ -303,7 +303,7 @@ struct StandingFailureTests {
             handedOver($1, from: host, authority: host, at: 400 - TimeInterval($0) * 100)
         }
 
-        let refreshed = await stubbedLoader(limit: 2).load(servers: [server], mode: .timeline)
+        let refreshed = await stubbedLoader(limit: 2).load(servers: [server], query: .publicPosts)
 
         // The page's own rows, then the tail below them — and the row the page and the screen
         // both had is the page's, once.
@@ -314,7 +314,7 @@ struct StandingFailureTests {
     @Test("With no sources left there is nobody whose rows those were")
     func noSourcesClearsTheScreen() async {
         let shown = [makePost(uri: "orphan", at: 100, from: "gone.test")]
-        let empty = await stubbedLoader().load(servers: [], mode: .timeline)
+        let empty = await stubbedLoader().load(servers: [], query: .publicPosts)
 
         #expect(empty.posts(carrying: shown, asked: []).isEmpty)
     }

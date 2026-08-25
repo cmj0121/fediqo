@@ -28,6 +28,9 @@ public struct Post: Sendable, Hashable, Identifiable {
     public let inReplyToURI: String?
     /// NFC, lowercased, no leading `#`, no repeats, in the order the source gave them.
     public let tags: [String]
+    /// The accounts the post names, in the order the source gave them. Carried from the first
+    /// read like everything else here: the store writes a post once and never backfills it.
+    public let mentions: [Mention]
     /// The booster's display name — what the row shows.
     public let boostedBy: String?
     /// The booster's `authorId` — what identity is built on.
@@ -68,6 +71,7 @@ public struct Post: Sendable, Hashable, Identifiable {
         webURL: URL? = nil,
         inReplyToURI: String? = nil,
         tags: [String] = [],
+        mentions: [Mention] = [],
         boostedBy: String? = nil,
         boostedById: String? = nil,
         sources: [String] = []
@@ -86,6 +90,7 @@ public struct Post: Sendable, Hashable, Identifiable {
         self.webURL = webURL
         self.inReplyToURI = inReplyToURI
         self.tags = Self.normalisedTags(tags)
+        self.mentions = Mention.folded(mentions)
         self.boostedBy = boostedBy
         self.boostedById = boostedById
         self.sources = sources
@@ -109,6 +114,31 @@ public struct Post: Sendable, Hashable, Identifiable {
             guard !name.isEmpty, seen.insert(name).inserted else { return nil }
             return name
         }
+    }
+}
+
+/// An account a post names.
+///
+/// The URI is the name — the same stable actor URI `Post.authorId` is — because a handle is
+/// what a profile renames. The handle rides along because it is what a reader would type and
+/// what a screen would show, and it is spelled the way the post's own server spelled it.
+///
+/// It is not a reference to an account we hold: a post routinely names people this device has
+/// never seen and may never see, which is why `post_mentions.mention_uri` is no foreign key.
+public struct Mention: Sendable, Hashable, Codable {
+    public let uri: String
+    /// `@user@host`, as the post's own server spelled it.
+    public let handle: String
+
+    public init(uri: String, handle: String) {
+        self.uri = uri
+        self.handle = handle
+    }
+
+    /// Each account once, in the order first named. A post may name the same person twice.
+    static func folded(_ raw: [Mention]) -> [Mention] {
+        var seen: Set<String> = []
+        return raw.filter { !$0.uri.isEmpty && seen.insert($0.uri).inserted }
     }
 }
 

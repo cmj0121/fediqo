@@ -59,8 +59,8 @@ extension AppState {
 /// to its own list, so it needs somewhere of its own to read them from for the same reason
 /// the app does.
 @MainActor
-func freshFeed(_ name: String, mode: FeedMode = .timeline) -> FeedModel {
-    FeedModel(mode: mode, preferences: Preferences(defaults: scratch(name)))
+func freshFeed(_ name: String, timeline: Timeline = .publicFixture) -> FeedModel {
+    FeedModel(timeline: timeline, preferences: Preferences(defaults: scratch(name)))
 }
 
 /// A chosen server, of the one protocol the double below claims to speak.
@@ -117,6 +117,9 @@ actor PagedClient: SourceClient {
 
     func trending(host: String, limit: Int, token: String?) async throws -> [Post] { [] }
 
+    /// Nothing here is signed in anywhere, so nothing here asks for a home timeline.
+    func home(host: String, limit: Int, before: Post?, token: String) async throws -> [Post] { [] }
+
     /// Nothing here reconciles anything away: a double that answered "gone" would mark posts
     /// no test asked it to.
     func stillHas(_ post: Post, host: String, token: String?) async throws -> Bool { true }
@@ -151,10 +154,20 @@ actor PagedClient: SourceClient {
 /// One feed reading `client` and, where there is one, `store` — the wired path a reach for
 /// the bottom takes, with the network replaced and nothing else.
 @MainActor
-func freshFeed(_ name: String, mode: FeedMode = .timeline, client: PagedClient,
+func freshFeed(_ name: String, timeline: Timeline = .publicFixture, client: PagedClient,
                store: LocalStore? = nil) -> FeedModel {
-    FeedModel(mode: mode, preferences: Preferences(defaults: scratch(name)),
+    FeedModel(timeline: timeline, preferences: Preferences(defaults: scratch(name)),
               loader: TimelineLoader(registry: SourceRegistry(clients: [.mastodon: client]),
                                      limit: PagedClient.pageSize, store: store,
                                      secrets: InMemorySecretStore()))
+}
+
+/// The two timelines these suites read, standing in for the two a fresh install ships with.
+extension Timeline {
+    static let publicFixture = Timeline(id: "public", name: "Public", source: .public, template: "public")
+    static let trendingFixture = Timeline(id: "trend", name: "Trending", source: .trend, template: "trend")
+}
+
+extension TimelineQuery {
+    static let publicPosts = TimelineQuery(source: .public)
 }
