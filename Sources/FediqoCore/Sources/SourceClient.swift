@@ -100,6 +100,14 @@ public protocol SourceClient: Sendable {
     /// with the one thing, and cannot disagree about where the page ended.
     func timeline(host: String, limit: Int, before: Post?, token: String?) async throws -> [Post]
 
+    /// What the server shows the account signed in to it, paged like `timeline`.
+    ///
+    /// `token` is not optional, and that is the difference between this and the two beside
+    /// it: there is no such thing as somebody's home timeline read as nobody. A server with
+    /// no account on it is not asked at all, and is never quietly handed its public timeline
+    /// instead — the same rule #4 set for a server that publishes no public timeline.
+    func home(host: String, limit: Int, before: Post?, token: String) async throws -> [Post]
+
     /// What the server says is trending. A separate thing, asked for separately.
     ///
     /// It takes no cursor, and that is deliberate rather than missing. A timeline is a thread

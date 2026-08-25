@@ -11,7 +11,11 @@ import os
 /// an actor — a second lock around the first would only add waiting.
 public final class LocalStore: Sendable {
     /// Where the store talks about itself. Never a post, never a row — paths, errors, counts.
-    static let log = Logger(subsystem: "fediqo", category: "store")
+    ///
+    /// Public because a write can be started from outside Core and finish long after the
+    /// caller has gone: the reader's timelines are saved from the app, in a task nobody is
+    /// waiting on, and a failure there is a fact about this store rather than about a screen.
+    public static let log = Logger(subsystem: "fediqo", category: "store")
 
     private let queue: DatabaseQueue
 
@@ -104,6 +108,21 @@ public final class LocalStore: Sendable {
         try queue.write(block)
     }
 
+    /// Everything this store holds, gone — and the schema built again behind it, so what is
+    /// left is the database a first launch would have opened.
+    ///
+    /// Rows rather than the file: the connection stays the one every screen is already holding,
+    /// so nothing has to be told that the store it was given has been replaced. Every table
+    /// goes, migrations included, and then the migrator runs from 001 as it did on the first
+    /// launch — which is also what makes this the one place in the app allowed to destroy
+    /// anything a network handed over. It is the reader asking for a fresh install; every other
+    /// path still obeys append-only.
+    public func eraseEverything() async throws {
+        try await queue.erase()
+        try Self.migrate(queue)
+        Self.log.info("erased \(self.path, privacy: .public) and built the schema again")
+    }
+
     private static func configuration() -> Configuration {
         var config = Configuration()
         // GRDB's default, but the schema says it out loud, so the code does too.
@@ -138,6 +157,14 @@ public final class LocalStore: Sendable {
         }
         migrator.registerMigration("003") { db in
             try db.execute(sql: schema(named: "schema-003"))
+        }
+        migrator.registerMigration("004") { db in
+            try db.execute(sql: schema(named: "schema-004"))
+            // Two more seeded lookups, stamped the way 001 stamps protocols: the file writes
+            // the rows, the migration is what knows when they arrived.
+            let now = milliseconds(Date())
+            try db.execute(sql: "UPDATE feeds SET created_at = ?", arguments: [now])
+            try db.execute(sql: "UPDATE filter_kinds SET created_at = ?", arguments: [now])
         }
         return migrator
     }

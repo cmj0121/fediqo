@@ -27,6 +27,13 @@ public extension SecretStore {
         try write(credentials, for: appKey(endpoint))
     }
 
+    /// The app registration for a server, forgotten. Signing out revokes and removes a token;
+    /// this is the other half, and only a reader asking for a fresh install wants it — the
+    /// registration is what lets the next sign-in skip registering all over again.
+    func removeAppCredentials(for endpoint: String) throws {
+        try removeSecret(for: appKey(endpoint))
+    }
+
     func token(for authorId: String) throws -> OAuthToken? {
         try read(OAuthToken.self, for: authorId)
     }

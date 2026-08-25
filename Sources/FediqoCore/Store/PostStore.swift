@@ -42,7 +42,14 @@ extension LocalStore {
     /// each once however many posts name them; then each post — inserted if new, otherwise
     /// touched, and rewritten only when the server it came from is the authority for it.
     /// Every hour these posts were posted in gets its `tag_buckets` recounted last.
-    public func save(_ posts: [Post], from server: Server, now: Date = Date()) async throws {
+    ///
+    /// `feed` is what this server was asked for and `reader` is who it was asked as, and the
+    /// pair is written beside each post rather than into it: a post is one row whichever base
+    /// sources carried it, and arriving again through another one adds an origin instead of
+    /// replacing anything. `reader` is kept only where the source has an owner — a public
+    /// timeline belongs to nobody, and neither does a trending list.
+    public func save(_ posts: [Post], from server: Server, into feed: BaseSource = .public,
+                     as reader: String? = nil, now: Date = Date()) async throws {
         for post in posts {
             if post.authorId.isEmpty { throw PostStoreError.missingAuthor(uri: post.uri) }
             if post.sourceURL.isEmpty { throw PostStoreError.missingSource(uri: post.uri) }
@@ -59,9 +66,15 @@ extension LocalStore {
             for row in servers { try Self.upsertServer(db, row, now: ms) }
             for row in accounts { try Self.upsertAccount(db, row, now: ms) }
 
+            // Whose home this was, or nobody's. Decided once here rather than at each call
+            // site, so the schema's rule — an account only where the source has one — cannot
+            // be broken by a caller passing the reader along with the wrong feed.
+            let account = feed.needsAccount ? reader : nil
             var hours: Set<Int64> = []
             for post in posts {
                 let postedAt = try Self.writePost(db, post, authorityURL: Self.authorityURL(of: post), now: ms)
+                try Self.recordOrigin(db, post.mergeKey, from: post.sourceURL,
+                                      into: feed, as: account, now: ms)
                 hours.insert(Self.hourBucket(postedAt))
             }
             try Self.rewriteTagBuckets(db, hours: hours, now: ms)
@@ -69,20 +82,42 @@ extension LocalStore {
     }
 
     /// The server's ranking of posts already saved: a post's rank is its place in the list the
-    /// server handed over. Seen again at the same rank, the row is touched, not updated.
+    /// server handed over. Seen again at the same rank, the row is touched, not updated. A post
+    /// back on the list after falling off it rises again — the mark is lifted, not a second row.
+    ///
+    /// The list is also evidence about the posts that are *not* on it, and that is the whole of
+    /// why `removed_at` exists. Staleness cannot stand in for it: `ServerBackoff` is built to
+    /// stop asking a server that is not answering, so "not seen for a day" covers a post that
+    /// fell off the list and a server nobody has asked, which are not the same fact. What is
+    /// written is the narrower true thing, the way 003 taught `deleted_at` to say one: **the
+    /// list this server hands over no longer contains this post** — not that it has stopped
+    /// rising, which a list with a length cannot tell anybody.
+    ///
+    /// An empty list decides nothing, and marks nothing. A server that has turned trending off,
+    /// or has nothing to say this hour, is not a server telling us a hundred posts retired at
+    /// the same instant; that reading belongs to the 24-hour window a screen already applies.
     public func recordTrending(_ posts: [Post], from server: Server, now: Date = Date()) async throws {
         let ms = Self.milliseconds(now)
+        let arrived = posts.map(\.mergeKey)
+        let sourceURL = server.endpoint
         try await write { db in
             let insert = try db.cachedStatement(sql: """
                 INSERT INTO server_trends (source_url, merge_key, rank, first_seen_at, last_seen_at, created_at)
                 VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT (source_url, merge_key) DO UPDATE SET
-                    rank = excluded.rank, last_seen_at = excluded.last_seen_at,
-                    \(Self.touchClause(unchanged: "rank = excluded.rank"))
+                    rank = excluded.rank, last_seen_at = excluded.last_seen_at, removed_at = NULL,
+                    \(Self.touchClause(unchanged: "rank = excluded.rank AND removed_at IS NULL"))
                 """)
             for (index, post) in posts.enumerated() {
                 try insert.execute(arguments: [post.sourceURL, post.mergeKey, index, ms, ms, ms])
             }
+            guard !arrived.isEmpty else { return }
+            let placeholders = Array(repeating: "?", count: arrived.count).joined(separator: ", ")
+            try db.execute(sql: """
+                UPDATE server_trends SET removed_at = ?, updated_at = ?
+                WHERE source_url = ? AND removed_at IS NULL AND merge_key NOT IN (\(placeholders))
+                """, arguments: StatementArguments([ms, ms, sourceURL] as [any DatabaseValueConvertible])
+                    + StatementArguments(arrived))
         }
     }
 
@@ -146,6 +181,111 @@ extension LocalStore {
         }
     }
 
+    /// One timeline's page: the posts its base source carried, with its rules applied, in the
+    /// order its base source puts them in.
+    ///
+    /// The rules are the same rules `TimelineFilter.admits` is, spelled for SQLite to run.
+    /// Two spellings of one thing is exactly the drift this codebase writes tests against, so
+    /// `TimelineFilterTests` runs a corpus through both and holds them to the same answer.
+    ///
+    /// **A ranked source takes no cursor.** `before` is a place on a thread of time, and a
+    /// trending list is not one: it is a snapshot somebody curated, and there is nothing
+    /// behind it a reader was reading towards (see `SourceClient.trending`). So a ranked
+    /// source answers its whole list, cut to `limit`, and a cursor handed in is ignored
+    /// rather than quietly turned into a page boundary that means nothing.
+    public func timeline(matching query: TimelineQuery, limit: Int = 200,
+                         before: Post? = nil, now: Date = Date()) async throws -> [Post] {
+        let (rules, ruleArguments) = Self.conditions(of: query)
+        let ms = Self.milliseconds(now.addingTimeInterval(-Self.trendingWindow))
+
+        if query.source.ranked {
+            let arguments = StatementArguments(([ms] + ruleArguments + [limit]).map(\.databaseValue))
+            return try await read { db in
+                let rows = try Row.fetchAll(db, sql: """
+                    \(Self.postSelect)
+                    JOIN server_trends t ON t.merge_key = p.merge_key
+                    WHERE t.last_seen_at >= ? AND t.removed_at IS NULL AND p.deleted_at IS NULL
+                    \(rules)
+                    GROUP BY p.merge_key
+                    ORDER BY min(t.rank), p.posted_at DESC, p.merge_key
+                    LIMIT ?
+                    """, arguments: arguments)
+                return try Self.posts(from: rows, db)
+            }
+        }
+
+        let cursor = before.map { (postedAt: Self.milliseconds($0.createdAt), key: $0.mergeKey) }
+        let keyset = cursor == nil ? "" : "AND (p.posted_at < ? OR (p.posted_at = ? AND p.merge_key > ?))"
+        // Which base source carried it, and — where the timeline names one — whose reading it
+        // was in. A `home` timeline with no account named is every home this device reads.
+        var origin = "AND EXISTS (SELECT 1 FROM post_origins o WHERE o.merge_key = p.merge_key AND o.feed = ?"
+        var originArguments: [any DatabaseValueConvertible] = [query.source.rawValue]
+        if let account = query.account {
+            origin += " AND o.author_id = ?"
+            originArguments.append(account)
+        }
+        origin += ")"
+        let originClause = origin
+
+        var values: [any DatabaseValueConvertible] = originArguments + ruleArguments
+        if let cursor { values += [cursor.postedAt, cursor.postedAt, cursor.key] }
+        values.append(limit)
+        let arguments = StatementArguments(values.map(\.databaseValue))
+
+        return try await read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                \(Self.postSelect)
+                WHERE p.deleted_at IS NULL
+                \(originClause)
+                \(rules)
+                \(keyset)
+                ORDER BY p.posted_at DESC, p.merge_key
+                LIMIT ?
+                """, arguments: arguments)
+            return try Self.posts(from: rows, db)
+        }
+    }
+
+    /// How far back a trending list is believed. A snapshot nobody has refreshed for a day is
+    /// not evidence about what is rising now, and a server inside a long wait is exactly how
+    /// one gets that old.
+    static let trendingWindow: TimeInterval = 24 * 60 * 60
+
+    /// The rules as SQL: one `AND` per rule, and its arguments in the same order.
+    ///
+    /// Every fragment is written so that negating it is `NOT (…)` and nothing else — no
+    /// second spelling per rule, and no rule whose negation quietly means something narrower
+    /// than "everything this one did not keep".
+    private static func conditions(of query: TimelineQuery)
+        -> (sql: String, arguments: [any DatabaseValueConvertible]) {
+        var sql: [String] = []
+        var arguments: [any DatabaseValueConvertible] = []
+        for filter in query.filters {
+            let fragment: String
+            switch filter.kind {
+            case .tag:
+                fragment = "EXISTS (SELECT 1 FROM post_tags pt WHERE pt.merge_key = p.merge_key AND pt.tag = ?)"
+                arguments.append(filter.value)
+            case .author:
+                fragment = "(p.author_id = ? OR a.handle = ?)"
+                arguments += [filter.value, filter.value]
+            case .mention:
+                fragment = """
+                    EXISTS (SELECT 1 FROM post_mentions pm WHERE pm.merge_key = p.merge_key
+                            AND (pm.mention_uri = ? OR pm.handle = ?))
+                    """
+                arguments += [filter.value, filter.value]
+            case .server:
+                fragment = "(p.source_url = ? OR p.source_url = 'https://' || ?)"
+                arguments += [filter.value, filter.value]
+            case .media:
+                fragment = "(p.media_urls IS NOT NULL AND json_array_length(p.media_urls) > 0)"
+            }
+            sql.append("AND \(filter.negate ? "NOT (\(fragment))" : fragment)")
+        }
+        return (sql.joined(separator: "\n"), arguments)
+    }
+
     /// What the servers said was trending, as of their last sighting on or after `since`.
     /// A post several servers list once, at its best rank; ties break the way
     /// `TimelineLoader` breaks them, so a refresh lands in the same order the store showed.
@@ -192,14 +332,28 @@ extension LocalStore {
     ///
     /// In no order, because the answer is a set the page is diffed against and never a list
     /// anybody reads. What order the survivors reach the queue in is `posts(named:)`'s to say.
-    public func postKeys(from sourceURL: String, postedIn range: ClosedRange<Date>) async throws -> [String] {
+    ///
+    /// A fourth thing is left out, and it is `feed`'s doing: a page is only evidence about the
+    /// source it came through. A post the store holds because this server's public timeline
+    /// carried it is not something that server's *home* page for somebody was ever going to
+    /// contain, and diffing the two would suspect half the store every time a home page
+    /// arrived. `as` narrows it once more where the source has an owner — one reader's home is
+    /// not evidence about another's.
+    public func postKeys(from sourceURL: String, through feed: BaseSource, as reader: String? = nil,
+                         postedIn range: ClosedRange<Date>) async throws -> [String] {
         let (from, to) = (Self.milliseconds(range.lowerBound), Self.milliseconds(range.upperBound))
+        let owner = reader == nil ? "" : "AND o.author_id = ?"
+        var values: [any DatabaseValueConvertible] = [sourceURL, from, to, sourceURL, feed.rawValue]
+        if let reader { values.append(reader) }
+        let arguments = StatementArguments(values.map(\.databaseValue))
         return try await read { db in
             try String.fetchAll(db, sql: """
-                SELECT merge_key FROM posts
-                WHERE source_url = ? AND posted_at >= ? AND posted_at <= ?
-                  AND deleted_at IS NULL AND authority_url IS NOT NULL
-                """, arguments: [sourceURL, from, to])
+                SELECT p.merge_key FROM posts p
+                WHERE p.source_url = ? AND p.posted_at >= ? AND p.posted_at <= ?
+                  AND p.deleted_at IS NULL AND p.authority_url IS NOT NULL
+                  AND EXISTS (SELECT 1 FROM post_origins o
+                              WHERE o.merge_key = p.merge_key AND o.source_url = ? AND o.feed = ? \(owner))
+                """, arguments: arguments)
         }
     }
 
@@ -249,10 +403,18 @@ extension LocalStore {
                                     arguments: StatementArguments(keys)) {
             tags[row["merge_key"], default: []].append(row["tag"])
         }
-        return rows.map { post(from: $0, tags: tags[$0["merge_key"]] ?? []) }
+        var mentions: [String: [Mention]] = [:]
+        for row in try Row.fetchAll(db, sql: """
+            SELECT merge_key, mention_uri, handle FROM post_mentions
+            WHERE merge_key IN (\(placeholders)) ORDER BY rowid
+            """, arguments: StatementArguments(keys)) {
+            mentions[row["merge_key"], default: []].append(Mention(uri: row["mention_uri"], handle: row["handle"]))
+        }
+        return rows.map { post(from: $0, tags: tags[$0["merge_key"]] ?? [],
+                               mentions: mentions[$0["merge_key"]] ?? []) }
     }
 
-    private static func post(from row: Row, tags: [String]) -> Post {
+    private static func post(from row: Row, tags: [String], mentions: [Mention]) -> Post {
         let mediaJSON: String? = row["media_urls"]
         let media = mediaJSON.flatMap { try? decoder.decode([String].self, from: Data($0.utf8)) } ?? []
         let sourceURL: String = row["source_url"]
@@ -271,6 +433,7 @@ extension LocalStore {
             webURL: (row["web_url"] as String?).flatMap(URL.init(string:)),
             inReplyToURI: row["in_reply_to_uri"],
             tags: tags,
+            mentions: mentions,
             boostedBy: row["booster_name"],
             boostedById: row["boosted_by"],
             sources: [host(of: sourceURL)]
@@ -387,6 +550,7 @@ extension LocalStore {
                                          post.sourceURL, postedAt, post.authorId,
                                          post.text, mediaJSON, webURL, post.inReplyToURI, post.boostedById, now, now])
             try insertTags(db, post.tags, for: key, now: now)
+            try insertMentions(db, post.mentions, for: key, now: now)
             return postedAt
         }
 
@@ -400,7 +564,11 @@ extension LocalStore {
         let storedTags = try String.fetchAll(db.cachedStatement(sql: "SELECT tag FROM post_tags WHERE merge_key = ? ORDER BY rowid"),
                                              arguments: [key])
         let tagsChanged = storedTags != post.tags
-        guard contentChanged || tagsChanged else { return postedAt }
+        let storedMentions = try Row.fetchAll(db.cachedStatement(sql: """
+            SELECT mention_uri, handle FROM post_mentions WHERE merge_key = ? ORDER BY rowid
+            """), arguments: [key]).map { Mention(uri: $0["mention_uri"], handle: $0["handle"]) }
+        let mentionsChanged = storedMentions != post.mentions
+        guard contentChanged || tagsChanged || mentionsChanged else { return postedAt }
 
         try db.cachedStatement(sql: "UPDATE posts SET updated_at = ? WHERE merge_key = ?").execute(arguments: [now, key])
         if contentChanged {
@@ -410,6 +578,10 @@ extension LocalStore {
         if tagsChanged {
             try db.cachedStatement(sql: "DELETE FROM post_tags WHERE merge_key = ?").execute(arguments: [key])
             try insertTags(db, post.tags, for: key, now: now)
+        }
+        if mentionsChanged {
+            try db.cachedStatement(sql: "DELETE FROM post_mentions WHERE merge_key = ?").execute(arguments: [key])
+            try insertMentions(db, post.mentions, for: key, now: now)
         }
         return postedAt
     }
@@ -424,6 +596,51 @@ extension LocalStore {
             try tag.execute(arguments: [name, name, now])
             try postTag.execute(arguments: [key, name, now])
         }
+    }
+
+    /// Who the post names. No `accounts` row is written for them: a mention is a name in a
+    /// post, and writing a half-empty account row for every stranger a post greets would fill
+    /// the table this device keys identity on with people it has never been handed.
+    private static func insertMentions(_ db: Database, _ mentions: [Mention], for key: String, now: Int64) throws {
+        let insert = try db.cachedStatement(sql: """
+            INSERT OR IGNORE INTO post_mentions (merge_key, mention_uri, handle, created_at) VALUES (?, ?, ?, ?)
+            """)
+        for mention in mentions {
+            try insert.execute(arguments: [key, mention.uri, mention.handle, now])
+        }
+    }
+
+    /// One sighting of one post through one base source, written beside the post and never
+    /// into it. Being told again moves `last_seen_at` and nothing else; being told by somebody
+    /// else, or through another source, is another row.
+    ///
+    /// Two statements because uniqueness is two partial indexes, and a conflict target has to
+    /// name the one it means. `author_id` is NULL for a source nobody owns, and NULLs are
+    /// distinct to a unique index — which is exactly why the anonymous rows are kept unique by
+    /// an index that leaves the column out.
+    private static func recordOrigin(_ db: Database, _ key: String, from sourceURL: String,
+                                     into feed: BaseSource, as account: String?, now: Int64) throws {
+        let statement = if account == nil {
+            try db.cachedStatement(sql: """
+                INSERT INTO post_origins (source_url, feed, author_id, merge_key,
+                                          first_seen_at, last_seen_at, created_at)
+                VALUES (?, ?, NULL, ?, ?, ?, ?)
+                ON CONFLICT (source_url, feed, merge_key) WHERE author_id IS NULL DO UPDATE SET
+                    last_seen_at = excluded.last_seen_at, updated_at = excluded.created_at
+                """)
+        } else {
+            try db.cachedStatement(sql: """
+                INSERT INTO post_origins (source_url, feed, author_id, merge_key,
+                                          first_seen_at, last_seen_at, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (source_url, feed, author_id, merge_key) WHERE author_id IS NOT NULL DO UPDATE SET
+                    last_seen_at = excluded.last_seen_at, updated_at = excluded.created_at
+                """)
+        }
+        let arguments: [(any DatabaseValueConvertible)?] = account == nil
+            ? [sourceURL, feed.rawValue, key, now, now, now]
+            : [sourceURL, feed.rawValue, account, key, now, now, now]
+        try statement.execute(arguments: StatementArguments(arguments))
     }
 
     private static let hour: Int64 = 3_600_000

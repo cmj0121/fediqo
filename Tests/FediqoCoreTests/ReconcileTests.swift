@@ -39,7 +39,7 @@ struct ReconcileTests {
         try await store.save(stored, from: server)
         stubRoutes.on(server.host, timeline, status: 200, body: page)
         let loader = stubbedLoader(store: store)
-        _ = await loader.loadOlder(servers: [server], now: t0)
+        _ = await loader.loadOlder(servers: [server], query: .publicPosts, now: t0)
         return (store, loader)
     }
 
@@ -142,7 +142,7 @@ struct ReconcileTests {
         // Never a reach-down — the plain refresh every screen already does. The top of the
         // timeline is where a post pulled down moments after it went up sits, and it is the
         // one stretch paging never revisits, because paging only ever walks away from it.
-        _ = await loader.load(servers: [relay], mode: .timeline, now: t0)
+        _ = await loader.load(servers: [relay], query: .publicPosts, now: t0)
 
         #expect(await loader.reconcile(now: t0) == [absent.mergeKey])
         #expect(try await marked(store) == [absent.mergeKey])
@@ -161,7 +161,7 @@ struct ReconcileTests {
         stubRoutes.on(authority, statusPath("2"), status: 404, body: "{}")
         let loader = stubbedLoader(store: store)
 
-        _ = await loader.load(servers: [relay], mode: .trending, now: t0)
+        _ = await loader.load(servers: [relay], query: .trending, now: t0)
 
         // A trending list is a snapshot a server curated, not a range it was asked for. A post
         // being absent from it means the server does not think it is rising — which is not a
@@ -318,7 +318,7 @@ struct ReconcileTests {
         // A first page leaving out only the post nobody here can phrase a question about.
         stubRoutes.on(relay.host, timeline, status: 200,
                       body: statusesJSON(["1", "2"], from: relay.host, authority: authority, at: [100, 100]))
-        _ = await loader.loadOlder(servers: [relay], now: t0)
+        _ = await loader.loadOlder(servers: [relay], query: .publicPosts, now: t0)
         #expect(await loader.reconcile(every: .seconds(30), now: t0).isEmpty)
 
         // A second page, this time leaving out one that can be asked about. Nothing was ever
@@ -326,7 +326,7 @@ struct ReconcileTests {
         // and the real question reaches the authority now rather than half a minute from now.
         stubRoutes.on(relay.host, timeline, status: 200,
                       body: statusesJSON(["1"], from: relay.host, authority: authority, at: [100]))
-        _ = await loader.loadOlder(servers: [relay], now: t0.addingTimeInterval(1))
+        _ = await loader.loadOlder(servers: [relay], query: .publicPosts, now: t0.addingTimeInterval(1))
         let gone = await loader.reconcile(every: .seconds(30), now: t0.addingTimeInterval(1))
 
         #expect(gone == [askable.mergeKey])

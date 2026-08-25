@@ -77,6 +77,21 @@ public final class Preferences {
     public var showBoosts: Bool { didSet { defaults.set(showBoosts, forKey: Keys.showBoosts) } }
     public var showMediaOnly: Bool { didSet { defaults.set(showMediaOnly, forKey: Keys.showMediaOnly) } }
     public var refreshInterval: RefreshInterval { didSet { defaults.set(refreshInterval.rawValue, forKey: Keys.refreshInterval) } }
+    /// Whether the one-time repair of `LocalStore.clearSeededWording` has run.
+    ///
+    /// It is a fact about this install rather than about any row, which is the whole reason it
+    /// is here: the rows cannot say whether the words in them are the app's or the reader's,
+    /// so what is remembered is that the question has been settled once.
+    public var clearedSeededWording: Bool { didSet { defaults.set(clearedSeededWording, forKey: Keys.clearedSeededWording) } }
+    /// Whether a home timeline has been offered — once, on the first sign-in ever.
+    ///
+    /// A home timeline is not among the ones a fresh install ships with: a device nobody is
+    /// signed in on anywhere has no home to read, and a page that can only ever be empty is
+    /// not something to hand somebody on their first launch. So it appears the first time
+    /// somebody signs in — and this is what stops it appearing again, because a reader who
+    /// deleted it deleted it, and offering it back on the next sign-in would be an app
+    /// disagreeing with them.
+    public var offeredHomeTimeline: Bool { didSet { defaults.set(offeredHomeTimeline, forKey: Keys.offeredHomeTimeline) } }
 
     private enum Keys {
         static let theme = "fediqo.theme"
@@ -86,6 +101,32 @@ public final class Preferences {
         static let showBoosts = "fediqo.showBoosts"
         static let showMediaOnly = "fediqo.showMediaOnly"
         static let refreshInterval = "fediqo.refreshInterval"
+        static let offeredHomeTimeline = "fediqo.offeredHomeTimeline"
+        static let clearedSeededWording = "fediqo.clearedSeededWording"
+
+        /// Every key above. Written out rather than derived, so that adding one and forgetting
+        /// it here is a compile-time-visible omission in one place rather than a preference
+        /// that quietly survives a reset.
+        static let all = [theme, textScale, language, railExpanded, showBoosts, showMediaOnly,
+                          refreshInterval, offeredHomeTimeline, clearedSeededWording]
+    }
+
+    /// Every preference back to the value a first launch would have given it, and the stored
+    /// keys with them. Part of "make this device look like a fresh install": the store being
+    /// emptied leaves the reader's theme, language and standing filters behind, and a fresh
+    /// install has none of those either.
+    public func resetToDefaults() {
+        for key in Keys.all { defaults.removeObject(forKey: key) }
+        let fresh = Preferences(defaults: defaults)
+        theme = fresh.theme
+        textScale = fresh.textScale
+        language = fresh.language
+        railExpanded = fresh.railExpanded
+        showBoosts = fresh.showBoosts
+        showMediaOnly = fresh.showMediaOnly
+        refreshInterval = fresh.refreshInterval
+        offeredHomeTimeline = fresh.offeredHomeTimeline
+        clearedSeededWording = fresh.clearedSeededWording
     }
 
     public init(defaults: UserDefaults = .standard) {
@@ -98,5 +139,7 @@ public final class Preferences {
         showBoosts = defaults.object(forKey: Keys.showBoosts) as? Bool ?? true
         showMediaOnly = defaults.object(forKey: Keys.showMediaOnly) as? Bool ?? false
         refreshInterval = defaults.string(forKey: Keys.refreshInterval).flatMap(RefreshInterval.init(rawValue:)) ?? .seconds30
+        offeredHomeTimeline = defaults.object(forKey: Keys.offeredHomeTimeline) as? Bool ?? false
+        clearedSeededWording = defaults.object(forKey: Keys.clearedSeededWording) as? Bool ?? false
     }
 }

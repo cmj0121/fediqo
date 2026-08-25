@@ -98,9 +98,9 @@ struct TokenSourceTests {
         try await signInRows("t0ken", to: server, store: store, secrets: secrets)
         let loader = stubbedLoader(store: store, secrets: secrets)
 
-        _ = await loader.load(servers: [server], mode: .timeline)
+        _ = await loader.load(servers: [server], query: .publicPosts)
         let afterFirst = secrets.readCount
-        _ = await loader.load(servers: [server], mode: .timeline)
+        _ = await loader.load(servers: [server], query: .publicPosts)
 
         #expect(afterFirst == 1)
         #expect(secrets.readCount == 1)
@@ -121,10 +121,10 @@ struct TokenSourceTests {
         try await signInRows("two", to: second, store: store, secrets: secrets)
         let loader = stubbedLoader(store: store, secrets: secrets)
 
-        _ = await loader.load(servers: [first], mode: .timeline)
+        _ = await loader.load(servers: [first], query: .publicPosts)
         #expect(secrets.readCount == 1)
 
-        _ = await loader.load(servers: [first, second], mode: .timeline)
+        _ = await loader.load(servers: [first, second], query: .publicPosts)
 
         // The second server cost one look-up, not two: what was known about the first was
         // kept rather than thrown away and walked again.
@@ -133,8 +133,8 @@ struct TokenSourceTests {
 
         // And a shorter list afterwards does not forget the longer one — two callers asking
         // about different servers must not undo each other's work.
-        _ = await loader.load(servers: [first], mode: .timeline)
-        _ = await loader.load(servers: [first, second], mode: .timeline)
+        _ = await loader.load(servers: [first], query: .publicPosts)
+        _ = await loader.load(servers: [first, second], query: .publicPosts)
         #expect(secrets.readCount == 2)
     }
 
@@ -207,15 +207,15 @@ struct TokenSourceTests {
         let coordinator = SignInCoordinator(store: store, secrets: secrets, tokens: tokens)
 
         // A read before anybody signs in, which is what caches "there is no token here".
-        _ = await loader.load(servers: [server], mode: .timeline)
+        _ = await loader.load(servers: [server], query: .publicPosts)
         _ = try await coordinator.signIn(server: server, using: auth, authenticate: approving)
-        _ = await loader.load(servers: [server], mode: .timeline)
+        _ = await loader.load(servers: [server], query: .publicPosts)
 
         // The second read carries the credential the first could not have known about.
         #expect(stubRoutes.requests(for: host, publicTimeline).map(\.authorization) == [nil, "Bearer token-1"])
 
         await coordinator.signOut(authorId: "\(server.endpoint)/@ada", using: auth)
-        _ = await loader.load(servers: [server], mode: .timeline)
+        _ = await loader.load(servers: [server], query: .publicPosts)
 
         // And the mirror: a read after signing out goes out as nobody again.
         #expect(stubRoutes.requests(for: host, publicTimeline).map(\.authorization).last == .some(nil))

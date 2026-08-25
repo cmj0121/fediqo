@@ -131,15 +131,15 @@ struct StorePagingTests {
     func theLoaderReadsTheStoreBackwards() async throws {
         let store = try await stocked()
         let loader = TimelineLoader(limit: 2, store: store, secrets: InMemorySecretStore())
-        let head = try await loader.stored(mode: .timeline)
+        let head = try await loader.stored(.publicPosts)
 
-        let page = await loader.storedOlder(than: head[1])
+        let page = await loader.storedOlder(than: head[1], matching: .publicPosts)
 
         #expect(page.posts.map(\.uri) == [uri("3a"), uri("3b")])
         #expect(page.failure == nil)
         // Nothing older, which is the store spent — and not the same answer as a store that
         // would not say, which is what the reach has to be able to tell apart.
-        let past = await loader.storedOlder(than: head.last!)
+        let past = await loader.storedOlder(than: head.last!, matching: .publicPosts)
         #expect(past.posts.isEmpty)
         #expect(past.failure == nil)
     }
@@ -190,8 +190,8 @@ struct ServerPagingTests {
         stubRoutes.on(two.host, path, status: 200, body: statusesJSON(["22", "20"], from: two.host))
         let loader = stubbedLoader(limit: 2)
 
-        _ = await loader.loadOlder(servers: [one, two], now: t0)
-        _ = await loader.loadOlder(servers: [one, two], now: t0.addingTimeInterval(1))
+        _ = await loader.loadOlder(servers: [one, two], query: .publicPosts, now: t0)
+        _ = await loader.loadOlder(servers: [one, two], query: .publicPosts, now: t0.addingTimeInterval(1))
 
         // Nothing the first time — that is each server's newest page — and then each one's own
         // number, which is the whole of what a per-server cursor is for.
@@ -205,14 +205,14 @@ struct ServerPagingTests {
         stubRoutes.on(short.host, path, status: 200, body: statusesJSON(["9"], from: short.host))
         let loader = stubbedLoader(limit: 2)
 
-        let result = await loader.loadOlder(servers: [short], now: t0)
+        let result = await loader.loadOlder(servers: [short], query: .publicPosts, now: t0)
 
         // A range with a blocked account in it comes back short from a server with plenty
         // left, so the only thing this page proves is what is in it.
         #expect(result.posts.count == 1)
         #expect(await loader.reachedTheEnd(of: [short]) == false)
 
-        _ = await loader.loadOlder(servers: [short], now: t0.addingTimeInterval(1))
+        _ = await loader.loadOlder(servers: [short], query: .publicPosts, now: t0.addingTimeInterval(1))
         #expect(cursors(short.host) == [nil, "9"])
     }
 
@@ -222,7 +222,7 @@ struct ServerPagingTests {
         stubRoutes.on(empty.host, path, status: 200, body: "[]")
         let loader = stubbedLoader(limit: 2)
 
-        _ = await loader.loadOlder(servers: [empty], now: t0)
+        _ = await loader.loadOlder(servers: [empty], query: .publicPosts, now: t0)
 
         #expect(await loader.reachedTheEnd(of: [empty]))
     }
@@ -235,8 +235,8 @@ struct ServerPagingTests {
         stubRoutes.on(going.host, path, status: 200, body: statusesJSON(["8", "7"], from: going.host))
         let loader = stubbedLoader(limit: 2)
 
-        _ = await loader.loadOlder(servers: [spent, going], now: t0)
-        let second = await loader.loadOlder(servers: [spent, going], now: t0.addingTimeInterval(1))
+        _ = await loader.loadOlder(servers: [spent, going], query: .publicPosts, now: t0)
+        let second = await loader.loadOlder(servers: [spent, going], query: .publicPosts, now: t0.addingTimeInterval(1))
 
         // One of the two has run out, which is a fact about that server: the reading is not
         // over, and the one still going has been asked a second time.
@@ -262,8 +262,8 @@ struct ServerPagingTests {
         let loader = stubbedLoader(limit: 2)
         let standing = [spent.endpoint: SourceFailure.tokenRejected(spent.host)]
 
-        _ = await loader.loadOlder(servers: [spent, going], now: t0)
-        let second = await loader.loadOlder(servers: [spent, going], now: t0.addingTimeInterval(1))
+        _ = await loader.loadOlder(servers: [spent, going], query: .publicPosts, now: t0)
+        let second = await loader.loadOlder(servers: [spent, going], query: .publicPosts, now: t0.addingTimeInterval(1))
 
         #expect(second.skipped.contains(spent.endpoint))
         #expect(second.failures[spent.endpoint] == nil)
@@ -281,15 +281,15 @@ struct ServerPagingTests {
         stubRoutes.on(two.host, path, status: 200, body: statusesJSON(["2", "3"], from: two.host))
         let loader = stubbedLoader(limit: 2)
 
-        _ = await loader.loadOlder(servers: [one, two], now: t0)
+        _ = await loader.loadOlder(servers: [one, two], query: .publicPosts, now: t0)
         #expect(await loader.reachedTheEnd(of: [one, two]) == false)
 
         stubRoutes.on(two.host, path, status: 200, body: "[]")
-        _ = await loader.loadOlder(servers: [one, two], now: t0.addingTimeInterval(1))
+        _ = await loader.loadOlder(servers: [one, two], query: .publicPosts, now: t0.addingTimeInterval(1))
 
         #expect(await loader.reachedTheEnd(of: [one, two]))
         // And with everyone at their end there is nobody left to ask.
-        let again = await loader.loadOlder(servers: [one, two], now: t0.addingTimeInterval(2))
+        let again = await loader.loadOlder(servers: [one, two], query: .publicPosts, now: t0.addingTimeInterval(2))
         #expect(again.posts.isEmpty)
         #expect(cursors(one.host).count == 1)
         #expect(cursors(two.host).count == 2)
@@ -303,14 +303,14 @@ struct ServerPagingTests {
         stubRoutes.on(other.host, path, status: 200, body: statusesJSON(["2", "1"], from: other.host))
         let loader = stubbedLoader(limit: 2)
 
-        _ = await loader.loadOlder(servers: [gone], now: t0)
+        _ = await loader.loadOlder(servers: [gone], query: .publicPosts, now: t0)
         #expect(await loader.reachedTheEnd(of: [gone]))
 
         // Removed for one reach and added back for the next: what it said about its own
         // bottom went with it, so it is asked again rather than passed over for the rest of
         // the run — and the server chosen throughout keeps where it had got to.
-        _ = await loader.loadOlder(servers: [other], now: t0.addingTimeInterval(1))
-        _ = await loader.loadOlder(servers: [gone, other], now: t0.addingTimeInterval(2))
+        _ = await loader.loadOlder(servers: [other], query: .publicPosts, now: t0.addingTimeInterval(1))
+        _ = await loader.loadOlder(servers: [gone, other], query: .publicPosts, now: t0.addingTimeInterval(2))
 
         #expect(cursors(gone.host).count == 2)
         #expect(cursors(other.host) == [nil, "1"])
@@ -357,9 +357,9 @@ struct ServerPagingTests {
         let loader = TimelineLoader(registry: SourceRegistry(clients: [.mastodon: client]),
                                     limit: 2, secrets: InMemorySecretStore())
 
-        async let first = loader.loadOlder(servers: [server], now: t0)
+        async let first = loader.loadOlder(servers: [server], query: .publicPosts, now: t0)
         await client.untilAsked()
-        let second = await loader.loadOlder(servers: [server], now: t0)
+        let second = await loader.loadOlder(servers: [server], query: .publicPosts, now: t0)
 
         #expect(second.posts.isEmpty)
         #expect(second.failures.isEmpty)
@@ -374,22 +374,22 @@ struct ServerPagingTests {
         let server = makeServer(host)
         stubRoutes.on(host, path, status: 200, body: statusesJSON(["5", "4"], from: host))
         let loader = stubbedLoader(limit: 2)
-        _ = await loader.loadOlder(servers: [server], every: .seconds(30), now: t0)
+        _ = await loader.loadOlder(servers: [server], query: .publicPosts, every: .seconds(30), now: t0)
 
         stubRoutes.on(host, path, status: 503, body: "gateway wept")
-        let failed = await loader.loadOlder(servers: [server], every: .seconds(30),
+        let failed = await loader.loadOlder(servers: [server], query: .publicPosts, every: .seconds(30),
                                             now: t0.addingTimeInterval(1))
         #expect(failed.failures[server.endpoint] == SourceFailure.http(503, Data("gateway wept".utf8)))
 
         // Inside its wait it is left alone rather than asked, and says so where a refresh
         // says it — so a screen keeps the reason up rather than blinking it off.
-        let waiting = await loader.loadOlder(servers: [server], every: .seconds(30),
+        let waiting = await loader.loadOlder(servers: [server], query: .publicPosts, every: .seconds(30),
                                              now: t0.addingTimeInterval(2))
         #expect(waiting.skipped == [server.endpoint])
         #expect(waiting.failures.isEmpty)
 
         stubRoutes.on(host, path, status: 200, body: statusesJSON(["3", "2"], from: host))
-        _ = await loader.loadOlder(servers: [server], every: .seconds(30),
+        _ = await loader.loadOlder(servers: [server], query: .publicPosts, every: .seconds(30),
                                    now: t0.addingTimeInterval(31))
 
         // Silence is not an end: the cursor stood through the failure, so the page that was
@@ -407,8 +407,8 @@ struct ServerPagingTests {
         let loader = TimelineLoader(registry: SourceRegistry(clients: [.mastodon: client]),
                                     limit: 1, secrets: InMemorySecretStore())
 
-        _ = await loader.loadOlder(servers: [server], now: t0)
-        let retried = await loader.loadOlder(servers: [server], now: t0.addingTimeInterval(1))
+        _ = await loader.loadOlder(servers: [server], query: .publicPosts, now: t0)
+        let retried = await loader.loadOlder(servers: [server], query: .publicPosts, now: t0.addingTimeInterval(1))
 
         // Refused, then asked again with no cursor at all — which puts a cursor of the
         // server's own back in place.
@@ -416,7 +416,7 @@ struct ServerPagingTests {
         #expect(retried.posts.map(\.uri) == [mine.uri])
         // Our mistake, so the reader is told nothing and no wait is started for it.
         #expect(retried.failures.isEmpty)
-        _ = await loader.loadOlder(servers: [server], now: t0.addingTimeInterval(2))
+        _ = await loader.loadOlder(servers: [server], query: .publicPosts, now: t0.addingTimeInterval(2))
         #expect(await client.cursors.map { $0?.uri } == [nil, elsewhere.uri, nil, mine.uri])
     }
 
@@ -428,8 +428,8 @@ struct ServerPagingTests {
         let loader = TimelineLoader(registry: SourceRegistry(clients: [.mastodon: client]),
                                     limit: 1, secrets: InMemorySecretStore())
 
-        _ = await loader.loadOlder(servers: [server], now: t0)
-        let retried = await loader.loadOlder(servers: [server], now: t0.addingTimeInterval(1))
+        _ = await loader.loadOlder(servers: [server], query: .publicPosts, now: t0)
+        let retried = await loader.loadOlder(servers: [server], query: .publicPosts, now: t0.addingTimeInterval(1))
 
         // The credential is turned down, the stranger's read is refused the cursor, and the
         // cursor is still ours: dropped, asked again without one, and never shown.

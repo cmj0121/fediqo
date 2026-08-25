@@ -185,15 +185,15 @@ struct CommandTests {
     func tabsRotate() {
         let app = freshApp("tabs-rotate")
         app.railItem = .timeline
-        app.feedTab = .timeline
+        app.currentTimeline = "public"
         #expect(app.perform(.nextTab))
-        #expect(app.feedTab == .trending)
+        #expect(app.currentTimeline == "trend")
         #expect(app.perform(.nextTab))
-        #expect(app.feedTab == .timeline)
+        #expect(app.currentTimeline == "public")
         #expect(app.perform(.previousTab))
-        #expect(app.feedTab == .trending)
+        #expect(app.currentTimeline == "trend")
         #expect(app.perform(.previousTab))
-        #expect(app.feedTab == .timeline)
+        #expect(app.currentTimeline == "public")
     }
 
     /// The one place the answer matters: a `false` here is the shell letting the press
@@ -202,14 +202,14 @@ struct CommandTests {
     func tabDoesNothingWithoutTabs(page: RailItem) {
         let app = freshApp("tab-without-tabs")
         app.railItem = page
-        let feed = app.feedTab
+        let feed = app.currentTimeline
         let statistics = app.statisticsTab
         let settings = app.settingsTab
         #expect(app.perform(.nextTab) == false)
         #expect(app.perform(.previousTab) == false)
         // Not one of the other pages' tabs moved either. A rotation that answered `false`
         // and still wrote somewhere would be the worst of both.
-        #expect(app.feedTab == feed)
+        #expect(app.currentTimeline == feed)
         #expect(app.statisticsTab == statistics)
         #expect(app.settingsTab == settings)
     }
@@ -253,7 +253,7 @@ struct CommandTests {
         #expect(app.perform(.nextTab))
         #expect(app.statisticsTab == .network)
         #expect(app.settingsTab == .sources)
-        #expect(app.feedTab == .timeline)
+        #expect(app.currentTimeline == "public")
     }
 
     @Test("R cycles Off → 15s → 30s → 60s → 5min → Off")
@@ -368,21 +368,21 @@ struct CommandTests {
     func tabMidDraftDoesNothing(modifiers: EventModifiers) {
         let app = freshApp("tab-mid-draft")
         app.railItem = .timeline
-        app.feedTab = .timeline
+        app.currentTimeline = "public"
         app.setComposing(true)
         app.setTyping(true)
         #expect(app.presses(tab, modifiers: modifiers))
         #expect(app.railItem == .timeline)
-        #expect(app.feedTab == .timeline)
+        #expect(app.currentTimeline == "public")
     }
 
     @Test("With no draft open, the same press moves the tab and is kept")
     func tabMovesWhenNobodyIsTyping() {
         let app = freshApp("tab-moves")
         app.railItem = .timeline
-        app.feedTab = .timeline
+        app.currentTimeline = "public"
         #expect(app.presses(tab))
-        #expect(app.feedTab == .trending)
+        #expect(app.currentTimeline == "trend")
         #expect(app.railItem == .timeline)
     }
 

@@ -1,23 +1,6 @@
 import Foundation
 import GRDB
 
-/// Which stream a screen is asking for. They are two different things and neither stands in
-/// for the other: the timeline is the timeline, ordered by time; trending is a place you go
-/// to, in the order the servers put it. Nothing is ranked by us — a server's ranking is kept.
-///
-/// The raw values name the screens too, so a mode carries its own titles rather than having
-/// them handed to it.
-///
-/// Being two of a kind rather than two unrelated things, they are also the sub-categories —
-/// the tabs — of the one page that reads a feed, and `allCases` is the order they sit in:
-/// the public timeline first, because that is what the page is for, trending beside it.
-public enum FeedMode: String, Sendable, CaseIterable, Identifiable {
-    case timeline
-    case trending
-
-    public var id: String { rawValue }
-}
-
 /// Who asked for a load, which is the whole of what a backoff is for.
 ///
 /// A reader who asked is answered at once, because they asked. A clock that asked is a guest
@@ -161,14 +144,14 @@ public struct TimelineLoader: Sendable {
         self.tokenSource = tokens ?? store.map { TokenSource(store: $0, secrets: secrets) }
     }
 
-    /// What the store already holds for `mode`, newest first — the screen before any server
-    /// answers. Trending is what servers listed in the last day. Nothing without a store.
-    public func stored(mode: FeedMode, now: Date = Date()) async throws -> [Post] {
+    /// What the store already holds for this reading, in its own order — the screen before any
+    /// server answers. Nothing without a store.
+    ///
+    /// The rules are applied here, by the store, and not to a list afterwards: a timeline that
+    /// keeps one post in fifty would otherwise read a page of two hundred to show four.
+    public func stored(_ query: TimelineQuery, now: Date = Date()) async throws -> [Post] {
         guard let store else { return [] }
-        return switch mode {
-        case .timeline: try await store.timeline()
-        case .trending: try await store.trending(since: now.addingTimeInterval(-24 * 60 * 60))
-        }
+        return try await store.timeline(matching: query, now: now)
     }
 
     /// The store's page before `post` — what the reader's next page down is already here,
@@ -185,10 +168,11 @@ public struct TimelineLoader: Sendable {
     /// answered it and a reader cannot tell from the length of the page where it came from.
     /// The cursor is a post, the way it is for a server, so the two cannot disagree about
     /// where the last page ended. Nothing without a store, which is what a preview has.
-    public func storedOlder(than post: Post) async -> (posts: [Post], failure: SourceFailure?) {
+    public func storedOlder(than post: Post, matching query: TimelineQuery)
+        async -> (posts: [Post], failure: SourceFailure?) {
         guard let store else { return ([], nil) }
         do {
-            return (try await store.timeline(limit: limit, before: post), nil)
+            return (try await store.timeline(matching: query, limit: limit, before: post), nil)
         } catch {
             // What SQLite said, in full, is for the log; the caller gets the reason to show.
             LocalStore.log.error("""
@@ -204,7 +188,7 @@ public struct TimelineLoader: Sendable {
     ///
     /// `refresh` says who asked, and the default is the reader — so a caller that has no
     /// clock asks everyone, which is what every caller did before there was one.
-    public func load(servers: [Server], mode: FeedMode,
+    public func load(servers: [Server], query: TimelineQuery,
                      refresh: Refresh = .manual, now: Date = Date()) async -> TimelineResult {
         // A server still inside its wait is not asked, and is not reported either: it is not
         // failing now, it is being left alone. What it said last time is not lost with it —
@@ -212,14 +196,16 @@ public struct TimelineLoader: Sendable {
         // than blinking it off and on as the server enters and leaves its wait.
         let (asked, skipped) = await askable(servers, refresh: refresh, now: now)
         // No cursors: a refresh asks everyone for their newest page, which is what it is.
-        let round = await fanOut(asked.map { ($0, nil) }, mode: mode)
+        let round = await fanOut(asked.map { ($0, nil) }, query: query)
         await record(round.failures, from: round.reached, refresh: refresh, now: now)
 
-        let posts = switch mode {
-        case .timeline: round.collected.flatMap { $0 }.merged()
-        case .trending: Self.mergedByRank(round.collected)
-        }
-        return TimelineResult(posts: posts, failures: round.failures, skipped: skipped)
+        // Everything that arrived is kept; only what this timeline is about is handed back.
+        // The two are different jobs and the store's is the wider one — a post filtered out
+        // here is still a post the next timeline may be entirely about, and asking somebody's
+        // server for it twice because we threw it away is the one thing worth avoiding.
+        let posts = query.source.ranked ? Self.mergedByRank(round.collected)
+                                        : round.collected.flatMap { $0 }.merged()
+        return TimelineResult(posts: query.admitted(posts), failures: round.failures, skipped: skipped)
     }
 
     /// Every server asked at once for the page before what it last handed over, merged into
@@ -241,7 +227,7 @@ public struct TimelineLoader: Sendable {
     ///
     /// `every` is how long a server that gives nothing here is left alone before it is asked
     /// for another page — the wait doubles and is forgiven exactly as it is on a refresh.
-    public func loadOlder(servers: [Server], every: Duration = .seconds(30),
+    public func loadOlder(servers: [Server], query: TimelineQuery, every: Duration = .seconds(30),
                           now: Date = Date()) async -> TimelineResult {
         // Unlike a refresh, nobody here is saying "ask anyway". Reaching the bottom is the
         // scroll's doing, and a scroll is as tireless as a clock, so a server inside its wait
@@ -283,7 +269,7 @@ public struct TimelineLoader: Sendable {
         // server had got to, so its cursor stands and it is not counted as having run out;
         // anything that arrived — posts, or posts the store would not keep — moves the cursor
         // to that page's last post, and ends the server where the page came back empty.
-        let round = await fanOut(claimed, mode: .timeline) { endpoint, answer in
+        let round = await fanOut(claimed, query: query) { endpoint, answer in
             if let failure = answer.failure, !failure.arrivedAnyway {
                 await paging.gaveNothing(endpoint)
             } else {
@@ -293,7 +279,7 @@ public struct TimelineLoader: Sendable {
         await record(round.failures, from: round.reached,
                      refresh: .automatic(every: every), now: now)
 
-        return TimelineResult(posts: round.collected.flatMap { $0 }.merged(),
+        return TimelineResult(posts: query.admitted(round.collected.flatMap { $0 }.merged()),
                               failures: round.failures, skipped: unasked)
     }
 
@@ -456,7 +442,7 @@ public struct TimelineLoader: Sendable {
     /// suspect. So the store is asked for names rather than posts, the diff is done on those,
     /// and a post is built only for what the diff leaves standing — which on that page is
     /// nothing at all, and used to be a page's worth of rows joined, tagged and thrown away.
-    private func suspectMissing(_ page: [Post], from endpoint: String) async {
+    private func suspectMissing(_ page: [Post], from endpoint: String, through query: TimelineQuery) async {
         guard let store, let first = page.first else { return }
         // One pass for all three: the stretch the page covers, and the keys it covered it with.
         var oldest = first.createdAt
@@ -469,7 +455,8 @@ public struct TimelineLoader: Sendable {
             handed.insert(post.mergeKey)
         }
         do {
-            let covered = try await store.postKeys(from: endpoint, postedIn: oldest...newest)
+            let covered = try await store.postKeys(from: endpoint, through: query.source,
+                                                   as: query.account, postedIn: oldest...newest)
             let missing = covered.filter { !handed.contains($0) }
             guard !missing.isEmpty else { return }
             await reconciler.suspect(try await store.posts(named: missing))
@@ -508,7 +495,7 @@ public struct TimelineLoader: Sendable {
     /// gives it, which is where a paging load writes down where that server has got to; a
     /// refresh has nothing to write down and passes nothing.
     private func fanOut(
-        _ targets: [(server: Server, cursor: Post?)], mode: FeedMode,
+        _ targets: [(server: Server, cursor: Post?)], query: TimelineQuery,
         answered: (String, Answer) async -> Void = { _, _ in }
     ) async -> (collected: [[Post]], failures: [String: SourceFailure], reached: Set<String>) {
         var failures: [String: SourceFailure] = [:]
@@ -516,6 +503,10 @@ public struct TimelineLoader: Sendable {
         // Once per load, not once per server: the rows and the Keychain are asked before
         // anything is asked of the network, and only about the servers being read.
         let tokens = await tokensByEndpoint(for: targets.map(\.server))
+        // And who each token belongs to, which only a source with an owner needs: it is what
+        // a post's origin is written under, so that two people's reading on one machine stays
+        // two readings. Nothing is asked for it where the source has no owner.
+        let readers = query.source.needsAccount ? await readersByEndpoint(for: targets.map(\.server)) : [:]
         // Which servers a request actually went to, so the bookkeeping above judges only
         // the ones that were given a chance to answer.
         var reached: Set<String> = []
@@ -533,10 +524,21 @@ public struct TimelineLoader: Sendable {
                     continue
                 }
                 let token = tokens[server.endpoint]
+                let reader = readers[server.endpoint]
+                // A home timeline is not readable as nobody, and nothing else is quietly put
+                // in its place: a server with no account on it is reported as needing one,
+                // the way #4 has a server with no public timeline reported rather than topped
+                // up with whatever else it was willing to hand over.
+                if query.source.needsAccount, token == nil || reader == nil {
+                    let needed = SourceFailure.needsSignIn(server.host)
+                    failures[server.endpoint] = needed
+                    await answered(server.endpoint, ([], needed))
+                    continue
+                }
                 reached.insert(server.endpoint)
                 group.addTask {
                     (server.endpoint,
-                     await ask(client, server, mode: mode, token: token, before: cursor))
+                     await ask(client, server, query: query, token: token, as: reader, before: cursor))
                 }
             }
             for await (endpoint, answer) in group {
@@ -548,7 +550,9 @@ public struct TimelineLoader: Sendable {
                 // and it is the one stretch paging never revisits, because paging only ever
                 // walks away from it. Trending is not a stretch of time at all and cannot
                 // leave anything out of one, so it raises no questions.
-                if mode == .timeline { await suspectMissing(answer.posts, from: endpoint) }
+                if query.source.isThreadOfTime {
+                    await suspectMissing(answer.posts, from: endpoint, through: query)
+                }
                 await answered(endpoint, answer)
             }
         }
@@ -559,9 +563,9 @@ public struct TimelineLoader: Sendable {
     /// as `token`'s owner, and where that is turned down once more as nobody. The whole of the
     /// retry policy is here, so the fan-outs above only have to name the servers and collect
     /// what each one answered.
-    private func ask(_ client: any SourceClient, _ server: Server, mode: FeedMode,
-                     token: String?, before: Post?) async -> Answer {
-        let answer = await attempt(client, server, mode: mode, token: token, before: before)
+    private func ask(_ client: any SourceClient, _ server: Server, query: TimelineQuery,
+                     token: String?, as reader: String?, before: Post?) async -> Answer {
+        let answer = await attempt(client, server, query: query, token: token, as: reader, before: before)
         // A cursor a server cannot be asked about is our wiring, not their machine: per-server
         // cursors mean a post from somewhere else can never become one, so this is the belt.
         // It goes in the log, where a mistake of ours belongs; the bad cursor is dropped so it
@@ -580,21 +584,24 @@ public struct TimelineLoader: Sendable {
             \(server.host, privacy: .public); asking for its newest page instead
             """)
         await paging.forget(server.endpoint)
-        return await attempt(client, server, mode: mode, token: token, before: nil)
+        return await attempt(client, server, query: query, token: token, as: reader, before: nil)
     }
 
     /// The read itself, tried as `token`'s owner and once more as a stranger where the
     /// credential is turned down — everything `ask` does but the belt around the cursor.
-    private func attempt(_ client: any SourceClient, _ server: Server, mode: FeedMode,
-                         token: String?, before: Post?) async -> Answer {
-        let signedIn = await read(client, server, mode: mode, token: token, before: before)
+    private func attempt(_ client: any SourceClient, _ server: Server, query: TimelineQuery,
+                         token: String?, as reader: String?, before: Post?) async -> Answer {
+        let signedIn = await read(client, server, query: query, token: token, as: reader, before: before)
         // A token the server turned down is the account's problem, not the server's, so the
         // same read goes out once more as a stranger and the column shows whatever anyone
         // would see. What is reported stays `.tokenRejected`, so the screen marks the account
         // rather than the server — and stays one failure for this server on this load, so a
         // backoff counting failures per server never counts the retry as a second.
         guard case .tokenRejected? = signedIn.failure else { return signedIn }
-        let anonymous = await read(client, server, mode: mode, token: nil, before: before)
+        // A source with an owner has nowhere to fall back to: read as nobody it is not this
+        // timeline at all. So the refusal stands, and it stands as the account's problem.
+        guard !query.source.needsAccount else { return signedIn }
+        let anonymous = await read(client, server, query: query, token: nil, as: nil, before: before)
         // A retry that read fine but would not store replaces `.tokenRejected` with `.store`,
         // and the account goes unmarked this round. That is the trade taken knowingly: one
         // host can only carry one reason, and the store failing is the newer news. It heals
@@ -606,21 +613,27 @@ public struct TimelineLoader: Sendable {
 
     /// One request to one server as `token`'s owner, and what it handed over kept. `before` is
     /// that server's own cursor; a trending list has none and is never given one.
-    private func read(_ client: any SourceClient, _ server: Server, mode: FeedMode,
-                      token: String?, before: Post?) async -> Answer {
+    private func read(_ client: any SourceClient, _ server: Server, query: TimelineQuery,
+                      token: String?, as reader: String?, before: Post?) async -> Answer {
         let posts: [Post]
         do {
-            posts = switch mode {
-            case .timeline: try await client.timeline(host: server.host, limit: limit,
-                                                      before: before, token: token)
-            case .trending: try await client.trending(host: server.host, limit: limit, token: token)
+            posts = switch query.source {
+            case .public: try await client.timeline(host: server.host, limit: limit,
+                                                    before: before, token: token)
+            case .home: try await client.home(host: server.host, limit: limit,
+                                              before: before, token: token ?? "")
+            case .trend: try await client.trending(host: server.host, limit: limit, token: token)
             }
         } catch {
             return ([], SourceFailure.of(error))
         }
         do {
-            try await store?.save(posts, from: server)
-            if mode == .trending { try await store?.recordTrending(posts, from: server) }
+            // The whole page is kept, whatever this timeline's rules make of it, and it is
+            // kept with the source it came through written beside it — that pairing is what
+            // lets a timeline be a question asked of one copy of each post rather than a copy
+            // of its own.
+            try await store?.save(posts, from: server, into: query.source, as: reader)
+            if query.source.ranked { try await store?.recordTrending(posts, from: server) }
         } catch {
             // What SQLite said, in full, is for the log; the screen gets the message.
             LocalStore.log.error("save failed for \(server.host, privacy: .public): \(String(describing: error), privacy: .public)")
@@ -668,6 +681,22 @@ public struct TimelineLoader: Sendable {
         if !answered.isEmpty { await backoff.answered(answered) }
         guard case .automatic(let every) = refresh, !silent.isEmpty else { return }
         await backoff.failed(silent, base: every, at: now)
+    }
+
+    /// Who each of `servers` is read as, by endpoint — the `accounts.author_id` of whoever is
+    /// signed in there. The rows alone: no Keychain, no network, and asked for only where the
+    /// base source has an owner.
+    private func readersByEndpoint(for servers: [Server]) async -> [String: String] {
+        guard let store else { return [:] }
+        do {
+            let asked = Set(servers.map(\.endpoint))
+            return try await store.signedInByServer()
+                .filter { asked.contains($0.key) }
+                .mapValues(\.authorId)
+        } catch {
+            LocalStore.log.error("reading who is signed in failed: \(String(describing: error), privacy: .public)")
+            return [:]
+        }
     }
 
     /// The access token to read each of `servers` as. `TokenSource` answers who is signed in

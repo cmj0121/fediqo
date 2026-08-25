@@ -13,7 +13,7 @@ struct TimelineNoFallbackTests {
         stubRoutes.on(host, "/api/v1/timelines/public", status: 401)
         stubRoutes.on(host, "/api/v1/trends/statuses", status: 200, body: oneStatusJSON)
 
-        let result = await stubbedLoader().load(servers: [server], mode: .timeline)
+        let result = await stubbedLoader().load(servers: [server], query: .publicPosts)
 
         #expect(result.posts.isEmpty)
         #expect(result.failures[server.endpoint] == SourceFailure.needsSignIn(host))
@@ -27,7 +27,7 @@ struct TimelineNoFallbackTests {
         stubRoutes.on(shut.host, "/api/v1/timelines/public", status: 401)
         stubRoutes.on(open.host, "/api/v1/timelines/public", status: 200, body: oneStatusJSON)
 
-        let result = await stubbedLoader().load(servers: [shut, open], mode: .timeline)
+        let result = await stubbedLoader().load(servers: [shut, open], query: .publicPosts)
 
         #expect(result.posts.map(\.sources) == [[open.host]])
         #expect(result.failures.keys.sorted() == [shut.endpoint])
@@ -38,7 +38,7 @@ struct TimelineNoFallbackTests {
         let host = "trends.test"
         stubRoutes.on(host, "/api/v1/trends/statuses", status: 200, body: oneStatusJSON)
 
-        let result = await stubbedLoader().load(servers: [makeServer(host)], mode: .trending)
+        let result = await stubbedLoader().load(servers: [makeServer(host)], query: .trending)
 
         #expect(result.posts.count == 1)
         #expect(stubRoutes.paths(for: host) == ["/api/v1/trends/statuses"])
@@ -49,14 +49,14 @@ struct TimelineNoFallbackTests {
         let server = makeServer("broken.test")
         stubRoutes.on(server.host, "/api/v1/timelines/public", status: 503, body: "gateway wept")
 
-        let result = await stubbedLoader().load(servers: [server], mode: .timeline)
+        let result = await stubbedLoader().load(servers: [server], query: .publicPosts)
 
         #expect(result.failures[server.endpoint] == SourceFailure.http(503, Data("gateway wept".utf8)))
     }
 
     @Test("Asking with no servers asks nothing of anyone")
     func noServers() async {
-        let result = await stubbedLoader().load(servers: [], mode: .timeline)
+        let result = await stubbedLoader().load(servers: [], query: .publicPosts)
         #expect(result.isEmpty)
         #expect(result.failures.isEmpty)
     }

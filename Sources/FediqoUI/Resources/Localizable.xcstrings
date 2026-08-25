@@ -1141,6 +1141,91 @@
         }
       }
     },
+    "settings.reset": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Start again"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新開始"
+          }
+        }
+      }
+    },
+    "settings.reset.ask": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Erase everything on this device?"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "要清掉這台裝置上的全部內容嗎？"
+          }
+        }
+      }
+    },
+    "settings.reset.confirm": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Erase everything"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全部清掉"
+          }
+        }
+      }
+    },
+    "settings.reset.note": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Signs out everywhere, forgets every server, empties the store and puts every setting back. Nothing is kept, and it cannot be undone."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "會登出所有帳號、忘掉每一台伺服器、清空本機資料，並把所有設定復原。什麼都不留，而且無法復原。"
+          }
+        }
+      }
+    },
+    "settings.reset.warning": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This cannot be undone."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這個動作無法復原。"
+          }
+        }
+      }
+    },
     "settings.sample": {
       "extractionState": "manual",
       "localizations": {
@@ -2229,7 +2314,143 @@
         }
       }
     },
-    "tab.timeline": {
+    "template.author.name": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Author"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "作者"
+          }
+        }
+      }
+    },
+    "template.author.prompt": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Handle, like @ada@mastodon.social"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "帳號，例如 @ada@mastodon.social"
+          }
+        }
+      }
+    },
+    "template.author.summary": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Everything one person posts, as far as your servers carry it."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "某一個人發的所有貼文，以你的伺服器收得到的為準。"
+          }
+        }
+      }
+    },
+    "template.home.name": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Home"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "首頁"
+          }
+        }
+      }
+    },
+    "template.home.summary": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Posts from the accounts you follow, newest first — the servers you have signed in to."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你追蹤的帳號發的貼文，新的在最上面，來自你已經登入的伺服器。"
+          }
+        }
+      }
+    },
+    "template.mentions.name": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mentions"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "提及"
+          }
+        }
+      }
+    },
+    "template.mentions.prompt": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Handle, like @ada@mastodon.social"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "帳號，例如 @ada@mastodon.social"
+          }
+        }
+      }
+    },
+    "template.mentions.summary": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Posts in your home timeline that mention the account you name — yours, or anybody's."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "首頁時間軸裡提到指定帳號的貼文——你自己的，或任何人的。"
+          }
+        }
+      }
+    },
+    "template.public.name": {
       "extractionState": "manual",
       "localizations": {
         "en": {
@@ -2246,7 +2467,75 @@
         }
       }
     },
-    "tab.trending": {
+    "template.public.summary": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Everything your servers show the world, newest first. Nothing here is ranked."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你的伺服器公開給所有人的貼文，新的在最上面。這裡沒有任何東西被排名。"
+          }
+        }
+      }
+    },
+    "template.tag.name": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hashtag"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "主題標籤"
+          }
+        }
+      }
+    },
+    "template.tag.prompt": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hashtag (without #)"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "主題標籤（不含 #）"
+          }
+        }
+      }
+    },
+    "template.tag.summary": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Public posts carrying the hashtag you pick, from every server you read."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你讀的每一台伺服器上，帶著你挑的那個主題標籤的公開貼文。"
+          }
+        }
+      }
+    },
+    "template.trend.name": {
       "extractionState": "manual",
       "localizations": {
         "en": {
@@ -2259,6 +2548,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "熱門"
+          }
+        }
+      }
+    },
+    "template.trend.summary": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "What each server says is rising, in its own order."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "各伺服器眼中正在紅的內容，順序照它們給的。"
           }
         }
       }
@@ -2314,6 +2620,108 @@
         }
       }
     },
+    "timeline.cancel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消"
+          }
+        }
+      }
+    },
+    "timeline.copy": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ copy"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 副本"
+          }
+        }
+      }
+    },
+    "timeline.delete": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "刪除"
+          }
+        }
+      }
+    },
+    "timeline.description": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Description"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "說明"
+          }
+        }
+      }
+    },
+    "timeline.duplicate": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Duplicate"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "複製一份"
+          }
+        }
+      }
+    },
+    "timeline.edit": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Edit timeline…"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "編輯時間軸…"
+          }
+        }
+      }
+    },
     "timeline.empty": {
       "extractionState": "manual",
       "localizations": {
@@ -2344,6 +2752,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "所有貼文都被你自己寫的規則擋下了。"
+          }
+        }
+      }
+    },
+    "timeline.empty.needsAccount": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign in to a server and its home timeline appears here."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "登入某個伺服器之後，它的首頁時間軸就會出現在這裡。"
           }
         }
       }
@@ -2484,6 +2909,108 @@
         }
       }
     },
+    "timeline.more": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Timelines"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "時間軸"
+          }
+        }
+      }
+    },
+    "timeline.name": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Name"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "名稱"
+          }
+        }
+      }
+    },
+    "timeline.needsAccount": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nobody is signed in yet, so this one stays empty until somebody is."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "目前還沒有登入任何帳號，在那之前這條時間軸會是空的。"
+          }
+        }
+      }
+    },
+    "timeline.new": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New timeline…"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新增時間軸…"
+          }
+        }
+      }
+    },
+    "timeline.noDescription": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No description yet. Edit this timeline to say what it is for."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "還沒有說明。編輯這條時間軸，寫下它是做什麼的。"
+          }
+        }
+      }
+    },
+    "timeline.none": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No timelines. Make one from a template."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "沒有任何時間軸。從範本建立一條吧。"
+          }
+        }
+      }
+    },
     "timeline.notifications": {
       "extractionState": "manual",
       "localizations": {
@@ -2586,6 +3113,23 @@
         }
       }
     },
+    "timeline.save": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "儲存"
+          }
+        }
+      }
+    },
     "timeline.sources": {
       "extractionState": "manual",
       "localizations": {
@@ -2620,19 +3164,19 @@
         }
       }
     },
-    "timeline.subtitle": {
+    "timeline.template": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ordered by time. Nothing here is ranked."
+            "value": "Start from"
           }
         },
         "zh-TW": {
           "stringUnit": {
             "state": "translated",
-            "value": "依時間排序。這裡沒有任何東西被排名。"
+            "value": "從哪個範本開始"
           }
         }
       }
@@ -2667,23 +3211,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "來自"
-          }
-        }
-      }
-    },
-    "trending.subtitle": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "What each server says is trending. A place you come to, never the timeline rearranged."
-          }
-        },
-        "zh-TW": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "各伺服器自己標示的熱門內容。這是你自己走過來的地方，不是被重新排列的時間軸。"
           }
         }
       }

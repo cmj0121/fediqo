@@ -48,7 +48,8 @@ Migration 遵守同一條規則：只增不減。只有 `CREATE`、`ADD COLUMN`�
 | ----------------------------- | -------------- | -------------------------------------------- |
 | 主題、字級、語言、側邊欄      | `UserDefaults` | 第一個 frame 在儲存層開起來之前就需要它們    |
 | 貼文、帳號、伺服器，與其關聯  | SQLite         | 社交資料                                     |
-| 時間軸篩選                    | `UserDefaults` | 值存這裡，但當成 bind parameter 在 SQL 生效  |
+| 兩個常駐篩選（轉推、媒體）    | `UserDefaults` | 值存這裡，但當成 bind parameter 在 SQL 生效  |
+| 你做的時間軸，以及它們的規則  | SQLite         | 它們是列：指向一個基底來源與一個帳號、有順序，規則掛在它們底下 |
 | 你登入了這件事                | SQLite         | 憑證放在 Keychain，永遠不在這裡              |
 
 讀完一頁再用 Swift 篩，每一頁的長度都會不一樣，所以不論值存在哪裡，篩選都屬於查詢。
@@ -59,10 +60,12 @@ Migration 遵守同一條規則：只增不減。只有 `CREATE`、`ADD COLUMN`�
 
 ```text
 network   伺服器交過來的。刷新寫入；只有權威方改得動內容。
-          protocols、servers、accounts、posts、tags、post_tags、server_trends
+          protocols、feeds、filter_kinds、servers、accounts、posts、tags、post_tags、
+          post_origins、post_mentions、server_trends
 
 local     你決定的，可以撤回。只有你動得了。
-          servers.selected_at、servers.position、tags.followed_at、tags.muted_at、owned_accounts
+          servers.selected_at、servers.position、tags.followed_at、tags.muted_at、owned_accounts、
+          timelines、timeline_filters
 
 record    在這裡數出來的，而且被數的列清掉之後它還留著。
           tag_buckets
@@ -101,6 +104,23 @@ derived   可以丟掉的索引。
               tag_buckets 數的是 post_tags × posts，清掉之後數字仍留著
 ```
 
+migration 004 再掛四張表上去，兩側各加一張查表：
+
+```text
+   ┌───────┐ feed  ┌──────────────┐ merge_key  ┌───────┐
+   │ feeds │◄──────┤ post_origins ├───────────►│ posts │◄──┐ merge_key
+   └───▲───┘       └──────┬───────┘            └───────┘   │
+       │ feed             │ source_url / author_id     ┌────┴──────────┐
+   ┌───┴───────┐          ▼                            │ post_mentions │
+   │ timelines │    servers / accounts                 └───────────────┘
+   └───▲───────┘
+       │ timeline_id   ┌───────────────────┐  kind  ┌──────────────┐
+       └───────────────┤ timeline_filters  ├───────►│ filter_kinds │
+                       └───────────────────┘        └──────────────┘
+
+   不是外鍵   post_mentions.mention_uri ──► accounts.author_id，讀取時比對
+```
+
 本地的決定永遠不是刷新會寫的欄位。它確實掛在 network 表上 —— `servers` 帶著 `selected_at` 與 `position`，
 `tags` 帶著 `followed_at` 與 `muted_at` —— 而讓這件事守得住的規則寫在 SQL 裡，不是寫在自律裡：
 
@@ -120,6 +140,67 @@ ON CONFLICT(url) DO UPDATE SET
 登入是同一種決定，而且大到值得自己的一張表：migration 002 加了 `owned_accounts`，屬於你的帳號一列一筆。
 token 放在 Keychain，以 `author_id` 為鍵；這一列記的只有事實本身。登出就是刪掉那一列 —— 帳號和它交給過
 你的每一則貼文都留著。
+
+做一條時間軸是這一類決定裡最大的一個，migration 004 給了它兩張表：`timelines` 與 `timeline_filters`。
+它們屬於 local 層，理由和 `selected_at` 一樣 —— 沒有任何刷新會寫它們，刪掉一條也只帶走它自己。
+
+## 一則貼文在自己之外記得的事
+
+**一則貼文只有一列，而且維持一列**，不管有幾條時間軸顯示它。這台裝置學到的、不屬於貼文本身的每一件事，
+都由 migration 004 寫在它旁邊：
+
+| 表              | 一列說的是什麼                                                                  |
+| --------------- | ------------------------------------------------------------------------------- |
+| `post_origins`  | 伺服器 `source_url` 透過基底來源 `feed` 交出了貼文 `merge_key`；來源有主人時記在 `author_id`；期間從 `first_seen_at` 到 `last_seen_at` |
+| `post_mentions` | 貼文 `merge_key` 提到了 `mention_uri` 這個帳號，`handle` 是貼文自己的伺服器怎麼拼它 |
+
+基底來源就是「能跟伺服器要的那個東西」：今天是 `public`、`home`、`trend`，它們是 `feeds` 的列而不是 enum
+的 case，因為伺服器的 hashtag 時間軸與清單時間軸遲早也會是基底來源。同一則貼文再從另一個來源抵達會**多一
+列**；從同一個來源再被告知一次，只會推進 `last_seen_at`，其他什麼都不動。
+
+`author_id` 是「這是誰的首頁」，`public` 與 `trend` 是 NULL —— 這是誠實的 NULL，公開時間軸不屬於任何人。
+它現在就記，而不是等到有第二個帳號才加，因為後來加的欄位永遠不回填：那樣的話現在已經存下的每一則貼文，
+都會是一則說不出自己在誰的首頁裡的貼文。唯一性用兩個 partial index 而不是主鍵，因為 SQLite 不會對 rowid
+表的主鍵欄位強制 NOT NULL，而 NULL 在 unique index 裡彼此相異 —— 四欄的鍵會讓每一次匿名的目擊都插進一列
+新的，永遠插下去。
+
+`post_mentions` 沒有指向 `accounts` 的外鍵，理由和 `posts.in_reply_to_uri` 一樣：一則貼文常常提到這台裝置
+從來沒被交付過的人。也不會為他們捏造一列半空的帳號。
+
+**migration 004 有回填，那是上面那條規則唯一的例外**，而它站得住腳只因為那個推論是精確的：在此之前整個
+app 只有一個時間軸端點 `/api/v1/timelines/public`，而 `server_trends` 本來就記著每一則來自熱門榜的貼文。
+只從熱門榜來的貼文也會拿到一列 `public`，這是刻意的 —— 004 之前，儲存層是把自己的全部交給時間軸的，所以
+那則貼文本來就在讀者的畫面上；回填要保證的事情是：沒有人打開這個版本，會看到比上個版本關掉時更短的時間軸。
+
+## 時間軸是一個篩選，不是一份清單
+
+讀者做的一條時間軸是**一個基底來源加上任意條規則**。只有一個基底來源，因為兩個會讓順序沒有答案；規則只會
+增加或移除。
+
+```sql
+SELECT … FROM posts p JOIN accounts a ON a.author_id = p.author_id
+WHERE p.deleted_at IS NULL
+  AND EXISTS (SELECT 1 FROM post_origins o
+              WHERE o.merge_key = p.merge_key AND o.feed = ? AND o.author_id = ?)
+  AND EXISTS (SELECT 1 FROM post_tags pt WHERE pt.merge_key = p.merge_key AND pt.tag = ?)
+ORDER BY p.posted_at DESC, p.merge_key
+LIMIT ?
+```
+
+沒有任何東西被複製進一條時間軸，也沒有任何一列貼文記著自己屬於哪些時間軸。目前這條時間軸篩掉的貼文照樣
+被存下來，讀者下一次做的時間軸會發現它已經在這裡了。
+
+**出廠就有的時間軸不帶自己的文字。** 首次啟動種下的那幾列，`name` 與 `summary` 都是空的，畫面每次都
+從範本取字——「公開」「熱門」因此是用讀者選的語言說的，而不是那一列被寫下來那天剛好開著的語言。一旦
+使用者自己打了名稱，那列就帶著他們的字，而讀者取的名字不會被翻譯。
+
+`clearSeededWording` 是給舊版寫過字進去的 store 的一次性修補：`id` 等於範本名稱的每一列都會被清空，每個
+安裝只跑一次，而且由安裝端記住跑過了。它不試圖從列本身判斷那些字是不是 app 的——因為列裡沒有東西答得出
+來：`updated_at` 連「重新排序」都會蓋掉，而拿字面去比對，只要哪一版改了文案就立刻失效。
+
+**順序屬於基底來源。** 它住在 `feeds.ranked` —— `public` 與 `home` 依時間排序，`trend` 保持伺服器交出來的
+順序 —— 所以沒有規則碰得到它，讀者也沒有開關可以改它。`timelines.template` 只是「它從哪裡來」，永遠不是一
+條活的連結：範本只在建立當下播下種子，之後對它沒有發言權，所以推出新版的範本不會改寫別人已經命名過的清單。
 
 ## 時間
 
@@ -250,6 +331,13 @@ network 表上的本地欄位，刷新只寫 `display`，永遠不碰它們。
 它的 trend 也就什麼都不代表。Trending 畫面是 `posts ⋈ server_trends`，走 `server_trends_recent` ——
 `WHERE last_seen_at` 夠新、`ORDER BY rank` —— 讀的是儲存層不是網路，所以離線也能用，過期的列只是從畫面上
 消失。
+
+migration 004 加了 `removed_at`，因為「過期」沒辦法代替「掉出榜」。`ServerBackoff` 存在的目的就是別再去問
+一台不回應的伺服器，所以「一天沒看到它」同時涵蓋了掉出榜的貼文和沒人去問的伺服器 —— 那是兩個不同的事實。
+這個記號只說比較窄的那句真話，就像 003 教 `deleted_at` 說的那樣：**這台伺服器交出來的那份榜單上，已經沒有
+這則貼文了。** 不是「它不紅了」，那是一份有長度的榜單說不出口的事。它只會從真的抵達的榜單寫出來，而且永遠
+不從空榜單寫，所以被跳過、正在 backoff、或乾脆關掉熱門的伺服器什麼都不會標記；重新回到榜上的貼文是把記號
+拿掉，而不是多一列。
 
 `tag_buckets` 是第三層 **record**，它存在的理由就是：它比它數的東西活得久。一個 bucket 是 `posted_at` 的一小時。
 每次刷新之後，這次刷新的貼文所落在的每一小時都會從 `post_tags` × `posts` 重算一遍，而 bucket 只會往上 ——

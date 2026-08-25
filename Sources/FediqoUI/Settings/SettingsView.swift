@@ -11,6 +11,7 @@ struct SettingsView: View {
     @Environment(AppState.self) private var app
     @Environment(\.webAuthenticationSession) private var webSession
     @State private var confirmingForget = false
+    @State private var confirmingReset = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -110,6 +111,39 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var sources: some View {
+        sourceList
+        // Below the sources and always there, servers or none: it is not about the servers.
+        // A reader with nothing added still has preferences, a store, and a Keychain item or
+        // two, and "make this like a fresh install" has to mean all of it.
+        startAgain
+    }
+
+    /// Everything on this device, gone. Two steps to reach it — the button and then a dialog
+    /// naming what goes — because it is the one action here that nothing can undo.
+    private var startAgain: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Hairline().padding(.vertical, 6)
+            Button(t("settings.reset"), role: .destructive) { confirmingReset = true }
+                .buttonStyle(.plain)
+                .fediqoFont(11)
+                .foregroundStyle(.red)
+                .confirmationDialog(t("settings.reset.ask"), isPresented: $confirmingReset, titleVisibility: .visible) {
+                    Button(t("settings.reset.confirm"), role: .destructive) {
+                        Task { await app.startAgain() }
+                    }
+                    Button(t("common.cancel"), role: .cancel) {}
+                } message: {
+                    Text(t("settings.reset.warning"))
+                }
+            Text(t("settings.reset.note"))
+                .fediqoFont(10)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private var sourceList: some View {
         if app.servers.isEmpty {
             Text(t("settings.sources.empty")).fediqoFont(12).foregroundStyle(.secondary)
         } else {
@@ -209,6 +243,10 @@ struct SettingsView: View {
                         throw CancellationError()
                     }
                 }
+                // A first account is what makes a home timeline readable, so this is where it
+                // is offered. Asked after the model has re-read the rows, so a handshake that
+                // failed offers nothing.
+                await app.offerHomeTimeline()
             }
         }
     }

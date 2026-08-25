@@ -191,7 +191,7 @@ struct PostCommandTests {
     func emptyTimeline() {
         let app = freshApp("post-keys-empty-timeline")
         app.railItem = .timeline
-        #expect(app.feedMode == .timeline)
+        #expect(app.readingTimeline?.id == "public")
         #expect(app.perform(.nextPost) == false)
         #expect(app.perform(.previousPost) == false)
     }
@@ -203,7 +203,7 @@ struct PostCommandTests {
         let app = freshApp("post-keys-top")
         app.railItem = .timeline
         #expect(app.perform(.backToTop))
-        #expect(app.feed(for: .timeline).topRequests == 1)
+        #expect(app.feed(for: .publicFixture).topRequests == 1)
     }
 
     @Test("With no post under the ring, nothing is opened at all")
@@ -221,10 +221,10 @@ struct PostCommandTests {
     func aRingPerTab() {
         let app = freshApp("post-keys-ring-per-tab")
         app.railItem = .timeline
-        app.feedTab = .timeline
+        app.currentTimeline = "public"
         #expect(app.perform(.backToTop))
-        #expect(app.feed(for: .timeline).topRequests == 1)
-        #expect(app.feed(for: .trending).topRequests == 0)
+        #expect(app.feed(for: .publicFixture).topRequests == 1)
+        #expect(app.feed(for: .trendingFixture).topRequests == 0)
     }
 }
 
@@ -242,15 +242,15 @@ struct WiredPostKeyTests {
     private func timeline(_ name: String) -> AppState {
         let app = freshApp(name)
         app.railItem = .timeline
-        app.feedTab = .timeline
-        app.feed(for: .timeline).show(Self.posts)
+        app.currentTimeline = "public"
+        app.feed(for: .publicFixture).show(Self.posts)
         return app
     }
 
     @Test("j and k walk the ring through the posts the app is showing, and stop at the ends")
     func movesThroughTheList() {
         let app = timeline("wired-move")
-        let feed = app.feed(for: .timeline)
+        let feed = app.feed(for: .publicFixture)
         for name in ["a", "b", "c"] {
             #expect(app.perform(.nextPost))
             #expect(feed.selection == name)
@@ -286,7 +286,7 @@ struct WiredPostKeyTests {
     @Test("A post the server gave no address for is nothing to open, and nothing is opened")
     func aPostWithNoAddress() {
         let app = timeline("wired-open-no-address")
-        app.feed(for: .timeline).show([post("a", web: nil)])
+        app.feed(for: .publicFixture).show([post("a", web: nil)])
         var opened: [URL] = []
         app.openLink = { opened.append($0) }
         #expect(app.perform(.nextPost))
@@ -311,7 +311,7 @@ struct WiredPostKeyTests {
         let app = timeline("wired-filtered")
         app.preferences.showMediaOnly = true
         #expect(app.perform(.nextPost) == false)
-        #expect(app.feed(for: .timeline).selection == nil)
+        #expect(app.feed(for: .publicFixture).selection == nil)
     }
 
     /// The shown list is worked out once and kept, so that a key does not filter the whole
@@ -323,6 +323,6 @@ struct WiredPostKeyTests {
         #expect(app.perform(.nextPost))
         app.preferences.showMediaOnly = true
         #expect(app.perform(.nextPost) == false)
-        #expect(app.feed(for: .timeline).selectedURL == nil)
+        #expect(app.feed(for: .publicFixture).selectedURL == nil)
     }
 }

@@ -5,7 +5,20 @@ import FediqoCore
 @MainActor
 @Observable
 final class FeedModel {
-    let mode: FeedMode
+    /// Which timeline this is reading — its base source, its rules, and the name the reader
+    /// gave it. Held whole rather than as an id, because everything this model does with it is
+    /// asking it what to read; and replaced when the reader edits it, so a rule taken off
+    /// changes the page rather than waiting for the next launch.
+    var timeline: Timeline {
+        didSet {
+            guard timeline.query != oldValue.query else { return }
+            // A different question is a different page. What was on the screen was the answer
+            // to the old one, and keeping it would leave posts under rules that no longer
+            // admit them until something else happened to replace them.
+            result = TimelineResult(posts: [], failures: result.failures, skipped: result.skipped)
+            loadedFor = nil
+        }
+    }
 
     private(set) var result = TimelineResult(posts: [], failures: [:]) {
         // Which list is being shown, counted rather than compared: telling two lists of posts
@@ -131,8 +144,8 @@ final class FeedModel {
     /// account and never the column.
     var onTokenRejected: (@MainActor (String) -> Void)?
 
-    init(mode: FeedMode, preferences: Preferences, loader: TimelineLoader = TimelineLoader()) {
-        self.mode = mode
+    init(timeline: Timeline, preferences: Preferences, loader: TimelineLoader = TimelineLoader()) {
+        self.timeline = timeline
         self.preferences = preferences
         self.loader = loader
     }
@@ -146,7 +159,7 @@ final class FeedModel {
     /// server is asked; a store that cannot be read is simply skipped on the way there.
     func loadIfNeeded(servers: [Server]) async {
         if loadedFor == nil, result.isEmpty,
-           let stored = try? await loader.stored(mode: mode), !stored.isEmpty {
+           let stored = try? await loader.stored(timeline.query), !stored.isEmpty {
             result = TimelineResult(posts: stored, failures: [:])
         }
         let signature = servers.map(\.id).sorted()
@@ -158,7 +171,7 @@ final class FeedModel {
     /// load of a screen — so that everything is asked at once, whatever it did last time.
     func load(servers: [Server], refresh: Refresh = .manual) async {
         loading = true
-        let loaded = await loader.load(servers: servers, mode: mode, refresh: refresh)
+        let loaded = await loader.load(servers: servers, query: timeline.query, refresh: refresh)
         // The whole result, `skipped` and all: a server inside its wait is neither in the
         // posts nor in the failures, and a rebuild that leaves it out of the third place too
         // loses the difference between a server that had nothing to say and one nobody asked.
@@ -172,7 +185,7 @@ final class FeedModel {
         // the one stretch paging never revisits, and a post pulled down moments after it went
         // up sits exactly there. Leaving the queue to the reach-down alone would have a reader
         // who never scrolls collect suspicions and answer none of them.
-        if mode == .timeline {
+        if timeline.source.isThreadOfTime {
             drop(await loader.reconcile())
             // Asked again here because the answer can change without a reach: the chosen list
             // is what it is asked of, so a source added while the reader sat at the end is a
@@ -224,7 +237,7 @@ final class FeedModel {
     /// says why. The two tabs are one screen, so the trigger fires on both and the answer to
     /// that has to be here rather than in the scroll view.
     func loadOlder(servers: [Server]) async {
-        guard mode == .timeline else { return }
+        guard timeline.source.isThreadOfTime else { return }
         guard !loadingOlder else { reachWaiting = true; return }
         loadingOlder = true
         defer { loadingOlder = false }
@@ -273,7 +286,7 @@ final class FeedModel {
     /// coming — a reach swallowed in silence, which is the one thing this must never do.
     private func reach(_ servers: [Server]) async {
         guard let foot = result.posts.last else { return }
-        let page = await loader.storedOlder(than: foot)
+        let page = await loader.storedOlder(than: foot, matching: timeline.query)
         storeFailure = page.failure
         if !page.posts.isEmpty { append(page.posts) }
         // Eight rounds are the answer to one thing only: the store having run out, which is the
@@ -295,7 +308,7 @@ final class FeedModel {
     private func askServers(_ servers: [Server], rounds: Int) async {
         guard !servers.isEmpty else { return }
         for _ in 0..<rounds {
-            let older = await loader.loadOlder(servers: servers)
+            let older = await loader.loadOlder(servers: servers, query: timeline.query)
             note(older, from: servers)
             // Nobody said anything at all — every server is spent, waiting or still out — so
             // asking again this instant would ask the same nobody. That covers the end of the

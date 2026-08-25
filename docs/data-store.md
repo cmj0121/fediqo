@@ -51,7 +51,8 @@ one.
 | ----------------------------------------- | -------------- | --------------------------------------------------- |
 | theme, text size, language, rail          | `UserDefaults` | the first frame needs them before the store opens   |
 | posts, accounts, servers, and their links | SQLite         | social data                                         |
-| timeline filters                          | `UserDefaults` | stored there, but applied as bind parameters in SQL |
+| the two standing filters (boosts, media)  | `UserDefaults` | stored there, but applied as bind parameters in SQL |
+| the timelines you made, and their rules   | SQLite         | rows: ordered, pointing at a base source and an account |
 | the fact of being signed in               | SQLite         | the credential lives in the Keychain, never here    |
 
 A filter applied in Swift after a page is read gives every page a different length, so filtering belongs in
@@ -64,10 +65,12 @@ screen, not a crash**, and the screen has to be readable in the right language.
 
 ```text
 network   what a server handed over. A refresh writes; only an authority edits.
-          protocols, servers, accounts, posts, tags, post_tags, server_trends
+          protocols, feeds, filter_kinds, servers, accounts, posts, tags, post_tags,
+          post_origins, post_mentions, server_trends
 
 local     what you decided, and can withdraw. Only you.
-          servers.selected_at, servers.position, tags.followed_at, tags.muted_at, owned_accounts
+          servers.selected_at, servers.position, tags.followed_at, tags.muted_at, owned_accounts,
+          timelines, timeline_filters
 
 record    what was counted here, and kept after the rows it counted are purged.
           tag_buckets
@@ -106,6 +109,23 @@ One arrow per foreign key, pointing at the table it references:
               tag_buckets counts post_tags × posts, and keeps the count after a purge
 ```
 
+Migration 004 hangs four more off that spine, and one lookup table each side of them:
+
+```text
+   ┌───────┐ feed  ┌──────────────┐ merge_key  ┌───────┐
+   │ feeds │◄──────┤ post_origins ├───────────►│ posts │◄──┐ merge_key
+   └───▲───┘       └──────┬───────┘            └───────┘   │
+       │ feed             │ source_url / author_id     ┌────┴──────────┐
+   ┌───┴───────┐          ▼                            │ post_mentions │
+   │ timelines │    servers / accounts                 └───────────────┘
+   └───▲───────┘
+       │ timeline_id   ┌───────────────────┐  kind  ┌──────────────┐
+       └───────────────┤ timeline_filters  ├───────►│ filter_kinds │
+                       └───────────────────┘        └──────────────┘
+
+   not a FK   post_mentions.mention_uri ──► accounts.author_id, matched at read time
+```
+
 A local decision is never a column a refresh writes. It does sit on a network table — `servers` carries
 `selected_at` and `position`, `tags` carries `followed_at` and `muted_at` — and the rule that keeps it
 honest is written into the SQL rather than into a habit:
@@ -127,6 +147,78 @@ Signing in is the same kind of decision, big enough for a table of its own: migr
 `owned_accounts`, one row per account that is yours. The token lives in the Keychain, keyed by
 `author_id`; the row records only the fact. Signing out deletes the row — the account and every post it
 handed over stay.
+
+Making a timeline is the largest decision of that kind, and migration 004 gives it two tables: `timelines`
+and `timeline_filters`. They sit in the local layer for the same reason `selected_at` does — no refresh
+writes them, and deleting one takes nothing but itself.
+
+## What a post remembers besides itself
+
+**A post is one row and stays one row**, whichever timelines show it. Everything this device learns about a
+post that is not the post itself is written beside it, by migration 004:
+
+| table           | a row says                                                                      |
+| --------------- | ------------------------------------------------------------------------------- |
+| `post_origins`  | `source_url` handed `merge_key` over through base source `feed`, to `author_id` where it has an owner |
+| `post_mentions` | post `merge_key` names the account at `mention_uri`, spelled `handle` by the post's own server |
+
+A base source is what a server can be asked for: `public`, `home` or `trend` today, rows in `feeds` rather
+than cases in an enum, because a server's hashtag timeline and a server's lists are both base sources
+waiting to happen. Seeing the same post arrive again through another one **adds a row**; being told again
+through the same one moves `last_seen_at` and nothing else.
+
+`author_id` is whose home it arrived in, and NULL for `public` and `trend` — an honest NULL, since a public
+timeline belongs to nobody. It is written now rather than when a second account appears, because a column
+added later is never backfilled: every post already stored would be one that could not say whose home it
+was in. Uniqueness is two partial indexes rather than a primary key, because SQLite does not enforce NOT
+NULL on a rowid table's primary key columns and NULLs are distinct to a unique index — a four-column key
+would have let every anonymous sighting insert another row for ever.
+
+`post_mentions` has no foreign key to `accounts`, for the reason `posts.in_reply_to_uri` has none: a post
+routinely names people this device has never been handed. No half-empty account row is invented for them.
+
+**Migration 004 backfills, which is the one exception to the rule above**, and it is defensible only because
+the inference is exact: until then there was one timeline endpoint in the app, `/api/v1/timelines/public`,
+and `server_trends` already names every post that came through a trending list. A post that arrived only
+through a trending list gets a `public` row anyway — before 004 the store handed the whole of itself to the
+timeline, so that post was on the reader's screen, and the backfill's job is that nobody opens this version
+to a shorter timeline than they closed the last one with.
+
+## A timeline is a filter, not a list
+
+A timeline the reader makes is **one base source and any number of rules**. One base source, because two
+would leave the order undecided; the rules only ever add or remove.
+
+```sql
+SELECT … FROM posts p JOIN accounts a ON a.author_id = p.author_id
+WHERE p.deleted_at IS NULL
+  AND EXISTS (SELECT 1 FROM post_origins o
+              WHERE o.merge_key = p.merge_key AND o.feed = ? AND o.author_id = ?)
+  AND EXISTS (SELECT 1 FROM post_tags pt WHERE pt.merge_key = p.merge_key AND pt.tag = ?)
+ORDER BY p.posted_at DESC, p.merge_key
+LIMIT ?
+```
+
+Nothing is copied into a timeline and no post row says which timelines it is in. A post the timeline being
+read filters out is still saved, and the next timeline the reader makes finds it already here.
+
+**A timeline that ships with the app keeps no words of its own.** `name` and `summary` are
+empty for the rows seeded on a first run, and the screen takes both from the template each time
+it draws them — which is how Public and Trending are said in the reader's language rather than
+in whichever one was on the day the row was written. Typing a name makes the row carry theirs,
+and nothing translates a name a reader chose.
+
+`clearSeededWording` is the one-time repair for stores an older build wrote words into: every row
+whose `id` is its template's name is cleared, once per install, and the install remembers that it
+has been. It does not try to work out from the row whether the words in it are the app's, because
+nothing in the row can answer that — `updated_at` is stamped by reordering as much as by renaming,
+and comparing against the app's own words breaks the moment a release rewrites one.
+
+**Order belongs to the base source.** `feeds.ranked` is where it lives — `public` and `home` in timestamp
+order, `trend` in the order the server handed over — so no rule reaches it and the reader has no switch for
+it. `timelines.template` is where a timeline came from and never a live link: a template seeds one and has
+nothing to say to it afterwards, so shipping a new version of a template cannot rewrite a list somebody
+named.
 
 ## Time
 
@@ -267,6 +359,14 @@ different layers, and they are kept apart:
 because a trend for a post that is gone says nothing. The Trending screen is `posts ⋈ server_trends` on
 `server_trends_recent` — `WHERE last_seen_at` is recent, `ORDER BY rank` — and it reads the store, not the
 network, so it works offline and a stale row simply drops off the screen.
+
+Migration 004 adds `removed_at`, because staleness could not stand in for leaving the list. `ServerBackoff`
+exists to stop asking a server that is not answering, so "not seen for a day" covers a post that fell off
+the list and a server nobody asked — two different facts. The mark says the narrower true thing, the way
+003 taught `deleted_at` to say one: **the list this server hands over no longer contains this post.** Not
+that it stopped rising, which a list with a length cannot tell anybody. It is only ever written from a list
+that arrived and is never written from an empty one, so a server that was skipped, backed off or has turned
+trending off marks nothing; a post back on the list has the mark lifted rather than a second row.
 
 `tag_buckets` is the third layer, **record**, and the reason it exists is that it outlives what it counted.
 A bucket is an hour of `posted_at`. After each refresh, every hour a post of that refresh falls into is

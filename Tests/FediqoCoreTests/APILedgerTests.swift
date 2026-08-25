@@ -215,7 +215,7 @@ struct APILedgerTests {
             store: store, secrets: InMemorySecretStore()
         )
 
-        _ = await loader.load(servers: [makeServer("ledger-memory.test")], mode: .timeline)
+        _ = await loader.load(servers: [makeServer("ledger-memory.test")], query: .publicPosts)
         #expect(ledger.accounting().total.callsSinceStart == 1)
 
         let fresh = APILedger()
