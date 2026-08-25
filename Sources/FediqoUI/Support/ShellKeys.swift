@@ -1,6 +1,7 @@
 import SwiftUI
 #if os(macOS)
 import AppKit
+import Carbon.HIToolbox
 #endif
 
 extension View {
@@ -124,16 +125,62 @@ func shellKey(keyCode: UInt16, typed: Character?) -> Character? {
 /// A sheet is its own window and keeps its own keyboard entirely: the pickers and their
 /// fields live there, and this steps aside for them.
 /// Which of the keys this app listens for a press is, and nothing at all when it is none of
-/// them. The numbered keys are asked about first, so a press that is one of them never has
-/// its characters read; everything else has to be a key `listened` covers before `shellKey`
-/// is troubled with it.
-private func listenedKey(of event: NSEvent) -> Character? {
-    if KeyCode.named.contains(event.keyCode) {
-        return shellKey(keyCode: event.keyCode, typed: nil)
+/// them.
+///
+/// Three answers, asked in that order. The numbered keys first, so a press that is one of
+/// them never has its characters read at all. Then what the press actually typed, which is
+/// the whole answer on a keyboard laid out in Latin letters. And last the same key read off
+/// the reader's Latin layout, which is what makes the letters survive an input method — see
+/// `latinCharacter(for:)`.
+///
+/// Pure, and the layout handed in rather than looked up, so all three ways a press can be
+/// recognised can be checked without a keyboard.
+func shellListenedKey(keyCode: UInt16, typed: Character?, latin: () -> Character?) -> Character? {
+    if KeyCode.named.contains(keyCode) { return shellKey(keyCode: keyCode, typed: nil) }
+    if let typed, KeyCommand.listenedCharacters.contains(typed) { return typed }
+    guard let latin = latin(), KeyCommand.listenedCharacters.contains(latin) else { return nil }
+    return latin
+}
+
+/// What a key would have typed on the reader's Latin keyboard, whatever it typed on the one
+/// they have up — and nothing when the system will not say.
+///
+/// A single-key shortcut is a place on the keyboard rather than a character. With 注音
+/// selected the `j` key types ㄨ, with Russian it types о, and a reader who wanted the post
+/// below pressed the same key in all three cases. `charactersIgnoringModifiers` answers for
+/// whichever layout is up, so on its own it takes every letter this app listens for away from
+/// anybody writing in a script that is not Latin — which is most of the people this app is
+/// for. The arrows never went with them, because those are matched by number, and one half of
+/// the keyboard working is how the fault was noticed.
+///
+/// The layout asked is the ASCII-capable one the system keeps alongside every input method,
+/// so a Dvorak or AZERTY reader is answered with the letter *their* keyboard has there rather
+/// than with whatever US QWERTY would have had. It is asked last and only when nothing else
+/// recognised the press, so the ordinary Latin case never pays for it.
+private func latinCharacter(for keyCode: UInt16) -> Character? {
+    guard let source = TISCopyCurrentASCIICapableKeyboardLayoutInputSource()?.takeRetainedValue(),
+          let property = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData)
+    else { return nil }
+    let data = Unmanaged<CFData>.fromOpaque(property).takeUnretainedValue() as Data
+    return data.withUnsafeBytes { raw -> Character? in
+        guard let layout = raw.bindMemory(to: UCKeyboardLayout.self).baseAddress else { return nil }
+        var deadKeys: UInt32 = 0
+        var characters = [UniChar](repeating: 0, count: 4)
+        var length = 0
+        // No modifiers held: the unshifted letter is what the commands are written in, and
+        // `KeyCommand` already reads a held Shift off the flags rather than off the character.
+        let status = UCKeyTranslate(layout, keyCode, UInt16(kUCKeyActionDown), 0,
+                                    UInt32(LMGetKbdType()), UInt32(kUCKeyTranslateNoDeadKeysBit),
+                                    &deadKeys, characters.count, &length, &characters)
+        guard status == noErr, length > 0 else { return nil }
+        return String(utf16CodeUnits: characters, count: length).first
     }
-    guard let typed = event.charactersIgnoringModifiers?.first,
-          KeyCommand.listenedCharacters.contains(typed) else { return nil }
-    return shellKey(keyCode: event.keyCode, typed: typed)
+}
+
+private func listenedKey(of event: NSEvent) -> Character? {
+    shellListenedKey(keyCode: event.keyCode, typed: event.charactersIgnoringModifiers?.first) {
+        latinCharacter(for: event.keyCode)
+    }
 }
 
 private struct ShellKeyMonitor: ViewModifier {
@@ -185,8 +232,10 @@ extension NSEvent.ModifierFlags {
     ///
     /// Internal rather than private so the translation can be checked on its own: it is the
     /// one place the two frameworks' spellings of a held key meet.
-    var eventModifiers: EventModifiers {
-        var modifiers: EventModifiers = []
+    /// Spelled out in full because Carbon, which this file reads a keyboard layout from,
+    /// has an `EventModifiers` of its own and a bare name here would be either of them.
+    var eventModifiers: SwiftUI.EventModifiers {
+        var modifiers: SwiftUI.EventModifiers = []
         if contains(.shift) { modifiers.insert(.shift) }
         if contains(.control) { modifiers.insert(.control) }
         if contains(.command) { modifiers.insert(.command) }

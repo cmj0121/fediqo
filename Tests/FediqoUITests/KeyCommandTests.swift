@@ -388,6 +388,59 @@ struct KeyCodeTests {
     }
 }
 
+/// The three ways a press is recognised, and the order they are asked in.
+///
+/// The last of them is what keeps the letters alive under an input method. With 注音 up, the
+/// `j` key types ㄨ and the `k` key types ㄜ, and every letter this app listens for was dead
+/// while the arrows — matched by number — went on working. The Latin layout the system keeps
+/// alongside the input method is what says which key it is.
+@Suite("Which of our keys a press is")
+struct ListenedKeyTests {
+    /// The Latin layout is never asked for the keys that are read by number: whatever it
+    /// would say about them, the number has already answered.
+    @Test("A numbered key is answered by its number, and nothing else is asked")
+    func numberedKeysAnswerFirst() {
+        var asked = false
+        let key = shellListenedKey(keyCode: 125, typed: "\u{3}") { asked = true; return "j" }
+        #expect(key == KeyEquivalent.downArrow.character)
+        #expect(!asked)
+    }
+
+    /// The ordinary case, and the one that must not pay for the fix: a Latin keyboard types
+    /// the letter, and the layout is never consulted.
+    @Test("A letter that was typed is taken as typed, and the layout is left alone")
+    func typedLetterAnswersSecond() {
+        var asked = false
+        #expect(shellListenedKey(keyCode: 38, typed: "j") { asked = true; return nil } == "j")
+        #expect(!asked)
+    }
+
+    /// 注音: the key types ㄨ, which is nobody's command, and the same key is `j` on the
+    /// reader's Latin layout.
+    @Test("A letter typed in another script is read off the Latin layout instead")
+    func latinLayoutAnswersLast() {
+        #expect(shellListenedKey(keyCode: 38, typed: "ㄨ") { "j" } == "j")
+        #expect(shellListenedKey(keyCode: 40, typed: "ㄜ") { "k" } == "k")
+    }
+
+    /// The Latin layout decides no more than the typed character does: a key nobody listens
+    /// for is still nobody's, however it is spelled.
+    @Test("A key that is nobody's stays nobody's, in either spelling")
+    func unlistenedKeysAreStillNobodys() {
+        #expect(shellListenedKey(keyCode: 0, typed: "ㄇ") { "a" } == nil)
+        #expect(shellListenedKey(keyCode: 0, typed: nil) { nil } == nil)
+    }
+
+    /// Shift is read off the flags rather than off the character, which is why the layout is
+    /// asked unshifted — and why `⇧r` under 注音 still cycles the interval.
+    @Test("A held Shift survives the crossing, because the character never carried it")
+    func shiftIsReadFromTheFlags() throws {
+        let key = try #require(shellListenedKey(keyCode: 15, typed: "ㄐ") { "r" })
+        #expect(KeyCommand.from(key, modifiers: [.shift], typing: false) == .cycleRefreshInterval)
+        #expect(KeyCommand.from(key, modifiers: [], typing: false) == .refreshNow)
+    }
+}
+
 /// The one place AppKit's spelling of a held key meets SwiftUI's. Everything above is
 /// written in `EventModifiers`, and on a Mac every press arrives in the other spelling, so
 /// this crossing is on the path of every single key in the app.
