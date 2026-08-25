@@ -34,6 +34,30 @@ enum RailItem: String, CaseIterable, Identifiable, Hashable {
     }
 }
 
+/// The tabs of the Statistics page.
+///
+/// Two, though the page has four groups of numbers, because it answers two questions and the
+/// four are those two twice over: what is held here and what it costs, then what was asked of
+/// other people and how much of it came back. How the numbers are counted is not a third: it
+/// is a note, and a note belongs beside the number it explains rather than on a page of its
+/// own that nobody would go to.
+enum StatisticsTab: String, CaseIterable, Identifiable, Hashable {
+    case storage, network
+
+    var id: String { rawValue }
+}
+
+/// The tabs of the Settings page.
+///
+/// What Fediqo does not do with what it reads is not a fourth. It is read at the moment a
+/// reader is looking at the servers they have added, which is what it is about, so it sits
+/// under Sources rather than somewhere they would have to be sent.
+enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
+    case appearance, sources, keyboard
+
+    var id: String { rawValue }
+}
+
 /// What the refreshing clock is keyed to: the feed being read, on the page it is being read
 /// on, and how often. Change any of the three and the old clock is thrown away and a new one
 /// started, which is the whole of how the refresh follows the reader and how turning it off
@@ -107,11 +131,17 @@ public final class AppState {
 
     var route: Route
     var railItem: RailItem
-    /// Which tab of the Timeline page is showing. It lives here rather than in the screen so
-    /// that leaving the page and coming back returns you to the feed you were reading, the
-    /// same way `railItem` remembers the page — and, like the page, it is remembered for as
-    /// long as the app is open rather than written down for the next launch.
+    /// Which tab of each page is showing. They live here rather than in the screens so that
+    /// leaving a page and coming back returns you to where you were on it, the same way
+    /// `railItem` remembers the page — and, like the page, they are remembered for as long as
+    /// the app is open rather than written down for the next launch.
+    ///
+    /// One property per page rather than one table keyed by page: a page's tabs are its own
+    /// list and nothing else's, and a table would have to be read back out as a string and
+    /// hoped into the right type.
     var feedTab: FeedMode
+    var statisticsTab: StatisticsTab = .storage
+    var settingsTab: SettingsTab = .appearance
     /// Whether the composer is open. It belongs here rather than to the bar because the
     /// panel is drawn by the shell, over everything, and the bar only asks for it.
     var composing: Bool
@@ -407,12 +437,28 @@ public final class AppState {
     }
 
     /// The tab `steps` along inside the page being looked at, wrapping at both ends. A page
-    /// with no tabs has nothing to rotate and says so.
+    /// with no tabs has nothing to rotate and says so — which is what hands `Tab` back to the
+    /// focus system on the one page that has none.
+    ///
+    /// Which page is being looked at is the whole of what decides it. The tabs themselves are
+    /// three unrelated lists, so this asks the page rather than a list asking whether it is
+    /// the one in front of the reader.
     @discardableResult
     func rotateTab(by steps: Int) -> Bool {
-        guard railItem == .timeline,
-              let next = rotated(FeedMode.allCases, from: feedTab, by: steps) else { return false }
-        feedTab = next
+        switch railItem {
+        case .timeline: rotate(&feedTab, by: steps)
+        case .statistics: rotate(&statisticsTab, by: steps)
+        case .settings: rotate(&settingsTab, by: steps)
+        case .kept: false
+        }
+    }
+
+    /// One rotation, whichever page's tabs it is over. `rotated` is the app's one rule for
+    /// going round a list, and this is only what writing the answer back looks like.
+    private func rotate<Tab>(_ tab: inout Tab, by steps: Int) -> Bool
+    where Tab: CaseIterable & Equatable {
+        guard let next = rotated(Array(Tab.allCases), from: tab, by: steps) else { return false }
+        tab = next
         return true
     }
 

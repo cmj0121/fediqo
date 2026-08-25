@@ -2,6 +2,23 @@
   "sourceLanguage": "en",
   "version": "1.0",
   "strings": {
+    "appearance.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "How Fediqo looks and reads, and how often it reads again."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fediqo 看起來如何、讀起來如何，以及多久重讀一次。"
+          }
+        }
+      }
+    },
     "common.cancel": {
       "extractionState": "manual",
       "localizations": {
@@ -274,6 +291,23 @@
         }
       }
     },
+    "keyboard.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Every key this app answers, written down."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這個 app 認得的每一個按鍵，都寫在這裡。"
+          }
+        }
+      }
+    },
     "landing.enter": {
       "extractionState": "manual",
       "localizations": {
@@ -321,6 +355,108 @@
           "stringUnit": {
             "state": "translated",
             "value": "一條時間軸，所有網路。"
+          }
+        }
+      }
+    },
+    "menu.go": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Go"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "前往"
+          }
+        }
+      }
+    },
+    "menu.newPost": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New Post"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新貼文"
+          }
+        }
+      }
+    },
+    "menu.readAgain": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Read Again"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新讀取"
+          }
+        }
+      }
+    },
+    "menu.settings": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Settings…"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "設定…"
+          }
+        }
+      }
+    },
+    "menu.shortcuts": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keyboard Shortcuts"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "鍵盤快速鍵"
+          }
+        }
+      }
+    },
+    "network.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "What has been asked of other people's servers, and how much of it came back."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "向別人的伺服器要過些什麼，以及其中有多少真的回來了。"
           }
         }
       }
@@ -508,91 +644,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "選一種協定"
-          }
-        }
-      }
-    },
-    "menu.go": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Go"
-          }
-        },
-        "zh-TW": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "前往"
-          }
-        }
-      }
-    },
-    "menu.newPost": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "New Post"
-          }
-        },
-        "zh-TW": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "新貼文"
-          }
-        }
-      }
-    },
-    "menu.readAgain": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Read Again"
-          }
-        },
-        "zh-TW": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "重新讀取"
-          }
-        }
-      }
-    },
-    "menu.settings": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Settings…"
-          }
-        },
-        "zh-TW": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "設定…"
-          }
-        }
-      }
-    },
-    "menu.shortcuts": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Keyboard Shortcuts"
-          }
-        },
-        "zh-TW": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "鍵盤快速鍵"
           }
         }
       }
@@ -1634,6 +1685,23 @@
         }
       }
     },
+    "sources.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The servers you read, and the accounts you read them as."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你讀的伺服器，以及你用哪個帳號讀它們。"
+          }
+        }
+      }
+    },
     "stats.counting": {
       "extractionState": "manual",
       "localizations": {
@@ -2059,6 +2127,108 @@
         }
       }
     },
+    "storage.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "What is kept on this device, and what it costs on disk."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這台裝置上留著什麼，以及它佔了多少磁碟。"
+          }
+        }
+      }
+    },
+    "tab.appearance": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Appearance"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "外觀"
+          }
+        }
+      }
+    },
+    "tab.keyboard": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keyboard"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "鍵盤"
+          }
+        }
+      }
+    },
+    "tab.network": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Network"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "網路"
+          }
+        }
+      }
+    },
+    "tab.sources": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sources"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "來源"
+          }
+        }
+      }
+    },
+    "tab.storage": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Storage"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "儲存"
+          }
+        }
+      }
+    },
     "tab.timeline": {
       "extractionState": "manual",
       "localizations": {
@@ -2354,13 +2524,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Reading further back\u2026"
+            "value": "Reading further back…"
           }
         },
         "zh-TW": {
           "stringUnit": {
             "state": "translated",
-            "value": "\u6b63\u5728\u8b80\u53d6\u66f4\u65e9\u7684\u2026"
+            "value": "正在讀取更早的…"
           }
         }
       }
@@ -2395,23 +2565,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "重新整理"
-          }
-        }
-      }
-    },
-    "timeline.top": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Back to the top"
-          }
-        },
-        "zh-TW": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "回到最上面"
           }
         }
       }
@@ -2462,7 +2615,7 @@
         "zh-TW": {
           "stringUnit": {
             "state": "translated",
-            "value": "\u7121\u6cd5\u8b80\u53d6\u672c\u6a5f\u6642\u9593\u8ef8\uff1a%@"
+            "value": "無法讀取本機時間軸：%@"
           }
         }
       }
@@ -2480,6 +2633,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "依時間排序。這裡沒有任何東西被排名。"
+          }
+        }
+      }
+    },
+    "timeline.top": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Back to the top"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "回到最上面"
           }
         }
       }

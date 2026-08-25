@@ -3,50 +3,74 @@ import SwiftUI
 import FediqoCore
 
 /// The general preferences: how it looks, what language it speaks, and what it reads.
+///
+/// Three tabs. What Fediqo does not do with what it reads is under Sources rather than on a
+/// tab of its own — it is about the servers, and the moment a reader thinks of it is the
+/// moment they are looking at the list of them.
 struct SettingsView: View {
     @Environment(AppState.self) private var app
     @Environment(\.webAuthenticationSession) private var webSession
     @State private var confirmingForget = false
 
     var body: some View {
-        @Bindable var preferences = app.preferences
-        return ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                Text(t("settings.title")).fediqoFont(20, weight: .semibold)
-
-                section(t("settings.appearance")) {
-                    choiceRow("settings.theme", keyPrefix: "settings.theme", selection: $preferences.theme)
-                    Divider().opacity(0.4)
-                    choiceRow("settings.textSize", keyPrefix: "settings.textSize", selection: $preferences.textScale)
-                    Divider().opacity(0.4)
-                    languageRow
-                    Divider().opacity(0.4)
-                    choiceRow("settings.refresh", keyPrefix: "settings.refresh", selection: $preferences.refreshInterval)
-                    Divider().opacity(0.4)
-                    Text(t("settings.sample"))
-                        .fediqoFont(13)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+        VStack(spacing: 0) {
+            header
+            Hairline()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    sections(of: app.settingsTab)
                 }
-
-                section(t("settings.sources")) { sources }
-
-                section(t("settings.privacy")) {
-                    Text(t("settings.privacy.body"))
-                        .fediqoFont(11)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                // The same list `?` puts up, in the one place a reader who has never
-                // pressed `?` would go looking. One view, so the two cannot drift apart.
-                section(t("shortcut.title")) { ShortcutList() }
+                .frame(maxWidth: 620, alignment: .leading)
+                .padding(22)
             }
-            .frame(maxWidth: 620, alignment: .leading)
-            .padding(22)
+            .frame(maxWidth: .infinity)
         }
-        .frame(maxWidth: .infinity)
         .task { await app.signIn?.refresh() }
+    }
+
+    private var header: some View {
+        @Bindable var app = app
+        return PageHeader(titleKey: app.railItem.titleKey,
+                          subtitleKey: "\(app.settingsTab.rawValue).subtitle") {
+            SegmentedChoice(SettingsTab.allCases, keyPrefix: "tab", selection: $app.settingsTab)
+        }
+    }
+
+    @ViewBuilder
+    private func sections(of tab: SettingsTab) -> some View {
+        switch tab {
+        case .appearance:
+            section(t("settings.appearance")) { appearance }
+        case .sources:
+            section(t("settings.sources")) { sources }
+            section(t("settings.privacy")) {
+                Text(t("settings.privacy.body"))
+                    .fediqoFont(11)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        case .keyboard:
+            // The same list `?` puts up, in the one place a reader who has never pressed `?`
+            // would go looking. One view, so the two cannot drift apart.
+            section(t("shortcut.title")) { ShortcutList() }
+        }
+    }
+
+    @ViewBuilder
+    private var appearance: some View {
+        @Bindable var preferences = app.preferences
+        choiceRow("settings.theme", keyPrefix: "settings.theme", selection: $preferences.theme)
+        Divider().opacity(0.4)
+        choiceRow("settings.textSize", keyPrefix: "settings.textSize", selection: $preferences.textScale)
+        Divider().opacity(0.4)
+        languageRow
+        Divider().opacity(0.4)
+        choiceRow("settings.refresh", keyPrefix: "settings.refresh", selection: $preferences.refreshInterval)
+        Divider().opacity(0.4)
+        Text(t("settings.sample"))
+            .fediqoFont(13)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: - Rows
