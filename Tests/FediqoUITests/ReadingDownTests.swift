@@ -356,3 +356,158 @@ struct ReadingDownKeyTests {
         #expect(feed.awaitingOlder == false)
     }
 }
+
+/// Where the timeline stops, and the moment it stops there.
+///
+/// Two different things, and the tests are two: the marker is a place, so it stays and may be
+/// read as often as the reader comes back to it; the toast is a moment, so it happens once per
+/// arrival and never again for the same one. Both are the loader's answer rather than a guess
+/// off an empty page — a round that brings nothing back is a round in which everybody was
+/// spent, waiting, or still out, and only the first of the three is an end.
+@Suite("Where the reading stops")
+@MainActor
+struct TheEndTests {
+    private let server = makeServer("one.example")
+    private let other = makeServer("two.example")
+
+    private static let all = (1...4).reversed()
+        .map { makePost("p\($0)", at: TimeInterval($0) * 100, from: "one.example") }
+
+    /// A feed reading a client with `all` in it, showing the newest page of them.
+    private func feedAtTheTop(_ name: String, client: PagedClient) -> FeedModel {
+        let feed = freshFeed(name, client: client)
+        feed.show(Array(Self.all.prefix(2)))
+        return feed
+    }
+
+    /// Reaches until the client has said it has nothing older. Two reaches: the first walks
+    /// the run down, the second is answered with an empty page and ends the server.
+    private func readToTheEnd(_ feed: FeedModel, servers: [Server]) async {
+        while !feed.reachedTheEnd { await feed.loadOlder(servers: servers) }
+    }
+
+    // MARK: - The place
+
+    /// Nothing on the screen says the reading is over until the loader says every server has
+    /// said so. A page that came back short is filtered accounts, not the end.
+    @Test("The end is the loader's answer, not the screen's guess")
+    func theEndComesFromTheLoader() async {
+        let client = PagedClient(Self.all)
+        let feed = feedAtTheTop("end-derived", client: client)
+        #expect(feed.reachedTheEnd == false)
+        #expect(feed.atTheEnd == false)
+
+        // A reach that brings a page back is a reach that found more, whatever else it found.
+        await feed.loadOlder(servers: [server])
+        #expect(feed.reachedTheEnd == false)
+
+        await readToTheEnd(feed, servers: [server])
+        #expect(feed.atTheEnd)
+    }
+
+    /// The two say opposite things about the same foot of the same list, so they must never
+    /// both be true. The reach owns it while it is out.
+    @Test("A reach still out is not an end", .timeLimit(.minutes(1)))
+    func aReachInFlightSuppressesBoth() async {
+        let client = PagedClient([], holds: true)
+        let feed = feedAtTheTop("end-in-flight", client: client)
+
+        async let reaching: Void = feed.loadOlder(servers: [server])
+        await client.untilAsked()
+        #expect(feed.loadingOlder)
+        #expect(feed.atTheEnd == false)
+        #expect(feed.announcingTheEnd == false)
+
+        await client.letGo()
+        await reaching
+
+        // And once it is back, the answer it brought stands.
+        #expect(feed.loadingOlder == false)
+        #expect(feed.atTheEnd)
+    }
+
+    /// A source added while the reader sat at the end is a server nobody has asked anything,
+    /// so the reading is not over any more — and it is over again once that one has run out too.
+    @Test("A server joining takes the end away, and reaching it again brings it back")
+    func aNewServerTakesTheEndAway() async {
+        let client = PagedClient([])
+        let feed = feedAtTheTop("end-server-joins", client: client)
+        await readToTheEnd(feed, servers: [server])
+        #expect(feed.atTheEnd)
+
+        await feed.load(servers: [server, other])
+        #expect(feed.reachedTheEnd == false)
+
+        await readToTheEnd(feed, servers: [server, other])
+        #expect(feed.atTheEnd)
+    }
+
+    // MARK: - The moment
+
+    @Test("Arriving at the end is announced once, and not again for the same arrival")
+    func theToastFiresOncePerArrival() async {
+        let client = PagedClient([])
+        let feed = feedAtTheTop("end-announced-once", client: client)
+
+        await feed.loadOlder(servers: [server])
+        #expect(feed.announcingTheEnd)
+
+        // Said. What is left is the place.
+        feed.saidTheEnd()
+        #expect(feed.announcingTheEnd == false)
+        #expect(feed.atTheEnd)
+
+        // Coming back to the foot of the list is not a second arrival.
+        await feed.loadOlder(servers: [server])
+        #expect(feed.announcingTheEnd == false)
+        #expect(feed.atTheEnd)
+    }
+
+    /// A second arrival is a real one — the reading ended, then there was more, then it ended
+    /// again — and it is said, because the reader was not standing at an end in between.
+    @Test("Reaching the end a second time is a second moment")
+    func aSecondArrivalIsAnnouncedAgain() async {
+        let client = PagedClient([])
+        let feed = feedAtTheTop("end-announced-twice", client: client)
+
+        await feed.loadOlder(servers: [server])
+        #expect(feed.announcingTheEnd)
+        feed.saidTheEnd()
+
+        await feed.load(servers: [server, other])
+        #expect(feed.reachedTheEnd == false)
+
+        await readToTheEnd(feed, servers: [server, other])
+        #expect(feed.announcingTheEnd)
+    }
+
+    /// A refresh is about the top of the list. Arriving at the bottom is something the reader
+    /// does, not something a clock does to them while they are looking elsewhere.
+    @Test("A refresh does not announce an end it did not bring about")
+    func aRefreshNeverAnnounces() async {
+        let client = PagedClient([])
+        let feed = freshFeed("end-refresh-quiet", client: client)
+        feed.show(Array(Self.all.prefix(2)))
+
+        await feed.load(servers: [server])
+        #expect(feed.announcingTheEnd == false)
+    }
+
+    // MARK: - Trending has no end to reach
+
+    /// Trending does not page, so it has no bottom to arrive at. Neither the marker nor the
+    /// toast has anything to be true about there.
+    @Test("Trending shows neither the marker nor the toast")
+    func trendingHasNoEnd() async {
+        let client = PagedClient([])
+        let feed = freshFeed("end-trending", mode: .trending, client: client)
+        feed.show(Array(Self.all.prefix(2)))
+
+        await feed.loadOlder(servers: [server])
+        await feed.load(servers: [server])
+
+        #expect(feed.reachedTheEnd == false)
+        #expect(feed.atTheEnd == false)
+        #expect(feed.announcingTheEnd == false)
+    }
+}

@@ -2178,6 +2178,57 @@
         }
       }
     },
+    "timeline.end.note": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Every server has given what it has."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每一台伺服器都給完了。"
+          }
+        }
+      }
+    },
+    "timeline.end.reached": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You have read back to %@."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你已經讀到 %@。"
+          }
+        }
+      }
+    },
+    "timeline.end.toast": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing older to read"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "沒有更早的了"
+          }
+        }
+      }
+    },
     "timeline.filter": {
       "extractionState": "manual",
       "localizations": {

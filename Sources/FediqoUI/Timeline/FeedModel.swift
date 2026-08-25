@@ -48,6 +48,28 @@ final class FeedModel {
     ///
     /// A flag and not a count. Ten crossings while a page is out are one ask, not ten.
     @ObservationIgnored private var reachWaiting = false
+    /// Every server has said it has nothing older, as of the last reach or load that asked.
+    ///
+    /// Read from `TimelineLoader.reachedTheEnd(of:)` rather than guessed from an empty page: a
+    /// round that brings nothing back is a round in which everybody was spent, waiting, or
+    /// still out, and only the first of those three is an end. It is a standing fact about the
+    /// servers, so it is asked afresh each time rather than latched — a server added, or one
+    /// that has more to give after all, takes it down again.
+    private(set) var reachedTheEnd = false
+    /// The foot of the list is the end of the reading, and not a pause on the way to it.
+    ///
+    /// The two are one question for a screen and must never be two answers on it: a reach that
+    /// is still out owns the foot of the list — it is what "still reading" is drawn for — and
+    /// the end is only the end once nothing is coming.
+    var atTheEnd: Bool { reachedTheEnd && !loadingOlder }
+    /// The reading has just this moment arrived at its end, and nobody has said so yet.
+    ///
+    /// The marker is the place and this is the moment, which is why it is a flag somebody
+    /// takes down rather than a fact anybody may read twice. It goes up on the crossing into
+    /// `reachedTheEnd` and comes down as soon as it has been said, so a reader who scrolls
+    /// away and comes back to the foot of the list finds the marker there and is not told
+    /// again something they were told the first time.
+    private(set) var announcingTheEnd = false
     /// Why the stored timeline could not be read for the page under the reader, where that is
     /// what happened, and nothing where the last reach read one fine.
     ///
@@ -150,7 +172,15 @@ final class FeedModel {
         // the one stretch paging never revisits, and a post pulled down moments after it went
         // up sits exactly there. Leaving the queue to the reach-down alone would have a reader
         // who never scrolls collect suspicions and answer none of them.
-        if mode == .timeline { drop(await loader.reconcile()) }
+        if mode == .timeline {
+            drop(await loader.reconcile())
+            // Asked again here because the answer can change without a reach: the chosen list
+            // is what it is asked of, so a source added while the reader sat at the end is a
+            // server nobody has asked anything, and the marker must come down. Not announced —
+            // a refresh is about the top of the list, and arriving at the bottom is something
+            // the reader does rather than something that happens to them.
+            await noteTheEnd(of: servers)
+        }
     }
 
     /// What a load said about the servers, whichever kind of load it was: the standing reason
@@ -205,6 +235,27 @@ final class FeedModel {
             reachWaiting = false
             await reach(servers)
         } while reachWaiting
+        // After the whole reach and not after each round, because a round is not the reader's
+        // unit: the eight of a cold start are one journey to the bottom, and the answer is only
+        // worth having once they have stopped.
+        await noteTheEnd(of: servers, announcing: true)
+    }
+
+    /// Whether the reading is over, asked of the loader — and, where this reach is what brought
+    /// it about, the moment raised for somebody to say.
+    ///
+    /// The crossing is what announces, never the state: a reader already at the end who reaches
+    /// again finds the same answer and is told nothing, which is the whole difference between
+    /// the marker and the toast.
+    private func noteTheEnd(of servers: [Server], announcing: Bool = false) async {
+        let reached = await loader.reachedTheEnd(of: servers)
+        if announcing, reached, !reachedTheEnd { announcingTheEnd = true }
+        reachedTheEnd = reached
+    }
+
+    /// Said. The moment is over; the place stays.
+    func saidTheEnd() {
+        announcingTheEnd = false
     }
 
     /// One reach: the store's page where it has one, and the servers either way.
