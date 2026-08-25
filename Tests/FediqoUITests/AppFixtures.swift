@@ -12,9 +12,15 @@ let enter = KeyEquivalent.return.character
 let up = KeyEquivalent.upArrow.character
 let down = KeyEquivalent.downArrow.character
 
-/// The three pages that are one screen each. Every rule about a page with no feed is asked
-/// of all of them, so the list is written once rather than at each of the tests.
-let pagesWithoutTabs: [RailItem] = [.kept, .statistics, .settings]
+/// The three pages that have no timeline on them. Every rule about a page with no feed is
+/// asked of all of them, so the list is written once rather than at each of the tests.
+let pagesWithoutFeeds: [RailItem] = [.kept, .statistics, .settings]
+
+/// The one page with no sub-categories, and so the one place `Tab` still belongs to the focus
+/// system. It was three of them until Statistics and Settings got tabs of their own; keeping
+/// the two lists apart is what stops "no feed" and "no tabs" being confused for each other
+/// again.
+let pagesWithoutTabs: [RailItem] = [.kept]
 
 /// A place of its own to write preferences into, so a test says the same thing on every
 /// machine rather than whatever this one was last left set to.

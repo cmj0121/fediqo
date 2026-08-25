@@ -2,9 +2,13 @@ import SwiftUI
 import FediqoCore
 
 /// What Fediqo is keeping for you, and what it has taken from other people's servers to get
-/// it. Four groups, and each one says what kind of number it is showing: the store is
-/// counted exactly, the split between sources is an estimate, and the requests are counted
-/// from a moment the screen names rather than from the beginning of time.
+/// it. Two tabs over four groups, and each group says what kind of number it is showing: the
+/// store is counted exactly, the split between sources is an estimate, and the requests are
+/// counted from a moment the screen names rather than from the beginning of time.
+///
+/// How the numbers are counted goes under Network rather than beside Storage, because two of
+/// the three things it explains are requests and the third is named in the same breath. A note
+/// follows what it is about.
 ///
 /// The screen reads the store and the running app. It asks nobody anything.
 struct StatisticsView: View {
@@ -15,22 +19,43 @@ struct StatisticsView: View {
     @State private var failed = false
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                Text(t("stats.title")).fediqoFont(20, weight: .semibold)
-
-                section(t("stats.stored")) { stored }
-                section(t("stats.disk")) { disk }
-                section(t("stats.requests")) { requests }
-                section(t("stats.counting")) { counting }
+        VStack(spacing: 0) {
+            header
+            Hairline()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    groups(of: app.statisticsTab)
+                }
+                .frame(maxWidth: 620, alignment: .leading)
+                .padding(22)
             }
-            .frame(maxWidth: 620, alignment: .leading)
-            .padding(22)
+            .frame(maxWidth: .infinity)
         }
-        .frame(maxWidth: .infinity)
         // The counting happens off this actor; all the screen does here is wait for it, and
         // it has already drawn something to wait behind.
         .task { await load() }
+    }
+
+    private var header: some View {
+        @Bindable var app = app
+        return PageHeader(titleKey: app.railItem.titleKey,
+                          subtitleKey: "\(app.statisticsTab.rawValue).subtitle") {
+            SegmentedChoice(StatisticsTab.allCases, keyPrefix: "tab", selection: $app.statisticsTab)
+        }
+    }
+
+    /// Both tabs are read from the same two loads, so switching between them shows the other
+    /// half of what is already here rather than counting anything again.
+    @ViewBuilder
+    private func groups(of tab: StatisticsTab) -> some View {
+        switch tab {
+        case .storage:
+            section(t("stats.stored")) { stored }
+            section(t("stats.disk")) { disk }
+        case .network:
+            section(t("stats.requests")) { requests }
+            section(t("stats.counting")) { counting }
+        }
     }
 
     private func load() async {

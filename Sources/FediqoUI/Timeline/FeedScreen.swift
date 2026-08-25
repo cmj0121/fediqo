@@ -14,10 +14,6 @@ struct FeedScreen: View {
     let mode: FeedMode
 
     @Environment(AppState.self) private var app
-    /// Whether there is one column's worth of room here rather than two. The shell decides
-    /// it — it is the one place that knows what the platform will say — and this reads the
-    /// answer rather than asking the platform a second time.
-    @Environment(\.fediqoCompact) private var compact
     /// Whether the reader has gone far enough down that going back up is a journey. The
     /// button to do it in one move only exists while that is true — an arrow pointing at
     /// where you already are is a button that does nothing.
@@ -99,60 +95,16 @@ struct FeedScreen: View {
 
     // MARK: - Header
 
+    /// The heading names the page, and the tabs beside it are the page's — so both come from
+    /// `app.railItem` rather than from the feed. A tab does not know its own page.
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(t(app.railItem.titleKey)).fediqoFont(20, weight: .semibold).lineLimit(1)
-                if model.loading { ProgressView().controlSize(.small) }
-                Spacer(minLength: 4)
-                controls
-            }
-            tabsAndSubtitle
-        }
-        .padding(.horizontal, 14)
-        .padding(.top, 14)
-        .padding(.bottom, 10)
-        .background(HeaderBackground())
-    }
-
-    /// Which tab is showing, and the line saying what that tab is.
-    ///
-    /// Given a window's width they sit on one line, the control no wider than its two words
-    /// need. A phone has no such width: the control there would take what it was given and
-    /// leave the description a couple of characters, so the two go one above the other and
-    /// the control spreads across the row, which is how a segmented control looks on iOS
-    /// anyway.
-    @ViewBuilder
-    private var tabsAndSubtitle: some View {
-        if compact {
-            tabs
-            subtitle
-        } else {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                tabs.fixedSize()
-                subtitle
-            }
-        }
-    }
-
-    /// The page's sub-categories, in the same segmented control the preferences use — one
-    /// row of named choices where exactly one is true, which is what this is. The two feeds
-    /// are the two tabs, in the order `FeedMode` lists them, which is the order the rest of
-    /// the app rotates through them in.
-    private var tabs: some View {
         @Bindable var app = app
-        return SegmentedChoice(FeedMode.allCases, keyPrefix: "tab", selection: $app.feedTab)
-    }
-
-    /// Beside the control it is given whatever is left of the row, so it is held to two
-    /// lines rather than pushing the header down. On its own row it has the width to say the
-    /// whole sentence, and a sentence cut off mid-word reads as a fault rather than a note.
-    private var subtitle: some View {
-        Text(t(subtitleKey))
-            .fediqoFont(11)
-            .foregroundStyle(.secondary)
-            .lineLimit(compact ? nil : 2)
-            .fixedSize(horizontal: false, vertical: true)
+        return PageHeader(titleKey: app.railItem.titleKey, subtitleKey: subtitleKey,
+                          loading: model.loading) {
+            SegmentedChoice(FeedMode.allCases, keyPrefix: "tab", selection: $app.feedTab)
+        } controls: {
+            controls
+        }
     }
 
     @ViewBuilder
@@ -466,14 +418,6 @@ private struct EndToast: View {
                             radius: 10, y: 4)
             }
             .accessibilityHidden(true)
-    }
-}
-
-private struct HeaderBackground: View {
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        Palette.raised(colorScheme).opacity(0.6)
     }
 }
 

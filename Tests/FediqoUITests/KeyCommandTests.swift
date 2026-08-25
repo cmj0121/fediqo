@@ -202,10 +202,58 @@ struct CommandTests {
     func tabDoesNothingWithoutTabs(page: RailItem) {
         let app = freshApp("tab-without-tabs")
         app.railItem = page
-        let was = app.feedTab
+        let feed = app.feedTab
+        let statistics = app.statisticsTab
+        let settings = app.settingsTab
         #expect(app.perform(.nextTab) == false)
         #expect(app.perform(.previousTab) == false)
-        #expect(app.feedTab == was)
+        // Not one of the other pages' tabs moved either. A rotation that answered `false`
+        // and still wrote somewhere would be the worst of both.
+        #expect(app.feedTab == feed)
+        #expect(app.statisticsTab == statistics)
+        #expect(app.settingsTab == settings)
+    }
+
+    @Test("Tab goes round the two Statistics tabs, both ways, wrapping at both ends")
+    func statisticsTabsRotate() {
+        let app = freshApp("statistics-tabs-rotate")
+        app.railItem = .statistics
+        app.statisticsTab = .storage
+        #expect(app.perform(.nextTab))
+        #expect(app.statisticsTab == .network)
+        #expect(app.perform(.nextTab))
+        #expect(app.statisticsTab == .storage)
+        #expect(app.perform(.previousTab))
+        #expect(app.statisticsTab == .network)
+    }
+
+    @Test("Tab goes round the three Settings tabs, both ways, wrapping at both ends")
+    func settingsTabsRotate() {
+        let app = freshApp("settings-tabs-rotate")
+        app.railItem = .settings
+        app.settingsTab = .appearance
+        #expect(app.perform(.nextTab))
+        #expect(app.settingsTab == .sources)
+        #expect(app.perform(.nextTab))
+        #expect(app.settingsTab == .keyboard)
+        #expect(app.perform(.nextTab))
+        #expect(app.settingsTab == .appearance)
+        #expect(app.perform(.previousTab))
+        #expect(app.settingsTab == .keyboard)
+    }
+
+    /// Each page keeps its own place. Rotating the tabs of one page is not a fact about any
+    /// other, so leaving a page and coming back is arriving where you were.
+    @Test("A page's tab is its own, and going somewhere else does not move it")
+    func tabsAreKeptPerPage() {
+        let app = freshApp("tabs-kept-per-page")
+        app.railItem = .statistics
+        #expect(app.perform(.nextTab))
+        app.railItem = .settings
+        #expect(app.perform(.nextTab))
+        #expect(app.statisticsTab == .network)
+        #expect(app.settingsTab == .sources)
+        #expect(app.feedTab == .timeline)
     }
 
     @Test("R cycles Off → 15s → 30s → 60s → 5min → Off")
@@ -236,7 +284,7 @@ struct CommandTests {
         #expect(app.railItem == .statistics)
     }
 
-    @Test("Reading again asks for nothing on a page that has no feed", arguments: pagesWithoutTabs)
+    @Test("Reading again asks for nothing on a page that has no feed", arguments: pagesWithoutFeeds)
     func refreshNeedsAFeed(page: RailItem) {
         let app = freshApp("refresh-needs-a-feed")
         app.railItem = page
@@ -247,7 +295,7 @@ struct CommandTests {
     /// nobody who wanted a bare `r` and beep, on a page where the app itself says the key
     /// does nothing.
     @Test("A letter we understand is ours even when it had nothing to do",
-          arguments: pagesWithoutTabs)
+          arguments: pagesWithoutFeeds)
     func recognisedKeysAreKept(page: RailItem) {
         let app = freshApp("recognised-keys-kept")
         app.railItem = page
@@ -256,9 +304,9 @@ struct CommandTests {
         #expect(app.railItem == page)
     }
 
-    /// The whole point of the bare key being the smaller move. Only the Timeline has tabs, so
-    /// on the other three `Tab` has nothing to do and goes back to AppKit — which is how the
-    /// pickers and buttons in Settings stay reachable without a pointer.
+    /// The whole point of the bare key being the smaller move. Kept is the one page with
+    /// nothing to rotate, so there `Tab` goes back to AppKit — which is how a reader without a
+    /// pointer still reaches whatever that page grows.
     @Test("On a page with no tabs, Tab is handed back to the focus system",
           arguments: pagesWithoutTabs)
     func tabIsHandedBackWithoutTabs(page: RailItem) {
