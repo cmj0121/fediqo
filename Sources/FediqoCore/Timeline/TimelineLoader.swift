@@ -47,11 +47,12 @@ public struct TimelineResult: Sendable {
     /// two ride alongside posts that did arrive, so a caller reading a server's fate reads
     /// `posts` for whether anything came and `failures` for whether anything needs attention.
     public let failures: [String: SourceFailure]
-    /// The servers this load did not ask at all, by `Server.endpoint`, because they were
-    /// still inside a wait. They are not failing now and they are not answering either, so
-    /// they are in neither `posts` nor `failures` — and a caller that draws a server's fate
-    /// needs to be told the difference between a server that had nothing to say and one
-    /// that was never asked.
+    /// The servers this load did not ask at all, by `Server.endpoint`. A refresh leaves out
+    /// whoever is still inside a wait; a reach for the bottom leaves out those and whoever
+    /// has run out of history or has a page still in flight. They are not failing now and
+    /// they are not answering either, so they are in neither `posts` nor `failures` — and a
+    /// caller that draws a server's fate needs to be told the difference between a server
+    /// that had nothing to say and one that was never asked.
     public let skipped: Set<String>
 
     public init(posts: [Post], failures: [String: SourceFailure], skipped: Set<String> = []) {
@@ -90,9 +91,18 @@ public struct TimelineResult: Sendable {
     ///
     /// Asking nobody is different from asking and being told nothing: with no sources left
     /// there is nothing whose rows these would be, so they go.
+    ///
+    /// And a refresh speaks for the top of the timeline and for nothing under it — it asked
+    /// every server for its newest page, which is what a refresh is. So whatever the reader
+    /// had already read down to below that page stays where it is: replacing the whole list
+    /// would snap it back to one page under them every time the clock ticked, undoing the
+    /// reading rather than adding to it.
     public func posts(carrying shown: [Post], asked servers: [Server]) -> [Post] {
-        if !posts.isEmpty || servers.isEmpty { return posts }
-        return shown
+        guard let cut = posts.last else { return servers.isEmpty ? posts : shown }
+        let covered = Set(posts.map(\.mergeKey))
+        return posts + shown.filter {
+            Post.isOlder($0, than: cut) && !covered.contains($0.mergeKey)
+        }
     }
 }
 
@@ -115,6 +125,25 @@ public struct TimelineLoader: Sendable {
     /// How long each server is to be left alone. One per loader, so a timeline that could
     /// not be had says nothing about the same server's trending list.
     private let backoff = ServerBackoff()
+    /// Where each server has got to reading backwards. One per loader, beside the backoff and
+    /// for the same reason: the two feeds page independently, and trending does not page at all.
+    private let paging = ServerPaging()
+    /// The posts a page should have contained and did not, waiting to be asked about. Beside
+    /// the other two and for their reasons; only a timeline can leave a post out, so trending
+    /// never puts anything here.
+    private let reconciler = Reconciler()
+
+    /// How many suspects one pass is allowed to ask about, and why there is a number at all:
+    /// a filter turned on can make a whole page absent at once, and forty single-post requests
+    /// fired at other people's servers because a reader changed a setting is not a reasonable
+    /// thing to do to them.
+    ///
+    /// Eight, because that keeps a pass the same order of magnitude as the page fetch it rides
+    /// beside — a chosen list is a handful of servers, so reaching the bottom already costs a
+    /// handful of requests — while still working a suspected page of forty off in five passes,
+    /// which is a few seconds of reading. Smaller would leave a real backlog crawling behind
+    /// the reader; larger would turn one changed setting into a burst.
+    static let confirmationsPerPass = 8
 
     /// With a `store`, what each server hands over is kept before it is merged; without one,
     /// nothing is remembered between loads — and nobody is signed in either, so a loader
@@ -142,72 +171,430 @@ public struct TimelineLoader: Sendable {
         }
     }
 
+    /// The store's page before `post` — what the reader's next page down is already here,
+    /// before anybody's server is asked for it — and, separately, what went wrong. The shape
+    /// a read from a server comes back in, because it is the same kind of answer.
+    ///
+    /// Three answers and not two. A page. Nothing older, which is the store spent and the
+    /// reader's cue to go to the network in earnest. And a store that would not say, which is
+    /// neither of those: it is our own database having a bad moment, and reading it as the
+    /// second buys a burst of somebody else's bandwidth with it. A `try?` at the call site is
+    /// exactly what collapses those two, so the difference is kept here instead.
+    ///
+    /// A page the size a server is asked for, so the list grows by the same step whichever
+    /// answered it and a reader cannot tell from the length of the page where it came from.
+    /// The cursor is a post, the way it is for a server, so the two cannot disagree about
+    /// where the last page ended. Nothing without a store, which is what a preview has.
+    public func storedOlder(than post: Post) async -> (posts: [Post], failure: SourceFailure?) {
+        guard let store else { return ([], nil) }
+        do {
+            return (try await store.timeline(limit: limit, before: post), nil)
+        } catch {
+            // What SQLite said, in full, is for the log; the caller gets the reason to show.
+            LocalStore.log.error("""
+                reading the page before \(post.mergeKey, privacy: .public) failed: \
+                \(String(describing: error), privacy: .public)
+                """)
+            let reason = (error as? DatabaseError)?.message ?? error.localizedDescription
+            return ([], .store(reason))
+        }
+    }
+
     /// Every server asked at once, merged into one stream in one order.
     ///
     /// `refresh` says who asked, and the default is the reader — so a caller that has no
     /// clock asks everyone, which is what every caller did before there was one.
     public func load(servers: [Server], mode: FeedMode,
                      refresh: Refresh = .manual, now: Date = Date()) async -> TimelineResult {
-        var failures: [String: SourceFailure] = [:]
-        var collected: [[Post]] = []
         // A server still inside its wait is not asked, and is not reported either: it is not
         // failing now, it is being left alone. What it said last time is not lost with it —
         // it comes back named in `skipped`, so a screen can keep showing the reason rather
         // than blinking it off and on as the server enters and leaves its wait.
         let (asked, skipped) = await askable(servers, refresh: refresh, now: now)
-        // Once per load, not once per server: the rows and the Keychain are asked before
-        // anything is asked of the network, and only about the servers being read.
-        let tokens = await tokensByEndpoint(for: asked)
-        // Which servers a request actually went to, so the bookkeeping below judges only
-        // the ones that were given a chance to answer.
-        var reached: Set<String> = []
-
-        // Each task answers with what arrived and, separately, what went wrong — a store that
-        // would not keep the posts is a failure worth reporting, but the posts still arrived.
-        await withTaskGroup(of: (endpoint: String, answer: Answer).self) { group in
-            for server in asked {
-                guard let client = registry.client(for: server.socialProtocol) else {
-                    // Nothing was sent anywhere, so there is nothing to back off from: a
-                    // protocol this build cannot read will not start speaking it in a minute.
-                    failures[server.endpoint] = .unsupported(server.socialProtocol)
-                    continue
-                }
-                let token = tokens[server.endpoint]
-                reached.insert(server.endpoint)
-                group.addTask {
-                    (server.endpoint, await ask(client, server, mode: mode, token: token))
-                }
-            }
-            for await (endpoint, answer) in group {
-                if !answer.posts.isEmpty { collected.append(answer.posts) }
-                if let failure = answer.failure { failures[endpoint] = failure }
-            }
-        }
-        await record(failures, from: reached, refresh: refresh, now: now)
+        // No cursors: a refresh asks everyone for their newest page, which is what it is.
+        let round = await fanOut(asked.map { ($0, nil) }, mode: mode)
+        await record(round.failures, from: round.reached, refresh: refresh, now: now)
 
         let posts = switch mode {
-        case .timeline: collected.flatMap { $0 }.merged()
-        case .trending: Self.mergedByRank(collected)
+        case .timeline: round.collected.flatMap { $0 }.merged()
+        case .trending: Self.mergedByRank(round.collected)
         }
-        return TimelineResult(posts: posts, failures: failures, skipped: skipped)
+        return TimelineResult(posts: posts, failures: round.failures, skipped: skipped)
+    }
+
+    /// Every server asked at once for the page before what it last handed over, merged into
+    /// one stream the way `load` merges it.
+    ///
+    /// The counterpart to `load` and a different question: `load` asks everyone for the newest
+    /// page, this asks each server for what came before its own last post. Only a timeline has
+    /// one, so there is no `mode` here — a trending list is a snapshot a server curated, and
+    /// what came before it means nothing (see `SourceClient.trending`).
+    ///
+    /// Three kinds of server go unasked, and they are three different facts. One that has said
+    /// it has nothing older has reached its end; one whose page is still out is being waited
+    /// for, however hard the reader scrolls; one inside its wait is being left alone. The rest
+    /// carry on without them — and all three come back in `skipped`, because whichever of the
+    /// three it was, this round asked them nothing and so has nothing to say about them.
+    ///
+    /// Whether that was the last page anyone had is `reachedTheEnd(of:)`'s to say, because it
+    /// is a standing fact about the servers rather than something this page brought back.
+    ///
+    /// `every` is how long a server that gives nothing here is left alone before it is asked
+    /// for another page — the wait doubles and is forgiven exactly as it is on a refresh.
+    public func loadOlder(servers: [Server], every: Duration = .seconds(30),
+                          now: Date = Date()) async -> TimelineResult {
+        // Unlike a refresh, nobody here is saying "ask anyway". Reaching the bottom is the
+        // scroll's doing, and a scroll is as tireless as a clock, so a server inside its wait
+        // is left alone whoever's finger started this — which is what `.automatic` means.
+        let (notWaiting, _) = await askable(servers, refresh: .automatic(every: every), now: now)
+        // Cold start — the store holds posts but nobody has asked a server for a page yet, so
+        // every cursor here is nil and the first page each server gives is its newest. That
+        // page sits above the foot the reader has read down to, not below it, and two things
+        // follow from that.
+        //
+        // The overlap is nothing: `mergeKey` collapses a post the store already had, the same
+        // fold two servers carrying one post go through.
+        //
+        // The hole is real: between the oldest post in that first page and the foot of the
+        // store there is a stretch this page does not reach. It is left open knowingly.
+        // Closing it would mean seeding a cursor from the store, which means naming the oldest
+        // post *this server* handed over — and the store does not know that. `posts.source_url`
+        // is only the first server to hand a post over, so the foot of a store page is nobody's
+        // cursor but the merged timeline's. Guessing it would skip whatever that server holds
+        // in the stretch, which is a hole that never closes. This one closes by itself: each
+        // cursor walks down its own server's thread of time, so the next reach for the bottom
+        // asks from where this page ended, and the one after that from where that one ended.
+        // The cost is round trips that append nothing the reader had not already read.
+        // The whole chosen list, before anyone is claimed: what is remembered about a server
+        // nobody reads any more goes, so one dropped and added back inside a run is asked
+        // again rather than passed over as spent (decision 9).
+        await paging.forget(everyoneBut: servers)
+        let claimed = await paging.claim(notWaiting)
+        // Everyone this round did not ask, whichever of the three reasons kept them out of it —
+        // which is why it is taken from the chosen list against what was claimed rather than
+        // from the wait alone. A spent server and one whose page is still out went unasked as
+        // surely as one inside its wait, and a round that leaves them out of `skipped` as well
+        // as out of `failures` is a round claiming it judged them and found nothing wrong.
+        // `failures(carrying:of:)` would then strike their standing reason off the screen —
+        // and `.tokenRejected` reaches exactly here, since it counts as having arrived, starts
+        // no wait, and so is the one reason a server carries all the way to running out.
+        let unasked = Set(servers.map(\.endpoint)).subtracting(claimed.map(\.server.endpoint))
+        // Every claim is given back here and nowhere else. Silence says nothing about where a
+        // server had got to, so its cursor stands and it is not counted as having run out;
+        // anything that arrived — posts, or posts the store would not keep — moves the cursor
+        // to that page's last post, and ends the server where the page came back empty.
+        let round = await fanOut(claimed, mode: .timeline) { endpoint, answer in
+            if let failure = answer.failure, !failure.arrivedAnyway {
+                await paging.gaveNothing(endpoint)
+            } else {
+                await paging.gave(answer.posts, endpoint)
+            }
+        }
+        await record(round.failures, from: round.reached,
+                     refresh: .automatic(every: every), now: now)
+
+        return TimelineResult(posts: round.collected.flatMap { $0 }.merged(),
+                              failures: round.failures, skipped: unasked)
+    }
+
+    /// Every one of `servers` has said it has nothing older, so there is nothing left to reach
+    /// for. The one thing on which a screen may say the reading is over — and a standing fact
+    /// about the servers rather than a property of any one page, which is why it is asked for
+    /// here rather than carried back by `loadOlder`.
+    public func reachedTheEnd(of servers: [Server]) async -> Bool {
+        await paging.reachedTheEnd(of: servers)
+    }
+
+    /// One bounded pass at the suspects: posts a page should have contained and did not, each
+    /// asked about by name — of the server whose word on it is final, never of whoever handed
+    /// it over, because a server that has stopped carrying somebody else's post has said
+    /// nothing about whether that post is still there. A relay's silence is not evidence.
+    ///
+    /// What an authority answers is the only thing that writes anything. It will not hand the
+    /// post over any more, and `deleted_at` is set; it will, and the suspicion is dropped.
+    /// Anything that is not an answer — offline, a 5xx, a timeout — decides nothing at all:
+    /// the post stays suspected and is asked about again another time, because "we could not
+    /// reach them" and "we checked" are different facts and only one of them is true.
+    ///
+    /// **What `deleted_at` then means.** Not "the author deleted it" — only that the authority
+    /// will not hand the post over any more. The measurement behind reading 404 and 410 as one
+    /// answer is written out once, on `SourceClient.stillHas`, and for the reader in
+    /// `docs/data-store.md`.
+    ///
+    /// The asking is anonymous, which is part of why the mark claims so little: the authority
+    /// is usually not a server anybody here is signed in to — it is wherever the post was
+    /// written — so there is generally no credential to send it.
+    ///
+    /// At most `confirmationsPerPass` are asked about, and an authority inside its wait is not
+    /// asked at all — the same wait a timeline page respects, kept in the same place. Whatever
+    /// is left over waits for the next pass; nothing unasked is counted as checked.
+    ///
+    /// Hands back the merge keys of the posts confirmed gone, so a screen showing one can stop.
+    @discardableResult
+    public func reconcile(every: Duration = .seconds(30), now: Date = Date()) async -> Set<String> {
+        let blocked = await backoff.blocked(at: now)
+        let asking = await reconciler.take(Self.confirmationsPerPass, avoiding: blocked)
+        guard !asking.isEmpty else { return [] }
+
+        var failures: [String: SourceFailure] = [:]
+        // The authorities that said something, whatever it was. Kept apart from `failures`
+        // because one authority can be asked about several posts at once and answer for only
+        // some of them, and having answered for any it is not silent.
+        var answered: Set<String> = []
+        // The merge keys the authority will not hand over any more, waiting to be written.
+        var gone: [String] = []
+        // What this pass learned about each post it asked about — see `Reconciler.Verdict`.
+        // Every subject taken gets an entry, so the queue can tell apart the ones it may
+        // close from the ones it must hand back.
+        var verdicts: [String: Reconciler.Verdict] = [:]
+
+        await withTaskGroup(of: (PostAuthority, Result<Bool, SourceFailure>).self) { group in
+            for subject in asking {
+                guard let client = registry.client(for: subject.post.socialProtocol) else {
+                    // Nothing in this build can ever answer for it — and it will not start
+                    // speaking that protocol in a minute, so this is not a question worth
+                    // keeping. Nothing was sent, so no server is judged for it either.
+                    verdicts[subject.post.mergeKey] = .unanswerable
+                    continue
+                }
+                group.addTask { (subject, await Self.stillThere(client, subject)) }
+            }
+            for await (subject, verdict) in group {
+                switch verdict {
+                case .success(let stillThere):
+                    answered.insert(subject.authorityURL)
+                    // A post found gone is only settled once the mark is actually written, so
+                    // it starts here as nothing learned and is upgraded below.
+                    verdicts[subject.post.mergeKey] = stillThere ? .settled : .unknown
+                    if !stillThere { gone.append(subject.post.mergeKey) }
+                case .failure(.notItsPost):
+                    // The client could not name this post on that server, so nothing was
+                    // sent: the authority has not been asked anything, and so is recorded
+                    // nowhere here — no answer, no failure, no wait. That is decision 8's
+                    // rule, that our own wiring never reaches anybody wearing a server's
+                    // fault. The question is dropped for good rather than left to spend a
+                    // slot of the bound on every pass for the rest of the run.
+                    verdicts[subject.post.mergeKey] = .unanswerable
+                case .failure(.needsSignIn):
+                    // The server answered at once and declined to discuss this post with a
+                    // stranger. That is an answer, so it starts no wait — and it decides
+                    // nothing about the post, which is asked about again another time.
+                    //
+                    // Counting it as silence would be actively harmful rather than merely
+                    // wrong. `arrivedAnyway` calls `.needsSignIn` a non-arrival because for a
+                    // timeline read it means no posts came; here it means the opposite. And
+                    // the wait is keyed by endpoint and shared with the chosen servers, so an
+                    // anonymous probe being refused would put a server's own signed-in
+                    // timeline into a wait it never earned.
+                    //
+                    // It decides nothing about the post, so the post is asked about again —
+                    // but not for ever. A standing refusal is a standing answer, and after
+                    // `Reconciler.refusalsBeforeSettingAside` of them the question is set
+                    // aside so that a handful of private posts cannot hold slots the bound
+                    // was meant to spend on suspects that can actually be settled.
+                    answered.insert(subject.authorityURL)
+                    verdicts[subject.post.mergeKey] = .refused
+                case .failure(let failure):
+                    failures[subject.authorityURL] = failure
+                    verdicts[subject.post.mergeKey] = .unknown
+                }
+            }
+        }
+        // An authority that answered for any of its posts is not silent about the rest, so its
+        // failures are struck out rather than allowed to start a wait for a server that is
+        // plainly talking to us. What is left is silence, and everything asked at all is the
+        // two together — there is no third set to keep in step.
+        for endpoint in answered { failures[endpoint] = nil }
+
+        var marked: Set<String> = []
+        for key in gone {
+            do {
+                try await store?.markDeleted(mergeKey: key)
+                marked.insert(key)
+                // The verdict is written here because this is where it becomes true: a post
+                // found gone is settled by the mark going down, not by the answer that
+                // prompted it, which is why it started as `.unknown` above.
+                verdicts[key] = .settled
+            } catch {
+                // The authority answered and its answer stands; only the writing of it failed.
+                // So the suspicion is kept, and the post is asked about again another time.
+                LocalStore.log.error("""
+                    marking \(key, privacy: .public) deleted failed: \
+                    \(String(describing: error), privacy: .public)
+                    """)
+            }
+        }
+
+        await reconciler.settle(verdicts)
+        await record(failures, from: answered.union(failures.keys),
+                     refresh: .automatic(every: every), now: now)
+        return marked
+    }
+
+    /// What a page that came back did not contain, of the posts the store holds from that
+    /// server inside the stretch the page covered.
+    ///
+    /// The stretch is what arrived, not what was asked for. A page of forty that came back
+    /// with three covers those three and no more: a server takes blocked accounts and filtered
+    /// posts out of a range it has already chosen, so the rest of the range it was asked for
+    /// is not this page's to speak for.
+    ///
+    /// **An empty page covers no stretch at all**, and so leaves nothing out. It is an end —
+    /// the server saying it has nothing older — and reading it as a page that omitted
+    /// everything would suspect the entire timeline every time a reader reached the bottom.
+    ///
+    /// Every timeline page runs through here, a refresh's as much as a reach-down's: which of
+    /// them asked says nothing about what the page is evidence of. The volume stays small by
+    /// construction rather than by policy — only posts inside the returned page's own range
+    /// can be suspected, and a refresh's range is a narrow one.
+    ///
+    /// Nothing is written here, and nothing is asked. Absence raises a question; `reconcile`
+    /// is what asks it, and only an answer writes anything.
+    ///
+    /// The healthy page is the one this is written for, because it is nearly every page: the
+    /// server handed over everything the store had in the stretch, and there is nothing to
+    /// suspect. So the store is asked for names rather than posts, the diff is done on those,
+    /// and a post is built only for what the diff leaves standing — which on that page is
+    /// nothing at all, and used to be a page's worth of rows joined, tagged and thrown away.
+    private func suspectMissing(_ page: [Post], from endpoint: String) async {
+        guard let store, let first = page.first else { return }
+        // One pass for all three: the stretch the page covers, and the keys it covered it with.
+        var oldest = first.createdAt
+        var newest = first.createdAt
+        var handed: Set<String> = [first.mergeKey]
+        handed.reserveCapacity(page.count)
+        for post in page.dropFirst() {
+            if post.createdAt < oldest { oldest = post.createdAt }
+            if post.createdAt > newest { newest = post.createdAt }
+            handed.insert(post.mergeKey)
+        }
+        do {
+            let covered = try await store.postKeys(from: endpoint, postedIn: oldest...newest)
+            let missing = covered.filter { !handed.contains($0) }
+            guard !missing.isEmpty else { return }
+            await reconciler.suspect(try await store.posts(named: missing))
+        } catch {
+            // Not being able to read our own store says nothing about anybody's post, so it
+            // goes in the log and this page simply raises no questions.
+            LocalStore.log.error("""
+                reading \(endpoint, privacy: .public) back to reconcile it failed: \
+                \(String(describing: error), privacy: .public)
+                """)
+        }
+    }
+
+    /// One post asked about, and what came back. A failure is not `false`: the two are exactly
+    /// the difference between a server saying no and a server saying nothing.
+    private static func stillThere(_ client: any SourceClient,
+                                   _ subject: PostAuthority) async -> Result<Bool, SourceFailure> {
+        do {
+            return .success(try await client.stillHas(subject.post,
+                                                      host: LocalStore.host(of: subject.authorityURL),
+                                                      token: nil))
+        } catch {
+            return .failure(SourceFailure.of(error))
+        }
     }
 
     /// What one server handed over, and separately what went wrong — a store that would not
     /// keep the posts is a failure worth reporting, but the posts still arrived.
     private typealias Answer = (posts: [Post], failure: SourceFailure?)
 
-    /// How one server is asked: as `token`'s owner, and — where that is turned down — once
-    /// more as nobody. The whole of the retry policy is here, so the fan-out above only has
-    /// to name the servers and collect what each one answered.
-    private func ask(_ client: any SourceClient, _ server: Server, mode: FeedMode, token: String?) async -> Answer {
-        let signedIn = await read(client, server, mode: mode, token: token)
+    /// The fan-out both loads are made of: every target asked at once, as whoever is signed in
+    /// to it, and what each one answered collected in one place.
+    ///
+    /// A target is a server and the cursor to ask it from — nil throughout for a refresh,
+    /// which asks everyone for their newest page. `answered` is told what each one gave as it
+    /// gives it, which is where a paging load writes down where that server has got to; a
+    /// refresh has nothing to write down and passes nothing.
+    private func fanOut(
+        _ targets: [(server: Server, cursor: Post?)], mode: FeedMode,
+        answered: (String, Answer) async -> Void = { _, _ in }
+    ) async -> (collected: [[Post]], failures: [String: SourceFailure], reached: Set<String>) {
+        var failures: [String: SourceFailure] = [:]
+        var collected: [[Post]] = []
+        // Once per load, not once per server: the rows and the Keychain are asked before
+        // anything is asked of the network, and only about the servers being read.
+        let tokens = await tokensByEndpoint(for: targets.map(\.server))
+        // Which servers a request actually went to, so the bookkeeping above judges only
+        // the ones that were given a chance to answer.
+        var reached: Set<String> = []
+
+        // Each task answers with what arrived and, separately, what went wrong — a store that
+        // would not keep the posts is a failure worth reporting, but the posts still arrived.
+        await withTaskGroup(of: (endpoint: String, answer: Answer).self) { group in
+            for (server, cursor) in targets {
+                guard let client = registry.client(for: server.socialProtocol) else {
+                    // Nothing was sent anywhere, so there is nothing to back off from: a
+                    // protocol this build cannot read will not start speaking it in a minute.
+                    let unsupported = SourceFailure.unsupported(server.socialProtocol)
+                    failures[server.endpoint] = unsupported
+                    await answered(server.endpoint, ([], unsupported))
+                    continue
+                }
+                let token = tokens[server.endpoint]
+                reached.insert(server.endpoint)
+                group.addTask {
+                    (server.endpoint,
+                     await ask(client, server, mode: mode, token: token, before: cursor))
+                }
+            }
+            for await (endpoint, answer) in group {
+                if !answer.posts.isEmpty { collected.append(answer.posts) }
+                if let failure = answer.failure { failures[endpoint] = failure }
+                // A page is the same evidence whoever asked for it, so this is here rather
+                // than in `loadOlder`. A refresh's newest page covers the top of the timeline,
+                // which is exactly where a post pulled down moments after it went up sits —
+                // and it is the one stretch paging never revisits, because paging only ever
+                // walks away from it. Trending is not a stretch of time at all and cannot
+                // leave anything out of one, so it raises no questions.
+                if mode == .timeline { await suspectMissing(answer.posts, from: endpoint) }
+                await answered(endpoint, answer)
+            }
+        }
+        return (collected, failures, reached)
+    }
+
+    /// How one server is asked: for the page before `before` — its newest where that is nil —
+    /// as `token`'s owner, and where that is turned down once more as nobody. The whole of the
+    /// retry policy is here, so the fan-outs above only have to name the servers and collect
+    /// what each one answered.
+    private func ask(_ client: any SourceClient, _ server: Server, mode: FeedMode,
+                     token: String?, before: Post?) async -> Answer {
+        let answer = await attempt(client, server, mode: mode, token: token, before: before)
+        // A cursor a server cannot be asked about is our wiring, not their machine: per-server
+        // cursors mean a post from somewhere else can never become one, so this is the belt.
+        // It goes in the log, where a mistake of ours belongs; the bad cursor is dropped so it
+        // cannot be asked about twice; and the server is asked once more for its newest page,
+        // which puts a cursor of its own back in place. The reader is told nothing, and none
+        // of it counts towards a backoff — the server never spoke.
+        //
+        // Around the whole attempt rather than inside it: which of the two reads refused the
+        // cursor is a fact about the credential and says nothing about whose mistake this is,
+        // and the point of it being ours is that no wiring of ours ever reaches the reader
+        // looking like a server's fault. The retry is a fresh attempt for the same reason it
+        // is not a recursive `ask` — a cursor already dropped cannot be refused again.
+        guard case .notItsPost(let uri)? = answer.failure, before != nil else { return answer }
+        LocalStore.log.error("""
+            paging cursor \(uri, privacy: .public) is not a post of \
+            \(server.host, privacy: .public); asking for its newest page instead
+            """)
+        await paging.forget(server.endpoint)
+        return await attempt(client, server, mode: mode, token: token, before: nil)
+    }
+
+    /// The read itself, tried as `token`'s owner and once more as a stranger where the
+    /// credential is turned down — everything `ask` does but the belt around the cursor.
+    private func attempt(_ client: any SourceClient, _ server: Server, mode: FeedMode,
+                         token: String?, before: Post?) async -> Answer {
+        let signedIn = await read(client, server, mode: mode, token: token, before: before)
         // A token the server turned down is the account's problem, not the server's, so the
         // same read goes out once more as a stranger and the column shows whatever anyone
         // would see. What is reported stays `.tokenRejected`, so the screen marks the account
         // rather than the server — and stays one failure for this server on this load, so a
         // backoff counting failures per server never counts the retry as a second.
         guard case .tokenRejected? = signedIn.failure else { return signedIn }
-        let anonymous = await read(client, server, mode: mode, token: nil)
+        let anonymous = await read(client, server, mode: mode, token: nil, before: before)
         // A retry that read fine but would not store replaces `.tokenRejected` with `.store`,
         // and the account goes unmarked this round. That is the trade taken knowingly: one
         // host can only carry one reason, and the store failing is the newer news. It heals
@@ -217,18 +604,19 @@ public struct TimelineLoader: Sendable {
         return (anonymous.posts, signedIn.failure)
     }
 
-    /// One request to one server as `token`'s owner, and what it handed over kept.
-    private func read(_ client: any SourceClient, _ server: Server, mode: FeedMode, token: String?) async -> Answer {
+    /// One request to one server as `token`'s owner, and what it handed over kept. `before` is
+    /// that server's own cursor; a trending list has none and is never given one.
+    private func read(_ client: any SourceClient, _ server: Server, mode: FeedMode,
+                      token: String?, before: Post?) async -> Answer {
         let posts: [Post]
         do {
             posts = switch mode {
-            case .timeline: try await client.timeline(host: server.host, limit: limit, token: token)
+            case .timeline: try await client.timeline(host: server.host, limit: limit,
+                                                      before: before, token: token)
             case .trending: try await client.trending(host: server.host, limit: limit, token: token)
             }
-        } catch let failure as SourceFailure {
-            return ([], failure)
         } catch {
-            return ([], .transport(error.localizedDescription))
+            return ([], SourceFailure.of(error))
         }
         do {
             try await store?.save(posts, from: server)
@@ -291,8 +679,13 @@ public struct TimelineLoader: Sendable {
     }
 
     /// Several servers' trending lists as one: a post's rank is its index in its server's
-    /// list, a post on several lists takes its best rank and keeps every source, and the
-    /// rest of the order (newest first, then `mergeKey`) only breaks ties the servers did not.
+    /// list, a post on several lists takes its best rank and keeps every source, and where
+    /// the servers ranked two posts the same the timeline's own order breaks the tie.
+    ///
+    /// That tail is `Post.isOlder` and not a fourth spelling of it. Rank is this list's own
+    /// idea and nothing else has one; the order underneath it is the same order the store
+    /// reads a page back in and the same one a merged timeline is in, so it is asked for
+    /// rather than written out again.
     static func mergedByRank(_ lists: [[Post]]) -> [Post] {
         var ranks: [String: Int] = [:]
         for list in lists {
@@ -302,9 +695,7 @@ public struct TimelineLoader: Sendable {
         }
         return lists.flatMap { $0 }.merged(orderedBy: {
             let (a, b) = (ranks[$0.mergeKey]!, ranks[$1.mergeKey]!)
-            if a != b { return a < b }
-            if $0.createdAt != $1.createdAt { return $0.createdAt > $1.createdAt }
-            return $0.mergeKey < $1.mergeKey
+            return a == b ? Post.isOlder($1, than: $0) : a < b
         })
     }
 

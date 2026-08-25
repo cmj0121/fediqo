@@ -23,6 +23,11 @@ public enum SourceFailure: Error, Sendable, Equatable, LocalizedError {
     /// host means the anonymous read did arrive — the account is what needs attention, not
     /// the column.
     case tokenRejected(String)
+    /// The post handed over as "what came before this" is not one of this server's — its
+    /// address is not a status on it. Nothing was sent: a server cannot be asked for what
+    /// came before a post it never had, and asking without the cursor would hand back the
+    /// newest page and repeat what has just been read.
+    case notItsPost(String)
     /// The server answered outside 2xx; the body rides along for whoever can read a
     /// reason out of it.
     case http(Int, Data)
@@ -42,8 +47,16 @@ public enum SourceFailure: Error, Sendable, Equatable, LocalizedError {
     public var arrivedAnyway: Bool {
         switch self {
         case .tokenRejected, .store: true
-        case .badHost, .notThatKind, .unsupported, .needsSignIn, .signInFailed, .http, .transport: false
+        case .badHost, .notThatKind, .unsupported, .needsSignIn, .signInFailed, .notItsPost, .http, .transport: false
         }
+    }
+
+    /// Whatever went wrong, as one of these: a `SourceFailure` is already the answer, and
+    /// anything else — a URLSession error, a decoding failure — is the connection not working,
+    /// which is what `.transport` is. Every read funnels through here so that what counts as
+    /// silence, and therefore what a backoff is decided on, is settled in one place.
+    static func of(_ error: any Error) -> SourceFailure {
+        error as? SourceFailure ?? .transport(error.localizedDescription)
     }
 
     /// The last resort, for anywhere that is not a screen. Screens localise the case instead.
@@ -55,6 +68,7 @@ public enum SourceFailure: Error, Sendable, Equatable, LocalizedError {
         case .needsSignIn(let host): "\(host) does not hand this over without signing in."
         case .signInFailed(let reason): "Signing in failed: \(reason)"
         case .tokenRejected(let host): "\(host) no longer accepts the account signed in to it."
+        case .notItsPost(let uri): "\(uri) is not a status on this server, so there is nothing to read back from."
         case .http(let code, _): "The server answered \(code)."
         case .transport(let reason): reason
         case .store(let reason): "The local store could not keep what arrived: \(reason)"
@@ -73,10 +87,49 @@ public protocol SourceClient: Sendable {
 
     /// What the server publishes to anyone — asked for as `token`'s owner where there is one,
     /// which is still the public timeline and never substituted for by anything else.
-    func timeline(host: String, limit: Int, token: String?) async throws -> [Post]
+    ///
+    /// `before` is a post this server already handed over, and what comes back is the page
+    /// before it; `nil` asks for the newest page, which is all anyone asked for until now.
+    ///
+    /// It is a `Post` and not any server's paging token because a timeline is a line through
+    /// time, and "older than this one" is the one thing every protocol can say — each in its
+    /// own words, which stay inside its own client: Mastodon reads its number back out of the
+    /// address it handed over, and where Nostr arrives it will read `until` off the timestamp.
+    /// Nothing above this line ever learns those words. It is also the cursor the store reads
+    /// a page back from, so what came from the network and what came from disk are asked for
+    /// with the one thing, and cannot disagree about where the page ended.
+    func timeline(host: String, limit: Int, before: Post?, token: String?) async throws -> [Post]
 
     /// What the server says is trending. A separate thing, asked for separately.
+    ///
+    /// It takes no cursor, and that is deliberate rather than missing. A timeline is a thread
+    /// of time and "what came before" is a place on it; a trending list is a snapshot the
+    /// server curated, and asking for what came before it means nothing — the list is what the
+    /// server thinks is rising now, not the front of a queue with more of itself behind it.
+    /// A server may well hand out a second page of one, and there is still nothing there a
+    /// reader was reading towards. Do not add one back because `timeline` has it.
     func trending(host: String, limit: Int, token: String?) async throws -> [Post]
+
+    /// Whether this server will still hand over one post, asked for on its own.
+    ///
+    /// The post is the whole of the question, the way it is for `before:`: which of its
+    /// addresses names a number on this server, and how that number is spelled into a
+    /// request, stays inside the client that speaks the protocol. Nothing above this line
+    /// learns those words.
+    ///
+    /// **`false` is not "the author deleted it", and must never be read as one.** Measured
+    /// against mastodon.social on 2026-08-25: a status it will not give answers 404, not
+    /// 410 — and a 404 to a request nobody is signed in for covers a post whose visibility
+    /// has since narrowed, or an account that has blocked us, exactly as well as one that
+    /// was taken down. What is true of all three, and what the reader sees either way, is
+    /// that **this server will not hand the post over any more**. That is what `false` says,
+    /// and it is why a client must read both statuses the same way.
+    ///
+    /// Anything that is not an answer — offline, a 5xx, a timeout — is thrown rather than
+    /// folded into `false`, because silence decides nothing: a server that cannot be reached
+    /// has said no more about a post than a server nobody asked. A post this server has no
+    /// number for is `notItsPost`, thrown for the same reason.
+    func stillHas(_ post: Post, host: String, token: String?) async throws -> Bool
 }
 
 public struct InstanceInfo: Sendable, Hashable {

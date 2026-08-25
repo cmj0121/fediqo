@@ -75,22 +75,101 @@ public struct MastodonClient: SourceClient {
         throw SourceFailure.notThatKind(.mastodon, host)
     }
 
-    public func timeline(host: String, limit: Int, token: String?) async throws -> [Post] {
-        try await posts(host: host, path: "/api/v1/timelines/public", limit: limit, token: token)
+    public func timeline(host: String, limit: Int, before: Post?, token: String?) async throws -> [Post] {
+        try await posts(host: host, path: "/api/v1/timelines/public", limit: limit, before: before, token: token)
     }
 
     public func trending(host: String, limit: Int, token: String?) async throws -> [Post] {
-        try await posts(host: host, path: "/api/v1/trends/statuses", limit: limit, token: token)
+        try await posts(host: host, path: "/api/v1/trends/statuses", limit: limit, before: nil, token: token)
+    }
+
+    /// `GET /api/v1/statuses/:id`, asked of the server the post's own address names.
+    ///
+    /// 404 and 410 are read as the same answer, and that is the measurement rather than a
+    /// convenience: mastodon.social answers **404** for a status it will not give, so a
+    /// client that only listened for 410 would hear nothing at all. Neither says why, and
+    /// the protocol's contract is that `false` does not claim to know why — see `stillHas`.
+    ///
+    /// Every other status is thrown. A 401 or 403 in particular is a server refusing to
+    /// discuss the post, not a server saying it is gone, and reading one as `false` would
+    /// turn every private post into a deleted one.
+    public func stillHas(_ post: Post, host rawHost: String, token: String?) async throws -> Bool {
+        let host = Server.normalise(rawHost)
+        let id = try Self.canonicalStatusId(of: post, on: host)
+        do {
+            _ = try await get(host: host, path: "/api/v1/statuses/\(id)", query: [], token: token)
+            return true
+        } catch let failure as SourceFailure {
+            guard case .http(let status, _) = failure, status == 404 || status == 410 else { throw failure }
+            return false
+        }
     }
 
     // MARK: - Transport
 
-    private func posts(host rawHost: String, path: String, limit: Int, token: String?) async throws -> [Post] {
+    private func posts(host rawHost: String, path: String, limit: Int,
+                       before: Post?, token: String?) async throws -> [Post] {
         let host = Server.normalise(rawHost)
-        let data = try await get(host: host, path: path, query: [
-            URLQueryItem(name: "limit", value: String(limit)),
-        ], token: token)
+        var query = [URLQueryItem(name: "limit", value: String(limit))]
+        // `max_id` is Mastodon's word for "older than", and it is spoken here and nowhere
+        // else. A cursor this server cannot be asked about stops the request rather than
+        // quietly dropping the parameter, which would fetch the newest page all over again.
+        if let before {
+            query.append(URLQueryItem(name: "max_id", value: try Self.statusId(of: before, on: host)))
+        }
+        let data = try await get(host: host, path: path, query: query, token: token)
         return try Self.decoder.decode([MastodonDTO.Status].self, from: data).map { $0.asPost(from: host) }
+    }
+
+    /// The server's own number for a post, read back out of the address it handed over.
+    ///
+    /// `asPost` writes every row's `uri` as `https://<host>/api/v1/statuses/<id>` — a boost
+    /// included, which carries the reblog wrapper's own id and so pages like any other row —
+    /// so the number is already there and is not stored a second time to fall out of step.
+    ///
+    /// Anything else is not this server's status: a post that arrived by another protocol,
+    /// or one handed over by a different Mastodon server, whose numbers mean nothing here.
+    /// Either is refused, because a `max_id` from elsewhere is a page nobody asked for.
+    static func statusId(of post: Post, on host: String) throws -> String {
+        let parts = try Self.pathOn(host, of: post.uri)
+        guard parts.count == 5, parts[1] == "api", parts[2] == "v1", parts[3] == "statuses"
+        else { throw SourceFailure.notItsPost(post.uri) }
+        return parts[4]
+    }
+
+    /// The path of an address, where the address is one on `host` at all — and `notItsPost`
+    /// where it is not, which is the whole of what "this server has no number for that post"
+    /// means here.
+    ///
+    /// The two readers around it expect two different shapes and must go on doing so. What
+    /// they must not differ about is this: what counts as an address on this server, and what
+    /// a URL that is not one throws. Kept here so that hardening it — a port, a trailing
+    /// slash, an escaped path — cannot reach one of them and miss the other.
+    private static func pathOn(_ host: String, of uri: String?) throws -> [String] {
+        guard let uri, let url = URL(string: uri), url.host() == host
+        else { throw SourceFailure.notItsPost(uri ?? "") }
+        return url.pathComponents
+    }
+
+    /// The number the server that wrote a post gave it, read out of the post's own canonical
+    /// address rather than out of whatever a relay called it.
+    ///
+    /// Mastodon spells that address `https://<host>/users/<name>/statuses/<id>`, so the
+    /// number is the last part of it. `statusId(of:on:)` above reads a different address for
+    /// a different purpose — the local number of the row *this* server handed over, which is
+    /// what it can be asked to page from — and the two are deliberately not one function: a
+    /// paging cursor must be refused unless it is the server's own row, and mixing the
+    /// canonical address into that check would weaken it.
+    ///
+    /// Anything not of that shape is refused. Another ActivityPub server names its objects
+    /// however it likes, and its addresses carry no number this endpoint could be asked
+    /// about; guessing one would ask for a status that was never there and read the answer
+    /// as a post withdrawn — the one mistake this must never make.
+    static func canonicalStatusId(of post: Post, on host: String) throws -> String {
+        let parts = try Self.pathOn(host, of: post.originURI)
+        guard parts.count == 5, parts[1] == "users", parts[3] == "statuses"
+        else { throw SourceFailure.notItsPost(post.originURI ?? post.uri) }
+        return parts[4]
     }
 
     /// The one door to the network here. A token becomes the bearer header and nothing else
@@ -198,10 +277,8 @@ enum JSONTransport {
             let (data, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse else { return (data, 200) }
             return (data, http.statusCode)
-        } catch let failure as SourceFailure {
-            throw failure
         } catch {
-            throw SourceFailure.transport(error.localizedDescription)
+            throw SourceFailure.of(error)
         }
     }
 }

@@ -42,11 +42,14 @@ public struct Post: Sendable, Hashable, Identifiable {
     /// boosted it is part of the key. Merging those two would be exactly the silent
     /// collapse #5 forbids. The booster is named by id rather than display name, because
     /// names change and two people may share one.
-    public var mergeKey: String {
-        let identity = originURI ?? uri
-        guard let boostedById else { return identity }
-        return "boost:\(boostedById)|\(identity)"
-    }
+    ///
+    /// Worked out once, in `init`, and kept — because it is asked for constantly and computing
+    /// it allocates a string for every boost, every time. A merged page asks it of every post,
+    /// so does the sort under it, so does the reconciler's diff, and a screen asks it once per
+    /// row per pass of its body. Nothing it is made of can change after `init`: `uri`,
+    /// `originURI` and `boostedById` are all `let`, and `sources` — the one field that moves —
+    /// is no part of identity.
+    public let mergeKey: String
 
     public var id: String { mergeKey }
 
@@ -86,6 +89,8 @@ public struct Post: Sendable, Hashable, Identifiable {
         self.boostedBy = boostedBy
         self.boostedById = boostedById
         self.sources = sources
+        let identity = originURI ?? uri
+        self.mergeKey = boostedById.map { "boost:\($0)|\(identity)" } ?? identity
     }
 
     public mutating func addSource(_ host: String) {
@@ -107,15 +112,34 @@ public struct Post: Sendable, Hashable, Identifiable {
     }
 }
 
+public extension Post {
+    /// Further down the timeline than `other`: the one order a timeline is in. Newest first,
+    /// `mergeKey` breaking the ties, so that two posts sharing a millisecond still have a
+    /// below and an above and a page boundary can fall between them.
+    ///
+    /// Written once here because it is otherwise written everywhere — as the store's page cut
+    /// and its `ORDER BY` in `LocalStore.timeline(limit:before:)`, as the sort in `merged()`,
+    /// as the tail of `TimelineLoader.mergedByRank` under the ranks the servers gave, and
+    /// wherever a screen joins one page to the one before it. Every extra spelling is another
+    /// chance for two of them to disagree, and the post that falls between two spellings is
+    /// skipped without anybody being told.
+    static func isOlder(_ post: Post, than other: Post) -> Bool {
+        post.createdAt == other.createdAt ? post.mergeKey > other.mergeKey
+                                          : post.createdAt < other.createdAt
+    }
+}
+
 public extension Array where Element == Post {
     /// One post from several places is one row. Collapse on `mergeKey`, keep every source,
     /// and leave the order to the timestamp — nothing here ranks anything.
     ///
     /// `order` is not redundant with the sort: Swift's sort is not stable, and two posts
     /// sharing a timestamp are common. Without it, equal-time rows would shuffle between
-    /// refreshes for no reason a reader could see.
+    /// refreshes for no reason a reader could see — and the tiebreak `Post.isOlder` gives
+    /// them is what makes this the same order the store reads its pages back in, so a page
+    /// boundary falling inside one millisecond lands in the same place on both sides.
     func merged() -> [Post] {
-        merged(orderedBy: { $0.createdAt > $1.createdAt })
+        merged(orderedBy: { Post.isOlder($1, than: $0) })
     }
 
     /// The fold itself: collapse on `mergeKey`, keep every source, then sort by `areInOrder`

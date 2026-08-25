@@ -14,6 +14,24 @@ public enum PostStoreError: Error, Equatable, LocalizedError {
     }
 }
 
+/// A post the store holds, and the server whose word on it is final — `posts.authority_url`,
+/// derived once from the post's own canonical address and written when the row was.
+///
+/// The pair travels together because neither is any use alone for the one job it exists for:
+/// asking whether a post is still there. The post says what to ask about, and the authority
+/// says who to ask — never whoever handed it over, because a server that has stopped
+/// carrying somebody else's post has said nothing about whether that post is still there.
+public struct PostAuthority: Sendable, Equatable {
+    public let post: Post
+    /// `posts.authority_url` — a `servers.url` endpoint, `https://<host>` for Mastodon.
+    public let authorityURL: String
+
+    public init(post: Post, authorityURL: String) {
+        self.post = post
+        self.authorityURL = authorityURL
+    }
+}
+
 /// Posts in and out of the store, as the "Writing" and "Reading" diagrams in
 /// `docs/data-store.md` draw them. Raw SQL against the schema: the schema is the contract,
 /// and there is no second description of it in Swift to drift.
@@ -92,14 +110,38 @@ extension LocalStore {
 
     /// The timeline: what is stored, newest first, `merge_key` breaking ties so a page lands in
     /// the same place on every refresh.
-    public func timeline(limit: Int = 200) async throws -> [Post] {
-        try await read { db in
+    ///
+    /// `before` is a post already read, and what comes back is the page that follows it in
+    /// that same order. The cursor is the pair the order is made of — `(posted_at, merge_key)`
+    /// — and the page is cut with `posted_at < it, or the same instant and a later merge_key`,
+    /// which `posts_by_time` answers in its own order. Two posts posted in the same
+    /// millisecond are ordinary, so the tiebreak is in the cut and not only in the sort: with
+    /// the timestamp alone, a boundary falling between them would either repeat the first or
+    /// skip the second. Never OFFSET — a page written in between would shift every count under
+    /// it — so nothing is skipped and nothing arrives twice.
+    ///
+    /// The two columns run opposite ways, so the cut cannot be the one row-value comparison
+    /// `(a, b) < (?, ?)` — that wants both going the same way. SQLite makes what it can of the
+    /// OR instead: it seeks on `posted_at` alone and re-checks the whole condition per row, so
+    /// the only rows read and dropped are those sharing the cursor's own millisecond. Measured
+    /// on 2026-08-25: `SEARCH p USING INDEX posts_by_time (posted_at<?)`, no temp b-tree, and a
+    /// page two hundred thousand rows down costs what the first page costs. Worth knowing: this
+    /// plan holds because nothing here runs ANALYZE, so if `PRAGMA optimize` is ever added,
+    /// read this plan again before believing it.
+    public func timeline(limit: Int = 200, before: Post? = nil) async throws -> [Post] {
+        let cursor = before.map { (postedAt: Self.milliseconds($0.createdAt), key: $0.mergeKey) }
+        let keyset = cursor == nil ? "" : "AND (p.posted_at < ? OR (p.posted_at = ? AND p.merge_key > ?))"
+        return try await read { db in
+            var arguments: [any DatabaseValueConvertible] = []
+            if let cursor { arguments += [cursor.postedAt, cursor.postedAt, cursor.key] }
+            arguments.append(limit)
             let rows = try Row.fetchAll(db, sql: """
                 \(Self.postSelect)
                 WHERE p.deleted_at IS NULL
+                \(keyset)
                 ORDER BY p.posted_at DESC, p.merge_key
                 LIMIT ?
-                """, arguments: [limit])
+                """, arguments: StatementArguments(arguments))
             return try Self.posts(from: rows, db)
         }
     }
@@ -119,6 +161,70 @@ extension LocalStore {
                 LIMIT ?
                 """, arguments: [ms, limit])
             return try Self.posts(from: rows, db)
+        }
+    }
+
+    /// What this server first handed over inside `postedIn`, named and no more than named —
+    /// the rows a page from that server covering that stretch should have contained, so that
+    /// whatever the page left out can be *asked* about.
+    ///
+    /// Keys rather than whole posts, because of what the caller does with them. Every timeline
+    /// page runs this, a refresh's as much as a reach-down's, and on a healthy page the page
+    /// contained every one of them and the whole answer is discarded. Building a `Post` per
+    /// row to find that out is the accounts join and a second query for the tags, once per
+    /// page, to answer a question the merge key alone answers. `posts(named:)` builds the ones
+    /// that survive the diff — with the authority for each, off the same row — which on a
+    /// healthy page is none of them.
+    ///
+    /// Nothing here is evidence of anything on its own. A row this hands back and a page did
+    /// not contain is a suspect, never a verdict: a server takes blocked accounts and
+    /// filtered posts out of a range it has already chosen, so absence is as much a fact
+    /// about the reader's settings as about the post. Only an answer from the authority
+    /// writes `deleted_at`.
+    ///
+    /// Three things are left out, and each for its own reason. `source_url` is only the
+    /// **first** server to hand a post over, so this is narrower than "every post that server
+    /// carries" and deliberately so — a post credited to somebody else is not evidence about
+    /// this server's page. Rows already marked are past being suspected. And rows with no
+    /// `authority_url` — Nostr's, and anything whose canonical address named no server — have
+    /// nobody who could be asked, so suspecting one would only ever hold a place in a queue
+    /// that never empties.
+    ///
+    /// In no order, because the answer is a set the page is diffed against and never a list
+    /// anybody reads. What order the survivors reach the queue in is `posts(named:)`'s to say.
+    public func postKeys(from sourceURL: String, postedIn range: ClosedRange<Date>) async throws -> [String] {
+        let (from, to) = (Self.milliseconds(range.lowerBound), Self.milliseconds(range.upperBound))
+        return try await read { db in
+            try String.fetchAll(db, sql: """
+                SELECT merge_key FROM posts
+                WHERE source_url = ? AND posted_at >= ? AND posted_at <= ?
+                  AND deleted_at IS NULL AND authority_url IS NOT NULL
+                """, arguments: [sourceURL, from, to])
+        }
+    }
+
+    /// The whole of each of `keys`, with the server whose word on it is final — the rows
+    /// `postKeys(from:postedIn:)` named, built once the diff has cut them down to the handful
+    /// that are actually going to be asked about.
+    ///
+    /// The same two rows are left out here as there, and for the same reasons: one already
+    /// marked is past being suspected, and one with no `authority_url` has nobody who could be
+    /// asked. So a key the answer does not carry back is a key there is nothing to ask about —
+    /// including one marked between the two reads, which is a post already gone.
+    public func posts(named keys: [String]) async throws -> [PostAuthority] {
+        guard !keys.isEmpty else { return [] }
+        let placeholders = Array(repeating: "?", count: keys.count).joined(separator: ", ")
+        return try await read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                \(Self.postSelect)
+                WHERE p.merge_key IN (\(placeholders))
+                  AND p.deleted_at IS NULL AND p.authority_url IS NOT NULL
+                ORDER BY p.posted_at DESC, p.merge_key
+                """, arguments: StatementArguments(keys))
+            // `posts(from:_:)` maps the rows in order, so the two line up pair for pair.
+            return zip(try Self.posts(from: rows, db), rows).map {
+                PostAuthority(post: $0, authorityURL: $1["authority_url"])
+            }
         }
     }
 

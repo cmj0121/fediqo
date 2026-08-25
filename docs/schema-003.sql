@@ -1,0 +1,27 @@
+-- Fediqo — the local store, migration 003. Appended after schema.sql (001) and schema-002.sql;
+-- the rules there still hold: STRICT, every *_at in INTEGER milliseconds, append-only.
+--
+-- One index, for one question: "what did this server hand over between these two instants?"
+--
+-- Reconciling asks it of every page that comes back. A page covers the stretch between its own
+-- newest and oldest post, and whatever this store holds from that server inside that stretch
+-- and the page does not contain is a post to go and ask about. `posts_by_source` alone answers
+-- it by walking every post that server ever gave — and then sorting them — because it carries
+-- no `posted_at`. This one seeks straight to the stretch and comes out already in order.
+--
+-- The column order is the query's: equality first, then the range, then the tie-break that
+-- makes the timeline's ordering total. It is the same ordering `posts_by_time` keeps, narrowed
+-- to one server.
+--
+-- ── what deleted_at actually says ─────────────────────────────────────────────
+--
+-- 001's header calls it "a post the remote deletes". That is narrower than the truth and this
+-- is the correction; `data-store.md` carries it in full. Measured against mastodon.social on
+-- 2026-08-25, a status it will not give answers **404**, not 410 — and a 404 to a request
+-- nobody is signed in for covers a post taken down, a post whose visibility has since narrowed,
+-- and an account that has blocked us, with nothing in the answer to separate them. So the mark
+-- says only the narrower true thing: **the server whose word on the post is final will not hand
+-- it over any more.** 404 and 410 are read as one answer, and absence from a page is never one
+-- at all — it is a question, settled only by asking that server for that post by name.
+
+CREATE INDEX posts_by_source_time ON posts(source_url, posted_at DESC, merge_key);

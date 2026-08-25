@@ -336,9 +336,72 @@ source that disagrees is simply ignored; recording what it said is one of the ta
 
 ## Deletion
 
-A post the remote reports deleted is marked, not removed: `posts.deleted_at` is set once and never
+A post a server stops handing over is marked, not removed: `posts.deleted_at` is set once and never
 rewritten, the same as every other network field. The timeline reads past it with `WHERE deleted_at IS
 NULL`, and the partial index `posts_deleted` finds the marked rows without scanning the rest.
+
+### What the mark actually says
+
+Not "the author deleted it". **It says the server whose word on the post is final will not hand it over
+any more**, which is a deliberately narrower claim.
+
+Measured against mastodon.social on 2026-08-25: a status it will not give answers **404**, not 410 — so a
+store listening only for a tombstone would never hear one. And a 404 to a request nobody is signed in for
+covers three different things at once: a post taken down, a post whose visibility has since narrowed, and
+an account that has blocked us. Nothing in the answer separates them, so the mark does not pretend to.
+What is true of all three, and what the reader experiences either way, is that the post cannot be had from
+there any more. So 404 and 410 are read as one answer.
+
+### How it comes to be written
+
+Absence is never enough. When a server hands over a page, the posts this store holds **from that server**
+that fall inside the stretch the page covers and are not in it become *suspects* — a question, never a
+verdict. A server takes blocked accounts and filtered posts out of a range it has already chosen, so a
+page routinely leaves out posts that are perfectly well there, and a filter turned on can leave out a
+whole page of them at once.
+
+Every timeline page counts, a refresh's as much as a reach-down's: which of them asked says nothing about
+what a page is evidence of, and the newest page is the one stretch reading downward never revisits —
+which is exactly where a post pulled down moments after it went up sits. A trending list is not a page of
+this kind and raises nothing: it is a snapshot a server curated, so a post's absence from it means the
+server does not think it is rising, which is not a claim about whether the post is there.
+
+The stretch is what the page arrived with — its own newest and oldest — not what was asked for. A page of
+forty that comes back with three speaks for those three and nothing beyond them. An **empty page covers
+no stretch at all**, and so leaves nothing out: it is the server saying it has nothing older, and reading
+it as a page that omitted everything would suspect the whole timeline every time a reader reached the
+bottom.
+
+A suspect is settled only by asking for that one post by name, and only an answer settles it:
+
+| the answer     | what happens                                           |
+| -------------- | ------------------------------------------------------ |
+| 404 or 410     | `deleted_at` is set                                     |
+| 200            | the suspicion is dropped — the post is there            |
+| 401 or 403     | nothing is decided, and no wait is started — it replied |
+| anything else  | nothing is decided; it is asked again another time      |
+
+A refusal is not silence, and the difference matters twice over. A server that declines to show a stranger
+one post has answered at once, so it has earned no backoff — and because that wait is keyed by endpoint and
+shared with the chosen servers, counting it as silence would skip that server's own signed-in timeline for
+having turned down an anonymous question. But a standing refusal is still a standing answer: after three of
+them the question is **set aside** — not marked, not forgotten, simply no longer holding one of the eight
+places a pass has to spend. A relaunch raises it again, since none of this outlives the app.
+
+Who is asked is `posts.authority_url`, the server the post's own canonical address names — and never
+`posts.source_url`, whoever happened to hand it over. A relay that has stopped carrying somebody else's
+post has said nothing about whether that post still exists, so its silence is not evidence. A post with no
+`authority_url`, or whose canonical address is not one this build knows how to ask about, has nobody who
+could answer and is therefore never marked at all.
+
+A boost inherits the authority of the post it carries, so asking about one asks whether the original is
+still there. If the original goes, the boost goes with it, which is right — a boost of a post nobody can
+read shows nothing. If the booster takes their boost back while the original stands, the answer is still
+yes and the row stays. Noticing that is a different question and this does not ask it.
+
+Confirmation is bounded: a pass asks about at most eight, and an authority inside its backoff wait is not
+asked at all, so a server already struggling is not then hammered with single-post requests. What is left
+over waits for the next pass. It is never dropped, and never counted as checked.
 
 Purging a marked row is **the one `DELETE` the store performs**, and it runs only by policy — a routine sweep,
 or the database growing past a size — never as part of a refresh. `post_tags` and `server_trends` go with it

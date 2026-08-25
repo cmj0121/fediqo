@@ -26,10 +26,20 @@ final class StubRoutes: @unchecked Sendable {
     func answer(for url: URL, method: String, body: Data, authorization: String?) -> (status: Int, body: Data) {
         let key = "\(url.host() ?? "")|\(url.path())"
         return lock.withLock {
-            log.append((key, CapturedRequest(method: method, body: String(decoding: body, as: UTF8.self), authorization: authorization)))
+            log.append((key, CapturedRequest(method: method, query: Self.query(of: url),
+                                             body: String(decoding: body, as: UTF8.self),
+                                             authorization: authorization)))
             if authorization != nil, let authorized = authorizedRoutes[key] { return authorized }
             return routes[key] ?? (404, Data("{}".utf8))
         }
+    }
+
+    /// A request's query as a dictionary — what a GET actually asked for, which is where a
+    /// page's cursor is spelled.
+    private static func query(of url: URL) -> [String: String] {
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        return Dictionary(items.compactMap { item in item.value.map { (item.name, $0) } },
+                          uniquingKeysWith: { _, last in last })
     }
 
     /// The paths asked of one host, in the order they were asked.
@@ -48,6 +58,8 @@ final class StubRoutes: @unchecked Sendable {
 /// One request as the stub saw it, body and all.
 struct CapturedRequest: Sendable {
     let method: String
+    /// What the URL asked for, by name — `limit`, and `max_id` where a page was asked for.
+    let query: [String: String]
     let body: String
     let authorization: String?
 
@@ -110,6 +122,33 @@ func stubbedSession() -> URLSession {
     return URLSession(configuration: configuration)
 }
 
+/// A `SourceClient` written for one question, with sensible nothings for the other three.
+///
+/// The doubles in these suites each exist to watch one thing — what cursor was sent, what a
+/// held request does to the next reach, which host got which list — and each was carrying three
+/// identical stubbed methods to get there. This is that boilerplate, once.
+///
+/// A **marker**: the defaults are on this and never on `SourceClient` itself. Put there they
+/// would reach `MastodonClient` too, and a real client that lost a method would quietly compile
+/// against a stub that answers "" and `[]` and `true` instead of failing to build — which is
+/// the one thing a protocol with four requirements is there to prevent. A double opts in by
+/// name; anything that wants its own answer just writes one, and it wins.
+protocol StubClient: SourceClient {}
+
+extension StubClient {
+    func instance(host: String) async throws -> InstanceInfo {
+        InstanceInfo(host: host, title: host, summary: "")
+    }
+
+    /// These suites read timelines. A double that invented a trending list would put posts on
+    /// a screen no test asked for them on.
+    func trending(host: String, limit: Int, token: String?) async throws -> [Post] { [] }
+
+    /// Nothing in these suites reconciles, and a double that answered "gone" would mark posts
+    /// no test asked it to. Still there is the answer that decides nothing.
+    func stillHas(_ post: Post, host: String, token: String?) async throws -> Bool { true }
+}
+
 /// A Mastodon server the stub answers for.
 func makeServer(_ host: String) -> Server {
     Server(host: host, socialProtocol: .mastodon, title: host)
@@ -117,10 +156,10 @@ func makeServer(_ host: String) -> Server {
 
 /// A loader that only speaks Mastodon, through the stub. `secrets` is in-memory by default so
 /// no test ever reaches the real Keychain, whatever a loader is handed a store.
-func stubbedLoader(store: LocalStore? = nil, secrets: any SecretStore = InMemorySecretStore(),
+func stubbedLoader(limit: Int = 40, store: LocalStore? = nil, secrets: any SecretStore = InMemorySecretStore(),
                    tokens: TokenSource? = nil) -> TimelineLoader {
     TimelineLoader(registry: SourceRegistry(clients: [.mastodon: MastodonClient(session: stubbedSession())]),
-                   store: store, secrets: secrets, tokens: tokens)
+                   limit: limit, store: store, secrets: secrets, tokens: tokens)
 }
 
 /// One account signed in to `server`, written the way `SignInCoordinator` writes it: the
@@ -191,16 +230,62 @@ struct Harness {
     }
 }
 
+/// A page of statuses as `host` would hand it over, `ids` in the order given. One spelling of
+/// the Mastodon status shape for every suite, so a change to what the decoder reads breaks all
+/// of them at once rather than one of them quietly.
+///
+/// `authority` is the server each status's canonical `uri` names — `host` itself by default,
+/// which is what a post written there looks like. Naming another is what a post this server is
+/// only carrying looks like, and it is what `posts.authority_url` is read out of, so it is how
+/// a test arranges for the relay and the authority to be two different machines.
+///
+/// `at` gives each id its own instant, in the order of `ids`, for a test that needs the page to
+/// cover a stretch of time rather than to sit on one. Without it every status shares one
+/// instant, which is all a test about anything else needs.
+func statusesJSON(_ ids: [String], from host: String, authority: String? = nil,
+                  at seconds: [TimeInterval] = []) -> String {
+    let origin = authority ?? host
+    let statuses = ids.enumerated().map { index, id in
+        let postedAt = index < seconds.count ? isoDate(seconds[index]) : "2026-08-21T10:00:00.000Z"
+        return """
+        {
+          "id": "\(id)",
+          "uri": "https://\(origin)/users/a/statuses/\(id)",
+          "url": "https://\(host)/@a/\(id)",
+          "created_at": "\(postedAt)",
+          "content": "<p>hello</p>",
+          "account": { "id": "10", "url": "https://\(host)/@a", "username": "a", "acct": "a",
+                       "display_name": "Ada", "avatar": null },
+          "media_attachments": [],
+          "tags": []
+        }
+        """
+    }
+    return "[\(statuses.joined(separator: ","))]"
+}
+
+/// An instant as a server spells one, so a page's `created_at` and a stored post's `at:` can be
+/// asked to mean the same moment.
+func isoDate(_ seconds: TimeInterval) -> String {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    formatter.timeZone = TimeZone(identifier: "UTC")
+    return formatter.string(from: Date(timeIntervalSince1970: seconds))
+}
+
 /// One status, enough to prove a list came back.
-let oneStatusJSON = """
-[{
-  "id": "1",
-  "uri": "https://example/users/a/statuses/1",
-  "url": "https://example/@a/1",
-  "created_at": "2026-08-21T10:00:00.000Z",
-  "content": "<p>hello</p>",
-  "account": { "id": "10", "url": "https://example/@a", "username": "a", "acct": "a", "display_name": "Ada", "avatar": null },
-  "media_attachments": [],
-  "tags": []
-}]
-"""
+let oneStatusJSON = statusesJSON(["1"], from: "example")
+
+/// A post as `host` would have handed it over — the address `MastodonDTO.asPost` writes, and
+/// so the only shape a cursor for `host` can take.
+///
+/// `authority` is the server whose canonical address the post carries, spelled the way
+/// Mastodon spells one. Without it the post has no canonical address at all, which is what a
+/// paging cursor needs and all any cursor test ever wanted; with it the post is one that can
+/// also be asked about by name, which is what reconciling needs.
+func handedOver(_ id: String, from host: String, authority: String? = nil,
+                at seconds: TimeInterval = 100) -> Post {
+    makePost(uri: "https://\(host)/api/v1/statuses/\(id)",
+             originURI: authority.map { "https://\($0)/users/a/statuses/\(id)" },
+             at: seconds, from: host)
+}
