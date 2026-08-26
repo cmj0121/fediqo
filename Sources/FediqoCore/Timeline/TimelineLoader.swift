@@ -283,6 +283,62 @@ public struct TimelineLoader: Sendable {
                               failures: round.failures, skipped: unasked)
     }
 
+    /// The conversation around one post as the store already has it — instant, offline, and
+    /// only as much of it as the timeline happened to carry past us.
+    public func storedThread(around post: Post) async -> Conversation {
+        guard let store else { return Conversation(post: post) }
+        do {
+            return try await store.thread(around: post)
+        } catch {
+            LocalStore.log.error("reading a thread failed: \(String(describing: error), privacy: .public)")
+            return Conversation(post: post)
+        }
+    }
+
+    /// The conversation as the post's own server has it, kept on the way past.
+    ///
+    /// One request, to one server, because a reader asked for it — which is what separates it
+    /// from everything else that talks to other people's machines here. There is no budget and
+    /// no backoff on it for the same reason `stillHas` has one and this does not: nothing here
+    /// fires on a clock.
+    ///
+    /// **The authority is asked, never the relay.** A server that carried somebody else's post
+    /// knows whatever replies happened to reach it; the server the post lives on is the one
+    /// with the conversation. That is the rule `reconcile` follows, for the same reason.
+    ///
+    /// What comes back is written down like any other arrival, through the `thread` base
+    /// source — those posts were handed over by a server, and throwing them away would mean
+    /// asking for them again the next time somebody opens the same post.
+    public func conversation(around post: Post) async -> (conversation: Conversation, failure: SourceFailure?) {
+        guard let authority = await authorityHost(of: post),
+              let client = registry.client(for: post.socialProtocol) else {
+            return (Conversation(post: post), nil)
+        }
+        let server = Server(host: authority, socialProtocol: post.socialProtocol, title: authority)
+        let token = await tokensByEndpoint(for: [server])[server.endpoint]
+        do {
+            let context = try await client.context(of: post, host: authority, token: token)
+            do {
+                try await store?.save(context.ancestors + context.descendants, from: server, into: .thread)
+            } catch {
+                LocalStore.log.error("keeping a thread failed: \(String(describing: error), privacy: .public)")
+            }
+            return (context, nil)
+        } catch {
+            return (Conversation(post: post), SourceFailure.of(error))
+        }
+    }
+
+    /// The host whose word on this post is final: the store's `authority_url` where it has one,
+    /// and the server that handed the post over where it does not — which is a preview, a test,
+    /// or a protocol that names no authority at all.
+    private func authorityHost(of post: Post) async -> String? {
+        if let store, let known = try? await store.posts(named: [post.mergeKey]).first {
+            return LocalStore.host(of: known.authorityURL)
+        }
+        return post.sourceURL.isEmpty ? nil : LocalStore.host(of: post.sourceURL)
+    }
+
     /// Every one of `servers` has said it has nothing older, so there is nothing left to reach
     /// for. The one thing on which a screen may say the reading is over — and a standing fact
     /// about the servers rather than a property of any one page, which is why it is asked for
@@ -623,6 +679,10 @@ public struct TimelineLoader: Sendable {
             case .home: try await client.home(host: server.host, limit: limit,
                                               before: before, token: token ?? "")
             case .trend: try await client.trending(host: server.host, limit: limit, token: token)
+            // A conversation is not read by fanning out across the chosen servers: it is one
+            // post's own, asked of the one server whose word on that post is final, when a
+            // reader opens it. `thread(around:)` is that path; this one never leads there.
+            case .thread: []
             }
         } catch {
             return ([], SourceFailure.of(error))

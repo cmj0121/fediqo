@@ -76,6 +76,17 @@ public final class Preferences {
     public var railExpanded: Bool { didSet { defaults.set(railExpanded, forKey: Keys.railExpanded) } }
     public var showBoosts: Bool { didSet { defaults.set(showBoosts, forKey: Keys.showBoosts) } }
     public var showMediaOnly: Bool { didSet { defaults.set(showMediaOnly, forKey: Keys.showMediaOnly) } }
+    /// Whether what a post covered arrives uncovered.
+    ///
+    /// One switch for two things, because to a reader they are one act: a post's media arrives
+    /// blurred when its source said `sensitive`, and its words sit behind the line the author
+    /// wrote as `spoiler_text`. Off by default — a warning somebody wrote is a warning until
+    /// the reader says otherwise, and this app is not the one to overrule it.
+    ///
+    /// A post opened by hand is opened for this run of the app only and is never written down.
+    /// Which posts somebody chose to look behind is a reading record, and the store keeps only
+    /// what a network handed over plus the choices a reader made about it.
+    public var showSensitive: Bool { didSet { defaults.set(showSensitive, forKey: Keys.showSensitive) } }
     public var refreshInterval: RefreshInterval { didSet { defaults.set(refreshInterval.rawValue, forKey: Keys.refreshInterval) } }
     /// Whether the one-time repair of `LocalStore.clearSeededWording` has run.
     ///
@@ -100,6 +111,7 @@ public final class Preferences {
         static let railExpanded = "fediqo.railExpanded"
         static let showBoosts = "fediqo.showBoosts"
         static let showMediaOnly = "fediqo.showMediaOnly"
+        static let showSensitive = "fediqo.showSensitive"
         static let refreshInterval = "fediqo.refreshInterval"
         static let offeredHomeTimeline = "fediqo.offeredHomeTimeline"
         static let clearedSeededWording = "fediqo.clearedSeededWording"
@@ -108,7 +120,7 @@ public final class Preferences {
         /// it here is a compile-time-visible omission in one place rather than a preference
         /// that quietly survives a reset.
         static let all = [theme, textScale, language, railExpanded, showBoosts, showMediaOnly,
-                          refreshInterval, offeredHomeTimeline, clearedSeededWording]
+                          showSensitive, refreshInterval, offeredHomeTimeline, clearedSeededWording]
     }
 
     /// Every preference back to the value a first launch would have given it, and the stored
@@ -124,6 +136,7 @@ public final class Preferences {
         railExpanded = fresh.railExpanded
         showBoosts = fresh.showBoosts
         showMediaOnly = fresh.showMediaOnly
+        showSensitive = fresh.showSensitive
         refreshInterval = fresh.refreshInterval
         offeredHomeTimeline = fresh.offeredHomeTimeline
         clearedSeededWording = fresh.clearedSeededWording
@@ -138,6 +151,7 @@ public final class Preferences {
         railExpanded = defaults.object(forKey: Keys.railExpanded) as? Bool ?? false
         showBoosts = defaults.object(forKey: Keys.showBoosts) as? Bool ?? true
         showMediaOnly = defaults.object(forKey: Keys.showMediaOnly) as? Bool ?? false
+        showSensitive = defaults.object(forKey: Keys.showSensitive) as? Bool ?? false
         refreshInterval = defaults.string(forKey: Keys.refreshInterval).flatMap(RefreshInterval.init(rawValue:)) ?? .seconds30
         offeredHomeTimeline = defaults.object(forKey: Keys.offeredHomeTimeline) as? Bool ?? false
         clearedSeededWording = defaults.object(forKey: Keys.clearedSeededWording) as? Bool ?? false

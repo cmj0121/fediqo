@@ -89,6 +89,25 @@ public struct MastodonClient: SourceClient {
         try await posts(host: host, path: "/api/v1/trends/statuses", limit: limit, before: nil, token: token)
     }
 
+    /// `GET /api/v1/statuses/:id/context`, asked of the server the post's own address names.
+    ///
+    /// Mastodon answers with `ancestors` and `descendants` already in reading order, and this
+    /// keeps that order rather than re-sorting: the ancestors are a chain and the descendants
+    /// are a conversation, and neither is the timeline's newest-first line.
+    ///
+    /// A post this server has no number for is `notItsPost`, thrown rather than answered with
+    /// an empty conversation — "not ours to talk about" and "nobody replied" are different
+    /// answers and a reader is shown different things for them.
+    public func context(of post: Post, host rawHost: String, token: String?) async throws -> Conversation {
+        let host = Server.normalise(rawHost)
+        let id = try Self.canonicalStatusId(of: post, on: host)
+        let data = try await get(host: host, path: "/api/v1/statuses/\(id)/context", query: [], token: token)
+        let context = try Self.decoder.decode(MastodonDTO.Context.self, from: data)
+        return Conversation(ancestors: context.ancestors.map { $0.asPost(from: host) },
+                            post: post,
+                            descendants: context.descendants.map { $0.asPost(from: host) })
+    }
+
     /// `GET /api/v1/statuses/:id`, asked of the server the post's own address names.
     ///
     /// 404 and 410 are read as the same answer, and that is the measurement rather than a

@@ -118,6 +118,16 @@ public protocol SourceClient: Sendable {
     /// reader was reading towards. Do not add one back because `timeline` has it.
     func trending(host: String, limit: Int, token: String?) async throws -> [Post]
 
+    /// The conversation around one post: what it answers, and what answered it.
+    ///
+    /// Asked of one server about one post, the way `stillHas` is, and for the same reason —
+    /// this is a question about a post rather than about a stretch of time, so it goes to the
+    /// server whose word on that post is final rather than to whoever relayed it.
+    ///
+    /// It takes no cursor and pages nowhere: a conversation is a shape, not a queue. What
+    /// comes back is what that server holds of it now.
+    func context(of post: Post, host: String, token: String?) async throws -> Conversation
+
     /// Whether this server will still hand over one post, asked for on its own.
     ///
     /// The post is the whole of the question, the way it is for `before:`: which of its

@@ -384,7 +384,9 @@ extension LocalStore {
 
     // MARK: - Rows
 
-    private static let postSelect = """
+    /// The one shape a post is read back in. Shared with `ThreadStore`, which reads the same
+    /// rows by a different question — a conversation rather than a page.
+    static let postSelect = """
         SELECT p.*, a.handle, a.display_name, a.avatar_url, b.display_name AS booster_name
         FROM posts p
         JOIN accounts a ON a.author_id = p.author_id
@@ -394,7 +396,7 @@ extension LocalStore {
     private static let encoder = JSONEncoder()
     private static let decoder = JSONDecoder()
 
-    private static func posts(from rows: [Row], _ db: Database) throws -> [Post] {
+    static func posts(from rows: [Row], _ db: Database) throws -> [Post] {
         guard !rows.isEmpty else { return [] }
         let keys = rows.map { $0["merge_key"] as String }
         let placeholders = Array(repeating: "?", count: keys.count).joined(separator: ", ")
@@ -402,6 +404,19 @@ extension LocalStore {
         for row in try Row.fetchAll(db, sql: "SELECT merge_key, tag FROM post_tags WHERE merge_key IN (\(placeholders)) ORDER BY rowid",
                                     arguments: StatementArguments(keys)) {
             tags[row["merge_key"], default: []].append(row["tag"])
+        }
+        // What came attached, in the order the source gave it. A post stored before migration
+        // 005 has no rows here at all; `post(from:…)` falls back to the one column 001 kept.
+        var media: [String: [Attachment]] = [:]
+        for row in try Row.fetchAll(db, sql: """
+            SELECT merge_key, kind, url, preview_url, alt FROM post_media
+            WHERE merge_key IN (\(placeholders)) ORDER BY merge_key, position
+            """, arguments: StatementArguments(keys)) {
+            media[row["merge_key"], default: []].append(Attachment(
+                kind: Attachment.Kind(rawValue: row["kind"]) ?? .unknown,
+                url: (row["url"] as String?).flatMap(URL.init(string:)),
+                previewURL: (row["preview_url"] as String?).flatMap(URL.init(string:)),
+                alt: row["alt"]))
         }
         var mentions: [String: [Mention]] = [:]
         for row in try Row.fetchAll(db, sql: """
@@ -411,12 +426,12 @@ extension LocalStore {
             mentions[row["merge_key"], default: []].append(Mention(uri: row["mention_uri"], handle: row["handle"]))
         }
         return rows.map { post(from: $0, tags: tags[$0["merge_key"]] ?? [],
-                               mentions: mentions[$0["merge_key"]] ?? []) }
+                               mentions: mentions[$0["merge_key"]] ?? [],
+                               media: media[$0["merge_key"]]) }
     }
 
-    private static func post(from row: Row, tags: [String], mentions: [Mention]) -> Post {
-        let mediaJSON: String? = row["media_urls"]
-        let media = mediaJSON.flatMap { try? decoder.decode([String].self, from: Data($0.utf8)) } ?? []
+    private static func post(from row: Row, tags: [String], mentions: [Mention],
+                             media: [Attachment]?) -> Post {
         let sourceURL: String = row["source_url"]
         return Post(
             uri: row["uri"],
@@ -429,7 +444,14 @@ extension LocalStore {
             authorHandle: row["handle"] ?? "",
             authorAvatarURL: (row["avatar_url"] as String?).flatMap(URL.init(string:)),
             text: row["text"],
-            mediaURLs: media.compactMap(URL.init(string:)),
+            attachments: media ?? legacyAttachments(in: row),
+            sensitive: (row["sensitive"] as Int?).map { $0 == 1 },
+            spoiler: row["spoiler_text"],
+            counts: Counts(replies: row["replies_count"], reblogs: row["reblogs_count"],
+                           favourites: row["favourites_count"]),
+            application: (row["application"] as String?).map {
+                Application(name: $0, website: (row["application_url"] as String?).flatMap(URL.init(string:)))
+            },
             webURL: (row["web_url"] as String?).flatMap(URL.init(string:)),
             inReplyToURI: row["in_reply_to_uri"],
             tags: tags,
@@ -438,6 +460,15 @@ extension LocalStore {
             boostedById: row["boosted_by"],
             sources: [host(of: sourceURL)]
         )
+    }
+
+    /// What 001 kept of a post's attachments: one address each, whichever of the file and its
+    /// still the server offered first, and no word about which it was. They come back as
+    /// `unknown` — an address that can be drawn, and nothing claimed beyond that.
+    private static func legacyAttachments(in row: Row) -> [Attachment] {
+        let json: String? = row["media_urls"]
+        let urls = json.flatMap { try? decoder.decode([String].self, from: Data($0.utf8)) } ?? []
+        return urls.compactMap(URL.init(string:)).map(Attachment.unknown(displaying:))
     }
 
     // MARK: - Writes
@@ -539,18 +570,30 @@ extension LocalStore {
         let mediaJSON = String(decoding: try encoder.encode(media), as: UTF8.self)
         let webURL = post.webURL?.absoluteString
 
-        let find = try db.cachedStatement(sql: "SELECT text, media_urls, web_url, authority_url FROM posts WHERE merge_key = ?")
+        let find = try db.cachedStatement(sql: """
+            SELECT text, media_urls, web_url, authority_url, sensitive, spoiler_text
+            FROM posts WHERE merge_key = ?
+            """)
         guard let existing = try Row.fetchOne(find, arguments: [key]) else {
+            // `media_urls` is written as well as `post_media`, and not instead of it. 001's
+            // column is what an older build reads, and the rule that a stored field is never
+            // rewritten cuts both ways: the column stays true rather than being abandoned.
             try db.cachedStatement(sql: """
                 INSERT INTO posts (merge_key, proto, origin_uri, uri, authority_url, source_url, posted_at, author_id,
                                    text, media_urls, web_url, in_reply_to_uri, boosted_by, extras, deleted_at,
-                                   last_seen_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, NULL)
+                                   sensitive, spoiler_text, replies_count, reblogs_count, favourites_count,
+                                   application, application_url, last_seen_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
                 """).execute(arguments: [key, post.socialProtocol.storeProto, post.originURI, post.uri, authorityURL,
                                          post.sourceURL, postedAt, post.authorId,
-                                         post.text, mediaJSON, webURL, post.inReplyToURI, post.boostedById, now, now])
+                                         post.text, mediaJSON, webURL, post.inReplyToURI, post.boostedById,
+                                         post.sensitive.map { $0 ? 1 : 0 }, post.spoiler,
+                                         post.counts.replies, post.counts.reblogs, post.counts.favourites,
+                                         post.application?.name, post.application?.website?.absoluteString,
+                                         now, now])
             try insertTags(db, post.tags, for: key, now: now)
             try insertMentions(db, post.mentions, for: key, now: now)
+            try insertMedia(db, post.attachments, for: key, now: now)
             return postedAt
         }
 
@@ -558,9 +601,18 @@ extension LocalStore {
 
         guard (existing["authority_url"] as String?) == post.sourceURL else { return postedAt }
 
+        // The counts move on their own and are not an edit: somebody favouriting a post is not
+        // its author changing it. So they are written on every sighting from the authority and
+        // never touch `updated_at`, which means what it has always meant — an authority edited
+        // this. Only what the authority actually said is written: a server that sends no counts
+        // has told us nothing, and nothing must not overwrite something.
+        try updateCounts(db, post.counts, for: key)
+
         let contentChanged = (existing["text"] as String) != post.text
             || (existing["media_urls"] as String?) != mediaJSON
             || (existing["web_url"] as String?) != webURL
+            || (existing["sensitive"] as Int?).map({ $0 == 1 }) != post.sensitive
+            || (existing["spoiler_text"] as String?) != post.spoiler
         let storedTags = try String.fetchAll(db.cachedStatement(sql: "SELECT tag FROM post_tags WHERE merge_key = ? ORDER BY rowid"),
                                              arguments: [key])
         let tagsChanged = storedTags != post.tags
@@ -572,8 +624,16 @@ extension LocalStore {
 
         try db.cachedStatement(sql: "UPDATE posts SET updated_at = ? WHERE merge_key = ?").execute(arguments: [now, key])
         if contentChanged {
-            try db.cachedStatement(sql: "UPDATE posts SET text = ?, media_urls = ?, web_url = ? WHERE merge_key = ?")
-                .execute(arguments: [post.text, mediaJSON, webURL, key])
+            try db.cachedStatement(sql: """
+                UPDATE posts SET text = ?, media_urls = ?, web_url = ?, sensitive = ?, spoiler_text = ?
+                WHERE merge_key = ?
+                """).execute(arguments: [post.text, mediaJSON, webURL,
+                                         post.sensitive.map { $0 ? 1 : 0 }, post.spoiler, key])
+            // The attachments go with the words: an edit that swapped a picture is the same
+            // edit, and the rows are rewritten whole rather than merged, for the reason the
+            // tags are — half an old set and half a new one is not a state anything produced.
+            try db.cachedStatement(sql: "DELETE FROM post_media WHERE merge_key = ?").execute(arguments: [key])
+            try insertMedia(db, post.attachments, for: key, now: now)
         }
         if tagsChanged {
             try db.cachedStatement(sql: "DELETE FROM post_tags WHERE merge_key = ?").execute(arguments: [key])
@@ -641,6 +701,34 @@ extension LocalStore {
             ? [sourceURL, feed.rawValue, key, now, now, now]
             : [sourceURL, feed.rawValue, account, key, now, now, now]
         try statement.execute(arguments: StatementArguments(arguments))
+    }
+
+    /// What came attached, in the order it came. `position` is that order, so a post read
+    /// again writes the same rows rather than growing new ones.
+    private static func insertMedia(_ db: Database, _ attachments: [Attachment],
+                                    for key: String, now: Int64) throws {
+        let insert = try db.cachedStatement(sql: """
+            INSERT OR REPLACE INTO post_media (merge_key, position, kind, url, preview_url, alt, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """)
+        for (position, attachment) in attachments.enumerated() where !attachment.isEmpty {
+            try insert.execute(arguments: [key, position, attachment.kind.rawValue,
+                                           attachment.url?.absoluteString,
+                                           attachment.previewURL?.absoluteString,
+                                           attachment.alt, now])
+        }
+    }
+
+    /// The three numbers, each written only where the source said one. `coalesce` keeps what is
+    /// known rather than letting a server that sends no counts blank the ones another gave.
+    private static func updateCounts(_ db: Database, _ counts: Counts, for key: String) throws {
+        guard counts.areKnown else { return }
+        try db.cachedStatement(sql: """
+            UPDATE posts SET replies_count = coalesce(?, replies_count),
+                             reblogs_count = coalesce(?, reblogs_count),
+                             favourites_count = coalesce(?, favourites_count)
+            WHERE merge_key = ?
+            """).execute(arguments: [counts.replies, counts.reblogs, counts.favourites, key])
     }
 
     private static let hour: Int64 = 3_600_000

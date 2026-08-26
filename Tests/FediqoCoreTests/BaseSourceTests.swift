@@ -37,6 +37,6 @@ struct BaseSourceTests {
         #expect(BaseSource.allCases.filter(\.needsAccount) == [.home])
         // A ranked list is a snapshot rather than a stretch of time, so nothing pages it and
         // no page from it is evidence that a post has gone.
-        #expect(BaseSource.allCases.filter { !$0.isThreadOfTime } == [.trend])
+        #expect(BaseSource.allCases.filter { !$0.isThreadOfTime } == [.trend, .thread])
     }
 }

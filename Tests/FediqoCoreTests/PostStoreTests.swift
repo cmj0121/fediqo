@@ -25,7 +25,7 @@ struct PostStoreTests {
             authorHandle: "@a@o.example",
             authorAvatarURL: URL(string: "https://o.example/a.png"),
             text: "hello <b>world</b>",
-            mediaURLs: [URL(string: "https://o.example/m/1.jpg")!],
+            attachments: [Attachment(kind: .image, url: URL(string: "https://o.example/m/1.jpg"))],
             webURL: URL(string: "https://o.example/@a/1"),
             inReplyToURI: "https://one.example/api/v1/statuses/0",
             tags: ["Swift", "rust"],
