@@ -13,8 +13,11 @@ settings:
   base:
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
-    MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "1"
+    # Only what a bare Xcode open reports. Every build that matters is given these on the
+    # command line by Apps/Makefile, worked out from the tag and the history by
+    # scripts/version.sh -- 0.0.0 is what "no release has happened" looks like.
+    MARKETING_VERSION: "0.0.0"
+    CURRENT_PROJECT_VERSION: "0"
     DEVELOPMENT_TEAM: ""
     CODE_SIGN_STYLE: Automatic
     CODE_SIGN_IDENTITY: "-"
@@ -36,6 +39,11 @@ targets:
     info:
       path: Apps/macOS/Info.plist
       properties:
+        # Both are build settings, never literals: Apps/Makefile hands xcodebuild what
+        # scripts/version.sh worked out from the tag and the history. A number typed here
+        # would be a number that stops being true on the next commit.
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleURLTypes:
           - CFBundleURLName: tw.cmj.fediqo
             CFBundleURLSchemes: [fediqo]
@@ -63,6 +71,8 @@ targets:
     info:
       path: Apps/iOS/Info.plist
       properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         # Without this, iOS runs the app in the compatibility mode it keeps for apps written
         # before the modern screen sizes: letterboxed, scaled, with the tab bar floating
         # somewhere above the bottom of the glass. An empty dictionary is the whole of what

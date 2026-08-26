@@ -6,7 +6,14 @@ XCODEPROJ     := $(ROOT)/Fediqo.xcodeproj
 DERIVED       := $(ROOT)/.build/xcode
 MASCOT        := $(ROOT)/Sources/FediqoUI/Resources/Media.xcassets/Mascot.imageset/mascot.svg
 
-.PHONY: all run mac ios xcodeproj sync-assets clean test build upgrade help
+# Deferred, not `:=` -- a `make help` should not go asking git what the version is. The two
+# come from scripts/version.sh so a build here and a build on a runner agree by construction
+# rather than by someone remembering to keep two numbers in step.
+VERSION        = $(shell $(ROOT)/scripts/version.sh --marketing)
+BUILD_NUMBER   = $(shell $(ROOT)/scripts/version.sh --build)
+STAMP          = MARKETING_VERSION=$(VERSION) CURRENT_PROJECT_VERSION=$(BUILD_NUMBER)
+
+.PHONY: all run mac ios version xcodeproj sync-assets clean test build upgrade help
 
 all: help			# default action
 
@@ -16,12 +23,15 @@ run: mac			# build and launch the macOS app
 mac: xcodeproj		# build the macOS app
 	@xcodebuild -project $(XCODEPROJ) -scheme $(MACOS_SCHEME) \
 		-configuration Debug -derivedDataPath $(DERIVED) \
-		-destination 'platform=macOS' build | tail -5
+		-destination 'platform=macOS' $(STAMP) build | tail -5
 
 ios: xcodeproj		# build the iOS app for the simulator
 	@xcodebuild -project $(XCODEPROJ) -scheme $(IOS_SCHEME) \
 		-configuration Debug -derivedDataPath $(DERIVED) \
-		-destination 'platform=iOS Simulator,name=$(IOS_DEVICE)' build | tail -5
+		-destination 'platform=iOS Simulator,name=$(IOS_DEVICE)' $(STAMP) build | tail -5
+
+version:			# show the version a build made here would report
+	@echo "$(VERSION) ($(BUILD_NUMBER))"
 
 xcodeproj: sync-assets	# generate Fediqo.xcodeproj from project.yml
 	@command -v xcodegen >/dev/null || { echo "xcodegen is missing: brew install xcodegen"; exit 1; }
