@@ -33,7 +33,7 @@ struct KeyCommandMeaningTests {
     @Test("Moving through the posts, in letters and in arrows", arguments: [
         (Character("j"), KeyCommand.nextPost), (down, .nextPost),
         (Character("k"), .previousPost), (up, .previousPost),
-        (Character("g"), .backToTop), (enter, .openPost),
+        (Character("g"), .backToTop), (enter, .expandPost),
     ] as [(Character, KeyCommand)])
     func postKeys(character: Character, command: KeyCommand) {
         #expect(KeyCommand.from(character, modifiers: [], typing: false) == command)
@@ -41,13 +41,24 @@ struct KeyCommandMeaningTests {
 
     /// ⇧↓ selects text and `J` is a letter this app has no use for: neither is the small
     /// step the bare key asks for, so neither is answered.
+    /// `Space` asks for the same thing `Return` does, and it is the one key here that used to
+    /// belong to the scroll view. It is taken knowingly: a page is not a unit in a list of
+    /// cards of different heights, and `j`/`k` already step by post — which is the finer move.
+    /// Inside the opened post there is no ring and `Space` scrolls again.
+    @Test("Space shows the whole post, the same as Return")
+    func spaceExpands() {
+        #expect(KeyCommand.from(" ", modifiers: [], typing: false) == .expandPost)
+        // And in a draft it is a space, like every other letter.
+        #expect(KeyCommand.from(" ", modifiers: [], typing: true) == nil)
+    }
+
     @Test("Held with Shift, none of the post keys are ours",
           arguments: ["j", "k", "g", enter, up, down] as [Character])
     func shiftedPostKeys(character: Character) {
         #expect(KeyCommand.from(character, modifiers: [.shift], typing: false) == nil)
     }
 
-    @Test("A key that is not one of ours means nothing", arguments: ["x", "1", "C", " "] as [Character])
+    @Test("A key that is not one of ours means nothing", arguments: ["x", "1", "C", ";"] as [Character])
     func unknownKeys(character: Character) {
         #expect(KeyCommand.from(character, modifiers: [], typing: false) == nil)
     }
@@ -141,7 +152,7 @@ struct KeyOwnershipTests {
     }
 
     @Test("A key that is nobody's is handed back, draft or no draft",
-          arguments: ["x", "1", " "] as [Character])
+          arguments: ["x", "1", ";"] as [Character])
     func unknownKeysAreNobodys(character: Character) {
         #expect(pressing(character, did: true) == false)
         #expect(pressing(character, typing: true, did: true) == false)
@@ -427,12 +438,12 @@ struct KeyCodeTests {
 
     /// The whole reason the pad's Enter is in the table. It types U+0003 where the Return
     /// above it types U+000D: one key to the reader, and read by what it typed it would be a
-    /// key that opened nothing.
-    @Test("The numeric pad's Enter opens a post, the same as the Return above it")
+    /// key that did nothing at all.
+    @Test("The numeric pad's Enter shows the whole post, the same as the Return above it")
     func keypadEnterOpensAPost() throws {
         let character = try #require(shellKey(keyCode: 76, typed: "\u{3}"))
         #expect(character == enter)
-        #expect(KeyCommand.from(character, modifiers: [], typing: false) == .openPost)
+        #expect(KeyCommand.from(character, modifiers: [], typing: false) == .expandPost)
     }
 }
 

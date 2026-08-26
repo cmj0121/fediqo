@@ -137,7 +137,10 @@ final class FeedModel {
     }
 
     private let preferences: Preferences
-    private let loader: TimelineLoader
+    /// What this feed reads through. Handed out for one other question — the conversation
+    /// around a post the reader opened — because it already knows the store and who is signed
+    /// in, and a second loader would be a second set of that.
+    let loader: TimelineLoader
 
     /// Told, by `Server.endpoint`, when a server turned down the token a read carried. The
     /// posts still arrived — the loader asked again as a stranger — so this marks the
@@ -476,6 +479,14 @@ final class FeedModel {
         guard key != selection else { return false }
         selection = key
         return true
+    }
+
+    /// The ring, put where the reader clicked. Nothing else moves: the list does not scroll to
+    /// it, because it is already under their pointer.
+    func select(_ post: Post) {
+        guard selection != post.mergeKey else { return }
+        selection = post.mergeKey
+        awaitingOlder = false
     }
 
     /// Back to the top: the ring is let go, because a reader taken to the top with the ring
