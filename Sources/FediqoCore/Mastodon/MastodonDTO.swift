@@ -18,6 +18,26 @@ enum MastodonDTO {
         let tags: [Tag]?
         /// Who the status names. Absent on the odd server, for the same reason as `tags`.
         let mentions: [Mention]?
+        /// Whether the attachments arrive covered, and the line standing in front of the
+        /// words. Optional because a server that does not send them has told us nothing,
+        /// which is a different thing from telling us there is nothing.
+        let sensitive: Bool?
+        let spoilerText: String?
+        let repliesCount: Int?
+        let reblogsCount: Int?
+        let favouritesCount: Int?
+        /// What it was written with. Sent for statuses this server hosts and left out for
+        /// everything it received from somewhere else, which is most of a timeline.
+        let application: Application?
+    }
+
+    struct Application: Decodable, Sendable {
+        let name: String
+        let website: String?
+
+        var asApplication: FediqoCore.Application? {
+            name.isEmpty ? nil : FediqoCore.Application(name: name, website: website.flatMap(URL.init(string:)))
+        }
     }
 
     /// One account a status names. `url` is the actor URI — the same name the account itself
@@ -66,9 +86,41 @@ enum MastodonDTO {
         let name: String
     }
 
+    /// What came attached. `type` is Mastodon's word for what it is — `image`, `gifv`,
+    /// `video`, `audio`, or `unknown` for anything it could not classify — and it is kept
+    /// rather than guessed at, because the file's address rarely says.
     struct MediaAttachment: Decodable, Sendable {
+        let type: String?
         let url: String?
         let previewUrl: String?
+        /// What the author wrote for somebody who cannot see it.
+        let description: String?
+
+        var asAttachment: Attachment? {
+            let attachment = Attachment(kind: Self.kind(of: type),
+                                        url: url.flatMap(URL.init(string:)),
+                                        previewURL: previewUrl.flatMap(URL.init(string:)),
+                                        alt: description ?? "")
+            return attachment.isEmpty ? nil : attachment
+        }
+
+        /// A looping soundless video is a video, whatever it is called; anything this build
+        /// has no name for is `unknown`, which is a truthful answer and not a failure.
+        private static func kind(of type: String?) -> Attachment.Kind {
+            switch type {
+            case "image": .image
+            case "video", "gifv": .video
+            case "audio": .audio
+            default: .unknown
+            }
+        }
+    }
+
+    /// What `/api/v1/statuses/:id/context` answers: the chain above a post and everything
+    /// under it, each already in the order that server reads them in.
+    struct Context: Decodable, Sendable {
+        let ancestors: [Status]
+        let descendants: [Status]
     }
 
     /// `/api/v2/instance` and `/api/v1/instance` disagree on names; both are read into this.
@@ -110,9 +162,12 @@ extension MastodonDTO.Status {
             authorHandle: subject.account.handle(on: host),
             authorAvatarURL: subject.account.avatar.flatMap(URL.init(string:)),
             text: HTMLText.plain(subject.content),
-            mediaURLs: subject.mediaAttachments.compactMap { attachment in
-                (attachment.previewUrl ?? attachment.url).flatMap(URL.init(string:))
-            },
+            attachments: subject.mediaAttachments.compactMap(\.asAttachment),
+            sensitive: subject.sensitive,
+            spoiler: subject.spoilerText,
+            counts: Counts(replies: subject.repliesCount, reblogs: subject.reblogsCount,
+                           favourites: subject.favouritesCount),
+            application: subject.application?.asApplication,
             webURL: subject.url.flatMap(URL.init(string:)),
             inReplyToURI: subject.inReplyToId.map { "https://\(host)/api/v1/statuses/\($0)" },
             tags: (subject.tags ?? []).map(\.name),

@@ -160,7 +160,7 @@ struct PostCommandTests {
     func nothingToDoWithoutAFeed(page: RailItem) {
         let app = freshApp("post-keys-without-a-feed")
         app.railItem = page
-        for command in [KeyCommand.nextPost, .previousPost, .openPost, .backToTop] {
+        for command in [KeyCommand.nextPost, .previousPost, .expandPost, .openInBrowser, .backToTop] {
             #expect(app.perform(command) == false)
         }
     }
@@ -212,7 +212,7 @@ struct PostCommandTests {
         app.railItem = .timeline
         var opened: [URL] = []
         app.openLink = { opened.append($0) }
-        #expect(app.perform(.openPost) == false)
+        #expect(app.perform(.openInBrowser) == false)
         #expect(opened.isEmpty)
     }
 
@@ -262,14 +262,15 @@ struct WiredPostKeyTests {
 
     /// The line issue #19 is written on: a post is *opened*. The shell lends the app its own
     /// way of opening a link, and this is that loan being spent, on the post the ring is on.
-    @Test("Return opens the address of the post the ring is on, and no other")
+    /// `o` is the key now — `Return` opens the post here instead of on somebody's website.
+    @Test("o opens the address of the post the ring is on, and no other")
     func opensTheSelectedPost() {
         let app = timeline("wired-open")
         var opened: [URL] = []
         app.openLink = { opened.append($0) }
         app.perform(.nextPost)
         app.perform(.nextPost)
-        #expect(app.perform(.openPost))
+        #expect(app.perform(.openInBrowser))
         #expect(opened.map(\.absoluteString) == ["https://example.social/@a/b"])
     }
 
@@ -280,7 +281,7 @@ struct WiredPostKeyTests {
         let app = timeline("wired-open-unlent")
         #expect(app.openLink == nil)
         #expect(app.perform(.nextPost))
-        #expect(app.perform(.openPost))
+        #expect(app.perform(.openInBrowser))
     }
 
     @Test("A post the server gave no address for is nothing to open, and nothing is opened")
@@ -290,7 +291,7 @@ struct WiredPostKeyTests {
         var opened: [URL] = []
         app.openLink = { opened.append($0) }
         #expect(app.perform(.nextPost))
-        #expect(app.perform(.openPost) == false)
+        #expect(app.perform(.openInBrowser) == false)
         #expect(opened.isEmpty)
     }
 

@@ -72,6 +72,16 @@ public struct FediqoCommands: Commands {
             Toggle(t("timeline.filter.mediaOnly"), isOn: $preferences.showMediaOnly)
                 .keyboardShortcut("m", modifiers: [.command, .shift])
                 .disabled(!reading)
+            Toggle(t("timeline.filter.sensitive"), isOn: $preferences.showSensitive)
+                .keyboardShortcut("s", modifiers: [.command, .shift])
+                .disabled(!reading)
+            Divider()
+            Button(t("post.open")) { app.perform(.expandPost) }
+                .keyboardShortcut(.return, modifiers: [])
+                .disabled(app.readingTimeline == nil)
+            Button(t("timeline.open")) { app.perform(.openInBrowser) }
+                .keyboardShortcut(.return, modifiers: .command)
+                .disabled(app.readingTimeline == nil)
         }
     }
 }

@@ -90,10 +90,24 @@ private struct CompactKey: EnvironmentKey {
     static let defaultValue = false
 }
 
+/// Whether a row has the width to put its attachments beside its words rather than under them.
+///
+/// Measured once by the screen that draws the list and read by every row, for the reason
+/// `fediqoCompact` is: a row asking the geometry for itself is the same question answered
+/// however many times there are rows on screen, and they would all answer the same.
+private struct WideRowsKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
 extension EnvironmentValues {
     var fediqoCompact: Bool {
         get { self[CompactKey.self] }
         set { self[CompactKey.self] = newValue }
+    }
+
+    var fediqoWideRows: Bool {
+        get { self[WideRowsKey.self] }
+        set { self[WideRowsKey.self] = newValue }
     }
 }
 

@@ -120,6 +120,11 @@ actor PagedClient: SourceClient {
     /// Nothing here is signed in anywhere, so nothing here asks for a home timeline.
     func home(host: String, limit: Int, before: Post?, token: String) async throws -> [Post] { [] }
 
+    /// Nothing here opens a post, so there is no conversation to invent.
+    func context(of post: Post, host: String, token: String?) async throws -> Conversation {
+        Conversation(post: post)
+    }
+
     /// Nothing here reconciles anything away: a double that answered "gone" would mark posts
     /// no test asked it to.
     func stillHas(_ post: Post, host: String, token: String?) async throws -> Bool { true }

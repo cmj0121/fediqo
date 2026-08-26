@@ -11,7 +11,15 @@ enum KeyCommand: Hashable, CaseIterable {
     case nextTab, previousTab
     case nextPage, previousPage
     case nextPost, previousPost
-    case openPost
+    /// Open the whole post, and the conversation around it, over the timeline.
+    case expandPost
+    /// Hand the post to the server it came from — the browser, which is what `Return` used
+    /// to do before opening the post here became a thing this app could do.
+    case openInBrowser
+    /// Turn the deck of attachments on the post the reader is on.
+    case rotateMedia
+    /// Play what is on top of that deck, or stop whatever is playing.
+    case playMedia
     case backToTop
     case showShortcuts
 
@@ -85,7 +93,15 @@ enum KeyCommand: Hashable, CaseIterable {
         case "j", KeyEquivalent.downArrow.character: return .nextPost
         case "k", KeyEquivalent.upArrow.character: return .previousPost
         case "g": return .backToTop
-        case KeyEquivalent.return.character: return .openPost
+        // `Return`, `Space` and a click are one ask: show me this post. `Space` no longer
+        // pages the list, and that is deliberate — a page is not a unit here, cards are
+        // different heights and `j`/`k` already step by post, which is the finer move. Inside
+        // the opened post there is no ring and `Space` goes back to scrolling, so each surface
+        // has one meaning rather than one key having two.
+        case KeyEquivalent.return.character, " ": return .expandPost
+        case "o": return .openInBrowser
+        case "m": return .rotateMedia
+        case "p": return .playMedia
         case "?": return .showShortcuts
         // A slash on its own asks for nothing. It is here only as the other half of `?`.
         default: return nil
@@ -126,7 +142,8 @@ enum KeyCommand: Hashable, CaseIterable {
     /// The keys worth listening for at all. Naming them keeps every other keystroke — the
     /// ones a text field, a menu or the focus system owns — out of our handler entirely.
     static let listened: Set<KeyEquivalent> = [
-        .tab, .escape, .return, .upArrow, .downArrow, "r", "R", "c", "j", "k", "g", "?", "/",
+        .tab, .escape, .return, .upArrow, .downArrow, .space,
+        "r", "R", "c", "j", "k", "g", "m", "o", "p", "?", "/",
     ]
 
     /// The same list, in the spelling a press arrives in, so that a key nobody listens for
@@ -219,7 +236,10 @@ extension KeyCommand {
         Shortcut(group: .doing, keys: ["r"], name: "readAgain", commands: [.refreshNow]),
         Shortcut(group: .doing, keys: ["R"], name: "interval", commands: [.cycleRefreshInterval]),
         Shortcut(group: .doing, keys: ["c"], name: "compose", commands: [.compose]),
-        Shortcut(group: .doing, keys: ["Return"], name: "open", commands: [.openPost]),
+        Shortcut(group: .doing, keys: ["Return", "Space"], name: "expand", commands: [.expandPost]),
+        Shortcut(group: .doing, keys: ["o"], name: "browser", commands: [.openInBrowser]),
+        Shortcut(group: .doing, keys: ["m"], name: "media", commands: [.rotateMedia]),
+        Shortcut(group: .doing, keys: ["p"], name: "play", commands: [.playMedia]),
         Shortcut(group: .doing, keys: ["?"], name: "list", commands: [.showShortcuts]),
         Shortcut(group: .leaving, keys: ["Escape"], name: "dismiss", commands: [.dismiss]),
     ]

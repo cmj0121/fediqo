@@ -22,6 +22,10 @@ struct FeedScreen: View {
     /// message stays and how it goes are the screen's, the way the scrolling already is.
     @State private var announcing = false
     @State private var editing: TimelineEditor.Subject?
+    /// Whether there is room to put a post's attachments beside its words. Measured from the
+    /// screen's own width; 560 is the attachment column plus a gap plus enough left for the
+    /// words to still be a paragraph rather than a stack of two-word lines.
+    @State private var wide = false
     /// The colour scheme, for the two marks drawn by hand at the foot of the list. Everything
     /// else here is `fediqoCard` or `Hairline`, which read it themselves.
     @Environment(\.colorScheme) private var colorScheme
@@ -48,6 +52,9 @@ struct FeedScreen: View {
     /// who was looking at the marker instead is not covered up for long.
     private static let announcementLasts = Duration.milliseconds(2500)
 
+    /// 200 for the attachments, 12 for the gap, and 348 left for the words.
+    private static let wideEnough: CGFloat = 560
+
     private var fading: Animation? { reduceMotion ? nil : Motion.appearing }
 
     private var model: FeedModel { app.feed(for: timeline) }
@@ -71,6 +78,23 @@ struct FeedScreen: View {
                 header
                 Hairline()
                 body(for: model.visible)
+            }
+            // Measured once here and read by every row: a row asking the geometry for itself
+            // is the same question answered once per row on screen, and they all answer the
+            // same. Below this there is no room to spend on an empty attachment column.
+            .onGeometryChange(for: Bool.self) { geometry in
+                geometry.size.width >= Self.wideEnough
+            } action: { wide in
+                self.wide = wide
+            }
+            .environment(\.fediqoWideRows, wide)
+            // The opened post, over the list rather than instead of it: underneath, the
+            // scroll position and the ring stay exactly where the reader left them.
+            .overlay {
+                if let opened = app.expanded {
+                    PostPage(post: opened) { app.perform(.dismiss) }
+                        .transition(.opacity)
+                }
             }
             // The ring is moved by a key, and a key can move it past the bottom of the
             // screen — which is most of what holding `j` is for. Without an anchor the list
@@ -159,6 +183,10 @@ struct FeedScreen: View {
         return Menu {
             Toggle(t("timeline.filter.boosts"), isOn: $preferences.showBoosts)
             Toggle(t("timeline.filter.mediaOnly"), isOn: $preferences.showMediaOnly)
+            // The third of the standing ones, and the odd one out: the other two decide which
+            // posts are here, this one decides how the ones that are here arrive. It sits with
+            // them because to a reader they are the same shelf — "what am I being shown".
+            Toggle(t("timeline.filter.sensitive"), isOn: $preferences.showSensitive)
             Divider()
             Text(t("timeline.filter.note"))
         } label: {
@@ -233,7 +261,15 @@ struct FeedScreen: View {
                     // scrolling to that id, and there is no second identity to keep in step
                     // with the first.
                     ForEach(posts) { post in
-                        PostRow(post: post, selected: post.mergeKey == model.selection)
+                        PostRow(post: post,
+                                selected: post.mergeKey == model.selection,
+                                // Only the row the reader is on hears `m`; every other deck
+                                // stays where its own reader left it.
+                                turns: post.mergeKey == model.selection ? app.mediaTurns : 0,
+                                plays: post.mergeKey == model.selection ? app.mediaPlays : 0,
+                                revealed: app.preferences.showSensitive) {
+                            app.expand(post)
+                        }
                     }
                     // One foot, and it says one thing. A reach still out owns it — a bottom
                     // that merely sits there is indistinguishable from a finished one — and

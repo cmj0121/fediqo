@@ -158,6 +158,21 @@ public final class AppState {
     /// from outside the screen that draws them. The drawing stays where it was.
     var addingSource = false
     var showingNotifications = false
+    /// The post whose whole self is open over the timeline, or nothing. It lives here rather
+    /// than in the screen for the reason the sheets do: a key, a click and a menu item all
+    /// have to be able to ask for it, and two of the three are outside the view that draws it.
+    var expanded: Post?
+    /// The conversation being read, where a post is open. It lives here rather than in the
+    /// page for the reason the page itself does: the keys are answered outside the view, and
+    /// while a post is open they belong to the conversation rather than to the list behind it.
+    private(set) var thread: ThreadModel?
+    /// How many times the reader has asked the deck on the selected row to turn over.
+    private(set) var mediaTurns = 0
+    /// The same, for asking it to play. Two counters rather than one command with an argument,
+    /// because both are events the row hears rather than state anybody holds.
+    private(set) var mediaPlays = 0
+    /// What is playing, which is at most one thing anywhere in the app.
+    let playback = Playback()
     /// Whether the written-down list of keys is up. It sits over everything the shell draws
     /// rather than in a sheet, so it lives here beside `composing` for the same reason: the
     /// key that opens it is answered outside the view that draws it.
@@ -358,6 +373,16 @@ public final class AppState {
         if let signIn { feed.onTokenRejected = { signIn.markRejected($0) } }
         feeds[timeline.id] = feed
         return feed
+    }
+
+    /// A loader to ask about one post's conversation with.
+    ///
+    /// The feed the reader is on, where there is one — its loader already knows the store and
+    /// who is signed in, and a conversation is one more question for it rather than a reason
+    /// to build a second one. A page opened from nowhere in particular gets a fresh loader,
+    /// which is what a preview and a test have.
+    func conversationLoader() -> TimelineLoader {
+        readingFeed?.loader ?? TimelineLoader(store: store, secrets: secrets, tokens: tokens)
     }
 
     /// One of the reader's timelines by id, or nothing where the id names none.
@@ -679,7 +704,10 @@ public final class AppState {
         case .previousPage: rotatePage(by: -1); return true
         case .nextPost: return moveSelection(by: 1)
         case .previousPost: return moveSelection(by: -1)
-        case .openPost: return openSelectedPost()
+        case .expandPost: return expandSelectedPost()
+        case .openInBrowser: return openSelectedPost()
+        case .rotateMedia: return turnTheDeck()
+        case .playMedia: return playTheAttachment()
         case .backToTop: return goToTop()
         case .showShortcuts: setShowingShortcuts(true); return true
         }
@@ -695,6 +723,9 @@ public final class AppState {
     /// The press still answers `false`, because nothing moved: `↓` at the bottom of a list is
     /// still the scroll view's to answer.
     private func moveSelection(by steps: Int) -> Bool {
+        // While a post is open, the keys belong to the conversation in front of the reader.
+        // Moving the ring in the list behind it would be moving something they cannot see.
+        if let thread { return thread.move(by: steps) }
         guard let feed = readingFeed else { return false }
         let moved = feed.moveSelection(by: steps)
         // Held down, `j` repeats twenty times a second against a ring that is still at the
@@ -706,8 +737,65 @@ public final class AppState {
         return moved
     }
 
-    /// Opens the post the ring is on, the way the row's own menu opens it, and says whether
-    /// there was a post to open.
+    /// Opens the whole of the post the ring is on, over the timeline, and says whether there
+    /// was one to open.
+    ///
+    /// It is a place the reader goes to and comes back from: the timeline underneath keeps its
+    /// scroll position and its ring, and `Escape` is the way back. What is opened is the post
+    /// itself rather than its key, because the page has something to draw before anything is
+    /// read back from the store or asked of anybody's server.
+    private func expandSelectedPost() -> Bool {
+        guard let post = readingFeed?.selectedPost else { return false }
+        open(post)
+        return true
+    }
+
+    /// One way in, whether a key or a click asked. The conversation is built here so that the
+    /// keys have something to move through the moment the page is on screen.
+    private func open(_ post: Post) {
+        thread = ThreadModel(post: post, loader: conversationLoader())
+        withAnimation(Motion.appearing) { expanded = post }
+    }
+
+    /// Opens a post the reader clicked, and puts the ring on it: they have said which post
+    /// they mean, and coming back to a list whose ring is somewhere else would be the app
+    /// disagreeing with them about where they are.
+    func expand(_ post: Post) {
+        readingFeed?.select(post)
+        open(post)
+    }
+
+    /// Turns the deck of attachments on the post the ring is on. An event rather than a state:
+    /// which attachment is on top belongs to the row that draws it, and pressing `m` twice
+    /// means it twice — the same shape `topRequests` has.
+    /// Plays what is on top of the deck on the post the ring is on — or stops it, if it is
+    /// what is already playing. Says `false` where there is nothing that can be played, which
+    /// includes every attachment stored before the file's own address was kept.
+    private func playTheAttachment() -> Bool {
+        // Anything at all playing is stopped by the key, wherever the ring happens to be:
+        // a reader pressing `p` to stop the sound should not have to find the row it is
+        // coming from first.
+        if playback.playing != nil, postUnderTheRing?.attachments.contains(where: {
+            playback.isPlaying($0.url)
+        }) != true {
+            playback.stop()
+            return true
+        }
+        guard let post = postUnderTheRing, post.attachments.contains(where: \.isPlayable) else {
+            return false
+        }
+        mediaPlays += 1
+        return true
+    }
+
+    private func turnTheDeck() -> Bool {
+        guard let post = postUnderTheRing, post.attachments.count > 1 else { return false }
+        mediaTurns += 1
+        return true
+    }
+
+    /// Hands the post the ring is on to the server it came from, and says whether there was
+    /// one to hand over.
     ///
     /// A post whose server gave no web address has nothing to open, and this says nothing
     /// about it: there is no fault to report — the post simply is not a page anywhere — and
@@ -720,9 +808,16 @@ public final class AppState {
     /// have `Return` mean "there was nothing there" when what happened was that we could not
     /// open it — so the loan is asked for at the point of opening, where it is used.
     private func openSelectedPost() -> Bool {
-        guard let url = readingFeed?.selectedURL else { return false }
+        guard let url = postUnderTheRing?.webURL else { return false }
         openLink?(url)
         return true
+    }
+
+    /// The post the ring is on, wherever the reader is: the one in the conversation while a
+    /// post is open, and the one in the list otherwise. Every key that acts on "this post"
+    /// asks here, so none of them can disagree about which post that is.
+    private var postUnderTheRing: Post? {
+        thread?.selected ?? readingFeed?.selectedPost
     }
 
     /// Back to the top of the feed being read. The screen does the scrolling; what happens
@@ -809,8 +904,18 @@ public final class AppState {
             setShowingShortcuts(false)
             return true
         }
-        guard composing else { return false }
-        setComposing(false)
+        if composing {
+            setComposing(false)
+            return true
+        }
+        // Last, because it is the thing furthest back: the composer floats over the opened
+        // post as it floats over everything else, and one press closes one thing.
+        guard expanded != nil else { return false }
+        withAnimation(Motion.appearing) { expanded = nil }
+        playback.stop()
+        // The conversation goes with the page. What it read is in the store; what it held was
+        // one reading of it, and the next opening starts from the store as this one did.
+        thread = nil
         return true
     }
 }

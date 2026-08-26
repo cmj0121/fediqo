@@ -166,6 +166,17 @@ public final class LocalStore: Sendable {
             try db.execute(sql: "UPDATE feeds SET created_at = ?", arguments: [now])
             try db.execute(sql: "UPDATE filter_kinds SET created_at = ?", arguments: [now])
         }
+        migrator.registerMigration("005") { db in
+            try db.execute(sql: schema(named: "schema-005"))
+            let now = milliseconds(Date())
+            try db.execute(sql: "UPDATE media_kinds SET created_at = ?", arguments: [now])
+            // Only the row this migration added: the other feeds were stamped by 004 and their
+            // created_at is when they arrived, not when the newest one did.
+            try db.execute(sql: "UPDATE feeds SET created_at = ? WHERE created_at = 0", arguments: [now])
+        }
+        migrator.registerMigration("006") { db in
+            try db.execute(sql: schema(named: "schema-006"))
+        }
         return migrator
     }
 

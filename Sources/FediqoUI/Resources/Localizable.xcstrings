@@ -835,6 +835,295 @@
         }
       }
     },
+    "post.alone": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nobody has replied to this, and it answers nothing."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "沒有人回覆這則，它也不是在回覆誰。"
+          }
+        }
+      }
+    },
+    "post.back": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Timeline"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "時間軸"
+          }
+        }
+      }
+    },
+    "post.covered.hide": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hide"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "收起"
+          }
+        }
+      }
+    },
+    "post.covered.show": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "顯示"
+          }
+        }
+      }
+    },
+    "post.favourite": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Favourite on the server it came from"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在它來的伺服器上收藏"
+          }
+        }
+      }
+    },
+    "post.media.audio": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "An audio clip."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一段音訊。"
+          }
+        }
+      }
+    },
+    "post.media.image": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "An image."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一張圖片。"
+          }
+        }
+      }
+    },
+    "post.media.play": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Play it here"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在這裡播放"
+          }
+        }
+      }
+    },
+    "post.media.position": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%d of %d."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "第 %d 個，共 %d 個。"
+          }
+        }
+      }
+    },
+    "post.media.turn": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Click to turn the stack"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "點一下換下一個"
+          }
+        }
+      }
+    },
+    "post.media.unknown": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "An attachment."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一個附件。"
+          }
+        }
+      }
+    },
+    "post.media.video": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A video."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一段影片。"
+          }
+        }
+      }
+    },
+    "post.open": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show the whole post"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "顯示整篇貼文"
+          }
+        }
+      }
+    },
+    "post.reblog": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Boost on the server it came from"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在它來的伺服器上轉推"
+          }
+        }
+      }
+    },
+    "post.reply": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reply on the server it came from"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在它來的伺服器上回覆"
+          }
+        }
+      }
+    },
+    "post.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Post"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "貼文"
+          }
+        }
+      }
+    },
+    "post.writtenWith": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "written with"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "發文用"
+          }
+        }
+      }
+    },
     "rail.collapse": {
       "extractionState": "manual",
       "localizations": {
@@ -1515,6 +1804,23 @@
         }
       }
     },
+    "shortcut.browser": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open on its server"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在它的伺服器上打開"
+          }
+        }
+      }
+    },
     "shortcut.compose": {
       "extractionState": "manual",
       "localizations": {
@@ -1545,6 +1851,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "關閉編輯器，或關掉眼前的東西"
+          }
+        }
+      }
+    },
+    "shortcut.expand": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show the whole post"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "顯示整篇貼文"
           }
         }
       }
@@ -1634,6 +1957,23 @@
         }
       }
     },
+    "shortcut.media": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Turn the attachments"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "換下一個附件"
+          }
+        }
+      }
+    },
     "shortcut.note": {
       "extractionState": "manual",
       "localizations": {
@@ -1651,23 +1991,6 @@
         }
       }
     },
-    "shortcut.open": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Open the post you are on"
-          }
-        },
-        "zh-TW": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "開啟目前所在的貼文"
-          }
-        }
-      }
-    },
     "shortcut.pages": {
       "extractionState": "manual",
       "localizations": {
@@ -1681,6 +2004,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "下一個頁面 / 上一個頁面"
+          }
+        }
+      }
+    },
+    "shortcut.play": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Play the attachment"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "播放附件"
           }
         }
       }
@@ -2888,6 +3228,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "規則決定時間軸裡有什麼，永遠不決定它排在哪裡。"
+          }
+        }
+      }
+    },
+    "timeline.filter.sensitive": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show what is covered"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "顯示被遮蔽的內容"
           }
         }
       }

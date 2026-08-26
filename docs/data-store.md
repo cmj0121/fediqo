@@ -184,6 +184,51 @@ through a trending list gets a `public` row anyway — before 004 the store hand
 timeline, so that post was on the reader's screen, and the backfill's job is that nobody opens this version
 to a shorter timeline than they closed the last one with.
 
+## What a post is, besides what it says
+
+Migration 005 keeps what 001 threw away. An attachment arrived as one address with no word about
+what kind of thing it was — and for a film that address was the *still*, so the file itself was
+never even asked for. A content warning was dropped on the floor, and so were the three numbers
+under every post.
+
+| table / column                    | a row says                                                    |
+| --------------------------------- | ------------------------------------------------------------- |
+| `post_media`                      | attachment `position` is a `kind`, at `url`, still at `preview_url`, described as `alt` |
+| `posts.sensitive`                 | the source said the attachments arrive covered                |
+| `posts.spoiler_text`              | the line the author put in front of the words                 |
+| `posts.replies_count` + the two beside it | how it had been received, when we were last told |
+| `posts.application` + `application_url` | what it was written with, where the server said (006) |
+
+**None of it is backfilled**, and the code says so rather than hiding it. An attachment from before
+005 comes back as kind `unknown` with a preview and no file, which is exactly what is true of it.
+`sensitive`, `spoiler_text` and every count are NULL for "never told" — a different fact from `0`
+and `''`, and the reason a screen may only hide what it was told to hide and may never draw a count
+it does not have.
+
+`application` is NULL far more often than not, and that is the server's doing: Mastodon sends it
+for statuses it hosts and leaves it out for everything that reached it by federation. A row without
+it says nothing at all — never "posted from an unknown app", which would be inventing a fact about
+somebody's client.
+
+The counts are written on every sighting from the authority and **never touch `updated_at`**:
+somebody favouriting a post is not its author editing it, and `updated_at` has one meaning. A server
+that sends no counts blanks none, because `coalesce` keeps whatever another already said.
+
+`post_media` is written beside `posts.media_urls` rather than instead of it. The column 001 froze
+stays true; the table is what anything new reads.
+
+## A conversation is a fourth way a post arrives
+
+Opening a post asks the server whose word on it is final — never whoever relayed it, the same rule
+`reconcile` follows — for the conversation around it. What comes back is posts, and posts are
+written down with the source they arrived through, so `thread` is a row in `feeds` beside the three
+base sources. No template offers it and nothing pages it: it is how a post got here, not somewhere
+to read.
+
+The store answers first. `LocalStore.thread(around:)` walks what is already here — up by address
+through `in_reply_to_uri`, down a generation at a time — and both walks are bounded, because two
+posts answering each other is something a server can write.
+
 ## A timeline is a filter, not a list
 
 A timeline the reader makes is **one base source and any number of rules**. One base source, because two

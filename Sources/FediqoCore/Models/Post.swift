@@ -22,7 +22,23 @@ public struct Post: Sendable, Hashable, Identifiable {
     public let authorHandle: String
     public let authorAvatarURL: URL?
     public let text: String
-    public let mediaURLs: [URL]
+    /// What came attached, in the order the source gave them.
+    public let attachments: [Attachment]
+    /// Whether the source said the attachments arrive covered. `nil` where it never said —
+    /// which is every post stored before there was anywhere to keep the answer, and is not
+    /// the same fact as "it said no".
+    public let sensitive: Bool?
+    /// The line the author put in front of the words, where there is one. `nil` where the
+    /// source never said; `""` where it said and there was none.
+    public let spoiler: String?
+    /// The three numbers under a post, each `nil` where we were never told. A number we do
+    /// not have is never shown as a zero: zero means nobody, and this means no idea.
+    public let counts: Counts
+    /// What the post was written with, where the server said. Nearly always `nil` for a post
+    /// that reached its server by federation — Mastodon only tells you about its own — and a
+    /// `nil` here is never drawn as "unknown app": that would be a fact about somebody's
+    /// client that nobody told us.
+    public let application: Application?
     public let webURL: URL?
     /// The parent's address. Not a reference: a reply routinely arrives before its parent.
     public let inReplyToURI: String?
@@ -38,6 +54,11 @@ public struct Post: Sendable, Hashable, Identifiable {
     public private(set) var sources: [String]
 
     public var isBoost: Bool { boostedById != nil }
+
+    /// What each attachment can be drawn as, in order — the still where there is one, the file
+    /// otherwise. The rules read this, and so does anything that only wants to know whether a
+    /// post carries anything at all.
+    public var mediaURLs: [URL] { attachments.compactMap(\.displayURL) }
 
     /// What counts as "the same post": identity only, two tiers, first match wins — the
     /// same two the store keys on. Two servers carrying one post agree on its canonical id,
@@ -67,7 +88,11 @@ public struct Post: Sendable, Hashable, Identifiable {
         authorHandle: String,
         authorAvatarURL: URL? = nil,
         text: String,
-        mediaURLs: [URL] = [],
+        attachments: [Attachment] = [],
+        sensitive: Bool? = nil,
+        spoiler: String? = nil,
+        counts: Counts = Counts(),
+        application: Application? = nil,
         webURL: URL? = nil,
         inReplyToURI: String? = nil,
         tags: [String] = [],
@@ -86,7 +111,11 @@ public struct Post: Sendable, Hashable, Identifiable {
         self.authorHandle = authorHandle
         self.authorAvatarURL = authorAvatarURL
         self.text = text
-        self.mediaURLs = mediaURLs
+        self.attachments = attachments
+        self.sensitive = sensitive
+        self.spoiler = spoiler
+        self.counts = counts
+        self.application = application
         self.webURL = webURL
         self.inReplyToURI = inReplyToURI
         self.tags = Self.normalisedTags(tags)
@@ -115,6 +144,90 @@ public struct Post: Sendable, Hashable, Identifiable {
             return name
         }
     }
+}
+
+/// One thing that came attached to a post.
+///
+/// **`kind` is what the source said it was, and `unknown` is a real answer** rather than a
+/// missing one: every attachment stored before migration 005 is one URL and nothing else, and
+/// what is true of it is that it can be drawn, not that it is a photograph.
+///
+/// `url` is the file and `previewURL` is a still to draw in its place; at least one is there.
+/// A photo often has only the file, an audio clip often has no still, and what the store kept
+/// before 005 was whichever of the two the server offered first — so those arrive here as a
+/// preview with no file behind it, which is exactly what they are.
+public struct Attachment: Sendable, Hashable, Codable {
+    public enum Kind: String, Sendable, Hashable, Codable, CaseIterable {
+        case image, video, audio, unknown
+    }
+
+    public let kind: Kind
+    public let url: URL?
+    public let previewURL: URL?
+    /// What the author wrote for somebody who cannot see it. Empty where they wrote none.
+    public let alt: String
+
+    public init(kind: Kind, url: URL? = nil, previewURL: URL? = nil, alt: String = "") {
+        self.kind = kind
+        self.url = url
+        self.previewURL = previewURL
+        self.alt = alt
+    }
+
+    /// What to draw: the still where there is one, the file otherwise.
+    public var displayURL: URL? { previewURL ?? url }
+
+    /// Whether this can be played here rather than handed to a browser.
+    ///
+    /// Two things have to be true and the second is why this is a property rather than a
+    /// guess: it has to be something that plays, and **we have to hold the file itself**. An
+    /// attachment stored before migration 005 is a still with nothing behind it — 001 kept
+    /// `preview_url ?? url` and never asked for the film — so it cannot be played, however
+    /// obviously it is a film to look at.
+    public var isPlayable: Bool {
+        guard url != nil else { return false }
+        return kind == .video || kind == .audio
+    }
+
+    /// Whether there is anything to draw at all — a row with neither is not written.
+    public var isEmpty: Bool { displayURL == nil }
+
+    /// An attachment as the store held one before migration 005: an address that can be drawn,
+    /// and no idea what is behind it.
+    public static func unknown(displaying url: URL) -> Attachment {
+        Attachment(kind: .unknown, previewURL: url)
+    }
+}
+
+/// The client a post was written with: a name, and the website its author registered for it.
+///
+/// It says nothing about the person and nothing about the words — which is exactly why it sits
+/// at the foot of a row, under everything that does.
+public struct Application: Sendable, Hashable, Codable {
+    public let name: String
+    public let website: URL?
+
+    public init(name: String, website: URL? = nil) {
+        self.name = name
+        self.website = website
+    }
+}
+
+/// The three numbers under a post, as the source last said them. Each is `nil` where it never
+/// did — which is what stops a screen inventing a zero.
+public struct Counts: Sendable, Hashable, Codable {
+    public let replies: Int?
+    public let reblogs: Int?
+    public let favourites: Int?
+
+    public init(replies: Int? = nil, reblogs: Int? = nil, favourites: Int? = nil) {
+        self.replies = replies
+        self.reblogs = reblogs
+        self.favourites = favourites
+    }
+
+    /// Whether the source said anything at all about how this post has been received.
+    public var areKnown: Bool { replies != nil || reblogs != nil || favourites != nil }
 }
 
 /// An account a post names.

@@ -29,7 +29,7 @@ func makePost(
         authorName: "someone",
         authorHandle: "@someone@\(host)",
         text: text,
-        mediaURLs: media.compactMap(URL.init(string:)),
+        attachments: media.compactMap(URL.init(string:)).map(Attachment.unknown(displaying:)),
         tags: tags,
         boostedBy: boostedBy,
         boostedById: boostedBy.map { "https://booster.example/users/\($0)" },

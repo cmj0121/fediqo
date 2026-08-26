@@ -149,6 +149,12 @@ extension StubClient {
     /// a screen no test asked for them on.
     func trending(host: String, limit: Int, token: String?) async throws -> [Post] { [] }
 
+    /// Nothing in these suites opens a post, so a double that invented a conversation would be
+    /// answering a question none of them asked.
+    func context(of post: Post, host: String, token: String?) async throws -> Conversation {
+        Conversation(post: post)
+    }
+
     /// Nothing in these suites reconciles, and a double that answered "gone" would mark posts
     /// no test asked it to. Still there is the answer that decides nothing.
     func stillHas(_ post: Post, host: String, token: String?) async throws -> Bool { true }

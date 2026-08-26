@@ -1,75 +1,279 @@
 import SwiftUI
 import FediqoCore
 
-/// One row. It can always say which server handed it over, and whether it is a boost.
+/// One row, in bands. Each is the whole width and each answers one question:
+///
+/// ```text
+/// what happened to this post before it got here   (only when something did)
+/// who wrote it, where it reached us, and when
+/// what it says              │ what came attached
+/// what can be done about it
+/// what it was written with                        (right, and often empty)
+/// ```
+///
+/// **The two columns are only the middle band**, and only where there is room for them: the
+/// words on the left, the attachments on the right, in a column that stays there whether or
+/// not anything is in it. That empty column is the point — it is what keeps every row's text
+/// starting and ending in the same place down a long list. Below `fediqoWideRows` there is
+/// nothing to spend on it and the attachments go back under the words.
+///
+/// Every row is the same height, set by the attachment card: a short post is padded up to it
+/// and a long one stops at it with an ellipsis. What the ellipsis is hiding is what opening
+/// the post is for.
 struct PostRow: View {
     let post: Post
     /// Whether this is the row the reader is on. The row is told rather than asking: which
     /// post the ring is on belongs to the feed, and a row knows nothing but itself.
     var selected = false
+    /// Bumped when `m` is pressed while this row is the one the reader is on — the deck turns
+    /// itself over, and which one is on top stays the deck's own business.
+    var turns = 0
+    /// Bumped when `p` is pressed on this row: what is on top of the deck plays, or stops.
+    var plays = 0
+    /// Whether what this post covered arrives uncovered. The reader's standing answer; a row
+    /// can still be opened by hand without changing it.
+    var revealed = false
+    /// Whether this is a row in a list rather than the post itself, opened.
+    ///
+    /// In a list it is held to the same height as every other row and its words stop with an
+    /// ellipsis — which is the row saying there is more, and `Return` is how to get it. The
+    /// opened post is where the whole of it lives, so nothing is clamped there.
+    var condensed = true
+    /// What a click on the row asks for. `nil` in a preview and in the detail page itself,
+    /// where opening what you are already looking at means nothing.
+    var open: (() -> Void)?
 
     @Environment(\.openURL) private var openURL
+    @Environment(\.fediqoWideRows) private var wide
+    /// The reader's text size, because how many lines fit in a card depends on it.
+    @Environment(\.fediqoTextScale) private var scale
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// What this reader decided about this post, or nothing where they have not decided.
+    ///
+    /// `nil` follows the standing preference; a press of the button is an answer of its own and
+    /// wins over it **in both directions** — a reader who turned everything on can still put
+    /// one post back behind its warning. It lasts as long as the app is open and is never
+    /// written down: which posts somebody chose to read is a reading record, and this app
+    /// keeps none.
+    @State private var reveal: Bool?
+
+    /// How much of a post a row shows before it stops — worked out from the height it has to
+    /// fit in rather than fixed at a number of lines.
+    ///
+    /// The reader's text size moves what a line is, and this app's own default is the largest
+    /// of them: a count that fits at 13 points overflows the card at 21. So the count follows
+    /// the size, and every row still stops at the same place as every other row, which is what
+    /// keeps the list level. 1.35 is the line height a `Text` gives itself around its point
+    /// size; three lines is the floor, because a row that shows one line of a paragraph is not
+    /// showing a post at all.
+    private var lines: Int {
+        max(3, Int(AttachmentDeck.height / (13 * scale * 1.35)))
+    }
+
+    private var spoiler: String { post.spoiler ?? "" }
+    /// One answer for both halves, the way the preference is one switch for both: the words
+    /// behind their line and the media behind its blur are the same act to a reader.
+    private var shown: Bool { reveal ?? revealed }
+    private var wordsAreCovered: Bool { !spoiler.isEmpty && !shown }
+    private var mediaIsCovered: Bool { post.sensitive == true && !shown }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let boostedBy = post.boostedBy {
-                Label(t("timeline.boostedBy", boostedBy), systemImage: "arrow.2.squarepath")
-                    .fediqoFont(10)
-                    .foregroundStyle(.secondary)
-            }
-
-            HStack(alignment: .top, spacing: 10) {
-                RemoteImage(url: post.authorAvatarURL, width: 34, height: 34)
-
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 6) {
-                        Text(post.authorName).fediqoFont(13, weight: .semibold).lineLimit(1)
-                        Text(post.authorHandle).fediqoFont(11).foregroundStyle(.secondary).lineLimit(1)
-                        Spacer(minLength: 6)
-                        Text(post.createdAt, format: .relative(presentation: .numeric))
-                            .fediqoFont(10)
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                    }
-
-                    if !post.text.isEmpty {
-                        Text(post.text)
-                            .fediqoFont(13)
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    if !post.mediaURLs.isEmpty {
-                        media
-                    }
-
-                    sources
+            decorator
+            metadata
+            if wide {
+                HStack(alignment: .top, spacing: 12) {
+                    words
+                    attachmentColumn
+                }
+                // Every row the same height, whatever is in it: the attachment card sets it,
+                // a post of two words is padded up to it, and a long one is cut off at it with
+                // an ellipsis saying there is more. The words are clamped to whatever number
+                // of lines fits in that height at the reader's own text size, so nothing is
+                // ever cut mid-line — the ellipsis is the row's, not the frame's.
+                .frame(height: AttachmentDeck.height, alignment: .topLeading)
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    words
+                    if !post.attachments.isEmpty { deck }
                 }
             }
+            InteractionBar(post: post, open: open)
+            footer
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .fediqoCard()
         .fediqoFocusRing(selected)
+        // A tap on the row opens the post. Not a `Button`: the words are selectable, the deck
+        // turns itself over and the interaction bar has buttons of its own, and wrapping the
+        // lot in one would take every one of those clicks away from them.
+        .contentShape(Rectangle())
+        .onTapGesture { open?() }
         .contextMenu {
+            if open != nil { Button(t("post.open")) { open?() } }
             if let url = post.webURL {
                 Button(t("timeline.open")) { openURL(url) }
             }
         }
     }
 
-    private var media: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 6) {
-                ForEach(post.mediaURLs, id: \.self) { url in
-                    RemoteImage(url: url, width: 132, height: 88)
-                }
-            }
+    /// The band above everything: what happened to this post before it reached the reader.
+    ///
+    /// Today that is one thing — somebody boosted it — because a boost is the only such fact
+    /// a timeline read hands over. Favourites and the rest arrive with notifications (#9), and
+    /// when they do this is the line they are said on, rather than a second design for the
+    /// same idea. Nothing at all is drawn when there is nothing to say.
+    @ViewBuilder
+    private var decorator: some View {
+        if let boostedBy = post.boostedBy {
+            Label(t("timeline.boostedBy", boostedBy), systemImage: "arrow.2.squarepath")
+                .fediqoFont(10)
+                .foregroundStyle(.secondary)
         }
-        .frame(height: 88)
     }
 
-    /// Every row can say which server handed it over — and when two did, it says both.
+    /// Who wrote it, where it reached us, and when. The whole width, above both columns: it
+    /// is about the post rather than about its words, and an avatar in a gutter beside the
+    /// text would make the text column start in a different place from the row above it.
+    private var metadata: some View {
+        HStack(spacing: 8) {
+            RemoteImage(url: post.authorAvatarURL, width: 30, height: 30)
+            Text(post.authorName).fediqoFont(13, weight: .semibold).lineLimit(1)
+            Text(post.authorHandle).fediqoFont(11).foregroundStyle(.secondary).lineLimit(1)
+            Spacer(minLength: 6)
+            sources
+            Text(post.createdAt, format: .relative(presentation: .numeric))
+                .fediqoFont(10)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+        }
+    }
+
+    /// The left column: what they said, and the line in front of it where there is one.
+    private var words: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            if !spoiler.isEmpty { warning }
+            if !post.text.isEmpty, !wordsAreCovered {
+                Text(post.text)
+                    .fediqoFont(13)
+                    .textSelection(.enabled)
+                    .lineLimit(condensed ? lines : nil)
+                    .truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: !condensed)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The line the author put in front of their words, and the way past it.
+    ///
+    /// A band rather than a line of small print: it is the one thing on a row that says "what
+    /// is under here is not what you were expecting", and it has to be read before the words
+    /// are, not after. The warning stays up whether or not the words behind it are showing —
+    /// taking it away once somebody has read past it would remove the only thing saying what
+    /// they are looking at — and the button beside it works both ways, so a reader who has
+    /// everything turned on can still put one post back.
+    private var warning: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.orange)
+            Text(spoiler)
+                .fediqoFont(12, weight: .semibold)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            toggle
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.orange.opacity(colorScheme == .dark ? 0.16 : 0.12))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Color.orange.opacity(0.35))
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Show, or hide again. One control, both ways, and it says which way it is about to go.
+    private var toggle: some View {
+        Button {
+            withAnimation(Motion.appearing) { reveal = !shown }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: shown ? "eye.slash" : "eye")
+                    .font(.system(size: 10, weight: .semibold))
+                Text(t(shown ? "post.covered.hide" : "post.covered.show"))
+                    .fediqoFont(10, weight: .semibold)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(Color.orange.opacity(colorScheme == .dark ? 0.28 : 0.20)))
+            .foregroundStyle(.orange)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .help(t(shown ? "post.covered.hide" : "post.covered.show"))
+    }
+
+    /// The right column. It is there whether or not anything is in it — that is what keeps the
+    /// words the same width down the whole list — and when it is empty it is nothing at all:
+    /// no frame, no dashes, no "no attachments". A visible empty box on every second post
+    /// reads as something broken.
+    @ViewBuilder
+    private var attachmentColumn: some View {
+        if post.attachments.isEmpty {
+            Color.clear.frame(width: 200, height: 0)
+        } else {
+            deck
+        }
+    }
+
+    private var deck: some View {
+        AttachmentDeck(attachments: post.attachments, covered: mediaIsCovered,
+                       turns: turns, plays: plays) {
+            withAnimation(Motion.appearing) { reveal = true }
+        }
+    }
+
+    /// The foot of the row: what the post was written with.
+    ///
+    /// Under everything, and quietly, because it is the least of what a row says — it is about
+    /// neither the person nor the words. It is absent far more often than not: a server tells
+    /// you what its own writers used and says nothing about a post that reached it from
+    /// somewhere else. Nothing is drawn then. "Unknown app" would be a claim nobody made.
+    @ViewBuilder
+    private var footer: some View {
+        if post.application == nil {
+            // Held open, because most posts have nothing to say here and a list where every
+            // other row is nine points shorter is a list that never sits still.
+            if condensed { Color.clear.frame(height: 11 * scale) }
+        } else if let application = post.application {
+            // At the right, alone. It is the only line in the row that is about none of the
+            // three — not the person, not the words, not what can be done — and the far end is
+            // where a reader's eye goes last.
+            HStack(spacing: 4) {
+                Spacer(minLength: 0)
+                Text(t("post.writtenWith")).fediqoFont(9).foregroundStyle(.tertiary)
+                if let website = application.website {
+                    Link(application.name, destination: website)
+                        .fediqoFont(9)
+                        .foregroundStyle(.tertiary)
+                } else {
+                    Text(application.name).fediqoFont(9).foregroundStyle(.tertiary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+    }
+
+    /// Which server handed it over — and when two did, it says both. It sits in the metadata
+    /// band beside who wrote it and when, because it is the same kind of fact: where this post
+    /// reached us from, rather than anything about what it says.
     private var sources: some View {
         HStack(spacing: 5) {
             Text(t("timeline.via")).fediqoFont(10).foregroundStyle(.tertiary)
@@ -77,7 +281,75 @@ struct PostRow: View {
                 Text(host).fediqoFont(10).fediqoPill()
             }
         }
-        .padding(.top, 2)
+    }
+}
+
+/// What can be done with a post, and what has already been done with it by everybody else.
+///
+/// One group, all of it to the left. Replying and opening are the same kind of thing as
+/// boosting — something a reader does to this post — and putting two of them at the far end
+/// of the row made them read as a different family. Nothing here is right-aligned, so the eye
+/// finds them in the same place on every row of a long list.
+///
+/// **Every button hands the post to the server it came from.** Fediqo has no write path yet
+/// (decision 6): replying, boosting and favouriting all happen where the post lives, so each
+/// of these opens it there. When there is a write path, the same buttons stop leaving.
+///
+/// A count is drawn only where there is one. Nothing here shows a zero it invented: zero means
+/// nobody replied, and a post stored before migration 005 has no idea how many did.
+struct InteractionBar: View {
+    let post: Post
+    var open: (() -> Void)?
+
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        HStack(spacing: 18) {
+            action("arrowshape.turn.up.left", count: post.counts.replies, labelKey: "post.reply")
+            action("arrow.2.squarepath", count: post.counts.reblogs, labelKey: "post.reblog")
+            action("star", count: post.counts.favourites, labelKey: "post.favourite")
+            if let open {
+                // The conversation, which is what opening a post here shows: the post and
+                // everything around it. Not an arrow — nothing is being sent anywhere.
+                button("bubble.left.and.bubble.right", labelKey: "post.open", action: open)
+            }
+            if post.webURL != nil {
+                // An arrow leaving the app, because that is exactly what this does.
+                button("arrow.up.right.square", labelKey: "timeline.open") { hand() }
+            }
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(.secondary)
+        .padding(.top, 4)
+    }
+
+    private func action(_ symbol: String, count: Int?, labelKey: String) -> some View {
+        Button { hand() } label: {
+            HStack(spacing: 4) {
+                Image(systemName: symbol).font(.system(size: 16, weight: .medium))
+                if let count { Text(verbatim: "\(count)").fediqoFont(11) }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(t(labelKey))
+        .accessibilityLabel(Text(t(labelKey)))
+        .disabled(post.webURL == nil)
+    }
+
+    private func button(_ symbol: String, labelKey: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 16, weight: .medium)).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(t(labelKey))
+        .accessibilityLabel(Text(t(labelKey)))
+    }
+
+    /// Handed to the server it came from, which is what every one of these means today.
+    private func hand() {
+        guard let url = post.webURL else { return }
+        openURL(url)
     }
 }
 

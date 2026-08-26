@@ -21,6 +21,12 @@ public enum BaseSource: String, Sendable, CaseIterable, Identifiable, Codable {
     case home
     /// What the server says is rising, in the order it said it.
     case trend
+    /// The conversation around one post, asked for when a reader opens it.
+    ///
+    /// Not a timeline anybody can build: no template offers it, and there is nothing to page
+    /// through. It is here because posts arrive this way and an arrival has to be able to say
+    /// how it arrived — `post_origins` keeps a source for every one of them.
+    case thread
 
     public var id: String { rawValue }
 
@@ -33,7 +39,8 @@ public enum BaseSource: String, Sendable, CaseIterable, Identifiable, Codable {
     public var needsAccount: Bool { self == .home }
 
     /// Whether a page from here is a stretch of time, and so can be evidence that a post the
-    /// store holds has gone. A trending list is a snapshot somebody curated: it covers no
-    /// stretch, leaves nothing out of one, and pages nowhere.
-    public var isThreadOfTime: Bool { self != .trend }
+    /// store holds has gone. A trending list is a snapshot somebody curated and a conversation
+    /// is a shape of its own: neither covers a stretch, neither leaves anything out of one,
+    /// and neither pages anywhere.
+    public var isThreadOfTime: Bool { self == .public || self == .home }
 }
