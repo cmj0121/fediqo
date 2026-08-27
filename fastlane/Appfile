@@ -1,0 +1,9 @@
+# Everything here is read out of the environment, which scripts/env.sh filled from .env on a
+# laptop and a runner's secret store fills by itself. Nothing about this file knows which.
+app_identifier ENV.fetch("FEDIQO_BUNDLE_ID")
+team_id        ENV.fetch("FEDIQO_TEAM_ID")
+
+# Only the fallback needs this: with an App Store Connect key there is nobody to be.
+apple_id       ENV["FEDIQO_APPLE_ID"]
+
+# vim: ts=2 sw=2 ft=ruby et :

@@ -2,7 +2,7 @@
 # `make xcodeproj` writes it, `make mac` runs that first.
 name: Fediqo
 options:
-  bundleIdPrefix: tw.cmj
+  bundleIdPrefix: dev.mini-poc
   deploymentTarget:
     macOS: "15.0"
     iOS: "18.0"
@@ -18,10 +18,45 @@ settings:
     # scripts/version.sh -- 0.0.0 is what "no release has happened" looks like.
     MARKETING_VERSION: "0.0.0"
     CURRENT_PROJECT_VERSION: "0"
-    DEVELOPMENT_TEAM: ""
-    CODE_SIGN_STYLE: Automatic
-    CODE_SIGN_IDENTITY: "-"
     ENABLE_USER_SCRIPT_SANDBOXING: YES
+  # Signing is a property of which build this is, not of the project. Debug is what a
+  # checkout with no certificates in it builds -- a pull request has none and must not need
+  # any -- and Release is the only configuration that expects to be handed an identity.
+  configs:
+    Debug:
+      DEVELOPMENT_TEAM: ""
+      CODE_SIGN_STYLE: Automatic
+      CODE_SIGN_IDENTITY: "-"
+    Release:
+      # The team and the profile arrive on the command line from the release lane, the same
+      # way the version does, and for the same reason: a team written here is an account
+      # written into a public repository, and a profile name written here is a name that
+      # stops being true the next time match regenerates it.
+      CODE_SIGN_STYLE: Manual
+      CODE_SIGN_IDENTITY: "Apple Distribution"
+
+# Xcode makes a scheme for every target on its own, but it makes them where only this user can
+# see them. fastlane reads the shared ones, and when it cannot find the name it was given it
+# does not stop -- it takes the first scheme in the project instead. That is how asking for
+# Fediqo-iOS produced a macOS archive signed with an iOS profile, and the first thing that
+# noticed was the export.
+schemes:
+  Fediqo:
+    build:
+      targets:
+        Fediqo: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+  Fediqo-iOS:
+    build:
+      targets:
+        Fediqo-iOS: all
+    run:
+      config: Debug
+    archive:
+      config: Release
 
 packages:
   Fediqo:
@@ -45,16 +80,34 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleURLTypes:
-          - CFBundleURLName: tw.cmj.fediqo
+          - CFBundleURLName: dev.mini-poc.fediqo
             CFBundleURLSchemes: [fediqo]
+        # HTTPS and nothing else, which is the exemption every app gets for free. Saying so
+        # here is what keeps App Store Connect from stopping to ask a person, once per build,
+        # a question whose answer never changes.
+        ITSAppUsesNonExemptEncryption: false
+        # Both stores refuse a submission that does not say which shelf it belongs on, and
+        # macOS wants the answer in the bundle rather than only in App Store Connect.
+        LSApplicationCategoryType: public.app-category.social-networking
+    # XcodeGen rewrites this file from the block above on every build, exactly as it does the
+    # plists -- so it is an empty dictionary and a key typed into it lives until the next
+    # `make mac`. The sandbox is asked for below instead, as build settings, because Xcode
+    # decides those last: with ENABLE_APP_SANDBOX unset it strips the entitlement back out of
+    # whatever the file said, which looks precisely like the file being ignored.
     entitlements:
       path: Apps/macOS/Fediqo.entitlements
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: tw.cmj.fediqo
+        PRODUCT_BUNDLE_IDENTIFIER: dev.mini-poc.fediqo
         PRODUCT_NAME: Fediqo
         INFOPLIST_FILE: Apps/macOS/Info.plist
         CODE_SIGN_ENTITLEMENTS: Apps/macOS/Fediqo.entitlements
+        # The Mac App Store takes sandboxed apps only. Fediqo reads servers and keeps one
+        # database, and the database is already somewhere the sandbox would have put it, so
+        # outgoing network is the only hole this app has to ask for. Debug is sandboxed too,
+        # on purpose: a container that breaks the app should break it here, not at upload.
+        ENABLE_APP_SANDBOX: YES
+        ENABLE_OUTGOING_NETWORK_CONNECTIONS: YES
         GENERATE_INFOPLIST_FILE: NO
         COMBINE_HIDPI_IMAGES: YES
         ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS: NO
@@ -78,15 +131,38 @@ targets:
         # somewhere above the bottom of the glass. An empty dictionary is the whole of what
         # a SwiftUI app needs to say it was written for the screen it is on.
         UILaunchScreen: {}
+        # All four, because this app is on the iPad as well as the phone and the iPad will not
+        # take a submission that cannot be a third of a screen. An app that reads a timeline
+        # has no reason to refuse any of them anyway.
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         CFBundleURLTypes:
-          - CFBundleURLName: tw.cmj.fediqo
+          - CFBundleURLName: dev.mini-poc.fediqo
             CFBundleURLSchemes: [fediqo]
+        # HTTPS and nothing else, which is the exemption every app gets for free. Saying so
+        # here is what keeps App Store Connect from stopping to ask a person, once per build,
+        # a question whose answer never changes.
+        ITSAppUsesNonExemptEncryption: false
+        # Both stores refuse a submission that does not say which shelf it belongs on, and
+        # macOS wants the answer in the bundle rather than only in App Store Connect.
+        LSApplicationCategoryType: public.app-category.social-networking
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: tw.cmj.fediqo
+        PRODUCT_BUNDLE_IDENTIFIER: dev.mini-poc.fediqo
         PRODUCT_NAME: Fediqo
         INFOPLIST_FILE: Apps/iOS/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         TARGETED_DEVICE_FAMILY: "1,2"
         ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      # Said again here because XcodeGen writes `CODE_SIGN_IDENTITY = iPhone Developer` into
+      # every iOS application target it generates, and a target setting beats a project one.
+      # The macOS target gets no such gift, which is why only this one repeats itself.
+      configs:
+        Debug:
+          CODE_SIGN_IDENTITY: "-"
+        Release:
+          CODE_SIGN_IDENTITY: "Apple Distribution"

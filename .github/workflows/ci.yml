@@ -60,8 +60,6 @@ jobs:
 
       - name: iOS
         run: make -C Apps ios
-        env:
-          IOS_DEVICE: iPhone 16
 
   lint:
     name: Hooks
