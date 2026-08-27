@@ -22,6 +22,8 @@ struct ServerPickerView: View {
 
     private var isSheet: Bool { onDismiss != nil }
 
+    private static let entryAnchor = "entry"
+
     var body: some View {
         @Bindable var model = model
         return ZStack {
@@ -32,13 +34,19 @@ struct ServerPickerView: View {
             VStack(alignment: .leading, spacing: 0) {
                 header
                 Hairline()
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
-                        entryField(typed: $model.typed)
-                        suggestionList
-                        sourceNote
+                ScrollViewReader { scroll in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 18) {
+                            entryField(typed: $model.typed).id(Self.entryAnchor)
+                            suggestionList
+                            sourceNote
+                        }
+                        .padding(20)
                     }
-                    .padding(20)
+                    .onChange(of: model.probe) { _, probe in
+                        guard case .found = probe else { return }
+                        withAnimation { scroll.scrollTo(Self.entryAnchor, anchor: .top) }
+                    }
                 }
             }
             .frame(maxWidth: isSheet ? .infinity : 640)
@@ -77,18 +85,22 @@ struct ServerPickerView: View {
                 TextField("mastodon.social", text: typed)
                     .textFieldStyle(.roundedBorder)
                     .fediqoFont(14)
-                    .onSubmit { submit(typed.wrappedValue) }
+                    .onSubmit { look(typed.wrappedValue) }
                     #if os(iOS)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .keyboardType(.URL)
                     #endif
 
-                Button(t("onboarding.server.add")) { submit(typed.wrappedValue) }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Palette.accent)
-                    .fediqoFont(12, weight: .medium)
-                    .disabled(!model.canSubmit)
+                Button { look(typed.wrappedValue) } label: {
+                    Image(systemName: "magnifyingglass")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Palette.accent)
+                .fediqoFont(12, weight: .medium)
+                .disabled(!model.canSubmit)
+                .help(t("onboarding.server.look"))
+                .accessibilityLabel(Text(t("onboarding.server.look")))
             }
 
             switch model.probe {
@@ -102,10 +114,48 @@ struct ServerPickerView: View {
                     .fediqoFont(11)
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
+            case .found(let info):
+                foundCard(info)
             case .idle:
                 EmptyView()
             }
         }
+    }
+
+    /// What the server says it is, before anything has been written down. Looking is not
+    /// joining: nothing has happened until the button below is pressed, and cancelling leaves
+    /// the app exactly as it was.
+    private func foundCard(_ info: InstanceInfo) -> some View {
+        let already = model.alreadyReading(info, among: app.servers)
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(info.title).fediqoFont(15, weight: .semibold)
+            Text(info.host).fediqoFont(11).foregroundStyle(.secondary)
+            if !info.summary.isEmpty {
+                Text(info.summary)
+                    .fediqoFont(11)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(8)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: 12) {
+                if already {
+                    Text(t("onboarding.server.already")).fediqoFont(11).foregroundStyle(.secondary)
+                } else {
+                    Button(t("onboarding.server.add")) { adopt(info) }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Palette.accent)
+                        .fediqoFont(12, weight: .medium)
+                }
+                Button(t("common.cancel")) { model.clear() }
+                    .buttonStyle(.plain)
+                    .fediqoFont(12)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.top, 2)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .fediqoCard()
     }
 
     private var suggestionList: some View {
@@ -126,7 +176,7 @@ struct ServerPickerView: View {
     private func suggestionRow(_ suggestion: SuggestedServer) -> some View {
         let already = app.servers.contains { $0.host == suggestion.host }
         return Button {
-            submit(suggestion.host)
+            look(suggestion.host)
         } label: {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
@@ -174,13 +224,18 @@ struct ServerPickerView: View {
 
     // MARK: - Actions
 
-    private func submit(_ host: String) {
-        Task {
-            guard let server = await model.adopt(host: host) else { return }
-            app.add(server)
-            model.typed = ""
-            dismiss()
-        }
+    /// Asks, and stops. The field is filled in on the way so that what is on screen and what
+    /// was asked about are never two different servers.
+    private func look(_ host: String) {
+        model.typed = host
+        Task { await model.look(host: host) }
+    }
+
+    private func adopt(_ info: InstanceInfo) {
+        app.add(model.server(from: info))
+        model.typed = ""
+        model.clear()
+        dismiss()
     }
 
     private func dismiss() {

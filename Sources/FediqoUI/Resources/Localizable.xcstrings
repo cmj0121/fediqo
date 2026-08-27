@@ -733,6 +733,23 @@
         }
       }
     },
+    "onboarding.server.look": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Look this server up"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "查看這個伺服器"
+          }
+        }
+      }
+    },
     "onboarding.server.source.builtIn": {
       "extractionState": "manual",
       "localizations": {
