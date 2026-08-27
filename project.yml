@@ -2,7 +2,7 @@
 # `make xcodeproj` writes it, `make mac` runs that first.
 name: Fediqo
 options:
-  bundleIdPrefix: tw.cmj
+  bundleIdPrefix: dev.mini-poc
   deploymentTarget:
     macOS: "15.0"
     iOS: "18.0"
@@ -45,13 +45,17 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleURLTypes:
-          - CFBundleURLName: tw.cmj.fediqo
+          - CFBundleURLName: dev.mini-poc.fediqo
             CFBundleURLSchemes: [fediqo]
+        # HTTPS and nothing else, which is the exemption every app gets for free. Saying so
+        # here is what keeps App Store Connect from stopping to ask a person, once per build,
+        # a question whose answer never changes.
+        ITSAppUsesNonExemptEncryption: false
     entitlements:
       path: Apps/macOS/Fediqo.entitlements
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: tw.cmj.fediqo
+        PRODUCT_BUNDLE_IDENTIFIER: dev.mini-poc.fediqo
         PRODUCT_NAME: Fediqo
         INFOPLIST_FILE: Apps/macOS/Info.plist
         CODE_SIGN_ENTITLEMENTS: Apps/macOS/Fediqo.entitlements
@@ -79,11 +83,15 @@ targets:
         # a SwiftUI app needs to say it was written for the screen it is on.
         UILaunchScreen: {}
         CFBundleURLTypes:
-          - CFBundleURLName: tw.cmj.fediqo
+          - CFBundleURLName: dev.mini-poc.fediqo
             CFBundleURLSchemes: [fediqo]
+        # HTTPS and nothing else, which is the exemption every app gets for free. Saying so
+        # here is what keeps App Store Connect from stopping to ask a person, once per build,
+        # a question whose answer never changes.
+        ITSAppUsesNonExemptEncryption: false
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: tw.cmj.fediqo
+        PRODUCT_BUNDLE_IDENTIFIER: dev.mini-poc.fediqo
         PRODUCT_NAME: Fediqo
         INFOPLIST_FILE: Apps/iOS/Info.plist
         GENERATE_INFOPLIST_FILE: NO
