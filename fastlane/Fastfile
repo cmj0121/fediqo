@@ -3,6 +3,8 @@
 # everything it needs to know it reads out of the environment and scripts/env.sh is what put
 # it there.
 
+require "digest"
+require "plist"
 require "shellwords"
 
 ROOT         = File.expand_path("..", __dir__)
@@ -63,10 +65,6 @@ def version_sh(flag)
   `#{File.join(ROOT, "scripts", "version.sh")} #{flag} 2>/dev/null`.strip
 end
 
-def tagged?
-  system("git -C #{ROOT} describe --tags --exact-match --match 'v[0-9]*' >/dev/null 2>&1")
-end
-
 # The tag names the release and the history counts the attempts. App Store Connect may already
 # hold the number this history would produce again, though -- the same commit released twice
 # counts the same commits twice -- so it is asked, and whichever is higher wins.
@@ -100,28 +98,68 @@ end
 # team, and which profile to sign with. The profile has to be here and not only in the export
 # options -- Release signs manually, and a manual archive with no profile named fails before
 # there is anything to export.
-def stamp(version, build, profile)
-  [
-    "MARKETING_VERSION=#{version}",
-    "CURRENT_PROJECT_VERSION=#{build}",
-    "DEVELOPMENT_TEAM=#{TEAM_ID}",
-    "PROVISIONING_PROFILE_SPECIFIER=#{Shellwords.escape(profile)}",
-  ].join(" ")
+def stamp(version, build)
+  "MARKETING_VERSION=#{version} CURRENT_PROJECT_VERSION=#{build} DEVELOPMENT_TEAM=#{TEAM_ID}"
 end
 
-# match writes the name of the profile it fetched into the environment under this key, so the
-# export never has to be told a name that stops being true the next time match runs.
+# Signing has to be written into the one target it belongs to. Handed to xcodebuild on the
+# command line it reaches every target in the build -- including the resource bundles Swift
+# Package Manager generates, which sign automatically, want no profile, and stop the build to
+# say so. The project is generated and gitignored, so writing into it costs nothing: the next
+# `make xcodeproj` has never heard of any of this.
+def sign_target(target, profile, identity)
+  update_code_signing_settings(
+    path: XCODEPROJ,
+    targets: [target],
+    build_configurations: ["Release"],
+    use_automatic_signing: false,
+    team_id: TEAM_ID,
+    code_sign_identity: identity,
+    profile_name: profile,
+  )
+end
+
+# match writes what it fetched into the environment under these keys, so nothing downstream has
+# to be told a name or a path that stops being true the next time match runs. iOS carries no
+# platform in the key, for reasons of fastlane's own history.
+def match_env(platform, suffix)
+  key = ["sigh", BUNDLE_ID, "appstore", (platform == :macos ? "macos" : nil), suffix].compact.join("_")
+  ENV.fetch(key)
+end
+
 def profile_name(platform)
-  suffix = platform == :macos ? "_macos" : ""
-  ENV.fetch("sigh_#{BUNDLE_ID}_appstore#{suffix}_profile-name") do
-    ENV.fetch("sigh_#{BUNDLE_ID}_appstore_profile-name")
+  match_env(platform, "profile-name")
+end
+
+# More than one certificate on a machine can answer to "Apple Distribution: … (J83AK3D9HB)" --
+# a team is allowed several, and they accumulate. xcodebuild is given a name and picks one, and
+# nothing says which; when it picks one the profile does not list, the archive fails to sign
+# and the message talks about the profile, which is the one thing that was right.
+#
+# So ask the profile. It carries the certificates it will accept, and the answer that is also
+# in this keychain is the one to sign with. A fingerprint names exactly one certificate, which
+# is the whole of what was missing.
+def identity_for(platform)
+  profile = match_env(platform, "profile-path")
+  plist = Plist.parse_xml(`security cms -D -i #{Shellwords.escape(profile)} 2>/dev/null`)
+
+  accepted = Array(plist && plist["DeveloperCertificates"]).map do |der|
+    Digest::SHA1.hexdigest(der.respond_to?(:string) ? der.string : der.to_s).upcase
   end
+  installed = `security find-identity -v`.scan(/\b([0-9A-F]{40})\b/).flatten
+
+  (accepted & installed).first || UI.user_error!(
+    "None of the #{accepted.count} certificates in '#{File.basename(profile)}' is in this keychain. " \
+    "Run match again, or check that the certificate has not expired."
+  )
 end
 
 desc "Archive, sign and send both apps to TestFlight. Nothing is submitted for review."
 lane :publish do
-  UI.user_error!("No v* tag on HEAD. A release is a tag -- `git tag v0.1.0` and try again.") unless tagged?
-
+  # No tag is asked for here. A tag is what makes a release happen -- it is what the workflow
+  # fires on -- but it is not what makes this command work. A laptop publishes whenever
+  # somebody types this, and takes whatever version scripts/version.sh settled for, saying so
+  # out loud when it had to settle. The tag is CI's business, and CI runs this same line.
   version = version_sh("--marketing")
   build   = build_number(version)
   UI.important("Fediqo #{version} (#{build}) -- both platforms, TestFlight only.")
@@ -135,7 +173,9 @@ end
 desc "The iPhone and iPad build, as far as TestFlight."
 private_lane :publish_ios do |options|
   match(type: "appstore", platform: "ios", api_key: asc_api_key, username: APPLE_ID)
-  profile = profile_name(:ios)
+  profile  = profile_name(:ios)
+  identity = identity_for(:ios)
+  sign_target(IOS_SCHEME, profile, identity)
 
   build_app(
     project: XCODEPROJ,
@@ -144,10 +184,11 @@ private_lane :publish_ios do |options|
     export_method: "app-store",
     derived_data_path: DERIVED,
     output_directory: OUTPUT,
-    output_name: "Fediqo-iOS.ipa",
-    xcargs: stamp(options[:version], options[:build], profile),
+    output_name: "Fediqo-iOS",
+    xcargs: stamp(options[:version], options[:build]),
     export_options: {
       teamID: TEAM_ID,
+      signingCertificate: identity,
       provisioningProfiles: { BUNDLE_ID => profile },
     },
   )
@@ -157,7 +198,9 @@ private_lane :publish_ios do |options|
     username: APPLE_ID,
     app_identifier: BUNDLE_ID,
     app_platform: "ios",
-    ipa: File.join(OUTPUT, "Fediqo-iOS.ipa"),
+    # Where gym says it put it, rather than where the name suggests: gym appends the
+    # extension itself, so a name that already has one comes back doubled.
+    ipa: lane_context[SharedValues::IPA_OUTPUT_PATH],
     skip_submission: true,
     skip_waiting_for_build_processing: true,
   )
@@ -168,22 +211,27 @@ private_lane :publish_macos do |options|
   # Two fetches, not one. The app is signed with the distribution identity and the package
   # around it with the installer identity, and the Mac App Store takes only a package.
   match(type: "appstore", platform: "macos", api_key: asc_api_key, username: APPLE_ID)
-  match(type: "mac_installer_distribution", platform: "macos", api_key: asc_api_key, username: APPLE_ID)
-  profile = profile_name(:macos)
+  # Only the certificate is wanted here. Left to itself this call also invents a provisioning
+  # profile, of no type anybody asked for, and pushes it into the shared repository.
+  match(type: "mac_installer_distribution", platform: "macos", skip_provisioning_profiles: true,
+        api_key: asc_api_key, username: APPLE_ID)
+  profile  = profile_name(:macos)
+  identity = identity_for(:macos)
+  sign_target(MACOS_SCHEME, profile, identity)
 
   build_app(
     project: XCODEPROJ,
     scheme: MACOS_SCHEME,
-    platform: "macOS",
     configuration: "Release",
     export_method: "app-store",
     installer_cert_name: INSTALLER_IDENTITY,
     derived_data_path: DERIVED,
     output_directory: OUTPUT,
-    output_name: "Fediqo.pkg",
-    xcargs: stamp(options[:version], options[:build], profile),
+    output_name: "Fediqo",
+    xcargs: stamp(options[:version], options[:build]),
     export_options: {
       teamID: TEAM_ID,
+      signingCertificate: identity,
       provisioningProfiles: { BUNDLE_ID => profile },
     },
   )
@@ -193,7 +241,7 @@ private_lane :publish_macos do |options|
     username: APPLE_ID,
     app_identifier: BUNDLE_ID,
     app_platform: "osx",
-    pkg: File.join(OUTPUT, "Fediqo.pkg"),
+    pkg: lane_context[SharedValues::PKG_OUTPUT_PATH],
     skip_submission: true,
     skip_waiting_for_build_processing: true,
   )
