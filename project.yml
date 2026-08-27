@@ -63,6 +63,9 @@ targets:
         # here is what keeps App Store Connect from stopping to ask a person, once per build,
         # a question whose answer never changes.
         ITSAppUsesNonExemptEncryption: false
+        # Both stores refuse a submission that does not say which shelf it belongs on, and
+        # macOS wants the answer in the bundle rather than only in App Store Connect.
+        LSApplicationCategoryType: public.app-category.social-networking
     # XcodeGen rewrites this file from the block above on every build, exactly as it does the
     # plists -- so it is an empty dictionary and a key typed into it lives until the next
     # `make mac`. The sandbox is asked for below instead, as build settings, because Xcode
@@ -112,6 +115,9 @@ targets:
         # here is what keeps App Store Connect from stopping to ask a person, once per build,
         # a question whose answer never changes.
         ITSAppUsesNonExemptEncryption: false
+        # Both stores refuse a submission that does not say which shelf it belongs on, and
+        # macOS wants the answer in the bundle rather than only in App Store Connect.
+        LSApplicationCategoryType: public.app-category.social-networking
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.mini-poc.fediqo
