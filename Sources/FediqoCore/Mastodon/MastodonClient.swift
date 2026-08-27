@@ -6,11 +6,13 @@ import Foundation
 /// than substituted for. `home` is the one endpoint that cannot be asked without a credential,
 /// and it is never stood in for by one that can.
 public struct MastodonClient: SourceClient {
-    private let session: URLSession
+    // `internal` rather than `private`: the writes live in a file of their own — see
+    // MastodonWrites.swift — and an extension in another file cannot reach a private one.
+    let session: URLSession
     /// What every request from this client is counted against. Injected rather than reached
     /// for, so a caller wanting its own count — a test, above all — is not touched by anybody
     /// else's requests.
-    private let ledger: APILedger
+    let ledger: APILedger
 
     public init(session: URLSession = .shared, ledger: APILedger = .shared) {
         self.session = session
@@ -260,6 +262,42 @@ enum JSONTransport {
             let (data, status) = try await perform(request, on: session)
             guard (200..<300).contains(status) else { throw SourceFailure.http(status, data) }
             return data
+        }
+    }
+
+    /// A write, sent as somebody. Beside `postForm` rather than under it, and deliberately:
+    /// the handshake above must go on reading a refusal as nothing but a refusal, because
+    /// mid-handshake there is no signed-out stranger and no credential to have stopped
+    /// working. A write has both — so it takes a method, since a domain block goes up with a
+    /// `POST` and comes down with a `DELETE`, and it takes a bearer, which brings back the
+    /// `get` reading: a write turned down while carrying a credential is that credential
+    /// having expired, and that is the one thing the reader has to act on.
+    static func send(_ method: String, _ url: URL, fields: [String: String] = [:],
+                     on session: URLSession, bearer: String? = nil, timeout: TimeInterval = 15,
+                     ledger: APILedger = .shared) async throws -> Data {
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.timeoutInterval = timeout
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let bearer {
+            request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        }
+        if !fields.isEmpty {
+            request.setValue("application/x-www-form-urlencoded; charset=utf-8", forHTTPHeaderField: "Content-Type")
+            request.httpBody = formEncode(fields)
+        }
+
+        return try await counted(url, in: ledger) {
+            let (data, status) = try await perform(request, on: session)
+            switch status {
+            case 200..<300:
+                return data
+            case 401, 403:
+                let host = url.host() ?? url.absoluteString
+                throw bearer == nil ? SourceFailure.needsSignIn(host) : SourceFailure.tokenRejected(host)
+            default:
+                throw SourceFailure.http(status, data)
+            }
         }
     }
 

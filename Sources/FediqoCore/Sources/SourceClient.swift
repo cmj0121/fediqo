@@ -148,6 +148,29 @@ public protocol SourceClient: Sendable {
     /// has said no more about a post than a server nobody asked. A post this server has no
     /// number for is `notItsPost`, thrown for the same reason.
     func stillHas(_ post: Post, host: String, token: String?) async throws -> Bool
+
+    // MARK: - Writing
+    //
+    // Declared here rather than only in the extension below, and that is not a style choice.
+    // A method that exists only in a protocol extension is not a witness: a call through
+    // `any SourceClient` binds to the extension at compile time and a conforming type's own
+    // version is never reached, however correct it looks. Written here, they dispatch; the
+    // extension below still supplies the default, which is the refusal a protocol this build
+    // cannot write to deserves.
+
+    /// The post on the acting server: its id there, whether that server had to go and get it,
+    /// and what it says this account has already done to it.
+    func localId(of post: Post, as account: ActingAccount, fetching: Bool) async throws -> Located
+
+    /// Favourite, boost or bookmark one post, or take it back.
+    func setMark(_ action: PostAction, on id: String, as account: ActingAccount, done: Bool) async throws
+
+    /// Mute an author or a whole host on the acting server, or take the mute down.
+    func setMute(_ kind: Mute.Kind, _ value: String, as account: ActingAccount, muted: Bool) async throws
+
+    /// Report a post to the acting server. There is no local half of this: a report that goes
+    /// nowhere is not a report.
+    func report(_ post: Post, id: String, as account: ActingAccount, comment: String) async throws
 }
 
 public struct InstanceInfo: Sendable, Hashable {
@@ -196,5 +219,92 @@ public struct SourceRegistry: Sendable {
     /// without an auth client, and a screen greys out Sign in from this, not from a list.
     public func authClient(for socialProtocol: SocialProtocol) -> (any AuthClient)? {
         authClients[socialProtocol]
+    }
+}
+
+// MARK: - Writing
+
+/// Who an action is sent as, and therefore which server learns of the post.
+///
+/// It is a value and not a `Server` because the two are different questions. A `Server` in
+/// this app is somewhere posts are read from, including servers nobody here has joined; this
+/// is the one place the reader has an account, and it is the only place a favourite or a mute
+/// can come from.
+public struct ActingAccount: Sendable, Hashable {
+    /// The reader's own server, bare.
+    public let host: String
+    /// That account's actor URI, which is how the store keys what it did.
+    public let authorId: String
+    public let token: String
+
+    public init(host: String, authorId: String, token: String) {
+        self.host = host
+        self.authorId = authorId
+        self.token = token
+    }
+}
+
+/// What a server had to be told before an action could be sent to it.
+///
+/// A post the acting server has never seen has no id there, so asking it to favourite the
+/// post means asking it to fetch the post first. That is a real consequence — the reader's
+/// own server learns that the post exists, and by extension that somebody asked about it —
+/// and it is reported rather than done quietly, because this app's whole promise is that
+/// nobody is told what you read.
+public enum Reach: Sendable, Hashable {
+    /// The acting server already held the post. Nothing new was fetched.
+    case alreadyThere
+    /// The acting server was asked to go and get it. Somebody now knows.
+    case fetched
+}
+
+/// A post found on the acting server: its id there, what it cost to find, and what that
+/// server says this account has already done to it.
+///
+/// The marks ride along because they are free. Finding the post is a search, and a search
+/// answers with the whole status — including whether this account favourited it, boosted it or
+/// bookmarked it. Asking again afterwards would be a second request for something already in
+/// our hands, and it is the only moment in this app where those answers are had at all: every
+/// timeline read is done as a stranger, and a stranger is told none of them.
+public struct Located: Sendable, Hashable {
+    public let id: String
+    public let reach: Reach
+    public let marks: PostMarks
+
+    public init(id: String, reach: Reach, marks: PostMarks = .unknown) {
+        self.id = id
+        self.reach = reach
+        self.marks = marks
+    }
+}
+
+public extension SourceClient {
+    /// The post on the acting server: its id there, whether that server had to go and get it,
+    /// and what it says this account has already done to it.
+    ///
+    /// Every write below needs the id: Mastodon's action endpoints take one local to the
+    /// server being asked, and the address a post arrived under is somebody else's. Default:
+    /// this build cannot write over that protocol.
+    func localId(of post: Post, as account: ActingAccount, fetching: Bool) async throws -> Located {
+        throw SourceFailure.unsupported(post.socialProtocol)
+    }
+
+    /// Favourite, boost or bookmark one post, or take it back.
+    func setMark(_ action: PostAction, on id: String, as account: ActingAccount,
+                 done: Bool) async throws {
+        throw SourceFailure.unsupported(.mastodon)
+    }
+
+    /// Mute an author or a whole host on the acting server, or take the mute down.
+    func setMute(_ kind: Mute.Kind, _ value: String, as account: ActingAccount,
+                 muted: Bool) async throws {
+        throw SourceFailure.unsupported(.mastodon)
+    }
+
+    /// Report a post to the acting server. There is no local half of this: a report that goes
+    /// nowhere is not a report.
+    func report(_ post: Post, id: String, as account: ActingAccount,
+                comment: String) async throws {
+        throw SourceFailure.unsupported(post.socialProtocol)
     }
 }
