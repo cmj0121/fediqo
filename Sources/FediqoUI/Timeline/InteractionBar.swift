@@ -10,8 +10,11 @@ import UIKit
 ///
 /// Three groups, left to right, and the order is the argument: **what others did**, which
 /// carries counts and is about the post; **what I did**, which carries no counts and is a
-/// switch; and **where this goes**, which leaves the row. Five controls in one undifferentiated
-/// run was readable; eight would not have been.
+/// switch; and **where this goes**, which leaves the row.
+///
+/// The grouping is spacing and nothing else. A rule between each pair drew three boxes where
+/// what was wanted was three breaths — the eye reads the gap on its own, and the lines were
+/// three more marks competing with the seven that mean something.
 ///
 /// A count is drawn only where there is one. Nothing here shows a zero it invented: zero means
 /// nobody replied, and a post stored before migration 005 has no idea how many did. The same
@@ -28,11 +31,9 @@ struct InteractionBar: View {
     private var marks: PostMarks { app.marks(of: post) }
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: Self.betweenGroups) {
             theirs
-            divider
             mine
-            divider
             leaving
             Spacer(minLength: 0)
         }
@@ -42,7 +43,7 @@ struct InteractionBar: View {
 
     /// What everybody else did, with the numbers the servers gave us.
     private var theirs: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: Self.withinGroup) {
             // Replying makes a new post rather than marking this one, and this app has no
             // composer that can send one yet — so it still leaves, and says so by doing
             // nothing else. When #8 lands it stops leaving and nothing else here changes.
@@ -63,7 +64,7 @@ struct InteractionBar: View {
     /// something is not a thing any server tells anybody, and what this device keeps is
     /// nobody's business but this device's.
     private var mine: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: Self.withinGroup) {
             switching(marks.bookmarked == true ? "bookmark.fill" : "bookmark",
                       labelKey: "post.bookmark", on: marks.bookmarked == true, tint: .blue) {
                 Task { await app.act(.bookmark, on: post) }
@@ -75,19 +76,19 @@ struct InteractionBar: View {
         }
     }
 
-    /// Where this goes: the conversation here, the post on its own server, and everything else.
+    /// Where this goes: the conversation here, and everything else.
+    ///
+    /// Opening the post on its own server used to sit here too, and does not any more. It is
+    /// the way out of the app, which makes it the rarest thing on the row and the one a reader
+    /// scanning a long list never wants — and it is one row down in `⋯` under **General**,
+    /// beside Copy link, which is the other thing you do with an address.
     private var leaving: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: Self.withinGroup) {
             if let open {
                 // The conversation, which is what opening a post here shows: the post and
                 // everything around it. Not an arrow — nothing is being sent anywhere.
                 switching("bubble.left.and.bubble.right", labelKey: "post.open",
                           on: false, tint: .secondary, action: open)
-            }
-            if post.webURL != nil {
-                // An arrow leaving the app, because that is exactly what this does.
-                switching("arrow.up.right.square", labelKey: "timeline.open",
-                          on: false, tint: .secondary) { hand() }
             }
             // Bare, not circled. The ring made it the heaviest mark in a row of outlines, so
             // the least of the controls read as the most important one — and the chips above
@@ -103,18 +104,21 @@ struct InteractionBar: View {
         }
     }
 
-    /// A hairline between the groups. It is what makes them groups rather than a longer run of
-    /// the same thing, and it is the cheapest possible way to say so.
-    private var divider: some View {
-        Rectangle().fill(.quaternary).frame(width: 1, height: 14)
-    }
+    /// How big a control is, and how far apart they sit.
+    ///
+    /// The gap between two groups is a little over twice the gap inside one, which is what
+    /// does the grouping now that nothing is drawn between them. Below about that ratio the
+    /// three runs read as one; far above it they read as three separate rows.
+    private static let glyph: CGFloat = 19
+    private static let withinGroup: CGFloat = 16
+    private static let betweenGroups: CGFloat = 34
 
     private func counted(_ symbol: String, count: Int?, labelKey: String, on: Bool,
                          tint: Color, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 4) {
-                Image(systemName: symbol).font(.system(size: 16, weight: .medium))
-                if let count { Text(verbatim: "\(count)").fediqoFont(11) }
+                Image(systemName: symbol).font(.system(size: Self.glyph, weight: .medium))
+                if let count { Text(verbatim: "\(count)").fediqoFont(12) }
             }
             .contentShape(Rectangle())
         }
@@ -128,7 +132,7 @@ struct InteractionBar: View {
     private func switching(_ symbol: String, labelKey: String, on: Bool, tint: Color,
                            action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol).font(.system(size: 16, weight: .medium)).contentShape(Rectangle())
+            Image(systemName: symbol).font(.system(size: Self.glyph, weight: .medium)).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(on ? tint : Color.secondary)
