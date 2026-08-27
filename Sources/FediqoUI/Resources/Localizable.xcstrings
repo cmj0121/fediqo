@@ -1838,6 +1838,23 @@
         }
       }
     },
+    "shortcut.cover": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show or hide what is covered"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "顯示或隱藏被遮蔽的內容"
+          }
+        }
+      }
+    },
     "shortcut.dismiss": {
       "extractionState": "manual",
       "localizations": {

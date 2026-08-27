@@ -128,6 +128,7 @@ struct PostPage: View {
         PostRow(post: post, selected: selected,
                 turns: selected ? app.mediaTurns : 0,
                 plays: selected ? app.mediaPlays : 0,
+                covers: selected ? app.mediaCovers : 0,
                 revealed: app.preferences.showSensitive,
                 condensed: false)
             .id(post.mergeKey)

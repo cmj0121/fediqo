@@ -17,6 +17,13 @@ import FediqoCore
 /// starting and ending in the same place down a long list. Below `fediqoWideRows` there is
 /// nothing to spend on it and the attachments go back under the words.
 ///
+extension Post {
+    /// Whether the author covered anything here: a line in front of the words, media behind a
+    /// blur, or both. What the key asks before it does anything, and the row asks before it
+    /// draws a control for it.
+    var hidesSomething: Bool { sensitive == true || !(spoiler ?? "").isEmpty }
+}
+
 /// Every row is the same height, set by the attachment card: a short post is padded up to it
 /// and a long one stops at it with an ellipsis. What the ellipsis is hiding is what opening
 /// the post is for.
@@ -30,6 +37,10 @@ struct PostRow: View {
     var turns = 0
     /// Bumped when `p` is pressed on this row: what is on top of the deck plays, or stops.
     var plays = 0
+    /// Bumped when `s` is pressed on this row: what the author covered is lifted, or put back.
+    /// The key and the button beside the warning are one control reached two ways, so they
+    /// end in the same line and cannot come to disagree about which way the row is going.
+    var covers = 0
     /// Whether what this post covered arrives uncovered. The reader's standing answer; a row
     /// can still be opened by hand without changing it.
     var revealed = false
@@ -78,7 +89,29 @@ struct PostRow: View {
     private var wordsAreCovered: Bool { !spoiler.isEmpty && !shown }
     private var mediaIsCovered: Bool { post.sensitive == true && !shown }
 
+    /// What `covers` stood at when the ring arrived here, or nothing while it is elsewhere.
+    ///
+    /// Without it the count alone would lie. Every row but the selected one is handed a zero,
+    /// so a ring moving onto a post takes its `covers` from 0 to however many times the key
+    /// has been pressed anywhere — which reads as a press and would lift the cover off a post
+    /// the reader has only just arrived at. That is the one thing a cover must never do, so
+    /// the row remembers where the count was when it became the reader's and acts only on
+    /// what happens after.
+    @State private var coversOnArrival: Int?
+
     var body: some View {
+        content
+            .onChange(of: selected, initial: true) { _, now in
+                coversOnArrival = now ? covers : nil
+            }
+            .onChange(of: covers) { _, now in
+                guard selected, let arrival = coversOnArrival, now > arrival else { return }
+                coversOnArrival = now
+                withAnimation(Motion.appearing) { reveal = !shown }
+            }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 8) {
             decorator
             metadata

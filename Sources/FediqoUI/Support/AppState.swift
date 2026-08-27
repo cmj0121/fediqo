@@ -176,6 +176,13 @@ public final class AppState {
     /// The same, for asking it to play. Two counters rather than one command with an argument,
     /// because both are events the row hears rather than state anybody holds.
     private(set) var mediaPlays = 0
+    /// And the same again, for asking the row to lift what its author covered or put it back.
+    ///
+    /// A third counter rather than a piece of state here, for the reason the other two are
+    /// counters: which posts a reader chose to look behind is a reading record, and this app
+    /// keeps none. The answer lives in the row for as long as the row does and is written
+    /// down nowhere — so the key is an event the row hears, not a fact the app holds.
+    private(set) var mediaCovers = 0
     /// What is playing, which is at most one thing anywhere in the app.
     let playback = Playback()
     /// Whether the written-down list of keys is up. It sits over everything the shell draws
@@ -739,6 +746,7 @@ public final class AppState {
         case .openInBrowser: return openSelectedPost()
         case .rotateMedia: return turnTheDeck()
         case .playMedia: return playTheAttachment()
+        case .toggleCover: return turnTheCover()
         case .backToTop: return goToTop()
         case .showShortcuts: setShowingShortcuts(true); return true
         }
@@ -816,6 +824,22 @@ public final class AppState {
             return false
         }
         mediaPlays += 1
+        return true
+    }
+
+    /// Lifts what the post under the ring covered, or puts it back.
+    ///
+    /// A post whose author covered nothing has nothing to lift, and the press does nothing
+    /// rather than pretending: `false` here is the same "there was nothing to do" that
+    /// turning a deck of one attachment gives. It is still the reader's key either way — a
+    /// letter is ours whatever it did — so nothing beeps.
+    ///
+    /// It says nothing about which way the row will go. That belongs to the row: the row is
+    /// what holds this reader's answer about this post, and asking it here would mean two
+    /// places holding one decision.
+    private func turnTheCover() -> Bool {
+        guard postUnderTheRing?.hidesSomething == true else { return false }
+        mediaCovers += 1
         return true
     }
 

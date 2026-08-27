@@ -267,6 +267,7 @@ struct FeedScreen: View {
                                 // stays where its own reader left it.
                                 turns: post.mergeKey == model.selection ? app.mediaTurns : 0,
                                 plays: post.mergeKey == model.selection ? app.mediaPlays : 0,
+                                covers: post.mergeKey == model.selection ? app.mediaCovers : 0,
                                 revealed: app.preferences.showSensitive) {
                             app.expand(post)
                         }
