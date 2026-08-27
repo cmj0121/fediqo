@@ -262,6 +262,21 @@ struct FixtureSource: SourceClient {
     /// Nothing invented is ever taken down: a fixture that reconciled its own rows away would
     /// photograph differently depending on how long the app had been open.
     func stillHas(_ post: Post, host: String, token: String?) async throws -> Bool { true }
+
+    // MARK: - Writing
+    //
+    // Every one of these agrees at once and sends nothing. An invented server that refused
+    // would photograph as a broken app, and one that reached the network would not be a
+    // fixture. What is written down still goes to the store, so a star pressed in a fixture
+    // run fills in exactly as it would anywhere else.
+
+    func localId(of post: Post, as account: ActingAccount, fetching: Bool) async throws -> Located {
+        Located(id: post.mergeKey, reach: .alreadyThere)
+    }
+
+    func setMark(_ action: PostAction, on id: String, as account: ActingAccount, done: Bool) async throws {}
+    func setMute(_ kind: Mute.Kind, _ value: String, as account: ActingAccount, muted: Bool) async throws {}
+    func report(_ post: Post, id: String, as account: ActingAccount, comment: String) async throws {}
 }
 
 /// The chosen servers, for a run that must not read or write the machine's own list.

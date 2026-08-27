@@ -20,6 +20,9 @@ enum KeyCommand: Hashable, CaseIterable {
     case rotateMedia
     /// Play what is on top of that deck, or stop whatever is playing.
     case playMedia
+    /// Lift what the author covered on the post the reader is on, or put it back. One key for
+    /// the words behind their line and the media behind its blur, because they are one act.
+    case toggleCover
     case backToTop
     case showShortcuts
 
@@ -102,6 +105,7 @@ enum KeyCommand: Hashable, CaseIterable {
         case "o": return .openInBrowser
         case "m": return .rotateMedia
         case "p": return .playMedia
+        case "s": return .toggleCover
         case "?": return .showShortcuts
         // A slash on its own asks for nothing. It is here only as the other half of `?`.
         default: return nil
@@ -143,7 +147,7 @@ enum KeyCommand: Hashable, CaseIterable {
     /// ones a text field, a menu or the focus system owns — out of our handler entirely.
     static let listened: Set<KeyEquivalent> = [
         .tab, .escape, .return, .upArrow, .downArrow, .space,
-        "r", "R", "c", "j", "k", "g", "m", "o", "p", "?", "/",
+        "r", "R", "c", "j", "k", "g", "m", "o", "p", "s", "?", "/",
     ]
 
     /// The same list, in the spelling a press arrives in, so that a key nobody listens for
@@ -240,6 +244,7 @@ extension KeyCommand {
         Shortcut(group: .doing, keys: ["o"], name: "browser", commands: [.openInBrowser]),
         Shortcut(group: .doing, keys: ["m"], name: "media", commands: [.rotateMedia]),
         Shortcut(group: .doing, keys: ["p"], name: "play", commands: [.playMedia]),
+        Shortcut(group: .doing, keys: ["s"], name: "cover", commands: [.toggleCover]),
         Shortcut(group: .doing, keys: ["?"], name: "list", commands: [.showShortcuts]),
         Shortcut(group: .leaving, keys: ["Escape"], name: "dismiss", commands: [.dismiss]),
     ]

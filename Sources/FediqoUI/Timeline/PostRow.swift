@@ -17,6 +17,13 @@ import FediqoCore
 /// starting and ending in the same place down a long list. Below `fediqoWideRows` there is
 /// nothing to spend on it and the attachments go back under the words.
 ///
+extension Post {
+    /// Whether the author covered anything here: a line in front of the words, media behind a
+    /// blur, or both. What the key asks before it does anything, and the row asks before it
+    /// draws a control for it.
+    var hidesSomething: Bool { sensitive == true || !(spoiler ?? "").isEmpty }
+}
+
 /// Every row is the same height, set by the attachment card: a short post is padded up to it
 /// and a long one stops at it with an ellipsis. What the ellipsis is hiding is what opening
 /// the post is for.
@@ -30,6 +37,10 @@ struct PostRow: View {
     var turns = 0
     /// Bumped when `p` is pressed on this row: what is on top of the deck plays, or stops.
     var plays = 0
+    /// Bumped when `s` is pressed on this row: what the author covered is lifted, or put back.
+    /// The key and the button beside the warning are one control reached two ways, so they
+    /// end in the same line and cannot come to disagree about which way the row is going.
+    var covers = 0
     /// Whether what this post covered arrives uncovered. The reader's standing answer; a row
     /// can still be opened by hand without changing it.
     var revealed = false
@@ -78,7 +89,29 @@ struct PostRow: View {
     private var wordsAreCovered: Bool { !spoiler.isEmpty && !shown }
     private var mediaIsCovered: Bool { post.sensitive == true && !shown }
 
+    /// What `covers` stood at when the ring arrived here, or nothing while it is elsewhere.
+    ///
+    /// Without it the count alone would lie. Every row but the selected one is handed a zero,
+    /// so a ring moving onto a post takes its `covers` from 0 to however many times the key
+    /// has been pressed anywhere — which reads as a press and would lift the cover off a post
+    /// the reader has only just arrived at. That is the one thing a cover must never do, so
+    /// the row remembers where the count was when it became the reader's and acts only on
+    /// what happens after.
+    @State private var coversOnArrival: Int?
+
     var body: some View {
+        content
+            .onChange(of: selected, initial: true) { _, now in
+                coversOnArrival = now ? covers : nil
+            }
+            .onChange(of: covers) { _, now in
+                guard selected, let arrival = coversOnArrival, now > arrival else { return }
+                coversOnArrival = now
+                withAnimation(Motion.appearing) { reveal = !shown }
+            }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 8) {
             decorator
             metadata
@@ -281,75 +314,6 @@ struct PostRow: View {
                 Text(host).fediqoFont(10).fediqoPill()
             }
         }
-    }
-}
-
-/// What can be done with a post, and what has already been done with it by everybody else.
-///
-/// One group, all of it to the left. Replying and opening are the same kind of thing as
-/// boosting — something a reader does to this post — and putting two of them at the far end
-/// of the row made them read as a different family. Nothing here is right-aligned, so the eye
-/// finds them in the same place on every row of a long list.
-///
-/// **Every button hands the post to the server it came from.** Fediqo has no write path yet
-/// (decision 6): replying, boosting and favouriting all happen where the post lives, so each
-/// of these opens it there. When there is a write path, the same buttons stop leaving.
-///
-/// A count is drawn only where there is one. Nothing here shows a zero it invented: zero means
-/// nobody replied, and a post stored before migration 005 has no idea how many did.
-struct InteractionBar: View {
-    let post: Post
-    var open: (() -> Void)?
-
-    @Environment(\.openURL) private var openURL
-
-    var body: some View {
-        HStack(spacing: 18) {
-            action("arrowshape.turn.up.left", count: post.counts.replies, labelKey: "post.reply")
-            action("arrow.2.squarepath", count: post.counts.reblogs, labelKey: "post.reblog")
-            action("star", count: post.counts.favourites, labelKey: "post.favourite")
-            if let open {
-                // The conversation, which is what opening a post here shows: the post and
-                // everything around it. Not an arrow — nothing is being sent anywhere.
-                button("bubble.left.and.bubble.right", labelKey: "post.open", action: open)
-            }
-            if post.webURL != nil {
-                // An arrow leaving the app, because that is exactly what this does.
-                button("arrow.up.right.square", labelKey: "timeline.open") { hand() }
-            }
-            Spacer(minLength: 0)
-        }
-        .foregroundStyle(.secondary)
-        .padding(.top, 4)
-    }
-
-    private func action(_ symbol: String, count: Int?, labelKey: String) -> some View {
-        Button { hand() } label: {
-            HStack(spacing: 4) {
-                Image(systemName: symbol).font(.system(size: 16, weight: .medium))
-                if let count { Text(verbatim: "\(count)").fediqoFont(11) }
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(t(labelKey))
-        .accessibilityLabel(Text(t(labelKey)))
-        .disabled(post.webURL == nil)
-    }
-
-    private func button(_ symbol: String, labelKey: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol).font(.system(size: 16, weight: .medium)).contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(t(labelKey))
-        .accessibilityLabel(Text(t(labelKey)))
-    }
-
-    /// Handed to the server it came from, which is what every one of these means today.
-    private func hand() {
-        guard let url = post.webURL else { return }
-        openURL(url)
     }
 }
 
