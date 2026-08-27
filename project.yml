@@ -35,6 +35,29 @@ settings:
       CODE_SIGN_STYLE: Manual
       CODE_SIGN_IDENTITY: "Apple Distribution"
 
+# Xcode makes a scheme for every target on its own, but it makes them where only this user can
+# see them. fastlane reads the shared ones, and when it cannot find the name it was given it
+# does not stop -- it takes the first scheme in the project instead. That is how asking for
+# Fediqo-iOS produced a macOS archive signed with an iOS profile, and the first thing that
+# noticed was the export.
+schemes:
+  Fediqo:
+    build:
+      targets:
+        Fediqo: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+  Fediqo-iOS:
+    build:
+      targets:
+        Fediqo-iOS: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+
 packages:
   Fediqo:
     path: .
@@ -108,6 +131,14 @@ targets:
         # somewhere above the bottom of the glass. An empty dictionary is the whole of what
         # a SwiftUI app needs to say it was written for the screen it is on.
         UILaunchScreen: {}
+        # All four, because this app is on the iPad as well as the phone and the iPad will not
+        # take a submission that cannot be a third of a screen. An app that reads a timeline
+        # has no reason to refuse any of them anyway.
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         CFBundleURLTypes:
           - CFBundleURLName: dev.mini-poc.fediqo
             CFBundleURLSchemes: [fediqo]
@@ -127,3 +158,11 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
         ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      # Said again here because XcodeGen writes `CODE_SIGN_IDENTITY = iPhone Developer` into
+      # every iOS application target it generates, and a target setting beats a project one.
+      # The macOS target gets no such gift, which is why only this one repeats itself.
+      configs:
+        Debug:
+          CODE_SIGN_IDENTITY: "-"
+        Release:
+          CODE_SIGN_IDENTITY: "Apple Distribution"
