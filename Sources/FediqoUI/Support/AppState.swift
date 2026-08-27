@@ -84,6 +84,10 @@ struct LaunchOptions {
     var composing = false
     /// Whether the landing screen should sit still instead of handing over on its own.
     var holdsLanding = false
+    /// Read an invented world instead of the network — see `Fixture`. What a screenshot is
+    /// taken of, and the only launch option that changes where the posts come from rather
+    /// than which screen is showing.
+    var fixture = false
 
     static let none = LaunchOptions()
 
@@ -114,6 +118,7 @@ struct LaunchOptions {
             options.railItem = environment["FEDIQO_RAIL"].flatMap(RailItem.init(rawValue:))
         }
         options.composing = environment["FEDIQO_COMPOSE"] == "1"
+        options.fixture = environment["FEDIQO_FIXTURE"] == "1"
         return options
         #else
         .none
@@ -214,13 +219,32 @@ public final class AppState {
     /// What every feed is built with, kept because the feeds are built later than this.
     private let secrets: any SecretStore
     private let tokens: TokenSource?
+    /// Who reads each protocol. The standard set in every build anybody ships; the fixture's
+    /// invented world when a screenshot is being taken. It is carried here rather than
+    /// defaulted at each feed so that one answer covers the timelines and the conversations.
+    private let registry: SourceRegistry
 
     public convenience init() {
-        self.init(store: LocalStore.openDefault(), launch: .fromEnvironment())
+        let launch = LaunchOptions.fromEnvironment()
+        #if DEBUG
+        if launch.fixture, let store = try? LocalStore.inMemory() {
+            // A store nobody's disk holds, preferences nobody's machine has set, and servers
+            // that are not the reader's: a screenshot must say the same thing on a laptop
+            // that has been signed in to three servers for a year as on a fresh runner.
+            let defaults = UserDefaults(suiteName: "fediqo.fixture")
+            defaults?.removePersistentDomain(forName: "fediqo.fixture")
+            self.init(preferences: Preferences(defaults: defaults ?? .standard),
+                      serverStore: FixtureServerStore(), store: store, launch: launch,
+                      registry: SourceRegistry(clients: [.mastodon: FixtureSource()]))
+            return
+        }
+        #endif
+        self.init(store: LocalStore.openDefault(), launch: launch)
     }
 
     init(preferences: Preferences = Preferences(), serverStore: (any ServerStore)? = nil,
-         store: LocalStore? = nil, launch: LaunchOptions = .none) {
+         store: LocalStore? = nil, launch: LaunchOptions = .none,
+         registry: SourceRegistry = .standard()) {
         // Counting starts when the app does, so that "since" is a moment the screen can name
         // rather than whichever request happened to be sent first.
         _ = APILedger.shared
@@ -239,6 +263,7 @@ public final class AppState {
         self.signIn = signIn
         self.secrets = secrets
         self.tokens = tokens
+        self.registry = registry
         // What a fresh install has before the store has answered — and, without a store, what
         // it has for good. The names are words in the reader's language, so they are made here
         // rather than in Core, which has none.
@@ -364,8 +389,7 @@ public final class AppState {
             feed.timeline = timeline
             return feed
         }
-        let feed = FeedModel(timeline: timeline, preferences: preferences,
-                             loader: TimelineLoader(store: store, secrets: secrets, tokens: tokens))
+        let feed = FeedModel(timeline: timeline, preferences: preferences, loader: loader())
         // A rejected token is noticed in two places, and both end in the same set. Reading is
         // the first: a server that turns a read's token down says so alongside the posts it
         // gave a stranger, and the row hears about it. One direction only — nothing here asks
@@ -382,7 +406,14 @@ public final class AppState {
     /// to build a second one. A page opened from nowhere in particular gets a fresh loader,
     /// which is what a preview and a test have.
     func conversationLoader() -> TimelineLoader {
-        readingFeed?.loader ?? TimelineLoader(store: store, secrets: secrets, tokens: tokens)
+        readingFeed?.loader ?? loader()
+    }
+
+    /// One loader, built the one way. Every caller went through the same four arguments
+    /// before the registry became a fifth, and a fifth spelled out twice is a fifth that
+    /// eventually differs in one of the two places.
+    private func loader() -> TimelineLoader {
+        TimelineLoader(registry: registry, store: store, secrets: secrets, tokens: tokens)
     }
 
     /// One of the reader's timelines by id, or nothing where the id names none.
