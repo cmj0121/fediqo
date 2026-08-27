@@ -5,3 +5,7 @@ DerivedData/
 *.xcodeproj
 *.xcworkspace
 .env
+fastlane/README.md
+fastlane/report.xml
+vendor/
+.bundle/

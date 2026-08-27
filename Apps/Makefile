@@ -20,7 +20,7 @@ VERSION        = $(shell $(ROOT)/scripts/version.sh --marketing)
 BUILD_NUMBER   = $(shell $(ROOT)/scripts/version.sh --build)
 STAMP          = MARKETING_VERSION=$(VERSION) CURRENT_PROJECT_VERSION=$(BUILD_NUMBER)
 
-.PHONY: all run mac ios version xcodeproj sync-assets clean test build upgrade help
+.PHONY: all run mac ios publish version xcodeproj sync-assets clean test build upgrade help
 
 all: help			# default action
 
@@ -39,6 +39,12 @@ ios: xcodeproj		# build the iOS app for the simulator
 	@set -o pipefail; xcodebuild -project $(XCODEPROJ) -scheme $(IOS_SCHEME) \
 		-configuration Debug -derivedDataPath $(DERIVED) \
 		-destination '$(IOS_DESTINATION)' $(STAMP) build | tail -5
+
+# The release, and the only target here that needs anything from outside the checkout.
+# scripts/env.sh loads .env and hands the lane an environment; a runner has one already and
+# runs this same line. Nothing about the release is written down anywhere else.
+publish: xcodeproj	# archive, sign and send both apps to TestFlight
+	@$(ROOT)/scripts/env.sh -- bundle exec fastlane publish
 
 version:			# show the version a build made here would report
 	@echo "$(VERSION) ($(BUILD_NUMBER))"

@@ -1,0 +1,15 @@
+# The certificates and profiles, encrypted, in a repository shared with the other apps on this
+# team -- match keeps them apart by bundle identifier, so sharing costs nothing.
+#
+# git_branch is not a detail: match looks for `master` unless told, and that repository's
+# default branch is `main`. Left unsaid, every lane below fails at the clone.
+git_url      ENV.fetch("MATCH_GIT_URL")
+git_branch   "main"
+storage_mode "git"
+
+app_identifier [ENV.fetch("FEDIQO_BUNDLE_ID")]
+
+# The type and the platform belong to the call, not to the file: this app needs three
+# different answers out of the same repository. See the Fastfile.
+
+# vim: ts=2 sw=2 ft=ruby et :

@@ -1,0 +1,175 @@
+# The release, as lanes. A tag is what makes one; everything else here is worked out rather
+# than typed. What runs on a laptop and what runs on a runner is the same file, because
+# everything it needs to know it reads out of the environment and scripts/env.sh is what put
+# it there.
+
+ROOT         = File.expand_path("..", __dir__)
+XCODEPROJ    = File.join(ROOT, "Fediqo.xcodeproj")
+MACOS_SCHEME = "Fediqo"
+IOS_SCHEME   = "Fediqo-iOS"
+DERIVED      = File.join(ROOT, ".build", "xcode-release")
+OUTPUT       = File.join(ROOT, ".build", "release")
+
+BUNDLE_ID = ENV.fetch("FEDIQO_BUNDLE_ID")
+TEAM_ID   = ENV.fetch("FEDIQO_TEAM_ID")
+APPLE_ID  = ENV["FEDIQO_APPLE_ID"]
+
+# The installer identity, named by its kind rather than by whose name is on it. Xcode resolves
+# the prefix against the keychain, so the same string works on any machine match has run on.
+INSTALLER_IDENTITY = "3rd Party Mac Developer Installer"
+
+# The App Store Connect key, where there is one. It is the only way in that never stops to ask
+# a person for a second factor, which is the only kind a runner can use. Nil where it is not
+# configured, and every action below then falls back to the Apple ID in the Appfile.
+def asc_api_key
+  return $asc_api_key if defined?($asc_api_key)
+
+  key_id  = ENV["ASC_KEY_ID"].to_s
+  issuer  = ENV["ASC_ISSUER_ID"].to_s
+  content = ENV["ASC_KEY_P8_BASE64"].to_s
+
+  $asc_api_key =
+    if key_id.empty? || issuer.empty? || content.empty?
+      UI.important("No App Store Connect key -- signing in as a person, who will be asked for a second factor.")
+      nil
+    else
+      app_store_connect_api_key(
+        key_id: key_id,
+        issuer_id: issuer,
+        key_content: content,
+        is_key_content_base64: true,
+        in_house: false,
+      )
+    end
+end
+
+def version_sh(flag)
+  `#{File.join(ROOT, "scripts", "version.sh")} #{flag} 2>/dev/null`.strip
+end
+
+def tagged?
+  system("git -C #{ROOT} describe --tags --exact-match --match 'v[0-9]*' >/dev/null 2>&1")
+end
+
+# The tag names the release and the history counts the attempts. App Store Connect may already
+# hold the number this history would produce again, though -- the same commit released twice
+# counts the same commits twice -- so it is asked, and whichever is higher wins.
+#
+# One number for both platforms. A release attempt is one attempt however many stores it
+# reaches, and a build 92 that means one thing on the phone and another on the Mac is a build
+# number nobody can read back.
+def build_number(version)
+  from_history = version_sh("--build").to_i
+
+  seen = ["ios", "osx"].map do |platform|
+    begin
+      latest_testflight_build_number(
+        app_identifier: BUNDLE_ID,
+        version: version,
+        platform: platform,
+        initial_build_number: 0,
+        api_key: asc_api_key,
+        username: APPLE_ID,
+      ).to_i
+    rescue StandardError => error
+      UI.important("Nothing on App Store Connect for #{platform} #{version} yet (#{error.class}); counting it as none.")
+      0
+    end
+  end
+
+  [from_history, seen.max + 1].max
+end
+
+def stamp(version, build)
+  "MARKETING_VERSION=#{version} CURRENT_PROJECT_VERSION=#{build} DEVELOPMENT_TEAM=#{TEAM_ID}"
+end
+
+# match writes the name of the profile it fetched into the environment under this key, so the
+# export never has to be told a name that stops being true the next time match runs.
+def profile_name(platform)
+  suffix = platform == :macos ? "_macos" : ""
+  ENV.fetch("sigh_#{BUNDLE_ID}_appstore#{suffix}_profile-name") do
+    ENV.fetch("sigh_#{BUNDLE_ID}_appstore_profile-name")
+  end
+end
+
+desc "Archive, sign and send both apps to TestFlight. Nothing is submitted for review."
+lane :publish do
+  UI.user_error!("No v* tag on HEAD. A release is a tag -- `git tag v0.1.0` and try again.") unless tagged?
+
+  version = version_sh("--marketing")
+  build   = build_number(version)
+  UI.important("Fediqo #{version} (#{build}) -- both platforms, TestFlight only.")
+
+  publish_ios(version: version, build: build)
+  publish_macos(version: version, build: build)
+
+  UI.success("Fediqo #{version} (#{build}) is on TestFlight. Nothing was submitted for review.")
+end
+
+desc "The iPhone and iPad build, as far as TestFlight."
+private_lane :publish_ios do |options|
+  match(type: "appstore", platform: "ios", api_key: asc_api_key, username: APPLE_ID)
+
+  build_app(
+    project: XCODEPROJ,
+    scheme: IOS_SCHEME,
+    configuration: "Release",
+    export_method: "app-store",
+    derived_data_path: DERIVED,
+    output_directory: OUTPUT,
+    output_name: "Fediqo-iOS.ipa",
+    xcargs: stamp(options[:version], options[:build]),
+    export_options: {
+      teamID: TEAM_ID,
+      provisioningProfiles: { BUNDLE_ID => profile_name(:ios) },
+    },
+  )
+
+  upload_to_testflight(
+    api_key: asc_api_key,
+    username: APPLE_ID,
+    app_identifier: BUNDLE_ID,
+    app_platform: "ios",
+    ipa: File.join(OUTPUT, "Fediqo-iOS.ipa"),
+    skip_submission: true,
+    skip_waiting_for_build_processing: true,
+  )
+end
+
+desc "The Mac build, as a package the installer identity signed, as far as TestFlight."
+private_lane :publish_macos do |options|
+  # Two fetches, not one. The app is signed with the distribution identity and the package
+  # around it with the installer identity, and the Mac App Store takes only a package.
+  match(type: "appstore", platform: "macos", api_key: asc_api_key, username: APPLE_ID)
+  match(type: "mac_installer_distribution", platform: "macos", api_key: asc_api_key, username: APPLE_ID)
+
+  build_app(
+    project: XCODEPROJ,
+    scheme: MACOS_SCHEME,
+    platform: "macOS",
+    configuration: "Release",
+    export_method: "app-store",
+    installer_cert_name: INSTALLER_IDENTITY,
+    derived_data_path: DERIVED,
+    output_directory: OUTPUT,
+    output_name: "Fediqo.pkg",
+    xcargs: stamp(options[:version], options[:build]),
+    export_options: {
+      teamID: TEAM_ID,
+      provisioningProfiles: { BUNDLE_ID => profile_name(:macos) },
+    },
+  )
+
+  upload_to_testflight(
+    api_key: asc_api_key,
+    username: APPLE_ID,
+    app_identifier: BUNDLE_ID,
+    app_platform: "osx",
+    pkg: File.join(OUTPUT, "Fediqo.pkg"),
+    skip_submission: true,
+    skip_waiting_for_build_processing: true,
+  )
+end
+
+# vim: ts=2 sw=2 ft=ruby et :
