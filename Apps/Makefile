@@ -1,10 +1,17 @@
-ROOT          := ..
-MACOS_SCHEME  := Fediqo
-IOS_SCHEME    := Fediqo-iOS
-IOS_DEVICE    ?= iPad Pro 11-inch (M5)
-XCODEPROJ     := $(ROOT)/Fediqo.xcodeproj
-DERIVED       := $(ROOT)/.build/xcode
-MASCOT        := $(ROOT)/Sources/FediqoUI/Resources/Media.xcassets/Mascot.imageset/mascot.svg
+ROOT            := ..
+MACOS_SCHEME    := Fediqo
+IOS_SCHEME      := Fediqo-iOS
+XCODEPROJ       := $(ROOT)/Fediqo.xcodeproj
+DERIVED         := $(ROOT)/.build/xcode
+
+# Nothing about compiling needs a particular simulator, and a device named here is a name that
+# rots: it exists on one machine and not on the next, or it is left holding a runtime nobody
+# installed. The generic destination always resolves, so a laptop and a runner ask for the
+# same thing. Pass a real one when you mean a real one:
+#
+#     make -C Apps ios IOS_DESTINATION='platform=iOS Simulator,name=iPhone 17'
+IOS_DESTINATION ?= generic/platform=iOS Simulator
+MASCOT          := $(ROOT)/Sources/FediqoUI/Resources/Media.xcassets/Mascot.imageset/mascot.svg
 
 # Deferred, not `:=` -- a `make help` should not go asking git what the version is. The two
 # come from scripts/version.sh so a build here and a build on a runner agree by construction
@@ -20,15 +27,18 @@ all: help			# default action
 run: mac			# build and launch the macOS app
 	@open $(DERIVED)/Build/Products/Debug/Fediqo.app
 
+# `| tail` is here because xcodebuild says a great deal and only the end of it is news. A
+# pipeline reports the exit status of its last command, though, so without pipefail the tail
+# would report success for every build that ever failed -- which is what CI was doing.
 mac: xcodeproj		# build the macOS app
-	@xcodebuild -project $(XCODEPROJ) -scheme $(MACOS_SCHEME) \
+	@set -o pipefail; xcodebuild -project $(XCODEPROJ) -scheme $(MACOS_SCHEME) \
 		-configuration Debug -derivedDataPath $(DERIVED) \
 		-destination 'platform=macOS' $(STAMP) build | tail -5
 
 ios: xcodeproj		# build the iOS app for the simulator
-	@xcodebuild -project $(XCODEPROJ) -scheme $(IOS_SCHEME) \
+	@set -o pipefail; xcodebuild -project $(XCODEPROJ) -scheme $(IOS_SCHEME) \
 		-configuration Debug -derivedDataPath $(DERIVED) \
-		-destination 'platform=iOS Simulator,name=$(IOS_DEVICE)' $(STAMP) build | tail -5
+		-destination '$(IOS_DESTINATION)' $(STAMP) build | tail -5
 
 version:			# show the version a build made here would report
 	@echo "$(VERSION) ($(BUILD_NUMBER))"
