@@ -65,6 +65,10 @@ so rather than pretending it was one post.
 | native      | Swift on Apple platforms -- no web view, no cross-platform runtime  |
 | open source | AGPL-3.0, buildable from this checkout, so the claim can be checked |
 
+`make` builds it, `make test` tests it, and neither needs anything this checkout does not already carry.
+[`docs/release.md`](docs/release.md) covers the one command that does need more — the one that signs both apps and
+sends them to TestFlight.
+
 ## The mark
 
 An octopus in front of a machined chassis. One creature with its arms in several places at
