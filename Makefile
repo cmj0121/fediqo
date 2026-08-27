@@ -1,6 +1,6 @@
 SUBDIR := Apps
 
-.PHONY: all clean test run build upgrade help $(SUBDIR)
+.PHONY: all clean test run build version upgrade help $(SUBDIR)
 
 all: $(SUBDIR) 		# default action
 	@[ -f .git/hooks/pre-commit ] || pre-commit install --install-hooks
@@ -17,6 +17,9 @@ run: $(SUBDIR)		# run in the local environment -- the macOS app
 
 build:				# build the binary/library
 	swift build
+
+version:			# show the version a build made here would report
+	@scripts/version.sh
 
 upgrade:			# upgrade all the necessary packages
 	pre-commit autoupdate
