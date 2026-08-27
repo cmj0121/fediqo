@@ -835,6 +835,23 @@
         }
       }
     },
+    "post.actingAs": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Acting as"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "以此帳號動作"
+          }
+        }
+      }
+    },
     "post.alone": {
       "extractionState": "manual",
       "localizations": {
@@ -865,6 +882,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "時間軸"
+          }
+        }
+      }
+    },
+    "post.bookmark": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bookmark on your server"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在你的伺服器加書籤"
+          }
+        }
+      }
+    },
+    "post.copyLink": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy link"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "複製連結"
           }
         }
       }
@@ -916,6 +967,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "在它來的伺服器上收藏"
+          }
+        }
+      }
+    },
+    "post.kept": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep it here"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "留在這台裝置"
           }
         }
       }
@@ -1039,6 +1107,125 @@
         }
       }
     },
+    "post.more": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Everything else"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "其他動作"
+          }
+        }
+      }
+    },
+    "post.more.danger": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Danger"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "危險"
+          }
+        }
+      }
+    },
+    "post.more.general": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "General"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一般"
+          }
+        }
+      }
+    },
+    "post.mute.here": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "here"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在這裡"
+          }
+        }
+      }
+    },
+    "post.mute.onServer": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "on your server"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在你的伺服器"
+          }
+        }
+      }
+    },
+    "post.muteAuthor": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mute %@"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "靜音 %@"
+          }
+        }
+      }
+    },
+    "post.muteHost": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mute %@"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "靜音 %@"
+          }
+        }
+      }
+    },
     "post.open": {
       "extractionState": "manual",
       "localizations": {
@@ -1086,6 +1273,57 @@
           "stringUnit": {
             "state": "translated",
             "value": "在它來的伺服器上回覆"
+          }
+        }
+      }
+    },
+    "post.report": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Report this post"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "檢舉這則貼文"
+          }
+        }
+      }
+    },
+    "post.report.why": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "What is wrong with it? (optional)"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "哪裡有問題？（可不填）"
+          }
+        }
+      }
+    },
+    "post.reported": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reported"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已檢舉"
           }
         }
       }

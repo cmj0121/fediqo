@@ -27,6 +27,6 @@ struct PlaceholderView: View {
 
 struct KeptView: View {
     var body: some View {
-        PlaceholderView(titleKey: "kept.title", bodyKey: "kept.soon", symbolName: "bookmark")
+        PlaceholderView(titleKey: "kept.title", bodyKey: "kept.soon", symbolName: "archivebox")
     }
 }

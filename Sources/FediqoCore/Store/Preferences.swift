@@ -103,6 +103,24 @@ public final class Preferences {
     /// deleted it deleted it, and offering it back on the next sign-in would be an app
     /// disagreeing with them.
     public var offeredHomeTimeline: Bool { didSet { defaults.set(offeredHomeTimeline, forKey: Keys.offeredHomeTimeline) } }
+    /// Which of the reader's accounts acts on a post, by `Server.endpoint`, or nothing where
+    /// they have not said.
+    ///
+    /// It is a preference and not a derived answer because the choice is not neutral: nearly
+    /// every post here comes from a server the reader has no account on, so acting on one goes
+    /// through a server of theirs — and *which* one decides who learns the post exists. An app
+    /// that picked quietly would be deciding that on their behalf, once per press.
+    ///
+    /// Unset is not a fault. With one account there is nothing to choose and this stays nil;
+    /// with several, the screen asks once and writes the answer here.
+    public var actingServer: String? { didSet { defaults.set(actingServer, forKey: Keys.actingServer) } }
+    /// Whether the reader has agreed that acting on a post may have their own server go and
+    /// fetch it. Off until they say otherwise, and revocable.
+    ///
+    /// Without it, an action on a post that server has never seen is refused rather than sent:
+    /// the request that would make it work is the request that tells somebody what is being
+    /// read, and this app does not send that one without being asked to.
+    public var mayFetchToAct: Bool { didSet { defaults.set(mayFetchToAct, forKey: Keys.mayFetchToAct) } }
 
     private enum Keys {
         static let theme = "fediqo.theme"
@@ -115,12 +133,15 @@ public final class Preferences {
         static let refreshInterval = "fediqo.refreshInterval"
         static let offeredHomeTimeline = "fediqo.offeredHomeTimeline"
         static let clearedSeededWording = "fediqo.clearedSeededWording"
+        static let actingServer = "fediqo.actingServer"
+        static let mayFetchToAct = "fediqo.mayFetchToAct"
 
         /// Every key above. Written out rather than derived, so that adding one and forgetting
         /// it here is a compile-time-visible omission in one place rather than a preference
         /// that quietly survives a reset.
         static let all = [theme, textScale, language, railExpanded, showBoosts, showMediaOnly,
-                          showSensitive, refreshInterval, offeredHomeTimeline, clearedSeededWording]
+                          showSensitive, refreshInterval, offeredHomeTimeline, clearedSeededWording,
+                          actingServer, mayFetchToAct]
     }
 
     /// Every preference back to the value a first launch would have given it, and the stored
@@ -140,6 +161,8 @@ public final class Preferences {
         refreshInterval = fresh.refreshInterval
         offeredHomeTimeline = fresh.offeredHomeTimeline
         clearedSeededWording = fresh.clearedSeededWording
+        actingServer = fresh.actingServer
+        mayFetchToAct = fresh.mayFetchToAct
     }
 
     public init(defaults: UserDefaults = .standard) {
@@ -152,6 +175,10 @@ public final class Preferences {
         showBoosts = defaults.object(forKey: Keys.showBoosts) as? Bool ?? true
         showMediaOnly = defaults.object(forKey: Keys.showMediaOnly) as? Bool ?? false
         showSensitive = defaults.object(forKey: Keys.showSensitive) as? Bool ?? false
+        actingServer = defaults.string(forKey: Keys.actingServer)
+        // Off until asked. The request this permits is the one that tells somebody what is
+        // being read, so it is not a default anybody arrives at by not looking.
+        mayFetchToAct = defaults.object(forKey: Keys.mayFetchToAct) as? Bool ?? false
         refreshInterval = defaults.string(forKey: Keys.refreshInterval).flatMap(RefreshInterval.init(rawValue:)) ?? .seconds30
         offeredHomeTimeline = defaults.object(forKey: Keys.offeredHomeTimeline) as? Bool ?? false
         clearedSeededWording = defaults.object(forKey: Keys.clearedSeededWording) as? Bool ?? false

@@ -55,7 +55,7 @@ public enum SourceFailure: Error, Sendable, Equatable, LocalizedError {
     /// anything else — a URLSession error, a decoding failure — is the connection not working,
     /// which is what `.transport` is. Every read funnels through here so that what counts as
     /// silence, and therefore what a backoff is decided on, is settled in one place.
-    static func of(_ error: any Error) -> SourceFailure {
+    public static func of(_ error: any Error) -> SourceFailure {
         error as? SourceFailure ?? .transport(error.localizedDescription)
     }
 

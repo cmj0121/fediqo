@@ -272,6 +272,10 @@ struct FeedScreen: View {
                             app.expand(post)
                         }
                     }
+                    // What this device already knows about the page: what each account did to
+                    // these posts, and which of them are being kept here. One read for the
+                    // page rather than forty, and again whenever the page changes.
+                    .task(id: posts.map(\.mergeKey)) { await app.loadMarks(for: posts) }
                     // One foot, and it says one thing. A reach still out owns it — a bottom
                     // that merely sits there is indistinguishable from a finished one — and
                     // the end is what is left when nothing is coming.

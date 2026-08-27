@@ -25,7 +25,7 @@ enum RailItem: String, CaseIterable, Identifiable, Hashable {
     var symbolName: String {
         switch self {
         case .timeline: "list.bullet.rectangle"
-        case .kept: "bookmark"
+        case .kept: "archivebox"
         // The rising line belongs to the Trending tab, and it means "what is happening out
         // there". This page is the other kind of chart: bars of what is already here.
         case .statistics: "chart.bar.xaxis"
@@ -183,6 +183,30 @@ public final class AppState {
     /// keeps none. The answer lives in the row for as long as the row does and is written
     /// down nowhere — so the key is an event the row hears, not a fact the app holds.
     private(set) var mediaCovers = 0
+    /// What each visible post is marked with, for whichever account acts. Held here rather
+    /// than in the rows because a page is read from the store in one go, and because an action
+    /// on the opened post has to move the row in the list behind it.
+    var postMarks: [String: PostMarks] = [:]
+    /// Which visible posts this device is holding on to. A set and not a mark, because keeping
+    /// is not an account's answer — it is this machine's.
+    var keptPosts: Set<String> = []
+    /// The reader's standing mutes, both kinds and both places.
+    var mutes: [Mute] = []
+    /// Posts already reported this run, so a control can stop offering.
+    var reported: Set<String> = []
+    /// What went wrong with the last thing the reader asked for, for the screen to say.
+    var actionFailure: SourceFailure?
+    /// The server that was last asked to go and fetch a post so an action could be sent.
+    ///
+    /// Kept so it can be said out loud. It is the one thing this app does that tells somebody
+    /// else what is being read, and a reader who has allowed it should still see it happen
+    /// rather than find out from a changelog.
+    var lastReachedOut: String?
+    /// The steps between a press and the store, which are Core's and not a screen's. Built
+    /// once beside the loaders and from the same two things, so an action and a read cannot
+    /// come to disagree about which client speaks which protocol.
+    @ObservationIgnored private(set) lazy var postActions =
+        PostActions(registry: registry, store: store)
     /// What is playing, which is at most one thing anywhere in the app.
     let playback = Playback()
     /// Whether the written-down list of keys is up. It sits over everything the shell draws
@@ -225,7 +249,9 @@ public final class AppState {
     @ObservationIgnored private var writes: Task<Void, Never>?
     /// What every feed is built with, kept because the feeds are built later than this.
     private let secrets: any SecretStore
-    private let tokens: TokenSource?
+    // `internal`: the acting layer lives in Timeline/PostActing.swift and needs to resolve a
+    // credential for the account that is about to act.
+    let tokens: TokenSource?
     /// Who reads each protocol. The standard set in every build anybody ships; the fixture's
     /// invented world when a screenshot is being taken. It is carried here rather than
     /// defaulted at each feed so that one answer covers the timelines and the conversations.
