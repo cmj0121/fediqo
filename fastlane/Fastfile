@@ -3,12 +3,28 @@
 # everything it needs to know it reads out of the environment and scripts/env.sh is what put
 # it there.
 
+require "shellwords"
+
 ROOT         = File.expand_path("..", __dir__)
 XCODEPROJ    = File.join(ROOT, "Fediqo.xcodeproj")
 MACOS_SCHEME = "Fediqo"
 IOS_SCHEME   = "Fediqo-iOS"
 DERIVED      = File.join(ROOT, ".build", "xcode-release")
 OUTPUT       = File.join(ROOT, ".build", "release")
+
+# fastlane reads .env itself, and an empty value there is not nothing. `MATCH_PASSWORD=` with
+# nothing after it arrives in Ruby as "", which is truthy -- so match takes the empty string
+# for the passphrase, never looks in the keychain where the real one is, and then blames the
+# environment variable for the failure. Empty is unset, here as it is in scripts/env.sh.
+%w[
+  MATCH_PASSWORD
+  MATCH_GIT_BASIC_AUTHORIZATION
+  ASC_KEY_ID
+  ASC_ISSUER_ID
+  ASC_KEY_P8_BASE64
+  FEDIQO_APPLE_ID
+  FASTLANE_APPLE_APPLICATION_SPECIFIC_PASSWORD
+].each { |name| ENV.delete(name) if ENV[name].to_s.empty? }
 
 BUNDLE_ID = ENV.fetch("FEDIQO_BUNDLE_ID")
 TEAM_ID   = ENV.fetch("FEDIQO_TEAM_ID")
@@ -80,8 +96,17 @@ def build_number(version)
   [from_history, seen.max + 1].max
 end
 
-def stamp(version, build)
-  "MARKETING_VERSION=#{version} CURRENT_PROJECT_VERSION=#{build} DEVELOPMENT_TEAM=#{TEAM_ID}"
+# What the archive is told on the command line rather than in the project: the version, the
+# team, and which profile to sign with. The profile has to be here and not only in the export
+# options -- Release signs manually, and a manual archive with no profile named fails before
+# there is anything to export.
+def stamp(version, build, profile)
+  [
+    "MARKETING_VERSION=#{version}",
+    "CURRENT_PROJECT_VERSION=#{build}",
+    "DEVELOPMENT_TEAM=#{TEAM_ID}",
+    "PROVISIONING_PROFILE_SPECIFIER=#{Shellwords.escape(profile)}",
+  ].join(" ")
 end
 
 # match writes the name of the profile it fetched into the environment under this key, so the
@@ -110,6 +135,7 @@ end
 desc "The iPhone and iPad build, as far as TestFlight."
 private_lane :publish_ios do |options|
   match(type: "appstore", platform: "ios", api_key: asc_api_key, username: APPLE_ID)
+  profile = profile_name(:ios)
 
   build_app(
     project: XCODEPROJ,
@@ -119,10 +145,10 @@ private_lane :publish_ios do |options|
     derived_data_path: DERIVED,
     output_directory: OUTPUT,
     output_name: "Fediqo-iOS.ipa",
-    xcargs: stamp(options[:version], options[:build]),
+    xcargs: stamp(options[:version], options[:build], profile),
     export_options: {
       teamID: TEAM_ID,
-      provisioningProfiles: { BUNDLE_ID => profile_name(:ios) },
+      provisioningProfiles: { BUNDLE_ID => profile },
     },
   )
 
@@ -143,6 +169,7 @@ private_lane :publish_macos do |options|
   # around it with the installer identity, and the Mac App Store takes only a package.
   match(type: "appstore", platform: "macos", api_key: asc_api_key, username: APPLE_ID)
   match(type: "mac_installer_distribution", platform: "macos", api_key: asc_api_key, username: APPLE_ID)
+  profile = profile_name(:macos)
 
   build_app(
     project: XCODEPROJ,
@@ -154,10 +181,10 @@ private_lane :publish_macos do |options|
     derived_data_path: DERIVED,
     output_directory: OUTPUT,
     output_name: "Fediqo.pkg",
-    xcargs: stamp(options[:version], options[:build]),
+    xcargs: stamp(options[:version], options[:build], profile),
     export_options: {
       teamID: TEAM_ID,
-      provisioningProfiles: { BUNDLE_ID => profile_name(:macos) },
+      provisioningProfiles: { BUNDLE_ID => profile },
     },
   )
 

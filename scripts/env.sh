@@ -101,6 +101,12 @@ load() {
             '"'*'"' | "'"*"'") value="${value:1:${#value} - 2}" ;;
         esac
 
+        # A name with nothing after the '=' is a name nobody filled in, and exporting it empty
+        # is worse than leaving it alone: `MATCH_PASSWORD=` in the file reads to match as a
+        # passphrase that happens to be the empty string, and it stops looking in the keychain
+        # where the real one is. Empty is unset here, as it is everywhere else in this file.
+        [ -n "$value" ] || continue
+
         export "$name=$value"
     done < "$ENV_FILE"
 }
