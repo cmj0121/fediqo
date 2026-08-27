@@ -606,6 +606,55 @@ is lost by waiting, so these wait until a screen needs them:
 Each is a new `CREATE`, read at query time as a join on `merge_key` or `author_id`. None changes a row that
 is already there.
 
+## What the reader did about a post
+
+Three answers arrive with 007, and they are kept in three places because they belong to three different
+things.
+
+| answer                        | kept in            | keyed by                | told to        |
+| ----------------------------- | ------------------ | ----------------------- | -------------- |
+| favourited, boosted, bookmarked | `post_marks`     | `(merge_key, author_id)` | a server       |
+| kept                          | `posts.kept_at`    | the post                | nobody         |
+| muted                         | `mutes`            | `(kind, value, server_url)` | one, both or neither |
+
+`post_marks` is keyed by two things for the reason `post_origins` is. `posts` holds one row per post
+however many servers carried it, and "favourited" is not a fact about a post — it is a fact about one
+account's relationship to it, and a reader signed in to two servers can have favourited something as one
+and not the other. A column on `posts` would have the second account overwrite the first's answer every
+time either was read.
+
+NULL is never-told and is not `false`, exactly as `sensitive` has been since 005. Nearly all reading here
+is done as a stranger, and a server answering a stranger says nothing about whether any account of yours
+favourited the status. A screen may draw an unfilled star for it; it may not call it "not favourited".
+
+Undoing writes NULL back rather than a row saying "undone at". Once it is undone there is nothing left to
+remember, and remembering that somebody unfavourited something is a reading record.
+
+`kept_at` is a column and not a table, and is not keyed by an account, because keeping is neither an
+account's fact nor a server's: it is this device's. No server is told, which is the whole of what separates
+it from `bookmarked_at`. What it is *for* is rotation — a post with it set is exempt — and nothing in 007
+implements rotation. The column is where the answer will live.
+
+`mutes` holds one row per rule and not one row per target with a flag. `server_url` NULL is this device's
+own rule, told to nobody; a row naming a server is one that server is carrying out. Both can stand about
+the same author at once, and they must be able to: this store's promise is that it can always say whether
+a rule of yours hid something or a server did, and one row with a flag cannot say both.
+
+### What it costs to act
+
+A post's own server is where a favourite would naturally go, and it is almost never available: this app
+reads a great many servers nobody here has an account on. So an action goes through a server of the
+reader's, and that server must know the post before it can be asked anything about it.
+
+Finding it there is two questions and often only one. `GET /api/v2/search` with `resolve=false` asks what
+the server already holds; only when that comes back empty is `resolve=true` sent, and that is the request
+that makes the server go and fetch the post from wherever it lives. It is the one request this app makes
+that tells somebody else what is being read, so it is not sent unless the reader has said it may be, and
+what it cost comes back for a screen to say out loud.
+
+The lookup answers with the whole status, including the three marks. That is the only moment this app is
+ever told them, so they are written down there rather than asked for again.
+
 ## Writing
 
 ```text
