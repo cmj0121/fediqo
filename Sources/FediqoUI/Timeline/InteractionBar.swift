@@ -89,7 +89,11 @@ struct InteractionBar: View {
                 switching("arrow.up.right.square", labelKey: "timeline.open",
                           on: false, tint: .secondary) { hand() }
             }
-            switching("ellipsis.circle", labelKey: "post.more", on: showingMore, tint: .secondary) {
+            // Bare, not circled. The ring made it the heaviest mark in a row of outlines, so
+            // the least of the controls read as the most important one — and the chips above
+            // the timeline have always spelled "more of this" as three plain dots, which is
+            // now the one spelling this app has.
+            switching("ellipsis", labelKey: "post.more", on: showingMore, tint: .secondary) {
                 showingMore = true
             }
             .popover(isPresented: $showingMore, arrowEdge: .bottom) {
