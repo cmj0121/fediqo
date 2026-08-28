@@ -14,6 +14,19 @@ IOS_DESTINATION ?= generic/platform=iOS Simulator
 MASCOT          := $(ROOT)/Sources/FediqoUI/Resources/Media.xcassets/Mascot.imageset/mascot.svg
 # Where the UI run leaves what it did, and what the coverage is read out of.
 UITEST_RESULT   := $(DERIVED)/uitest.xcresult
+UITEST_IOS_RESULT := $(DERIVED)/uitest-ios.xcresult
+
+# The simulator the driven tests run on, found rather than named -- the same reason
+# IOS_DESTINATION is generic: a device named here exists on one machine and not on the next.
+# The first available iPad, whatever this Xcode ships.
+#
+# An iPad and not a phone. On a compact screen the rail is a `TabView`, which keeps every tab
+# alive, so leaving a page and coming back would not rebuild the timeline and the test that
+# matters most would pass without asking anything. Override it when you mean a particular one:
+#
+#     make -C Apps uitest-ios UITEST_IOS_ID=<udid>
+UITEST_IOS_ID  ?= $(shell xcrun simctl list devices available | grep -m1 -E '^ *iPad' | \
+	sed -E 's/.*\(([0-9A-F-]{36})\).*/\1/')
 
 # Deferred, not `:=` -- a `make help` should not go asking git what the version is. The two
 # come from scripts/version.sh so a build here and a build on a runner agree by construction
@@ -22,7 +35,7 @@ VERSION        = $(shell $(ROOT)/scripts/version.sh --marketing)
 BUILD_NUMBER   = $(shell $(ROOT)/scripts/version.sh --build)
 STAMP          = MARKETING_VERSION=$(VERSION) CURRENT_PROJECT_VERSION=$(BUILD_NUMBER)
 
-.PHONY: all run mac ios uitest publish version xcodeproj sync-assets clean test build upgrade help
+.PHONY: all run mac ios uitest uitest-ios publish version xcodeproj sync-assets clean test build upgrade help
 
 all: help			# default action
 
@@ -72,6 +85,22 @@ uitest: xcodeproj	# run the tests that drive the macOS app
 		-resultBundlePath $(UITEST_RESULT) $(STAMP) test 2>&1 \
 		| tee $(DERIVED)/uitest.log | tail -30
 	@$(ROOT)/scripts/ui_coverage.sh $(DERIVED)
+
+# The same tests, the same app, on the simulator -- and the one CI can run. A hosted macOS
+# runner will not grant an app the accessibility permission UI testing needs, so every test
+# there fails at launch waiting sixty seconds for it; a simulator has no such trouble. The
+# macOS target above stays because it is the app a person actually uses and needs no simulator
+# booted to run.
+uitest-ios: xcodeproj	# run the tests that drive the app on an iPad simulator
+	@[ -n "$(UITEST_IOS_ID)" ] || { echo "no iPad simulator available"; exit 1; }
+	@mkdir -p $(DERIVED)
+	@rm -rf $(UITEST_IOS_RESULT)
+	@set -o pipefail; xcodebuild -project $(XCODEPROJ) -scheme $(IOS_SCHEME) \
+		-configuration Debug -derivedDataPath $(DERIVED) \
+		-destination 'platform=iOS Simulator,id=$(UITEST_IOS_ID)' -enableCodeCoverage YES \
+		-resultBundlePath $(UITEST_IOS_RESULT) $(STAMP) test 2>&1 \
+		| tee $(DERIVED)/uitest-ios.log | tail -30
+	@$(ROOT)/scripts/ui_coverage.sh $(DERIVED) ios
 
 # The release, and the only target here that needs anything from outside the checkout.
 # scripts/env.sh loads .env and hands the lane an environment; a runner has one already and

@@ -2,7 +2,7 @@
 #
 # Reports what the tests that drive the app covered of Sources/FediqoUI.
 #
-#   scripts/ui_coverage.sh [derived data path]     # defaults to .build/xcode
+#   scripts/ui_coverage.sh [derived data path] [macos|ios]    # default .build/xcode, macos
 #
 # Reports, and does not gate. `scripts/coverage.sh` is the gate and it measures
 # Sources/FediqoCore, for the reason its own header gives: nothing in the package can execute a
@@ -27,14 +27,19 @@ DERIVED_ABSOLUTE="$(cd "$DERIVED_ARG" 2>/dev/null && pwd || true)"
 cd "$(dirname "$0")/.."
 
 DERIVED="${DERIVED_ABSOLUTE:-$DERIVED_ARG}"
-PRODUCTS="$DERIVED/Build/Products/Debug/Fediqo.app/Contents/MacOS"
+
+# The same app, in the two places the two runs leave it.
+case "${2:-macos}" in
+    ios) PRODUCTS="$DERIVED/Build/Products/Debug-iphonesimulator/Fediqo.app" ;;
+    *)   PRODUCTS="$DERIVED/Build/Products/Debug/Fediqo.app/Contents/MacOS" ;;
+esac
 # The debug dylib where there is one -- a debug build puts the code there and leaves the
 # executable a stub -- and the executable itself where there is not.
 BINARY="$PRODUCTS/Fediqo.debug.dylib"
 [ -f "$BINARY" ] || BINARY="$PRODUCTS/Fediqo"
 PROFILE="$(find "$DERIVED/Build/ProfileData" -name '*.profdata' -print -quit 2>/dev/null || true)"
 
-[ -f "$BINARY" ]  || { echo "no app binary at $BINARY -- run make -C Apps uitest first"; exit 1; }
+[ -f "$BINARY" ]  || { echo "no app binary at $BINARY -- run make -C Apps uitest or uitest-ios first"; exit 1; }
 [ -n "$PROFILE" ] || { echo "no coverage profile under $DERIVED/Build/ProfileData"; exit 1; }
 
 SUMMARY="$(mktemp -t fediqo-ui-coverage)"

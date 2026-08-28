@@ -63,8 +63,16 @@ schemes:
     build:
       targets:
         Fediqo-iOS: all
+        FediqoAppTests-iOS: [test]
     run:
       config: Debug
+    # The same driver, against the same app, on the simulator -- which is where CI can actually
+    # run it. See `FediqoAppTests-iOS` for why there are two of these and not one.
+    test:
+      config: Debug
+      gatherCoverageData: true
+      targets:
+        - FediqoAppTests-iOS
     archive:
       config: Release
 
@@ -158,6 +166,38 @@ targets:
         # Swift 5 knob and this target is on 6, where data-race safety is the language rather
         # than an option. What the driver needs instead is to say where it runs — XCUITest is
         # main-actor isolated throughout, so the tests are too. See `DrivenApp`.
+      configs:
+        Debug:
+          CODE_SIGN_IDENTITY: "-"
+
+  # The same tests, driving the same app, on the simulator. Two targets and one set of sources:
+  # `Apps/Tests` is built into both, because what the tests ask is about the app and not about
+  # the platform it happens to be running on.
+  #
+  # Both exist because each can do something the other cannot. macOS is what a person runs here
+  # -- it is the app they actually use, and it needs no simulator to boot. The simulator is what
+  # CI can run: a hosted runner will not grant a macOS app the accessibility permission UI
+  # testing needs, and every test fails at launch waiting for it, which is what this target was
+  # written to answer.
+  #
+  # An iPad and not a phone, wherever this is pointed. On a compact screen the rail becomes a
+  # `TabView`, which keeps every tab alive -- so leaving a page and coming back would not
+  # rebuild the timeline, and the one test that matters most here would pass without asking
+  # anything. The regular size class is the arrangement macOS has, and the one the tests mean.
+  FediqoAppTests-iOS:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: Apps/Tests
+    dependencies:
+      - target: Fediqo-iOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.mini-poc.fediqo.uitests.ios
+        PRODUCT_NAME: FediqoAppTestsiOS
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Fediqo-iOS
+        TARGETED_DEVICE_FAMILY: "1,2"
       configs:
         Debug:
           CODE_SIGN_IDENTITY: "-"
