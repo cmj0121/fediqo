@@ -12,6 +12,7 @@ struct ServerPickerView: View {
 
     @Environment(AppState.self) private var app
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.locale) private var locale
     @State private var model: ServerPickerModel
 
     init(socialProtocol: SocialProtocol, onDismiss: (() -> Void)? = nil) {
@@ -21,6 +22,8 @@ struct ServerPickerView: View {
     }
 
     private var isSheet: Bool { onDismiss != nil }
+
+    private static let entryAnchor = "entry"
 
     var body: some View {
         @Bindable var model = model
@@ -32,13 +35,22 @@ struct ServerPickerView: View {
             VStack(alignment: .leading, spacing: 0) {
                 header
                 Hairline()
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
-                        entryField(typed: $model.typed)
-                        suggestionList
-                        sourceNote
+                ScrollViewReader { scroll in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 18) {
+                            entryField(typed: $model.typed).id(Self.entryAnchor)
+                            if case .found(let info) = model.probe {
+                                foundCard(info)
+                            }
+                            suggestionList
+                            sourceNote
+                        }
+                        .padding(20)
                     }
-                    .padding(20)
+                    .onChange(of: model.probe) { _, probe in
+                        guard case .found = probe else { return }
+                        withAnimation { scroll.scrollTo(Self.entryAnchor, anchor: .top) }
+                    }
                 }
             }
             .frame(maxWidth: isSheet ? .infinity : 640)
@@ -77,18 +89,22 @@ struct ServerPickerView: View {
                 TextField("mastodon.social", text: typed)
                     .textFieldStyle(.roundedBorder)
                     .fediqoFont(14)
-                    .onSubmit { submit(typed.wrappedValue) }
+                    .onSubmit { look(typed.wrappedValue) }
                     #if os(iOS)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .keyboardType(.URL)
                     #endif
 
-                Button(t("onboarding.server.add")) { submit(typed.wrappedValue) }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Palette.accent)
-                    .fediqoFont(12, weight: .medium)
-                    .disabled(!model.canSubmit)
+                Button { look(typed.wrappedValue) } label: {
+                    Image(systemName: "magnifyingglass")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Palette.accent)
+                .fediqoFont(12, weight: .medium)
+                .disabled(!model.canSubmit)
+                .help(t("onboarding.server.look"))
+                .accessibilityLabel(Text(t("onboarding.server.look")))
             }
 
             switch model.probe {
@@ -102,10 +118,144 @@ struct ServerPickerView: View {
                     .fediqoFont(11)
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
-            case .idle:
+            case .found, .idle:
+                // The answer is a card of its own, below. What belongs under the field is only
+                // what is too small to be one: a spinner, or the reason there is no answer.
                 EmptyView()
             }
         }
+    }
+
+    /// What the server says it is, before anything has been written down. Everything on this
+    /// card came off that server and nowhere else, which is what makes it safe to put in front
+    /// of somebody who has decided nothing. Looking is not joining: the field above is still a
+    /// field, cancelling leaves the app exactly as it was, and either way the next server can
+    /// be looked at without anything having happened to this one.
+    private func foundCard(_ info: InstanceInfo) -> some View {
+        let already = model.alreadyReading(info, among: app.servers)
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                if info.thumbnailURL != nil {
+                    RemoteImage(url: info.thumbnailURL, width: 56, height: 56)
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(info.title).fediqoFont(16, weight: .semibold)
+                    Text(info.host).fediqoFont(11).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+
+            if !info.summary.isEmpty {
+                Text(info.summary)
+                    .fediqoFont(12)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            let counted = figures(for: info)
+            if !counted.isEmpty {
+                Text(counted.joined(separator: " · "))
+                    .fediqoFont(10)
+                    .foregroundStyle(.tertiary)
+            }
+
+            let marks = badges(for: info)
+            if !marks.isEmpty {
+                FlowRow(spacing: 4) {
+                    ForEach(marks, id: \.self) { mark in
+                        Text(mark).fediqoFont(10).fediqoPill()
+                    }
+                }
+            }
+
+            if !info.rules.isEmpty {
+                Hairline()
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(t("onboarding.server.rules"))
+                        .fediqoFont(11, weight: .medium)
+                        .foregroundStyle(.secondary)
+                    ForEach(Array(info.rules.enumerated()), id: \.offset) { index, rule in
+                        rulesRow(number: index + 1, rule: rule)
+                    }
+                }
+            }
+
+            HStack(spacing: 12) {
+                if already {
+                    Text(t("onboarding.server.already")).fediqoFont(11).foregroundStyle(.secondary)
+                } else {
+                    Button(t("onboarding.server.add")) { adopt(info) }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Palette.accent)
+                        .fediqoFont(12, weight: .medium)
+                }
+                Button(t("common.cancel")) { model.clear() }
+                    .buttonStyle(.plain)
+                    .fediqoFont(12)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.top, 2)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .fediqoCard()
+    }
+
+    private func rulesRow(number: Int, rule: InstanceRule) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text("\(number)")
+                .fediqoFont(10, weight: .medium)
+                .foregroundStyle(.tertiary)
+                .frame(minWidth: 14, alignment: .trailing)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(rule.text).fediqoFont(11).fixedSize(horizontal: false, vertical: true)
+                if let detail = rule.detail {
+                    Text(detail)
+                        .fediqoFont(10)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    /// The short facts, each said only where the server said it. What it runs, whether it is
+    /// taking anybody new, and the languages it claims -- a reader deciding on a server wants
+    /// all three at a glance and none of them invented.
+    private func badges(for info: InstanceInfo) -> [String] {
+        var marks = info.languages.prefix(6).map(languageName)
+        if let version = info.version, !version.isEmpty {
+            marks.append(t("onboarding.server.version", version))
+        }
+        if let open = info.registrationsOpen {
+            marks.append(t(open ? "onboarding.server.registrations.open" : "onboarding.server.registrations.closed"))
+        }
+        return marks
+    }
+
+    /// Only what the server actually counted. The two APIs count different things -- a month of
+    /// people who posted, or everybody who ever registered -- and a server that publishes
+    /// neither is not given one.
+    private func figures(for info: InstanceInfo) -> [String] {
+        var counted: [String] = []
+        if let active = info.activeMonthlyUsers {
+            counted.append(t("onboarding.server.active", active.formatted(.number.locale(locale))))
+        }
+        if let users = info.totalUsers {
+            counted.append(t("onboarding.server.users", users.formatted(.number.locale(locale))))
+        }
+        if let posts = info.posts {
+            counted.append(t("onboarding.server.posts", posts.formatted(.number.locale(locale))))
+        }
+        return counted
+    }
+
+    /// A language as the reader's own language spells it, and as the server spelled it where
+    /// nothing can be made of the code.
+    private func languageName(_ code: String) -> String {
+        locale.localizedString(forIdentifier: code)
+            ?? locale.localizedString(forLanguageCode: code)
+            ?? code
     }
 
     private var suggestionList: some View {
@@ -126,7 +276,7 @@ struct ServerPickerView: View {
     private func suggestionRow(_ suggestion: SuggestedServer) -> some View {
         let already = app.servers.contains { $0.host == suggestion.host }
         return Button {
-            submit(suggestion.host)
+            look(suggestion.host)
         } label: {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
@@ -174,13 +324,18 @@ struct ServerPickerView: View {
 
     // MARK: - Actions
 
-    private func submit(_ host: String) {
-        Task {
-            guard let server = await model.adopt(host: host) else { return }
-            app.add(server)
-            model.typed = ""
-            dismiss()
-        }
+    /// Asks, and stops. The field is filled in on the way so that what is on screen and what
+    /// was asked about are never two different servers.
+    private func look(_ host: String) {
+        model.typed = host
+        Task { await model.look(host: host) }
+    }
+
+    private func adopt(_ info: InstanceInfo) {
+        app.add(model.server(from: info))
+        model.typed = ""
+        model.clear()
+        dismiss()
     }
 
     private func dismiss() {

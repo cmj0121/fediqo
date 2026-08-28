@@ -8,6 +8,8 @@ final class ServerPickerModel {
     enum Probe: Equatable {
         case idle
         case checking(String)
+        /// What the server said about itself. Nothing has been written down yet.
+        case found(InstanceInfo)
         case failed(SourceFailure)
     }
 
@@ -31,6 +33,12 @@ final class ServerPickerModel {
         return Server.looksLikeHost(typed)
     }
 
+    /// A server this app already reads. The screen still shows what it found -- looking is
+    /// never refused -- but there is nothing left to decide.
+    func alreadyReading(_ info: InstanceInfo, among servers: [Server]) -> Bool {
+        servers.contains { $0.host == info.host }
+    }
+
     func loadSuggestions() async {
         loadingSuggestions = true
         let result = await directory.suggested()
@@ -39,25 +47,31 @@ final class ServerPickerModel {
         loadingSuggestions = false
     }
 
-    /// Asks the server whether it is one before it is written down as a source. A hostname
-    /// that never answers should fail here, not in the timeline.
-    func adopt(host: String) async -> Server? {
+    /// Asks a server what it is, and stops there. What comes back goes on the screen; whether
+    /// to read it is the reader's next decision and not this one. A hostname that never answers
+    /// fails here rather than in the timeline.
+    func look(host: String) async {
         let normalised = Server.normalise(host)
         guard let client = registry.client(for: socialProtocol) else {
             probe = .failed(.unsupported(socialProtocol))
-            return nil
+            return
         }
         probe = .checking(normalised)
         do {
-            let instance = try await client.instance(host: normalised)
-            probe = .idle
-            return Server(host: instance.host, socialProtocol: socialProtocol, title: instance.title)
+            probe = .found(try await client.instance(host: normalised))
         } catch let failure as SourceFailure {
             probe = .failed(failure)
-            return nil
         } catch {
             probe = .failed(.transport(error.localizedDescription))
-            return nil
         }
+    }
+
+    /// The server that was looked at, as something to write down.
+    func server(from info: InstanceInfo) -> Server {
+        Server(host: info.host, socialProtocol: socialProtocol, title: info.title)
+    }
+
+    func clear() {
+        probe = .idle
     }
 }

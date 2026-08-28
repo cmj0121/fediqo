@@ -128,6 +128,74 @@ enum MastodonDTO {
         let title: String?
         let description: String?
         let shortDescription: String?
+        let languages: [String]?
+        let thumbnail: Thumbnail?
+        let version: String?
+        /// The server's own house rules, in the order it lists them. v1 servers old enough to
+        /// keep these behind a second request simply answer nothing here, and nothing is what
+        /// the card then shows: this screen makes one request and is not about to make two.
+        let rules: [Rule]?
+        let registrations: Registrations?
+        /// v2's figures.
+        let usage: Usage?
+        /// v1's, under a different name and counting different things.
+        let stats: Stats?
+
+        /// v2 hands back an object with the picture inside it and v1 the address on its own.
+        /// Either way it is one URL, so the difference stops here.
+        struct Thumbnail: Decodable, Sendable {
+            let url: String?
+
+            private struct Object: Decodable { let url: String? }
+
+            init(from decoder: any Decoder) throws {
+                if let address = try? decoder.singleValueContainer().decode(String.self) {
+                    url = address
+                } else {
+                    url = try? Object(from: decoder).url
+                }
+            }
+        }
+
+        struct Rule: Decodable, Sendable {
+            let text: String?
+            let hint: String?
+        }
+
+        /// v2 answers with a dictionary that distinguishes closed from closed-pending-approval;
+        /// v1 answers with a bare yes or no. Only the yes or no is common to both.
+        struct Registrations: Decodable, Sendable {
+            let enabled: Bool?
+            let approvalRequired: Bool?
+
+            private struct Object: Decodable {
+                let enabled: Bool?
+                let approvalRequired: Bool?
+            }
+
+            init(from decoder: any Decoder) throws {
+                if let flag = try? decoder.singleValueContainer().decode(Bool.self) {
+                    enabled = flag
+                    approvalRequired = nil
+                } else {
+                    let object = try? Object(from: decoder)
+                    enabled = object?.enabled
+                    approvalRequired = object?.approvalRequired
+                }
+            }
+        }
+
+        /// A month is the shortest window Mastodon publishes. There is no daily figure to ask
+        /// for, here or anywhere else in the API.
+        struct Usage: Decodable, Sendable {
+            struct Users: Decodable, Sendable { let activeMonth: Int? }
+            let users: Users?
+        }
+
+        struct Stats: Decodable, Sendable {
+            let userCount: Int?
+            let statusCount: Int?
+        }
     }
 
     /// `reblog` nests a `Status` inside itself; a class box keeps the type finite.

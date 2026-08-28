@@ -86,6 +86,11 @@ targets:
         # here is what keeps App Store Connect from stopping to ask a person, once per build,
         # a question whose answer never changes.
         ITSAppUsesNonExemptEncryption: false
+        # Without this the app tells the system it speaks English and nothing else, so a phone
+        # set to 繁體中文 is handed English -- the strings are all there, in the FediqoUI
+        # resource bundle, but every bundle under an app resolves against what the app itself
+        # claims to support. It is also what puts Fediqo in the per-app language list.
+        CFBundleLocalizations: [en, zh-TW]
         # Both stores refuse a submission that does not say which shelf it belongs on, and
         # macOS wants the answer in the bundle rather than only in App Store Connect.
         LSApplicationCategoryType: public.app-category.social-networking
@@ -146,6 +151,11 @@ targets:
         # here is what keeps App Store Connect from stopping to ask a person, once per build,
         # a question whose answer never changes.
         ITSAppUsesNonExemptEncryption: false
+        # Without this the app tells the system it speaks English and nothing else, so a phone
+        # set to 繁體中文 is handed English -- the strings are all there, in the FediqoUI
+        # resource bundle, but every bundle under an app resolves against what the app itself
+        # claims to support. It is also what puts Fediqo in the per-app language list.
+        CFBundleLocalizations: [en, zh-TW]
         # Both stores refuse a submission that does not say which shelf it belongs on, and
         # macOS wants the answer in the bundle rather than only in App Store Connect.
         LSApplicationCategoryType: public.app-category.social-networking
