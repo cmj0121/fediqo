@@ -29,10 +29,6 @@ struct ActionNotice: View {
     /// it would be a message nobody read.
     @State private var saying: Saying?
 
-    /// How long each of the two stands — see `Saying.lasts`, which is what reads them.
-    static let failureLasts = Duration.milliseconds(4500)
-    static let noteLasts = Duration.milliseconds(2500)
-
     /// One piece of news, and everything about how it is said.
     ///
     /// Two kinds, and they are not the same kind of thing: one is a thing that did not happen,
@@ -48,15 +44,25 @@ struct ActionNotice: View {
         case wrong(SourceFailure)
         case reachedOut(String)
 
-        /// How long it stands.
+        /// How long each of the two stands.
         ///
         /// A failure is a sentence with a hostname in it and something to do about it, so it is
         /// given time to be read twice. The reach-out is four words about something that has
         /// already happened, and it is not worth covering a corner of the timeline for longer.
+        ///
+        /// Here rather than on the view, and not only because this is where they are read.
+        /// `ActionNotice` is a `View`, and `View` is main-actor isolated — so a static on it is
+        /// too, and `lasts` is an ordinary property of an ordinary enum with no isolation at
+        /// all. Reaching from the second into the first compiles under a new enough compiler
+        /// and does not under the one CI has, which is a difference nobody should have to know
+        /// about: the numbers belong to the news, so they live on it.
+        static let failureLasts = Duration.milliseconds(4500)
+        static let noteLasts = Duration.milliseconds(2500)
+
         var lasts: Duration {
             switch self {
-            case .wrong: ActionNotice.failureLasts
-            case .reachedOut: ActionNotice.noteLasts
+            case .wrong: Self.failureLasts
+            case .reachedOut: Self.noteLasts
             }
         }
 

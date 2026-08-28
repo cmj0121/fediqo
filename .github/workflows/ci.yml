@@ -61,6 +61,17 @@ jobs:
       - name: iOS
         run: make -C Apps ios
 
+      # What xcodebuild actually said. The console keeps the last five lines, which name the
+      # files that failed and never the reason -- so without this a build that breaks on a
+      # runner and nowhere else is a failure nobody can read.
+      - name: What the build said
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: .build/xcode/*-build.log
+          retention-days: 7
+
   # What `swift test` cannot ask. It reaches Core and the models above it and stops where
   # SwiftUI begins -- nothing in a package can execute a view body -- so this launches the real
   # app and drives it, against the world `Fixture` invents and no network at all.
@@ -94,7 +105,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: uitest-result
-          path: .build/xcode/uitest.xcresult
+          path: |
+            .build/xcode/uitest.xcresult
+            .build/xcode/uitest.log
           retention-days: 7
 
   lint:

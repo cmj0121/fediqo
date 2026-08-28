@@ -72,8 +72,11 @@ final class ReadingTests: XCTestCase {
         let top = app.postRows.firstMatch.identifier
         for _ in 0..<4 { app.typeKey("j", modifierFlags: []) }
         XCTAssertNotNil(app.ringedRow(waiting: DrivenApp.patience))
-        // `g` lets the ring go, which is what being taken to the top means here.
+        // `g` lets the ring go, which is what being taken to the top means here — and it is
+        // waited for rather than assumed, or what follows is a test that left the page before
+        // the app had answered the press.
         app.typeKey("g", modifierFlags: [])
+        XCTAssertTrue(app.waitForNoRing(), "g left the ring on a post")
 
         app.rotatePage()
         XCTAssertTrue(app.postRows.firstMatch.waitForNonExistence(timeout: DrivenApp.patience))

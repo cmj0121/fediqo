@@ -103,6 +103,20 @@ extension XCUIApplication {
         return nil
     }
 
+    /// Back once no row is ringed, or false where one still is when the waiting is over.
+    ///
+    /// The other half of `ringedRow(waiting:)`, and needed for the same reason: `g` lets the
+    /// ring go and the app answers a frame later, so a test that walks away the instant after
+    /// pressing it walks away from a screen that has not answered yet — and comes back to find
+    /// the ring it thought it had dropped.
+    func waitForNoRing(_ waiting: TimeInterval = DrivenApp.patience) -> Bool {
+        let deadline = Date().addingTimeInterval(waiting)
+        while Date() < deadline {
+            if ringedRow == nil { return true }
+        }
+        return false
+    }
+
     /// The page `steps` along the rail, asked for the way a reader asks: ⌃Tab, which rotates
     /// the four and wraps. Written here because every test that leaves a page and comes back
     /// does it, and doing it by hand each time is how the count comes to be wrong once.

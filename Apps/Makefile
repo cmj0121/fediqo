@@ -32,15 +32,24 @@ run: mac			# build and launch the macOS app
 # `| tail` is here because xcodebuild says a great deal and only the end of it is news. A
 # pipeline reports the exit status of its last command, though, so without pipefail the tail
 # would report success for every build that ever failed -- which is what CI was doing.
+#
+# The whole of what it said is kept beside the build. The last five lines name the files that
+# failed and never the reason, so a build that broke on a runner and nowhere else left a log
+# with no error in it at all -- which is a failure nobody can read, and one this project has
+# already spent an afternoon on.
 mac: xcodeproj		# build the macOS app
+	@mkdir -p $(DERIVED)
 	@set -o pipefail; xcodebuild -project $(XCODEPROJ) -scheme $(MACOS_SCHEME) \
 		-configuration Debug -derivedDataPath $(DERIVED) \
-		-destination 'platform=macOS' $(STAMP) build | tail -5
+		-destination 'platform=macOS' $(STAMP) build 2>&1 \
+		| tee $(DERIVED)/mac-build.log | tail -5
 
 ios: xcodeproj		# build the iOS app for the simulator
+	@mkdir -p $(DERIVED)
 	@set -o pipefail; xcodebuild -project $(XCODEPROJ) -scheme $(IOS_SCHEME) \
 		-configuration Debug -derivedDataPath $(DERIVED) \
-		-destination '$(IOS_DESTINATION)' $(STAMP) build | tail -5
+		-destination '$(IOS_DESTINATION)' $(STAMP) build 2>&1 \
+		| tee $(DERIVED)/ios-build.log | tail -5
 
 # The tests that need the app running. `swift test` reaches Core and the models above it and
 # stops where SwiftUI begins -- nothing in a package can execute a view body -- so what a reader
@@ -56,7 +65,8 @@ uitest: xcodeproj	# run the tests that drive the macOS app
 	@set -o pipefail; xcodebuild -project $(XCODEPROJ) -scheme $(MACOS_SCHEME) \
 		-configuration Debug -derivedDataPath $(DERIVED) \
 		-destination 'platform=macOS' -enableCodeCoverage YES \
-		-resultBundlePath $(UITEST_RESULT) $(STAMP) test | tail -5
+		-resultBundlePath $(UITEST_RESULT) $(STAMP) test 2>&1 \
+		| tee $(DERIVED)/uitest.log | tail -5
 	@$(ROOT)/scripts/ui_coverage.sh $(DERIVED)
 
 # The release, and the only target here that needs anything from outside the checkout.
