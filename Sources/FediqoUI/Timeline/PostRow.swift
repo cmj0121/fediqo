@@ -11,6 +11,10 @@ import FediqoCore
 /// what it was written with                        (right, and often empty)
 /// ```
 ///
+/// The band that says whose post this is stands a little further off than the rest of them —
+/// `Space.step` between every pair of bands, and one `Space.tight` more under the metadata.
+/// Everything above that line is *about* the post; everything below it is the post.
+///
 /// **The two columns are only the middle band**, and only where there is room for them: the
 /// words on the left, the attachments on the right, in a column that stays there whether or
 /// not anything is in it. That empty column is the point — it is what keeps every row's text
@@ -129,11 +133,13 @@ struct PostRow: View {
                 // of lines fits in that height at the reader's own text size, so nothing is
                 // ever cut mid-line — the ellipsis is the row's, not the frame's.
                 .frame(height: AttachmentDeck.height, alignment: .topLeading)
+                .padding(.top, Space.tight)
             } else {
                 VStack(alignment: .leading, spacing: Space.step) {
                     words
                     if !post.attachments.isEmpty { deck }
                 }
+                .padding(.top, Space.tight)
             }
             InteractionBar(post: post, open: open)
             footer
