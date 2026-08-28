@@ -104,7 +104,7 @@ enum Fixture {
             post("the-tags", host: hosts[2], minutesAgo: 27, now: now,
                  name: "Yusuf Adeyemi", handle: "yusuf",
                  text: "Reading rooms, mostly. The one at the top of the hill has the light "
-                     + "and none of the chairs.",
+                     + "and none of the chairs. https://cedar.example/rooms",
                  attachments: [image("room", seed: 3)],
                  counts: Counts(replies: 2, reblogs: 5, favourites: 41),
                  tags: ["libraries", "slowweb"]),

@@ -81,11 +81,39 @@ struct EmojiText: View {
         }
     }
 
+    /// Words, with any address in them drawn as one.
+    ///
+    /// An `AttributedString` and not a `Link`: what is being built is one `Text`, and a link
+    /// inside a line has to wrap with the line rather than sit in it as a view of its own.
+    /// SwiftUI draws a `.link` run in the accent colour and hands a press of it to `openURL`,
+    /// which is the one way out of this app and already the reader's browser.
+    private static func written(_ words: String) -> Text {
+        let runs = TextLinks.runs(in: words)
+        guard runs.contains(where: { if case .link = $0 { true } else { false } }) else {
+            return Text(verbatim: words)
+        }
+        var attributed = AttributedString()
+        for run in runs {
+            switch run {
+            case .text(let plain):
+                attributed += AttributedString(plain)
+            case .link(let label, let url):
+                var piece = AttributedString(label)
+                piece.link = url
+                // Underlined as well as tinted, because a link that is only a colour is not a
+                // link to a reader who cannot tell the two colours apart.
+                piece.underlineStyle = .single
+                attributed += piece
+            }
+        }
+        return Text(attributed)
+    }
+
     private func line(at instant: TimeInterval) -> Text {
         CustomEmoji.runs(in: text, from: emojis).reduce(Text(verbatim: "")) { line, run in
             switch run {
             case .text(let words):
-                return line + Text(verbatim: words)
+                return line + Self.written(words)
             case .emoji(let emoji):
                 // Until the picture is here the shortcode stands in for it, which is what the
                 // reader would have seen anyway and is never a blank.

@@ -152,11 +152,21 @@ struct PostRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .fediqoCard()
         .fediqoFocusRing(selected)
-        // A tap on the row opens the post. Not a `Button`: the words are selectable, the deck
-        // turns itself over and the interaction bar has buttons of its own, and wrapping the
-        // lot in one would take every one of those clicks away from them.
-        .contentShape(Rectangle())
-        .onTapGesture { open?() }
+        // A tap on the row opens the post — from **behind** the row rather than over it.
+        //
+        // Not a `Button`, for the reason it never was: the words are selectable, the deck turns
+        // itself over and the interaction bar has buttons of its own, and wrapping the lot in
+        // one would take every one of those presses away from them. And not a gesture over the
+        // top of it either, which is what it used to be: an address in the words is now a link,
+        // and a press of a link that a gesture above it has already swallowed is a link that
+        // does nothing. Behind, so anything in the row that wants a press gets it first and
+        // everything else — the padding, the name, the empty half of a short row — still opens
+        // the post.
+        .background {
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture { open?() }
+        }
         .contextMenu {
             if open != nil { Button(t("post.open")) { open?() } }
             if let url = post.webURL {
