@@ -17,9 +17,9 @@
 -- server contradicts itself, the first spelling wins and the second is ignored, which is what
 -- the primary key does.
 --
--- `static_url` is the still of an animated one. It is kept and not yet drawn: a reader who has
--- asked for less movement has asked for it here too, and the answer has to be in the store
--- before anything can honour it.
+-- `static_url` is the still of an animated one, and it is what a reader who has asked for less
+-- movement is given. Everybody else is given the moving one, frame by frame. Both are kept
+-- because both are drawn, and which of the two a reader sees is never written down here.
 --
 -- Nothing is backfilled. A post stored before this migration has no rows here and draws its
 -- shortcodes as the text they are, which is exactly what it did yesterday.

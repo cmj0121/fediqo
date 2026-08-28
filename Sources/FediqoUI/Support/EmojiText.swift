@@ -1,4 +1,6 @@
 import SwiftUI
+import ImageIO
+import UniformTypeIdentifiers
 import FediqoCore
 #if os(macOS)
 import AppKit
@@ -6,17 +8,24 @@ import AppKit
 import UIKit
 #endif
 
-/// A line of a post, with the pictures in it drawn as pictures.
+/// A line of a post, with the pictures in it drawn as pictures — moving, where they move.
 ///
 /// One `Text` and not a row of views: a post is prose, and prose wraps, is selected, and is cut
 /// off with an ellipsis. Laying it out as a stack of words and images would take all three away
 /// — so the pictures are interpolated into the `Text` itself, which is the one way SwiftUI
 /// offers to put an image inside a line and have the line still behave like a line.
 ///
-/// The price of that is the picture has to be sized before it goes in: nothing inside a `Text`
-/// can be resized afterwards. So the cache is asked for a picture at a height, and the height
-/// is the reader's own text size — which is why the scale is read here rather than left to
-/// `fediqoFont`.
+/// Two things follow from that, and they are the whole of this file.
+///
+/// **Nothing inside a `Text` can be resized**, so a picture has to be drawn at the size it will
+/// be shown. That size is the font's own — the ink between its ascender and its descender at
+/// the reader's text scale — so a custom emoji stands exactly as tall as the letters beside it
+/// rather than at some fraction of the point size that happens to look close.
+///
+/// **Nothing inside a `Text` animates either**, so an animated emoji is animated the only way
+/// left: the frames are decoded once, and the line is rebuilt with the next one on a clock.
+/// That is why the clock only runs where there is something moving in this particular line, and
+/// why a reader who has asked for less movement gets the first frame and no clock at all.
 struct EmojiText: View {
     let text: String
     let emojis: [CustomEmoji]
@@ -24,6 +33,8 @@ struct EmojiText: View {
     var weight: Font.Weight = .regular
 
     @Environment(\.fediqoTextScale) private var scale
+    @Environment(\.displayScale) private var displayScale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Not `@State`: the cache is one object for the whole app, and observation follows from
     /// reading it in `body` rather than from owning it.
     private let cache = EmojiCache.shared
@@ -35,17 +46,42 @@ struct EmojiText: View {
         self.weight = weight
     }
 
-    /// The height a picture is drawn at: the line's own, so a custom emoji sits at the weight
-    /// of the letters beside it rather than looming over them.
-    private var side: CGFloat { (size * scale).rounded() }
+    /// How tall a picture in this line is, and how far below the baseline it starts: the font's
+    /// own ascender and descender at the size this line is set in. A picture as tall as the
+    /// point size and sitting on the baseline is the usual approximation, and it is visibly
+    /// wrong — too tall for the letters and floating above the line's own bottom.
+    private var metrics: EmojiCache.Metrics { EmojiCache.metrics(size: size * scale) }
 
-    var body: some View {
-        composed
-            .font(.system(size: size * scale, weight: weight))
-            .task(id: emojis) { await cache.fetch(emojis, side: side) }
+    /// A clock only where one is needed. A page of ordinary posts never starts one, and a line
+    /// whose emoji are all stills does not either.
+    private var moving: Bool {
+        guard !reduceMotion else { return false }
+        return emojis.contains { cache.moves($0, metrics: metrics, scale: displayScale) }
     }
 
-    private var composed: Text {
+    var body: some View {
+        Group {
+            if moving {
+                // 20 a second: enough for the frame rates a custom emoji is drawn at, and far
+                // enough below the display's own that a screen of them is not the app's
+                // largest expense.
+                TimelineView(.periodic(from: .now, by: 0.05)) { tick in
+                    line(at: tick.date.timeIntervalSinceReferenceDate)
+                }
+            } else {
+                line(at: 0)
+            }
+        }
+        .font(.system(size: size * scale, weight: weight))
+        // What a screen reader is given is what the author typed, shortcodes and all: it cannot
+        // see a picture, and `:blobcat:` is at least the name of one.
+        .accessibilityLabel(Text(verbatim: text))
+        .task(id: EmojiCache.Request(emojis: emojis, metrics: metrics, scale: displayScale)) {
+            await cache.fetch(emojis, metrics: metrics, scale: displayScale, still: reduceMotion)
+        }
+    }
+
+    private func line(at instant: TimeInterval) -> Text {
         CustomEmoji.runs(in: text, from: emojis).reduce(Text(verbatim: "")) { line, run in
             switch run {
             case .text(let words):
@@ -53,82 +89,183 @@ struct EmojiText: View {
             case .emoji(let emoji):
                 // Until the picture is here the shortcode stands in for it, which is what the
                 // reader would have seen anyway and is never a blank.
-                guard let image = cache.image(emoji, side: side) else {
+                guard let image = cache.image(emoji, metrics: metrics, scale: displayScale, at: instant) else {
                     return line + Text(verbatim: ":\(emoji.shortcode):")
                 }
-                return line + Text("\(image)").baselineOffset(-size * scale * 0.1)
+                return line + Text(image).baselineOffset(metrics.baseline)
             }
         }
     }
 }
 
-/// The pictures, fetched once each and kept.
+/// The pictures, fetched once each, decoded to the size they will be drawn at, and kept.
 ///
-/// Keyed by address **and height**, because a picture that goes into a `Text` cannot be resized
-/// once it is there: a display name and the words under it ask for two different sizes of the
-/// same emoji, and each of them has to be drawn at the size it will be shown.
+/// Keyed by address, size **and** screen, because none of the three can be changed after the
+/// fact: a picture that goes into a `Text` is already the size it will be, and a picture
+/// decoded for one screen's pixels is soft on another's.
 ///
-/// Shared for the reason a cache is: a hundred rows carrying `:blobcat:` are one request, and
-/// what is already in hand is drawn on the first pass rather than after a flash of the
-/// shortcode.
+/// Shared for the reason a cache is: a hundred rows carrying `:blobcat:` are one request and
+/// one decode, and what is already in hand is drawn on the first pass rather than after a
+/// flash of the shortcode.
 @MainActor
 @Observable
 final class EmojiCache {
     static let shared = EmojiCache()
 
-    private struct Key: Hashable {
-        let url: URL
+    /// The two numbers a line of text gives a picture standing in it: how tall it is, and how
+    /// far under the baseline it sits. Both come from the font rather than from the point size,
+    /// which is not the same thing — a 13-point font's letters are not 13 points of ink.
+    struct Metrics: Hashable {
         let side: CGFloat
+        let baseline: CGFloat
     }
 
-    private var images: [Key: Image] = [:]
+    /// What `task(id:)` watches: a line asks again when its emoji, its size or its screen
+    /// change, and never in between.
+    struct Request: Hashable {
+        let emojis: [CustomEmoji]
+        let metrics: Metrics
+        let scale: CGFloat
+    }
+
+    /// One emoji, decoded: the frames in order, and how long each of them stands. A still is
+    /// one frame and no duration, and is drawn without a clock ever starting.
+    ///
+    /// Not private, and neither is `decode`: how many frames a file has and how long each of
+    /// them stands is the part of this worth testing, and it is testable without a screen.
+    struct Frames {
+        let images: [Image]
+        /// The instant each frame gives way to the next, measured from the start of the loop.
+        let ends: [TimeInterval]
+        var moves: Bool { images.count > 1 }
+        var total: TimeInterval { ends.last ?? 0 }
+    }
+
+    private struct Key: Hashable {
+        let url: URL
+        let metrics: Metrics
+        let scale: CGFloat
+    }
+
+    private var frames: [Key: Frames] = [:]
     /// What is already on its way, so a screenful of the same emoji is one request.
     private var inFlight: Set<Key> = []
 
-    /// The picture at this height, or nothing where it is not here yet.
-    func image(_ emoji: CustomEmoji, side: CGFloat) -> Image? {
-        images[Key(url: Self.address(of: emoji), side: side)]
-    }
-
-    /// Fetches whatever of these is not already in hand. Every one of them is drawn as a still:
-    /// a `Text` cannot animate what is inside it, so the moving copy would be a first frame
-    /// fetched at the size of a film — and a reader who asked for less movement is answered by
-    /// the same picture rather than by a second code path.
-    func fetch(_ emojis: [CustomEmoji], side: CGFloat) async {
-        for emoji in emojis {
-            let key = Key(url: Self.address(of: emoji), side: side)
-            guard images[key] == nil, inFlight.insert(key).inserted else { continue }
-            defer { inFlight.remove(key) }
-            guard let data = try? await Self.load(key.url), let image = Self.image(from: data, side: side) else { continue }
-            images[key] = image
-        }
-    }
-
-    private static func address(of emoji: CustomEmoji) -> URL { emoji.staticURL ?? emoji.url }
-
-    private static func load(_ url: URL) async throws -> Data {
-        try await URLSession.shared.data(from: url).0
-    }
-
-    /// Scaled here rather than by the view, for the reason the key carries the height: the
-    /// image goes into a line of text at whatever size it arrives as.
-    private static func image(from data: Data, side: CGFloat) -> Image? {
+    static func metrics(size: CGFloat) -> Metrics {
         #if os(macOS)
-        guard let source = NSImage(data: data), source.size.height > 0 else { return nil }
-        let width = side * (source.size.width / source.size.height)
-        let scaled = NSImage(size: CGSize(width: width, height: side))
-        scaled.lockFocus()
-        source.draw(in: NSRect(x: 0, y: 0, width: width, height: side))
-        scaled.unlockFocus()
-        return Image(nsImage: scaled)
+        let font = NSFont.systemFont(ofSize: size)
         #else
-        guard let source = UIImage(data: data), source.size.height > 0 else { return nil }
-        let width = side * (source.size.width / source.size.height)
-        let size = CGSize(width: width, height: side)
-        let scaled = UIGraphicsImageRenderer(size: size).image { _ in
-            source.draw(in: CGRect(origin: .zero, size: size))
-        }
-        return Image(uiImage: scaled)
+        let font = UIFont.systemFont(ofSize: size)
         #endif
+        // The ink of a line: from the top of an ascender to the bottom of a descender. Rounded
+        // to whole points so two lines of the same size share one decode.
+        let side = (font.ascender - font.descender).rounded()
+        return Metrics(side: side, baseline: font.descender.rounded())
+    }
+
+    /// Whether this one moves — asked by the line, so that a clock only runs where it must.
+    func moves(_ emoji: CustomEmoji, metrics: Metrics, scale: CGFloat) -> Bool {
+        frames[Key(url: emoji.url, metrics: metrics, scale: scale)]?.moves ?? false
+    }
+
+    /// The frame to draw at this instant. `instant` is a wall clock rather than a position in
+    /// the loop, so every emoji on the screen runs off the same one and none of them needs to
+    /// remember where it had got to.
+    func image(_ emoji: CustomEmoji, metrics: Metrics, scale: CGFloat, at instant: TimeInterval) -> Image? {
+        let key = Key(url: emoji.url, metrics: metrics, scale: scale)
+        guard let held = frames[key] else {
+            // Reduce-motion asked for the still, which is a different address and a different
+            // row in the cache.
+            guard let still = emoji.staticURL else { return nil }
+            return frames[Key(url: still, metrics: metrics, scale: scale)]?.images.first
+        }
+        guard held.moves, held.total > 0 else { return held.images.first }
+        let position = instant.truncatingRemainder(dividingBy: held.total)
+        let index = held.ends.firstIndex { position < $0 } ?? 0
+        return held.images[index]
+    }
+
+    /// Fetches and decodes whatever of these is not already in hand.
+    ///
+    /// `still` is the reader's answer about movement: it asks for the copy the server says does
+    /// not move, and where a server offered none the moving one is decoded and its first frame
+    /// drawn — which is the same picture, standing still.
+    func fetch(_ emojis: [CustomEmoji], metrics: Metrics, scale: CGFloat, still: Bool) async {
+        for emoji in emojis {
+            let address = still ? (emoji.staticURL ?? emoji.url) : emoji.url
+            let key = Key(url: address, metrics: metrics, scale: scale)
+            guard frames[key] == nil, inFlight.insert(key).inserted else { continue }
+            defer { inFlight.remove(key) }
+            guard let data = try? await URLSession.shared.data(from: address).0 else { continue }
+            let decoded = await Task.detached(priority: .utility) {
+                Self.decode(data, metrics: metrics, scale: scale, firstFrameOnly: still)
+            }.value
+            guard let decoded else { continue }
+            frames[key] = decoded
+        }
+    }
+
+    // MARK: - Decoding
+
+    /// Every frame there is, drawn at the size the line will show it at.
+    ///
+    /// `ImageIO` and not `NSImage`/`UIImage`: it is the one API on both platforms that will say
+    /// how many frames a file has and how long each of them stands, and it reads GIF, APNG and
+    /// WebP — which between them is what a server's custom emoji are.
+    nonisolated static func decode(_ data: Data, metrics: Metrics, scale: CGFloat,
+                                           firstFrameOnly: Bool) -> Frames? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let count = firstFrameOnly ? min(1, CGImageSourceGetCount(source)) : CGImageSourceGetCount(source)
+        guard count > 0 else { return nil }
+
+        var images: [Image] = []
+        var ends: [TimeInterval] = []
+        var elapsed: TimeInterval = 0
+        for index in 0..<count {
+            guard let frame = CGImageSourceCreateImageAtIndex(source, index, nil),
+                  let drawn = scaled(frame, metrics: metrics, scale: scale) else { continue }
+            images.append(Image(decorative: drawn, scale: scale))
+            // A frame with no duration, or one so short nothing could draw it, is given the
+            // tenth of a second every renderer gives it.
+            let delay = duration(of: source, at: index)
+            elapsed += delay < 0.011 ? 0.1 : delay
+            ends.append(elapsed)
+        }
+        return images.isEmpty ? nil : Frames(images: images, ends: ends)
+    }
+
+    /// The frame, drawn into a rectangle of the height the line has and whatever width keeps it
+    /// the shape it was. Done here rather than by the view for the reason the key carries the
+    /// size: what goes into a `Text` is already what will be shown.
+    private nonisolated static func scaled(_ frame: CGImage, metrics: Metrics, scale: CGFloat) -> CGImage? {
+        let height = metrics.side
+        let ratio = frame.height > 0 ? CGFloat(frame.width) / CGFloat(frame.height) : 1
+        let pixels = CGSize(width: max(1, (height * ratio * scale).rounded()), height: max(1, (height * scale).rounded()))
+        guard let context = CGContext(data: nil, width: Int(pixels.width), height: Int(pixels.height),
+                                      bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        context.interpolationQuality = .high
+        context.draw(frame, in: CGRect(origin: .zero, size: pixels))
+        return context.makeImage()
+    }
+
+    /// How long one frame stands, whichever of the three formats it came out of. The unclamped
+    /// time is asked for first: it is what the file actually says, where the other has already
+    /// been rounded up to what a browser was once willing to draw.
+    private nonisolated static func duration(of source: CGImageSource, at index: Int) -> TimeInterval {
+        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any] else {
+            return 0
+        }
+        let dictionaries = [kCGImagePropertyGIFDictionary, kCGImagePropertyPNGDictionary, kCGImagePropertyWebPDictionary]
+        let unclamped = [kCGImagePropertyGIFUnclampedDelayTime, kCGImagePropertyAPNGUnclampedDelayTime,
+                         kCGImagePropertyWebPUnclampedDelayTime]
+        let clamped = [kCGImagePropertyGIFDelayTime, kCGImagePropertyAPNGDelayTime, kCGImagePropertyWebPDelayTime]
+        for (which, dictionary) in dictionaries.enumerated() {
+            guard let frame = properties[dictionary] as? [CFString: Any] else { continue }
+            if let time = frame[unclamped[which]] as? TimeInterval, time > 0 { return time }
+            if let time = frame[clamped[which]] as? TimeInterval, time > 0 { return time }
+        }
+        return 0
     }
 }

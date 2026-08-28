@@ -673,10 +673,10 @@ so `:blobcat:` in a display name is `:blobcat:` in the words under it, and two r
 fact written twice. Where a server contradicts itself the first spelling wins, which is what the primary
 key `(merge_key, shortcode)` does.
 
-`static_url` is the still of a moving one. It is kept and it is what gets drawn: a picture inside a line of
-text cannot animate, so the moving copy would be a first frame fetched at the size of a film — and a reader
-who has asked for less movement is answered by the same picture rather than by a second path through the
-code.
+`static_url` is the still of a moving one, and it is what a reader who has asked for less movement is
+given. Everybody else is given the moving one. A `Text` cannot animate what is inside it, so the frames are
+decoded once, at the size of the line's own ink, and the line is rebuilt with the next of them on a clock —
+one that runs only where something in that particular line actually moves.
 
 Nothing is backfilled. A post stored before 008 has no rows here and draws its shortcodes as the text they
 are, which is exactly what it did the day before.
