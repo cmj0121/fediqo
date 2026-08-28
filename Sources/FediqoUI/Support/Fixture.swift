@@ -108,6 +108,14 @@ enum Fixture {
                  attachments: [image("room", seed: 3)],
                  counts: Counts(replies: 2, reblogs: 5, favourites: 41),
                  tags: ["libraries", "slowweb"]),
+            // Written partly in pictures, in the words and in the name above them: a
+            // shortcode is what the server sends, and a picture is what a reader should see.
+            post("the-emoji", host: hosts[2], minutesAgo: 5, now: now,
+                 name: "Tove :spark: Rasmussen", handle: "tove",
+                 text: "Custom emoji are :spark: a server's own, and a client that cannot draw "
+                     + "them leaves you reading the shortcode :cog: instead.",
+                 counts: Counts(replies: 2, reblogs: 6, favourites: 23),
+                 emojis: [emoji("spark", seed: 1), emoji("cog", seed: 4)]),
             post("the-plain-one", host: hosts[2], minutesAgo: 74, now: now,
                  name: "Bea Lindqvist", handle: "bea",
                  text: "No picture, no warning, no numbers anybody has told us. A post can be "
@@ -144,8 +152,8 @@ enum Fixture {
         _ uri: String, host: String, origin: String? = nil, minutesAgo: Double, now: Date,
         name: String, handle: String, text: String,
         attachments: [Attachment] = [], sensitive: Bool? = nil, spoiler: String? = nil,
-        counts: Counts = Counts(), tags: [String] = [], boostedBy: String? = nil,
-        inReplyToURI: String? = nil
+        counts: Counts = Counts(), tags: [String] = [], emojis: [CustomEmoji] = [],
+        boostedBy: String? = nil, inReplyToURI: String? = nil
     ) -> Post {
         Post(
             uri: address(uri, on: host, by: handle),
@@ -166,6 +174,7 @@ enum Fixture {
             webURL: URL(string: "https://\(host)/@\(handle)/\(uri)"),
             inReplyToURI: inReplyToURI,
             tags: tags,
+            emojis: emojis,
             boostedBy: boostedBy,
             boostedById: boostedBy.map { "https://\(host)/users/\($0.lowercased())" },
             sources: [host]
@@ -175,6 +184,20 @@ enum Fixture {
     /// Where one post lives, spelled the way a Mastodon server spells it.
     private static func address(_ uri: String, on host: String, by handle: String) -> String {
         "https://\(host)/users/\(handle)/statuses/\(uri)"
+    }
+
+    /// A custom emoji that moves, drawn here for the same reason the photographs are: an
+    /// animated GIF in the repository is a binary no test can check, and the point of the
+    /// fixture is that everything above it does its actual work — the fetch, the frame-by-frame
+    /// decode, and the line rebuilt on a clock.
+    private static func emoji(_ shortcode: String, seed: Int) -> CustomEmoji {
+        guard let moving = FixtureImages.emoji(shortcode, seed: seed, frames: 6),
+              let still = FixtureImages.emoji("\(shortcode)-still", seed: seed, frames: 1) else {
+            // Unreachable in practice; a shortcode with nowhere to point is drawn as its own
+            // text, which is exactly what should happen.
+            return CustomEmoji(shortcode: shortcode, url: URL(string: "file:///dev/null")!)
+        }
+        return CustomEmoji(shortcode: shortcode, url: moving, staticURL: still)
     }
 
     /// A picture that is drawn rather than downloaded, and drawn the same way every run.
@@ -197,6 +220,47 @@ enum FixtureImages {
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         return base
     }()
+
+    /// A custom emoji, drawn as a disc that turns through the palette. `frames` of 1 is the
+    /// still — the copy a reader who has asked for less movement is given — and anything more
+    /// is a GIF with a fortieth of a second on each frame, which is what a real one looks like.
+    static func emoji(_ name: String, seed: Int, frames: Int) -> URL? {
+        let file = directory.appendingPathComponent("emoji-\(name).gif")
+        if FileManager.default.fileExists(atPath: file.path) { return file }
+        guard let destination = CGImageDestinationCreateWithURL(file as CFURL, UTType.gif.identifier as CFString,
+                                                               frames, nil) else { return nil }
+        CGImageDestinationSetProperties(destination, [
+            kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0],
+        ] as CFDictionary)
+        for frame in 0..<frames {
+            guard let image = disc(seed: seed + frame, turn: Double(frame) / Double(frames)) else { continue }
+            CGImageDestinationAddImage(destination, image, [
+                kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFUnclampedDelayTime: 0.1],
+            ] as CFDictionary)
+        }
+        return CGImageDestinationFinalize(destination) ? file : nil
+    }
+
+    /// One frame of one: a disc on nothing, at a size and a colour that say which frame it is.
+    private static func disc(seed: Int, turn: Double) -> CGImage? {
+        let side = 64
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8,
+                                      bytesPerRow: 0, space: space,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        let hues: [(CGFloat, CGFloat, CGFloat)] = [
+            (0.96, 0.72, 0.24), (0.36, 0.74, 0.62), (0.86, 0.42, 0.42),
+            (0.45, 0.58, 0.92), (0.72, 0.52, 0.88), (0.52, 0.78, 0.36),
+        ]
+        let (red, green, blue) = hues[abs(seed) % hues.count]
+        context.setFillColor(red: red, green: green, blue: blue, alpha: 1)
+        // The disc breathes between two thirds and the whole of the square, so the movement is
+        // unmistakable at the size a line of text draws it.
+        let inset = CGFloat(side) * 0.16 * CGFloat(abs(sin(turn * .pi)))
+        context.fillEllipse(in: CGRect(x: inset, y: inset,
+                                       width: CGFloat(side) - inset * 2, height: CGFloat(side) - inset * 2))
+        return context.makeImage()
+    }
 
     /// Two flat bands and a disc, from a palette picked by `seed`. It is not art and is not
     /// trying to be; it is a picture-shaped thing of a fixed size, so a row with something
