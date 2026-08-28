@@ -134,6 +134,38 @@ struct ActionNoticeTests {
         #expect(wrong.lasts > ActionNotice.Saying.reachedOut("one.example").lasts)
     }
 
+    /// Orange and not red: nothing was taken away — the mark went back and the post is as it
+    /// was. Red would be claiming something this app did not do.
+    @Test("A failure wears the colour a server that is unwell wears")
+    func aFailureIsOrange() {
+        #expect(ActionNotice.Saying.wrong(.badHost("nope")).tint == .orange)
+        #expect(ActionNotice.Saying.reachedOut("one.example").tint == .secondary)
+    }
+
+    /// Two kinds of news, two marks. A note about a request that went out must not be read as
+    /// something having gone wrong.
+    @Test("The two are not drawn with the same glyph")
+    func theTwoAreToldApart() {
+        let wrong = ActionNotice.Saying.wrong(.badHost("nope"))
+        let note = ActionNotice.Saying.reachedOut("one.example")
+        #expect(wrong.symbol != note.symbol)
+        #expect(wrong.tint != note.tint)
+    }
+
+    /// The one moment this app tells somebody else what is being read, so the sentence has to
+    /// name who was told — a note that did not would be no better than silence.
+    ///
+    /// Asked of the catalogue rather than of `words`, and for the reason `ShortcutListTests`
+    /// asks the same way: SwiftPM copies `.xcstrings` across untouched and only the app build
+    /// compiles it, so under `swift test` every key resolves to itself and a sentence read
+    /// here would prove nothing. The file is the thing to ask.
+    @Test("The reach-out names the server that was asked, in both languages",
+          arguments: ["en", "zh-TW"])
+    func theReachOutNamesTheServer(language: String) throws {
+        let value = try #require(stringCatalogue()["post.reachedOut"]?[language])
+        #expect(value.contains("%@"), "post.reachedOut says nothing about who in \(language)")
+    }
+
     /// Whatever went wrong, it is said in the reader's own language — which is the whole
     /// reason `SourceFailure` carries a case rather than a sentence.
     @Test("Every failure has words of its own", arguments: [
@@ -141,6 +173,8 @@ struct ActionNoticeTests {
         .unsupported(.mastodon), .badHost("nope"), .transport("no route"),
     ])
     func everyFailureHasWords(failure: SourceFailure) {
-        #expect(!message(for: failure).isEmpty)
+        let saying = ActionNotice.Saying.wrong(failure)
+        #expect(saying.words == message(for: failure))
+        #expect(!saying.words.isEmpty)
     }
 }

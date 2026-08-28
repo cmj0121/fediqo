@@ -29,24 +29,60 @@ struct ActionNotice: View {
     /// it would be a message nobody read.
     @State private var saying: Saying?
 
-    /// How long each of the two stands.
-    ///
-    /// A failure is a sentence with a hostname in it and something to do about it, so it is
-    /// given time to be read twice. The reach-out is four words about something that has
-    /// already happened, and it is not worth covering a corner of the timeline for longer.
-    private static let failureLasts = Duration.milliseconds(4500)
-    private static let noteLasts = Duration.milliseconds(2500)
+    /// How long each of the two stands — see `Saying.lasts`, which is what reads them.
+    static let failureLasts = Duration.milliseconds(4500)
+    static let noteLasts = Duration.milliseconds(2500)
 
-    /// One piece of news. Two kinds, and they are not the same kind of thing: one is a thing
-    /// that did not happen, the other a thing that did.
+    /// One piece of news, and everything about how it is said.
+    ///
+    /// Two kinds, and they are not the same kind of thing: one is a thing that did not happen,
+    /// the other a thing that did. Which is why each of the four answers below is a `switch`
+    /// over the two rather than a flag the view reads — how long it stands, what colour it
+    /// wears, which glyph it is and what it says are four decisions, and every one of them is
+    /// decided by which kind of news this is.
+    ///
+    /// They live on the news rather than in the view because none of them is a drawing: they
+    /// are what the app has decided to tell the reader, and a decision that can only be
+    /// checked by rendering a screen is a decision nothing checks.
     enum Saying: Equatable {
         case wrong(SourceFailure)
         case reachedOut(String)
 
+        /// How long it stands.
+        ///
+        /// A failure is a sentence with a hostname in it and something to do about it, so it is
+        /// given time to be read twice. The reach-out is four words about something that has
+        /// already happened, and it is not worth covering a corner of the timeline for longer.
         var lasts: Duration {
             switch self {
             case .wrong: ActionNotice.failureLasts
             case .reachedOut: ActionNotice.noteLasts
+            }
+        }
+
+        /// Orange rather than red. Red is for what takes something away, and nothing here has:
+        /// the mark went back and the post is as it was. What this is, is a server that would
+        /// not do as it was asked — which is the colour a server that is unwell already wears.
+        var tint: Color {
+            switch self {
+            case .wrong: .orange
+            case .reachedOut: .secondary
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .wrong: "exclamationmark.triangle"
+            case .reachedOut: "antenna.radiowaves.left.and.right"
+            }
+        }
+
+        /// The words, in the reader's own language — which is the whole reason `SourceFailure`
+        /// carries a case rather than a sentence.
+        @MainActor var words: String {
+            switch self {
+            case .wrong(let failure): message(for: failure)
+            case .reachedOut(let host): t("post.reachedOut", host)
             }
         }
     }
@@ -101,9 +137,9 @@ struct ActionNotice: View {
     private var pill: some View {
         if let saying {
             HStack(spacing: Space.step) {
-                Image(systemName: symbol(of: saying)).fediqoSymbol(Glyph.inline, weight: .medium)
-                    .foregroundStyle(tint(of: saying))
-                Text(words(of: saying)).fediqoFont(TypeScale.small, weight: .medium)
+                Image(systemName: saying.symbol).fediqoSymbol(Glyph.inline, weight: .medium)
+                    .foregroundStyle(saying.tint)
+                Text(saying.words).fediqoFont(TypeScale.small, weight: .medium)
             }
             .fediqoPill()
             // A pill usually speaks quietly beside something louder. This one is the whole of
@@ -121,30 +157,6 @@ struct ActionNotice: View {
             // all. A reader who cannot see the pill has to be told the same thing.
             .accessibilityElement(children: .combine)
             .transition(.opacity)
-        }
-    }
-
-    /// Orange rather than red. Red is for what takes something away, and nothing here has:
-    /// the mark went back and the post is as it was. What this is, is a server that would not
-    /// do as it was asked — which is the colour a server that is unwell already wears.
-    private func tint(of saying: Saying) -> Color {
-        switch saying {
-        case .wrong: .orange
-        case .reachedOut: .secondary
-        }
-    }
-
-    private func symbol(of saying: Saying) -> String {
-        switch saying {
-        case .wrong: "exclamationmark.triangle"
-        case .reachedOut: "antenna.radiowaves.left.and.right"
-        }
-    }
-
-    private func words(of saying: Saying) -> String {
-        switch saying {
-        case .wrong(let failure): message(for: failure)
-        case .reachedOut(let host): t("post.reachedOut", host)
         }
     }
 }

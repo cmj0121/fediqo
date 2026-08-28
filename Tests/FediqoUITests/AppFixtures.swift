@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import Testing
 import FediqoCore
 @testable import FediqoUI
 
@@ -175,4 +176,26 @@ extension Timeline {
 
 extension TimelineQuery {
     static let publicPosts = TimelineQuery(source: .public)
+}
+
+/// The string catalogue as `key → language → text`, read from the source of truth itself.
+///
+/// SwiftPM copies `.xcstrings` across untouched and only the app build compiles it into
+/// `.lproj` folders — so under `swift test` every key resolves to itself, and a test that read
+/// a sentence out of the bundle would pass whatever the catalogue said. The file is the thing
+/// to ask, and every suite that asks about words asks it here.
+func stringCatalogue() throws -> [String: [String: String]] {
+    let path = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()  // FediqoUITests
+        .deletingLastPathComponent()  // Tests
+        .deletingLastPathComponent()  // the package
+        .appending(path: "Sources/FediqoUI/Resources/Localizable.xcstrings")
+    let json = try JSONSerialization.jsonObject(with: Data(contentsOf: path))
+    let strings = try #require((json as? [String: Any])?["strings"] as? [String: Any])
+    return strings.compactMapValues { entry in
+        guard let localizations = (entry as? [String: Any])?["localizations"] as? [String: Any] else { return nil }
+        return localizations.compactMapValues { unit in
+            ((unit as? [String: Any])?["stringUnit"] as? [String: Any])?["value"] as? String
+        }
+    }
 }
