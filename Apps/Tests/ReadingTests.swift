@@ -9,14 +9,6 @@ final class ReadingTests: XCTestCase {
         continueAfterFailure = false
     }
 
-    override func tearDown() {
-        // Whatever is still up when a test ends, taken down. `launch()` would have terminated
-        // it anyway before the next one started; this is so the last test does not leave a
-        // window standing on somebody's screen.
-        XCUIApplication().terminate()
-        super.tearDown()
-    }
-
     /// The one test that proves the pipeline itself. Everything else here is worthless if the
     /// app does not start and draw a timeline.
     func testTheTimelineHasPostsInIt() {

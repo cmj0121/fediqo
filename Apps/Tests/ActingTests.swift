@@ -13,14 +13,6 @@ final class ActingTests: XCTestCase {
         continueAfterFailure = false
     }
 
-    override func tearDown() {
-        // Whatever is still up when a test ends, taken down. `launch()` would have terminated
-        // it anyway before the next one started; this is so the last test does not leave a
-        // window standing on somebody's screen.
-        XCUIApplication().terminate()
-        super.tearDown()
-    }
-
     /// Every key that acts on a post, and the same answer from each: there is nobody to act as,
     /// and the app says so instead of putting the mark quietly back.
     func testAKeyThatCannotActSaysWhy() {

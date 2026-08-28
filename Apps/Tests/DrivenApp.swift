@@ -38,10 +38,14 @@ enum DrivenApp {
         // that exists, is drawn, and cannot be pressed — which is precisely the difference
         // this suite reads "is it on the screen" out of.
         //
-        // Nothing is torn down here and nothing needs to be: `launch()` terminates an instance
+        // Nothing is torn down, here or in a `tearDown`, and the reason is worth writing down
+        // because it was tried twice. `XCTestCase`'s synchronous `tearDown` is isolated to
+        // nothing, `XCUIApplication` is isolated to the main actor, and under Swift 6 the two
+        // do not meet — which the compiler on this laptop is lenient about and the one on the
+        // runner is not. Nothing is lost by leaving it out: `launch()` terminates an instance
         // already running before it starts one, so no test ever meets the window another left
-        // behind. The last one does stay up until something takes it down, which is a window on
-        // the second display and nobody's problem.
+        // behind. The last app stays up until somebody quits it, which is one window on the
+        // second display.
         app.activate()
         return app
     }
