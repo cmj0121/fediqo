@@ -1,0 +1,117 @@
+import XCTest
+
+/// The app, launched and driven from outside itself.
+///
+/// Everything the package tests is tested with the app not running: `swift test` reaches Core
+/// and the models above it and stops where SwiftUI begins, because nothing in a package can
+/// execute a view body. This is the other side of that line — a second process that starts the
+/// real app and presses things in it.
+///
+/// What it reads is `Fixture`'s invented world, asked for with `FEDIQO_FIXTURE`. Three servers
+/// whose names all end in `.example`, which no resolver will ever answer, so a run here asks
+/// nobody's machine anything and says the same thing on a laptop as on a runner.
+///
+/// Nothing here asserts on an English sentence. The app follows the reader's own language and
+/// no launch variable overrides it — inventing one so a test could read the screen would be a
+/// door in the product that exists for the test alone. What is asserted on instead is what
+/// survives translation: whether an element is there, whether the ring is on it, and whether a
+/// message names the host it is about.
+enum DrivenApp {
+    /// A running app, on the page named, reading the invented world.
+    ///
+    /// The launch variables are the ones the app already understands — the screenshot workflow
+    /// opens it the same way. Nothing here is a door built for testing: a test that needs its
+    /// own way in is a test of something no reader can reach.
+    static func launched(by test: XCTestCase, on rail: String = "timeline") -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchEnvironment["FEDIQO_FIXTURE"] = "1"
+        app.launchEnvironment["FEDIQO_ROUTE"] = "shell"
+        app.launchEnvironment["FEDIQO_RAIL"] = rail
+        // Nothing restored from the last run. macOS brings a window back where it was left,
+        // and a suite that launches the app eight times would be asking each of those eight
+        // questions of a window somebody else placed — which is a suite that passes alone and
+        // fails in company, and did.
+        app.launchArguments += ["-ApplePersistenceIgnoreState", "YES"]
+        app.launch()
+        // Frontmost, and taken down again when the test is over. Neither is tidiness: a window
+        // left standing by an earlier test sits in front of the next one's, and an element
+        // behind another window is an element that exists, is drawn, and cannot be pressed —
+        // which is precisely the difference this suite reads "is it on the screen" out of.
+        app.activate()
+        test.addTeardownBlock { app.terminate() }
+        return app
+    }
+
+    /// How long anything here waits for the app to catch up.
+    ///
+    /// A press is answered in a frame and a launch takes a second or two; ten is not a guess at
+    /// either, it is the point past which something is wrong rather than slow. A test that
+    /// fails after ten seconds fails for a reason, and one that passes never waits that long.
+    static let patience: TimeInterval = 10
+}
+
+extension XCUIElement {
+    /// This element, once it is actually there. Fails the test where it never arrives.
+    @discardableResult
+    func waitForIt(_ file: StaticString = #filePath, _ line: UInt = #line) -> XCUIElement {
+        XCTAssertTrue(waitForExistence(timeout: DrivenApp.patience),
+                      "\(self) never appeared", file: file, line: line)
+        return self
+    }
+
+    /// Whether this element comes to be on the screen and pressable, waiting for it rather
+    /// than asking once.
+    ///
+    /// Asking once is what a flaky test is made of. Existing and being on the screen are two
+    /// different moments here: a screen the reader has just come back to is built, laid out and
+    /// only then scrolled to where they were, and a question asked between the second and the
+    /// third gets the honest answer that the post is above the top of the list. Waiting is not
+    /// a workaround for that — it is the same thing a reader does, which is look at the screen
+    /// a moment after arriving at it.
+    func waitUntilOnScreen(timeout: TimeInterval = DrivenApp.patience) -> Bool {
+        let hittable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isHittable == true"),
+                                                 object: self)
+        return XCTWaiter().wait(for: [hittable], timeout: timeout) == .completed
+    }
+}
+
+extension XCUIApplication {
+    /// Every post row on screen, by the identifier `PostRow` puts on itself.
+    var postRows: XCUIElementQuery {
+        descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'post.'"))
+    }
+
+    /// The row the ring is on — the one drawn with the focus ring, which says as much to a
+    /// screen reader and therefore to this.
+    var ringedRow: XCUIElement? {
+        let rows = postRows
+        for index in 0..<rows.count where rows.element(boundBy: index).isSelected {
+            return rows.element(boundBy: index)
+        }
+        return nil
+    }
+
+    /// The ring, waited for. A press is answered in a frame and a screen coming back is built
+    /// before it is scrolled, so "which row is ringed" asked the instant after either is a
+    /// question asked too early.
+    func ringedRow(waiting: TimeInterval = DrivenApp.patience) -> XCUIElement? {
+        let deadline = Date().addingTimeInterval(waiting)
+        while Date() < deadline {
+            if let row = ringedRow { return row }
+        }
+        return nil
+    }
+
+    /// The page `steps` along the rail, asked for the way a reader asks: ⌃Tab, which rotates
+    /// the four and wraps. Written here because every test that leaves a page and comes back
+    /// does it, and doing it by hand each time is how the count comes to be wrong once.
+    func rotatePage(by steps: Int = 1) {
+        for _ in 0..<steps { typeKey(XCUIKeyboardKey.tab, modifierFlags: .control) }
+    }
+
+    /// What the app is saying about the last thing it was asked to do, or nothing.
+    var notice: XCUIElement {
+        descendants(matching: .any)["action.notice"]
+    }
+}

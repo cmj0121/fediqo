@@ -13,6 +13,9 @@ public struct FediqoRootView: View {
     public var body: some View {
         content
             .fediqoChrome(app)
+            // A fixture run opens the same size in the same place every time, and on the second
+            // display where there is one. Nothing at all on a reader's own run.
+            .fixtureWindow(app.isFixture)
             .preferredColorScheme(app.preferences.theme.colorScheme)
             // Strings are read through a bundle chosen at runtime, so a language change has
             // to rebuild the tree rather than merely redraw it.

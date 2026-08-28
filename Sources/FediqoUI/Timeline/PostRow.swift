@@ -165,6 +165,17 @@ struct PostRow: View {
         .padding(Space.pad)
         .frame(maxWidth: .infinity, alignment: .leading)
         .fediqoCard()
+        // One element standing for the whole row, with everything in it still reachable
+        // underneath — which is what `.contain` says and what a row needs: the words are read,
+        // the buttons are pressed, and none of that may be swallowed by the row having a name.
+        //
+        // The name is for a driver outside this process. `mergeKey` and not a position, for the
+        // same reason the ring is written in one: row 3 is a different post the moment anything
+        // arrives above it, and a test that said "row 3" would quietly change what it was
+        // asking about. Declared before the ring below, so that "where the reader is" lands on
+        // this element rather than on something inside it.
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("post.\(post.mergeKey)")
         .fediqoFocusRing(selected)
         // A tap on the row opens the post — from **behind** the row rather than over it.
         //

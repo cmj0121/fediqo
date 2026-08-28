@@ -61,6 +61,42 @@ jobs:
       - name: iOS
         run: make -C Apps ios
 
+  # What `swift test` cannot ask. It reaches Core and the models above it and stops where
+  # SwiftUI begins -- nothing in a package can execute a view body -- so this launches the real
+  # app and drives it, against the world `Fixture` invents and no network at all.
+  #
+  # It reports what it covered of Sources/FediqoUI and gates on nothing. The gate is
+  # scripts/coverage.sh, which measures Core; what this number ought to be is a question to
+  # answer from a few of these runs rather than from a threshold picked before the first one.
+  uitest:
+    name: The app, driven
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Cache the Xcode build
+        uses: actions/cache@v4
+        with:
+          path: .build/xcode/SourcePackages
+          key: xcode-spm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
+          restore-keys: xcode-spm-${{ runner.os }}-
+
+      - name: Drive the macOS app
+        run: make -C Apps uitest
+
+      # What the run did, when it did not do it. A UI test that fails on a runner and nowhere
+      # else is a UI test nobody can fix without this.
+      - name: What the run left behind
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uitest-result
+          path: .build/xcode/uitest.xcresult
+          retention-days: 7
+
   lint:
     name: Hooks
     runs-on: ubuntu-latest
