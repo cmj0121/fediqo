@@ -33,6 +33,88 @@ extension View {
     }
 }
 
+// MARK: - Tokens
+
+/// Every gap and every padding, named. A number written in a view is a number that cannot be
+/// changed anywhere else — two of them written a week apart disagree, and the disagreement is
+/// invisible until the two screens are put side by side.
+enum Space {
+    static let hair: CGFloat = 2
+    static let tight: CGFloat = 4
+    static let snug: CGFloat = 6
+    static let step: CGFloat = 8
+    static let gap: CGFloat = 12
+    /// What a card holds its contents in.
+    static let pad: CGFloat = 14
+    /// Controls that belong together, and the breath between two runs of them. The second is
+    /// at least twice the first, which is what does the grouping now that no line is drawn.
+    static let withinGroup: CGFloat = 16
+    static let betweenGroups: CGFloat = 34
+}
+
+/// Every corner. Three, because there are three things with corners: a card, something inside
+/// one, and a picture off a server.
+enum Radius {
+    static let inner: CGFloat = 8
+    static let card: CGFloat = 10
+    static let thumbnail: CGFloat = 7
+}
+
+/// Every symbol size. A glyph does not follow the reader's text scale — a row's height is
+/// worked out from the text in it, and marks that grew with it would overflow the card.
+enum Glyph {
+    /// What can be done to a post, in the interaction bar.
+    static let action: CGFloat = 19
+    /// A mark that sits beside words, at the weight of the words.
+    static let inline: CGFloat = 12
+    /// A mark inside a pill, a capsule, or over a picture.
+    static let badge: CGFloat = 10
+    /// The width a leading icon is aligned in, so what follows it lines up down a list.
+    static let column: CGFloat = 14
+}
+
+/// Every text size. Always reached through `fediqoFont`, which is what carries the reader's own
+/// text size down a tree macOS gives no Dynamic Type to.
+enum TypeScale {
+    static let micro: CGFloat = 9
+    static let caption: CGFloat = 10
+    static let minor: CGFloat = 11
+    static let small: CGFloat = 12
+    static let body: CGFloat = 13
+}
+
+/// The smallest thing worth pressing, which is not the same for a finger as for a cursor: 44 is
+/// Apple's touch minimum, 28 is enough to aim at with a pointer.
+enum Hit {
+    #if os(iOS)
+    static let target: CGFloat = 44
+    #else
+    static let target: CGFloat = 28
+    #endif
+}
+
+/// Sizes that are a role rather than a step on a scale.
+enum Size {
+    static let avatar: CGFloat = 30
+    /// A popover wide enough for a row of words and narrow enough not to cover the post it
+    /// was opened from.
+    static let popover: CGFloat = 300
+    /// The width at which a row has room to put its attachments beside its words:
+    /// `AttachmentDeck.side` for the deck, `Space.gap` for the gap, and 348 left for the words.
+    ///
+    /// Out here rather than on the screen that measures it, because the closure that asks the
+    /// geometry is `Sendable` and a `View`'s own static is isolated to the main actor.
+    static let wideRows: CGFloat = 560
+}
+
+extension View {
+    /// A symbol at one of the `Glyph` sizes. The counterpart of `fediqoFont`, and the only way
+    /// a view is allowed to set the size of an `Image(systemName:)`.
+    func fediqoSymbol(_ size: CGFloat, weight: Font.Weight = .semibold) -> some View {
+        font(.system(size: size, weight: weight))
+    }
+}
+
 // MARK: - Palette
 
 extension AppTheme {
@@ -150,8 +232,8 @@ private struct Pill: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .padding(.horizontal, 7)
-            .padding(.vertical, 2)
+            .padding(.horizontal, Space.step)
+            .padding(.vertical, Space.hair)
             .background(Capsule().fill(Palette.hairline(colorScheme)))
             .foregroundStyle(.secondary)
     }
@@ -172,14 +254,14 @@ private struct FocusRing: ViewModifier {
 
     private var ring: some View {
         let colour = Palette.focus(colorScheme)
-        return RoundedRectangle(cornerRadius: 10, style: .continuous)
+        return RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
             .strokeBorder(colour, lineWidth: 2)
             .overlay(alignment: .leading) {
                 Capsule()
                     .fill(colour)
-                    .frame(width: 4)
-                    .padding(.vertical, 12)
-                    .padding(.leading, 6)
+                    .frame(width: Space.tight)
+                    .padding(.vertical, Space.gap)
+                    .padding(.leading, Space.snug)
             }
     }
 
@@ -191,7 +273,7 @@ private struct FocusRing: ViewModifier {
 }
 
 extension View {
-    func fediqoCard(radius: CGFloat = 10, raised: Bool = true, shadow: Bool = false) -> some View {
+    func fediqoCard(radius: CGFloat = Radius.card, raised: Bool = true, shadow: Bool = false) -> some View {
         modifier(Card(radius: radius, raised: raised, shadow: shadow))
     }
 
@@ -259,20 +341,13 @@ struct IconButton: View {
     var tint: Color = .secondary
     var action: () -> Void
 
-    /// What the glyph has to be worth hitting, which is not the same size for a finger as
-    /// for a cursor: 44 is Apple's touch minimum, 28 is enough to aim at with a pointer.
     /// Every icon button in the app is one of these — the feed header as much as a Settings
-    /// row — so the size is decided here rather than at each of them.
-    #if os(iOS)
-    private static let target: CGFloat = 44
-    #else
-    private static let target: CGFloat = 28
-    #endif
-
-    var body: some View {
+    /// row — so what it is worth hitting is `Hit.target` and is decided here rather than at
+    /// each of them.
+        var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .frame(width: Self.target, height: Self.target)
+                .frame(width: Hit.target, height: Hit.target)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

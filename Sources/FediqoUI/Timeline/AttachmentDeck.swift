@@ -52,11 +52,11 @@ struct AttachmentDeck: View {
     private var hidden: Bool { covered }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Space.snug) {
             deck
             if attachments.count > 1 {
                 Text(verbatim: "\(top % attachments.count + 1) / \(attachments.count)")
-                    .fediqoFont(10)
+                    .fediqoFont(TypeScale.caption)
                     .foregroundStyle(.tertiary)
             }
         }
@@ -79,17 +79,17 @@ struct AttachmentDeck: View {
             // the top one is not something the reader can see anyway, and loading three more
             // images to show six points of each is a request nobody asked for.
             ForEach(0..<min(attachments.count - 1, Self.shown), id: \.self) { depth in
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: Radius.inner, style: .continuous)
                     .fill(Palette.raised(colorScheme))
-                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .overlay(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous)
                         .strokeBorder(Palette.hairline(colorScheme)))
                     .frame(width: Self.side, height: Self.height)
-                    .offset(x: CGFloat(depth + 1) * 4, y: CGFloat(depth + 1) * 4)
+                    .offset(x: CGFloat(depth + 1) * Space.tight, y: CGFloat(depth + 1) * Space.tight)
             }
             top(showing)
         }
-        .frame(width: Self.side + CGFloat(min(attachments.count - 1, Self.shown)) * 4,
-               height: Self.height + CGFloat(min(attachments.count - 1, Self.shown)) * 4,
+        .frame(width: Self.side + CGFloat(min(attachments.count - 1, Self.shown)) * Space.tight,
+               height: Self.height + CGFloat(min(attachments.count - 1, Self.shown)) * Space.tight,
                alignment: .topLeading)
     }
 
@@ -105,7 +105,7 @@ struct AttachmentDeck: View {
                 }
             }
             .frame(width: Self.side, height: Self.height)
-            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .overlay(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous)
                 .strokeBorder(Palette.hairline(colorScheme)))
             .accessibilityElement()
             .accessibilityLabel(Text(label(for: attachment)))
@@ -119,7 +119,7 @@ struct AttachmentDeck: View {
         ZStack(alignment: .bottomLeading) {
             RemoteImage(url: hidden ? nil : attachment.displayURL,
                         width: Self.side, height: Self.height)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous))
                 .blur(radius: hidden ? 18 : 0)
             if hidden {
                 cover
@@ -147,23 +147,23 @@ struct AttachmentDeck: View {
 
     private func badge(_ symbol: String) -> some View {
         Image(systemName: symbol)
-            .font(.system(size: 11, weight: .semibold))
-            .padding(5)
+            .fediqoSymbol(Glyph.badge)
+            .padding(Space.snug)
             .background(.black.opacity(0.55), in: Capsule())
             .foregroundStyle(.white)
-            .padding(6)
+            .padding(Space.snug)
     }
 
     private var cover: some View {
-        HStack(spacing: 5) {
-            Image(systemName: "eye.slash").font(.system(size: 11, weight: .semibold))
-            Text(t("post.covered.show")).fediqoFont(10, weight: .medium)
+        HStack(spacing: Space.snug) {
+            Image(systemName: "eye.slash").fediqoSymbol(Glyph.badge)
+            Text(t("post.covered.show")).fediqoFont(TypeScale.caption, weight: .medium)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
+        .padding(.horizontal, Space.step)
+        .padding(.vertical, Space.snug)
         .background(.black.opacity(0.6), in: Capsule())
         .foregroundStyle(.white)
-        .padding(8)
+        .padding(Space.step)
     }
 
     /// The one mark on a picture, and only where there is something to say. An image gets

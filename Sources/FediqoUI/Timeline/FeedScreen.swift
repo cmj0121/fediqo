@@ -52,9 +52,6 @@ struct FeedScreen: View {
     /// who was looking at the marker instead is not covered up for long.
     private static let announcementLasts = Duration.milliseconds(2500)
 
-    /// 200 for the attachments, 12 for the gap, and 348 left for the words.
-    private static let wideEnough: CGFloat = 560
-
     private var fading: Animation? { reduceMotion ? nil : Motion.appearing }
 
     private var model: FeedModel { app.feed(for: timeline) }
@@ -83,7 +80,7 @@ struct FeedScreen: View {
             // is the same question answered once per row on screen, and they all answer the
             // same. Below this there is no room to spend on an empty attachment column.
             .onGeometryChange(for: Bool.self) { geometry in
-                geometry.size.width >= Self.wideEnough
+                geometry.size.width >= Size.wideRows
             } action: { wide in
                 self.wide = wide
             }
