@@ -18,11 +18,11 @@ struct SettingsView: View {
             header
             Hairline()
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: Space.room) {
                     sections(of: app.settingsTab)
                 }
-                .frame(maxWidth: 620, alignment: .leading)
-                .padding(22)
+                .frame(maxWidth: Size.pageColumn, alignment: .leading)
+                .padding(Space.band)
             }
             .frame(maxWidth: .infinity)
         }
@@ -46,7 +46,7 @@ struct SettingsView: View {
             section(t("settings.sources")) { sources }
             section(t("settings.privacy")) {
                 Text(t("settings.privacy.body"))
-                    .fediqoFont(11)
+                    .fediqoFont(TypeScale.minor)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -69,7 +69,7 @@ struct SettingsView: View {
         choiceRow("settings.refresh", keyPrefix: "settings.refresh", selection: $preferences.refreshInterval)
         Divider().opacity(0.4)
         Text(t("settings.sample"))
-            .fediqoFont(13)
+            .fediqoFont(TypeScale.body)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
     }
@@ -85,7 +85,7 @@ struct SettingsView: View {
             SegmentedChoice(Array(T.allCases), keyPrefix: keyPrefix, selection: selection)
                 .fixedSize()
         } label: {
-            Text(t(titleKey)).fediqoFont(13)
+            Text(t(titleKey)).fediqoFont(TypeScale.body)
         }
     }
 
@@ -105,7 +105,7 @@ struct SettingsView: View {
             .labelsHidden()
             .fixedSize()
         } label: {
-            Text(t("settings.language")).fediqoFont(13)
+            Text(t("settings.language")).fediqoFont(TypeScale.body)
         }
     }
 
@@ -121,11 +121,11 @@ struct SettingsView: View {
     /// Everything on this device, gone. Two steps to reach it — the button and then a dialog
     /// naming what goes — because it is the one action here that nothing can undo.
     private var startAgain: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Hairline().padding(.vertical, 6)
+        VStack(alignment: .leading, spacing: Space.tight) {
+            Hairline().padding(.vertical, Space.snug)
             Button(t("settings.reset"), role: .destructive) { confirmingReset = true }
                 .buttonStyle(.plain)
-                .fediqoFont(11)
+                .fediqoFont(TypeScale.minor)
                 .foregroundStyle(.red)
                 .confirmationDialog(t("settings.reset.ask"), isPresented: $confirmingReset, titleVisibility: .visible) {
                     Button(t("settings.reset.confirm"), role: .destructive) {
@@ -136,7 +136,7 @@ struct SettingsView: View {
                     Text(t("settings.reset.warning"))
                 }
             Text(t("settings.reset.note"))
-                .fediqoFont(10)
+                .fediqoFont(TypeScale.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -145,7 +145,7 @@ struct SettingsView: View {
     @ViewBuilder
     private var sourceList: some View {
         if app.servers.isEmpty {
-            Text(t("settings.sources.empty")).fediqoFont(12).foregroundStyle(.secondary)
+            Text(t("settings.sources.empty")).fediqoFont(TypeScale.small).foregroundStyle(.secondary)
         } else {
             ForEach(app.servers) { server in
                 sourceRow(server)
@@ -153,16 +153,16 @@ struct SettingsView: View {
 
             if let failure = app.signIn?.failure {
                 Label(message(for: failure), systemImage: "exclamationmark.triangle")
-                    .fediqoFont(11)
+                    .fediqoFont(TypeScale.minor)
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
             Button(t("settings.sources.forget"), role: .destructive) { confirmingForget = true }
                 .buttonStyle(.plain)
-                .fediqoFont(11)
+                .fediqoFont(TypeScale.minor)
                 .foregroundStyle(.red)
-                .padding(.top, 4)
+                .padding(.top, Space.tight)
                 .confirmationDialog(t("settings.sources.forget"), isPresented: $confirmingForget) {
                     Button(t("settings.sources.forget"), role: .destructive) { app.forgetAllServers() }
                     Button(t("common.cancel"), role: .cancel) {}
@@ -175,11 +175,11 @@ struct SettingsView: View {
     /// build can sign in to — and only with a store behind them, since without one there is
     /// no `signIn` at all. Stopping reading is always offered.
     private func sourceRow(_ server: Server) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: server.socialProtocol.symbolName).foregroundStyle(.secondary).frame(width: 18)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(server.title).fediqoFont(13, weight: .medium).lineLimit(1)
-                Text(server.host).fediqoFont(10).foregroundStyle(.secondary)
+        HStack(spacing: Space.step) {
+            Image(systemName: server.socialProtocol.symbolName).foregroundStyle(.secondary).frame(width: Glyph.lead)
+            VStack(alignment: .leading, spacing: Space.hair) {
+                Text(server.title).fediqoFont(TypeScale.body, weight: .medium).lineLimit(1)
+                Text(server.host).fediqoFont(TypeScale.caption).foregroundStyle(.secondary)
             }
             Spacer()
             // The handle and the controls are one group so the model behind them is unwrapped
@@ -191,17 +191,17 @@ struct SettingsView: View {
                         // A handle the server no longer answers to reads as the warning it
                         // is, rather than as a quiet claim to be signed in.
                         Text(account.handle)
-                            .fediqoFont(11)
+                            .fediqoFont(TypeScale.minor)
                             .foregroundStyle(signIn.isRejected(server) ? Color.orange : Color.secondary)
                             .lineLimit(1)
-                            .padding(.trailing, 8)
+                            .padding(.trailing, Space.step)
                     }
                     accountControl(signIn, for: server)
                 }
                 IconButton(symbol: "xmark.circle", labelKey: "timeline.remove", tint: .red) { app.remove(server) }
             }
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, Space.tight)
     }
 
     /// The signed-in state of one row, as the icons it is worth: sign out when there is an
@@ -254,10 +254,10 @@ struct SettingsView: View {
     // MARK: - Chrome
 
     private func section(_ title: String, @ViewBuilder content: () -> some View) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title).fediqoFont(11, weight: .semibold).foregroundStyle(.secondary).textCase(.uppercase)
-            VStack(alignment: .leading, spacing: 10) { content() }
-                .padding(14)
+        VStack(alignment: .leading, spacing: Space.mid) {
+            Text(title).fediqoFont(TypeScale.minor, weight: .semibold).foregroundStyle(.secondary).textCase(.uppercase)
+            VStack(alignment: .leading, spacing: Space.mid) { content() }
+                .padding(Space.pad)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fediqoCard()
         }

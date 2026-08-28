@@ -46,29 +46,29 @@ struct ComposerView: View {
     }
 
     private var content: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: Space.gap) {
+            HStack(spacing: Space.step) {
                 Image(systemName: "square.and.pencil").foregroundStyle(Palette.accent)
-                Text(t("compose.title")).fediqoFont(15, weight: .semibold)
+                Text(t("compose.title")).fediqoFont(TypeScale.lead, weight: .semibold)
                 Spacer()
-                Text(t("compose.wip")).fediqoFont(10, weight: .medium).fediqoPill()
+                Text(t("compose.wip")).fediqoFont(TypeScale.caption, weight: .medium).fediqoPill()
             }
 
             TextField(t("compose.placeholder"), text: $draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .focused($typing)
-                .fediqoFont(12)
-                .padding(10)
+                .fediqoFont(TypeScale.small)
+                .padding(Space.mid)
                 .frame(maxWidth: .infinity, minHeight: 72, alignment: .topLeading)
                 .fediqoCard(radius: 8, raised: false)
                 .onChange(of: typing) { _, now in app.setTyping(now) }
 
             Text(t("compose.soon"))
-                .fediqoFont(11)
+                .fediqoFont(TypeScale.minor)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(14)
+        .padding(Space.pad)
         .frame(width: Self.size.width, alignment: .topLeading)
     }
 

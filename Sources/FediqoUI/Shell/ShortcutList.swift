@@ -10,11 +10,11 @@ struct ShortcutList: View {
     private let groups = KeyCommand.ShortcutGroup.allCases
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: Space.pad) {
             // Said first, because it is the thing that decides whether any of the rest is
             // of use to the reader holding the screen.
             Text(t("shortcut.note"))
-                .fediqoFont(11)
+                .fediqoFont(TypeScale.minor)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -24,7 +24,7 @@ struct ShortcutList: View {
                 ForEach(groups) { group in
                     GridRow {
                         Text(t(group.titleKey))
-                            .fediqoFont(10, weight: .semibold)
+                            .fediqoFont(TypeScale.caption, weight: .semibold)
                             .foregroundStyle(.secondary)
                             .textCase(.uppercase)
                             // Air above a heading that follows a group, and none above the
@@ -36,7 +36,7 @@ struct ShortcutList: View {
                         GridRow {
                             keys(of: shortcut)
                             Text(t(shortcut.detailKey))
-                                .fediqoFont(12)
+                                .fediqoFont(TypeScale.small)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
@@ -47,9 +47,9 @@ struct ShortcutList: View {
 
     /// The caps themselves, as the small capsules the rest of the app marks a thing with.
     private func keys(of shortcut: KeyCommand.Shortcut) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: Space.tight) {
             ForEach(shortcut.keys, id: \.self) { cap in
-                Text(cap).fediqoFont(11, design: .monospaced).fediqoPill()
+                Text(cap).fediqoFont(TypeScale.minor, design: .monospaced).fediqoPill()
             }
         }
         .fixedSize()
@@ -81,13 +81,13 @@ private struct ShortcutsOverlay: ViewModifier {
     }
 
     private var card: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Space.gap) {
             HStack {
-                Text(t("shortcut.title")).fediqoFont(17, weight: .semibold)
+                Text(t("shortcut.title")).fediqoFont(TypeScale.section, weight: .semibold)
                 Spacer()
                 Button(t("common.close")) { app.setShowingShortcuts(false) }
                     .buttonStyle(.plain)
-                    .fediqoFont(12)
+                    .fediqoFont(TypeScale.small)
                     .foregroundStyle(.secondary)
             }
             // The card is as tall as the list and no taller — but a short window, or a
@@ -100,14 +100,14 @@ private struct ShortcutsOverlay: ViewModifier {
                 }
             }
         }
-        .padding(20)
+        .padding(Space.room)
         // Width only. A `maxHeight` here would be a height rather than a ceiling: given a
         // finite proposal the frame takes all of it, and the card would stand at its
         // ceiling with the list floating in the middle of it. The height is the list's, and
         // where the list has to scroll the branch above already fills what it is given.
-        .frame(maxWidth: 440)
+        .frame(maxWidth: Size.prose)
         .fediqoCard(radius: 12, shadow: true)
-        .padding(24)
+        .padding(Space.band)
         .transition(.scale(scale: 0.96).combined(with: .opacity))
     }
 }

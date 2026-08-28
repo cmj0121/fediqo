@@ -37,7 +37,7 @@ struct ServerPickerView: View {
                 Hairline()
                 ScrollViewReader { scroll in
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 18) {
+                        VStack(alignment: .leading, spacing: Space.room) {
                             entryField(typed: $model.typed).id(Self.entryAnchor)
                             if case .found(let info) = model.probe {
                                 foundCard(info)
@@ -45,7 +45,7 @@ struct ServerPickerView: View {
                             suggestionList
                             sourceNote
                         }
-                        .padding(20)
+                        .padding(Space.room)
                     }
                     .onChange(of: model.probe) { _, probe in
                         guard case .found = probe else { return }
@@ -62,33 +62,33 @@ struct ServerPickerView: View {
     // MARK: - Pieces
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Space.step) {
             HStack {
-                Text(t("onboarding.server.title")).fediqoFont(22, weight: .semibold)
+                Text(t("onboarding.server.title")).fediqoFont(TypeScale.title, weight: .semibold)
                 Spacer()
                 Button(t(isSheet ? "common.close" : "onboarding.server.back")) { dismiss() }
                     .buttonStyle(.plain)
-                    .fediqoFont(12)
+                    .fediqoFont(TypeScale.small)
                     .foregroundStyle(.secondary)
             }
             Text(t("onboarding.server.subtitle"))
-                .fediqoFont(12)
+                .fediqoFont(TypeScale.small)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, Space.room)
         .padding(.top, isSheet ? 20 : 40)
-        .padding(.bottom, 16)
+        .padding(.bottom, Space.withinGroup)
     }
 
     private func entryField(typed: Binding<String>) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(t("onboarding.server.field")).fediqoFont(12, weight: .medium).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: Space.step) {
+            Text(t("onboarding.server.field")).fediqoFont(TypeScale.small, weight: .medium).foregroundStyle(.secondary)
 
-            HStack(spacing: 8) {
+            HStack(spacing: Space.step) {
                 TextField("mastodon.social", text: typed)
                     .textFieldStyle(.roundedBorder)
-                    .fediqoFont(14)
+                    .fediqoFont(TypeScale.lead)
                     .onSubmit { look(typed.wrappedValue) }
                     #if os(iOS)
                     .textInputAutocapitalization(.never)
@@ -101,7 +101,7 @@ struct ServerPickerView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Palette.accent)
-                .fediqoFont(12, weight: .medium)
+                .fediqoFont(TypeScale.small, weight: .medium)
                 .disabled(!model.canSubmit)
                 .help(t("onboarding.server.look"))
                 .accessibilityLabel(Text(t("onboarding.server.look")))
@@ -109,13 +109,13 @@ struct ServerPickerView: View {
 
             switch model.probe {
             case .checking(let host):
-                HStack(spacing: 6) {
+                HStack(spacing: Space.snug) {
                     ProgressView().controlSize(.small)
-                    Text("\(t("onboarding.server.checking")) \(host)").fediqoFont(11).foregroundStyle(.secondary)
+                    Text("\(t("onboarding.server.checking")) \(host)").fediqoFont(TypeScale.minor).foregroundStyle(.secondary)
                 }
             case .failed(let failure):
                 Label(message(for: failure), systemImage: "exclamationmark.triangle")
-                    .fediqoFont(11)
+                    .fediqoFont(TypeScale.minor)
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
             case .found, .idle:
@@ -133,21 +133,21 @@ struct ServerPickerView: View {
     /// be looked at without anything having happened to this one.
     private func foundCard(_ info: InstanceInfo) -> some View {
         let already = model.alreadyReading(info, among: app.servers)
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
+        return VStack(alignment: .leading, spacing: Space.gap) {
+            HStack(alignment: .top, spacing: Space.gap) {
                 if info.thumbnailURL != nil {
-                    RemoteImage(url: info.thumbnailURL, width: 56, height: 56)
+                    RemoteImage(url: info.thumbnailURL, width: Size.thumbnail, height: Size.thumbnail)
                 }
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(info.title).fediqoFont(16, weight: .semibold)
-                    Text(info.host).fediqoFont(11).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: Space.tight) {
+                    Text(info.title).fediqoFont(TypeScale.section, weight: .semibold)
+                    Text(info.host).fediqoFont(TypeScale.minor).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
             }
 
             if !info.summary.isEmpty {
                 Text(info.summary)
-                    .fediqoFont(12)
+                    .fediqoFont(TypeScale.small)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -155,24 +155,24 @@ struct ServerPickerView: View {
             let counted = figures(for: info)
             if !counted.isEmpty {
                 Text(counted.joined(separator: " · "))
-                    .fediqoFont(10)
+                    .fediqoFont(TypeScale.caption)
                     .foregroundStyle(.tertiary)
             }
 
             let marks = badges(for: info)
             if !marks.isEmpty {
-                FlowRow(spacing: 4) {
+                FlowRow(spacing: Space.tight) {
                     ForEach(marks, id: \.self) { mark in
-                        Text(mark).fediqoFont(10).fediqoPill()
+                        Text(mark).fediqoFont(TypeScale.caption).fediqoPill()
                     }
                 }
             }
 
             if !info.rules.isEmpty {
                 Hairline()
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: Space.snug) {
                     Text(t("onboarding.server.rules"))
-                        .fediqoFont(11, weight: .medium)
+                        .fediqoFont(TypeScale.minor, weight: .medium)
                         .foregroundStyle(.secondary)
                     ForEach(Array(info.rules.enumerated()), id: \.offset) { index, rule in
                         rulesRow(number: index + 1, rule: rule)
@@ -180,38 +180,38 @@ struct ServerPickerView: View {
                 }
             }
 
-            HStack(spacing: 12) {
+            HStack(spacing: Space.gap) {
                 if already {
-                    Text(t("onboarding.server.already")).fediqoFont(11).foregroundStyle(.secondary)
+                    Text(t("onboarding.server.already")).fediqoFont(TypeScale.minor).foregroundStyle(.secondary)
                 } else {
                     Button(t("onboarding.server.add")) { adopt(info) }
                         .buttonStyle(.borderedProminent)
                         .tint(Palette.accent)
-                        .fediqoFont(12, weight: .medium)
+                        .fediqoFont(TypeScale.small, weight: .medium)
                 }
                 Button(t("common.cancel")) { model.clear() }
                     .buttonStyle(.plain)
-                    .fediqoFont(12)
+                    .fediqoFont(TypeScale.small)
                     .foregroundStyle(.secondary)
             }
-            .padding(.top, 2)
+            .padding(.top, Space.hair)
         }
-        .padding(14)
+        .padding(Space.pad)
         .frame(maxWidth: .infinity, alignment: .leading)
         .fediqoCard()
     }
 
     private func rulesRow(number: Int, rule: InstanceRule) -> some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: Space.step) {
             Text("\(number)")
-                .fediqoFont(10, weight: .medium)
+                .fediqoFont(TypeScale.caption, weight: .medium)
                 .foregroundStyle(.tertiary)
-                .frame(minWidth: 14, alignment: .trailing)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(rule.text).fediqoFont(11).fixedSize(horizontal: false, vertical: true)
+                .frame(minWidth: Glyph.column, alignment: .trailing)
+            VStack(alignment: .leading, spacing: Space.hair) {
+                Text(rule.text).fediqoFont(TypeScale.minor).fixedSize(horizontal: false, vertical: true)
                 if let detail = rule.detail {
                     Text(detail)
-                        .fediqoFont(10)
+                        .fediqoFont(TypeScale.caption)
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -259,9 +259,9 @@ struct ServerPickerView: View {
     }
 
     private var suggestionList: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: Space.mid) {
             HStack {
-                Text(t("onboarding.server.suggested")).fediqoFont(12, weight: .medium).foregroundStyle(.secondary)
+                Text(t("onboarding.server.suggested")).fediqoFont(TypeScale.small, weight: .medium).foregroundStyle(.secondary)
                 if model.loadingSuggestions {
                     ProgressView().controlSize(.small)
                 }
@@ -278,32 +278,32 @@ struct ServerPickerView: View {
         return Button {
             look(suggestion.host)
         } label: {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        Text(suggestion.host).fediqoFont(14, weight: .medium)
+            HStack(alignment: .top, spacing: Space.gap) {
+                VStack(alignment: .leading, spacing: Space.tight) {
+                    HStack(spacing: Space.snug) {
+                        Text(suggestion.host).fediqoFont(TypeScale.lead, weight: .medium)
                         if already {
-                            Text(t("onboarding.server.already")).fediqoFont(10).foregroundStyle(.secondary)
+                            Text(t("onboarding.server.already")).fediqoFont(TypeScale.caption).foregroundStyle(.secondary)
                         }
                     }
                     if !suggestion.summary.isEmpty {
                         Text(suggestion.summary)
-                            .fediqoFont(11)
+                            .fediqoFont(TypeScale.minor)
                             .foregroundStyle(.secondary)
                             .lineLimit(2)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     if let users = suggestion.totalUsers {
                         Text(t("onboarding.server.users", users.formatted()))
-                            .fediqoFont(10)
+                            .fediqoFont(TypeScale.caption)
                             .foregroundStyle(.tertiary)
                     }
                 }
-                Spacer(minLength: 8)
+                Spacer(minLength: Space.step)
                 Image(systemName: already ? "checkmark" : "plus")
                     .foregroundStyle(already ? Color.secondary : Palette.accent)
             }
-            .padding(12)
+            .padding(Space.gap)
             .frame(maxWidth: .infinity, alignment: .leading)
             .fediqoCard()
         }
@@ -316,10 +316,10 @@ struct ServerPickerView: View {
     /// makes it — and says it in whatever terms the directory that answered calls for.
     private var sourceNote: some View {
         Label(t(model.origin.noteKey), systemImage: model.origin.symbolName)
-            .fediqoFont(10)
+            .fediqoFont(TypeScale.caption)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.top, 4)
+            .padding(.top, Space.tight)
     }
 
     // MARK: - Actions

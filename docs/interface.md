@@ -101,7 +101,12 @@ disagree, and the disagreement is invisible until the screens are put side by si
 | `Hit`       | the smallest thing worth pressing            |
 
 Text is set with `fediqoFont` and never with `.font(.system(size:))`, because that is what carries the reader's
-own text size down a tree macOS gives no Dynamic Type to.
+own text size down a tree macOS gives no Dynamic Type to. A symbol is set with `fediqoSymbol`, which does not
+scale: a row's height is worked out from the text in it, and marks that grew with the text would overflow it.
+
+What the rule forbids is an **unnamed** number, not a number. A measure that belongs to one view and to
+nothing else — the width of the attachment column, the size of the composer panel, the rail's two widths —
+is a named, documented `static let` on that view. It goes in `Size` when a second screen needs it.
 
 ## When a rule is in the way
 

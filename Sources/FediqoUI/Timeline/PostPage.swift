@@ -94,27 +94,27 @@ struct PostPage: View {
     }
 
     private var header: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: Space.mid) {
             Button(action: done) {
                 Label(t("post.back"), systemImage: "chevron.left")
-                    .fediqoFont(12, weight: .medium)
+                    .fediqoFont(TypeScale.small, weight: .medium)
             }
             .buttonStyle(.plain)
             .foregroundStyle(Palette.accent)
             .keyboardShortcut(.escape, modifiers: [])
 
-            Text(t("post.title")).fediqoFont(15, weight: .semibold)
+            Text(t("post.title")).fediqoFont(TypeScale.lead, weight: .semibold)
             if model?.loading == true { ProgressView().controlSize(.small) }
-            Spacer(minLength: 6)
+            Spacer(minLength: Space.snug)
             if let failure = model?.failure {
                 Label(message(for: failure), systemImage: "exclamationmark.triangle")
-                    .fediqoFont(10)
+                    .fediqoFont(TypeScale.caption)
                     .foregroundStyle(.orange)
                     .lineLimit(1)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.horizontal, Space.pad)
+        .padding(.vertical, Space.mid)
         .background(PageHeaderBackground())
     }
 
@@ -136,7 +136,7 @@ struct PostPage: View {
 
     private var thread: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 8) {
+            LazyVStack(alignment: .leading, spacing: Space.step) {
                 let conversation = model?.conversation ?? Conversation(post: post)
                 let ring = model?.selection
                 ForEach(conversation.ancestors) { above in
@@ -144,16 +144,16 @@ struct PostPage: View {
                 }
                 row(conversation.post, selected: conversation.post.mergeKey == ring)
                 ForEach(conversation.descendants) { below in
-                    row(below, selected: below.mergeKey == ring).padding(.leading, 18)
+                    row(below, selected: below.mergeKey == ring).padding(.leading, Space.room)
                 }
                 if conversation.isAlone, model?.loading != true {
                     Text(t("post.alone"))
-                        .fediqoFont(11)
+                        .fediqoFont(TypeScale.minor)
                         .foregroundStyle(.tertiary)
-                        .padding(.top, 6)
+                        .padding(.top, Space.snug)
                 }
             }
-            .padding(12)
+            .padding(Space.gap)
         }
     }
 }

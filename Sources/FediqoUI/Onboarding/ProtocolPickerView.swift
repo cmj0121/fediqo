@@ -14,58 +14,58 @@ struct ProtocolPickerView: View {
             VStack(alignment: .leading, spacing: 0) {
                 header
                 ScrollView {
-                    VStack(spacing: 12) {
+                    VStack(spacing: Space.gap) {
                         ForEach(SocialProtocol.allCases) { row($0) }
                     }
-                    .padding(24)
+                    .padding(Space.band)
                 }
             }
-            .frame(maxWidth: 640)
+            .frame(maxWidth: Size.pageColumn)
         }
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 14) {
-                MascotView(side: 44)
-                Text(t("onboarding.protocol.title")).fediqoFont(26, weight: .semibold)
+        VStack(alignment: .leading, spacing: Space.step) {
+            HStack(spacing: Space.pad) {
+                MascotView(side: Size.wideIconColumn + Space.mid)
+                Text(t("onboarding.protocol.title")).fediqoFont(TypeScale.display, weight: .semibold)
             }
             Text(t("onboarding.protocol.subtitle"))
-                .fediqoFont(13)
+                .fediqoFont(TypeScale.body)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.horizontal, 24)
-        .padding(.top, 40)
+        .padding(.horizontal, Space.band)
+        .padding(.top, Space.page)
     }
 
     private func row(_ socialProtocol: SocialProtocol) -> some View {
         Button {
             app.route = .serverPicker(socialProtocol)
         } label: {
-            HStack(spacing: 14) {
+            HStack(spacing: Space.pad) {
                 Image(systemName: socialProtocol.symbolName)
-                    .font(.system(size: 20))
-                    .frame(width: 34)
+                    .fediqoSymbol(Glyph.action, weight: .regular)
+                    .frame(width: Size.wideIconColumn)
                     .foregroundStyle(socialProtocol.isImplemented ? Palette.accent : Color.secondary)
 
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(t("onboarding.protocol.\(socialProtocol.rawValue)")).fediqoFont(15, weight: .medium)
+                VStack(alignment: .leading, spacing: Space.tight) {
+                    Text(t("onboarding.protocol.\(socialProtocol.rawValue)")).fediqoFont(TypeScale.lead, weight: .medium)
                     Text(t("onboarding.protocol.\(socialProtocol.rawValue).summary"))
-                        .fediqoFont(12)
+                        .fediqoFont(TypeScale.small)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                Spacer(minLength: 12)
+                Spacer(minLength: Space.gap)
 
                 if socialProtocol.isImplemented {
                     Image(systemName: "chevron.right").foregroundStyle(.secondary)
                 } else {
-                    Text(t("onboarding.protocol.soon")).fediqoFont(11, weight: .medium).fediqoPill()
+                    Text(t("onboarding.protocol.soon")).fediqoFont(TypeScale.minor, weight: .medium).fediqoPill()
                 }
             }
-            .padding(16)
+            .padding(Space.withinGroup)
             .frame(maxWidth: .infinity, alignment: .leading)
             .fediqoCard(radius: 12)
         }

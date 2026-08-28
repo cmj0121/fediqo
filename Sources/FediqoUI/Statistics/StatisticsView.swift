@@ -31,11 +31,11 @@ struct StatisticsView: View {
             header
             Hairline()
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: Space.room) {
                     groups(of: app.statisticsTab)
                 }
-                .frame(maxWidth: 620, alignment: .leading)
-                .padding(22)
+                .frame(maxWidth: Size.pageColumn, alignment: .leading)
+                .padding(Space.band)
             }
             .frame(maxWidth: .infinity)
         }
@@ -112,24 +112,24 @@ struct StatisticsView: View {
             Divider().opacity(0.4)
 
             Text(t("stats.disk.bySource"))
-                .fediqoFont(11, weight: .semibold)
+                .fediqoFont(TypeScale.minor, weight: .semibold)
                 .foregroundStyle(.secondary)
                 .textCase(.uppercase)
 
             if statistics.bySource.isEmpty {
-                Text(t("stats.disk.empty")).fediqoFont(12).foregroundStyle(.secondary)
+                Text(t("stats.disk.empty")).fediqoFont(TypeScale.small).foregroundStyle(.secondary)
             } else {
                 ForEach(statistics.bySource) { source in
-                    HStack(spacing: 8) {
-                        Text(source.host).fediqoFont(12).lineLimit(1).truncationMode(.middle)
-                        Spacer(minLength: 8)
+                    HStack(spacing: Space.step) {
+                        Text(source.host).fediqoFont(TypeScale.small).lineLimit(1).truncationMode(.middle)
+                        Spacer(minLength: Space.step)
                         Text(source.share, format: .percent.precision(.fractionLength(0)))
-                            .fediqoFont(12)
+                            .fediqoFont(TypeScale.small)
                             .monospacedDigit()
                             .foregroundStyle(.secondary)
                         if let bytes = source.estimatedBytes {
                             Text(bytes, format: .byteCount(style: .file))
-                                .fediqoFont(12)
+                                .fediqoFont(TypeScale.small)
                                 .monospacedDigit()
                         }
                     }
@@ -161,7 +161,7 @@ struct StatisticsView: View {
                 .sorted { $0.usage.callsSinceStart > $1.usage.callsSinceStart }
 
             if chosen.isEmpty && strangers.isEmpty {
-                Text(t("stats.requests.none")).fediqoFont(12).foregroundStyle(.secondary)
+                Text(t("stats.requests.none")).fediqoFont(TypeScale.small).foregroundStyle(.secondary)
             } else {
                 if !chosen.isEmpty {
                     usageTable(t("stats.requests.mine"), rows: chosen)
@@ -191,20 +191,20 @@ struct StatisticsView: View {
     /// holding reads as nothing being there — which would be the same as having hidden them.
     private func others(_ rows: [UsageRow]) -> some View {
         DisclosureGroup(isExpanded: $showingOthers) {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: Space.snug) {
                 usageGrid(rows)
                 Text(t("stats.requests.others.note"))
-                    .fediqoFont(11)
+                    .fediqoFont(TypeScale.minor)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(.top, 6)
+            .padding(.top, Space.snug)
             .frame(maxWidth: .infinity, alignment: .leading)
         } label: {
-            HStack(spacing: 7) {
+            HStack(spacing: Space.step) {
                 tableHeading(t("stats.requests.others"))
                 Text(rows.count, format: .number)
-                    .fediqoFont(10)
+                    .fediqoFont(TypeScale.caption)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
                     .fediqoPill()
@@ -219,7 +219,7 @@ struct StatisticsView: View {
     /// One heading and its rows: who was asked, how often, how fast, and how much of it came
     /// back. A rate nobody has is a dash — never a hundred percent of nothing.
     private func usageTable(_ heading: String, rows: [UsageRow]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Space.snug) {
             tableHeading(heading)
             usageGrid(rows)
         }
@@ -229,7 +229,7 @@ struct StatisticsView: View {
     /// that opens is still the same heading, and it has to look like one.
     private func tableHeading(_ heading: String) -> some View {
         Text(heading)
-            .fediqoFont(11, weight: .semibold)
+            .fediqoFont(TypeScale.minor, weight: .semibold)
             .foregroundStyle(.secondary)
             .textCase(.uppercase)
     }
@@ -242,13 +242,13 @@ struct StatisticsView: View {
                 Text(t("stats.requests.perMinute")).gridColumnAlignment(.trailing)
                 Text(t("stats.requests.answered")).gridColumnAlignment(.trailing)
             }
-            .fediqoFont(10)
+            .fediqoFont(TypeScale.caption)
             .foregroundStyle(.tertiary)
             .textCase(.uppercase)
 
             ForEach(rows) { row in
                 GridRow {
-                    Text(row.host).fediqoFont(12).lineLimit(1).truncationMode(.middle)
+                    Text(row.host).fediqoFont(TypeScale.small).lineLimit(1).truncationMode(.middle)
                     Text(row.usage.callsSinceStart, format: .number)
                     Text(row.usage.callsPerMinute, format: .number.precision(.fractionLength(1)))
                     if let rate = row.usage.successRate {
@@ -257,7 +257,7 @@ struct StatisticsView: View {
                         Text(verbatim: dash)
                     }
                 }
-                .fediqoFont(12)
+                .fediqoFont(TypeScale.small)
                 .monospacedDigit()
             }
         }
@@ -305,10 +305,10 @@ struct StatisticsView: View {
     @ViewBuilder
     private var storeStatus: some View {
         if app.store == nil {
-            Text(t("stats.noStore")).fediqoFont(12).foregroundStyle(.secondary)
+            Text(t("stats.noStore")).fediqoFont(TypeScale.small).foregroundStyle(.secondary)
         } else if failed {
             Label(t("stats.failed"), systemImage: "exclamationmark.triangle")
-                .fediqoFont(12)
+                .fediqoFont(TypeScale.small)
                 .foregroundStyle(.orange)
         } else {
             ProgressView().controlSize(.small)
@@ -317,15 +317,15 @@ struct StatisticsView: View {
 
     private func metric(_ titleKey: String, @ViewBuilder value: () -> some View) -> some View {
         LabeledContent {
-            value().fediqoFont(13).monospacedDigit()
+            value().fediqoFont(TypeScale.body).monospacedDigit()
         } label: {
-            Text(t(titleKey)).fediqoFont(13)
+            Text(t(titleKey)).fediqoFont(TypeScale.body)
         }
     }
 
     private func note(_ key: String) -> some View {
         Text(t(key))
-            .fediqoFont(11)
+            .fediqoFont(TypeScale.minor)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
     }
@@ -334,17 +334,17 @@ struct StatisticsView: View {
     /// it is the one that has to say its window out loud.
     private func windowNote(_ minutes: Int) -> some View {
         Text(t("stats.requests.window", minutes))
-            .fediqoFont(11)
+            .fediqoFont(TypeScale.minor)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
     }
 
     /// The same card and heading Settings uses, so the two screens read as one app.
     private func section(_ title: String, @ViewBuilder content: () -> some View) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title).fediqoFont(11, weight: .semibold).foregroundStyle(.secondary).textCase(.uppercase)
-            VStack(alignment: .leading, spacing: 10) { content() }
-                .padding(14)
+        VStack(alignment: .leading, spacing: Space.mid) {
+            Text(title).fediqoFont(TypeScale.minor, weight: .semibold).foregroundStyle(.secondary).textCase(.uppercase)
+            VStack(alignment: .leading, spacing: Space.mid) { content() }
+                .padding(Space.pad)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fediqoCard()
         }

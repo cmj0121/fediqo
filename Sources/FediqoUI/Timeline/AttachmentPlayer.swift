@@ -64,17 +64,17 @@ struct AttachmentPlayer: View {
     var body: some View {
         VideoPlayer(player: player)
             .frame(width: width, height: height)
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous))
             // A clip with no picture is a black rectangle with controls in it, which says
             // nothing about what it is. The mark stays, over the controls' own background.
             .overlay(alignment: .topLeading) {
                 if audio {
                     Image(systemName: "waveform")
-                        .font(.system(size: 11, weight: .semibold))
-                        .padding(5)
+                        .fediqoSymbol(Glyph.badge)
+                        .padding(Space.snug)
                         .background(.black.opacity(0.55), in: Capsule())
                         .foregroundStyle(.white)
-                        .padding(6)
+                        .padding(Space.snug)
                         .allowsHitTesting(false)
                 }
             }

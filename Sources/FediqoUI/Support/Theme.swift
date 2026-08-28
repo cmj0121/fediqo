@@ -43,13 +43,20 @@ enum Space {
     static let tight: CGFloat = 4
     static let snug: CGFloat = 6
     static let step: CGFloat = 8
+    static let mid: CGFloat = 10
     static let gap: CGFloat = 12
     /// What a card holds its contents in.
     static let pad: CGFloat = 14
-    /// Controls that belong together, and the breath between two runs of them. The second is
-    /// at least twice the first, which is what does the grouping now that no line is drawn.
+    /// Controls that belong together. Its pair is `betweenGroups`, which is at least twice it —
+    /// that ratio is what does the grouping now that no line is drawn between them.
     static let withinGroup: CGFloat = 16
+    /// What a panel keeps between itself and its own edge.
+    static let room: CGFloat = 20
+    /// One band of a page from the next.
+    static let band: CGFloat = 24
     static let betweenGroups: CGFloat = 34
+    /// What a page that is mostly empty leaves round what little it has.
+    static let page: CGFloat = 40
 }
 
 /// Every corner. Three, because there are three things with corners: a card, something inside
@@ -71,6 +78,11 @@ enum Glyph {
     static let badge: CGFloat = 10
     /// The width a leading icon is aligned in, so what follows it lines up down a list.
     static let column: CGFloat = 14
+    /// A mark that leads a heading rather than a line, and the width one is aligned in.
+    static let lead: CGFloat = 18
+    /// A mark that is the only thing in its own space: an empty screen, a landing page.
+    static let big: CGFloat = 26
+    static let huge: CGFloat = 34
 }
 
 /// Every text size. Always reached through `fediqoFont`, which is what carries the reader's own
@@ -81,6 +93,12 @@ enum TypeScale {
     static let minor: CGFloat = 11
     static let small: CGFloat = 12
     static let body: CGFloat = 13
+    static let lead: CGFloat = 15
+    static let section: CGFloat = 17
+    static let title: CGFloat = 20
+    static let display: CGFloat = 26
+    /// The one line on a page that has the page to itself.
+    static let banner: CGFloat = 34
 }
 
 /// The smallest thing worth pressing, which is not the same for a finger as for a cursor: 44 is
@@ -105,6 +123,22 @@ enum Size {
     /// Out here rather than on the screen that measures it, because the closure that asks the
     /// geometry is `Sendable` and a `View`'s own static is isolated to the main actor.
     static let wideRows: CGFloat = 560
+    /// One pixel of edge, where a gradient or a shape has to draw it rather than `Hairline`.
+    static let hairline: CGFloat = 1
+    /// The mark that says a list has ended.
+    static let dot: CGFloat = 5
+    /// The box a mark sits in beside a line of text, and the wider one it sits in where it is
+    /// standing in for the text rather than beside it — a rail with its words put away.
+    static let iconColumn: CGFloat = 24
+    static let wideIconColumn: CGFloat = 34
+    /// A picture a server sent to stand for itself.
+    static let thumbnail: CGFloat = 56
+    /// A button wide enough not to shrink to its two words.
+    static let button: CGFloat = 96
+    /// A panel of prose, and the column a page of settings is read in. Wider than either and
+    /// the eye loses the start of the next line.
+    static let prose: CGFloat = 420
+    static let pageColumn: CGFloat = 620
 }
 
 extension View {
