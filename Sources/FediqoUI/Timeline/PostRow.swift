@@ -28,6 +28,22 @@ extension Post {
     var hidesSomething: Bool { sensitive == true || !(spoiler ?? "").isEmpty }
 }
 
+/// What a row says about this post being an answer to another.
+///
+/// Three cases and not an optional string, because "we know it answers somebody we cannot
+/// name" is a different thing from "it answers nothing" — and a row that quietly said nothing
+/// for the first of those would be hiding half a conversation. Which of the three it is
+/// belongs to the page: the timeline knows whether a parent is on the screen with it, and the
+/// conversation page knows that a direct answer to the post needs no line at all, because the
+/// post is what the page already is.
+enum Answering: Equatable {
+    /// Nothing is said: it answers nothing, or the page is the conversation it answers into.
+    case nothing
+    /// It answers something nobody has handed us. We can say that much and no more.
+    case somebody
+    case handle(String)
+}
+
 /// Every row is the same height, set by the attachment card: a short post is padded up to it
 /// and a long one stops at it with an ellipsis. What the ellipsis is hiding is what opening
 /// the post is for.
@@ -48,10 +64,8 @@ struct PostRow: View {
     /// Whether what this post covered arrives uncovered. The reader's standing answer; a row
     /// can still be opened by hand without changing it.
     var revealed = false
-    /// Whom this post is answering, where the page it is drawn on knows and it is worth
-    /// saying — a reply to a reply, in a conversation. `nil` everywhere else, including for a
-    /// reply to the post the page is about, which is what the page already is.
-    var answering: String?
+    /// What this row says about the post being an answer. Decided by the page that draws it.
+    var answering: Answering = .nothing
     /// Whether this is a row in a list rather than the post itself, opened.
     ///
     /// In a list it is held to the same height as every other row and its words stop with an
@@ -183,10 +197,17 @@ struct PostRow: View {
     /// same idea. Nothing at all is drawn when there is nothing to say.
     @ViewBuilder
     private var decorator: some View {
-        if let answering {
+        if answering != .nothing {
             HStack(spacing: Space.tight) {
                 Image(systemName: "arrowshape.turn.up.left").fediqoSymbol(TypeScale.caption, weight: .regular)
-                Text(t("post.replyingTo", answering)).fediqoFont(TypeScale.caption)
+                // Named where the page can name them, and "an answer" where it cannot. It is
+                // never a name we worked out for ourselves: a reply's first mention is usually
+                // the person it answers and usually is not good enough to print under somebody
+                // else's name.
+                switch answering {
+                case .handle(let handle): Text(t("post.replyingTo", handle)).fediqoFont(TypeScale.caption)
+                default: Text(t("post.isReply")).fediqoFont(TypeScale.caption)
+                }
             }
             .foregroundStyle(.secondary)
         }

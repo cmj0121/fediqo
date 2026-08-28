@@ -1090,6 +1090,23 @@
         }
       }
     },
+    "post.isReply": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "In reply"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "回覆"
+          }
+        }
+      }
+    },
     "post.kept": {
       "extractionState": "manual",
       "localizations": {

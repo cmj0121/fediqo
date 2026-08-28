@@ -91,6 +91,12 @@ enum Fixture {
                  attachments: [image("warned", seed: 7)],
                  sensitive: true, spoiler: "Archaeology, human remains",
                  counts: Counts(replies: 6, reblogs: 4, favourites: 31)),
+            post("the-answer", host: hosts[1], minutesAgo: 8, now: now,
+                 name: "Ines Okafor", handle: "ines",
+                 text: "Answering something this timeline never carried past us. The row says "
+                     + "it is an answer and stops there rather than inventing whose.",
+                 counts: Counts(replies: 1, reblogs: 0, favourites: 5),
+                 inReplyToURI: "https://elm.example/api/v1/statuses/nobody-handed-us-this"),
             post("the-boost", host: hosts[1], minutesAgo: 128, now: now,
                  name: "Mira Halvorsen", handle: "mira",
                  text: "A quiet argument for reading things in the order they were written.",
@@ -116,11 +122,14 @@ enum Fixture {
                      + "them leaves you reading the shortcode :cog: instead.",
                  counts: Counts(replies: 2, reblogs: 6, favourites: 23),
                  emojis: [emoji("spark", seed: 1), emoji("cog", seed: 4)]),
-            post("the-plain-one", host: hosts[2], minutesAgo: 74, now: now,
+            // An answer to a post on the same page, so the row can name whom it answers, and
+            // an answer to something nobody handed us, where it can only say that much.
+            post("the-plain-one", host: hosts[2], minutesAgo: 18, now: now,
                  name: "Bea Lindqvist", handle: "bea",
                  text: "No picture, no warning, no numbers anybody has told us. A post can be "
                      + "just its words, and the row does not pad it out with an empty box.",
-                 counts: Counts()),
+                 counts: Counts(),
+                 inReplyToURI: address("the-tags", on: hosts[2], by: "yusuf")),
         ]
     }
 

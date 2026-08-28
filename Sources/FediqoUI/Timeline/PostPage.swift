@@ -124,7 +124,7 @@ struct PostPage: View {
     /// One post in the conversation. It is the same row the timeline draws — a reader who
     /// pressed `Return` on a post should find the same thing here — and clicking one opens
     /// nothing, because they are already looking at the whole of it.
-    private func row(_ post: Post, selected: Bool, answering: String? = nil) -> some View {
+    private func row(_ post: Post, selected: Bool, answering: Answering = .nothing) -> some View {
         PostRow(post: post, selected: selected,
                 turns: selected ? app.mediaTurns : 0,
                 plays: selected ? app.mediaPlays : 0,
@@ -167,7 +167,10 @@ struct PostPage: View {
                 }
                 row(conversation.post, selected: conversation.post.mergeKey == ring)
                 ForEach(conversation.laidOut()) { reply in
-                    row(reply.post, selected: reply.post.mergeKey == ring, answering: reply.answering)
+                    row(reply.post, selected: reply.post.mergeKey == ring,
+                        // A direct answer to the post says nothing: the post is above it, and
+                        // the page is the conversation.
+                        answering: reply.answering.map(Answering.handle) ?? .nothing)
                         .padding(.leading, indent(reply.depth))
                         .overlay(alignment: .leading) { rail(reply.depth) }
                 }
