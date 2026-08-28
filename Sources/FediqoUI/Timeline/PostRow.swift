@@ -79,7 +79,7 @@ struct PostRow: View {
     /// size; three lines is the floor, because a row that shows one line of a paragraph is not
     /// showing a post at all.
     private var lines: Int {
-        max(3, Int(AttachmentDeck.height / (13 * scale * 1.35)))
+        max(3, Int(AttachmentDeck.height / (TypeScale.body * scale * 1.35)))
     }
 
     private var spoiler: String { post.spoiler ?? "" }
@@ -112,11 +112,11 @@ struct PostRow: View {
     }
 
     private var content: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Space.step) {
             decorator
             metadata
             if wide {
-                HStack(alignment: .top, spacing: 12) {
+                HStack(alignment: .top, spacing: Space.gap) {
                     words
                     attachmentColumn
                 }
@@ -127,7 +127,7 @@ struct PostRow: View {
                 // ever cut mid-line — the ellipsis is the row's, not the frame's.
                 .frame(height: AttachmentDeck.height, alignment: .topLeading)
             } else {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: Space.step) {
                     words
                     if !post.attachments.isEmpty { deck }
                 }
@@ -135,7 +135,7 @@ struct PostRow: View {
             InteractionBar(post: post, open: open)
             footer
         }
-        .padding(14)
+        .padding(Space.pad)
         .frame(maxWidth: .infinity, alignment: .leading)
         .fediqoCard()
         .fediqoFocusRing(selected)
@@ -162,7 +162,7 @@ struct PostRow: View {
     private var decorator: some View {
         if let boostedBy = post.boostedBy {
             Label(t("timeline.boostedBy", boostedBy), systemImage: "arrow.2.squarepath")
-                .fediqoFont(10)
+                .fediqoFont(TypeScale.caption)
                 .foregroundStyle(.secondary)
         }
     }
@@ -171,14 +171,14 @@ struct PostRow: View {
     /// is about the post rather than about its words, and an avatar in a gutter beside the
     /// text would make the text column start in a different place from the row above it.
     private var metadata: some View {
-        HStack(spacing: 8) {
-            RemoteImage(url: post.authorAvatarURL, width: 30, height: 30)
-            Text(post.authorName).fediqoFont(13, weight: .semibold).lineLimit(1)
-            Text(post.authorHandle).fediqoFont(11).foregroundStyle(.secondary).lineLimit(1)
-            Spacer(minLength: 6)
+        HStack(spacing: Space.step) {
+            RemoteImage(url: post.authorAvatarURL, width: Size.avatar, height: Size.avatar)
+            Text(post.authorName).fediqoFont(TypeScale.body, weight: .semibold).lineLimit(1)
+            Text(post.authorHandle).fediqoFont(TypeScale.minor).foregroundStyle(.secondary).lineLimit(1)
+            Spacer(minLength: Space.snug)
             sources
             Text(post.createdAt, format: .relative(presentation: .numeric))
-                .fediqoFont(10)
+                .fediqoFont(TypeScale.caption)
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
         }
@@ -186,11 +186,11 @@ struct PostRow: View {
 
     /// The left column: what they said, and the line in front of it where there is one.
     private var words: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: Space.snug) {
             if !spoiler.isEmpty { warning }
             if !post.text.isEmpty, !wordsAreCovered {
                 Text(post.text)
-                    .fediqoFont(13)
+                    .fediqoFont(TypeScale.body)
                     .textSelection(.enabled)
                     .lineLimit(condensed ? lines : nil)
                     .truncationMode(.tail)
@@ -209,24 +209,24 @@ struct PostRow: View {
     /// they are looking at — and the button beside it works both ways, so a reader who has
     /// everything turned on can still put one post back.
     private var warning: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
+        HStack(alignment: .firstTextBaseline, spacing: Space.step) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 12, weight: .semibold))
+                .fediqoSymbol(Glyph.inline)
                 .foregroundStyle(.orange)
             Text(spoiler)
-                .fediqoFont(12, weight: .semibold)
+                .fediqoFont(TypeScale.small, weight: .semibold)
                 .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 8)
+            Spacer(minLength: Space.step)
             toggle
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
+        .padding(.horizontal, Space.gap)
+        .padding(.vertical, Space.step)
         .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
+            RoundedRectangle(cornerRadius: Radius.inner, style: .continuous)
                 .fill(Color.orange.opacity(colorScheme == .dark ? 0.16 : 0.12))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
+            RoundedRectangle(cornerRadius: Radius.inner, style: .continuous)
                 .strokeBorder(Color.orange.opacity(0.35))
         )
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -237,14 +237,14 @@ struct PostRow: View {
         Button {
             withAnimation(Motion.appearing) { reveal = !shown }
         } label: {
-            HStack(spacing: 4) {
+            HStack(spacing: Space.tight) {
                 Image(systemName: shown ? "eye.slash" : "eye")
-                    .font(.system(size: 10, weight: .semibold))
+                    .fediqoSymbol(Glyph.badge)
                 Text(t(shown ? "post.covered.hide" : "post.covered.show"))
-                    .fediqoFont(10, weight: .semibold)
+                    .fediqoFont(TypeScale.caption, weight: .semibold)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
+            .padding(.horizontal, Space.step)
+            .padding(.vertical, Space.tight)
             .background(Capsule().fill(Color.orange.opacity(colorScheme == .dark ? 0.28 : 0.20)))
             .foregroundStyle(.orange)
             .contentShape(Capsule())
@@ -260,7 +260,7 @@ struct PostRow: View {
     @ViewBuilder
     private var attachmentColumn: some View {
         if post.attachments.isEmpty {
-            Color.clear.frame(width: 200, height: 0)
+            Color.clear.frame(width: AttachmentDeck.side, height: 0)
         } else {
             deck
         }
@@ -284,20 +284,20 @@ struct PostRow: View {
         if post.application == nil {
             // Held open, because most posts have nothing to say here and a list where every
             // other row is nine points shorter is a list that never sits still.
-            if condensed { Color.clear.frame(height: 11 * scale) }
+            if condensed { Color.clear.frame(height: TypeScale.minor * scale) }
         } else if let application = post.application {
             // At the right, alone. It is the only line in the row that is about none of the
             // three — not the person, not the words, not what can be done — and the far end is
             // where a reader's eye goes last.
-            HStack(spacing: 4) {
+            HStack(spacing: Space.tight) {
                 Spacer(minLength: 0)
-                Text(t("post.writtenWith")).fediqoFont(9).foregroundStyle(.tertiary)
+                Text(t("post.writtenWith")).fediqoFont(TypeScale.micro).foregroundStyle(.tertiary)
                 if let website = application.website {
                     Link(application.name, destination: website)
-                        .fediqoFont(9)
+                        .fediqoFont(TypeScale.micro)
                         .foregroundStyle(.tertiary)
                 } else {
-                    Text(application.name).fediqoFont(9).foregroundStyle(.tertiary)
+                    Text(application.name).fediqoFont(TypeScale.micro).foregroundStyle(.tertiary)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
@@ -308,10 +308,10 @@ struct PostRow: View {
     /// band beside who wrote it and when, because it is the same kind of fact: where this post
     /// reached us from, rather than anything about what it says.
     private var sources: some View {
-        HStack(spacing: 5) {
-            Text(t("timeline.via")).fediqoFont(10).foregroundStyle(.tertiary)
+        HStack(spacing: Space.snug) {
+            Text(t("timeline.via")).fediqoFont(TypeScale.caption).foregroundStyle(.tertiary)
             ForEach(post.sources, id: \.self) { host in
-                Text(host).fediqoFont(10).fediqoPill()
+                Text(host).fediqoFont(TypeScale.caption).fediqoPill()
             }
         }
     }
@@ -324,7 +324,7 @@ struct RemoteImage: View {
     let url: URL?
     let width: CGFloat
     let height: CGFloat
-    var radius: CGFloat = 7
+    var radius: CGFloat = Radius.thumbnail
 
     var body: some View {
         AsyncImage(url: url) { image in

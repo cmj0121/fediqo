@@ -31,19 +31,19 @@ struct InteractionBar: View {
     private var marks: PostMarks { app.marks(of: post) }
 
     var body: some View {
-        HStack(spacing: Self.betweenGroups) {
+        HStack(spacing: Space.betweenGroups) {
             theirs
             mine
             leaving
             Spacer(minLength: 0)
         }
         .foregroundStyle(.secondary)
-        .padding(.top, 4)
+        .padding(.top, Space.tight)
     }
 
     /// What everybody else did, with the numbers the servers gave us.
     private var theirs: some View {
-        HStack(spacing: Self.withinGroup) {
+        HStack(spacing: Space.withinGroup) {
             // Replying makes a new post rather than marking this one, and this app has no
             // composer that can send one yet — so it still leaves, and says so by doing
             // nothing else. When #8 lands it stops leaving and nothing else here changes.
@@ -64,7 +64,7 @@ struct InteractionBar: View {
     /// something is not a thing any server tells anybody, and what this device keeps is
     /// nobody's business but this device's.
     private var mine: some View {
-        HStack(spacing: Self.withinGroup) {
+        HStack(spacing: Space.withinGroup) {
             switching(marks.bookmarked == true ? "bookmark.fill" : "bookmark",
                       labelKey: "post.bookmark", on: marks.bookmarked == true, tint: .blue) {
                 Task { await app.act(.bookmark, on: post) }
@@ -83,7 +83,7 @@ struct InteractionBar: View {
     /// scanning a long list never wants — and it is one row down in `⋯` under **General**,
     /// beside Copy link, which is the other thing you do with an address.
     private var leaving: some View {
-        HStack(spacing: Self.withinGroup) {
+        HStack(spacing: Space.withinGroup) {
             if let open {
                 // The conversation, which is what opening a post here shows: the post and
                 // everything around it. Not an arrow — nothing is being sent anywhere.
@@ -104,21 +104,12 @@ struct InteractionBar: View {
         }
     }
 
-    /// How big a control is, and how far apart they sit.
-    ///
-    /// The gap between two groups is a little over twice the gap inside one, which is what
-    /// does the grouping now that nothing is drawn between them. Below about that ratio the
-    /// three runs read as one; far above it they read as three separate rows.
-    private static let glyph: CGFloat = 19
-    private static let withinGroup: CGFloat = 16
-    private static let betweenGroups: CGFloat = 34
-
     private func counted(_ symbol: String, count: Int?, labelKey: String, on: Bool,
                          tint: Color, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 4) {
-                Image(systemName: symbol).font(.system(size: Self.glyph, weight: .medium))
-                if let count { Text(verbatim: "\(count)").fediqoFont(12) }
+            HStack(spacing: Space.tight) {
+                Image(systemName: symbol).fediqoSymbol(Glyph.action, weight: .medium)
+                if let count { Text(verbatim: "\(count)").fediqoFont(TypeScale.small) }
             }
             .contentShape(Rectangle())
         }
@@ -132,7 +123,7 @@ struct InteractionBar: View {
     private func switching(_ symbol: String, labelKey: String, on: Bool, tint: Color,
                            action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol).font(.system(size: Self.glyph, weight: .medium)).contentShape(Rectangle())
+            Image(systemName: symbol).fediqoSymbol(Glyph.action, weight: .medium).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(on ? tint : Color.secondary)
@@ -172,7 +163,7 @@ struct MoreActions: View {
     private var host: String { post.sources.first ?? "" }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: Space.gap) {
             Picker("", selection: $page) {
                 ForEach(Page.allCases) { page in
                     Text(t(page.titleKey)).tag(page)
@@ -188,12 +179,12 @@ struct MoreActions: View {
 
             acting
         }
-        .padding(12)
-        .frame(width: 300)
+        .padding(Space.gap)
+        .frame(width: Size.popover)
     }
 
     private var general: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: Space.hair) {
             row("link", t("post.copyLink"), tint: .primary) {
                 copy(post.webURL)
                 dismiss()
@@ -212,21 +203,21 @@ struct MoreActions: View {
     /// this app promises it can always say which of the two hid something — and it can only
     /// keep that promise if the reader was asked which of the two they meant.
     private var danger: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: Space.hair) {
             muting(.author, author, labelKey: "post.muteAuthor", value: post.authorId)
             muting(.host, host, labelKey: "post.muteHost", value: host)
-            Divider().padding(.vertical, 4)
+            Divider().padding(.vertical, Space.tight)
             if app.reported.contains(post.mergeKey) {
                 label("checkmark.circle", t("post.reported"), tint: .secondary)
             } else {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: Space.snug) {
                     row("flag", t("post.report"), tint: .red) {
                         Task { await app.report(post, comment: comment); dismiss() }
                     }
                     TextField(t("post.report.why"), text: $comment, axis: .vertical)
                         .textFieldStyle(.roundedBorder)
                         .lineLimit(1...3)
-                        .fediqoFont(11)
+                        .fediqoFont(TypeScale.minor)
                 }
             }
         }
@@ -234,10 +225,10 @@ struct MoreActions: View {
 
     private func muting(_ kind: Mute.Kind, _ name: String, labelKey: String,
                         value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: Space.hair) {
             label(kind == .author ? "person.slash" : "network.slash",
                   t(labelKey, name), tint: .orange)
-            HStack(spacing: 6) {
+            HStack(spacing: Space.snug) {
                 place(t("post.mute.here"), done: app.isMuted(kind, value, onServer: false)) {
                     Task { await app.mute(kind, value, onServer: false, for: post) }
                 }
@@ -246,20 +237,20 @@ struct MoreActions: View {
                 }
                 .disabled(app.actingChoices.isEmpty)
             }
-            .padding(.leading, 22)
+            .padding(.leading, Glyph.column + Space.step)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, Space.hair)
     }
 
     private func place(_ name: String, done: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 3) {
+            HStack(spacing: Space.tight) {
                 Image(systemName: done ? "checkmark" : "circle")
-                    .font(.system(size: 9, weight: .semibold))
-                Text(name).fediqoFont(11)
+                    .fediqoSymbol(Glyph.badge)
+                Text(name).fediqoFont(TypeScale.minor)
             }
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
+            .padding(.horizontal, Space.step)
+            .padding(.vertical, Space.tight)
             .background(Capsule().fill(.quaternary.opacity(done ? 1 : 0.4)))
             .contentShape(Capsule())
         }
@@ -282,7 +273,7 @@ struct MoreActions: View {
                     Text(choice.account.handle).tag(choice.endpoint)
                 }
             }
-            .fediqoFont(11)
+            .fediqoFont(TypeScale.minor)
         }
     }
 
@@ -295,13 +286,13 @@ struct MoreActions: View {
     }
 
     private func label(_ symbol: String, _ name: String, tint: Color) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: symbol).font(.system(size: 12, weight: .medium)).frame(width: 14)
-            Text(name).fediqoFont(12)
+        HStack(spacing: Space.step) {
+            Image(systemName: symbol).fediqoSymbol(Glyph.inline, weight: .medium).frame(width: Glyph.column)
+            Text(name).fediqoFont(TypeScale.small)
             Spacer(minLength: 0)
         }
         .foregroundStyle(tint)
-        .padding(.vertical, 3)
+        .padding(.vertical, Space.tight)
         .contentShape(Rectangle())
     }
 
