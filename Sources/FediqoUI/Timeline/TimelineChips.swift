@@ -18,15 +18,15 @@ struct TimelineChips: View {
     @Binding var editing: TimelineEditor.Subject?
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Space.snug) {
             ScrollViewReader { row in
                 ScrollView(.horizontal) {
-                    HStack(spacing: 6) {
+                    HStack(spacing: Space.snug) {
                         ForEach(app.timelines) { timeline in
                             chip(timeline)
                         }
                     }
-                    .padding(.vertical, 1)
+                    .padding(.vertical, Space.hair)
                 }
                 // The chosen one is brought into view whenever it changes, because it changes
                 // from outside this row as well: `Tab` rotates through the timelines, and a
@@ -64,10 +64,10 @@ struct TimelineChips: View {
             app.currentTimeline = timeline.id
         } label: {
             Text(timeline.displayName)
-                .fediqoFont(12, weight: selected ? .semibold : .regular)
+                .fediqoFont(TypeScale.small, weight: selected ? .semibold : .regular)
                 .lineLimit(1)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
+                .padding(.horizontal, Space.mid)
+                .padding(.vertical, Space.snug)
                 .background(
                     Capsule().fill(selected ? Palette.accent.opacity(colorScheme == .dark ? 0.22 : 0.18)
                                             : Color.primary.opacity(0.06))
@@ -128,14 +128,14 @@ struct NoTimelinesView: View {
     @State private var making: TimelineEditor.Subject?
 
     var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "rectangle.stack").font(.system(size: 26, weight: .light))
+        VStack(spacing: Space.mid) {
+            Image(systemName: "rectangle.stack").fediqoSymbol(Glyph.big, weight: .light)
                 .foregroundStyle(.tertiary)
-            Text(t("timeline.none")).fediqoFont(12).foregroundStyle(.secondary)
+            Text(t("timeline.none")).fediqoFont(TypeScale.small).foregroundStyle(.secondary)
             Button(t("timeline.new")) { making = .new }
                 .buttonStyle(.borderedProminent)
                 .tint(Palette.accent)
-                .fediqoFont(12)
+                .fediqoFont(TypeScale.small)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .sheet(item: $making) { subject in

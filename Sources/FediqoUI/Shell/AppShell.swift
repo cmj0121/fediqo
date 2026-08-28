@@ -19,6 +19,14 @@ struct AppShell: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
 
+    /// The floor, and only the floor. A window narrower than a panel of prose has nothing to
+    /// put beside the rail, and one shorter than this shows a single row and a scrollbar.
+    private static let shortestUsefulColumn: CGFloat = 300
+    /// The one thing on a phone that is not a place to go: the press that writes. Bigger than
+    /// anything it floats over, and held clear of the tab bar underneath it.
+    private static let composeButton: CGFloat = 54
+    private static let aboveTabBar: CGFloat = 72
+
     private var railWidth: CGFloat {
         app.preferences.railExpanded ? RailView.expandedWidth : RailView.collapsedWidth
     }
@@ -75,11 +83,11 @@ struct AppShell: View {
         }
         // The floor, and only the floor. Anything larger is the reader's business, and
         // anything that made this bigger than it needs to be was a bug.
-        .frame(minWidth: 420, minHeight: 300)
+        .frame(minWidth: Size.prose, minHeight: Self.shortestUsefulColumn)
         // Beside the bar, at the foot, next to the button that opened it.
         .composerPanel(
             alignment: .bottomLeading,
-            inset: EdgeInsets(top: 0, leading: railWidth + 10, bottom: 10, trailing: 0)
+            inset: EdgeInsets(top: 0, leading: railWidth + Space.mid, bottom: Space.mid, trailing: 0)
         )
     }
 
@@ -97,22 +105,23 @@ struct AppShell: View {
         .overlay(alignment: .bottomTrailing) { composeButton }
         .composerPanel(
             alignment: .bottomTrailing,
-            inset: EdgeInsets(top: 0, leading: 0, bottom: 140, trailing: 16)
+            inset: EdgeInsets(top: 0, leading: 0, bottom: Self.aboveTabBar + Self.composeButton + Space.pad,
+                              trailing: Space.withinGroup)
         )
     }
 
     private var composeButton: some View {
         Button { app.toggleComposer() } label: {
             Image(systemName: "square.and.pencil")
-                .font(.system(size: 20, weight: .semibold))
-                .frame(width: 54, height: 54)
+                .fediqoSymbol(Glyph.action, weight: .semibold)
+                .frame(width: Self.composeButton, height: Self.composeButton)
                 .background(Circle().fill(Palette.accent))
                 .foregroundStyle(Color.black.opacity(0.85))
                 .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
         }
         .buttonStyle(.plain)
-        .padding(.trailing, 20)
-        .padding(.bottom, 72)
+        .padding(.trailing, Space.room)
+        .padding(.bottom, Self.aboveTabBar)
         .accessibilityLabel(Text(t("rail.compose")))
     }
     #endif

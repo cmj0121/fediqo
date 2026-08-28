@@ -52,6 +52,9 @@ struct FeedScreen: View {
     /// who was looking at the marker instead is not covered up for long.
     private static let announcementLasts = Duration.milliseconds(2500)
 
+    /// The line under the last post: a hairline that fades out, ending in a dot.
+    private static let stopLine: CGFloat = 34
+
     private var fading: Animation? { reduceMotion ? nil : Motion.appearing }
 
     private var model: FeedModel { app.feed(for: timeline) }
@@ -155,7 +158,7 @@ struct FeedScreen: View {
 
     @ViewBuilder
     private var controls: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: Space.hair) {
             // Back to the top in one move. It lives with the other controls rather than
             // floating over the posts, where the composer already is on the narrow layout.
             // It asks the app rather than scrolling the list itself, so that the button and
@@ -251,7 +254,7 @@ struct FeedScreen: View {
             emptyState
         } else {
             ScrollView {
-                LazyVStack(spacing: 8) {
+                LazyVStack(spacing: Space.step) {
                     Color.clear.frame(height: 0).id(Self.top)
                     // The id `ForEach` gives a row is the post's own `mergeKey`, and that is
                     // what the selection is written in — so scrolling to the ring is
@@ -282,13 +285,13 @@ struct FeedScreen: View {
                         theEnd(readBackTo: oldest.createdAt)
                     }
                 }
-                .padding(12)
+                .padding(Space.gap)
             }
             // Over the foot of the feed rather than in it: the marker is the place and this is
             // the moment, and a moment that pushed the list down would be a place too.
             .overlay(alignment: .bottom) {
                 if announcing {
-                    EndToast().padding(.bottom, 28)
+                    EndToast().padding(.bottom, Space.band)
                 }
             }
             // Raised by the feed on the crossing and taken back down here — a reader who comes
@@ -337,12 +340,12 @@ struct FeedScreen: View {
     /// indistinguishable from one that is finished — which is a different sentence, and not
     /// this one's to say.
     private var readingOn: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Space.step) {
             ProgressView().controlSize(.small)
-            Text(t("timeline.older")).fediqoFont(11).foregroundStyle(.secondary)
+            Text(t("timeline.older")).fediqoFont(TypeScale.minor).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 12)
+        .padding(.vertical, Space.gap)
     }
 
     /// Where the timeline stops, and how far back that is.
@@ -358,11 +361,11 @@ struct FeedScreen: View {
     /// wanted. It is also the cue that does not depend on seeing a five-point dot, which is why
     /// the two lines are one thing to a screen reader and the drawing is nothing to it at all.
     private func theEnd(readBackTo oldest: Date) -> some View {
-        VStack(spacing: 12) {
+        VStack(spacing: Space.gap) {
             theLineStopping.accessibilityHidden(true)
-            VStack(spacing: 3) {
-                Text(t("timeline.end.reached", reached(oldest))).fediqoFont(12)
-                Text(t("timeline.end.note")).fediqoFont(11).foregroundStyle(.secondary)
+            VStack(spacing: Space.tight) {
+                Text(t("timeline.end.reached", reached(oldest))).fediqoFont(TypeScale.small)
+                Text(t("timeline.end.note")).fediqoFont(TypeScale.minor).foregroundStyle(.secondary)
             }
             .multilineTextAlignment(.center)
             .fixedSize(horizontal: false, vertical: true)
@@ -370,7 +373,7 @@ struct FeedScreen: View {
         .frame(maxWidth: .infinity)
         // Nothing above it. The line has to leave the last card rather than start somewhere
         // below it — a gap between the two is a line that came from nowhere.
-        .padding(.bottom, 24)
+        .padding(.bottom, Space.band)
         .accessibilityElement(children: .combine)
     }
 
@@ -385,10 +388,10 @@ struct FeedScreen: View {
                 .fill(LinearGradient(colors: [Palette.hairline(colorScheme),
                                               Palette.hairline(colorScheme).opacity(0)],
                                      startPoint: .top, endPoint: .bottom))
-                .frame(width: 1, height: 34)
+                .frame(width: Size.hairline, height: Self.stopLine)
             Circle()
                 .fill(Palette.focus(colorScheme))
-                .frame(width: 5, height: 5)
+                .frame(width: Size.dot, height: Size.dot)
         }
     }
 
@@ -408,27 +411,27 @@ struct FeedScreen: View {
         // is nothing wrong and nothing to wait for, and "no posts" would have the reader
         // looking for a fault. It says what is missing instead.
         let needsAccount = !app.isReadable(timeline)
-        return VStack(spacing: 10) {
+        return VStack(spacing: Space.mid) {
             if model.loading {
                 ProgressView()
-                Text(t("timeline.loading")).fediqoFont(12).foregroundStyle(.secondary)
+                Text(t("timeline.loading")).fediqoFont(TypeScale.small).foregroundStyle(.secondary)
             } else {
                 Image(systemName: needsAccount ? "person.crop.circle.badge.questionmark" : "tray")
-                    .font(.system(size: 26, weight: .light)).foregroundStyle(.tertiary)
+                    .fediqoSymbol(Glyph.big, weight: .light).foregroundStyle(.tertiary)
                 Text(t(needsAccount ? "timeline.empty.needsAccount"
                                     : hiddenByRules ? "timeline.empty.filtered" : "timeline.empty"))
-                    .fediqoFont(12)
+                    .fediqoFont(TypeScale.small)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                 if showsTimelineControls {
                     Button(t("timeline.addSource")) { app.addingSource = true }
                         .buttonStyle(.borderedProminent)
                         .tint(Palette.accent)
-                        .fediqoFont(12)
+                        .fediqoFont(TypeScale.small)
                 }
             }
         }
-        .padding(20)
+        .padding(Space.room)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
@@ -448,7 +451,7 @@ struct HeaderMenuChrome: ViewModifier {
             .buttonStyle(.plain)
             .menuIndicator(.hidden)
             .foregroundStyle(warning ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.secondary))
-            .frame(width: 24, height: 24)
+            .frame(width: Size.iconColumn, height: Size.iconColumn)
             .help(t(labelKey))
             .accessibilityLabel(Text(t(labelKey)))
     }
@@ -475,7 +478,7 @@ private struct EndToast: View {
         // half seconds these are the only words there are, and a reader who has to look twice
         // has already missed them.
         Text(t("timeline.end.toast"))
-            .fediqoFont(12, weight: .medium)
+            .fediqoFont(TypeScale.small, weight: .medium)
             .fediqoPill()
             // A pill is usually a label beside something louder, so it speaks quietly. This
             // one is the whole of what is being said, and for two and a half seconds only.
@@ -496,22 +499,25 @@ private struct EndToast: View {
 /// Notifications live inside the timeline. There is nothing to show until #9 lands, and the
 /// reason there will never be a push server is worth saying on the screen that would want one.
 struct NotificationsSheet: View {
+    /// The least a sheet of notifications can be given and still be a list rather than a slot.
+    private static let narrowest = CGSize(width: 320, height: 180)
+
     let onClose: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: Space.pad) {
             HStack {
-                Text(t("timeline.notifications")).fediqoFont(17, weight: .semibold)
+                Text(t("timeline.notifications")).fediqoFont(TypeScale.section, weight: .semibold)
                 Spacer()
-                Button(t("common.close"), action: onClose).buttonStyle(.plain).fediqoFont(12).foregroundStyle(.secondary)
+                Button(t("common.close"), action: onClose).buttonStyle(.plain).fediqoFont(TypeScale.small).foregroundStyle(.secondary)
             }
             Text(t("timeline.notifications.empty"))
-                .fediqoFont(12)
+                .fediqoFont(TypeScale.small)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer()
         }
-        .padding(20)
-        .frame(minWidth: 320, minHeight: 180)
+        .padding(Space.room)
+        .frame(minWidth: Self.narrowest.width, minHeight: Self.narrowest.height)
     }
 }

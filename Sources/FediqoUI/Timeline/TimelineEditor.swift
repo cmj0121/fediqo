@@ -32,6 +32,10 @@ struct TimelineEditor: View {
     let subject: Subject
     let done: () -> Void
 
+    /// Wide enough for a rule and its two fields side by side, and no wider: the sheet stands
+    /// over the timeline it edits, and covering the whole of it would hide what is being said.
+    private static let sheetWidth: CGFloat = 380
+
     @Environment(AppState.self) private var app
     @State private var template = TimelineTemplate.shipped[0]
     @State private var name = ""
@@ -60,26 +64,26 @@ struct TimelineEditor: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: Space.pad) {
             Text(t(editing == nil ? "timeline.new" : "timeline.edit"))
-                .fediqoFont(15, weight: .semibold)
+                .fediqoFont(TypeScale.lead, weight: .semibold)
 
             if editing == nil { templates }
             fields
             Spacer(minLength: 0)
             buttons
         }
-        .padding(16)
-        .frame(width: 380, alignment: .topLeading)
-        .fediqoCard(radius: 12, shadow: true)
+        .padding(Space.withinGroup)
+        .frame(width: Self.sheetWidth, alignment: .topLeading)
+        .fediqoCard(radius: Radius.panel, shadow: true)
         .onAppear(perform: load)
     }
 
     // MARK: - The questions
 
     private var templates: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(t("timeline.template")).fediqoFont(11).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: Space.snug) {
+            Text(t("timeline.template")).fediqoFont(TypeScale.minor).foregroundStyle(.secondary)
             Picker("", selection: $template) {
                 ForEach(TimelineTemplate.all) { option in
                     Text(t("template.\(option.id).name")).tag(option.id)
@@ -94,7 +98,7 @@ struct TimelineEditor: View {
                 summary = t("template.\(id).summary")
             }
             Text(t("template.\(chosen.id).summary"))
-                .fediqoFont(11)
+                .fediqoFont(TypeScale.minor)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -116,33 +120,33 @@ struct TimelineEditor: View {
 
         if chosen.source.needsAccount, app.servers.isEmpty {
             Text(t("timeline.needsAccount"))
-                .fediqoFont(11)
+                .fediqoFont(TypeScale.minor)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
 
     private func field(_ label: String, text: Binding<String>, lines: Int) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label).fediqoFont(11).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: Space.tight) {
+            Text(label).fediqoFont(TypeScale.minor).foregroundStyle(.secondary)
             TextField("", text: text, axis: lines > 1 ? .vertical : .horizontal)
                 .textFieldStyle(.plain)
                 .lineLimit(lines, reservesSpace: lines > 1)
-                .fediqoFont(12)
-                .padding(8)
-                .fediqoCard(radius: 8, raised: false)
+                .fediqoFont(TypeScale.small)
+                .padding(Space.step)
+                .fediqoCard(radius: Radius.inner, raised: false)
         }
     }
 
     private var buttons: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Space.step) {
             Spacer()
             Button(t("timeline.cancel"), action: done)
                 .buttonStyle(.plain)
-                .fediqoFont(12)
+                .fediqoFont(TypeScale.small)
             Button(t("timeline.save"), action: save)
                 .buttonStyle(.borderedProminent)
-                .fediqoFont(12)
+                .fediqoFont(TypeScale.small)
                 .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
         }
     }

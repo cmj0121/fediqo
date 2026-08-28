@@ -10,26 +10,29 @@ struct RailView: View {
     @Environment(\.colorScheme) private var colorScheme
     static let collapsedWidth: CGFloat = 52
     static let expandedWidth: CGFloat = 184
+    /// The box the open-and-close control is, which is wider than a row's icon and shorter
+    /// than a row: it is the one thing in the bar that is about the bar rather than a place.
+    private static let toggleTile = CGSize(width: 34, height: 30)
 
     var body: some View {
         let expanded = app.preferences.railExpanded
 
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: Space.tight) {
             toggle(expanded: expanded)
-                .padding(.bottom, 6)
+                .padding(.bottom, Space.snug)
 
             ForEach(RailItem.allCases) { item in
                 button(item, expanded: expanded)
             }
 
-            Spacer(minLength: 8)
+            Spacer(minLength: Space.step)
 
-            Hairline().padding(.bottom, 6)
+            Hairline().padding(.bottom, Space.snug)
 
             composeButton(expanded: expanded)
         }
-        .padding(.horizontal, 7)
-        .padding(.vertical, 10)
+        .padding(.horizontal, Space.step)
+        .padding(.vertical, Space.mid)
         .frame(width: expanded ? Self.expandedWidth : Self.collapsedWidth, alignment: .leading)
         .background(Palette.raised(colorScheme))
     }
@@ -41,8 +44,8 @@ struct RailView: View {
             }
         } label: {
             Image(systemName: expanded ? "sidebar.leading" : "sidebar.trailing")
-                .font(.system(size: 16, weight: .medium))
-                .frame(width: 34, height: 30)
+                .fediqoSymbol(Glyph.lead, weight: .medium)
+                .frame(width: Self.toggleTile.width, height: Self.toggleTile.height)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -64,7 +67,7 @@ struct RailView: View {
                 weight: selected ? .semibold : .regular
             )
             .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: Radius.inner, style: .continuous)
                     .fill(selected ? Palette.accent.opacity(colorScheme == .dark ? 0.22 : 0.18) : .clear)
             )
             .foregroundStyle(selected ? Palette.accent : Color.primary.opacity(0.75))
@@ -81,7 +84,7 @@ struct RailView: View {
         } label: {
             rowLabel(symbol: "square.and.pencil", titleKey: "rail.compose", expanded: expanded, weight: .semibold)
                 .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    RoundedRectangle(cornerRadius: Radius.inner, style: .continuous)
                         .fill(Palette.accent.opacity(colorScheme == .dark ? 0.20 : 0.16))
                 )
                 .foregroundStyle(Palette.accent)
@@ -93,23 +96,24 @@ struct RailView: View {
     }
 
     private func rowLabel(symbol: String, titleKey: String, expanded: Bool, weight: Font.Weight) -> some View {
-        HStack(spacing: 9) {
+        HStack(spacing: Space.mid) {
             Image(systemName: symbol)
                 // The bar is icons and nothing else when it is closed, so the icon is the
                 // whole of what a reader has to aim at and to recognise. Drawn at the size a
                 // toolbar icon is rather than the size a word is: it is not sitting beside
                 // text here, it is standing in for it.
-                .font(.system(size: 18, weight: weight))
-                .frame(width: 24)
+                .fediqoSymbol(Glyph.lead, weight: weight)
+                .frame(width: Size.iconColumn)
             if expanded {
                 Text(t(titleKey))
-                    .fediqoFont(13, weight: weight)
+                    .fediqoFont(TypeScale.body, weight: weight)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
             }
         }
-        .frame(width: expanded ? Self.expandedWidth - 28 : 34, alignment: expanded ? .leading : .center)
-        .padding(.vertical, 8)
+        .frame(width: expanded ? Self.expandedWidth - Space.pad * 2 : Size.wideIconColumn,
+               alignment: expanded ? .leading : .center)
+        .padding(.vertical, Space.step)
         .padding(.horizontal, expanded ? 7 : 0)
         .contentShape(Rectangle())
     }

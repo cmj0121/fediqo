@@ -3,6 +3,9 @@ import SwiftUI
 /// The first thing you see: the octopus, turning, and nothing else. It hands over on its
 /// own once the turn finishes, and to a click before that for anyone who has seen it.
 struct LandingView: View {
+    /// The mark, at the size a page with nothing else on it can give it.
+    private static let mascot: CGFloat = 190
+
     @Environment(AppState.self) private var app
     @Environment(\.colorScheme) private var colorScheme
 
@@ -16,19 +19,19 @@ struct LandingView: View {
         ZStack {
             Palette.surface(colorScheme).ignoresSafeArea()
 
-            VStack(spacing: 28) {
+            VStack(spacing: Space.band) {
                 Spacer()
 
-                MascotView(side: 190)
+                MascotView(side: Self.mascot)
                     .rotation3DEffect(.degrees(spin), axis: (x: 0, y: 1, z: 0), perspective: 0.4)
                     .scaleEffect(settled ? 1.0 : 0.86)
                     .shadow(color: .black.opacity(colorScheme == .dark ? 0.6 : 0.2), radius: 30, y: 12)
 
-                VStack(spacing: 10) {
+                VStack(spacing: Space.mid) {
                     Text(verbatim: "Fediqo")
-                        .fediqoFont(34, weight: .semibold, design: .rounded)
+                        .fediqoFont(TypeScale.banner, weight: .semibold, design: .rounded)
                     Text(t("landing.tagline"))
-                        .fediqoFont(15)
+                        .fediqoFont(TypeScale.lead)
                         .foregroundStyle(.secondary)
                 }
                 .opacity(settled ? 1 : 0)
@@ -37,14 +40,14 @@ struct LandingView: View {
 
                 Button(action: advance) {
                     Text(t(settled ? "landing.enter" : "landing.skip"))
-                        .fediqoFont(13, weight: .medium)
-                        .frame(minWidth: 96)
+                        .fediqoFont(TypeScale.body, weight: .medium)
+                        .frame(minWidth: Size.button)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Palette.accent)
-                .padding(.bottom, 36)
+                .padding(.bottom, Space.page)
             }
-            .padding(40)
+            .padding(Space.page)
         }
         .contentShape(Rectangle())
         .onTapGesture(perform: advance)

@@ -8,20 +8,20 @@ struct PlaceholderView: View {
     let symbolName: String
 
     var body: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: Space.pad) {
             Image(systemName: symbolName)
-                .font(.system(size: 34, weight: .light))
+                .fediqoSymbol(Glyph.huge, weight: .light)
                 .foregroundStyle(.tertiary)
-            Text(t(titleKey)).fediqoFont(19, weight: .medium)
+            Text(t(titleKey)).fediqoFont(TypeScale.title, weight: .medium)
             Text(t(bodyKey))
-                .fediqoFont(12)
+                .fediqoFont(TypeScale.small)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: 420)
+                .frame(maxWidth: Size.prose)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(40)
+        .padding(Space.page)
     }
 }
 

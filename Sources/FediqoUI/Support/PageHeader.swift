@@ -46,18 +46,18 @@ struct PageHeader<Tabs: View, Controls: View>: View {
     @Environment(\.fediqoCompact) private var compact
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(t(titleKey)).fediqoFont(20, weight: .semibold).lineLimit(1)
+        VStack(alignment: .leading, spacing: Space.step) {
+            HStack(alignment: .firstTextBaseline, spacing: Space.mid) {
+                Text(t(titleKey)).fediqoFont(TypeScale.title, weight: .semibold).lineLimit(1)
                 if loading { ProgressView().controlSize(.small) }
-                Spacer(minLength: 4)
+                Spacer(minLength: Space.tight)
                 controls
             }
             tabsAndSubtitle
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 14)
-        .padding(.bottom, 10)
+        .padding(.horizontal, Space.pad)
+        .padding(.top, Space.pad)
+        .padding(.bottom, Space.mid)
         .background(PageHeaderBackground())
     }
 
@@ -73,7 +73,7 @@ struct PageHeader<Tabs: View, Controls: View>: View {
             tabs
             subtitleLine
         } else {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: Space.gap) {
                 tabs.fixedSize()
                 subtitleLine
             }
@@ -88,7 +88,7 @@ struct PageHeader<Tabs: View, Controls: View>: View {
     /// and cannot read back is worse than no description, and the tooltip costs a line.
     private var subtitleLine: some View {
         Text(subtitle)
-            .fediqoFont(11)
+            .fediqoFont(TypeScale.minor)
             .foregroundStyle(.secondary)
             .lineLimit(compact ? nil : 3)
             .multilineTextAlignment(.leading)
