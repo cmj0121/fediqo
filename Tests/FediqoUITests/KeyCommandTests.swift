@@ -486,7 +486,7 @@ struct ListenedKeyTests {
     /// for is still nobody's, however it is spelled.
     @Test("A key that is nobody's stays nobody's, in either spelling")
     func unlistenedKeysAreStillNobodys() {
-        #expect(shellListenedKey(keyCode: 0, typed: "ㄇ") { "a" } == nil)
+        #expect(shellListenedKey(keyCode: 6, typed: "ㄈ") { "z" } == nil)
         #expect(shellListenedKey(keyCode: 0, typed: nil) { nil } == nil)
     }
 

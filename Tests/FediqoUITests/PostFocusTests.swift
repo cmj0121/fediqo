@@ -328,6 +328,84 @@ struct WiredPostKeyTests {
     }
 }
 
+/// The four marks and the four keys, written once: the pairs every test below is asked of.
+private let actingKeys: [(KeyCommand, Character)] = [
+    (.favouritePost, "l"), (.boostPost, "b"), (.bookmarkPost, "d"), (.keepPost, "a"),
+]
+
+/// The four things a key can do *to* the post the ring is on.
+///
+/// What each of them does after that is Core's — a request to somebody's server, or a row in
+/// this device's database — and is tested there. What is asked here is the part a key owns:
+/// that there is a post under the ring to act on, and that the press says so.
+@Suite("Acting on the post you are on")
+@MainActor
+struct PostActionKeyTests {
+    private static let posts = ["a", "b", "c"].map { post($0) }
+
+    private func timeline(_ name: String) -> AppState {
+        let app = freshApp(name)
+        app.railItem = .timeline
+        app.currentTimeline = "public"
+        app.feed(for: .publicFixture).show(Self.posts)
+        return app
+    }
+
+    @Test("Each of the four is a key of its own", arguments: actingKeys)
+    func eachHasItsOwnKey(command: KeyCommand, key: Character) {
+        #expect(KeyCommand.from(key, modifiers: [], typing: false) == command)
+        // And in a draft it is a letter like any other.
+        #expect(KeyCommand.from(key, modifiers: [], typing: true) == nil)
+        // Held with Shift it is a capital this app has no use for, the way `⇧j` is.
+        #expect(KeyCommand.from(key, modifiers: [.shift], typing: false) == nil)
+    }
+
+    @Test("With a post under the ring, the press has something to do",
+          arguments: actingKeys)
+    func actsOnThePostUnderTheRing(command: KeyCommand, key: Character) {
+        let app = timeline("acting-key-\(key)")
+        #expect(app.perform(.nextPost))
+        #expect(app.perform(command))
+    }
+
+    /// The ring is what says which post, so with no ring there is no post — and the app says
+    /// nothing rather than picking the top of the list on the reader's behalf.
+    @Test("With no ring there is nothing to act on", arguments: actingKeys)
+    func nothingUnderTheRing(command: KeyCommand, key: Character) {
+        let app = timeline("acting-key-no-ring-\(key)")
+        #expect(app.feed(for: .publicFixture).selection == nil)
+        #expect(app.perform(command) == false)
+    }
+
+    @Test("On a page with no timeline, none of the four has anything to do",
+          arguments: pagesWithoutFeeds)
+    func nothingToActOnElsewhere(page: RailItem) {
+        let app = freshApp("acting-key-off-timeline-\(page.rawValue)")
+        app.railItem = page
+        for (command, _) in actingKeys {
+            #expect(app.perform(command) == false)
+        }
+    }
+
+    /// A letter is ours alone. A press that found no post is silent rather than a beep, the
+    /// same as `j` held at the bottom of a list.
+    @Test("The four letters are kept whether or not there was a post",
+          arguments: actingKeys)
+    func theLettersAreOurs(command: KeyCommand, key: Character) {
+        let app = freshApp("acting-key-kept-\(key)")
+        app.railItem = .kept
+        #expect(app.presses(key))
+    }
+
+    /// Every key the app answers has to be a key it listens for, or the shortcut is silently
+    /// dead — the whole list is checked elsewhere, and these four are named here as well
+    /// because they are the ones this change added.
+    @Test("All four are listened for", arguments: actingKeys)
+    func allFourAreHeard(command: KeyCommand, key: Character) {
+        #expect(KeyCommand.listenedCharacters.contains(key))
+    }
+}
+
 /// Where the reader was, when they come back to it.
 ///
 /// The ring lives on the feed and the feeds outlive the screens, which is what makes coming

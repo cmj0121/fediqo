@@ -53,6 +53,10 @@ struct AppShell: View {
             // Over everything the shell draws, including the composer: what the reader asked
             // to look at is the thing in front of them until they leave it.
             .overlay { MediaViewer() }
+            // What came of the last thing the reader asked for, at the foot of whatever they
+            // are looking at. Above the viewer rather than under it: a message nothing can be
+            // drawn over is the only kind worth showing at all.
+            .overlay(alignment: .bottom) { ActionNotice() }
             // The keys, written down, over everything the shell draws — including the
             // composer, so `?` with a draft open puts the list in front of it rather than
             // behind it.

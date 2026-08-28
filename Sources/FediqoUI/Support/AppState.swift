@@ -786,6 +786,10 @@ public final class AppState {
         case .rotateMedia: return turnTheDeck()
         case .playMedia: return playTheAttachment()
         case .toggleCover: return turnTheCover()
+        case .favouritePost: return mark(.favourite)
+        case .boostPost: return mark(.reblog)
+        case .bookmarkPost: return mark(.bookmark)
+        case .keepPost: return keepThePost()
         case .backToTop: return goToTop()
         case .showShortcuts: setShowingShortcuts(true); return true
         }
@@ -813,6 +817,32 @@ public final class AppState {
             Task { [servers] in await feed.loadOlder(servers: servers) }
         }
         return moved
+    }
+
+    /// Favourites, boosts or bookmarks the post the ring is on, and says whether there was one
+    /// to do it to.
+    ///
+    /// The press answers the moment there is a post, not when the server does. It has to: a
+    /// key is answered in the same instant a click on the same mark is, and the acting itself
+    /// is a round trip to somebody else's machine. What comes back of it is the row's — the
+    /// mark moves and moves back on its own — and what comes back of a refusal is
+    /// `ActionNotice`'s, which is the whole reason a key that fails is no longer silent.
+    ///
+    /// `postUnderTheRing` and not the feed's own selection, so that the four keys work inside
+    /// an opened conversation as well: the ring there is the conversation's, and a reader
+    /// reading a reply should be able to keep it without going back to the list first.
+    private func mark(_ action: PostAction) -> Bool {
+        guard let post = postUnderTheRing else { return false }
+        Task { await act(action, on: post) }
+        return true
+    }
+
+    /// Keeps the post the ring is on, or lets it go. No server is told and none can refuse,
+    /// so unlike the three above this one only ever fails on our own database.
+    private func keepThePost() -> Bool {
+        guard let post = postUnderTheRing else { return false }
+        Task { await keep(post) }
+        return true
     }
 
     /// Opens the whole of the post the ring is on, over the timeline, and says whether there
