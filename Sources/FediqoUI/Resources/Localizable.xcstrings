@@ -784,6 +784,57 @@
         }
       }
     },
+    "onboarding.server.registrations.closed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Closed to new accounts"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不開放新帳號"
+          }
+        }
+      }
+    },
+    "onboarding.server.registrations.open": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open to new accounts"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "開放新帳號"
+          }
+        }
+      }
+    },
+    "onboarding.server.rules": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "House rules"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "站規"
+          }
+        }
+      }
+    },
     "onboarding.server.source.builtIn": {
       "extractionState": "manual",
       "localizations": {
@@ -882,6 +933,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ 人"
+          }
+        }
+      }
+    },
+    "onboarding.server.version": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Runs %@"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "版本 %@"
           }
         }
       }

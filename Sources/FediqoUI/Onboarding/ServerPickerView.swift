@@ -39,6 +39,9 @@ struct ServerPickerView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 18) {
                             entryField(typed: $model.typed).id(Self.entryAnchor)
+                            if case .found(let info) = model.probe {
+                                foundCard(info)
+                            }
                             suggestionList
                             sourceNote
                         }
@@ -115,27 +118,28 @@ struct ServerPickerView: View {
                     .fediqoFont(11)
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
-            case .found(let info):
-                foundCard(info)
-            case .idle:
+            case .found, .idle:
+                // The answer is a card of its own, below. What belongs under the field is only
+                // what is too small to be one: a spinner, or the reason there is no answer.
                 EmptyView()
             }
         }
     }
 
     /// What the server says it is, before anything has been written down. Everything on this
-    /// card came off that server and nowhere else, which is what makes it safe to show to
-    /// somebody who has decided nothing: looking is not joining, and cancelling leaves the app
-    /// exactly as it was.
+    /// card came off that server and nowhere else, which is what makes it safe to put in front
+    /// of somebody who has decided nothing. Looking is not joining: the field above is still a
+    /// field, cancelling leaves the app exactly as it was, and either way the next server can
+    /// be looked at without anything having happened to this one.
     private func foundCard(_ info: InstanceInfo) -> some View {
         let already = model.alreadyReading(info, among: app.servers)
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 10) {
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
                 if info.thumbnailURL != nil {
-                    RemoteImage(url: info.thumbnailURL, width: 52, height: 52)
+                    RemoteImage(url: info.thumbnailURL, width: 56, height: 56)
                 }
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(info.title).fediqoFont(15, weight: .semibold)
+                    Text(info.title).fediqoFont(16, weight: .semibold)
                     Text(info.host).fediqoFont(11).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
@@ -143,9 +147,8 @@ struct ServerPickerView: View {
 
             if !info.summary.isEmpty {
                 Text(info.summary)
-                    .fediqoFont(11)
+                    .fediqoFont(12)
                     .foregroundStyle(.secondary)
-                    .lineLimit(8)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -156,10 +159,23 @@ struct ServerPickerView: View {
                     .foregroundStyle(.tertiary)
             }
 
-            if !info.languages.isEmpty {
-                HStack(spacing: 4) {
-                    ForEach(info.languages.prefix(6), id: \.self) { code in
-                        Text(languageName(code)).fediqoFont(10).fediqoPill()
+            let marks = badges(for: info)
+            if !marks.isEmpty {
+                FlowRow(spacing: 4) {
+                    ForEach(marks, id: \.self) { mark in
+                        Text(mark).fediqoFont(10).fediqoPill()
+                    }
+                }
+            }
+
+            if !info.rules.isEmpty {
+                Hairline()
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(t("onboarding.server.rules"))
+                        .fediqoFont(11, weight: .medium)
+                        .foregroundStyle(.secondary)
+                    ForEach(Array(info.rules.enumerated()), id: \.offset) { index, rule in
+                        rulesRow(number: index + 1, rule: rule)
                     }
                 }
             }
@@ -180,9 +196,41 @@ struct ServerPickerView: View {
             }
             .padding(.top, 2)
         }
-        .padding(12)
+        .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .fediqoCard()
+    }
+
+    private func rulesRow(number: Int, rule: InstanceRule) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text("\(number)")
+                .fediqoFont(10, weight: .medium)
+                .foregroundStyle(.tertiary)
+                .frame(minWidth: 14, alignment: .trailing)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(rule.text).fediqoFont(11).fixedSize(horizontal: false, vertical: true)
+                if let detail = rule.detail {
+                    Text(detail)
+                        .fediqoFont(10)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    /// The short facts, each said only where the server said it. What it runs, whether it is
+    /// taking anybody new, and the languages it claims -- a reader deciding on a server wants
+    /// all three at a glance and none of them invented.
+    private func badges(for info: InstanceInfo) -> [String] {
+        var marks = info.languages.prefix(6).map(languageName)
+        if let version = info.version, !version.isEmpty {
+            marks.append(t("onboarding.server.version", version))
+        }
+        if let open = info.registrationsOpen {
+            marks.append(t(open ? "onboarding.server.registrations.open" : "onboarding.server.registrations.closed"))
+        }
+        return marks
     }
 
     /// Only what the server actually counted. The two APIs count different things -- a month of

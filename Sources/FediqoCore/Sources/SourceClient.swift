@@ -190,6 +190,12 @@ public struct InstanceInfo: Sendable, Hashable {
     /// Everybody registered, which is a different question and is all the older API answers.
     public let totalUsers: Int?
     public let posts: Int?
+    /// What the server is running, as it names itself.
+    public let version: String?
+    /// Whether it is taking new accounts. Nil where it did not say.
+    public let registrationsOpen: Bool?
+    /// Its house rules, in the order it lists them.
+    public let rules: [InstanceRule]
 
     public init(
         host: String,
@@ -199,7 +205,10 @@ public struct InstanceInfo: Sendable, Hashable {
         languages: [String] = [],
         activeMonthlyUsers: Int? = nil,
         totalUsers: Int? = nil,
-        posts: Int? = nil
+        posts: Int? = nil,
+        version: String? = nil,
+        registrationsOpen: Bool? = nil,
+        rules: [InstanceRule] = []
     ) {
         self.host = host
         self.title = title
@@ -209,6 +218,20 @@ public struct InstanceInfo: Sendable, Hashable {
         self.activeMonthlyUsers = activeMonthlyUsers
         self.totalUsers = totalUsers
         self.posts = posts
+        self.version = version
+        self.registrationsOpen = registrationsOpen
+        self.rules = rules
+    }
+}
+
+/// One of a server's house rules. The hint is the longer form some servers write underneath.
+public struct InstanceRule: Sendable, Hashable {
+    public let text: String
+    public let detail: String?
+
+    public init(text: String, detail: String? = nil) {
+        self.text = text
+        self.detail = detail
     }
 }
 

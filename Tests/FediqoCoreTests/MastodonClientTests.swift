@@ -45,6 +45,11 @@ struct MastodonClientTests {
         {"domain": "rich.test", "title": "Rich", "description": "<p>Hello</p>",
          "thumbnail": {"url": "https://rich.test/thumb.png", "blurhash": "ignored"},
          "languages": ["en", "zh-TW"],
+         "version": "4.4.0",
+         "registrations": {"enabled": true, "approval_required": false},
+         "rules": [{"id": "1", "text": "Be kind", "hint": "<p>Or &amp; else</p>"},
+                   {"id": "2", "text": "No spam"},
+                   {"id": "3", "text": ""}],
          "usage": {"users": {"active_month": 4321}}}
         """)
 
@@ -53,6 +58,12 @@ struct MastodonClientTests {
         #expect(instance.thumbnailURL == URL(string: "https://rich.test/thumb.png"))
         #expect(instance.languages == ["en", "zh-TW"])
         #expect(instance.activeMonthlyUsers == 4321)
+        #expect(instance.version == "4.4.0")
+        #expect(instance.registrationsOpen == true)
+        // A rule with no words is not a rule, and the hint arrives as plain text like the
+        // description does.
+        #expect(instance.rules == [InstanceRule(text: "Be kind", detail: "Or & else"),
+                                   InstanceRule(text: "No spam", detail: nil)])
         // v2 counts nobody the older way, and says so by saying nothing.
         #expect(instance.totalUsers == nil)
         #expect(instance.posts == nil)
@@ -66,12 +77,16 @@ struct MastodonClientTests {
         {"uri": "old.test", "title": "Old", "short_description": "older",
          "thumbnail": "https://old.test/thumb.png",
          "languages": ["ja"],
+         "registrations": false,
          "stats": {"user_count": 99, "status_count": 12345}}
         """)
 
         let instance = try await client.instance(host: host)
 
         #expect(instance.thumbnailURL == URL(string: "https://old.test/thumb.png"))
+        // v1 answers this with a bare yes or no rather than a dictionary, and it still reads.
+        #expect(instance.registrationsOpen == false)
+        #expect(instance.rules.isEmpty)
         #expect(instance.languages == ["ja"])
         #expect(instance.totalUsers == 99)
         #expect(instance.posts == 12345)
