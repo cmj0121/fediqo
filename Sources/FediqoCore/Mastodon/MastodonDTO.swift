@@ -128,6 +128,40 @@ enum MastodonDTO {
         let title: String?
         let description: String?
         let shortDescription: String?
+        let languages: [String]?
+        let thumbnail: Thumbnail?
+        /// v2's figures.
+        let usage: Usage?
+        /// v1's, under a different name and counting different things.
+        let stats: Stats?
+
+        /// v2 hands back an object with the picture inside it and v1 the address on its own.
+        /// Either way it is one URL, so the difference stops here.
+        struct Thumbnail: Decodable, Sendable {
+            let url: String?
+
+            private struct Object: Decodable { let url: String? }
+
+            init(from decoder: any Decoder) throws {
+                if let address = try? decoder.singleValueContainer().decode(String.self) {
+                    url = address
+                } else {
+                    url = try? Object(from: decoder).url
+                }
+            }
+        }
+
+        /// A month is the shortest window Mastodon publishes. There is no daily figure to ask
+        /// for, here or anywhere else in the API.
+        struct Usage: Decodable, Sendable {
+            struct Users: Decodable, Sendable { let activeMonth: Int? }
+            let users: Users?
+        }
+
+        struct Stats: Decodable, Sendable {
+            let userCount: Int?
+            let statusCount: Int?
+        }
     }
 
     /// `reblog` nests a `Status` inside itself; a class box keeps the type finite.

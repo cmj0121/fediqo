@@ -67,7 +67,12 @@ public struct MastodonClient: SourceClient {
                     return InstanceInfo(
                         host: host,
                         title: instance.title ?? host,
-                        summary: HTMLText.plain(instance.description ?? instance.shortDescription ?? "")
+                        summary: HTMLText.plain(instance.description ?? instance.shortDescription ?? ""),
+                        thumbnailURL: instance.thumbnail?.url.flatMap(URL.init(string:)),
+                        languages: instance.languages ?? [],
+                        activeMonthlyUsers: instance.usage?.users?.activeMonth,
+                        totalUsers: instance.stats?.userCount,
+                        posts: instance.stats?.statusCount
                     )
                 }
             } catch SourceFailure.transport(let reason) {

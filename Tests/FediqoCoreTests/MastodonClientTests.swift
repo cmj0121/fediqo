@@ -38,6 +38,62 @@ struct MastodonClientTests {
         #expect(stubRoutes.paths(for: host) == ["/api/v2/instance", "/api/v1/instance"])
     }
 
+    @Test("v2's picture, languages and monthly figure come back with it")
+    func v2Metadata() async throws {
+        let host = "rich.test"
+        stubRoutes.on(host, "/api/v2/instance", status: 200, body: """
+        {"domain": "rich.test", "title": "Rich", "description": "<p>Hello</p>",
+         "thumbnail": {"url": "https://rich.test/thumb.png", "blurhash": "ignored"},
+         "languages": ["en", "zh-TW"],
+         "usage": {"users": {"active_month": 4321}}}
+        """)
+
+        let instance = try await client.instance(host: host)
+
+        #expect(instance.thumbnailURL == URL(string: "https://rich.test/thumb.png"))
+        #expect(instance.languages == ["en", "zh-TW"])
+        #expect(instance.activeMonthlyUsers == 4321)
+        // v2 counts nobody the older way, and says so by saying nothing.
+        #expect(instance.totalUsers == nil)
+        #expect(instance.posts == nil)
+    }
+
+    @Test("v1 spells the picture as a bare address and counts different things")
+    func v1Metadata() async throws {
+        let host = "old.test"
+        stubRoutes.on(host, "/api/v2/instance", status: 404)
+        stubRoutes.on(host, "/api/v1/instance", status: 200, body: """
+        {"uri": "old.test", "title": "Old", "short_description": "older",
+         "thumbnail": "https://old.test/thumb.png",
+         "languages": ["ja"],
+         "stats": {"user_count": 99, "status_count": 12345}}
+        """)
+
+        let instance = try await client.instance(host: host)
+
+        #expect(instance.thumbnailURL == URL(string: "https://old.test/thumb.png"))
+        #expect(instance.languages == ["ja"])
+        #expect(instance.totalUsers == 99)
+        #expect(instance.posts == 12345)
+        // There is no monthly figure in the older API, and inventing one would be worse.
+        #expect(instance.activeMonthlyUsers == nil)
+    }
+
+    @Test("A server that says none of it is still a server")
+    func bareMetadata() async throws {
+        let host = "bare.test"
+        stubRoutes.on(host, "/api/v2/instance", status: 200, body: """
+        {"domain": "bare.test", "title": "Bare"}
+        """)
+
+        let instance = try await client.instance(host: host)
+
+        #expect(instance.title == "Bare")
+        #expect(instance.thumbnailURL == nil)
+        #expect(instance.languages.isEmpty)
+        #expect(instance.activeMonthlyUsers == nil)
+    }
+
     @Test("A host that answers as something else is refused")
     func notMastodon() async {
         let host = "elsewhere.test"

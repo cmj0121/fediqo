@@ -12,6 +12,7 @@ struct ServerPickerView: View {
 
     @Environment(AppState.self) private var app
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.locale) private var locale
     @State private var model: ServerPickerModel
 
     init(socialProtocol: SocialProtocol, onDismiss: (() -> Void)? = nil) {
@@ -122,14 +123,24 @@ struct ServerPickerView: View {
         }
     }
 
-    /// What the server says it is, before anything has been written down. Looking is not
-    /// joining: nothing has happened until the button below is pressed, and cancelling leaves
-    /// the app exactly as it was.
+    /// What the server says it is, before anything has been written down. Everything on this
+    /// card came off that server and nowhere else, which is what makes it safe to show to
+    /// somebody who has decided nothing: looking is not joining, and cancelling leaves the app
+    /// exactly as it was.
     private func foundCard(_ info: InstanceInfo) -> some View {
         let already = model.alreadyReading(info, among: app.servers)
-        return VStack(alignment: .leading, spacing: 8) {
-            Text(info.title).fediqoFont(15, weight: .semibold)
-            Text(info.host).fediqoFont(11).foregroundStyle(.secondary)
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                if info.thumbnailURL != nil {
+                    RemoteImage(url: info.thumbnailURL, width: 52, height: 52)
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(info.title).fediqoFont(15, weight: .semibold)
+                    Text(info.host).fediqoFont(11).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+
             if !info.summary.isEmpty {
                 Text(info.summary)
                     .fediqoFont(11)
@@ -137,6 +148,22 @@ struct ServerPickerView: View {
                     .lineLimit(8)
                     .fixedSize(horizontal: false, vertical: true)
             }
+
+            let counted = figures(for: info)
+            if !counted.isEmpty {
+                Text(counted.joined(separator: " · "))
+                    .fediqoFont(10)
+                    .foregroundStyle(.tertiary)
+            }
+
+            if !info.languages.isEmpty {
+                HStack(spacing: 4) {
+                    ForEach(info.languages.prefix(6), id: \.self) { code in
+                        Text(languageName(code)).fediqoFont(10).fediqoPill()
+                    }
+                }
+            }
+
             HStack(spacing: 12) {
                 if already {
                     Text(t("onboarding.server.already")).fediqoFont(11).foregroundStyle(.secondary)
@@ -156,6 +183,31 @@ struct ServerPickerView: View {
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .fediqoCard()
+    }
+
+    /// Only what the server actually counted. The two APIs count different things -- a month of
+    /// people who posted, or everybody who ever registered -- and a server that publishes
+    /// neither is not given one.
+    private func figures(for info: InstanceInfo) -> [String] {
+        var counted: [String] = []
+        if let active = info.activeMonthlyUsers {
+            counted.append(t("onboarding.server.active", active.formatted(.number.locale(locale))))
+        }
+        if let users = info.totalUsers {
+            counted.append(t("onboarding.server.users", users.formatted(.number.locale(locale))))
+        }
+        if let posts = info.posts {
+            counted.append(t("onboarding.server.posts", posts.formatted(.number.locale(locale))))
+        }
+        return counted
+    }
+
+    /// A language as the reader's own language spells it, and as the server spelled it where
+    /// nothing can be made of the code.
+    private func languageName(_ code: String) -> String {
+        locale.localizedString(forIdentifier: code)
+            ?? locale.localizedString(forLanguageCode: code)
+            ?? code
     }
 
     private var suggestionList: some View {

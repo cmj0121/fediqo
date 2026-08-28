@@ -648,6 +648,23 @@
         }
       }
     },
+    "onboarding.server.active": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ posting this month"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本月 %@ 人在發文"
+          }
+        }
+      }
+    },
     "onboarding.server.add": {
       "extractionState": "manual",
       "localizations": {
@@ -746,6 +763,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "查看這個伺服器"
+          }
+        }
+      }
+    },
+    "onboarding.server.posts": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ posts"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 則貼文"
           }
         }
       }

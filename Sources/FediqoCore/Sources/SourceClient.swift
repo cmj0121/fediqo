@@ -173,15 +173,42 @@ public protocol SourceClient: Sendable {
     func report(_ post: Post, id: String, as account: ActingAccount, comment: String) async throws
 }
 
+/// What a server says about itself, to somebody who has not joined it. Everything here came
+/// from that server and nowhere else, which is what makes it safe to show before a reader has
+/// decided anything.
 public struct InstanceInfo: Sendable, Hashable {
     public let host: String
     public let title: String
     public let summary: String
+    /// The picture the server puts on its own front page.
+    public let thumbnailURL: URL?
+    /// The languages it says it is in, spelled the way it spells them.
+    public let languages: [String]
+    /// How many people posted from here in the last month. A month is the shortest window
+    /// Mastodon publishes -- there is no daily figure to ask for.
+    public let activeMonthlyUsers: Int?
+    /// Everybody registered, which is a different question and is all the older API answers.
+    public let totalUsers: Int?
+    public let posts: Int?
 
-    public init(host: String, title: String, summary: String) {
+    public init(
+        host: String,
+        title: String,
+        summary: String,
+        thumbnailURL: URL? = nil,
+        languages: [String] = [],
+        activeMonthlyUsers: Int? = nil,
+        totalUsers: Int? = nil,
+        posts: Int? = nil
+    ) {
         self.host = host
         self.title = title
         self.summary = summary
+        self.thumbnailURL = thumbnailURL
+        self.languages = languages
+        self.activeMonthlyUsers = activeMonthlyUsers
+        self.totalUsers = totalUsers
+        self.posts = posts
     }
 }
 
