@@ -124,14 +124,37 @@ struct PostPage: View {
     /// One post in the conversation. It is the same row the timeline draws — a reader who
     /// pressed `Return` on a post should find the same thing here — and clicking one opens
     /// nothing, because they are already looking at the whole of it.
-    private func row(_ post: Post, selected: Bool) -> some View {
+    private func row(_ post: Post, selected: Bool, answering: String? = nil) -> some View {
         PostRow(post: post, selected: selected,
                 turns: selected ? app.mediaTurns : 0,
                 plays: selected ? app.mediaPlays : 0,
                 covers: selected ? app.mediaCovers : 0,
                 revealed: app.preferences.showSensitive,
+                answering: answering,
                 condensed: false)
             .id(post.mergeKey)
+    }
+
+    /// How far in a reply sits, and where that stops.
+    ///
+    /// One step per generation, up to four. Past that the indent stops growing: a conversation
+    /// twenty deep would otherwise walk off the right-hand edge, and a row squeezed to nothing
+    /// says less about the shape than a row that has stopped moving does.
+    private static let deepest = 4
+
+    private func indent(_ depth: Int) -> CGFloat {
+        CGFloat(min(depth, Self.deepest)) * Space.withinGroup
+    }
+
+    /// The line down the gutter of a reply, in the column its parent's own line stands in.
+    ///
+    /// It is what says "these belong together" without saying it in colour, and it is the one
+    /// mark here that survives a reader who cannot tell the indent apart from the edge of the
+    /// card — which, at four levels in a narrow window, is most readers.
+    private func rail(_ depth: Int) -> some View {
+        Hairline(axis: .vertical)
+            .padding(.leading, indent(depth) - Space.mid)
+            .padding(.vertical, Space.hair)
     }
 
     private var thread: some View {
@@ -143,8 +166,10 @@ struct PostPage: View {
                     row(above, selected: above.mergeKey == ring).opacity(0.85)
                 }
                 row(conversation.post, selected: conversation.post.mergeKey == ring)
-                ForEach(conversation.descendants) { below in
-                    row(below, selected: below.mergeKey == ring).padding(.leading, Space.room)
+                ForEach(conversation.laidOut()) { reply in
+                    row(reply.post, selected: reply.post.mergeKey == ring, answering: reply.answering)
+                        .padding(.leading, indent(reply.depth))
+                        .overlay(alignment: .leading) { rail(reply.depth) }
                 }
                 if conversation.isAlone, model?.loading != true {
                     Text(t("post.alone"))

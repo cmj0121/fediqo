@@ -48,6 +48,10 @@ struct PostRow: View {
     /// Whether what this post covered arrives uncovered. The reader's standing answer; a row
     /// can still be opened by hand without changing it.
     var revealed = false
+    /// Whom this post is answering, where the page it is drawn on knows and it is worth
+    /// saying — a reply to a reply, in a conversation. `nil` everywhere else, including for a
+    /// reply to the post the page is about, which is what the page already is.
+    var answering: String?
     /// Whether this is a row in a list rather than the post itself, opened.
     ///
     /// In a list it is held to the same height as every other row and its words stop with an
@@ -169,6 +173,13 @@ struct PostRow: View {
     /// same idea. Nothing at all is drawn when there is nothing to say.
     @ViewBuilder
     private var decorator: some View {
+        if let answering {
+            HStack(spacing: Space.tight) {
+                Image(systemName: "arrowshape.turn.up.left").fediqoSymbol(TypeScale.caption, weight: .regular)
+                Text(t("post.replyingTo", answering)).fediqoFont(TypeScale.caption)
+            }
+            .foregroundStyle(.secondary)
+        }
         if let boostedBy = post.boostedBy {
             HStack(spacing: Space.tight) {
                 Image(systemName: "arrow.2.squarepath").fediqoSymbol(TypeScale.caption, weight: .regular)

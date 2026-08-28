@@ -1447,6 +1447,23 @@
         }
       }
     },
+    "post.replyingTo": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Replying to %1$@"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "回覆 %1$@"
+          }
+        }
+      }
+    },
     "post.report": {
       "extractionState": "manual",
       "localizations": {
