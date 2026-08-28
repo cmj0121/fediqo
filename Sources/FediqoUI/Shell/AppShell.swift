@@ -140,9 +140,11 @@ struct AppShell: View {
         // The price is paid in both directions, and it is the price we chose. Going back to
         // a tab builds it afresh: its `.task` runs again — which asks the model nothing it
         // has already been asked — and the scroll position and any open sheet are gone.
-        // Remembering where each tab was left is not something anybody asked for, and it
-        // would cost the clean swap above; if it is ever wanted, it is state to hold beside
-        // the feeds rather than a reason to drop this `.id`.
+        //
+        // Where the reader was is now wanted, and it is kept the way this comment always said
+        // it would have to be: beside the feeds rather than by dropping this `.id`. The ring
+        // lives on the `FeedModel`, and `FeedScreen` scrolls to it once on the way in — so
+        // the swap is still clean, and coming back is still a screen built from nothing.
         case .timeline:
             if let timeline = app.readingTimeline {
                 FeedScreen(timeline: timeline).id(timeline.id)

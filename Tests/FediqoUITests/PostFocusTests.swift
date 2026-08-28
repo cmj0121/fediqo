@@ -327,3 +327,82 @@ struct WiredPostKeyTests {
         #expect(app.feed(for: .publicFixture).selectedURL == nil)
     }
 }
+
+/// Where the reader was, when they come back to it.
+///
+/// The ring lives on the feed and the feeds outlive the screens, which is what makes coming
+/// back to the post you were on possible at all. The scrolling itself is `FeedScreen`'s and
+/// is not asked about here; what is asked is the thing it scrolls to.
+@Suite("Coming back to a timeline")
+@MainActor
+struct ReturningToATimelineTests {
+    private static let posts = ["a", "b", "c"].map { post($0) }
+
+    @Test("A trip to another page leaves the ring where the reader put it")
+    func theRingSurvivesAnotherPage() {
+        let app = freshApp("returning-another-page")
+        app.railItem = .timeline
+        app.currentTimeline = "public"
+        let feed = app.feed(for: .publicFixture)
+        feed.show(Self.posts)
+        app.perform(.nextPost)
+        app.perform(.nextPost)
+        #expect(feed.selection == "b")
+
+        app.railItem = .settings
+        app.railItem = .timeline
+        // The same model, and the same post in it: a screen built again reads the ring off
+        // this rather than starting the reader at the top of a list they were half way down.
+        #expect(app.feed(for: .publicFixture) === feed)
+        #expect(app.feed(for: .publicFixture).selectedPost?.mergeKey == "b")
+    }
+
+    @Test("Switching to another timeline and back does the same")
+    func theRingSurvivesAnotherTimeline() {
+        let app = freshApp("returning-another-timeline")
+        app.railItem = .timeline
+        app.currentTimeline = "public"
+        let feed = app.feed(for: .publicFixture)
+        feed.show(Self.posts)
+        app.perform(.nextPost)
+        #expect(feed.selection == "a")
+
+        app.currentTimeline = "trend"
+        app.feed(for: .trendingFixture).show(Self.posts)
+        app.perform(.nextPost)
+        app.perform(.nextPost)
+        // Two lists, two rings. Neither is the other's.
+        #expect(app.feed(for: .trendingFixture).selection == "b")
+        app.currentTimeline = "public"
+        #expect(app.feed(for: .publicFixture).selectedPost?.mergeKey == "a")
+    }
+
+    /// What the screen scrolls to is `selectedPost` rather than `selection`, and this is why:
+    /// a key naming a post the list no longer shows resolves to nothing, so the reader is put
+    /// back at the top instead of being scrolled to a row that is not there.
+    @Test("A ring on a post the list no longer shows is nothing to come back to")
+    func aRingWithNoPostUnderIt() {
+        let app = freshApp("returning-post-gone")
+        app.railItem = .timeline
+        app.currentTimeline = "public"
+        let feed = app.feed(for: .publicFixture)
+        feed.show(Self.posts)
+        app.perform(.nextPost)
+        feed.show([post("c")])
+        #expect(feed.selection == "a")
+        #expect(feed.selectedPost == nil)
+    }
+
+    /// Nothing was ever selected, so there is nothing to go back to and the list starts where
+    /// every list starts.
+    @Test("A timeline nobody has put a ring on comes back to its top")
+    func nothingToComeBackTo() {
+        let app = freshApp("returning-no-ring")
+        app.railItem = .timeline
+        app.currentTimeline = "public"
+        app.feed(for: .publicFixture).show(Self.posts)
+        app.railItem = .kept
+        app.railItem = .timeline
+        #expect(app.feed(for: .publicFixture).selectedPost == nil)
+    }
+}
