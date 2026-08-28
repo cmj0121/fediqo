@@ -161,9 +161,13 @@ struct PostRow: View {
     @ViewBuilder
     private var decorator: some View {
         if let boostedBy = post.boostedBy {
-            Label(t("timeline.boostedBy", boostedBy), systemImage: "arrow.2.squarepath")
-                .fediqoFont(TypeScale.caption)
-                .foregroundStyle(.secondary)
+            HStack(spacing: Space.tight) {
+                Image(systemName: "arrow.2.squarepath").fediqoSymbol(TypeScale.caption, weight: .regular)
+                // Not a `Label`: whoever boosted this may have a picture in their name, and a
+                // label takes a string.
+                EmojiText(t("timeline.boostedBy", boostedBy), emojis: post.emojis, size: TypeScale.caption)
+            }
+            .foregroundStyle(.secondary)
         }
     }
 
@@ -173,7 +177,8 @@ struct PostRow: View {
     private var metadata: some View {
         HStack(spacing: Space.step) {
             RemoteImage(url: post.authorAvatarURL, width: Size.avatar, height: Size.avatar)
-            Text(post.authorName).fediqoFont(TypeScale.body, weight: .semibold).lineLimit(1)
+            EmojiText(post.authorName, emojis: post.emojis, size: TypeScale.body, weight: .semibold)
+                .lineLimit(1)
             Text(post.authorHandle).fediqoFont(TypeScale.minor).foregroundStyle(.secondary).lineLimit(1)
             Spacer(minLength: Space.snug)
             sources
@@ -189,8 +194,7 @@ struct PostRow: View {
         VStack(alignment: .leading, spacing: Space.snug) {
             if !spoiler.isEmpty { warning }
             if !post.text.isEmpty, !wordsAreCovered {
-                Text(post.text)
-                    .fediqoFont(TypeScale.body)
+                EmojiText(post.text, emojis: post.emojis)
                     .textSelection(.enabled)
                     .lineLimit(condensed ? lines : nil)
                     .truncationMode(.tail)
@@ -213,8 +217,7 @@ struct PostRow: View {
             Image(systemName: "exclamationmark.triangle.fill")
                 .fediqoSymbol(Glyph.inline)
                 .foregroundStyle(.orange)
-            Text(spoiler)
-                .fediqoFont(TypeScale.small, weight: .semibold)
+            EmojiText(spoiler, emojis: post.emojis, size: TypeScale.small, weight: .semibold)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: Space.step)
             toggle
