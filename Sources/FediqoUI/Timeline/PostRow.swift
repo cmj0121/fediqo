@@ -56,6 +56,7 @@ struct PostRow: View {
 
     @Environment(\.openURL) private var openURL
     @Environment(\.fediqoWideRows) private var wide
+    @Environment(\.fediqoCompact) private var compact
     /// The reader's text size, because how many lines fit in a card depends on it.
     @Environment(\.fediqoTextScale) private var scale
     @Environment(\.colorScheme) private var colorScheme
@@ -181,13 +182,22 @@ struct PostRow: View {
             RemoteImage(url: post.authorAvatarURL, width: Size.avatar, height: Size.avatar)
             EmojiText(post.authorName, emojis: post.emojis, size: TypeScale.body, weight: .semibold)
                 .lineLimit(1)
-            Text(post.authorHandle).fediqoFont(TypeScale.minor).foregroundStyle(.secondary).lineLimit(1)
+                .layoutPriority(1)
+            // Not on a phone. The band has four things to say and room for three, and the
+            // handle is the one the reader can do without: it is usually the name again in
+            // lower case, and the opened post says it in full.
+            if !compact {
+                Text(post.authorHandle).fediqoFont(TypeScale.minor).foregroundStyle(.secondary).lineLimit(1)
+            }
             Spacer(minLength: Space.snug)
             sources
+            // When it was written is four characters and never gives any of them up: a time
+            // squeezed to an ellipsis is a row that has stopped saying when it happened.
             Text(post.createdAt, format: .relative(presentation: .numeric))
                 .fediqoFont(TypeScale.caption)
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
+                .fixedSize()
         }
     }
 
@@ -309,8 +319,8 @@ struct PostRow: View {
         }
     }
 
-    /// Which server handed it over — and when several did, the first of them and a mark saying
-    /// how many more. It sits in the metadata band beside who wrote it and when, because it is
+    /// Which server handed it over — and when several did, one of them and a mark saying how
+    /// many more. It sits in the metadata band beside who wrote it and when, because it is
     /// the same kind of fact: where this post reached us from, rather than anything about what
     /// it says.
     ///
@@ -320,30 +330,56 @@ struct PostRow: View {
     /// reader, which can neither hover nor see the mark, is told every one of them outright.
     private var sources: some View {
         HStack(spacing: Space.snug) {
-            Text(t("timeline.via")).fediqoFont(TypeScale.caption).foregroundStyle(.tertiary)
-            if let first = post.sources.first {
-                Text(first).fediqoFont(TypeScale.caption).fediqoPill().lineLimit(1)
+            // The word is worth a column on a screen that has one to spare and is the first
+            // thing to go on a phone, where a pill saying `birch.example` says it anyway.
+            if !compact {
+                Text(t("timeline.via")).fediqoFont(TypeScale.caption).foregroundStyle(.tertiary)
             }
-            if post.sources.count > 1 { carriedByTheRest }
+            if let first = shownSources.first {
+                Text(first)
+                    .fediqoFont(TypeScale.caption)
+                    .lineLimit(1)
+                    // Middle, not tail: what a reader recognises about a server is at both
+                    // ends, and `birch.exa…` names one no better than `b…` does.
+                    .truncationMode(.middle)
+                    .fediqoPill()
+            }
+            if shownSources.count > 1 { carriedByTheRest }
         }
+        // Where the room runs out it is the name that gives, not this — hence the higher
+        // priority of the two. A name cut short is still the person; a host cut short is not
+        // a server, and where a post came from is the one thing on this row that the merge
+        // exists to keep honest.
+        .layoutPriority(2)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text("\(t("post.sources")): \(post.sources.joined(separator: ", "))"))
+        .accessibilityLabel(Text("\(t("post.sources")): \(shownSources.joined(separator: ", "))"))
     }
+
+    /// The servers that carried this post, in a settled order.
+    ///
+    /// **Sorted, and that is not a detail.** `Post.sources` is in the order the servers
+    /// answered, which is a fact about a refresh rather than about the post: the same row read
+    /// twice puts a different server first, and a row that says `alder.example` one second and
+    /// `birch.example` the next is a row nobody can read. Which of them is drawn has to be the
+    /// same answer every time, and alphabetical is the only ordering here that does not depend
+    /// on the network's mood.
+    private var shownSources: [String] { post.sources.sorted() }
 
     /// The mark, and the list behind it. `help` is the hover — the whole list, one per line —
     /// and the press is the same list where there is no pointer to hover with.
     private var carriedByTheRest: some View {
         Button { showingSources = true } label: {
-            Text(verbatim: "+\(post.sources.count - 1)")
+            Text(verbatim: "+\(shownSources.count - 1)")
                 .fediqoFont(TypeScale.caption, weight: .medium)
+                .fixedSize()
                 .fediqoPill()
         }
         .buttonStyle(.plain)
-        .help(post.sources.joined(separator: "\n"))
+        .help(shownSources.joined(separator: "\n"))
         .popover(isPresented: $showingSources, arrowEdge: .bottom) {
             VStack(alignment: .leading, spacing: Space.tight) {
                 Text(t("post.sources")).fediqoFont(TypeScale.caption).foregroundStyle(.secondary)
-                ForEach(post.sources, id: \.self) { host in
+                ForEach(shownSources, id: \.self) { host in
                     Text(host).fediqoFont(TypeScale.small).textSelection(.enabled)
                 }
             }
