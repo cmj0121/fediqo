@@ -1447,6 +1447,23 @@
         }
       }
     },
+    "post.sources": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Carried by"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "由這些伺服器傳來"
+          }
+        }
+      }
+    },
     "post.title": {
       "extractionState": "manual",
       "localizations": {

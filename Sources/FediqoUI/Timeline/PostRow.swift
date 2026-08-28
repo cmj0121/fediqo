@@ -98,6 +98,8 @@ struct PostRow: View {
     /// the row remembers where the count was when it became the reader's and acts only on
     /// what happens after.
     @State private var coversOnArrival: Int?
+    /// Whether the list of the servers that carried this post is up.
+    @State private var showingSources = false
 
     var body: some View {
         content
@@ -307,15 +309,45 @@ struct PostRow: View {
         }
     }
 
-    /// Which server handed it over — and when two did, it says both. It sits in the metadata
-    /// band beside who wrote it and when, because it is the same kind of fact: where this post
-    /// reached us from, rather than anything about what it says.
+    /// Which server handed it over — and when several did, the first of them and a mark saying
+    /// how many more. It sits in the metadata band beside who wrote it and when, because it is
+    /// the same kind of fact: where this post reached us from, rather than anything about what
+    /// it says.
+    ///
+    /// A pill per server was the repetition the merge exists to end: three servers carrying one
+    /// post drew three pills, and the row was a third as wide again for a fact most readers
+    /// never ask. So it is said once, and the rest is one hover or one press away — and a screen
+    /// reader, which can neither hover nor see the mark, is told every one of them outright.
     private var sources: some View {
         HStack(spacing: Space.snug) {
             Text(t("timeline.via")).fediqoFont(TypeScale.caption).foregroundStyle(.tertiary)
-            ForEach(post.sources, id: \.self) { host in
-                Text(host).fediqoFont(TypeScale.caption).fediqoPill()
+            if let first = post.sources.first {
+                Text(first).fediqoFont(TypeScale.caption).fediqoPill().lineLimit(1)
             }
+            if post.sources.count > 1 { carriedByTheRest }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text("\(t("post.sources")): \(post.sources.joined(separator: ", "))"))
+    }
+
+    /// The mark, and the list behind it. `help` is the hover — the whole list, one per line —
+    /// and the press is the same list where there is no pointer to hover with.
+    private var carriedByTheRest: some View {
+        Button { showingSources = true } label: {
+            Text(verbatim: "+\(post.sources.count - 1)")
+                .fediqoFont(TypeScale.caption, weight: .medium)
+                .fediqoPill()
+        }
+        .buttonStyle(.plain)
+        .help(post.sources.joined(separator: "\n"))
+        .popover(isPresented: $showingSources, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: Space.tight) {
+                Text(t("post.sources")).fediqoFont(TypeScale.caption).foregroundStyle(.secondary)
+                ForEach(post.sources, id: \.self) { host in
+                    Text(host).fediqoFont(TypeScale.small).textSelection(.enabled)
+                }
+            }
+            .padding(Space.gap)
         }
     }
 }
