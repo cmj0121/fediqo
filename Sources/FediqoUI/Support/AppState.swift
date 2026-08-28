@@ -240,6 +240,13 @@ public final class AppState {
     /// timeline instead of writing a letter.
     private(set) var isTyping = false
     let holdsLanding: Bool
+    /// Whether this run is reading the invented world rather than the reader's own.
+    ///
+    /// Nothing about a screen depends on it — the fixture is a `SourceClient` like any other,
+    /// and everything above it does its actual work. What reads it is the window: a run that
+    /// exists to be photographed, or driven by a test, wants to open the same size in the same
+    /// place every time, and a reader's window wants to open where they left it.
+    let isFixture: Bool
 
     private(set) var servers: [Server]
 
@@ -318,6 +325,7 @@ public final class AppState {
         self.currentTimeline = launch.timeline ?? BaseSource.public.rawValue
         self.composing = launch.composing
         self.holdsLanding = launch.holdsLanding
+        self.isFixture = launch.fixture
         L10n.use(preferences.language)
     }
 

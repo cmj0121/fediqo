@@ -45,8 +45,18 @@ schemes:
     build:
       targets:
         Fediqo: all
+        FediqoAppTests: [test]
     run:
       config: Debug
+    # The tests that need the app running live here rather than in the package. `swift test`
+    # reaches Core and the models above it and stops where SwiftUI begins -- nothing in the
+    # package can execute a view body -- so what a reader actually does with this app is
+    # driven from outside it, by xcodebuild, against the world `Fixture` invents.
+    test:
+      config: Debug
+      gatherCoverageData: true
+      targets:
+        - FediqoAppTests
     archive:
       config: Release
   Fediqo-iOS:
@@ -117,6 +127,36 @@ targets:
         COMBINE_HIDPI_IMAGES: YES
         ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+
+  # The app, driven. A UI test bundle is a second process that launches the first one and
+  # presses things in it, which is the only way anything here can execute a SwiftUI body.
+  #
+  # macOS and not iOS, and the reason is the keyboard: most of what this app can be told to do
+  # is told to it by a single key, and sending one to a running app is what `typeKey` does on
+  # this platform. iOS is the second step rather than the first, once the pipeline this target
+  # is the point of exists and there is somewhere for it to go.
+  #
+  # The sources sit under `Apps/` rather than `Tests/`, which is the package's own ground:
+  # `swift test` builds what `Package.swift` declares, and a directory of XCTest files it was
+  # never told about is a directory it complains about.
+  FediqoAppTests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: Apps/Tests
+    dependencies:
+      - target: Fediqo
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.mini-poc.fediqo.uitests
+        PRODUCT_NAME: FediqoAppTests
+        GENERATE_INFOPLIST_FILE: YES
+        # Which app this bundle drives. Without it the runner has nothing to launch and the
+        # test target builds perfectly and tests nothing.
+        TEST_TARGET_NAME: Fediqo
+      configs:
+        Debug:
+          CODE_SIGN_IDENTITY: "-"
 
   Fediqo-iOS:
     type: application

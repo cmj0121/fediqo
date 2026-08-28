@@ -155,7 +155,16 @@ struct ActionNotice: View {
             // Not hidden, unlike the marker at the foot of a timeline: that one repeats a
             // sentence the list already says, and this is the only place the news appears at
             // all. A reader who cannot see the pill has to be told the same thing.
-            .accessibilityElement(children: .combine)
+            //
+            // The words said outright rather than gathered from the children. The glyph is
+            // decoration — it says nothing the sentence does not — and a combined element left
+            // the label empty, which is a message that exists and says nothing to anybody
+            // reading the screen rather than looking at it.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text(saying.words))
+            // One name for the whole message, so a driver outside the app can wait for it to
+            // arrive and read what it says. There is at most one of these anywhere.
+            .accessibilityIdentifier("action.notice")
             .transition(.opacity)
         }
     }
