@@ -99,6 +99,12 @@ enum Size {
     /// A popover wide enough for a row of words and narrow enough not to cover the post it
     /// was opened from.
     static let popover: CGFloat = 300
+    /// The width at which a row has room to put its attachments beside its words:
+    /// `AttachmentDeck.side` for the deck, `Space.gap` for the gap, and 348 left for the words.
+    ///
+    /// Out here rather than on the screen that measures it, because the closure that asks the
+    /// geometry is `Sendable` and a `View`'s own static is isolated to the main actor.
+    static let wideRows: CGFloat = 560
 }
 
 extension View {
