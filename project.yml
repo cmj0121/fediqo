@@ -154,13 +154,10 @@ targets:
         # Which app this bundle drives. Without it the runner has nothing to launch and the
         # test target builds perfectly and tests nothing.
         TEST_TARGET_NAME: Fediqo
-        # The one place in this project that is not on `complete`, and the reason is XCTest
-        # rather than this code: UI automation hands out an `XCUIApplication` and expects it to
-        # be captured by the teardown blocks and waiters it also hands out, and how much of
-        # that is annotated depends on which Xcode is doing the compiling. The app itself and
-        # everything it ships stay on `complete`; what is relaxed is the driver, which ships
-        # nowhere.
-        SWIFT_STRICT_CONCURRENCY: minimal
+        # No concurrency setting here, and that is deliberate: `SWIFT_STRICT_CONCURRENCY` is a
+        # Swift 5 knob and this target is on 6, where data-race safety is the language rather
+        # than an option. What the driver needs instead is to say where it runs — XCUITest is
+        # main-actor isolated throughout, so the tests are too. See `DrivenApp`.
       configs:
         Debug:
           CODE_SIGN_IDENTITY: "-"

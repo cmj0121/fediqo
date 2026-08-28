@@ -1,6 +1,7 @@
+import SwiftUI
+
 #if DEBUG && os(macOS)
 import AppKit
-import SwiftUI
 
 /// Where a fixture run puts its window: the same size every time, and out of the way where
 /// there is somewhere to be out of the way.
@@ -69,7 +70,11 @@ struct FixtureWindow: ViewModifier {
 #endif
 
 extension View {
-    /// The window a fixture run opens in. Nothing at all in a build anybody ships, and nothing
+    /// The window a fixture run opens in.
+    ///
+    /// Declared outside the `#if` above, which is why `SwiftUI` is imported outside it too:
+    /// every platform has to have this method, or the one line in `FediqoRootView` that calls
+    /// it stops compiling on the platform that has nothing to do. iOS found that out. Nothing at all in a build anybody ships, and nothing
     /// on a run reading the reader's own servers.
     @ViewBuilder
     func fixtureWindow(_ on: Bool) -> some View {

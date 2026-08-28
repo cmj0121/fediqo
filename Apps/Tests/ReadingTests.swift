@@ -2,16 +2,25 @@ import XCTest
 
 /// Reading a timeline: that there is one, and that leaving it and coming back puts the reader
 /// back on the post they were on.
+@MainActor
 final class ReadingTests: XCTestCase {
     override func setUp() {
         super.setUp()
         continueAfterFailure = false
     }
 
+    override func tearDown() {
+        // Whatever is still up when a test ends, taken down. `launch()` would have terminated
+        // it anyway before the next one started; this is so the last test does not leave a
+        // window standing on somebody's screen.
+        XCUIApplication().terminate()
+        super.tearDown()
+    }
+
     /// The one test that proves the pipeline itself. Everything else here is worthless if the
     /// app does not start and draw a timeline.
     func testTheTimelineHasPostsInIt() {
-        let app = DrivenApp.launched(by: self)
+        let app = DrivenApp.launched()
         XCTAssertTrue(app.postRows.firstMatch.waitForExistence(timeout: DrivenApp.patience),
                       "the timeline drew no rows")
         XCTAssertGreaterThan(app.postRows.count, 1, "a timeline of one row is not a timeline")
@@ -19,7 +28,7 @@ final class ReadingTests: XCTestCase {
 
     /// `j` twice, and the ring is on the second post rather than nowhere.
     func testTheRingFollowsTheKeys() {
-        let app = DrivenApp.launched(by: self)
+        let app = DrivenApp.launched()
         app.postRows.firstMatch.waitForIt()
         XCTAssertNil(app.ringedRow, "something was ringed before anybody pressed anything")
 
@@ -40,18 +49,15 @@ final class ReadingTests: XCTestCase {
     /// back to it — so whether they are looking at the post they were on is a question about a
     /// scroll, and nothing inside the package can perform one.
     func testComingBackLandsOnThePostYouWereOn() {
-        let app = DrivenApp.launched(by: self)
+        let app = DrivenApp.launched()
         app.postRows.firstMatch.waitForIt()
         for _ in 0..<4 { app.typeKey("j", modifierFlags: []) }
         let left = app.ringedRow(waiting: DrivenApp.patience)?.identifier
         XCTAssertNotNil(left, "no ring to come back to")
 
-        // Away, and round the other three pages back to this one.
-        app.rotatePage()
-        XCTAssertTrue(app.postRows.firstMatch.waitForNonExistence(timeout: DrivenApp.patience),
-                      "the timeline is still on screen, so nothing was left")
-        app.rotatePage(by: 3)
-        app.postRows.firstMatch.waitForIt()
+        // Away, and round the rail back to this page.
+        XCTAssertTrue(app.leaveTheTimeline(), "the timeline is still on screen, so nothing was left")
+        XCTAssertTrue(app.returnToTheTimeline(), "the timeline never came back")
 
         // Two things, and the second is the one only this target can ask. The ring is on the
         // same post — which the package already knows. And the post is *on the screen*: a list
@@ -67,7 +73,7 @@ final class ReadingTests: XCTestCase {
     /// key alone: with no ring there is nothing to come back to, and the list starts where
     /// every list starts rather than wherever the reader last happened to be.
     func testWithNoRingTheListComesBackToItsTop() {
-        let app = DrivenApp.launched(by: self)
+        let app = DrivenApp.launched()
         app.postRows.firstMatch.waitForIt()
         let top = app.postRows.firstMatch.identifier
         for _ in 0..<4 { app.typeKey("j", modifierFlags: []) }
@@ -78,10 +84,8 @@ final class ReadingTests: XCTestCase {
         app.typeKey("g", modifierFlags: [])
         XCTAssertTrue(app.waitForNoRing(), "g left the ring on a post")
 
-        app.rotatePage()
-        XCTAssertTrue(app.postRows.firstMatch.waitForNonExistence(timeout: DrivenApp.patience))
-        app.rotatePage(by: 3)
-        app.postRows.firstMatch.waitForIt()
+        XCTAssertTrue(app.leaveTheTimeline())
+        XCTAssertTrue(app.returnToTheTimeline(), "the timeline never came back")
 
         XCTAssertNil(app.ringedRow, "a ring appeared while the reader was away")
         XCTAssertTrue(app.descendants(matching: .any)[top].waitUntilOnScreen(),

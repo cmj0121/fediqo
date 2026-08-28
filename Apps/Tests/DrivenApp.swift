@@ -22,7 +22,8 @@ enum DrivenApp {
     /// The launch variables are the ones the app already understands — the screenshot workflow
     /// opens it the same way. Nothing here is a door built for testing: a test that needs its
     /// own way in is a test of something no reader can reach.
-    static func launched(by test: XCTestCase, on rail: String = "timeline") -> XCUIApplication {
+    @MainActor
+    static func launched(on rail: String = "timeline") -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["FEDIQO_FIXTURE"] = "1"
         app.launchEnvironment["FEDIQO_ROUTE"] = "shell"
@@ -33,12 +34,15 @@ enum DrivenApp {
         // fails in company, and did.
         app.launchArguments += ["-ApplePersistenceIgnoreState", "YES"]
         app.launch()
-        // Frontmost, and taken down again when the test is over. Neither is tidiness: a window
-        // left standing by an earlier test sits in front of the next one's, and an element
-        // behind another window is an element that exists, is drawn, and cannot be pressed —
-        // which is precisely the difference this suite reads "is it on the screen" out of.
+        // Frontmost, and not merely running. An element behind another window is an element
+        // that exists, is drawn, and cannot be pressed — which is precisely the difference
+        // this suite reads "is it on the screen" out of.
+        //
+        // Nothing is torn down here and nothing needs to be: `launch()` terminates an instance
+        // already running before it starts one, so no test ever meets the window another left
+        // behind. The last one does stay up until something takes it down, which is a window on
+        // the second display and nobody's problem.
         app.activate()
-        test.addTeardownBlock { app.terminate() }
         return app
     }
 
@@ -50,6 +54,13 @@ enum DrivenApp {
     static let patience: TimeInterval = 10
 }
 
+/// The waiting and the finding, all of it on the main actor.
+///
+/// Not a preference: `XCUIApplication` and `XCUIElement` are main-actor isolated, and under
+/// Swift 6 a nonisolated test method touching either is an error rather than a warning. The
+/// compiler on this laptop is lenient about it and the one on the runner is not, which is a
+/// difference worth spelling out rather than discovering twice.
+@MainActor
 extension XCUIElement {
     /// This element, once it is actually there. Fails the test where it never arrives.
     @discardableResult
@@ -75,6 +86,7 @@ extension XCUIElement {
     }
 }
 
+@MainActor
 extension XCUIApplication {
     /// Every post row on screen, by the identifier `PostRow` puts on itself.
     var postRows: XCUIElementQuery {
@@ -118,10 +130,30 @@ extension XCUIApplication {
     }
 
     /// The page `steps` along the rail, asked for the way a reader asks: ⌃Tab, which rotates
-    /// the four and wraps. Written here because every test that leaves a page and comes back
-    /// does it, and doing it by hand each time is how the count comes to be wrong once.
+    /// the four and wraps.
     func rotatePage(by steps: Int = 1) {
         for _ in 0..<steps { typeKey(XCUIKeyboardKey.tab, modifierFlags: .control) }
+    }
+
+    /// Off the timeline, and back once its rows are gone.
+    func leaveTheTimeline() -> Bool {
+        rotatePage()
+        return postRows.firstMatch.waitForNonExistence(timeout: DrivenApp.patience)
+    }
+
+    /// Round the rail until the timeline is in front of the reader again.
+    ///
+    /// Counted presses were what this used to be — three of them, because there are four pages
+    /// — and counting is what made it fragile: a single press that the app never saw leaves the
+    /// reader on Settings, and the test that follows waits ten seconds for rows that were never
+    /// going to be there. Pressing until the destination arrives asks the question the test
+    /// actually has, which is whether the timeline came back and not how many keys it took.
+    func returnToTheTimeline(within presses: Int = 6) -> Bool {
+        for _ in 0..<presses {
+            rotatePage()
+            if postRows.firstMatch.waitForExistence(timeout: 2) { return true }
+        }
+        return false
     }
 
     /// What the app is saying about the last thing it was asked to do, or nothing.

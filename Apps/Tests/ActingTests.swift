@@ -6,17 +6,26 @@ import XCTest
 /// account on any of them — so every one of these presses is refused. That is the case worth
 /// driving: it is the commonest one a reader meets, and until recently it was the one that
 /// looked exactly like a button that does nothing.
+@MainActor
 final class ActingTests: XCTestCase {
     override func setUp() {
         super.setUp()
         continueAfterFailure = false
     }
 
+    override func tearDown() {
+        // Whatever is still up when a test ends, taken down. `launch()` would have terminated
+        // it anyway before the next one started; this is so the last test does not leave a
+        // window standing on somebody's screen.
+        XCUIApplication().terminate()
+        super.tearDown()
+    }
+
     /// Every key that acts on a post, and the same answer from each: there is nobody to act as,
     /// and the app says so instead of putting the mark quietly back.
     func testAKeyThatCannotActSaysWhy() {
         for key in ["l", "b", "d"] {
-            let app = DrivenApp.launched(by: self)
+            let app = DrivenApp.launched()
             app.postRows.firstMatch.waitForIt()
             app.typeKey("j", modifierFlags: [])
             XCTAssertNotNil(app.ringedRow(waiting: DrivenApp.patience),
@@ -36,7 +45,7 @@ final class ActingTests: XCTestCase {
     /// Keeping a post is this device's own business: no server is asked and none can refuse, so
     /// there is nothing to report and nothing is reported.
     func testKeepingAPostTellsNobodyAndSaysNothing() {
-        let app = DrivenApp.launched(by: self)
+        let app = DrivenApp.launched()
         app.postRows.firstMatch.waitForIt()
         app.typeKey("j", modifierFlags: [])
         app.typeKey("a", modifierFlags: [])
@@ -47,7 +56,7 @@ final class ActingTests: XCTestCase {
     /// A press with no post under the ring is silent rather than a beep, and it is silent here
     /// too: nothing is acted on and nothing is said about it.
     func testAKeyWithNoRingDoesNothingAtAll() {
-        let app = DrivenApp.launched(by: self)
+        let app = DrivenApp.launched()
         app.postRows.firstMatch.waitForIt()
         XCTAssertNil(app.ringedRow)
         app.typeKey("l", modifierFlags: [])
