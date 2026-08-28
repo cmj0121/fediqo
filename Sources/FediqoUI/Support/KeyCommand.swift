@@ -27,6 +27,19 @@ enum KeyCommand: Hashable, CaseIterable {
     /// Lift what the author covered on the post the reader is on, or put it back. One key for
     /// the words behind their line and the media behind its blur, because they are one act.
     case toggleCover
+    /// The four things that can be done *to* the post the reader is on, rather than with it.
+    ///
+    /// Three of them are a server's answer and one of them is this device's, and the keys do
+    /// not say which is which — the row already does, by drawing the first three in a group
+    /// that carries other people's counts and the last two in one that carries nobody's. What
+    /// a key is for is the reader who is going down a timeline with one hand and does not want
+    /// to reach for a pointer to keep a post they liked.
+    ///
+    /// Each is a switch and not a command: pressed again, it takes the mark back off.
+    case favouritePost
+    case boostPost
+    case bookmarkPost
+    case keepPost
     case backToTop
     case showShortcuts
 
@@ -114,6 +127,16 @@ enum KeyCommand: Hashable, CaseIterable {
         case "m": return .rotateMedia
         case "p": return .playMedia
         case "s": return .toggleCover
+        // What is done to the post itself. `f` would have been favourite's letter in any
+        // other app and it is already the screen a picture takes, so the mark takes the
+        // letter of what pressing it means — `l` for liking it. `b` is boost where a reader
+        // coming from Mastodon's own web client already expects it, which leaves bookmark
+        // `d`. And `a` is the archive box's own letter, on the one of the four that tells
+        // nobody: keeping a post is this device's business and no server's.
+        case "l": return .favouritePost
+        case "b": return .boostPost
+        case "d": return .bookmarkPost
+        case "a": return .keepPost
         case "?": return .showShortcuts
         // A slash on its own asks for nothing. It is here only as the other half of `?`.
         default: return nil
@@ -156,6 +179,7 @@ enum KeyCommand: Hashable, CaseIterable {
     static let listened: Set<KeyEquivalent> = [
         .tab, .escape, .return, .upArrow, .downArrow, .space,
         "r", "R", "c", "j", "k", "g", "m", "o", "p", "s", "v", "f", "?", "/",
+        "l", "b", "d", "a",
     ]
 
     /// The same list, in the spelling a press arrives in, so that a key nobody listens for
@@ -250,6 +274,10 @@ extension KeyCommand {
         Shortcut(group: .doing, keys: ["c"], name: "compose", commands: [.compose]),
         Shortcut(group: .doing, keys: ["Return", "Space"], name: "expand", commands: [.expandPost]),
         Shortcut(group: .doing, keys: ["o"], name: "browser", commands: [.openInBrowser]),
+        Shortcut(group: .doing, keys: ["l"], name: "favourite", commands: [.favouritePost]),
+        Shortcut(group: .doing, keys: ["b"], name: "boost", commands: [.boostPost]),
+        Shortcut(group: .doing, keys: ["d"], name: "bookmark", commands: [.bookmarkPost]),
+        Shortcut(group: .doing, keys: ["a"], name: "keep", commands: [.keepPost]),
         Shortcut(group: .doing, keys: ["v"], name: "viewMedia", commands: [.openMedia]),
         Shortcut(group: .doing, keys: ["f"], name: "fullScreen", commands: [.fullScreen]),
         Shortcut(group: .doing, keys: ["m"], name: "media", commands: [.rotateMedia]),

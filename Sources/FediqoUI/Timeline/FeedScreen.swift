@@ -18,6 +18,10 @@ struct FeedScreen: View {
     /// button to do it in one move only exists while that is true — an arrow pointing at
     /// where you already are is a button that does nothing.
     @State private var scrolledAway = false
+    /// Whether the reader has been put back on the post they were on. One screen, one
+    /// restoring: the ring is remembered for as long as the app runs, and this is only the
+    /// once-per-arrival act of scrolling to it.
+    @State private var restored = false
     /// Whether the toast is up. The feed decides *that* the end was reached; how long a passing
     /// message stays and how it goes are the screen's, the way the scrolling already is.
     @State private var announcing = false
@@ -115,12 +119,31 @@ struct FeedScreen: View {
             // Near either end there is not enough list to centre against and it settles for
             // as close as it can get, which is what a reader at the top or bottom expects
             // anyway.
-            //
-            // Only when the ring moves, so coming back to a tab does not scroll to the ring
-            // that tab still holds: the list is built again at the top, the way every other
-            // trip between pages and tabs already leaves it.
             .onChange(of: model.selection) { _, key in
                 guard let key else { return }
+                proxy.scrollTo(key, anchor: .center)
+            }
+            // And once on the way in, to the post the reader was already on.
+            //
+            // The ring itself was never lost: it lives on the feed, and the feeds outlive the
+            // screens that show them. What was lost was the place — `AppShell` gives this
+            // screen the timeline's own id, so coming back builds a new scroll view at the top
+            // of the list while the ring sits wherever the reader left it. Somebody who
+            // stepped away to look at something else and came back was being told two
+            // different places at once.
+            //
+            // Watched rather than done on arrival, because on arrival the answer is not ready:
+            // the ring names a post, and whether this list has that post is a question about a
+            // list a load may still be replacing. `selectedPost` is that question asked
+            // properly — it resolves through the same rules the rows are drawn from — so a
+            // ring on a post the filters now hide scrolls nowhere, and the reader simply
+            // starts at the top, which is where a list with no ring in it starts anyway.
+            //
+            // Once per screen, and then never again. After the first one this is the reader's
+            // own list, and every move in it belongs to the change above.
+            .onChange(of: model.selectedPost?.mergeKey, initial: true) { _, key in
+                guard !restored, let key else { return }
+                restored = true
                 proxy.scrollTo(key, anchor: .center)
             }
             // Back to the top, however it was asked for — the key or the button — and with

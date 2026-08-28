@@ -327,3 +327,160 @@ struct WiredPostKeyTests {
         #expect(app.feed(for: .publicFixture).selectedURL == nil)
     }
 }
+
+/// The four marks and the four keys, written once: the pairs every test below is asked of.
+private let actingKeys: [(KeyCommand, Character)] = [
+    (.favouritePost, "l"), (.boostPost, "b"), (.bookmarkPost, "d"), (.keepPost, "a"),
+]
+
+/// The four things a key can do *to* the post the ring is on.
+///
+/// What each of them does after that is Core's — a request to somebody's server, or a row in
+/// this device's database — and is tested there. What is asked here is the part a key owns:
+/// that there is a post under the ring to act on, and that the press says so.
+@Suite("Acting on the post you are on")
+@MainActor
+struct PostActionKeyTests {
+    private static let posts = ["a", "b", "c"].map { post($0) }
+
+    private func timeline(_ name: String) -> AppState {
+        let app = freshApp(name)
+        app.railItem = .timeline
+        app.currentTimeline = "public"
+        app.feed(for: .publicFixture).show(Self.posts)
+        return app
+    }
+
+    @Test("Each of the four is a key of its own", arguments: actingKeys)
+    func eachHasItsOwnKey(command: KeyCommand, key: Character) {
+        #expect(KeyCommand.from(key, modifiers: [], typing: false) == command)
+        // And in a draft it is a letter like any other.
+        #expect(KeyCommand.from(key, modifiers: [], typing: true) == nil)
+        // Held with Shift it is a capital this app has no use for, the way `⇧j` is.
+        #expect(KeyCommand.from(key, modifiers: [.shift], typing: false) == nil)
+    }
+
+    @Test("With a post under the ring, the press has something to do",
+          arguments: actingKeys)
+    func actsOnThePostUnderTheRing(command: KeyCommand, key: Character) {
+        let app = timeline("acting-key-\(key)")
+        #expect(app.perform(.nextPost))
+        #expect(app.perform(command))
+    }
+
+    /// The ring is what says which post, so with no ring there is no post — and the app says
+    /// nothing rather than picking the top of the list on the reader's behalf.
+    @Test("With no ring there is nothing to act on", arguments: actingKeys)
+    func nothingUnderTheRing(command: KeyCommand, key: Character) {
+        let app = timeline("acting-key-no-ring-\(key)")
+        #expect(app.feed(for: .publicFixture).selection == nil)
+        #expect(app.perform(command) == false)
+    }
+
+    @Test("On a page with no timeline, none of the four has anything to do",
+          arguments: pagesWithoutFeeds)
+    func nothingToActOnElsewhere(page: RailItem) {
+        let app = freshApp("acting-key-off-timeline-\(page.rawValue)")
+        app.railItem = page
+        for (command, _) in actingKeys {
+            #expect(app.perform(command) == false)
+        }
+    }
+
+    /// A letter is ours alone. A press that found no post is silent rather than a beep, the
+    /// same as `j` held at the bottom of a list.
+    @Test("The four letters are kept whether or not there was a post",
+          arguments: actingKeys)
+    func theLettersAreOurs(command: KeyCommand, key: Character) {
+        let app = freshApp("acting-key-kept-\(key)")
+        app.railItem = .kept
+        #expect(app.presses(key))
+    }
+
+    /// Every key the app answers has to be a key it listens for, or the shortcut is silently
+    /// dead — the whole list is checked elsewhere, and these four are named here as well
+    /// because they are the ones this change added.
+    @Test("All four are listened for", arguments: actingKeys)
+    func allFourAreHeard(command: KeyCommand, key: Character) {
+        #expect(KeyCommand.listenedCharacters.contains(key))
+    }
+}
+
+/// Where the reader was, when they come back to it.
+///
+/// The ring lives on the feed and the feeds outlive the screens, which is what makes coming
+/// back to the post you were on possible at all. The scrolling itself is `FeedScreen`'s and
+/// is not asked about here; what is asked is the thing it scrolls to.
+@Suite("Coming back to a timeline")
+@MainActor
+struct ReturningToATimelineTests {
+    private static let posts = ["a", "b", "c"].map { post($0) }
+
+    @Test("A trip to another page leaves the ring where the reader put it")
+    func theRingSurvivesAnotherPage() {
+        let app = freshApp("returning-another-page")
+        app.railItem = .timeline
+        app.currentTimeline = "public"
+        let feed = app.feed(for: .publicFixture)
+        feed.show(Self.posts)
+        app.perform(.nextPost)
+        app.perform(.nextPost)
+        #expect(feed.selection == "b")
+
+        app.railItem = .settings
+        app.railItem = .timeline
+        // The same model, and the same post in it: a screen built again reads the ring off
+        // this rather than starting the reader at the top of a list they were half way down.
+        #expect(app.feed(for: .publicFixture) === feed)
+        #expect(app.feed(for: .publicFixture).selectedPost?.mergeKey == "b")
+    }
+
+    @Test("Switching to another timeline and back does the same")
+    func theRingSurvivesAnotherTimeline() {
+        let app = freshApp("returning-another-timeline")
+        app.railItem = .timeline
+        app.currentTimeline = "public"
+        let feed = app.feed(for: .publicFixture)
+        feed.show(Self.posts)
+        app.perform(.nextPost)
+        #expect(feed.selection == "a")
+
+        app.currentTimeline = "trend"
+        app.feed(for: .trendingFixture).show(Self.posts)
+        app.perform(.nextPost)
+        app.perform(.nextPost)
+        // Two lists, two rings. Neither is the other's.
+        #expect(app.feed(for: .trendingFixture).selection == "b")
+        app.currentTimeline = "public"
+        #expect(app.feed(for: .publicFixture).selectedPost?.mergeKey == "a")
+    }
+
+    /// What the screen scrolls to is `selectedPost` rather than `selection`, and this is why:
+    /// a key naming a post the list no longer shows resolves to nothing, so the reader is put
+    /// back at the top instead of being scrolled to a row that is not there.
+    @Test("A ring on a post the list no longer shows is nothing to come back to")
+    func aRingWithNoPostUnderIt() {
+        let app = freshApp("returning-post-gone")
+        app.railItem = .timeline
+        app.currentTimeline = "public"
+        let feed = app.feed(for: .publicFixture)
+        feed.show(Self.posts)
+        app.perform(.nextPost)
+        feed.show([post("c")])
+        #expect(feed.selection == "a")
+        #expect(feed.selectedPost == nil)
+    }
+
+    /// Nothing was ever selected, so there is nothing to go back to and the list starts where
+    /// every list starts.
+    @Test("A timeline nobody has put a ring on comes back to its top")
+    func nothingToComeBackTo() {
+        let app = freshApp("returning-no-ring")
+        app.railItem = .timeline
+        app.currentTimeline = "public"
+        app.feed(for: .publicFixture).show(Self.posts)
+        app.railItem = .kept
+        app.railItem = .timeline
+        #expect(app.feed(for: .publicFixture).selectedPost == nil)
+    }
+}

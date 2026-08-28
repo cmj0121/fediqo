@@ -76,22 +76,6 @@ struct ShortcutListTests {
         }
     }
 
-    /// The catalogue as `key → language → text`, read from the source of truth itself.
-    private func stringCatalogue() throws -> [String: [String: String]] {
-        let path = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()  // FediqoUITests
-            .deletingLastPathComponent()  // Tests
-            .deletingLastPathComponent()  // the package
-            .appending(path: "Sources/FediqoUI/Resources/Localizable.xcstrings")
-        let json = try JSONSerialization.jsonObject(with: Data(contentsOf: path))
-        let strings = try #require((json as? [String: Any])?["strings"] as? [String: Any])
-        return strings.compactMapValues { entry in
-            guard let localizations = (entry as? [String: Any])?["localizations"] as? [String: Any] else { return nil }
-            return localizations.compactMapValues { unit in
-                ((unit as? [String: Any])?["stringUnit"] as? [String: Any])?["value"] as? String
-            }
-        }
-    }
 }
 
 /// The key that puts the list up, and the key that takes it down again.

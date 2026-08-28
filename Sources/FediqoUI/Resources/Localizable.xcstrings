@@ -1430,6 +1430,23 @@
         }
       }
     },
+    "post.reachedOut": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ was asked to fetch this post so it could act on it."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "為了替你動作，已請 %@ 去取回這篇貼文。"
+          }
+        }
+      }
+    },
     "post.reblog": {
       "extractionState": "manual",
       "localizations": {
@@ -2263,6 +2280,40 @@
         }
       }
     },
+    "shortcut.bookmark": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bookmark the post you are on"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "為你所在的貼文加書籤"
+          }
+        }
+      }
+    },
+    "shortcut.boost": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Boost the post you are on"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "轉推你所在的貼文"
+          }
+        }
+      }
+    },
     "shortcut.browser": {
       "extractionState": "manual",
       "localizations": {
@@ -2348,6 +2399,23 @@
         }
       }
     },
+    "shortcut.favourite": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Favourite the post you are on"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "收藏你所在的貼文"
+          }
+        }
+      }
+    },
     "shortcut.fullScreen": {
       "extractionState": "manual",
       "localizations": {
@@ -2429,6 +2497,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "輪替自動重新讀取的間隔"
+          }
+        }
+      }
+    },
+    "shortcut.keep": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep the post you are on here"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "把你所在的貼文留在這台裝置"
           }
         }
       }
