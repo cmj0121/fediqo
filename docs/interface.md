@@ -18,15 +18,20 @@ else, not on the screen beside it.
 
 A row of posts is read a hundred times a session and its actions are the same six every time. A label beside
 each of them is six words the eye must skip on every row, and after the first screen it has stopped reading
-them anyway. The exception is where a mistake cannot be taken back: muting, blocking, reporting and deleting
-carry their words, because the reader must be told what they are about to do, not reminded what they already
-know.
+them anyway.
 
-| what it is                      | how it is drawn                                      |
-| ------------------------------- | ---------------------------------------------------- |
-| an ordinary action              | glyph only, with `help()` and an accessibility label |
-| a destructive or one-way action | glyph and its words                                  |
-| a place to go                   | glyph, and words where there is room for them        |
+Two things keep their words. One is where a mistake cannot be taken back — muting, blocking, reporting and
+deleting — because the reader must be told what they are about to do, not reminded what they already know.
+The other is where the control is the only thing naming what the reader is looking at: the button over a
+covered post says **Show**, because an eye above a blur is a glyph with no convention to lean on, and a
+reader who cannot read it cannot find out what was covered.
+
+| what it is                                      | how it is drawn                                      |
+| ----------------------------------------------- | ---------------------------------------------------- |
+| an ordinary action                              | glyph only, with `help()` and an accessibility label |
+| a destructive or one-way action                 | glyph and its words                                  |
+| a control that is the only thing naming a state | glyph and its words                                  |
+| a place to go                                   | glyph, and words where there is room for them        |
 
 ## S2 — One size per role
 
@@ -46,13 +51,13 @@ and every line is one more mark competing with the marks that mean something.
 
 ## S4 — Colour is state
 
-| colour           | what it means                          |
-| ---------------- | -------------------------------------- |
-| grey (secondary) | at rest, nothing has been done         |
-| a tint           | on — this is a thing you did           |
-| red              | this takes something away              |
-| orange           | a server is unwell                     |
-| the accent       | where the reader is                    |
+| colour           | what it means                  |
+| ---------------- | ------------------------------ |
+| grey (secondary) | at rest, nothing has been done |
+| a tint           | on — this is a thing you did   |
+| red              | this takes something away      |
+| orange           | a server is unwell             |
+| the accent       | where the reader is            |
 
 Nothing is coloured to be pretty. A reader who cannot tell two hues apart still has every state available to
 them, because each of these is also a filled or unfilled glyph, a word, or a position.
@@ -87,13 +92,13 @@ Spacing, radius, type size and glyph size come from `Theme.swift`. A bare number
 A number written in a view is a number that cannot be changed anywhere else. Two of them written a week apart
 disagree, and the disagreement is invisible until the screens are put side by side.
 
-| token       | what it is for                                             |
-| ----------- | ---------------------------------------------------------- |
-| `Space`     | every gap and every padding                                |
-| `Radius`    | every corner                                               |
-| `Glyph`     | every symbol size                                          |
-| `TypeScale` | every text size, always through `fediqoFont`               |
-| `Hit`       | the smallest thing worth pressing                          |
+| token       | what it is for                               |
+| ----------- | -------------------------------------------- |
+| `Space`     | every gap and every padding                  |
+| `Radius`    | every corner                                 |
+| `Glyph`     | every symbol size                            |
+| `TypeScale` | every text size, always through `fediqoFont` |
+| `Hit`       | the smallest thing worth pressing            |
 
 Text is set with `fediqoFont` and never with `.font(.system(size:))`, because that is what carries the reader's
 own text size down a tree macOS gives no Dynamic Type to.

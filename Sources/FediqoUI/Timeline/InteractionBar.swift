@@ -183,18 +183,23 @@ struct MoreActions: View {
         .frame(width: Size.popover)
     }
 
+    /// The two ordinary things: take the address, or go to it. Glyphs in a row, the way the
+    /// interaction bar spells everything it can do — the words are in `help()` and in what a
+    /// screen reader is told, because neither of these can go wrong and neither needs reading
+    /// twice. What is under **Danger** keeps its words for exactly the opposite reason.
     private var general: some View {
-        VStack(alignment: .leading, spacing: Space.hair) {
-            row("link", t("post.copyLink"), tint: .primary) {
+        HStack(spacing: Space.withinGroup) {
+            IconButton(symbol: "link", labelKey: "post.copyLink") {
                 copy(post.webURL)
                 dismiss()
             }
             .disabled(post.webURL == nil)
-            row("arrow.up.right.square", t("timeline.open"), tint: .primary) {
+            IconButton(symbol: "arrow.up.right.square", labelKey: "timeline.open") {
                 if let url = post.webURL { openURL(url) }
                 dismiss()
             }
             .disabled(post.webURL == nil)
+            Spacer(minLength: 0)
         }
     }
 
