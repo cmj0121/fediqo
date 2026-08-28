@@ -235,7 +235,7 @@ struct StatisticsView: View {
     }
 
     private func usageGrid(_ rows: [UsageRow]) -> some View {
-        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 5) {
+        Grid(alignment: .leading, horizontalSpacing: Space.gap, verticalSpacing: Space.snug) {
             GridRow {
                 Text(t("stats.requests.source")).gridColumnAlignment(.leading)
                 Text(t("stats.requests.calls")).gridColumnAlignment(.trailing)

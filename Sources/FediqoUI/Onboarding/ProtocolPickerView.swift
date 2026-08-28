@@ -67,7 +67,7 @@ struct ProtocolPickerView: View {
             }
             .padding(Space.withinGroup)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .fediqoCard(radius: 12)
+            .fediqoCard(radius: Radius.panel)
         }
         .buttonStyle(.plain)
         .disabled(!socialProtocol.isImplemented)

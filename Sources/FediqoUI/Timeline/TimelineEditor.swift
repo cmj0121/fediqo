@@ -75,7 +75,7 @@ struct TimelineEditor: View {
         }
         .padding(Space.withinGroup)
         .frame(width: Self.sheetWidth, alignment: .topLeading)
-        .fediqoCard(radius: 12, shadow: true)
+        .fediqoCard(radius: Radius.panel, shadow: true)
         .onAppear(perform: load)
     }
 
@@ -134,7 +134,7 @@ struct TimelineEditor: View {
                 .lineLimit(lines, reservesSpace: lines > 1)
                 .fediqoFont(TypeScale.small)
                 .padding(Space.step)
-                .fediqoCard(radius: 8, raised: false)
+                .fediqoCard(radius: Radius.inner, raised: false)
         }
     }
 

@@ -20,7 +20,7 @@ struct ShortcutList: View {
 
             // One grid for all three groups rather than one each, so the keys line up down
             // the whole list instead of forming three columns of different widths.
-            Grid(alignment: .topLeading, horizontalSpacing: 12, verticalSpacing: 7) {
+            Grid(alignment: .topLeading, horizontalSpacing: Space.gap, verticalSpacing: Space.step) {
                 ForEach(groups) { group in
                     GridRow {
                         Text(t(group.titleKey))
@@ -29,7 +29,7 @@ struct ShortcutList: View {
                             .textCase(.uppercase)
                             // Air above a heading that follows a group, and none above the
                             // first, which already has the card's padding over it.
-                            .padding(.top, group == groups.first ? 0 : 6)
+                            .padding(.top, group == groups.first ? 0 : Space.snug)
                             .gridCellColumns(2)
                     }
                     ForEach(KeyCommand.byGroup[group] ?? []) { shortcut in
@@ -106,7 +106,7 @@ private struct ShortcutsOverlay: ViewModifier {
         // ceiling with the list floating in the middle of it. The height is the list's, and
         // where the list has to scroll the branch above already fills what it is given.
         .frame(maxWidth: Size.prose)
-        .fediqoCard(radius: 12, shadow: true)
+        .fediqoCard(radius: Radius.panel, shadow: true)
         .padding(Space.band)
         .transition(.scale(scale: 0.96).combined(with: .opacity))
     }

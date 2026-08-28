@@ -59,11 +59,13 @@ enum Space {
     static let page: CGFloat = 40
 }
 
-/// Every corner. Three, because there are three things with corners: a card, something inside
-/// one, and a picture off a server.
+/// Every corner. Four, because there are four things with corners: a card, something inside
+/// one, a panel over the page, and a picture off a server.
 enum Radius {
     static let inner: CGFloat = 8
     static let card: CGFloat = 10
+    /// A panel that stands over the page rather than in it: the composer, a sheet, the keys.
+    static let panel: CGFloat = 12
     static let thumbnail: CGFloat = 7
 }
 

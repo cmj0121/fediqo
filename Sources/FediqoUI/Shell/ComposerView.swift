@@ -20,7 +20,7 @@ struct ComposerView: View {
             content
         }
         .frame(width: Self.size.width, height: Self.size.height)
-        .fediqoCard(radius: 12, shadow: true)
+        .fediqoCard(radius: Radius.panel, shadow: true)
         // A composer you have to reach for the mouse to type in is a composer that failed on
         // a keyboard. `c` opens it and the cursor is already here; `Escape` is how you leave,
         // and it is the one key that still works while this has the keyboard.
@@ -60,7 +60,7 @@ struct ComposerView: View {
                 .fediqoFont(TypeScale.small)
                 .padding(Space.mid)
                 .frame(maxWidth: .infinity, minHeight: 72, alignment: .topLeading)
-                .fediqoCard(radius: 8, raised: false)
+                .fediqoCard(radius: Radius.inner, raised: false)
                 .onChange(of: typing) { _, now in app.setTyping(now) }
 
             Text(t("compose.soon"))
