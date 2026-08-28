@@ -1,6 +1,9 @@
 import Observation
 import SwiftUI
 import FediqoCore
+#if os(macOS)
+import AppKit
+#endif
 
 enum Route: Hashable {
     case landing
@@ -209,6 +212,14 @@ public final class AppState {
         PostActions(registry: registry, store: store)
     /// What is playing, which is at most one thing anywhere in the app.
     let playback = Playback()
+    /// The attachment the reader has opened over the app, or nothing. It lives here rather
+    /// than in the row for the reason `expanded` does: a key, a press and the shell that draws
+    /// it are three places, and only one of them is the row.
+    var viewing: MediaViewing?
+    /// Whether **this app** put the window into full screen for the opened picture. Kept so
+    /// that leaving the picture leaves the screen it took — and so that a reader who was
+    /// already in full screen before any of this is left exactly where they were.
+    private(set) var tookTheScreen = false
     /// Whether the written-down list of keys is up. It sits over everything the shell draws
     /// rather than in a sheet, so it lives here beside `composing` for the same reason: the
     /// key that opens it is answered outside the view that draws it.
@@ -770,6 +781,8 @@ public final class AppState {
         case .previousPost: return moveSelection(by: -1)
         case .expandPost: return expandSelectedPost()
         case .openInBrowser: return openSelectedPost()
+        case .openMedia: return openTheMedia()
+        case .fullScreen: return takeTheScreen()
         case .rotateMedia: return turnTheDeck()
         case .playMedia: return playTheAttachment()
         case .toggleCover: return turnTheCover()
@@ -866,6 +879,59 @@ public final class AppState {
     private func turnTheCover() -> Bool {
         guard postUnderTheRing?.hidesSomething == true else { return false }
         mediaCovers += 1
+        return true
+    }
+
+    /// Opens what is attached to the post the ring is on, or closes what is open.
+    ///
+    /// It opens at the front of the deck rather than at whatever the row happens to be
+    /// showing: which card is on top belongs to the row, and asking it here would mean two
+    /// places holding one answer. `m` turns it once it is open, which is the same key it was
+    /// before, doing the same thing to the same deck.
+    private func openTheMedia() -> Bool {
+        if viewing != nil { return closeTheMedia() }
+        guard let post = postUnderTheRing, !post.attachments.isEmpty else { return false }
+        show(post.attachments, at: 0, covered: post.sensitive == true)
+        return true
+    }
+
+    /// Opens a picture the reader pressed, at the one they were looking at.
+    func show(_ attachments: [Attachment], at index: Int, covered: Bool) {
+        guard !attachments.isEmpty else { return }
+        withAnimation(Motion.appearing) {
+            viewing = MediaViewing(attachments: attachments, index: index, covered: covered)
+        }
+    }
+
+    /// Gives the opened picture the whole screen, or hands it back. Nothing at all where
+    /// there is no picture open, and nothing on a platform whose windows have no such state:
+    /// on a phone the app already has the screen.
+    private func takeTheScreen() -> Bool {
+        guard viewing != nil else { return false }
+        #if os(macOS)
+        guard let window = NSApplication.shared.keyWindow else { return false }
+        window.toggleFullScreen(nil)
+        tookTheScreen.toggle()
+        return true
+        #else
+        return false
+        #endif
+    }
+
+    /// Closes the opened picture, and gives back the screen if this app took it.
+    @discardableResult
+    func closeTheMedia() -> Bool {
+        guard viewing != nil else { return false }
+        #if os(macOS)
+        if tookTheScreen, let window = NSApplication.shared.keyWindow {
+            window.toggleFullScreen(nil)
+        }
+        #endif
+        tookTheScreen = false
+        withAnimation(Motion.appearing) { viewing = nil }
+        // What was playing in it was playing in front of the reader; it does not go on
+        // playing behind them.
+        playback.stop()
         return true
     }
 
@@ -985,6 +1051,9 @@ public final class AppState {
             setShowingShortcuts(false)
             return true
         }
+        // In front of the composer as well: the picture is drawn over the whole app, so it
+        // is what a press of Escape is aimed at while it is up.
+        if viewing != nil { return closeTheMedia() }
         if composing {
             setComposing(false)
             return true

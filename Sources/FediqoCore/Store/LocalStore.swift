@@ -180,6 +180,9 @@ public final class LocalStore: Sendable {
         migrator.registerMigration("007") { db in
             try db.execute(sql: schema(named: "schema-007"))
         }
+        migrator.registerMigration("008") { db in
+            try db.execute(sql: schema(named: "schema-008"))
+        }
         return migrator
     }
 

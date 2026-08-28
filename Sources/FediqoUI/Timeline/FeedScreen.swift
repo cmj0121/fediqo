@@ -55,6 +55,18 @@ struct FeedScreen: View {
     /// The line under the last post: a hairline that fades out, ending in a dot.
     private static let stopLine: CGFloat = 34
 
+    /// Whether a row is an answer, and whose — as much as a timeline can honestly say.
+    ///
+    /// A reply carries the address of what it answers and nothing about who wrote it, so the
+    /// name comes from the page itself where the parent happens to be on it. Where it is not,
+    /// the row says it is an answer and stops: the rest is one press away, where the whole
+    /// conversation is read from the store and the server.
+    static func answering(_ post: Post, among posts: [Post]) -> Answering {
+        guard let parent = post.inReplyToURI else { return .nothing }
+        guard let above = posts.first(where: { $0.uri == parent }) else { return .somebody }
+        return .handle(above.authorHandle)
+    }
+
     private var fading: Animation? { reduceMotion ? nil : Motion.appearing }
 
     private var model: FeedModel { app.feed(for: timeline) }
@@ -268,7 +280,8 @@ struct FeedScreen: View {
                                 turns: post.mergeKey == model.selection ? app.mediaTurns : 0,
                                 plays: post.mergeKey == model.selection ? app.mediaPlays : 0,
                                 covers: post.mergeKey == model.selection ? app.mediaCovers : 0,
-                                revealed: app.preferences.showSensitive) {
+                                revealed: app.preferences.showSensitive,
+                                answering: Self.answering(post, among: posts)) {
                             app.expand(post)
                         }
                     }

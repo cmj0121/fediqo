@@ -3,10 +3,15 @@ import FediqoCore
 
 /// What came attached, drawn as a deck.
 ///
-/// Several attachments are not a row of thumbnails here: they are a stack with one on top, and
-/// clicking it turns the stack over. There is no lightbox and no gallery — nothing that has to
-/// be got out of again — which is why the deck can live in a column 200 points wide beside the
-/// words rather than pushing them out of the way.
+/// Several attachments are not a row of thumbnails here: they are a stack with one on top,
+/// which is why the deck can live in a column 200 points wide beside the words rather than
+/// pushing them out of the way.
+///
+/// **This used to say there was no lightbox and no gallery, on purpose.** That was overturned
+/// in #41: the one thing a reader most wants from a picture is to see it, and a column 200
+/// points wide is not seeing it. A press opens it over the app — `MediaViewer` — and `m` turns
+/// the deck without opening anything. What was right about the old rule survives: there is
+/// still nothing to get lost in, and one press of `Escape` is the whole of getting out.
 ///
 /// What can be played, plays here too, in the same rectangle the still was in: the mark on a
 /// film or a clip is a button. Nothing starts by itself, and turning the stack over stops
@@ -138,11 +143,11 @@ struct AttachmentDeck: View {
             }
         }
         // The deck owns this click and does not pass it on: the row opens the post, and a
-        // reader turning the stack over has not asked to leave the timeline. The play mark
-        // sits above it and takes its own clicks first.
+        // reader who pressed the picture asked for the picture rather than for the words
+        // beside it. The play mark sits above it and takes its own clicks first.
         .contentShape(Rectangle())
-        .onTapGesture { hidden ? uncover() : turn() }
-        .help(attachment.alt.isEmpty ? t("post.media.turn") : attachment.alt)
+        .onTapGesture { hidden ? uncover() : open() }
+        .help(attachment.alt.isEmpty ? t("post.media.open") : attachment.alt)
     }
 
     private func badge(_ symbol: String) -> some View {
@@ -183,6 +188,12 @@ struct AttachmentDeck: View {
         let described = attachment.alt.isEmpty ? t("post.media.\(attachment.kind.rawValue)") : attachment.alt
         guard attachments.count > 1 else { return described }
         return t("post.media.position", top % attachments.count + 1, attachments.count) + " " + described
+    }
+
+    /// Hands what is on top to the app, which draws it over everything. The deck keeps its
+    /// own place in the stack: the reader comes back to the card they left.
+    private func open() {
+        app.show(attachments, at: top % max(attachments.count, 1), covered: covered)
     }
 
     private func turn() {

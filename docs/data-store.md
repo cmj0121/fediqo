@@ -66,7 +66,7 @@ screen, not a crash**, and the screen has to be readable in the right language.
 ```text
 network   what a server handed over. A refresh writes; only an authority edits.
           protocols, feeds, filter_kinds, servers, accounts, posts, tags, post_tags,
-          post_origins, post_mentions, server_trends
+          post_origins, post_mentions, post_emojis, server_trends
 
 local     what you decided, and can withdraw. Only you.
           servers.selected_at, servers.position, tags.followed_at, tags.muted_at, owned_accounts,
@@ -654,6 +654,32 @@ what it cost comes back for a screen to say out loud.
 
 The lookup answers with the whole status, including the three marks. That is the only moment this app is
 ever told them, so they are written down there rather than asked for again.
+
+## What a post is written in
+
+A server hands its custom emoji over beside every status: `:blobcat:` in the words, and, in a list of its
+own, the address of the picture `:blobcat:` means. Both halves arrive together and only one of them used to
+be kept, which left the reader reading the machine's spelling of a picture.
+
+| table         | a row says                                                                         |
+| ------------- | ---------------------------------------------------------------------------------- |
+| `post_emojis` | in post `merge_key`, `shortcode` means the picture at `url`, still at `static_url` |
+
+A table and not a column, for the reason `post_tags` is one: it is a list, and a list in a column is a list
+nothing can join on.
+
+The status's own emoji and its author's go into the same list. A shortcode means one picture on one server,
+so `:blobcat:` in a display name is `:blobcat:` in the words under it, and two rows saying so would be one
+fact written twice. Where a server contradicts itself the first spelling wins, which is what the primary
+key `(merge_key, shortcode)` does.
+
+`static_url` is the still of a moving one, and it is what a reader who has asked for less movement is
+given. Everybody else is given the moving one. A `Text` cannot animate what is inside it, so the frames are
+decoded once, at the size of the line's own ink, and the line is rebuilt with the next of them on a clock —
+one that runs only where something in that particular line actually moves.
+
+Nothing is backfilled. A post stored before 008 has no rows here and draws its shortcodes as the text they
+are, which is exactly what it did the day before.
 
 ## Writing
 

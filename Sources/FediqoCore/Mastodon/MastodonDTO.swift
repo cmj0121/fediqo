@@ -29,6 +29,23 @@ enum MastodonDTO {
         /// What it was written with. Sent for statuses this server hosts and left out for
         /// everything it received from somewhere else, which is most of a timeline.
         let application: Application?
+        /// The custom emoji the words are partly written in. Absent on the odd server, for the
+        /// same reason as `tags`.
+        let emojis: [Emoji]?
+    }
+
+    /// One custom emoji: the name between the colons, and the picture it stands for. A row
+    /// with no address behind it is dropped rather than kept as a shortcode pointing nowhere.
+    struct Emoji: Decodable, Sendable {
+        let shortcode: String
+        let url: String?
+        let staticUrl: String?
+
+        var asEmoji: CustomEmoji? {
+            guard !shortcode.isEmpty, let address = url.flatMap(URL.init(string:)) else { return nil }
+            return CustomEmoji(shortcode: shortcode, url: address,
+                               staticURL: staticUrl.flatMap(URL.init(string:)))
+        }
     }
 
     struct Application: Decodable, Sendable {
@@ -49,7 +66,7 @@ enum MastodonDTO {
 
         func asMention(on host: String) -> FediqoCore.Mention? {
             let uri = url ?? Account(id: "", url: nil, username: username, acct: acct,
-                                     displayName: "", avatar: nil).authorId(on: host)
+                                     displayName: "", avatar: nil, emojis: nil).authorId(on: host)
             let handle = acct.contains("@") ? "@\(acct)" : "@\(acct)@\(host)"
             return uri.isEmpty ? nil : FediqoCore.Mention(uri: uri, handle: handle)
         }
@@ -63,6 +80,8 @@ enum MastodonDTO {
         let acct: String
         let displayName: String
         let avatar: String?
+        /// The custom emoji the display name is partly written in.
+        let emojis: [Emoji]?
 
         var name: String { displayName.isEmpty ? username : displayName }
 
@@ -240,6 +259,9 @@ extension MastodonDTO.Status {
             inReplyToURI: subject.inReplyToId.map { "https://\(host)/api/v1/statuses/\($0)" },
             tags: (subject.tags ?? []).map(\.name),
             mentions: (subject.mentions ?? []).compactMap { $0.asMention(on: host) },
+            // The words' own emoji first, then the author's: where a server spells one
+            // shortcode two ways, what the post says wins over what the name does.
+            emojis: ((subject.emojis ?? []) + (subject.account.emojis ?? [])).compactMap(\.asEmoji),
             boostedBy: reblog == nil ? nil : account.name,
             boostedById: reblog == nil ? nil : account.authorId(on: host),
             sources: [host]

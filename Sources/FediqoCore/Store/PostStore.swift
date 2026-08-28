@@ -425,13 +425,24 @@ extension LocalStore {
             """, arguments: StatementArguments(keys)) {
             mentions[row["merge_key"], default: []].append(Mention(uri: row["mention_uri"], handle: row["handle"]))
         }
+        var emojis: [String: [CustomEmoji]] = [:]
+        for row in try Row.fetchAll(db, sql: """
+            SELECT merge_key, shortcode, url, static_url FROM post_emojis
+            WHERE merge_key IN (\(placeholders)) ORDER BY rowid
+            """, arguments: StatementArguments(keys)) {
+            guard let address = URL(string: row["url"]) else { continue }
+            emojis[row["merge_key"], default: []].append(CustomEmoji(
+                shortcode: row["shortcode"], url: address,
+                staticURL: (row["static_url"] as String?).flatMap(URL.init(string:))))
+        }
         return rows.map { post(from: $0, tags: tags[$0["merge_key"]] ?? [],
                                mentions: mentions[$0["merge_key"]] ?? [],
+                               emojis: emojis[$0["merge_key"]] ?? [],
                                media: media[$0["merge_key"]]) }
     }
 
     private static func post(from row: Row, tags: [String], mentions: [Mention],
-                             media: [Attachment]?) -> Post {
+                             emojis: [CustomEmoji], media: [Attachment]?) -> Post {
         let sourceURL: String = row["source_url"]
         return Post(
             uri: row["uri"],
@@ -456,6 +467,7 @@ extension LocalStore {
             inReplyToURI: row["in_reply_to_uri"],
             tags: tags,
             mentions: mentions,
+            emojis: emojis,
             boostedBy: row["booster_name"],
             boostedById: row["boosted_by"],
             sources: [host(of: sourceURL)]
@@ -593,6 +605,7 @@ extension LocalStore {
                                          now, now])
             try insertTags(db, post.tags, for: key, now: now)
             try insertMentions(db, post.mentions, for: key, now: now)
+            try insertEmojis(db, post.emojis, for: key, now: now)
             try insertMedia(db, post.attachments, for: key, now: now)
             return postedAt
         }
@@ -620,7 +633,15 @@ extension LocalStore {
             SELECT mention_uri, handle FROM post_mentions WHERE merge_key = ? ORDER BY rowid
             """), arguments: [key]).map { Mention(uri: $0["mention_uri"], handle: $0["handle"]) }
         let mentionsChanged = storedMentions != post.mentions
-        guard contentChanged || tagsChanged || mentionsChanged else { return postedAt }
+        let storedEmojis = try Row.fetchAll(db.cachedStatement(sql: """
+            SELECT shortcode, url, static_url FROM post_emojis WHERE merge_key = ? ORDER BY rowid
+            """), arguments: [key]).compactMap { row -> CustomEmoji? in
+            guard let address = URL(string: row["url"]) else { return nil }
+            return CustomEmoji(shortcode: row["shortcode"], url: address,
+                               staticURL: (row["static_url"] as String?).flatMap(URL.init(string:)))
+        }
+        let emojisChanged = storedEmojis != post.emojis
+        guard contentChanged || tagsChanged || mentionsChanged || emojisChanged else { return postedAt }
 
         try db.cachedStatement(sql: "UPDATE posts SET updated_at = ? WHERE merge_key = ?").execute(arguments: [now, key])
         if contentChanged {
@@ -643,7 +664,28 @@ extension LocalStore {
             try db.cachedStatement(sql: "DELETE FROM post_mentions WHERE merge_key = ?").execute(arguments: [key])
             try insertMentions(db, post.mentions, for: key, now: now)
         }
+        // An author who changed their emoji, or a server that started sending them: the set is
+        // rewritten whole for the reason the tags are — half an old set and half a new one is
+        // not a state anything produced.
+        if emojisChanged {
+            try db.cachedStatement(sql: "DELETE FROM post_emojis WHERE merge_key = ?").execute(arguments: [key])
+            try insertEmojis(db, post.emojis, for: key, now: now)
+        }
         return postedAt
+    }
+
+    /// The pictures the post is partly written in. `OR IGNORE` and not a merge: the primary
+    /// key is (post, shortcode), so a server that named one shortcode twice has named it once.
+    private static func insertEmojis(_ db: Database, _ emojis: [CustomEmoji], for key: String, now: Int64) throws {
+        guard !emojis.isEmpty else { return }
+        let insert = try db.cachedStatement(sql: """
+            INSERT OR IGNORE INTO post_emojis (merge_key, shortcode, url, static_url, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """)
+        for emoji in emojis {
+            try insert.execute(arguments: [key, emoji.shortcode, emoji.url.absoluteString,
+                                           emoji.staticURL?.absoluteString, now])
+        }
     }
 
     /// The post's tags: into `tags` if not yet known, and into `post_tags` for this post.

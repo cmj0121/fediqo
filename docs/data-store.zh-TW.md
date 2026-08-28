@@ -61,7 +61,7 @@ Migration 遵守同一條規則：只增不減。只有 `CREATE`、`ADD COLUMN`�
 ```text
 network   伺服器交過來的。刷新寫入；只有權威方改得動內容。
           protocols、feeds、filter_kinds、servers、accounts、posts、tags、post_tags、
-          post_origins、post_mentions、server_trends
+          post_origins、post_mentions、post_emojis、server_trends
 
 local     你決定的，可以撤回。只有你動得了。
           servers.selected_at、servers.position、tags.followed_at、tags.muted_at、owned_accounts、
@@ -590,6 +590,27 @@ NULL 是「沒被告知」，不是 `false` —— 和 005 之後的 `sensitive`
 
 那次查詢回來的是完整的 status，包含那三個標記。這是這個 app 唯一一次被告知它們，所以就地寫下來，而不是
 再問一次。
+
+## 一則貼文是用什麼寫成的
+
+伺服器在每則貼文旁邊一併交出它的自訂 emoji：文字裡的 `:blobcat:`，以及另外一份清單，說 `:blobcat:` 指的是哪一張圖。
+兩半是一起來的，而過去只有一半被留下來，於是讀者讀到的是機器拼出來的圖。
+
+| 資料表        | 一列說的是                                                                    |
+| ------------- | ----------------------------------------------------------------------------- |
+| `post_emojis` | 在貼文 `merge_key` 裡，`shortcode` 指的是 `url` 那張圖，靜止版在 `static_url` |
+
+是一張表而不是一個欄位，理由跟 `post_tags` 一樣：它是一份清單，而塞進欄位裡的清單是沒有東西能 join 的清單。
+
+貼文自己的 emoji 與作者的會進到同一份清單。一個 shortcode 在一台伺服器上就是一張圖，所以顯示名稱裡的 `:blobcat:`
+就是下面文字裡的 `:blobcat:`，寫成兩列等於同一件事寫兩次。伺服器自相矛盾時，先出現的那個拼法勝出 —— 這就是主鍵
+`(merge_key, shortcode)` 在做的事。
+
+`static_url` 是會動的那張的靜止版，也是要求少一點動態的讀者會拿到的那張；其他人拿到的是會動的那份。`Text` 裡的圖
+自己不會動，所以每一格都先照著那一行文字本身的墨高解碼一次，再由一個時鐘把整行用下一格重畫 —— 而那個時鐘只在那一行
+真的有東西在動的時候才會走。
+
+什麼都不回填。008 之前存下來的貼文在這裡沒有任何一列，它的 shortcode 就照著原本的文字畫出來，跟前一天一模一樣。
 
 ## 寫入
 

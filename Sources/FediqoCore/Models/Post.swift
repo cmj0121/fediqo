@@ -47,6 +47,11 @@ public struct Post: Sendable, Hashable, Identifiable {
     /// The accounts the post names, in the order the source gave them. Carried from the first
     /// read like everything else here: the store writes a post once and never backfills it.
     public let mentions: [Mention]
+    /// The pictures this post is partly written in: a shortcode, and the address of what it
+    /// means. Both the status's own and its author's, folded into one list — a shortcode means
+    /// one picture on one server, so `:blobcat:` in a display name is `:blobcat:` in the words
+    /// under it. Empty where the source said nothing, which is every post stored before 008.
+    public let emojis: [CustomEmoji]
     /// The booster's display name — what the row shows.
     public let boostedBy: String?
     /// The booster's `authorId` — what identity is built on.
@@ -97,6 +102,7 @@ public struct Post: Sendable, Hashable, Identifiable {
         inReplyToURI: String? = nil,
         tags: [String] = [],
         mentions: [Mention] = [],
+        emojis: [CustomEmoji] = [],
         boostedBy: String? = nil,
         boostedById: String? = nil,
         sources: [String] = []
@@ -120,6 +126,7 @@ public struct Post: Sendable, Hashable, Identifiable {
         self.inReplyToURI = inReplyToURI
         self.tags = Self.normalisedTags(tags)
         self.mentions = Mention.folded(mentions)
+        self.emojis = CustomEmoji.folded(emojis)
         self.boostedBy = boostedBy
         self.boostedById = boostedById
         self.sources = sources
@@ -302,4 +309,91 @@ public extension Array where Element == Post {
         }
         return order.compactMap { merged[$0] }.sorted(by: areInOrder)
     }
+}
+
+/// One picture a post is partly written in, and the shortcode it is spelled by.
+///
+/// The shortcode arrives without its colons and is kept that way: `:blobcat:` in the words is
+/// `blobcat` here, because the colons are punctuation the server put round a name rather than
+/// part of it.
+public struct CustomEmoji: Sendable, Hashable, Codable {
+    public let shortcode: String
+    public let url: URL
+    /// The still of an animated one, where the server offered it. `nil` is not "it does not
+    /// move" — it is a server that did not say.
+    public let staticURL: URL?
+
+    public init(shortcode: String, url: URL, staticURL: URL? = nil) {
+        self.shortcode = shortcode
+        self.url = url
+        self.staticURL = staticURL
+    }
+
+    /// One shortcode, one picture, first spelling wins. Two lists arrive for every post — the
+    /// status's and its author's — and a server saying `blobcat` twice is saying it once.
+    static func folded(_ raw: [CustomEmoji]) -> [CustomEmoji] {
+        var seen: Set<String> = []
+        return raw.filter { !$0.shortcode.isEmpty && seen.insert($0.shortcode).inserted }
+    }
+}
+
+/// A line of text, cut into what is written in letters and what is written in pictures.
+///
+/// The cut is made here rather than on the screen so it can be tested without one, and so the
+/// two screens that draw a post — the row and the opened page — cannot come to disagree about
+/// what a shortcode is.
+public enum EmojiRun: Sendable, Hashable {
+    case text(String)
+    case emoji(CustomEmoji)
+}
+
+extension CustomEmoji {
+    /// Cuts `text` into runs, replacing only the shortcodes this post was actually given a
+    /// picture for.
+    ///
+    /// A shortcode is `:name:`, where the name is letters, digits and underscores. A colon
+    /// standing on its own, a smiley typed by hand, and a `:name:` nobody sent a picture for
+    /// are all left exactly as they were typed — a screen drawing a blank where a reader wrote
+    /// a colon would be inventing something.
+    ///
+    /// Scanned by hand rather than by a regular expression, because a `Regex` cannot be a
+    /// shared constant in a concurrent program and building one per post is a cost paid on
+    /// every row of every page. An empty list means one run of text, which is the fast path
+    /// and the common one: most posts have no custom emoji at all.
+    public static func runs(in text: String, from emojis: [CustomEmoji]) -> [EmojiRun] {
+        guard !emojis.isEmpty, text.contains(":") else { return text.isEmpty ? [] : [.text(text)] }
+        let byShortcode = Dictionary(emojis.map { ($0.shortcode, $0) }, uniquingKeysWith: { first, _ in first })
+        var runs: [EmojiRun] = []
+        var plain = ""
+        var index = text.startIndex
+        var wordStart = text.startIndex          // the colon that may open a shortcode
+
+        while index < text.endIndex {
+            guard text[index] == ":" else {
+                plain.append(text[index])
+                index = text.index(after: index)
+                continue
+            }
+            wordStart = index
+            var cursor = text.index(after: index)
+            while cursor < text.endIndex, text[cursor].isShortcodeCharacter { cursor = text.index(after: cursor) }
+            guard cursor < text.endIndex, cursor > text.index(after: wordStart), text[cursor] == ":",
+                  let emoji = byShortcode[String(text[text.index(after: wordStart)..<cursor])] else {
+                // Not a shortcode, or not one of ours. The colon is text, and the scan starts
+                // again at the character after it — the next colon may open a real one.
+                plain.append(text[index])
+                index = text.index(after: index)
+                continue
+            }
+            if !plain.isEmpty { runs.append(.text(plain)); plain = "" }
+            runs.append(.emoji(emoji))
+            index = text.index(after: cursor)
+        }
+        if !plain.isEmpty { runs.append(.text(plain)) }
+        return runs
+    }
+}
+
+private extension Character {
+    var isShortcodeCharacter: Bool { isASCII && (isLetter || isNumber || self == "_") }
 }

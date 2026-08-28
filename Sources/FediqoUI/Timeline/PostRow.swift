@@ -11,6 +11,10 @@ import FediqoCore
 /// what it was written with                        (right, and often empty)
 /// ```
 ///
+/// The band that says whose post this is stands a little further off than the rest of them —
+/// `Space.step` between every pair of bands, and one `Space.tight` more under the metadata.
+/// Everything above that line is *about* the post; everything below it is the post.
+///
 /// **The two columns are only the middle band**, and only where there is room for them: the
 /// words on the left, the attachments on the right, in a column that stays there whether or
 /// not anything is in it. That empty column is the point — it is what keeps every row's text
@@ -22,6 +26,22 @@ extension Post {
     /// blur, or both. What the key asks before it does anything, and the row asks before it
     /// draws a control for it.
     var hidesSomething: Bool { sensitive == true || !(spoiler ?? "").isEmpty }
+}
+
+/// What a row says about this post being an answer to another.
+///
+/// Three cases and not an optional string, because "we know it answers somebody we cannot
+/// name" is a different thing from "it answers nothing" — and a row that quietly said nothing
+/// for the first of those would be hiding half a conversation. Which of the three it is
+/// belongs to the page: the timeline knows whether a parent is on the screen with it, and the
+/// conversation page knows that a direct answer to the post needs no line at all, because the
+/// post is what the page already is.
+enum Answering: Equatable {
+    /// Nothing is said: it answers nothing, or the page is the conversation it answers into.
+    case nothing
+    /// It answers something nobody has handed us. We can say that much and no more.
+    case somebody
+    case handle(String)
 }
 
 /// Every row is the same height, set by the attachment card: a short post is padded up to it
@@ -44,6 +64,8 @@ struct PostRow: View {
     /// Whether what this post covered arrives uncovered. The reader's standing answer; a row
     /// can still be opened by hand without changing it.
     var revealed = false
+    /// What this row says about the post being an answer. Decided by the page that draws it.
+    var answering: Answering = .nothing
     /// Whether this is a row in a list rather than the post itself, opened.
     ///
     /// In a list it is held to the same height as every other row and its words stop with an
@@ -56,6 +78,7 @@ struct PostRow: View {
 
     @Environment(\.openURL) private var openURL
     @Environment(\.fediqoWideRows) private var wide
+    @Environment(\.fediqoCompact) private var compact
     /// The reader's text size, because how many lines fit in a card depends on it.
     @Environment(\.fediqoTextScale) private var scale
     @Environment(\.colorScheme) private var colorScheme
@@ -98,6 +121,8 @@ struct PostRow: View {
     /// the row remembers where the count was when it became the reader's and acts only on
     /// what happens after.
     @State private var coversOnArrival: Int?
+    /// Whether the list of the servers that carried this post is up.
+    @State private var showingSources = false
 
     var body: some View {
         content
@@ -126,11 +151,13 @@ struct PostRow: View {
                 // of lines fits in that height at the reader's own text size, so nothing is
                 // ever cut mid-line — the ellipsis is the row's, not the frame's.
                 .frame(height: AttachmentDeck.height, alignment: .topLeading)
+                .padding(.top, Space.tight)
             } else {
                 VStack(alignment: .leading, spacing: Space.step) {
                     words
                     if !post.attachments.isEmpty { deck }
                 }
+                .padding(.top, Space.tight)
             }
             InteractionBar(post: post, open: open)
             footer
@@ -139,11 +166,21 @@ struct PostRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .fediqoCard()
         .fediqoFocusRing(selected)
-        // A tap on the row opens the post. Not a `Button`: the words are selectable, the deck
-        // turns itself over and the interaction bar has buttons of its own, and wrapping the
-        // lot in one would take every one of those clicks away from them.
-        .contentShape(Rectangle())
-        .onTapGesture { open?() }
+        // A tap on the row opens the post — from **behind** the row rather than over it.
+        //
+        // Not a `Button`, for the reason it never was: the words are selectable, the deck turns
+        // itself over and the interaction bar has buttons of its own, and wrapping the lot in
+        // one would take every one of those presses away from them. And not a gesture over the
+        // top of it either, which is what it used to be: an address in the words is now a link,
+        // and a press of a link that a gesture above it has already swallowed is a link that
+        // does nothing. Behind, so anything in the row that wants a press gets it first and
+        // everything else — the padding, the name, the empty half of a short row — still opens
+        // the post.
+        .background {
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture { open?() }
+        }
         .contextMenu {
             if open != nil { Button(t("post.open")) { open?() } }
             if let url = post.webURL {
@@ -160,10 +197,28 @@ struct PostRow: View {
     /// same idea. Nothing at all is drawn when there is nothing to say.
     @ViewBuilder
     private var decorator: some View {
+        if answering != .nothing {
+            HStack(spacing: Space.tight) {
+                Image(systemName: "arrowshape.turn.up.left").fediqoSymbol(TypeScale.caption, weight: .regular)
+                // Named where the page can name them, and "an answer" where it cannot. It is
+                // never a name we worked out for ourselves: a reply's first mention is usually
+                // the person it answers and usually is not good enough to print under somebody
+                // else's name.
+                switch answering {
+                case .handle(let handle): Text(t("post.replyingTo", handle)).fediqoFont(TypeScale.caption)
+                default: Text(t("post.isReply")).fediqoFont(TypeScale.caption)
+                }
+            }
+            .foregroundStyle(.secondary)
+        }
         if let boostedBy = post.boostedBy {
-            Label(t("timeline.boostedBy", boostedBy), systemImage: "arrow.2.squarepath")
-                .fediqoFont(TypeScale.caption)
-                .foregroundStyle(.secondary)
+            HStack(spacing: Space.tight) {
+                Image(systemName: "arrow.2.squarepath").fediqoSymbol(TypeScale.caption, weight: .regular)
+                // Not a `Label`: whoever boosted this may have a picture in their name, and a
+                // label takes a string.
+                EmojiText(t("timeline.boostedBy", boostedBy), emojis: post.emojis, size: TypeScale.caption)
+            }
+            .foregroundStyle(.secondary)
         }
     }
 
@@ -173,14 +228,24 @@ struct PostRow: View {
     private var metadata: some View {
         HStack(spacing: Space.step) {
             RemoteImage(url: post.authorAvatarURL, width: Size.avatar, height: Size.avatar)
-            Text(post.authorName).fediqoFont(TypeScale.body, weight: .semibold).lineLimit(1)
-            Text(post.authorHandle).fediqoFont(TypeScale.minor).foregroundStyle(.secondary).lineLimit(1)
+            EmojiText(post.authorName, emojis: post.emojis, size: TypeScale.body, weight: .semibold)
+                .lineLimit(1)
+                .layoutPriority(1)
+            // Not on a phone. The band has four things to say and room for three, and the
+            // handle is the one the reader can do without: it is usually the name again in
+            // lower case, and the opened post says it in full.
+            if !compact {
+                Text(post.authorHandle).fediqoFont(TypeScale.minor).foregroundStyle(.secondary).lineLimit(1)
+            }
             Spacer(minLength: Space.snug)
             sources
+            // When it was written is four characters and never gives any of them up: a time
+            // squeezed to an ellipsis is a row that has stopped saying when it happened.
             Text(post.createdAt, format: .relative(presentation: .numeric))
                 .fediqoFont(TypeScale.caption)
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
+                .fixedSize()
         }
     }
 
@@ -189,8 +254,7 @@ struct PostRow: View {
         VStack(alignment: .leading, spacing: Space.snug) {
             if !spoiler.isEmpty { warning }
             if !post.text.isEmpty, !wordsAreCovered {
-                Text(post.text)
-                    .fediqoFont(TypeScale.body)
+                EmojiText(post.text, emojis: post.emojis)
                     .textSelection(.enabled)
                     .lineLimit(condensed ? lines : nil)
                     .truncationMode(.tail)
@@ -213,8 +277,7 @@ struct PostRow: View {
             Image(systemName: "exclamationmark.triangle.fill")
                 .fediqoSymbol(Glyph.inline)
                 .foregroundStyle(.orange)
-            Text(spoiler)
-                .fediqoFont(TypeScale.small, weight: .semibold)
+            EmojiText(spoiler, emojis: post.emojis, size: TypeScale.small, weight: .semibold)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: Space.step)
             toggle
@@ -304,15 +367,71 @@ struct PostRow: View {
         }
     }
 
-    /// Which server handed it over — and when two did, it says both. It sits in the metadata
-    /// band beside who wrote it and when, because it is the same kind of fact: where this post
-    /// reached us from, rather than anything about what it says.
+    /// Which server handed it over — and when several did, one of them and a mark saying how
+    /// many more. It sits in the metadata band beside who wrote it and when, because it is
+    /// the same kind of fact: where this post reached us from, rather than anything about what
+    /// it says.
+    ///
+    /// A pill per server was the repetition the merge exists to end: three servers carrying one
+    /// post drew three pills, and the row was a third as wide again for a fact most readers
+    /// never ask. So it is said once, and the rest is one hover or one press away — and a screen
+    /// reader, which can neither hover nor see the mark, is told every one of them outright.
     private var sources: some View {
         HStack(spacing: Space.snug) {
-            Text(t("timeline.via")).fediqoFont(TypeScale.caption).foregroundStyle(.tertiary)
-            ForEach(post.sources, id: \.self) { host in
-                Text(host).fediqoFont(TypeScale.caption).fediqoPill()
+            // The word is worth a column on a screen that has one to spare and is the first
+            // thing to go on a phone, where a pill saying `birch.example` says it anyway.
+            if !compact {
+                Text(t("timeline.via")).fediqoFont(TypeScale.caption).foregroundStyle(.tertiary)
             }
+            if let first = shownSources.first {
+                Text(first)
+                    .fediqoFont(TypeScale.caption)
+                    .lineLimit(1)
+                    // Middle, not tail: what a reader recognises about a server is at both
+                    // ends, and `birch.exa…` names one no better than `b…` does.
+                    .truncationMode(.middle)
+                    .fediqoPill()
+            }
+            if shownSources.count > 1 { carriedByTheRest }
+        }
+        // Where the room runs out it is the name that gives, not this — hence the higher
+        // priority of the two. A name cut short is still the person; a host cut short is not
+        // a server, and where a post came from is the one thing on this row that the merge
+        // exists to keep honest.
+        .layoutPriority(2)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text("\(t("post.sources")): \(shownSources.joined(separator: ", "))"))
+    }
+
+    /// The servers that carried this post, in a settled order.
+    ///
+    /// **Sorted, and that is not a detail.** `Post.sources` is in the order the servers
+    /// answered, which is a fact about a refresh rather than about the post: the same row read
+    /// twice puts a different server first, and a row that says `alder.example` one second and
+    /// `birch.example` the next is a row nobody can read. Which of them is drawn has to be the
+    /// same answer every time, and alphabetical is the only ordering here that does not depend
+    /// on the network's mood.
+    private var shownSources: [String] { post.sources.sorted() }
+
+    /// The mark, and the list behind it. `help` is the hover — the whole list, one per line —
+    /// and the press is the same list where there is no pointer to hover with.
+    private var carriedByTheRest: some View {
+        Button { showingSources = true } label: {
+            Text(verbatim: "+\(shownSources.count - 1)")
+                .fediqoFont(TypeScale.caption, weight: .medium)
+                .fixedSize()
+                .fediqoPill()
+        }
+        .buttonStyle(.plain)
+        .help(shownSources.joined(separator: "\n"))
+        .popover(isPresented: $showingSources, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: Space.tight) {
+                Text(t("post.sources")).fediqoFont(TypeScale.caption).foregroundStyle(.secondary)
+                ForEach(shownSources, id: \.self) { host in
+                    Text(host).fediqoFont(TypeScale.small).textSelection(.enabled)
+                }
+            }
+            .padding(Space.gap)
         }
     }
 }

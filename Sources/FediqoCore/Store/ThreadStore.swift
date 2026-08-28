@@ -21,6 +21,44 @@ public struct Conversation: Sendable, Hashable {
 
     public var isAlone: Bool { ancestors.isEmpty && descendants.isEmpty }
 
+    /// One reply, and where it sits in the conversation.
+    public struct Reply: Sendable, Hashable, Identifiable {
+        public let post: Post
+        /// How far under the opened post it is: 1 answers the post, 2 answers one of those.
+        public let depth: Int
+        /// Whom it is answering, where that is not the post itself. A reply to the post needs
+        /// no such line — the post is what the page already is.
+        public let answering: String?
+
+        public var id: String { post.mergeKey }
+    }
+
+    /// The replies in the order they were written, each with how deep under the post it sits
+    /// and whom it answers.
+    ///
+    /// Depth is walked up from each reply rather than down from the post, because a reply can
+    /// arrive before what it answers and can answer something nobody handed us. A reply whose
+    /// parent is missing is drawn one step under the post: it is in this conversation, and
+    /// pretending to know where would be inventing a shape the server never sent.
+    ///
+    /// The walk is bounded by the number of replies there are — a server can write a cycle,
+    /// and a page that hangs on one is a page a stranger can take down.
+    public func laidOut() -> [Reply] {
+        let byURI = Dictionary(descendants.map { ($0.uri, $0) }, uniquingKeysWith: { first, _ in first })
+        return descendants.map { reply in
+            var depth = 1
+            var parent = reply.inReplyToURI
+            var seen: Set<String> = [reply.uri]
+            while let uri = parent, uri != post.uri, let above = byURI[uri], seen.insert(uri).inserted,
+                  depth <= descendants.count {
+                depth += 1
+                parent = above.inReplyToURI
+            }
+            let answers = reply.inReplyToURI.flatMap { $0 == post.uri ? nil : byURI[$0] }
+            return Reply(post: reply, depth: depth, answering: answers?.authorHandle)
+        }
+    }
+
     /// The same conversation with `other`'s posts folded in — what the store had, and then
     /// what a server said, without either being thrown away.
     ///
@@ -53,7 +91,11 @@ extension LocalStore {
         return try await read { db in
             let up = try Self.walkUp(db, from: parent, depth: depth)
             let down = try Self.walkDown(db, from: uri, depth: depth)
-            return Conversation(ancestors: up, post: post, descendants: down)
+            // The walk is by generation, because that is the cheap way to find them. What is
+            // read is by time, because that is the order the conversation happened in — and
+            // the two are not the same the moment somebody answers an old reply. Sorted here
+            // so the store alone answers in the same order the server's copy will.
+            return Conversation(ancestors: up, post: post, descendants: down.merged(oldestFirst: true))
         }
     }
 
