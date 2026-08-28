@@ -55,6 +55,10 @@ ios: xcodeproj		# build the iOS app for the simulator
 # stops where SwiftUI begins -- nothing in a package can execute a view body -- so what a reader
 # actually does is driven from here, by a second process that launches the first one.
 #
+# Thirty lines and not five, which is what everything else here keeps. A failed test says which
+# test and why on separate lines and the rest of the run is between them, so five lines is the
+# name with the reason cut off -- a job log that says something failed and refuses to say what.
+#
 # The result bundle is removed first because xcodebuild refuses to write over one; it is what a
 # runner keeps when something fails. The coverage is read from the profile the run left in the
 # derived data, not from the bundle -- see `scripts/ui_coverage.sh` for why -- and it is
@@ -66,7 +70,7 @@ uitest: xcodeproj	# run the tests that drive the macOS app
 		-configuration Debug -derivedDataPath $(DERIVED) \
 		-destination 'platform=macOS' -enableCodeCoverage YES \
 		-resultBundlePath $(UITEST_RESULT) $(STAMP) test 2>&1 \
-		| tee $(DERIVED)/uitest.log | tail -5
+		| tee $(DERIVED)/uitest.log | tail -30
 	@$(ROOT)/scripts/ui_coverage.sh $(DERIVED)
 
 # The release, and the only target here that needs anything from outside the checkout.
