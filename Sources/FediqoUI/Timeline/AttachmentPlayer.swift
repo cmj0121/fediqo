@@ -58,8 +58,11 @@ final class Playback {
 struct AttachmentPlayer: View {
     let player: AVPlayer
     let audio: Bool
-    let width: CGFloat
-    let height: CGFloat
+    /// The rectangle to play in. `nil` is "whatever room there is", which is what the opened
+    /// picture hands it and what a row never does: in a list every row is the same height, and
+    /// a film that sized itself would be the one row that is not.
+    var width: CGFloat?
+    var height: CGFloat?
 
     var body: some View {
         VideoPlayer(player: player)

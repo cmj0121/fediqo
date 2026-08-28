@@ -16,6 +16,10 @@ enum KeyCommand: Hashable, CaseIterable {
     /// Hand the post to the server it came from — the browser, which is what `Return` used
     /// to do before opening the post here became a thing this app could do.
     case openInBrowser
+    /// Open what is attached to the post the reader is on, over the app.
+    case openMedia
+    /// Give the opened picture the whole screen, where the platform has one to give.
+    case fullScreen
     /// Turn the deck of attachments on the post the reader is on.
     case rotateMedia
     /// Play what is on top of that deck, or stop whatever is playing.
@@ -103,6 +107,10 @@ enum KeyCommand: Hashable, CaseIterable {
         // has one meaning rather than one key having two.
         case KeyEquivalent.return.character, " ": return .expandPost
         case "o": return .openInBrowser
+        // `v` for the look at it, `f` for the screen it takes. `f` means nothing until
+        // something is open — it is the second press, not a first one.
+        case "v": return .openMedia
+        case "f": return .fullScreen
         case "m": return .rotateMedia
         case "p": return .playMedia
         case "s": return .toggleCover
@@ -147,7 +155,7 @@ enum KeyCommand: Hashable, CaseIterable {
     /// ones a text field, a menu or the focus system owns — out of our handler entirely.
     static let listened: Set<KeyEquivalent> = [
         .tab, .escape, .return, .upArrow, .downArrow, .space,
-        "r", "R", "c", "j", "k", "g", "m", "o", "p", "s", "?", "/",
+        "r", "R", "c", "j", "k", "g", "m", "o", "p", "s", "v", "f", "?", "/",
     ]
 
     /// The same list, in the spelling a press arrives in, so that a key nobody listens for
@@ -242,6 +250,8 @@ extension KeyCommand {
         Shortcut(group: .doing, keys: ["c"], name: "compose", commands: [.compose]),
         Shortcut(group: .doing, keys: ["Return", "Space"], name: "expand", commands: [.expandPost]),
         Shortcut(group: .doing, keys: ["o"], name: "browser", commands: [.openInBrowser]),
+        Shortcut(group: .doing, keys: ["v"], name: "viewMedia", commands: [.openMedia]),
+        Shortcut(group: .doing, keys: ["f"], name: "fullScreen", commands: [.fullScreen]),
         Shortcut(group: .doing, keys: ["m"], name: "media", commands: [.rotateMedia]),
         Shortcut(group: .doing, keys: ["p"], name: "play", commands: [.playMedia]),
         Shortcut(group: .doing, keys: ["s"], name: "cover", commands: [.toggleCover]),

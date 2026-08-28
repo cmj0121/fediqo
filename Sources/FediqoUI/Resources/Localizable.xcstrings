@@ -1124,6 +1124,23 @@
         }
       }
     },
+    "post.media.fullScreen": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Full screen"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全螢幕"
+          }
+        }
+      }
+    },
     "post.media.image": {
       "extractionState": "manual",
       "localizations": {
@@ -1137,6 +1154,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "一張圖片。"
+          }
+        }
+      }
+    },
+    "post.media.leaveFullScreen": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Leave full screen"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "離開全螢幕"
+          }
+        }
+      }
+    },
+    "post.media.open": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open it"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打開"
           }
         }
       }
@@ -2263,6 +2314,23 @@
         }
       }
     },
+    "shortcut.fullScreen": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Give the opened picture the whole screen"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "讓開著的圖佔滿整個螢幕"
+          }
+        }
+      }
+    },
     "shortcut.group.doing": {
       "extractionState": "manual",
       "localizations": {
@@ -2497,6 +2565,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "回到最上面"
+          }
+        }
+      }
+    },
+    "shortcut.viewMedia": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open what is attached, over the app"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "把附件開在整個 app 上"
           }
         }
       }

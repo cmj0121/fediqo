@@ -50,6 +50,9 @@ struct AppShell: View {
         // nobody is looking at.
         layout
             .environment(\.fediqoCompact, compact)
+            // Over everything the shell draws, including the composer: what the reader asked
+            // to look at is the thing in front of them until they leave it.
+            .overlay { MediaViewer() }
             // The keys, written down, over everything the shell draws — including the
             // composer, so `?` with a draft open puts the list in front of it rather than
             // behind it.
