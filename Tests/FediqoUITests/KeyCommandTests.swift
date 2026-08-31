@@ -225,7 +225,7 @@ struct CommandTests {
         #expect(app.settingsTab == settings)
     }
 
-    @Test("Tab goes round the two Statistics tabs, both ways, wrapping at both ends")
+    @Test("Tab goes round the three Statistics tabs, both ways, wrapping at both ends")
     func statisticsTabsRotate() {
         let app = freshApp("statistics-tabs-rotate")
         app.railItem = .statistics
@@ -233,9 +233,11 @@ struct CommandTests {
         #expect(app.perform(.nextTab))
         #expect(app.statisticsTab == .network)
         #expect(app.perform(.nextTab))
+        #expect(app.statisticsTab == .merges)
+        #expect(app.perform(.nextTab))
         #expect(app.statisticsTab == .storage)
         #expect(app.perform(.previousTab))
-        #expect(app.statisticsTab == .network)
+        #expect(app.statisticsTab == .merges)
     }
 
     @Test("Tab goes round the three Settings tabs, both ways, wrapping at both ends")
