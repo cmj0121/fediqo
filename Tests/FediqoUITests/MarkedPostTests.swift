@@ -125,30 +125,38 @@ struct MarkedPostTests {
 
 /// A write that can be held open, so a test can put something else in the gap between the
 /// press and the answer.
+///
+/// It counts arrivals and holds all of them, rather than one: a reader can have two marks out
+/// on the same post at once, and a gate that only remembered the last would let one of them
+/// through and hang the other.
 actor Gate {
-    private var entered = false
+    private(set) var entered = 0
     private var opened = false
-    private var waitingForEntry: CheckedContinuation<Void, Never>?
-    private var waitingToLeave: CheckedContinuation<Void, Never>?
+    private var waitingForEntry: [CheckedContinuation<Void, Never>] = []
+    private var waitingToLeave: [CheckedContinuation<Void, Never>] = []
 
     /// Called from inside the write: says it has started, then waits to be let go.
     func enter() async {
-        entered = true
-        waitingForEntry?.resume()
-        waitingForEntry = nil
+        entered += 1
+        let waiting = waitingForEntry
+        waitingForEntry = []
+        for continuation in waiting { continuation.resume() }
         guard !opened else { return }
-        await withCheckedContinuation { waitingToLeave = $0 }
+        await withCheckedContinuation { waitingToLeave.append($0) }
     }
 
-    func waitUntilEntered() async {
-        guard !entered else { return }
-        await withCheckedContinuation { waitingForEntry = $0 }
+    /// Waits until at least `count` writes are being held.
+    func waitUntilEntered(_ count: Int = 1) async {
+        while entered < count {
+            await withCheckedContinuation { waitingForEntry.append($0) }
+        }
     }
 
     func open() {
         opened = true
-        waitingToLeave?.resume()
-        waitingToLeave = nil
+        let waiting = waitingToLeave
+        waitingToLeave = []
+        for continuation in waiting { continuation.resume() }
     }
 }
 
