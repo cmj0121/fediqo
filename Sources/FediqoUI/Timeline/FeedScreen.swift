@@ -30,6 +30,8 @@ struct FeedScreen: View {
     /// screen's own width; 560 is the attachment column plus a gap plus enough left for the
     /// words to still be a paragraph rather than a stack of two-word lines.
     @State private var wide = false
+    /// Whether the list of what the rules kept off this page is up.
+    @State private var showingHidden = false
     /// The colour scheme, for the two marks drawn by hand at the foot of the list. Everything
     /// else here is `fediqoCard` or `Hairline`, which read it themselves.
     @Environment(\.colorScheme) private var colorScheme
@@ -318,6 +320,9 @@ struct FeedScreen: View {
                     // One foot, and it says one thing. A reach still out owns it — a bottom
                     // that merely sits there is indistinguishable from a finished one — and
                     // the end is what is left when nothing is coming.
+                    // What the reader's own rules kept off this page, said where the page
+                    // ends — which is where somebody notices a post they expected is missing.
+                    whatIsMissing
                     if model.loadingOlder {
                         readingOn
                     } else if model.atTheEnd, let oldest = posts.last {
@@ -441,6 +446,77 @@ struct FeedScreen: View {
     /// dates whatever the machine is set to, which is what `fediqoChrome` carries it down for.
     private func reached(_ when: Date) -> String {
         when.formatted(Date.FormatStyle(date: .long, time: .omitted).locale(locale))
+    }
+
+    /// How many posts the reader's own rules kept off this page, and what each of them was.
+    ///
+    /// #6's last promise: every hidden post can say which rule hid it. A rule that removes
+    /// things silently is one nobody can check, and four of that issue's other lines are rules
+    /// this app follows silently — so this is the one that makes them checkable.
+    ///
+    /// Only ever the reader's own doing. A post a server never handed over is not here to say
+    /// anything about, and that is said elsewhere: a server that gave nothing is a line of its
+    /// own above, and one that was never asked is not a fault at all.
+    @ViewBuilder
+    private var whatIsMissing: some View {
+        let hidden = model.hidden
+        if !hidden.isEmpty {
+            Button { showingHidden = true } label: {
+                Label(t("timeline.hidden", String(hidden.count)), systemImage: "eye.slash")
+                    .fediqoFont(TypeScale.minor)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .padding(.top, Space.snug)
+            .sheet(isPresented: $showingHidden) {
+                hiddenList(hidden).fediqoChrome(app)
+            }
+        }
+    }
+
+    /// One line per post: what it says, and the rule that kept it off.
+    private func hiddenList(_ hidden: [Hidden]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text(t("timeline.hidden.title")).fediqoFont(TypeScale.lead, weight: .semibold)
+                Spacer()
+                Button(t("common.close")) { showingHidden = false }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Palette.accent)
+                    .keyboardShortcut(.escape, modifiers: [])
+            }
+            .padding(Space.pad)
+            Hairline()
+            ScrollView {
+                VStack(alignment: .leading, spacing: Space.gap) {
+                    ForEach(Array(hidden.enumerated()), id: \.offset) { _, one in
+                        VStack(alignment: .leading, spacing: Space.tight) {
+                            Text(one.post.text).fediqoFont(TypeScale.small).lineLimit(2)
+                            Text(Self.why(one.because))
+                                .fediqoFont(TypeScale.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(Space.mid)
+                        .fediqoCard(radius: Radius.inner, raised: false)
+                    }
+                }
+                .padding(Space.pad)
+            }
+        }
+        .frame(minWidth: Size.prose, minHeight: Size.prose)
+    }
+
+    /// The reason, in the reader's language. A rule names what it is about, because "a rule"
+    /// is not an answer to "why is this post missing".
+    private static func why(_ because: Hidden.Because) -> String {
+        switch because {
+        case .boostsHidden: t("timeline.hidden.boosts")
+        case .mediaOnly: t("timeline.hidden.media")
+        case .rule(let rule):
+            t(rule.negate ? "timeline.hidden.without" : "timeline.hidden.only",
+              t("filter.kind.\(rule.kind.rawValue)"), rule.value)
+        }
     }
 
     /// Not `@ViewBuilder`: it works out two facts first and then returns one view, and a

@@ -37,11 +37,19 @@ public struct TimelineResult: Sendable {
     /// caller that draws a server's fate needs to be told the difference between a server
     /// that had nothing to say and one that was never asked.
     public let skipped: Set<String>
+    /// What arrived and is not in `posts`, and what kept each of them off the screen.
+    ///
+    /// #6's last promise. Only ever this app's own doing: a post a server never handed over is
+    /// not here to say anything about, and that half of the question is answered by `failures`
+    /// and `skipped` above. Empty on a timeline with no rules, which is most of them.
+    public let hidden: [Hidden]
 
-    public init(posts: [Post], failures: [String: SourceFailure], skipped: Set<String> = []) {
+    public init(posts: [Post], failures: [String: SourceFailure], skipped: Set<String> = [],
+                hidden: [Hidden] = []) {
         self.posts = posts
         self.failures = failures
         self.skipped = skipped
+        self.hidden = hidden
     }
 
     public var isEmpty: Bool { posts.isEmpty }
@@ -205,7 +213,13 @@ public struct TimelineLoader: Sendable {
         // server for it twice because we threw it away is the one thing worth avoiding.
         let posts = query.source.ranked ? Self.mergedByRank(round.collected)
                                         : round.collected.flatMap { $0 }.merged()
-        return TimelineResult(posts: query.admitted(posts), failures: round.failures, skipped: skipped)
+        // Sifted rather than filtered: what the rules turned away is carried alongside what
+        // they let through, so a reader can ask why a post they expected is not here.
+        // Sifted rather than filtered: what the rules turned away is carried alongside what
+        // they let through, so a reader can ask why a post they expected is not here.
+        let sifted = query.sifted(posts)
+        return TimelineResult(posts: sifted.admitted, failures: round.failures, skipped: skipped,
+                              hidden: sifted.hidden)
     }
 
     /// Every server asked at once for the page before what it last handed over, merged into
@@ -279,8 +293,9 @@ public struct TimelineLoader: Sendable {
         await record(round.failures, from: round.reached,
                      refresh: .automatic(every: every), now: now)
 
-        return TimelineResult(posts: query.admitted(round.collected.flatMap { $0 }.merged()),
-                              failures: round.failures, skipped: unasked)
+        let sifted = query.sifted(round.collected.flatMap { $0 }.merged())
+        return TimelineResult(posts: sifted.admitted, failures: round.failures, skipped: unasked,
+                              hidden: sifted.hidden)
     }
 
     /// The conversation around one post as the store already has it — instant, offline, and
@@ -790,10 +805,27 @@ public struct TimelineLoader: Sendable {
 
     /// The only thing between what arrived and what you see. It adds and removes; it never moves.
     public static func apply(showBoosts: Bool, mediaOnly: Bool, to posts: [Post]) -> [Post] {
-        posts.filter { post in
-            if !showBoosts, post.isBoost { return false }
-            if mediaOnly, post.mediaURLs.isEmpty { return false }
-            return true
+        sift(showBoosts: showBoosts, mediaOnly: mediaOnly, posts).admitted
+    }
+
+    /// The same, and what it turned away, with the reason attached.
+    ///
+    /// These two switches are rules like the ones written on a timeline — the reader's own, and
+    /// they remove rather than move — so they answer #6's question the same way. A post is not
+    /// on the screen for one reason, so the first that refuses it is the reason.
+    public static func sift(showBoosts: Bool, mediaOnly: Bool,
+                            _ posts: [Post]) -> (admitted: [Post], hidden: [Hidden]) {
+        var admitted: [Post] = []
+        var hidden: [Hidden] = []
+        for post in posts {
+            if !showBoosts, post.isBoost {
+                hidden.append(Hidden(post: post, because: .boostsHidden))
+            } else if mediaOnly, post.mediaURLs.isEmpty {
+                hidden.append(Hidden(post: post, because: .mediaOnly))
+            } else {
+                admitted.append(post)
+            }
         }
+        return (admitted, hidden)
     }
 }
