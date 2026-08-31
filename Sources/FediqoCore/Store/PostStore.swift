@@ -192,6 +192,51 @@ extension LocalStore {
         }
     }
 
+    /// The posts whose words match, as a page of the timeline rather than a list of its own.
+    ///
+    /// Same order as every other page here, same cursor, same cut — searching is a reading of
+    /// the timeline and not a second idea of one, so a reader who has read down through results
+    /// asks for what comes next the way they ask everywhere else.
+    ///
+    /// **What a query means.** The words, all of them, anywhere in the post — not the phrase.
+    /// Each is quoted and they are `AND`ed, which does two things at once. It keeps FTS5's own
+    /// syntax out of what somebody typed: a `*`, a `-`, an `OR` or a stray quote is a character
+    /// in a word here and not an operator, and a query cannot be made to mean something nobody
+    /// asked for. And it is the right reading in both languages — `server emoji` is two English
+    /// words in any order, while `公開` is one term that `Words` cuts into `公` `開`, which
+    /// inside quotes is the phrase it was written as rather than two characters loose in the
+    /// post.
+    ///
+    /// A query of nothing but spaces matches nothing rather than everything. There is no
+    /// sensible answer to "find me the posts containing nothing", and `MATCH ''` is an error.
+    public func search(_ query: String, limit: Int = 200, before: Post? = nil) async throws -> [Post] {
+        let terms = query.split(whereSeparator: \.isWhitespace).map { word in
+            // Doubled, which is how a quote is escaped inside an FTS5 string, so a word with
+            // one in it is a word rather than the end of a phrase and the start of trouble.
+            "\"\(word.replacingOccurrences(of: "\"", with: "\"\""))\""
+        }
+        guard !terms.isEmpty else { return [] }
+        let match = terms.joined(separator: " AND ")
+
+        let cursor = before.map { (postedAt: Self.milliseconds($0.createdAt), key: $0.mergeKey) }
+        let keyset = cursor == nil ? "" : "AND (p.posted_at < ? OR (p.posted_at = ? AND p.merge_key > ?))"
+        return try await read { db in
+            var arguments: [any DatabaseValueConvertible] = [match]
+            if let cursor { arguments += [cursor.postedAt, cursor.postedAt, cursor.key] }
+            arguments.append(limit)
+            let rows = try Row.fetchAll(db, sql: """
+                \(Self.postSelect)
+                JOIN posts_fts ON posts_fts.rowid = p.id
+                WHERE posts_fts MATCH ?
+                  AND p.deleted_at IS NULL
+                \(keyset)
+                ORDER BY p.posted_at DESC, p.merge_key
+                LIMIT ?
+                """, arguments: StatementArguments(arguments))
+            return try Self.posts(from: rows, db)
+        }
+    }
+
     /// One timeline's page: the posts its base source carried, with its rules applied, in the
     /// order its base source puts them in.
     ///
