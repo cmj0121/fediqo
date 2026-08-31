@@ -91,6 +91,22 @@ extension XCUIElement {
 }
 
 @MainActor
+extension XCUICoordinate {
+    /// A click on macOS and a tap on iOS, which are one thing to a reader and two to XCTest.
+    ///
+    /// A point rather than the element, because where in a row the press lands is the whole
+    /// question here: most of a post is selectable words that take the press before the row
+    /// behind them sees it, and "clicking a post" has to mean something there too.
+    func press() {
+        #if os(macOS)
+        click()
+        #else
+        tap()
+        #endif
+    }
+}
+
+@MainActor
 extension XCUIApplication {
     /// Every post row on screen, by the identifier `PostRow` puts on itself.
     var postRows: XCUIElementQuery {
