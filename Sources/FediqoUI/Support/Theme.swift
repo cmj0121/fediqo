@@ -157,6 +157,10 @@ enum Size {
     /// draws is the count it was told.
     static let actionGlyph: CGFloat = 24
     static let actionCount: CGFloat = 22
+    /// The box the audience mark is hovered over. A glyph is only as hoverable as its own ink,
+    /// and a padlock at `Glyph.inline` is a few strokes with holes between them — without a
+    /// shape behind it the hint appears and disappears as the pointer crosses one.
+    static let audienceMark: CGFloat = 18
     /// A panel of prose, and the column a page of settings is read in. Wider than either and
     /// the eye loses the start of the next line.
     static let prose: CGFloat = 420

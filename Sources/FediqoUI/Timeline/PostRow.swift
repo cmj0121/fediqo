@@ -278,20 +278,45 @@ struct PostRow: View {
             let name = t("post.visibility.\(audience.rawValue)")
             Image(systemName: Self.mark(for: audience))
                 .fediqoSymbol(Glyph.inline, weight: .medium)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(Self.tint(for: audience))
+                // A box to hover over. An `Image` is only as hoverable as its own ink, and a
+                // twelve-point glyph is a few strokes with holes in it — a pointer between them
+                // is a pointer over nothing, and the hint would come and go as it moved. The
+                // shape is what a tooltip is aimed at, so it is given one.
+                .frame(width: Size.audienceMark, height: Size.audienceMark)
+                .contentShape(Rectangle())
                 .help(name)
                 .accessibilityLabel(Text(name))
         }
     }
 
-    /// One glyph each. The name is always beside it -- as help, and as the accessibility label
-    /// -- because four shapes at twelve points is not a thing anybody should have to learn.
+    /// One glyph each. The name is always beside it — as the hover hint, and as the
+    /// accessibility label — because four shapes at twelve points is not a thing anybody should
+    /// have to learn.
     private static func mark(for audience: Audience) -> String {
         switch audience {
         case .everyone: "globe"
         case .unlisted: "moon"
         case .followers: "lock"
         case .mentioned: "at"
+        }
+    }
+
+    /// Colour says how far the post travels, and it is a ramp rather than four labels.
+    ///
+    /// Public is the ordinary case and stays the colour of everything else on the line. It is
+    /// what most of a timeline is, and forty coloured globes down a page would be a decoration
+    /// that means "normal" — the marks that are worth a colour are the ones that are not.
+    ///
+    /// From there it warms as the audience narrows: out of the public eye, then the author's
+    /// followers, then the people they named. What the colour never does is carry the fact on
+    /// its own — the shape says which, the hint says it in words, and this is the third telling.
+    private static func tint(for audience: Audience) -> Color {
+        switch audience {
+        case .everyone: .secondary
+        case .unlisted: .teal
+        case .followers: .orange
+        case .mentioned: .pink
         }
     }
 
