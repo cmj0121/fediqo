@@ -26,7 +26,13 @@ struct InteractionBar: View {
 
     @Environment(AppState.self) private var app
     @Environment(\.openURL) private var openURL
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showingMore = false
+
+    /// How a mark moves, or nothing at all where the reader has asked for nothing to move.
+    /// The same pair `ActionNotice` and `FeedScreen` keep, and kept the same way: the answer
+    /// is the view's, so nothing below it has to carry an accessibility setting around.
+    private var motion: Animation? { reduceMotion ? nil : Motion.appearing }
 
     private var marks: PostMarks { app.marks(of: post) }
     /// The numbers, from the app rather than off the post: a write's answer says what they are
@@ -54,11 +60,13 @@ struct InteractionBar: View {
             counted("arrowshape.turn.up.left", count: counts.replies,
                     labelKey: "post.reply", on: false, tint: .secondary) { hand() }
             counted("arrow.2.squarepath", count: counts.reblogs,
-                    labelKey: "post.reblog", on: marks.reblogged == true, tint: .green) {
+                    labelKey: "post.reblog", on: marks.reblogged == true, tint: .green,
+                    sending: app.isActing(.reblog, on: post)) {
                 Task { await app.act(.reblog, on: post) }
             }
             counted(marks.favourited == true ? "star.fill" : "star", count: counts.favourites,
-                    labelKey: "post.favourite", on: marks.favourited == true, tint: .yellow) {
+                    labelKey: "post.favourite", on: marks.favourited == true, tint: .yellow,
+                    sending: app.isActing(.favourite, on: post)) {
                 Task { await app.act(.favourite, on: post) }
             }
         }
@@ -70,7 +78,8 @@ struct InteractionBar: View {
     private var mine: some View {
         HStack(spacing: Space.withinGroup) {
             switching(marks.bookmarked == true ? "bookmark.fill" : "bookmark",
-                      labelKey: "post.bookmark", on: marks.bookmarked == true, tint: .blue) {
+                      labelKey: "post.bookmark", on: marks.bookmarked == true, tint: .blue,
+                      sending: app.isActing(.bookmark, on: post)) {
                 Task { await app.act(.bookmark, on: post) }
             }
             switching(app.isKept(post) ? "archivebox.fill" : "archivebox",
@@ -108,32 +117,75 @@ struct InteractionBar: View {
         }
     }
 
+    /// A control with a number beside it. `sending` is a write still out to a server.
+    ///
+    /// Three things move, and each says something different. The glyph swaps — an empty star
+    /// for a filled one — and the swap is a transition rather than a cut, because the two are
+    /// one control in two states and nothing about the row has changed but that. The colour
+    /// arrives with it. And the number is a number, so it rolls to the one it became rather
+    /// than being replaced by a different string in the same place.
+    ///
+    /// A press answers instantly and the server does not, which is the whole reason `sending`
+    /// exists: between the two the control pulses, so a reader on a slow server can see that
+    /// the mark went somewhere rather than wondering whether the click landed.
     private func counted(_ symbol: String, count: Int?, labelKey: String, on: Bool,
-                         tint: Color, action: @escaping () -> Void) -> some View {
+                         tint: Color, sending: Bool = false,
+                         action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: Space.tight) {
-                Image(systemName: symbol).fediqoSymbol(Glyph.action, weight: .medium)
-                if let count { Text(verbatim: "\(count)").fediqoFont(TypeScale.small) }
+                glyph(symbol, on: on, sending: sending)
+                if let count {
+                    Text(verbatim: "\(count)")
+                        .fediqoFont(TypeScale.small)
+                        // A count is a quantity, and `numericText` moves the digits that
+                        // changed rather than crossfading one whole number into another.
+                        .contentTransition(.numericText(value: Double(count)))
+                        .animation(motion, value: count)
+                }
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(on ? tint : Color.secondary)
+        .animation(motion, value: on)
         .help(t(labelKey))
         .accessibilityLabel(Text(t(labelKey)))
         .accessibilityAddTraits(on ? .isSelected : [])
     }
 
     private func switching(_ symbol: String, labelKey: String, on: Bool, tint: Color,
-                           action: @escaping () -> Void) -> some View {
+                           sending: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol).fediqoSymbol(Glyph.action, weight: .medium).contentShape(Rectangle())
+            glyph(symbol, on: on, sending: sending).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(on ? tint : Color.secondary)
+        .animation(motion, value: on)
         .help(t(labelKey))
         .accessibilityLabel(Text(t(labelKey)))
         .accessibilityAddTraits(on ? .isSelected : [])
+    }
+
+    /// The glyph both controls draw, and everything that happens to it.
+    ///
+    /// Written once because the two are one control with and without a number beside it, and a
+    /// mark that bounced in the list but not on the opened post would be two designs for one
+    /// idea. Under Reduce Motion it is the plain image: the state is still said by the shape
+    /// and the colour, which is what has to be true for the animation to be decoration.
+    @ViewBuilder
+    private func glyph(_ symbol: String, on: Bool, sending: Bool) -> some View {
+        let image = Image(systemName: symbol).fediqoSymbol(Glyph.action, weight: .medium)
+        if reduceMotion {
+            image
+        } else {
+            image
+                .contentTransition(.symbolEffect(.replace))
+                // The landing, and the wait. `bounce` fires on the press because `on` moves
+                // there and not when the server answers — the mark is the reader's the moment
+                // they make it, and putting it back is what a refusal is for.
+                .symbolEffect(.bounce, value: on)
+                .symbolEffect(.pulse, isActive: sending)
+        }
     }
 
     private func hand() {

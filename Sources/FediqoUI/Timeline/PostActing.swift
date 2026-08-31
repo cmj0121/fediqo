@@ -59,6 +59,15 @@ extension AppState {
 
     func isKept(_ post: Post) -> Bool { keptPosts.contains(post.mergeKey) }
 
+    /// Whether this mark is still out to a server.
+    ///
+    /// What a control asks so it can say it is working. Keeping is not here and never will be:
+    /// it goes no further than this machine, so there is nothing to wait for and nothing to
+    /// show — a control that pulsed at a write to a local database would be inventing a wait.
+    func isActing(_ action: PostAction, on post: Post) -> Bool {
+        actingOn[post.mergeKey]?.contains(action) ?? false
+    }
+
     /// Reads back what this device holds about a page of posts: what each account did, and
     /// what is being kept here.
     ///
@@ -76,7 +85,7 @@ extension AppState {
         // used to hand the star back to the store's older answer, where it stayed until the
         // next read. That is what "it did not update" looked like.
         var next = found
-        for key in actingOn { next[key] = postMarks[key] }
+        for key in actingOn.keys { next[key] = postMarks[key] }
         postMarks = next
     }
 
@@ -97,8 +106,11 @@ extension AppState {
         let before = marks(of: post)
         let was = before.value(of: action) ?? false
         postMarks[key] = before.setting(action, to: !was)
-        actingOn.insert(key)
-        defer { actingOn.remove(key) }
+        actingOn[key, default: []].insert(action)
+        defer {
+            actingOn[key]?.remove(action)
+            if actingOn[key]?.isEmpty == true { actingOn[key] = nil }
+        }
         do {
             let acted = try await postActions.perform(action, on: post, as: account, done: !was,
                                                       fetching: preferences.mayFetchToAct)
