@@ -580,6 +580,23 @@
         }
       }
     },
+    "merges.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Every post made out of more than one arrival, and on what grounds."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每一篇由多次抵達合成的貼文，以及合併的依據。"
+          }
+        }
+      }
+    },
     "network.subtitle": {
       "extractionState": "manual",
       "localizations": {
@@ -3079,6 +3096,74 @@
         }
       }
     },
+    "stats.merges": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "What was collapsed, and why"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "什麼被合併了，為什麼"
+          }
+        }
+      }
+    },
+    "stats.merges.none": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing here was made out of more than one arrival. Every post came from one server, and none was published from this device to several."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這裡沒有任何一篇是由多次抵達合成的。每篇都只來自一台伺服器，也沒有任何一篇是從這台裝置發到多個地方的。"
+          }
+        }
+      }
+    },
+    "stats.merges.published": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sent from here to each of these"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "從這裡發到以上每一個地方"
+          }
+        }
+      }
+    },
+    "stats.merges.sameAddress": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Both name %@"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "兩邊都指向 %@"
+          }
+        }
+      }
+    },
     "stats.noStore": {
       "extractionState": "manual",
       "localizations": {
@@ -3398,6 +3483,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "鍵盤"
+          }
+        }
+      }
+    },
+    "tab.merges": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merges"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "合併"
           }
         }
       }

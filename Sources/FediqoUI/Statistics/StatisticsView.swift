@@ -25,6 +25,9 @@ struct StatisticsView: View {
     @State private var statistics: Statistics?
     @State private var accounting: APIAccounting?
     @State private var failed = false
+    /// What this store made out of more than one arrival. Loaded with the rest, because the
+    /// tabs are three views of one reading rather than three readings.
+    @State private var collapses: [Collapse] = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -63,6 +66,8 @@ struct StatisticsView: View {
         case .network:
             section(t("stats.requests")) { requests }
             section(t("stats.counting")) { counting }
+        case .merges:
+            section(t("stats.merges")) { merged }
         }
     }
 
@@ -71,8 +76,65 @@ struct StatisticsView: View {
         guard let store = app.store else { return }
         do {
             statistics = try await store.statistics()
+            collapses = try await store.collapses()
         } catch {
             failed = true
+        }
+    }
+
+    // MARK: - What was made out of more than one
+
+    /// Every post this store made out of more than one arrival, and on what grounds.
+    ///
+    /// #5's last promise, and the only one of its five that is about being wrong: the other four
+    /// are rules the app follows silently, and this is the one that says a reader must be able
+    /// to check them. So it is a list of decisions rather than of posts — what the row says, the
+    /// servers it was made from, and which of the two reasons it had.
+    ///
+    /// The two reasons are drawn apart because they are not the same kind of thing. An address
+    /// two servers agreed on is an inference, and it is shown so it can be disbelieved; a post
+    /// this app published is a record of what it did, and there is nothing to check.
+    @ViewBuilder
+    private var merged: some View {
+        if collapses.isEmpty {
+            Text(t("stats.merges.none"))
+                .fediqoFont(TypeScale.small)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            VStack(alignment: .leading, spacing: Space.gap) {
+                ForEach(collapses, id: \.mergeKey) { collapse in
+                    VStack(alignment: .leading, spacing: Space.tight) {
+                        Text(collapse.says)
+                            .fediqoFont(TypeScale.small)
+                            .lineLimit(2)
+                        HStack(spacing: Space.tight) {
+                            ForEach(collapse.sources, id: \.self) { source in
+                                Text(source).fediqoFont(TypeScale.caption).fediqoPill()
+                            }
+                        }
+                        .foregroundStyle(.secondary)
+                        switch collapse.reason {
+                        case .published:
+                            Label(t("stats.merges.published"), systemImage: "square.and.pencil")
+                                .fediqoFont(TypeScale.caption)
+                                .foregroundStyle(Palette.accent)
+                        case .sameAddress(let address):
+                            // The address itself, because it is the reasoning: if two posts were
+                            // ever wrongly made one, this is the line that says why.
+                            Text(t("stats.merges.sameAddress", address))
+                                .fediqoFont(TypeScale.caption)
+                                .foregroundStyle(.tertiary)
+                                .textSelection(.enabled)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(Space.mid)
+                    .fediqoCard(radius: Radius.inner, raised: false)
+                }
+            }
         }
     }
 

@@ -45,7 +45,7 @@ enum RailItem: String, CaseIterable, Identifiable, Hashable {
 /// is a note, and a note belongs beside the number it explains rather than on a page of its
 /// own that nobody would go to.
 enum StatisticsTab: String, CaseIterable, Identifiable, Hashable {
-    case storage, network
+    case storage, network, merges
 
     var id: String { rawValue }
 }
