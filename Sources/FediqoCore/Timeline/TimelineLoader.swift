@@ -205,6 +205,8 @@ public struct TimelineLoader: Sendable {
         // server for it twice because we threw it away is the one thing worth avoiding.
         let posts = query.source.ranked ? Self.mergedByRank(round.collected)
                                         : round.collected.flatMap { $0 }.merged()
+        // Sifted rather than filtered: what the rules turned away is carried alongside what
+        // they let through, so a reader can ask why a post they expected is not here.
         return TimelineResult(posts: query.admitted(posts), failures: round.failures, skipped: skipped)
     }
 
@@ -790,10 +792,27 @@ public struct TimelineLoader: Sendable {
 
     /// The only thing between what arrived and what you see. It adds and removes; it never moves.
     public static func apply(showBoosts: Bool, mediaOnly: Bool, to posts: [Post]) -> [Post] {
-        posts.filter { post in
-            if !showBoosts, post.isBoost { return false }
-            if mediaOnly, post.mediaURLs.isEmpty { return false }
-            return true
+        sift(showBoosts: showBoosts, mediaOnly: mediaOnly, posts).admitted
+    }
+
+    /// The same, and what it turned away, with the reason attached.
+    ///
+    /// These two switches are rules like the ones written on a timeline — the reader's own, and
+    /// they remove rather than move — so they answer #6's question the same way. A post is not
+    /// on the screen for one reason, so the first that refuses it is the reason.
+    public static func sift(showBoosts: Bool, mediaOnly: Bool,
+                            _ posts: [Post]) -> (admitted: [Post], hidden: [Hidden]) {
+        var admitted: [Post] = []
+        var hidden: [Hidden] = []
+        for post in posts {
+            if !showBoosts, post.isBoost {
+                hidden.append(Hidden(post: post, because: .boostsHidden))
+            } else if mediaOnly, post.mediaURLs.isEmpty {
+                hidden.append(Hidden(post: post, because: .mediaOnly))
+            } else {
+                admitted.append(post)
+            }
         }
+        return (admitted, hidden)
     }
 }

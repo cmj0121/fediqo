@@ -111,8 +111,61 @@ public struct TimelineQuery: Sendable, Hashable {
     /// The whole of the rules, applied to posts that have not been through the store — a page
     /// straight off the network. The store answers the same question in SQL.
     public func admitted(_ posts: [Post]) -> [Post] {
-        guard !filters.isEmpty else { return posts }
-        return posts.filter { post in filters.allSatisfy { $0.admits(post) } }
+        sifted(posts).admitted
+    }
+
+    /// The same, and what it turned away, with the reason attached.
+    ///
+    /// #6 asks that every hidden post can say which rule hid it, and a rule that removes things
+    /// silently is one nobody can check. So the filtering answers both halves at once rather
+    /// than throwing one away: what is left, and what is not and why.
+    ///
+    /// **The first rule that refused it, not all of them.** A post has to satisfy every rule, so
+    /// the first refusal is the whole reason it is not here — the rest were never asked, and
+    /// listing them would be inventing reasons after the fact.
+    public func sifted(_ posts: [Post]) -> (admitted: [Post], hidden: [Hidden]) {
+        guard !filters.isEmpty else { return (posts, []) }
+        var admitted: [Post] = []
+        var hidden: [Hidden] = []
+        for post in posts {
+            if let refused = filters.first(where: { !$0.admits(post) }) {
+                hidden.append(Hidden(post: post, because: .rule(refused)))
+            } else {
+                admitted.append(post)
+            }
+        }
+        return (admitted, hidden)
+    }
+}
+
+/// A post that arrived and is not on the screen, and what kept it off.
+///
+/// #6's last promise: *"Every hidden post can say which rule hid it, or which server did."* Four
+/// of its five lines are rules the app follows silently — timestamp order, add or remove but
+/// never move, no rules means everything — and this is the one that says a reader must be able
+/// to hold it to them.
+///
+/// It is only ever the reader's own doing. A post a server never handed over is not here to say
+/// anything about, and that half of the sentence is answered somewhere else entirely: a server
+/// that gave nothing is in `TimelineResult.failures`, and one that was never asked is in
+/// `skipped`. What can be attributed post by post is what this app itself took out.
+public struct Hidden: Sendable, Hashable {
+    /// Why a post that arrived is not on the screen.
+    public enum Because: Sendable, Hashable {
+        /// A rule the reader wrote on this timeline, and the first one that turned it away.
+        case rule(TimelineFilter)
+        /// The reader asked not to be shown boosts.
+        case boostsHidden
+        /// The reader asked for posts with something attached, and this had nothing.
+        case mediaOnly
+    }
+
+    public let post: Post
+    public let because: Because
+
+    public init(post: Post, because: Because) {
+        self.post = post
+        self.because = because
     }
 }
 
