@@ -70,14 +70,47 @@ extension LocalStore {
             // site, so the schema's rule — an account only where the source has one — cannot
             // be broken by a caller passing the reader along with the wrong feed.
             let account = feed.needsAccount ? reader : nil
+            // Asked once for the page rather than once per post, and only where there is
+            // anywhere to ask: a store migrated no further than 010 -- which is what the
+            // upgrade tests build -- has published nothing, because there was nowhere to
+            // write it down.
+            let published = try Self.keysOfWhatWasPublished(db, among: posts)
             var hours: Set<Int64> = []
             for post in posts {
-                let postedAt = try Self.writePost(db, post, authorityURL: Self.authorityURL(of: post), now: ms)
-                try Self.recordOrigin(db, post.mergeKey, from: post.sourceURL,
-                                      into: feed, as: account, now: ms)
+                // What this post is one of, where this app is the one that published it. For
+                // everything else it is the post's own key, and this is the whole of what makes
+                // one composed post one row.
+                let key = published[post.originURI ?? post.uri] ?? post.mergeKey
+                let postedAt = try Self.writePost(db, post, key: key,
+                                                 authorityURL: Self.authorityURL(of: post), now: ms)
+                try Self.recordOrigin(db, key, from: post.sourceURL, into: feed, as: account, now: ms)
                 hours.insert(Self.hourBucket(postedAt))
             }
             try Self.rewriteTagBuckets(db, hours: hours, now: ms)
+        }
+    }
+
+    /// Writes down the servers and accounts these posts name, and nothing else about them.
+    ///
+    /// `publications` names a server and an account per destination, and a foreign key means
+    /// both rows have to be there first — but a post going to three servers is saved as one row
+    /// under one of them, so the other two destinations have nothing to write theirs. This is
+    /// the references without the posts, which is what those rows are waiting for.
+    ///
+    /// Not a way in for anything else. Every other caller wants `save`, which writes these on
+    /// the way past; this exists because one act has to be written in two halves and the halves
+    /// point at each other.
+    public func remember(referencesOf posts: [Post], now: Date = Date()) async throws {
+        guard !posts.isEmpty else { return }
+        let ms = Self.milliseconds(now)
+        let named = posts.map {
+            Self.references(in: [$0], serverURL: $0.sourceURL, serverTitle: Self.host(of: $0.sourceURL))
+        }
+        let servers = named.flatMap(\.servers)
+        let accounts = named.flatMap(\.accounts)
+        try await write { db in
+            for row in servers { try Self.upsertServer(db, row, now: ms) }
+            for row in accounts { try Self.upsertAccount(db, row, now: ms) }
         }
     }
 
@@ -461,6 +494,18 @@ extension LocalStore {
                                     arguments: StatementArguments(keys)) {
             tags[row["merge_key"], default: []].append(row["tag"])
         }
+        // Every server that carried each of these, which is what a row says underneath itself.
+        // Read here rather than taken from `posts.source_url`: that column is the server whose
+        // copy was written first, and a post two servers carried — or one this app sent to
+        // three — is one row that has to be able to name all of them.
+        var carriedBy: [String: [String]] = [:]
+        for row in try Row.fetchAll(db, sql: """
+            SELECT merge_key, source_url FROM post_origins
+            WHERE merge_key IN (\(placeholders)) ORDER BY source_url
+            """, arguments: StatementArguments(keys)) {
+            carriedBy[row["merge_key"], default: []].append(host(of: row["source_url"]))
+        }
+
         // What came attached, in the order the source gave it. A post stored before migration
         // 005 has no rows here at all; `post(from:…)` falls back to the one column 001 kept.
         var media: [String: [Attachment]] = [:]
@@ -494,11 +539,13 @@ extension LocalStore {
         return rows.map { post(from: $0, tags: tags[$0["merge_key"]] ?? [],
                                mentions: mentions[$0["merge_key"]] ?? [],
                                emojis: emojis[$0["merge_key"]] ?? [],
-                               media: media[$0["merge_key"]]) }
+                               media: media[$0["merge_key"]],
+                               carriedBy: carriedBy[$0["merge_key"]] ?? []) }
     }
 
     private static func post(from row: Row, tags: [String], mentions: [Mention],
-                             emojis: [CustomEmoji], media: [Attachment]?) -> Post {
+                             emojis: [CustomEmoji], media: [Attachment]?,
+                             carriedBy: [String]) -> Post {
         let sourceURL: String = row["source_url"]
         return Post(
             uri: row["uri"],
@@ -529,7 +576,10 @@ extension LocalStore {
             emojis: emojis,
             boostedBy: row["booster_name"],
             boostedById: row["boosted_by"],
-            sources: [host(of: sourceURL)]
+            // Every server that carried it, and the one the row was written under where
+            // nothing else has. A post stored before there were origins to read still names
+            // the server it came from, which is what it did yesterday.
+            sources: carriedBy.isEmpty ? [host(of: sourceURL)] : carriedBy
         )
     }
 
@@ -634,8 +684,8 @@ extension LocalStore {
 
     /// Writes one post and says when it was posted, so the caller can recount that hour. The
     /// statements are cached on the connection: a refresh prepares each of them once.
-    private static func writePost(_ db: Database, _ post: Post, authorityURL: String?, now: Int64) throws -> Int64 {
-        let key = post.mergeKey
+    private static func writePost(_ db: Database, _ post: Post, key: String,
+                                  authorityURL: String?, now: Int64) throws -> Int64 {
         let postedAt = milliseconds(post.createdAt)
         let media = post.mediaURLs.map(\.absoluteString)
         let mediaJSON = String(decoding: try encoder.encode(media), as: UTF8.self)
@@ -779,6 +829,34 @@ extension LocalStore {
     /// name the one it means. `author_id` is NULL for a source nobody owns, and NULLs are
     /// distinct to a unique index — which is exactly why the anonymous rows are kept unique by
     /// an index that leaves the column out.
+    /// The key a post belongs under, where this app published it, and `nil` for everything else.
+    ///
+    /// This is the one collapse in the store that is knowledge rather than inference. Two
+    /// servers carrying somebody else's post agree on a canonical address, and `merge_key` is
+    /// that agreement — a good inference, and still an inference. A post the reader wrote and
+    /// sent to three accounts is three posts on three servers whose addresses agree about
+    /// nothing, and this app knows they are one because it sent them. `publications` is where it
+    /// wrote that down (011), and this is where the writing is read.
+    ///
+    /// Asked by the address the post carries on its own server, which is exactly what was
+    /// recorded for that destination — so a copy arriving back through a home timeline weeks
+    /// later folds into the row it belongs to rather than arriving as a stranger.
+    ///
+    /// **What was written down wins**, which #63 asks for in as many words. Where the record and
+    /// the addresses disagree, the record is the one that was there when it happened.
+    private static func keysOfWhatWasPublished(_ db: Database, among posts: [Post]) throws -> [String: String] {
+        guard try db.tableExists("publications") else { return [:] }
+        let addresses = posts.map { $0.originURI ?? $0.uri }
+        guard !addresses.isEmpty else { return [:] }
+        let placeholders = Array(repeating: "?", count: addresses.count).joined(separator: ", ")
+        let rows = try Row.fetchAll(db, sql: """
+            SELECT uri, merge_key FROM publications
+            WHERE uri IN (\(placeholders)) AND merge_key IS NOT NULL
+            """, arguments: StatementArguments(addresses))
+        return Dictionary(rows.map { ($0["uri"] as String, $0["merge_key"] as String) },
+                          uniquingKeysWith: { first, _ in first })
+    }
+
     private static func recordOrigin(_ db: Database, _ key: String, from sourceURL: String,
                                      into feed: BaseSource, as account: String?, now: Int64) throws {
         let statement = if account == nil {

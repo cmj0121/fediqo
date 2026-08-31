@@ -54,7 +54,12 @@ struct PostStoreTests {
         #expect(source == "https://one.example")
         #expect(lastSeen == LocalStore.milliseconds(t1))
         #expect(created == LocalStore.milliseconds(t0))
-        #expect(try await store.timeline().map(\.sources) == [["one.example"]])
+        // The column keeps the first — that is what `source_url` is above — and the row names
+        // both. They are two different questions: which server's copy was written down here,
+        // and which servers have carried this post. The second is read from `post_origins`, and
+        // until #63 it was not read at all: a row that two servers carried could only say one.
+        let carried = try await store.timeline().map(\.sources)
+        #expect(carried == [["one.example", "two.example"]])
     }
 
     @Test("A boost and its original are two rows")
