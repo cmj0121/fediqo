@@ -212,6 +212,24 @@ public struct MastodonClient: SourceClient {
         return parts[4]
     }
 
+    /// The acting server's own number for a post, where the acting server is one of the two
+    /// that already named it — and `nil` where it is neither, which is the only case that has
+    /// to be looked up.
+    ///
+    /// Two addresses, two ways of a post being this server's. `originURI` is the post's
+    /// canonical name and its host is the server that wrote it; `uri` is the row we were
+    /// handed and its host is the server that handed it over. Either one being `host` means
+    /// the number inside that address is a number `host` can be asked about, which is the
+    /// whole of what a write needs — so nothing is sent to find out what we were already told.
+    ///
+    /// The canonical name is tried first, because it is the post itself. `uri` comes second
+    /// and is a boost's own wrapper where the row is a boost; that is still the right id to
+    /// send, because a favourite, a boost or a bookmark aimed at a reblog is carried through
+    /// to the status it reblogged — the reader's star lands on the post, not on the boost.
+    static func ownId(of post: Post, on host: String) -> String? {
+        (try? canonicalStatusId(of: post, on: host)) ?? (try? statusId(of: post, on: host))
+    }
+
     /// The one door to the network here. A token becomes the bearer header and nothing else
     /// changes: the same URL, the same endpoint, asked for as somebody rather than as anybody.
     private func get(host: String, path: String, query: [URLQueryItem], token: String? = nil) async throws -> Data {

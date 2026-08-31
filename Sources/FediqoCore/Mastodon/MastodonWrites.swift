@@ -5,40 +5,79 @@ import Foundation
 /// All of it goes to the reader's own server and none of it to the server the post came from,
 /// for the plainest of reasons: a favourite is an account's act, and this app reads a great
 /// many servers nobody here has an account on. Where the reader does have one on the post's
-/// own server, the caller passes that as the acting account and the first request below is
-/// free — `search` finds the status already there and nothing is fetched.
+/// own server, the caller passes that as the acting account — and then there is nothing to
+/// look up at all, because that server's own number for the post is already in the address
+/// this app stored.
 extension MastodonClient {
     /// The status's id on the acting server, and whether that server had to go and get it.
     ///
-    /// Two steps, and the first is often the last. `resolve=false` asks the server what it
-    /// already holds; only when that comes back empty is `resolve=true` sent, and that is the
-    /// request that makes the server fetch the post from wherever it lives. `fetching: false`
-    /// stops before it, which is how a reader who has not agreed to that gets an honest
-    /// refusal rather than a quiet federation request in their name.
+    /// The first question is whether there is anything to look up at all. Where the acting
+    /// server is the one that wrote the post, or the one that handed it over, its own number
+    /// for the post is already inside the address this app stored — see `ownId` — and the
+    /// answer is free. That is the reader's own timeline, which is most of what a star is ever
+    /// pressed on, and it used to be the case that failed: the lookup below was sent for it
+    /// and came back empty, so favouriting a post on your own server was refused as a post
+    /// that server had never heard of.
+    ///
+    /// Everything else is somebody else's post, and Mastodon has one way to ask about one by
+    /// address: `/api/v2/search`. That search reads a query as an address **only** when
+    /// `resolve=true`; with `resolve=false` the same query falls through to the full-text
+    /// index, which answers about no statuses at all on a server with no Elasticsearch behind
+    /// it and would not match a URI if there were. So there is no asking a Mastodon server
+    /// "do you already hold this one" without also asking it to go and fetch it — and a
+    /// reader who has not agreed to that is refused here rather than sent a question whose
+    /// only possible answer is no.
     public func localId(of post: Post, as account: ActingAccount,
                         fetching: Bool) async throws -> Located {
+        if let id = Self.ownId(of: post, on: account.host) {
+            return Located(id: id, reach: .alreadyThere)
+        }
         // The address the post's own server gave it. A relay's copy is not what we search for:
         // the canonical URI is the one every other server keys the post by.
         let uri = post.originURI ?? post.uri
-        if let status = try await searchStatus(uri, as: account, resolving: false) {
-            return Located(id: status.id, reach: .alreadyThere, marks: status.marks)
-        }
         guard fetching else { throw SourceFailure.notItsPost(uri) }
-        guard let status = try await searchStatus(uri, as: account, resolving: true) else {
+        guard let status = try await searchStatus(uri, as: account) else {
             throw SourceFailure.notItsPost(uri)
         }
         return Located(id: status.id, reach: .fetched, marks: status.marks)
     }
 
+    /// Mastodon answers a write with the whole status, so the numbers come back with the act
+    /// that changed them and are read off it rather than guessed at. A boost answers about the
+    /// reblog it just made and carries the original underneath, which is where the numbers
+    /// that moved are — so that is the one this reads.
+    ///
+    /// An answer this cannot make sense of is not an error: the write went through, which is
+    /// what was asked for. What comes back is `nil` counts — nobody told us — and the screen
+    /// goes on showing the number the post arrived with rather than one made up here.
+    @discardableResult
     public func setMark(_ action: PostAction, on id: String, as account: ActingAccount,
-                        done: Bool) async throws {
+                        done: Bool) async throws -> Marked {
         let verb: String
         switch action {
         case .favourite: verb = done ? "favourite" : "unfavourite"
         case .reblog: verb = done ? "reblog" : "unreblog"
         case .bookmark: verb = done ? "bookmark" : "unbookmark"
         }
-        _ = try await write("POST", "/api/v1/statuses/\(id)/\(verb)", as: account)
+        let data = try await write("POST", "/api/v1/statuses/\(id)/\(verb)", as: account)
+        return Self.marked(from: data)
+    }
+
+    /// The three marks and the three numbers, out of a status the server just handed back.
+    static func marked(from data: Data) -> Marked {
+        guard let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        else { return Marked() }
+        // `reblog` is the status a boost wraps. The counts that moved are the original's, and
+        // so is every mark: Mastodon carries an act aimed at a reblog through to what it
+        // reblogged, and the answer says so in the same place.
+        let status = (body["reblog"] as? [String: Any]) ?? body
+        let counts = Counts(replies: status["replies_count"] as? Int,
+                            reblogs: status["reblogs_count"] as? Int,
+                            favourites: status["favourites_count"] as? Int)
+        return Marked(marks: PostMarks(favourited: status["favourited"] as? Bool,
+                                       reblogged: status["reblogged"] as? Bool,
+                                       bookmarked: status["bookmarked"] as? Bool),
+                      counts: counts.areKnown ? counts : nil)
     }
 
     /// An author is muted by account id; a host is blocked by name.
@@ -87,9 +126,8 @@ extension MastodonClient {
     /// A key that is absent is left as `nil` — never told — while a key that is present and
     /// `false` is the server saying so. The two are different facts and the schema keeps them
     /// apart, so the decoding has to as well.
-    private func searchStatus(_ uri: String, as account: ActingAccount,
-                              resolving: Bool) async throws -> (id: String, marks: PostMarks)? {
-        let found = try await search(uri, type: "statuses", as: account, resolving: resolving)
+    private func searchStatus(_ uri: String, as account: ActingAccount) async throws -> (id: String, marks: PostMarks)? {
+        let found = try await search(uri, type: "statuses", as: account)
         guard let status = (found["statuses"] as? [[String: Any]])?.first,
               let id = status["id"] as? String else { return nil }
         return (id, PostMarks(favourited: status["favourited"] as? Bool,
@@ -100,12 +138,19 @@ extension MastodonClient {
     private func searchAccount(_ authorId: String, as account: ActingAccount) async throws -> String? {
         // An actor URI is always resolvable by a server that already holds the post, and the
         // post is what got us here — so this never reaches further than the status did.
-        let found = try await search(authorId, type: "accounts", as: account, resolving: true)
+        let found = try await search(authorId, type: "accounts", as: account)
         return (found["accounts"] as? [[String: Any]])?.first?["id"] as? String
     }
 
-    private func search(_ query: String, type: String, as account: ActingAccount,
-                        resolving: Bool) async throws -> [String: Any] {
+    /// `/api/v2/search`, always resolving.
+    ///
+    /// Not a choice made here but the endpoint's shape: it reads a query as an address only
+    /// when `resolve` is set, and both callers above are asking about an address. Sending
+    /// `false` would not be a cheaper version of the same question — it is a different
+    /// question, one this app never wants to ask, and one that on a stock server answers
+    /// nothing at all. Whether a fetch may happen is settled before this is reached.
+    private func search(_ query: String, type: String,
+                        as account: ActingAccount) async throws -> [String: Any] {
         var components = URLComponents()
         components.scheme = "https"
         components.host = account.host
@@ -113,7 +158,7 @@ extension MastodonClient {
         components.queryItems = [
             URLQueryItem(name: "q", value: query),
             URLQueryItem(name: "type", value: type),
-            URLQueryItem(name: "resolve", value: resolving ? "true" : "false"),
+            URLQueryItem(name: "resolve", value: "true"),
             URLQueryItem(name: "limit", value: "1"),
         ]
         guard let url = components.url else { throw SourceFailure.badHost(account.host) }

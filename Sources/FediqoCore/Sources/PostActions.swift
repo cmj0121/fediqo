@@ -1,5 +1,22 @@
 import Foundation
 
+/// What came of doing something to a post: what it cost to reach, and what the server's own
+/// answer said the numbers are now.
+///
+/// The numbers are `nil` where nobody said. That is a different fact from "nothing has been
+/// done to this post", and the screen keeps them apart the way it does everywhere else: what
+/// it shows is what it was told, and where it was told nothing it goes on showing the number
+/// the post arrived with.
+public struct Acted: Sendable, Hashable {
+    public let reach: Reach
+    public let counts: Counts?
+
+    public init(reach: Reach, counts: Counts? = nil) {
+        self.reach = reach
+        self.counts = counts
+    }
+}
+
 /// Doing something to a post: finding it on the acting server, asking that server, and writing
 /// down what came of it.
 ///
@@ -39,7 +56,7 @@ public struct PostActions: Sendable {
     /// would mean a star that is empty until this app itself fills it.
     @discardableResult
     public func perform(_ action: PostAction, on post: Post, as account: ActingAccount,
-                        done: Bool, fetching: Bool, now: Date = Date()) async throws -> Reach {
+                        done: Bool, fetching: Bool, now: Date = Date()) async throws -> Acted {
         guard let client = registry.client(for: post.socialProtocol) else {
             throw SourceFailure.unsupported(post.socialProtocol)
         }
@@ -47,9 +64,15 @@ public struct PostActions: Sendable {
         if found.marks.areKnown {
             try? await store?.record([post.mergeKey: found.marks], as: account.authorId, now: now)
         }
-        try await client.setMark(action, on: found.id, as: account, done: done)
+        let marked = try await client.setMark(action, on: found.id, as: account, done: done)
         try await store?.mark(action, on: post.mergeKey, as: account.authorId, done: done, now: now)
-        return found.reach
+        // The numbers the write's own answer carried. Kept where the store has a row for the
+        // post, so a screen built from the store the next time round starts from the same
+        // numbers the screen that pressed the key is showing.
+        if let counts = marked.counts {
+            try? await store?.recount(post.mergeKey, as: counts, now: now)
+        }
+        return Acted(reach: found.reach, counts: marked.counts)
     }
 
     /// A mute, put up or taken down, in one or both of the two places it can live.

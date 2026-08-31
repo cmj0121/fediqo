@@ -121,6 +121,17 @@ extension LocalStore {
         }
     }
 
+    /// The numbers as a write's own answer reported them.
+    ///
+    /// The same columns a sighting from the authority writes, and written the same way — only
+    /// what was actually said, and never touching `updated_at`, because somebody favouriting a
+    /// post is not its author changing it. A post this store has no row for is silently
+    /// nothing to recount: the write still happened, and the screen is holding the answer.
+    public func recount(_ mergeKey: String, as counts: Counts, now: Date = Date()) async throws {
+        guard counts.areKnown else { return }
+        try await write { db in try Self.updateCounts(db, counts, for: mergeKey) }
+    }
+
     /// The remote says the post is gone. Marked once; a second report changes nothing.
     public func markDeleted(mergeKey: String, now: Date = Date()) async throws {
         let ms = Self.milliseconds(now)

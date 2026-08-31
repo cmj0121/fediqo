@@ -46,6 +46,17 @@ extension AppState {
         postMarks[post.mergeKey] ?? .unknown
     }
 
+    /// What this post has been received with, as far as anybody has told us: the numbers a
+    /// write's answer gave where there has been one, and the numbers the post arrived with
+    /// where there has not.
+    ///
+    /// A post is a value, and the one in the list and the one on the opened page are two
+    /// copies of it. So the newer numbers cannot live on the post — they live here, keyed the
+    /// way the marks are, and both copies read the same answer.
+    func counts(of post: Post) -> Counts {
+        postCounts[post.mergeKey] ?? post.counts
+    }
+
     func isKept(_ post: Post) -> Bool { keptPosts.contains(post.mergeKey) }
 
     /// Reads back what this device holds about a page of posts: what each account did, and
@@ -60,7 +71,13 @@ extension AppState {
         if let kept = try? await store.kept(among: keys) { keptPosts = kept }
         guard let account = await acting(on: posts[0]),
               let found = try? await store.marks(of: keys, as: account.authorId) else { return }
-        postMarks = found
+        // What the store holds — except for a post an action is still out for. In that gap this
+        // app knows something the store has not been told yet, and a page read landing in it
+        // used to hand the star back to the store's older answer, where it stayed until the
+        // next read. That is what "it did not update" looked like.
+        var next = found
+        for key in actingOn { next[key] = postMarks[key] }
+        postMarks = next
     }
 
     /// Favourite, boost or bookmark, or take it back.
@@ -73,14 +90,24 @@ extension AppState {
             actionFailure = .needsSignIn(post.sources.first ?? "")
             return
         }
-        let was = marks(of: post).value(of: action) ?? false
-        postMarks[post.mergeKey] = marks(of: post).setting(action, to: !was)
+        let key = post.mergeKey
+        // What was there before the press, whole. Putting a rejected press back means putting
+        // *this* back — not a `false` worked out from it, which would turn a mark nobody has
+        // ever told us about into this app claiming the reader has not made it.
+        let before = marks(of: post)
+        let was = before.value(of: action) ?? false
+        postMarks[key] = before.setting(action, to: !was)
+        actingOn.insert(key)
+        defer { actingOn.remove(key) }
         do {
-            let reach = try await postActions.perform(action, on: post, as: account, done: !was,
+            let acted = try await postActions.perform(action, on: post, as: account, done: !was,
                                                       fetching: preferences.mayFetchToAct)
-            if reach == .fetched { lastReachedOut = account.host }
+            if acted.reach == .fetched { lastReachedOut = account.host }
+            // The numbers as the server's own answer to the write reported them — the one
+            // moment this app is told what the count is with this press counted in.
+            if let counts = acted.counts { postCounts[key] = counts }
         } catch {
-            postMarks[post.mergeKey] = marks(of: post).setting(action, to: was)
+            postMarks[key] = before
             actionFailure = SourceFailure.of(error)
         }
     }

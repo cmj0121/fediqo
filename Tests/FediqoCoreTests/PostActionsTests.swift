@@ -156,9 +156,9 @@ struct ActingTests {
         let client = WritingClient(holding: true)
         let (actions, store, post) = try await wired(client)
 
-        let reach = try await actions.perform(.favourite, on: post, as: account,
+        let acted = try await actions.perform(.favourite, on: post, as: account,
                                               done: true, fetching: false)
-        #expect(reach == .alreadyThere)
+        #expect(acted.reach == .alreadyThere)
         #expect(await client.sent == [.favourite])
         #expect(try await store.marks(of: [post.mergeKey], as: account.authorId)[post.mergeKey]?.favourited == true)
     }
@@ -182,9 +182,9 @@ struct ActingTests {
         let client = WritingClient(holding: false)
         let (actions, _, post) = try await wired(client)
 
-        let reach = try await actions.perform(.reblog, on: post, as: account,
+        let acted = try await actions.perform(.reblog, on: post, as: account,
                                               done: true, fetching: true)
-        #expect(reach == .fetched)
+        #expect(acted.reach == .fetched)
         #expect(await client.sent == [.reblog])
     }
 
@@ -199,6 +199,46 @@ struct ActingTests {
         let marks = try await store.marks(of: [post.mergeKey], as: account.authorId)[post.mergeKey]
         #expect(marks?.bookmarked == true)
         #expect(marks?.favourited == true)
+    }
+
+    /// The numbers the write's answer carried, handed back to the caller and kept in the store.
+    ///
+    /// Both halves matter and they are different jobs. The caller is the screen that pressed
+    /// the key and has to move a number now; the store is so that the next page built from it
+    /// starts from the same number rather than the one the post arrived with.
+    @Test("What the write said the numbers are now is handed back, and kept")
+    func theNumbersMove() async throws {
+        let client = WritingClient(holding: true,
+                                   answering: Marked(marks: PostMarks(favourited: true),
+                                                     counts: Counts(replies: 1, reblogs: 2, favourites: 9)))
+        let (actions, store, post) = try await wired(client)
+
+        let acted = try await actions.perform(.favourite, on: post, as: account,
+                                              done: true, fetching: false)
+
+        #expect(acted.counts?.favourites == 9)
+        #expect(try await count(store, "SELECT favourites_count FROM posts WHERE merge_key = ?",
+                                [post.mergeKey]) == 9)
+        #expect(try await count(store, "SELECT reblogs_count FROM posts WHERE merge_key = ?",
+                                [post.mergeKey]) == 2)
+    }
+
+    /// A server that said nothing about the numbers must not have a number invented for it:
+    /// never-told is not "no" here either, and the row goes on showing what the post arrived
+    /// with.
+    @Test("A write that said nothing about the numbers changes none of them")
+    func silenceChangesNoNumbers() async throws {
+        let client = WritingClient(holding: true)
+        let (actions, store, post) = try await wired(client)
+
+        let acted = try await actions.perform(.favourite, on: post, as: account,
+                                              done: true, fetching: false)
+
+        #expect(acted.counts == nil)
+        // The column is left as it was — untold, which is not zero.
+        #expect(try await count(store, """
+            SELECT count(*) FROM posts WHERE merge_key = ? AND favourites_count IS NULL
+            """, [post.mergeKey]) == 1)
     }
 
     /// The local half is the reader's own rule and never leaves the machine, so it stands
@@ -228,13 +268,17 @@ struct ActingTests {
 actor WritingClient: SourceClient {
     private let holding: Bool
     private let marks: PostMarks
+    /// What the write answers with — the numbers a real server sends back with the act that
+    /// changed them. Nothing by default: most of these tests are about the steps, not the count.
+    private let answer: Marked
     private(set) var sent: [PostAction] = []
     private(set) var muted: [String] = []
     private(set) var reported: [String] = []
 
-    init(holding: Bool, marks: PostMarks = .unknown) {
+    init(holding: Bool, marks: PostMarks = .unknown, answering answer: Marked = Marked()) {
         self.holding = holding
         self.marks = marks
+        self.answer = answer
     }
 
     func localId(of post: Post, as account: ActingAccount, fetching: Bool) async throws -> Located {
@@ -243,8 +287,10 @@ actor WritingClient: SourceClient {
         return Located(id: "1", reach: .fetched, marks: marks)
     }
 
-    func setMark(_ action: PostAction, on id: String, as account: ActingAccount, done: Bool) async throws {
+    func setMark(_ action: PostAction, on id: String, as account: ActingAccount,
+                 done: Bool) async throws -> Marked {
         sent.append(action)
+        return answer
     }
 
     func setMute(_ kind: Mute.Kind, _ value: String, as account: ActingAccount, muted: Bool) async throws {

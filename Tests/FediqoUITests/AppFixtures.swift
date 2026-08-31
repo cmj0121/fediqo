@@ -47,6 +47,41 @@ func freshApp(_ name: String, launch: LaunchOptions = .none) -> AppState {
     AppState(preferences: Preferences(defaults: scratch(name)), serverStore: EmptyServerStore(), launch: launch)
 }
 
+/// An app with one account signed in to one server, and `posts` already in its store and on
+/// its timeline.
+///
+/// Everything an action needs and nothing a reader's machine has: the store is in memory, the
+/// credential is in memory, and the server is a double. Without this there was no way to press
+/// a star in a test at all — `acting(on:)` wants a signed-in account and a token, and the only
+/// place a real one lives is the Keychain.
+@MainActor
+func signedInApp(_ name: String, posts: [Post], client: any SourceClient,
+                 host: String = "one.example") async throws -> AppState {
+    let store = try LocalStore.inMemory()
+    let server = makeServer(host)
+    try await store.save(posts, from: server)
+
+    let authorId = posts.first?.authorId ?? "https://\(host)/@a"
+    let secrets = InMemorySecretStore()
+    try secrets.setToken(OAuthToken(accessToken: "t", scope: "read write", createdAt: Date()),
+                         for: authorId)
+    try await store.write { db in
+        try db.execute(sql: "INSERT INTO owned_accounts (author_id, server_url, created_at) VALUES (?, ?, ?)",
+                       arguments: [authorId, server.endpoint, Int64(Date().timeIntervalSince1970 * 1000)])
+    }
+
+    let servers = EmptyServerStore()
+    servers.add(server)
+    let app = AppState(preferences: Preferences(defaults: scratch(name)),
+                       serverStore: servers, store: store,
+                       registry: SourceRegistry(clients: [.mastodon: client]), secrets: secrets)
+    app.railItem = .timeline
+    app.currentTimeline = "public"
+    app.feed(for: .publicFixture).show(posts)
+    await app.signIn?.refresh()
+    return app
+}
+
 extension AppState {
     /// One press, through the door both listeners use: what the key means, what the app did
     /// about it, and whether the press was ours to keep.

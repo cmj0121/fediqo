@@ -163,7 +163,8 @@ public protocol SourceClient: Sendable {
     func localId(of post: Post, as account: ActingAccount, fetching: Bool) async throws -> Located
 
     /// Favourite, boost or bookmark one post, or take it back.
-    func setMark(_ action: PostAction, on id: String, as account: ActingAccount, done: Bool) async throws
+    func setMark(_ action: PostAction, on id: String, as account: ActingAccount,
+                 done: Bool) async throws -> Marked
 
     /// Mute an author or a whole host on the acting server, or take the mute down.
     func setMute(_ kind: Mute.Kind, _ value: String, as account: ActingAccount, muted: Bool) async throws
@@ -308,6 +309,28 @@ public enum Reach: Sendable, Hashable {
     case fetched
 }
 
+/// What the server said about a post once it had done what it was asked.
+///
+/// A write's answer is a whole status, and two facts in it are ones nothing else here can
+/// learn. The marks are what this account has now done to the post. The counts are the numbers
+/// **with that counted in** — which is the only honest way this app's numbers move on a press.
+/// Adding one to what the post arrived with would be inventing a number: never-told is not
+/// "no", so a reader who had already favourited something on another client would be counted
+/// twice by an app that guessed.
+///
+/// Reading them costs nothing. The request was made anyway; this is its answer, kept instead
+/// of thrown away.
+public struct Marked: Sendable, Hashable {
+    public let marks: PostMarks
+    /// What the server said the numbers are now, or nothing where it said nothing.
+    public let counts: Counts?
+
+    public init(marks: PostMarks = .unknown, counts: Counts? = nil) {
+        self.marks = marks
+        self.counts = counts
+    }
+}
+
 /// A post found on the acting server: its id there, what it cost to find, and what that
 /// server says this account has already done to it.
 ///
@@ -341,7 +364,7 @@ public extension SourceClient {
 
     /// Favourite, boost or bookmark one post, or take it back.
     func setMark(_ action: PostAction, on id: String, as account: ActingAccount,
-                 done: Bool) async throws {
+                 done: Bool) async throws -> Marked {
         throw SourceFailure.unsupported(.mastodon)
     }
 

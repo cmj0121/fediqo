@@ -29,6 +29,10 @@ struct InteractionBar: View {
     @State private var showingMore = false
 
     private var marks: PostMarks { app.marks(of: post) }
+    /// The numbers, from the app rather than off the post: a write's answer says what they are
+    /// with the press counted in, and the row in the list and the opened post are two copies of
+    /// one post that have to agree.
+    private var counts: Counts { app.counts(of: post) }
 
     var body: some View {
         HStack(spacing: Space.betweenGroups) {
@@ -47,13 +51,13 @@ struct InteractionBar: View {
             // Replying makes a new post rather than marking this one, and this app has no
             // composer that can send one yet — so it still leaves, and says so by doing
             // nothing else. When #8 lands it stops leaving and nothing else here changes.
-            counted("arrowshape.turn.up.left", count: post.counts.replies,
+            counted("arrowshape.turn.up.left", count: counts.replies,
                     labelKey: "post.reply", on: false, tint: .secondary) { hand() }
-            counted("arrow.2.squarepath", count: post.counts.reblogs,
+            counted("arrow.2.squarepath", count: counts.reblogs,
                     labelKey: "post.reblog", on: marks.reblogged == true, tint: .green) {
                 Task { await app.act(.reblog, on: post) }
             }
-            counted(marks.favourited == true ? "star.fill" : "star", count: post.counts.favourites,
+            counted(marks.favourited == true ? "star.fill" : "star", count: counts.favourites,
                     labelKey: "post.favourite", on: marks.favourited == true, tint: .yellow) {
                 Task { await app.act(.favourite, on: post) }
             }

@@ -20,9 +20,24 @@ final class ThreadModel {
     /// is not taken away for it: what the store held is still true.
     private(set) var failure: SourceFailure?
 
+    /// The post this conversation is around, as it was when the reader opened it.
+    ///
+    /// Held rather than read back off `conversation`, because the conversation is replaced by
+    /// what the store and the server say and this is the one thing about a level that must not
+    /// move: it is what the page draws, and what says whether a press would open this level
+    /// again rather than a new one.
+    let root: Post
+
     private let loader: TimelineLoader
+    /// Whether the two reads below have already happened for this level.
+    ///
+    /// The view asks when the page appears, and with a stack a page appears again every time
+    /// the reader comes back down to it — so without this, walking four replies deep and back
+    /// out would ask four servers a second time for conversations already on the screen.
+    private var hasRead = false
 
     init(post: Post, loader: TimelineLoader) {
+        self.root = post
         self.conversation = Conversation(post: post)
         self.selection = post.mergeKey
         self.loader = loader
@@ -52,6 +67,8 @@ final class ThreadModel {
 
     /// The store, then the server. Both, in that order, and only once per opening.
     func read() async {
+        guard !hasRead else { return }
+        hasRead = true
         conversation = await loader.storedThread(around: conversation.post)
         loading = true
         let asked = await loader.conversation(around: conversation.post)
