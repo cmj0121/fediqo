@@ -24,6 +24,7 @@ enum DrivenApp {
     /// own way in is a test of something no reader can reach.
     @MainActor
     static func launched(on rail: String = "timeline") -> XCUIApplication {
+        spendTheFirstLaunch()
         let app = XCUIApplication()
         app.launchEnvironment["FEDIQO_FIXTURE"] = "1"
         app.launchEnvironment["FEDIQO_ROUTE"] = "shell"
@@ -47,38 +48,50 @@ enum DrivenApp {
         // behind. The last app stays up until somebody quits it, which is one window on the
         // second display.
         app.activate()
-        handOverTheKeyboard(app)
         return app
     }
 
-    /// Hands the app the keyboard, the way a reader does: by touching it.
+    /// Whether this process has ever launched the app.
     ///
-    /// The first launch of a test process is drawn, hittable and deaf. A click lands and a key
-    /// does not, and that was measured rather than guessed at: `ClickingTests` passes run on its
-    /// own, every test that presses a key fails run on its own -- whichever one happens to be
-    /// first -- and a press repeated three times over six seconds still moves nothing. One click
-    /// and every press lands, on that launch and on every launch after it.
+    /// The first launch of a test process does not receive keys. Not one: `j`, `k`, `g`,
+    /// `Space`, `c` and `l` all arrive nowhere, before a click and after one, however long the
+    /// wait. The second launch receives all of them, and so does every launch after it —
+    /// measured with a probe that launched the app itself, so nothing in this file was between
+    /// the question and the answer:
     ///
-    /// It is not the app being broken for a reader. Nobody launches an app without touching it;
-    /// XCTest does, and it is the only thing that does.
+    /// ```text
+    /// launch1 j → ring=false | launch2 j → ring=true | launch2 l → notice=true
+    /// ```
     ///
-    /// So the app is touched once and then put back where it started. The touch is a click on
-    /// the words of the first post, which rings it and opens nothing -- the row opens from
-    /// behind itself and the words take the press first, which `ClickingTests` asserts on its
-    /// own account. `g` then lets the ring go, which is what a timeline nobody has touched looks
-    /// like. Both halves are behaviour this suite tests elsewhere, so nothing here is standing
-    /// in for the app.
+    /// It is XCTest and the simulator finding each other, not the app: clicks land on that same
+    /// first launch throughout, so the harness is reaching the app and what it cannot deliver is
+    /// a key. Nothing a reader does is affected — nobody's first launch of the day is driven by
+    /// another process.
     ///
-    /// A page with no posts on it is left alone: there is nothing to click, and no test that
-    /// opens one presses a key at it.
+    /// So the first launch is spent and thrown away. It costs a second, once per process, and
+    /// what it buys is every key test in the suite: whichever one ran first used to fail, and
+    /// the one that pressed a key it could not see the result of — `l`, and the notice that
+    /// should follow — failed wherever it ran.
+    @MainActor private static var hasLaunchedBefore = false
+
+    /// Spends the deaf launch, so the one the test uses can hear.
     @MainActor
-    private static func handOverTheKeyboard(_ app: XCUIApplication) {
-        let first = app.postRows.firstMatch
-        guard first.waitForExistence(timeout: patience), first.waitUntilOnScreen() else { return }
-        first.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5)).press()
-        guard app.ringedRow(waiting: 3) != nil else { return }
-        app.typeKey("g", modifierFlags: [])
-        _ = app.waitForNoRing(3)
+    private static func spendTheFirstLaunch() {
+        guard !hasLaunchedBefore else { return }
+        hasLaunchedBefore = true
+        let throwaway = XCUIApplication()
+        throwaway.launchEnvironment["FEDIQO_FIXTURE"] = "1"
+        throwaway.launchEnvironment["FEDIQO_ROUTE"] = "shell"
+        throwaway.launchEnvironment["FEDIQO_RAIL"] = "timeline"
+        throwaway.launchArguments += ["-ApplePersistenceIgnoreState", "YES"]
+        throwaway.launch()
+        throwaway.activate()
+        // All the way up before it is thrown away. A launch cut short is not the launch that
+        // has to be spent -- terminating before the app has drawn anything leaves the next one
+        // as deaf as the first, which is how this was measured.
+        _ = throwaway.postRows.firstMatch.waitForExistence(timeout: patience)
+        throwaway.typeKey("j", modifierFlags: [])
+        throwaway.terminate()
     }
 
     /// How long anything here waits for the app to catch up.
