@@ -31,6 +31,12 @@ public struct Post: Sendable, Hashable, Identifiable {
     /// The line the author put in front of the words, where there is one. `nil` where the
     /// source never said; `""` where it said and there was none.
     public let spoiler: String?
+    /// Who the author wrote it for — `posts.visibility`, which is the word the wire uses.
+    ///
+    /// `nil` where the source never said, which is every post stored before 009 and every
+    /// protocol that has no such idea. Never read as "public": that would be a claim about
+    /// somebody's post that nobody made.
+    public let audience: Audience?
     /// The three numbers under a post, each `nil` where we were never told. A number we do
     /// not have is never shown as a zero: zero means nobody, and this means no idea.
     public let counts: Counts
@@ -96,6 +102,7 @@ public struct Post: Sendable, Hashable, Identifiable {
         attachments: [Attachment] = [],
         sensitive: Bool? = nil,
         spoiler: String? = nil,
+        audience: Audience? = nil,
         counts: Counts = Counts(),
         application: Application? = nil,
         webURL: URL? = nil,
@@ -120,6 +127,7 @@ public struct Post: Sendable, Hashable, Identifiable {
         self.attachments = attachments
         self.sensitive = sensitive
         self.spoiler = spoiler
+        self.audience = audience
         self.counts = counts
         self.application = application
         self.webURL = webURL
@@ -235,6 +243,31 @@ public struct Counts: Sendable, Hashable, Codable {
 
     /// Whether the source said anything at all about how this post has been received.
     public var areKnown: Bool { replies != nil || reblogs != nil || favourites != nil }
+}
+
+/// Who a post was written for.
+///
+/// The four ActivityPub offers, and the raw values are the words the wire uses so that nothing
+/// is translated on the way in or out — the same words `visibilities` is keyed by. The Swift
+/// names are who can read it, because that is the fact: two of the four are Swift keywords and
+/// backticks would have been a worse answer than saying the thing plainly.
+///
+/// **Not `Visibility`**, which is SwiftUI's own type and one every screen in this app may want.
+/// The schema and the wire keep their word for it; what a reader is being told is who the post
+/// was for, and that is what this is called.
+///
+/// A word this build does not know decodes as `nil`, which is the same answer as never having
+/// been told. A server inventing a fifth kind of audience is a server this app cannot describe
+/// to a reader, and guessing at it would be worse than saying nothing.
+public enum Audience: String, Sendable, Hashable, Codable, CaseIterable {
+    /// On the public timelines, and anybody may find it.
+    case everyone = "public"
+    /// Anybody may read it, and it is on no public timeline.
+    case unlisted
+    /// The author's followers, and nobody else.
+    case followers = "private"
+    /// The accounts it names, and nobody else.
+    case mentioned = "direct"
 }
 
 /// An account a post names.

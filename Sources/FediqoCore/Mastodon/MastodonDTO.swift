@@ -23,6 +23,10 @@ enum MastodonDTO {
         /// which is a different thing from telling us there is nothing.
         let sensitive: Bool?
         let spoilerText: String?
+        /// Who it was written for, as the wire spells it. A word this build does not know is
+        /// left as `nil` by `Visibility(rawValue:)` rather than failing the status: one strange
+        /// value must never cost the reader a post.
+        let visibility: String?
         let repliesCount: Int?
         let reblogsCount: Int?
         let favouritesCount: Int?
@@ -252,6 +256,11 @@ extension MastodonDTO.Status {
             attachments: subject.mediaAttachments.compactMap(\.asAttachment),
             sensitive: subject.sensitive,
             spoiler: subject.spoilerText,
+            // The subject's and not the wrapper's: the row draws the post that was written,
+            // and who it was written for is a fact about that post. A boost cannot widen an
+            // audience -- Mastodon will not let one be made of anything but a public or
+            // unlisted status -- so the wrapper has nothing to add here.
+            audience: subject.visibility.flatMap(Audience.init(rawValue:)),
             counts: Counts(replies: subject.repliesCount, reblogs: subject.reblogsCount,
                            favourites: subject.favouritesCount),
             application: subject.application?.asApplication,

@@ -85,16 +85,20 @@ enum Fixture {
                  text: "Two servers carried this one. The timeline says so underneath rather "
                      + "than showing it to you twice.",
                  counts: Counts(replies: 4, reblogs: 11, favourites: 27)),
+            // Written for the author's followers rather than for the world -- the one post
+            // here that the row draws a padlock beside.
             post("the-warning", host: hosts[1], minutesAgo: 63, now: now,
                  name: "Dag Solheim", handle: "dag",
                  text: "The photographs from the dig, which are a lot of bones.",
                  attachments: [image("warned", seed: 7)],
-                 sensitive: true, spoiler: "Archaeology, human remains",
+                 sensitive: true, spoiler: "Archaeology, human remains", audience: .followers,
                  counts: Counts(replies: 6, reblogs: 4, favourites: 31)),
             post("the-answer", host: hosts[1], minutesAgo: 8, now: now,
                  name: "Ines Okafor", handle: "ines",
                  text: "Answering something this timeline never carried past us. The row says "
                      + "it is an answer and stops there rather than inventing whose.",
+                 // Readable by anybody and on nobody's public timeline.
+                 audience: .unlisted,
                  counts: Counts(replies: 1, reblogs: 0, favourites: 5),
                  inReplyToURI: "https://elm.example/api/v1/statuses/nobody-handed-us-this"),
             post("the-boost", host: hosts[1], minutesAgo: 128, now: now,
@@ -128,6 +132,8 @@ enum Fixture {
                  name: "Bea Lindqvist", handle: "bea",
                  text: "No picture, no warning, no numbers anybody has told us. A post can be "
                      + "just its words, and the row does not pad it out with an empty box.",
+                 // And nobody said who it was for either, so the row says nothing about that.
+                 audience: nil,
                  counts: Counts(),
                  inReplyToURI: address("the-tags", on: hosts[2], by: "yusuf")),
         ]
@@ -161,6 +167,7 @@ enum Fixture {
         _ uri: String, host: String, origin: String? = nil, minutesAgo: Double, now: Date,
         name: String, handle: String, text: String,
         attachments: [Attachment] = [], sensitive: Bool? = nil, spoiler: String? = nil,
+        audience: Audience? = .everyone,
         counts: Counts = Counts(), tags: [String] = [], emojis: [CustomEmoji] = [],
         boostedBy: String? = nil, inReplyToURI: String? = nil
     ) -> Post {
@@ -178,6 +185,7 @@ enum Fixture {
             attachments: attachments,
             sensitive: sensitive,
             spoiler: spoiler,
+            audience: audience,
             counts: counts,
             application: Application(name: "Fediqo"),
             webURL: URL(string: "https://\(host)/@\(handle)/\(uri)"),

@@ -122,6 +122,24 @@ struct ThreadStackTests {
         #expect(app.thread?.selected?.text == "b")
     }
 
+    /// A click is the reader saying which post they mean, and every key that acts on "this
+    /// post" reads the ring — so the two have to be the same post. Without this a reader could
+    /// click a reply, press a key, and have it land on whichever post `j` last walked to.
+    @Test("Clicking a post in a conversation puts the ring on it, and the keys follow")
+    func clickingFocuses() async throws {
+        let app = try await self.app("thread-stack-focus")
+        app.expand(post("a"))
+        await app.thread?.read()
+        #expect(app.thread?.selected?.text == "a")
+
+        app.focus(post("c"))
+        #expect(app.thread?.selected?.text == "c")
+
+        // And the press that opens "this post" now means the one that was clicked.
+        #expect(app.perform(.expandPost))
+        #expect(app.expanded?.text == "c")
+    }
+
     /// The one press refused. A level around the post the reader is already reading would be
     /// a step they have to take back twice for nothing.
     @Test("Space on the post the conversation is already around opens nothing")

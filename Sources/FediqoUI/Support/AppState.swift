@@ -212,12 +212,18 @@ public final class AppState {
     /// adding one to what the post arrived with would count a reader who had already favourited
     /// it somewhere else twice.
     var postCounts: [String: Counts] = [:]
-    /// The posts an action is still out for.
+    /// Which of the three marks a write is still out for, per post.
     ///
-    /// Between the press and the server answering, this app believes something the store has
-    /// not been told yet. A page read landing in that gap would otherwise put the star back —
-    /// see `loadMarks`, which is where this is read.
-    var actingOn: Set<String> = []
+    /// Two things read it. Between the press and the server answering, this app believes
+    /// something the store has not been told yet, and a page read landing in that gap would
+    /// otherwise put the star back — see `loadMarks`. And the row draws it: a mark that goes to
+    /// somebody else's machine takes as long as that machine takes, and the control says so
+    /// while it waits.
+    ///
+    /// By action rather than by post, so the one that was pressed is the one that shows it. A
+    /// reader who boosts a post and then stars it while the boost is still out should see two
+    /// controls working, not one control speaking for both.
+    var actingOn: [String: Set<PostAction>] = [:]
     /// Which visible posts this device is holding on to. A set and not a mark, because keeping
     /// is not an account's answer — it is this machine's.
     var keptPosts: Set<String> = []
@@ -913,6 +919,15 @@ public final class AppState {
         withAnimation(Motion.appearing) {
             threads.append(ThreadModel(post: post, loader: conversationLoader()))
         }
+    }
+
+    /// Puts the ring on a post the reader clicked inside an open conversation.
+    ///
+    /// The half of `expand` that is left where there is nothing to open. A click says which
+    /// post they mean; every key that acts on "this post" reads the ring; so the two have to
+    /// be the same post, on the page as much as in the list.
+    func focus(_ post: Post) {
+        thread?.select(post)
     }
 
     /// Opens a post the reader clicked, and puts the ring on it: they have said which post

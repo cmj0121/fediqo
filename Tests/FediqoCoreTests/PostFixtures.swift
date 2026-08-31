@@ -15,6 +15,7 @@ func makePost(
     socialProtocol: SocialProtocol = .mastodon,
     authorId: String? = nil,
     text: String = "hello",
+    audience: Audience? = nil,
     boostedBy: String? = nil,
     tags: [String] = [],
     media: [String] = []
@@ -30,6 +31,7 @@ func makePost(
         authorHandle: "@someone@\(host)",
         text: text,
         attachments: media.compactMap(URL.init(string:)).map(Attachment.unknown(displaying:)),
+        audience: audience,
         tags: tags,
         boostedBy: boostedBy,
         boostedById: boostedBy.map { "https://booster.example/users/\($0)" },

@@ -72,8 +72,18 @@ struct PostRow: View {
     /// ellipsis — which is the row saying there is more, and `Return` is how to get it. The
     /// opened post is where the whole of it lives, so nothing is clamped there.
     var condensed = true
-    /// What a click on the row asks for. `nil` in a preview and in the detail page itself,
-    /// where opening what you are already looking at means nothing.
+    /// What a click on the row means: this one. Put the ring here.
+    ///
+    /// Every page passes it, because a click means that on every page — and it is a
+    /// `simultaneousGesture` rather than the row's own tap, so it fires wherever in the row the
+    /// click landed. Most of a row is selectable words and buttons that want their own presses,
+    /// and a reader who clicked one of those has still said which post they mean.
+    var focus: (() -> Void)?
+    /// What a click on the row asks for **beyond** that. `nil` in a preview and in the
+    /// conversation page, where opening what you are already looking at means nothing.
+    ///
+    /// Declared last on purpose: a call site writes it as a trailing closure, and a parameter
+    /// added after it would quietly take the closure instead.
     var open: (() -> Void)?
 
     @Environment(\.openURL) private var openURL
@@ -192,6 +202,10 @@ struct PostRow: View {
                 .contentShape(Rectangle())
                 .onTapGesture { open?() }
         }
+        // Beside whatever else the click was for, and not instead of it. The tap above is
+        // behind the row so that the words stay selectable and the marks stay pressable; this
+        // is over the whole of it and takes nothing away, because it only moves the ring.
+        .simultaneousGesture(TapGesture().onEnded { focus?() })
         .contextMenu {
             if open != nil { Button(t("post.open")) { open?() } }
             if let url = post.webURL {
@@ -257,6 +271,72 @@ struct PostRow: View {
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
                 .fixedSize()
+            // Last on the line, and that is about holding still rather than about reading
+            // order. A relative time is whatever width its words are — "5m" and "18m" and "2h"
+            // are three different widths, and it changes under the reader as the clock moves —
+            // so anything drawn before it sits somewhere different on every row and shifts on
+            // its own. A mark repeated down a list has to hold a column, and the only column
+            // here that nothing can move is the one against the edge.
+            audience
+        }
+    }
+
+    /// Who the author wrote it for, where the server said so.
+    ///
+    /// Nothing at all where it did not, which is every post stored before 009 and every
+    /// protocol with no such idea. A globe drawn on a post nobody described would be this app
+    /// making a claim about somebody else's audience, and the one it would make — "anybody may
+    /// read this" — is the worst of the four to get wrong.
+    ///
+    /// Beside the time rather than beside the name, because it belongs with where and when the
+    /// post reached the reader rather than with who wrote it. Small and tertiary: it is a fact
+    /// about the post, not a warning about it — the one mark on a row that is a warning is the
+    /// author's own, and it is a band across the words.
+    @ViewBuilder
+    private var audience: some View {
+        if let audience = post.audience {
+            let name = t("post.visibility.\(audience.rawValue)")
+            Image(systemName: Self.mark(for: audience))
+                .fediqoSymbol(Glyph.inline, weight: .medium)
+                .foregroundStyle(Self.tint(for: audience))
+                // A box to hover over. An `Image` is only as hoverable as its own ink, and a
+                // twelve-point glyph is a few strokes with holes in it — a pointer between them
+                // is a pointer over nothing, and the hint would come and go as it moved. The
+                // shape is what a tooltip is aimed at, so it is given one.
+                .frame(width: Size.audienceMark, height: Size.audienceMark)
+                .contentShape(Rectangle())
+                .help(name)
+                .accessibilityLabel(Text(name))
+        }
+    }
+
+    /// One glyph each. The name is always beside it — as the hover hint, and as the
+    /// accessibility label — because four shapes at twelve points is not a thing anybody should
+    /// have to learn.
+    private static func mark(for audience: Audience) -> String {
+        switch audience {
+        case .everyone: "globe"
+        case .unlisted: "moon"
+        case .followers: "lock"
+        case .mentioned: "at"
+        }
+    }
+
+    /// Colour says how far the post travels, and it is a ramp rather than four labels.
+    ///
+    /// Public is the ordinary case and stays the colour of everything else on the line. It is
+    /// what most of a timeline is, and forty coloured globes down a page would be a decoration
+    /// that means "normal" — the marks that are worth a colour are the ones that are not.
+    ///
+    /// From there it warms as the audience narrows: out of the public eye, then the author's
+    /// followers, then the people they named. What the colour never does is carry the fact on
+    /// its own — the shape says which, the hint says it in words, and this is the third telling.
+    private static func tint(for audience: Audience) -> Color {
+        switch audience {
+        case .everyone: .secondary
+        case .unlisted: .teal
+        case .followers: .orange
+        case .mentioned: .pink
         }
     }
 
