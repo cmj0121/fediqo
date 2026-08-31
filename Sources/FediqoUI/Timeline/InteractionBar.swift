@@ -26,16 +26,7 @@ struct InteractionBar: View {
 
     @Environment(AppState.self) private var app
     @Environment(\.openURL) private var openURL
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// The reader's text size, because the column a count sits in is measured in digits and a
-    /// digit is whatever size they asked for.
-    @Environment(\.fediqoTextScale) private var scale
     @State private var showingMore = false
-
-    /// How a mark moves, or nothing at all where the reader has asked for nothing to move.
-    /// The same pair `ActionNotice` and `FeedScreen` keep, and kept the same way: the answer
-    /// is the view's, so nothing below it has to carry an accessibility setting around.
-    private var motion: Animation? { reduceMotion ? nil : Motion.appearing }
 
     private var marks: PostMarks { app.marks(of: post) }
     /// The numbers, from the app rather than off the post: a write's answer says what they are
@@ -120,38 +111,94 @@ struct InteractionBar: View {
         }
     }
 
-    /// A control with a number beside it. `sending` is a write still out to a server.
-    ///
-    /// Three things move, and each says something different. The glyph swaps — an empty star
-    /// for a filled one — and the swap is a transition rather than a cut, because the two are
-    /// one control in two states and nothing about the row has changed but that. The colour
-    /// arrives with it. And the number is a number, so it rolls to the one it became rather
-    /// than being replaced by a different string in the same place.
-    ///
-    /// A press answers instantly and the server does not, which is the whole reason `sending`
-    /// exists: between the two the control pulses, so a reader on a slow server can see that
-    /// the mark went somewhere rather than wondering whether the click landed.
+    /// A control with a number beside it, and one without. Both are `MarkButton`; these name
+    /// the two shapes so the bar above reads as what it is rather than as a parameter list.
     private func counted(_ symbol: String, count: Int?, labelKey: String, on: Bool,
                          tint: Color, sending: Bool = false,
                          action: @escaping () -> Void) -> some View {
+        MarkButton(symbol: symbol, counting: true, count: count, labelKey: labelKey, on: on,
+                   tint: tint, sending: sending, action: action)
+    }
+
+    private func switching(_ symbol: String, labelKey: String, on: Bool, tint: Color,
+                           sending: Bool = false, action: @escaping () -> Void) -> some View {
+        MarkButton(symbol: symbol, counting: false, count: nil, labelKey: labelKey, on: on,
+                   tint: tint, sending: sending, action: action)
+    }
+
+    private func hand() {
+        guard let url = post.webURL else { return }
+        openURL(url)
+    }
+}
+
+/// One control in the interaction bar: a mark, and the number beside it where there is one.
+///
+/// A view of its own rather than a function, because it has a fact of its own to keep — how
+/// long the write has been out. Everything else here is read off the app.
+///
+/// **Three fixed things and one moving one.** The glyph sits in a box of one width and the
+/// count in a column of one width, so every control is the same size on every row and the bar
+/// holds its columns down a list. What moves is the mark itself, once, when it is pressed.
+private struct MarkButton: View {
+    let symbol: String
+    /// Whether this control has a count at all — not whether it has one *now*.
+    ///
+    /// The two are different and the difference is the column. A favourite whose number nobody
+    /// has told us still keeps the space, so the mark beside it lands where every other row's
+    /// does; a bookmark has no number and never will — how many other people bookmarked
+    /// something is not a thing any server tells anybody — so it keeps no space for one.
+    let counting: Bool
+    /// The number, where there is one to draw.
+    var count: Int?
+    let labelKey: String
+    let on: Bool
+    let tint: Color
+    /// Whether a write for this mark is still out to a server.
+    var sending = false
+    let action: () -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The reader's text size, because the column a count sits in is measured in digits and a
+    /// digit is whatever size they asked for.
+    @Environment(\.fediqoTextScale) private var scale
+    /// Whether the wait has gone on long enough to be worth showing. See `settling`.
+    @State private var waiting = false
+
+    /// How long a write is given to land before the control says it is working.
+    ///
+    /// A server on the same machine answers in a few milliseconds, and a pulse that starts and
+    /// stops inside that is not a signal — it is a blink, and a row of them reads as the bar
+    /// twitching. So a mark that lands quickly never says anything at all, and the ones that do
+    /// say it are the slow servers the signal was always for.
+    private static let settling = Duration.milliseconds(320)
+
+    /// How a mark moves, or nothing at all where the reader has asked for nothing to move.
+    /// The same pair `ActionNotice` and `FeedScreen` keep.
+    private var motion: Animation? { reduceMotion ? nil : Motion.appearing }
+
+    var body: some View {
         Button(action: action) {
             HStack(spacing: Space.tight) {
-                glyph(symbol, on: on, sending: sending)
-                // The column is here whether or not there is a number for it, and it is the
-                // same width either way. A post nobody has given counts for still draws no
-                // zero — it draws nothing — but it holds the place, so the mark beside it lands
-                // where every other row's does.
-                Text(verbatim: count.map { "\($0)" } ?? "")
-                    .fediqoFont(TypeScale.small)
-                    // Proportional digits are different widths: 1 is narrow and 8 is not, so a
-                    // count going from 3 to 4 moved the whole bar a hair to the right. These
-                    // are all one width, which also gives `numericText` a place to roll in.
-                    .monospacedDigit()
-                    // A count is a quantity, and `numericText` moves the digits that changed
-                    // rather than crossfading one whole number into another.
-                    .contentTransition(.numericText(value: Double(count ?? 0)))
-                    .animation(motion, value: count)
-                    .frame(minWidth: Size.actionCount * scale, alignment: .leading)
+                glyph
+                if counting {
+                    // The column is here whether or not there is a number in it, and it is the
+                    // same width either way. A post nobody has given counts for still draws no
+                    // zero — it draws nothing — but it holds the place, so the mark beside it
+                    // lands where every other row's does.
+                    Text(verbatim: count.map { "\($0)" } ?? "")
+                        .fediqoFont(TypeScale.small)
+                        // Proportional digits are different widths: 1 is narrow and 8 is not,
+                        // so a count going from 3 to 4 moved the whole bar a hair to the right.
+                        // These are all one width, which also gives `numericText` somewhere to
+                        // roll in.
+                        .monospacedDigit()
+                        // A count is a quantity, and `numericText` moves the digits that
+                        // changed rather than crossfading one number into another.
+                        .contentTransition(.numericText(value: Double(count ?? 0)))
+                        .animation(motion, value: count)
+                        .frame(minWidth: Size.actionCount * scale, alignment: .leading)
+                }
             }
             .contentShape(Rectangle())
         }
@@ -161,31 +208,22 @@ struct InteractionBar: View {
         .help(t(labelKey))
         .accessibilityLabel(Text(t(labelKey)))
         .accessibilityAddTraits(on ? .isSelected : [])
+        .task(id: sending) { await settle() }
     }
 
-    private func switching(_ symbol: String, labelKey: String, on: Bool, tint: Color,
-                           sending: Bool = false, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            glyph(symbol, on: on, sending: sending).contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(on ? tint : Color.secondary)
-        .animation(motion, value: on)
-        .help(t(labelKey))
-        .accessibilityLabel(Text(t(labelKey)))
-        .accessibilityAddTraits(on ? .isSelected : [])
-    }
-
-    /// The glyph both controls draw, and everything that happens to it.
+    /// The mark, in a box of one width — so a wide symbol and a narrow one start their control
+    /// in the same place, and so a symbol swapped for another cannot move what is beside it.
     ///
-    /// Written once because the two are one control with and without a number beside it, and a
-    /// mark that bounced in the list but not on the opened post would be two designs for one
-    /// idea. Under Reduce Motion it is the plain image: the state is still said by the shape
-    /// and the colour, which is what has to be true for the animation to be decoration.
+    /// **One movement, not two.** The press bounces the mark; the shape changes inside that
+    /// bounce and is not given a transition of its own. Both together were two scales on one
+    /// glyph in the same instant, which read as a stutter rather than as one thing happening —
+    /// and the shape change needs no announcing when the whole mark has just jumped.
+    ///
+    /// Under Reduce Motion it is the plain image. That is the test of whether the movement was
+    /// decoration: the state is still said by the shape and the colour, and standing still
+    /// costs the reader nothing.
     @ViewBuilder
-    private func glyph(_ symbol: String, on: Bool, sending: Bool) -> some View {
-        // One box for every mark, so a wide symbol and a narrow one start their control in the
-        // same place — and so a symbol swapped for another cannot move what is beside it.
+    private var glyph: some View {
         let image = Image(systemName: symbol)
             .fediqoSymbol(Glyph.action, weight: .medium)
             .frame(width: Size.actionGlyph)
@@ -193,20 +231,25 @@ struct InteractionBar: View {
             image
         } else {
             image
-                .contentTransition(.symbolEffect(.replace))
-                // The landing, and the wait. `bounce` fires on the press because `on` moves
-                // there and not when the server answers — the mark is the reader's the moment
-                // they make it, and putting it back is what a refusal is for.
+                // `bounce` fires on the press, because `on` moves there and not when the server
+                // answers — the mark is the reader's the moment they make it, and putting it
+                // back is what a refusal is for.
                 .symbolEffect(.bounce, value: on)
-                .symbolEffect(.pulse, isActive: sending)
+                .symbolEffect(.pulse, isActive: waiting)
         }
     }
 
-    private func hand() {
-        guard let url = post.webURL else { return }
-        openURL(url)
+    /// Waits out `settling` before letting the mark say it is working, and stops the moment the
+    /// write lands. `task(id:)` cancels this when `sending` changes, which is what makes a
+    /// quick write silent rather than a blink.
+    private func settle() async {
+        guard sending else { return waiting = false }
+        try? await Task.sleep(for: Self.settling)
+        guard !Task.isCancelled else { return }
+        waiting = true
     }
 }
+
 
 /// Everything else that can be done with a post, behind one control and two headings.
 ///
