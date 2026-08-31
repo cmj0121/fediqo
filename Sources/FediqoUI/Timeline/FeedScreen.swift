@@ -304,9 +304,12 @@ struct FeedScreen: View {
                                 plays: post.mergeKey == model.selection ? app.mediaPlays : 0,
                                 covers: post.mergeKey == model.selection ? app.mediaCovers : 0,
                                 revealed: app.preferences.showSensitive,
-                                answering: Self.answering(post, among: posts)) {
-                            app.expand(post)
-                        }
+                                answering: Self.answering(post, among: posts),
+                                // A click on the words says which post the reader means even
+                                // where it opens nothing — selectable text takes the press
+                                // before the row behind it ever sees it.
+                                focus: { model.select(post) },
+                                open: { app.expand(post) })
                     }
                     // What this device already knows about the page: what each account did to
                     // these posts, and which of them are being kept here. One read for the

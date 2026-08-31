@@ -72,16 +72,19 @@ struct PostRow: View {
     /// ellipsis — which is the row saying there is more, and `Return` is how to get it. The
     /// opened post is where the whole of it lives, so nothing is clamped there.
     var condensed = true
-    /// What a click on the row asks for. `nil` in a preview and in the detail page itself,
-    /// where opening what you are already looking at means nothing.
-    var open: (() -> Void)?
-    /// What a click asks for where it opens nothing: put the ring here.
+    /// What a click on the row means: this one. Put the ring here.
     ///
-    /// A click is the reader saying which post they mean, and it means that on every page.
-    /// Where the row opens, the ring goes with it — see `AppState.expand`. Where it does not,
-    /// this is what is left of the same sentence, and without it a reader could click a reply
-    /// in a conversation, press `l`, and favourite whichever post `j` had last walked to.
+    /// Every page passes it, because a click means that on every page — and it is a
+    /// `simultaneousGesture` rather than the row's own tap, so it fires wherever in the row the
+    /// click landed. Most of a row is selectable words and buttons that want their own presses,
+    /// and a reader who clicked one of those has still said which post they mean.
     var focus: (() -> Void)?
+    /// What a click on the row asks for **beyond** that. `nil` in a preview and in the
+    /// conversation page, where opening what you are already looking at means nothing.
+    ///
+    /// Declared last on purpose: a call site writes it as a trailing closure, and a parameter
+    /// added after it would quietly take the closure instead.
+    var open: (() -> Void)?
 
     @Environment(\.openURL) private var openURL
     @Environment(\.fediqoWideRows) private var wide
@@ -197,8 +200,12 @@ struct PostRow: View {
         .background {
             Color.clear
                 .contentShape(Rectangle())
-                .onTapGesture { if let open { open() } else { focus?() } }
+                .onTapGesture { open?() }
         }
+        // Beside whatever else the click was for, and not instead of it. The tap above is
+        // behind the row so that the words stay selectable and the marks stay pressable; this
+        // is over the whole of it and takes nothing away, because it only moves the ring.
+        .simultaneousGesture(TapGesture().onEnded { focus?() })
         .contextMenu {
             if open != nil { Button(t("post.open")) { open?() } }
             if let url = post.webURL {
@@ -257,7 +264,6 @@ struct PostRow: View {
             }
             Spacer(minLength: Space.snug)
             sources
-            audience
             // When it was written is four characters and never gives any of them up: a time
             // squeezed to an ellipsis is a row that has stopped saying when it happened.
             Text(post.createdAt, format: .relative(presentation: .numeric))
@@ -265,6 +271,13 @@ struct PostRow: View {
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
                 .fixedSize()
+            // Last on the line, and that is about holding still rather than about reading
+            // order. A relative time is whatever width its words are — "5m" and "18m" and "2h"
+            // are three different widths, and it changes under the reader as the clock moves —
+            // so anything drawn before it sits somewhere different on every row and shifts on
+            // its own. A mark repeated down a list has to hold a column, and the only column
+            // here that nothing can move is the one against the edge.
+            audience
         }
     }
 
