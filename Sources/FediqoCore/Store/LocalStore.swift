@@ -127,6 +127,22 @@ public final class LocalStore: Sendable {
         var config = Configuration()
         // GRDB's default, but the schema says it out loud, so the code does too.
         config.foreignKeysEnabled = true
+        // Every connection, before any statement runs on it. `posts_fts` is tokenized by
+        // `Words`, and the triggers on `posts` write into it on every insert — so a connection
+        // without it could not write a post, let alone search for one. Registered here rather
+        // than at each call site because there is no call site that may forget.
+        //
+        // The statement in front of it is not a formality. A file that is not a database opens
+        // without complaint and fails at the first access, and `openDefault` opens exactly that
+        // on purpose — it is how a store somebody's disk corrupted is moved aside and replaced.
+        // GRDB's way in to the tokenizer API prepares `SELECT fts5(?)` and **traps** rather than
+        // throws when it cannot, so registering on that connection would take the app down
+        // before the recovery it exists for could run. A connection that cannot count to one is
+        // left alone, and whatever is wrong with it is said a moment later by the open itself.
+        config.prepareDatabase { db in
+            do { try db.execute(sql: "SELECT 1") } catch { return }
+            db.add(tokenizer: Words.self)
+        }
         return config
     }
 
@@ -188,6 +204,9 @@ public final class LocalStore: Sendable {
             // One more seeded lookup, stamped the way 004 and 005 stamp theirs: the file writes
             // the rows, the migration is what knows when they arrived.
             try db.execute(sql: "UPDATE visibilities SET created_at = ?", arguments: [milliseconds(Date())])
+        }
+        migrator.registerMigration("010") { db in
+            try db.execute(sql: schema(named: "schema-010"))
         }
         return migrator
     }
