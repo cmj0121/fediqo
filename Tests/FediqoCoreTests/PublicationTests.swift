@@ -63,15 +63,18 @@ struct PublicationTests {
         let sent = await actions.publish(Draft(text: "hello"), as: hosts.map(account))
         let first = try #require(sent.first?.post)
         let second = try #require(sent.last?.post)
-        // Two posts, two servers, and nothing about their addresses says they are one.
+        // Two posts on two servers, and nothing about the addresses they came back with says
+        // they are one. That is the whole reason the record exists.
         #expect(first.mergeKey != second.mergeKey)
 
+        // Asked of the row they were kept under — which is one row, because the record is what
+        // `save` reads to decide that. See #63.
         let everywhere = try await store.published(with: first.mergeKey)
         #expect(everywhere.count == 2)
         #expect(Set(everywhere.map(\.serverURL)) == Set(hosts.map { "https://\($0)" }))
-        // Asked of either of them, the answer is the same: this is one composed post.
-        let fromTheOther = try await store.published(with: second.mergeKey)
-        #expect(fromTheOther.count == 2)
+        // And each destination kept its own address, which is the part that could not be
+        // inferred from anything: they agree about nothing.
+        #expect(Set(everywhere.map(\.uri)) == Set([first.originURI, second.originURI].compactMap { $0 }))
     }
 
     /// A partial failure is a list of what happened, never a whole that succeeded or failed.

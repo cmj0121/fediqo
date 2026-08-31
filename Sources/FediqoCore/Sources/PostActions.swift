@@ -151,24 +151,54 @@ public struct PostActions: Sendable {
         guard !draft.isEmpty else {
             return accounts.map { Sent(authorId: $0.authorId, host: $0.host, failure: .emptyDraft) }
         }
+        guard let client = registry.client(for: socialProtocol) else {
+            return accounts.map { Sent(authorId: $0.authorId, host: $0.host,
+                                       failure: .unsupported(socialProtocol)) }
+        }
+
         var sent: [Sent] = []
-        var published: [Publication] = []
         for account in accounts {
             do {
-                let post = try await publish(draft, as: account, to: socialProtocol, now: now)
-                sent.append(Sent(authorId: account.authorId, host: account.host, post: post))
-                published.append(Publication(authorId: account.authorId,
-                                             serverURL: "https://\(account.host)",
-                                             mergeKey: post.mergeKey, uri: post.uri))
+                sent.append(Sent(authorId: account.authorId, host: account.host,
+                                 post: try await client.publish(draft, as: account)))
             } catch {
                 sent.append(Sent(authorId: account.authorId, host: account.host,
                                  failure: SourceFailure.of(error)))
             }
         }
-        // Where it went, and nothing about where it did not. A store that will not keep the
-        // record has not unsent anything, so this cannot undo what just happened -- it is
-        // reported like any other refusal of this machine's own database.
-        try? await store?.recordPublication(composition, of: published, now: now)
+
+        // Keeping it comes after sending all of it, and in an order the store depends on.
+        //
+        // The first that went is the row the others live in — one composed post is one row here,
+        // the way one post carried by two servers has always been one row. So that post is
+        // written first, then the record naming every destination against it, and only then the
+        // rest: `save` reads that record to decide which row a post belongs in, and a post saved
+        // before the record existed would have made a row of its own.
+        //
+        // A store that will not keep any of this has not unsent anything. Nothing here can undo
+        // what the servers already did, so a refusal from this machine's own database is
+        // reported like any other and the posts stand.
+        let went = sent.compactMap(\.post)
+        if let primary = went.first {
+            let server = { (post: Post) in
+                Server(host: LocalStore.host(of: post.sourceURL), socialProtocol: socialProtocol)
+            }
+            try? await store?.save([primary], from: server(primary), into: .home,
+                                   as: sent.first(where: { $0.post != nil })?.authorId, now: now)
+            // The other destinations, before the record that names them: `publications` points
+            // at a server and an account, and the ones whose posts are not written yet have
+            // neither.
+            try? await store?.remember(referencesOf: Array(went.dropFirst()), now: now)
+            let published = zip(sent.filter { $0.post != nil }, went).map { destination, post in
+                Publication(authorId: destination.authorId, serverURL: "https://\(destination.host)",
+                            mergeKey: primary.mergeKey, uri: post.originURI ?? post.uri)
+            }
+            try? await store?.recordPublication(composition, of: published, now: now)
+            for (destination, post) in zip(sent.filter { $0.post != nil }, went).dropFirst() {
+                try? await store?.save([post], from: server(post), into: .home,
+                                       as: destination.authorId, now: now)
+            }
+        }
         return sent
     }
 
