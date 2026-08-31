@@ -37,6 +37,9 @@ public enum SourceFailure: Error, Sendable, Equatable, LocalizedError {
     /// A draft with nothing in it. Refused here rather than sent for a server to refuse:
     /// whitespace is not a post, and the round trip would only be a slower way of saying so.
     case emptyDraft
+    /// Longer than that server will take, and known before a word of it was sent. The number is
+    /// the server's own — this app has none of its own to offer.
+    case tooLong(String, Int)
 
     /// Whether the server answered at all, in spite of this.
     ///
@@ -51,7 +54,7 @@ public enum SourceFailure: Error, Sendable, Equatable, LocalizedError {
         switch self {
         case .tokenRejected, .store: true
         case .badHost, .notThatKind, .unsupported, .needsSignIn, .signInFailed, .notItsPost,
-             .http, .transport, .emptyDraft: false
+             .http, .transport, .emptyDraft, .tooLong: false
         }
     }
 
@@ -77,6 +80,7 @@ public enum SourceFailure: Error, Sendable, Equatable, LocalizedError {
         case .transport(let reason): reason
         case .store(let reason): "The local store could not keep what arrived: \(reason)"
         case .emptyDraft: "There is nothing written to send."
+        case .tooLong(let host, let limit): "\(host) takes \(limit) characters, and this is longer."
         }
     }
 }
@@ -351,6 +355,11 @@ public struct Draft: Sendable, Hashable {
 
     /// Whether there is anything to send. Whitespace is not a post.
     public var isEmpty: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    /// What a server's limit is counted against. Written once so the number the composer counts
+    /// down and the number the check compares cannot come to disagree — the warning counts,
+    /// because Mastodon counts it.
+    public var length: Int { text.count + (warning?.count ?? 0) }
 }
 
 /// What the server said about a post once it had done what it was asked.

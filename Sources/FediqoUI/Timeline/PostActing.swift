@@ -56,33 +56,79 @@ extension AppState {
     /// nothing rather than counting down to a number this app made up.
     func askTheLimit() async {
         postingLimit = nil
-        guard let account = await publishing(),
-              let client = registry.client(for: .mastodon) else { return }
-        postingLimit = try? await client.instance(host: account.host).maxCharacters
+        guard let client = registry.client(for: .mastodon) else { return }
+        // The narrowest of the servers chosen. A post going to three has to fit the strictest of
+        // them, and a counter showing the roomiest would run out after the reader had already
+        // written past somebody's limit.
+        var narrowest: Int?
+        for account in await postingAccounts() {
+            guard let limit = try? await client.instance(host: account.host).maxCharacters else { continue }
+            narrowest = min(narrowest ?? limit, limit)
+        }
+        postingLimit = narrowest
     }
 
-    /// Sends what was written, and says whether it went.
+    /// The accounts a new post would go to, ready to act as.
     ///
-    /// The panel closes on the way out rather than on the way in: a draft that could not be
-    /// sent is still written, and losing it is the worst thing this could do to somebody.
+    /// `postingTo` where the reader has chosen, and whichever one `publishing()` would have
+    /// picked where they have not — so a reader with one account never has to choose, and one
+    /// with three has already chosen by the time they press send.
+    func postingAccounts() async -> [ActingAccount] {
+        guard let signIn, let tokens else { return [] }
+        let chosen = postingTo.isEmpty
+            ? Set([await publishing()].compactMap { account in
+                servers.first { $0.host == account?.host }?.endpoint
+              })
+            : postingTo
+        var accounts: [ActingAccount] = []
+        for endpoint in chosen.sorted() {
+            guard let account = signIn.accounts[endpoint],
+                  let server = servers.first(where: { $0.endpoint == endpoint }),
+                  let token = await tokens.tokens(for: [server])[endpoint] else { continue }
+            accounts.append(ActingAccount(host: server.host, authorId: account.authorId,
+                                          token: token.accessToken))
+        }
+        return accounts
+    }
+
+    /// Sends what was written to every account chosen, and says whether all of it went.
+    ///
+    /// The panel closes only where everything went. A draft that one server would not take is
+    /// still written and still on the screen, beside the mark saying which one refused — losing
+    /// it, or closing over the news, is the worst thing this could do to somebody.
     @discardableResult
     func publish(_ draft: Draft) async -> Bool {
         guard !isSending else { return false }
-        guard let account = await publishing() else {
+        let accounts = await postingAccounts()
+        guard !accounts.isEmpty else {
             actionFailure = .needsSignIn("")
             return false
         }
         isSending = true
         defer { isSending = false }
-        do {
-            let post = try await postActions.publish(draft, as: account)
-            lastPosted = post.authorHandle
-            setComposing(false)
-            return true
-        } catch {
-            actionFailure = SourceFailure.of(error)
+
+        // Asked before a word of it is sent, which is the whole of what #8 means by a network
+        // that cannot take part of it saying so beforehand.
+        let refusals = await postActions.refusals(of: draft, from: accounts)
+        if let first = refusals.values.first {
+            lastSent = Dictionary(uniqueKeysWithValues: refusals.map { host, why in
+                (host, Sent(authorId: "", host: host, failure: why))
+            })
+            actionFailure = first
             return false
         }
+
+        let sent = await postActions.publish(draft, as: accounts)
+        lastSent = Dictionary(uniqueKeysWithValues: sent.map { ($0.host, $0) })
+        let went = sent.filter(\.went)
+        if !went.isEmpty { lastPosted = went.map(\.host).joined(separator: ", ") }
+        guard let refused = sent.first(where: { !$0.went }) else {
+            lastSent = [:]
+            setComposing(false)
+            return true
+        }
+        actionFailure = refused.failure
+        return false
     }
 
     /// Every account the reader could act as, in a stable order, for the screen that asks them

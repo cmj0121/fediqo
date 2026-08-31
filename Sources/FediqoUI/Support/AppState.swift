@@ -168,6 +168,17 @@ public final class AppState {
     /// it has been asked, and `nil` for good where the server did not say: a composer that
     /// does not know says nothing rather than counting down to a number of ours.
     var postingLimit: Int?
+    /// Which accounts a new post is going to, by endpoint. The reader's choice, and empty until
+    /// they have made one — the composer fills it with whichever account would have been chosen
+    /// anyway, so a reader with one account never has to choose at all.
+    var postingTo: Set<String> = []
+    /// What became of each destination of the last send, keyed by host.
+    ///
+    /// Per destination and not one answer, because that is what happened: a post that reached
+    /// two servers of three is two that went and one that did not. It is drawn beside the
+    /// accounts the reader chose, which is where they can act on it, rather than in a notice
+    /// that can only say one thing.
+    var lastSent: [String: Sent] = [:]
     /// The two sheets the timeline puts up. They live here rather than in the screen for the
     /// same reason `composing` does: a menu item and a key have to be able to ask for them
     /// from outside the screen that draws them. The drawing stays where it was.

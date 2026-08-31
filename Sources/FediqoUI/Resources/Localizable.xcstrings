@@ -359,6 +359,23 @@
         }
       }
     },
+    "error.tooLong": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ takes %2$@ characters, and this is longer."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ 只收 %2$@ 個字，這篇超過了。"
+          }
+        }
+      }
+    },
     "error.unsupported": {
       "extractionState": "manual",
       "localizations": {
