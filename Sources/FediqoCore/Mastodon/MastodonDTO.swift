@@ -163,6 +163,15 @@ enum MastodonDTO {
         let usage: Usage?
         /// v1's, under a different name and counting different things.
         let stats: Stats?
+        /// What the server will take. v2 keeps it here; v1 keeps it at the top level under
+        /// `max_toot_chars`, which some forks send and Mastodon itself does not.
+        let configuration: Configuration?
+        let maxTootChars: Int?
+
+        struct Configuration: Decodable, Sendable {
+            struct Statuses: Decodable, Sendable { let maxCharacters: Int? }
+            let statuses: Statuses?
+        }
 
         /// v2 hands back an object with the picture inside it and v1 the address on its own.
         /// Either way it is one URL, so the difference stops here.

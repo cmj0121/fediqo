@@ -80,6 +80,43 @@ extension MastodonClient {
                       counts: counts.areKnown ? counts : nil)
     }
 
+    /// `POST /api/v1/statuses` — the one thing here that makes a post rather than marking one.
+    ///
+    /// What comes back is the status the server made, decoded the way every other status this
+    /// app reads is decoded, so the reader's own timeline has it without waiting for a refresh
+    /// and it arrives already agreeing with the rows beside it.
+    ///
+    /// `Idempotency-Key` is the header Mastodon offers for exactly the failure that matters
+    /// here: a request that was received and whose answer never got back. A second send of the
+    /// same draft carries the same key and the server hands back the post it already made
+    /// rather than making a second one. The key is the draft's own content, so two different
+    /// drafts are never confused for one and the same draft sent twice on purpose -- a reader
+    /// posting the same words again -- would need a different key, which is why it carries the
+    /// account and a time as well.
+    public func publish(_ draft: Draft, as account: ActingAccount) async throws -> Post {
+        var fields = [
+            "status": draft.text,
+            "visibility": draft.audience.rawValue,
+        ]
+        // Only when there is one. A server told `spoiler_text=""` has been told there is a
+        // warning and it is empty, which is not the same as not being told.
+        if let warning = draft.warning { fields["spoiler_text"] = warning }
+
+        let data = try await write("POST", "/api/v1/statuses", fields: fields, as: account,
+                                   idempotency: Self.key(for: draft, as: account))
+        let status = try Self.decoder.decode(MastodonDTO.Status.self, from: data)
+        return status.asPost(from: account.host)
+    }
+
+    /// One draft, one account, one key. Stable for as long as the draft is, and different the
+    /// moment either changes.
+    static func key(for draft: Draft, as account: ActingAccount) -> String {
+        var hasher = Hasher()
+        hasher.combine(draft)
+        hasher.combine(account.authorId)
+        return String(hasher.finalize(), radix: 16)
+    }
+
     /// An author is muted by account id; a host is blocked by name.
     ///
     /// Two endpoints and two shapes, because Mastodon has two ideas here and they are not the
@@ -167,7 +204,7 @@ extension MastodonClient {
     }
 
     private func write(_ method: String, _ path: String, fields: [String: String] = [:],
-                       as account: ActingAccount) async throws -> Data {
+                       as account: ActingAccount, idempotency: String? = nil) async throws -> Data {
         var components = URLComponents()
         components.scheme = "https"
         components.host = account.host
@@ -180,6 +217,7 @@ extension MastodonClient {
         }
         guard let url = components.url else { throw SourceFailure.badHost(account.host) }
         return try await JSONTransport.send(method, url, fields: method == "DELETE" ? [:] : fields,
-                                            on: session, bearer: account.token, ledger: ledger)
+                                            on: session, bearer: account.token,
+                                            idempotency: idempotency, ledger: ledger)
     }
 }

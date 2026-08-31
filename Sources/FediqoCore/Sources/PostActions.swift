@@ -75,6 +75,31 @@ public struct PostActions: Sendable {
         return Acted(reach: found.reach, counts: marked.counts)
     }
 
+    /// Sends a draft, and keeps what came back.
+    ///
+    /// The post the server made is written down like any arrival from that server, into the
+    /// same feed a home timeline lands in — because that is what it is. So the reader's own
+    /// timeline has it now rather than at the next refresh, and it is there with the same
+    /// columns, the same merge key and the same order as everything beside it.
+    ///
+    /// A draft with nothing in it is refused here rather than sent for a server to refuse:
+    /// whitespace is not a post, and the round trip would only be a slower way of saying so.
+    @discardableResult
+    public func publish(_ draft: Draft, as account: ActingAccount, to socialProtocol: SocialProtocol = .mastodon,
+                        now: Date = Date()) async throws -> Post {
+        guard !draft.isEmpty else { throw SourceFailure.emptyDraft }
+        guard let client = registry.client(for: socialProtocol) else {
+            throw SourceFailure.unsupported(socialProtocol)
+        }
+        let post = try await client.publish(draft, as: account)
+        // Kept where it can fail without unsending anything. The post is on the server whatever
+        // this database does next, and a store that would not take it is a fact about this
+        // machine — reported by the caller, never by pretending the post did not go.
+        try await store?.save([post], from: Server(host: account.host, socialProtocol: socialProtocol),
+                              into: .home, as: account.authorId, now: now)
+        return post
+    }
+
     /// A mute, put up or taken down, in one or both of the two places it can live.
     ///
     /// `on` names a server to carry it out, or is nil for a rule this device keeps to itself.
