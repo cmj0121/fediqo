@@ -166,14 +166,27 @@ public final class AppState {
     /// from outside the screen that draws them. The drawing stays where it was.
     var addingSource = false
     var showingNotifications = false
-    /// The post whose whole self is open over the timeline, or nothing. It lives here rather
-    /// than in the screen for the reason the sheets do: a key, a click and a menu item all
-    /// have to be able to ask for it, and two of the three are outside the view that draws it.
-    var expanded: Post?
-    /// The conversation being read, where a post is open. It lives here rather than in the
-    /// page for the reason the page itself does: the keys are answered outside the view, and
-    /// while a post is open they belong to the conversation rather than to the list behind it.
-    private(set) var thread: ThreadModel?
+    /// The conversations being read, oldest first, empty while the reader is in the list.
+    ///
+    /// A stack rather than one, because a conversation is a place a reader walks *into*.
+    /// `Space` on a reply opens that reply's own thread over this one, and `Escape` comes back
+    /// out a step at a time — so the way down and the way back up are the same path, and a
+    /// reader four replies deep can retrace it rather than being dropped at the timeline.
+    ///
+    /// It lives here rather than in the page for the reason the page itself does: the keys are
+    /// answered outside the view, and while a post is open they belong to the conversation
+    /// rather than to the list behind it.
+    private(set) var threads: [ThreadModel] = []
+
+    /// The conversation in front of the reader — the top of the stack — or nothing.
+    var thread: ThreadModel? { threads.last }
+
+    /// The post whose whole self is open over the timeline, or nothing.
+    ///
+    /// Read by the screen that draws the page and by nobody who sets it: which post is open is
+    /// whichever one the top of the stack is a conversation around, and two places holding
+    /// that answer would be two places to get it wrong.
+    var expanded: Post? { threads.last?.root }
     /// How many times the reader has asked the deck on the selected row to turn over.
     private(set) var mediaTurns = 0
     /// The same, for asking it to play. Two counters rather than one command with an argument,
@@ -860,8 +873,18 @@ public final class AppState {
     /// scroll position and its ring, and `Escape` is the way back. What is opened is the post
     /// itself rather than its key, because the page has something to draw before anything is
     /// read back from the store or asked of anybody's server.
+    /// `postUnderTheRing` and not the feed's own selection, so that the key means the same
+    /// thing wherever the reader is: open the conversation around the post the ring is on.
+    /// Inside an opened thread that is the reply `j`/`k` walked to, and opening it puts its
+    /// conversation over this one.
+    ///
+    /// The post the open thread is already built around is the one press this refuses. There
+    /// is nothing to open — the reader is looking at that conversation — and a level that
+    /// repeated the one under it would be a step back you have to take twice.
     private func expandSelectedPost() -> Bool {
-        guard let post = readingFeed?.selectedPost else { return false }
+        guard let post = postUnderTheRing, post.mergeKey != thread?.root.mergeKey else {
+            return false
+        }
         open(post)
         return true
     }
@@ -869,15 +892,20 @@ public final class AppState {
     /// One way in, whether a key or a click asked. The conversation is built here so that the
     /// keys have something to move through the moment the page is on screen.
     private func open(_ post: Post) {
-        thread = ThreadModel(post: post, loader: conversationLoader())
-        withAnimation(Motion.appearing) { expanded = post }
+        withAnimation(Motion.appearing) {
+            threads.append(ThreadModel(post: post, loader: conversationLoader()))
+        }
     }
 
     /// Opens a post the reader clicked, and puts the ring on it: they have said which post
     /// they mean, and coming back to a list whose ring is somewhere else would be the app
     /// disagreeing with them about where they are.
+    ///
+    /// A click comes from the list, which is only ever behind the whole stack, so it starts a
+    /// new one rather than adding to whatever was left standing.
     func expand(_ post: Post) {
         readingFeed?.select(post)
+        threads = []
         open(post)
     }
 
@@ -1098,12 +1126,14 @@ public final class AppState {
         }
         // Last, because it is the thing furthest back: the composer floats over the opened
         // post as it floats over everything else, and one press closes one thing.
-        guard expanded != nil else { return false }
-        withAnimation(Motion.appearing) { expanded = nil }
+        //
+        // One level, not the stack. A reader who opened a reply's thread from inside another
+        // one asked for two steps and gets to take them back one at a time; the last of them
+        // is the one that returns them to the list, which still has its scroll position and
+        // its ring.
+        guard !threads.isEmpty else { return false }
+        withAnimation(Motion.appearing) { threads.removeLast() }
         playback.stop()
-        // The conversation goes with the page. What it read is in the store; what it held was
-        // one reading of it, and the next opening starts from the store as this one did.
-        thread = nil
         return true
     }
 }

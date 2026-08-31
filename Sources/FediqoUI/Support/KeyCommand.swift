@@ -113,11 +113,12 @@ enum KeyCommand: Hashable, CaseIterable {
         case "j", KeyEquivalent.downArrow.character: return .nextPost
         case "k", KeyEquivalent.upArrow.character: return .previousPost
         case "g": return .backToTop
-        // `Return`, `Space` and a click are one ask: show me this post. `Space` no longer
-        // pages the list, and that is deliberate — a page is not a unit here, cards are
-        // different heights and `j`/`k` already step by post, which is the finer move. Inside
-        // the opened post there is no ring and `Space` goes back to scrolling, so each surface
-        // has one meaning rather than one key having two.
+        // `Return`, `Space` and a click are one ask: show me the post the ring is on. `Space`
+        // no longer pages the list, and that is deliberate — a page is not a unit here, cards
+        // are different heights and `j`/`k` already step by post, which is the finer move.
+        // Inside an opened conversation the ring is the conversation's, so the same press
+        // opens the reply it is on, over the thread being read: one meaning, wherever the
+        // reader is.
         case KeyEquivalent.return.character, " ": return .expandPost
         case "o": return .openInBrowser
         // `v` for the look at it, `f` for the screen it takes. `f` means nothing until
