@@ -443,7 +443,8 @@ struct FeedScreen: View {
         when.formatted(Date.FormatStyle(date: .long, time: .omitted).locale(locale))
     }
 
-    @ViewBuilder
+    /// Not `@ViewBuilder`: it works out two facts first and then returns one view, and a
+    /// builder turned off by the `return` that follows it is a warning rather than a shape.
     private var emptyState: some View {
         let hiddenByRules = !model.result.posts.isEmpty
         // A home timeline on a device nobody is signed in on is not an empty timeline: there

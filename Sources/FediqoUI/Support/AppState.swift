@@ -1165,7 +1165,10 @@ public final class AppState {
         // is the one that returns them to the list, which still has its scroll position and
         // its ring.
         guard !threads.isEmpty else { return false }
-        withAnimation(Motion.appearing) { threads.removeLast() }
+        // `_ =` because `removeLast` hands back what it removed, and a closure whose last
+        // expression is a value makes `withAnimation` return it — which nobody wants and the
+        // compiler is right to mention.
+        withAnimation(Motion.appearing) { _ = threads.removeLast() }
         playback.stop()
         return true
     }
