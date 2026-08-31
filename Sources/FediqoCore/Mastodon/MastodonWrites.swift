@@ -42,15 +42,42 @@ extension MastodonClient {
         return Located(id: status.id, reach: .fetched, marks: status.marks)
     }
 
+    /// Mastodon answers a write with the whole status, so the numbers come back with the act
+    /// that changed them and are read off it rather than guessed at. A boost answers about the
+    /// reblog it just made and carries the original underneath, which is where the numbers
+    /// that moved are — so that is the one this reads.
+    ///
+    /// An answer this cannot make sense of is not an error: the write went through, which is
+    /// what was asked for. What comes back is `nil` counts — nobody told us — and the screen
+    /// goes on showing the number the post arrived with rather than one made up here.
+    @discardableResult
     public func setMark(_ action: PostAction, on id: String, as account: ActingAccount,
-                        done: Bool) async throws {
+                        done: Bool) async throws -> Marked {
         let verb: String
         switch action {
         case .favourite: verb = done ? "favourite" : "unfavourite"
         case .reblog: verb = done ? "reblog" : "unreblog"
         case .bookmark: verb = done ? "bookmark" : "unbookmark"
         }
-        _ = try await write("POST", "/api/v1/statuses/\(id)/\(verb)", as: account)
+        let data = try await write("POST", "/api/v1/statuses/\(id)/\(verb)", as: account)
+        return Self.marked(from: data)
+    }
+
+    /// The three marks and the three numbers, out of a status the server just handed back.
+    static func marked(from data: Data) -> Marked {
+        guard let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        else { return Marked() }
+        // `reblog` is the status a boost wraps. The counts that moved are the original's, and
+        // so is every mark: Mastodon carries an act aimed at a reblog through to what it
+        // reblogged, and the answer says so in the same place.
+        let status = (body["reblog"] as? [String: Any]) ?? body
+        let counts = Counts(replies: status["replies_count"] as? Int,
+                            reblogs: status["reblogs_count"] as? Int,
+                            favourites: status["favourites_count"] as? Int)
+        return Marked(marks: PostMarks(favourited: status["favourited"] as? Bool,
+                                       reblogged: status["reblogged"] as? Bool,
+                                       bookmarked: status["bookmarked"] as? Bool),
+                      counts: counts.areKnown ? counts : nil)
     }
 
     /// An author is muted by account id; a host is blocked by name.

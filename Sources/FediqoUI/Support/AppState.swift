@@ -203,6 +203,21 @@ public final class AppState {
     /// than in the rows because a page is read from the store in one go, and because an action
     /// on the opened post has to move the row in the list behind it.
     var postMarks: [String: PostMarks] = [:]
+    /// What a post's numbers are now, where a write's own answer has said something newer than
+    /// the post arrived with.
+    ///
+    /// Keyed like `postMarks` and for the same reason: a star pressed on the opened post has to
+    /// move the number on the row in the list behind it, and the two are different values of
+    /// the same post. Never added up here — the server's answer carries the new number, and
+    /// adding one to what the post arrived with would count a reader who had already favourited
+    /// it somewhere else twice.
+    var postCounts: [String: Counts] = [:]
+    /// The posts an action is still out for.
+    ///
+    /// Between the press and the server answering, this app believes something the store has
+    /// not been told yet. A page read landing in that gap would otherwise put the star back —
+    /// see `loadMarks`, which is where this is read.
+    var actingOn: Set<String> = []
     /// Which visible posts this device is holding on to. A set and not a mark, because keeping
     /// is not an account's answer — it is this machine's.
     var keptPosts: Set<String> = []
@@ -308,7 +323,7 @@ public final class AppState {
 
     init(preferences: Preferences = Preferences(), serverStore: (any ServerStore)? = nil,
          store: LocalStore? = nil, launch: LaunchOptions = .none,
-         registry: SourceRegistry = .standard()) {
+         registry: SourceRegistry = .standard(), secrets: (any SecretStore)? = nil) {
         // Counting starts when the app does, so that "since" is a moment the screen can name
         // rather than whichever request happened to be sent first.
         _ = APILedger.shared
@@ -318,7 +333,10 @@ public final class AppState {
         // One answer to who we are, shared by everything that asks: both feeds and the launch
         // check. One each would mean a sign-in invalidating only its own — the other two would
         // go on reading as a stranger from a cache that says nobody is signed in, until relaunch.
-        let secrets = KeychainSecretStore()
+        // The Keychain unless somebody hands over something else. A test that acts as an
+        // account needs a credential to act with, and the one thing it must not do is reach
+        // for the reader's own — so this is the seam, and nothing but a test uses it.
+        let secrets = secrets ?? KeychainSecretStore()
         let tokens = store.map { TokenSource(store: $0, secrets: secrets) }
         let signIn = store.map { SignInModel(store: $0, secrets: secrets, tokens: tokens) }
         self.preferences = preferences

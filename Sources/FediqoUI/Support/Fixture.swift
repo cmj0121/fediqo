@@ -347,7 +347,12 @@ struct FixtureSource: SourceClient {
         Located(id: post.mergeKey, reach: .alreadyThere)
     }
 
-    func setMark(_ action: PostAction, on id: String, as account: ActingAccount, done: Bool) async throws {}
+    /// An invented server agrees and says nothing about the numbers: a fixture that made one
+    /// up would photograph differently every time somebody pressed a key.
+    func setMark(_ action: PostAction, on id: String, as account: ActingAccount,
+                 done: Bool) async throws -> Marked {
+        Marked()
+    }
     func setMute(_ kind: Mute.Kind, _ value: String, as account: ActingAccount, muted: Bool) async throws {}
     func report(_ post: Post, id: String, as account: ActingAccount, comment: String) async throws {}
 }

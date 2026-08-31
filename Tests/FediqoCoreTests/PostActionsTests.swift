@@ -156,9 +156,9 @@ struct ActingTests {
         let client = WritingClient(holding: true)
         let (actions, store, post) = try await wired(client)
 
-        let reach = try await actions.perform(.favourite, on: post, as: account,
+        let acted = try await actions.perform(.favourite, on: post, as: account,
                                               done: true, fetching: false)
-        #expect(reach == .alreadyThere)
+        #expect(acted.reach == .alreadyThere)
         #expect(await client.sent == [.favourite])
         #expect(try await store.marks(of: [post.mergeKey], as: account.authorId)[post.mergeKey]?.favourited == true)
     }
@@ -182,9 +182,9 @@ struct ActingTests {
         let client = WritingClient(holding: false)
         let (actions, _, post) = try await wired(client)
 
-        let reach = try await actions.perform(.reblog, on: post, as: account,
+        let acted = try await actions.perform(.reblog, on: post, as: account,
                                               done: true, fetching: true)
-        #expect(reach == .fetched)
+        #expect(acted.reach == .fetched)
         #expect(await client.sent == [.reblog])
     }
 
@@ -228,13 +228,17 @@ struct ActingTests {
 actor WritingClient: SourceClient {
     private let holding: Bool
     private let marks: PostMarks
+    /// What the write answers with — the numbers a real server sends back with the act that
+    /// changed them. Nothing by default: most of these tests are about the steps, not the count.
+    private let answer: Marked
     private(set) var sent: [PostAction] = []
     private(set) var muted: [String] = []
     private(set) var reported: [String] = []
 
-    init(holding: Bool, marks: PostMarks = .unknown) {
+    init(holding: Bool, marks: PostMarks = .unknown, answering answer: Marked = Marked()) {
         self.holding = holding
         self.marks = marks
+        self.answer = answer
     }
 
     func localId(of post: Post, as account: ActingAccount, fetching: Bool) async throws -> Located {
@@ -243,8 +247,10 @@ actor WritingClient: SourceClient {
         return Located(id: "1", reach: .fetched, marks: marks)
     }
 
-    func setMark(_ action: PostAction, on id: String, as account: ActingAccount, done: Bool) async throws {
+    func setMark(_ action: PostAction, on id: String, as account: ActingAccount,
+                 done: Bool) async throws -> Marked {
         sent.append(action)
+        return answer
     }
 
     func setMute(_ kind: Mute.Kind, _ value: String, as account: ActingAccount, muted: Bool) async throws {
