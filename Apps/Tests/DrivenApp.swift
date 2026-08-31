@@ -47,7 +47,38 @@ enum DrivenApp {
         // behind. The last app stays up until somebody quits it, which is one window on the
         // second display.
         app.activate()
+        handOverTheKeyboard(app)
         return app
+    }
+
+    /// Hands the app the keyboard, the way a reader does: by touching it.
+    ///
+    /// The first launch of a test process is drawn, hittable and deaf. A click lands and a key
+    /// does not, and that was measured rather than guessed at: `ClickingTests` passes run on its
+    /// own, every test that presses a key fails run on its own -- whichever one happens to be
+    /// first -- and a press repeated three times over six seconds still moves nothing. One click
+    /// and every press lands, on that launch and on every launch after it.
+    ///
+    /// It is not the app being broken for a reader. Nobody launches an app without touching it;
+    /// XCTest does, and it is the only thing that does.
+    ///
+    /// So the app is touched once and then put back where it started. The touch is a click on
+    /// the words of the first post, which rings it and opens nothing -- the row opens from
+    /// behind itself and the words take the press first, which `ClickingTests` asserts on its
+    /// own account. `g` then lets the ring go, which is what a timeline nobody has touched looks
+    /// like. Both halves are behaviour this suite tests elsewhere, so nothing here is standing
+    /// in for the app.
+    ///
+    /// A page with no posts on it is left alone: there is nothing to click, and no test that
+    /// opens one presses a key at it.
+    @MainActor
+    private static func handOverTheKeyboard(_ app: XCUIApplication) {
+        let first = app.postRows.firstMatch
+        guard first.waitForExistence(timeout: patience), first.waitUntilOnScreen() else { return }
+        first.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5)).press()
+        guard app.ringedRow(waiting: 3) != nil else { return }
+        app.typeKey("g", modifierFlags: [])
+        _ = app.waitForNoRing(3)
     }
 
     /// How long anything here waits for the app to catch up.
