@@ -17,6 +17,31 @@ public struct Acted: Sendable, Hashable {
     }
 }
 
+/// What became of one destination of one composed post.
+///
+/// A per-destination answer and not a whole. A post that reached two servers of three is exactly
+/// that — two that went and one that did not — and flattening it into a success or a failure
+/// would mean either claiming the third or unclaiming the two.
+public struct Sent: Sendable {
+    /// The account it was sent as.
+    public let authorId: String
+    /// The server it was sent to, bare.
+    public let host: String
+    /// The post that server made, or nothing where it refused.
+    public let post: Post?
+    /// Why it refused, or nothing where it did not.
+    public let failure: SourceFailure?
+
+    public var went: Bool { post != nil }
+
+    public init(authorId: String, host: String, post: Post? = nil, failure: SourceFailure? = nil) {
+        self.authorId = authorId
+        self.host = host
+        self.post = post
+        self.failure = failure
+    }
+}
+
 /// Doing something to a post: finding it on the acting server, asking that server, and writing
 /// down what came of it.
 ///
@@ -98,6 +123,73 @@ public struct PostActions: Sendable {
         try await store?.save([post], from: Server(host: account.host, socialProtocol: socialProtocol),
                               into: .home, as: account.authorId, now: now)
         return post
+    }
+
+    /// One composed post, several accounts, one action — and the record of what went where.
+    ///
+    /// **Nothing throws.** A destination is a thing that can fail on its own, and every one of
+    /// them reports itself: what comes back is a list as long as the list that went in, in the
+    /// same order, each saying whether it went and why not. A single error would have to choose
+    /// between claiming what did not happen and unclaiming what did.
+    ///
+    /// **Nothing is retried anywhere else.** A post that one server would not take did not go to
+    /// that server, and no other one is quietly offered it — the reader chose these accounts,
+    /// and choosing again is theirs.
+    ///
+    /// They go one at a time rather than at once. Publishing is not a read: a reader watching
+    /// three servers be asked in parallel cannot be told which of them was slow, and an app that
+    /// gave up halfway through a parallel send would not know what it had done. One after
+    /// another, each written down as it lands.
+    ///
+    /// The record is written once, at the end, for the destinations that went. It is one act, so
+    /// it is one transaction: half of it would tell #5 that two of three posts are one post and
+    /// leave the third looking like somebody else's.
+    public func publish(_ draft: Draft, as accounts: [ActingAccount],
+                        to socialProtocol: SocialProtocol = .mastodon,
+                        composition: String = UUID().uuidString,
+                        now: Date = Date()) async -> [Sent] {
+        guard !draft.isEmpty else {
+            return accounts.map { Sent(authorId: $0.authorId, host: $0.host, failure: .emptyDraft) }
+        }
+        var sent: [Sent] = []
+        var published: [Publication] = []
+        for account in accounts {
+            do {
+                let post = try await publish(draft, as: account, to: socialProtocol, now: now)
+                sent.append(Sent(authorId: account.authorId, host: account.host, post: post))
+                published.append(Publication(authorId: account.authorId,
+                                             serverURL: "https://\(account.host)",
+                                             mergeKey: post.mergeKey, uri: post.uri))
+            } catch {
+                sent.append(Sent(authorId: account.authorId, host: account.host,
+                                 failure: SourceFailure.of(error)))
+            }
+        }
+        // Where it went, and nothing about where it did not. A store that will not keep the
+        // record has not unsent anything, so this cannot undo what just happened -- it is
+        // reported like any other refusal of this machine's own database.
+        try? await store?.recordPublication(composition, of: published, now: now)
+        return sent
+    }
+
+    /// What each of these servers would refuse before a word of it is sent.
+    ///
+    /// The half of #8 that is easy to get backwards: *"A network that cannot take part of it
+    /// says so before sending, not after."* Asking is a request per destination, so it is asked
+    /// when the reader chooses who to send to rather than on every keystroke, and the answer is
+    /// a rule of that server's rather than a number of ours — a server that says nothing about
+    /// its limit is a server this cannot speak for, and it is left out rather than guessed at.
+    public func refusals(of draft: Draft, from accounts: [ActingAccount],
+                         to socialProtocol: SocialProtocol = .mastodon) async -> [String: SourceFailure] {
+        guard let client = registry.client(for: socialProtocol) else { return [:] }
+        var refused: [String: SourceFailure] = [:]
+        for account in accounts {
+            guard let limit = try? await client.instance(host: account.host).maxCharacters else { continue }
+            if draft.length > limit {
+                refused[account.host] = .tooLong(account.host, limit)
+            }
+        }
+        return refused
     }
 
     /// A mute, put up or taken down, in one or both of the two places it can live.

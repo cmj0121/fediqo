@@ -78,6 +78,7 @@ struct ComposerView: View {
                 .fediqoCard(radius: Radius.inner, raised: false)
                 .onChange(of: typing) { _, now in app.setTyping(now) }
 
+            destinations
             controls
         }
         .padding(Space.pad)
@@ -93,11 +94,56 @@ struct ComposerView: View {
     @ViewBuilder
     private var room: some View {
         if let limit = app.postingLimit {
-            let left = limit - draft.count - warning.count
+            // Counted the way the check counts it, so what the reader watches run out and what
+            // a server would refuse are one number rather than two that nearly agree.
+            let left = limit - written.length
             Text(verbatim: "\(left)")
                 .fediqoFont(TypeScale.caption, weight: .medium)
                 .monospacedDigit()
                 .foregroundStyle(left < 0 ? .red : .secondary)
+        }
+    }
+
+    /// Where it is going, and what became of each of them last time it was sent.
+    ///
+    /// Drawn only where there is a choice to make: a reader with one account has already chosen
+    /// by having one, and a row of one toggle is a question with one answer.
+    ///
+    /// The marks beside them are the per-destination answer #8 asks for. A post that reached two
+    /// servers of three is two ticks and one cross, said where the reader chose them and where
+    /// they can choose again — a notice can only say one thing, and this is three things.
+    @ViewBuilder
+    private var destinations: some View {
+        let choices = app.actingChoices
+        if choices.count > 1 {
+            FlowRow(spacing: Space.tight) {
+                ForEach(choices, id: \.endpoint) { choice in
+                    let host = Server.normalise(choice.endpoint)
+                    let chosen = app.postingTo.isEmpty
+                        ? host == app.lastPosted : app.postingTo.contains(choice.endpoint)
+                    Button {
+                        if app.postingTo.isEmpty { app.postingTo = Set(choices.map(\.endpoint)) }
+                        if app.postingTo.contains(choice.endpoint) {
+                            app.postingTo.remove(choice.endpoint)
+                        } else {
+                            app.postingTo.insert(choice.endpoint)
+                        }
+                        Task { await app.askTheLimit() }
+                    } label: {
+                        HStack(spacing: Space.tight) {
+                            if let sent = app.lastSent[host] {
+                                Image(systemName: sent.went ? "checkmark" : "exclamationmark.triangle.fill")
+                                    .fediqoSymbol(Glyph.badge, weight: .semibold)
+                                    .foregroundStyle(sent.went ? Color.green : .orange)
+                            }
+                            Text(host).fediqoFont(TypeScale.caption, weight: .medium)
+                        }
+                        .fediqoPill()
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(chosen ? Palette.accent : Color.secondary)
+                }
+            }
         }
     }
 
@@ -134,12 +180,11 @@ struct ComposerView: View {
             Spacer(minLength: Space.snug)
 
             Button(t(app.isSending ? "composer.sending" : "composer.send")) {
-                let written = Draft(text: draft, audience: audience,
-                                    warning: showingWarning ? warning : nil)
+                let going = written
                 Task {
-                    // The draft is cleared only where it went. A post that a server refused is
-                    // still written, and losing it is the worst thing this could do.
-                    if await app.publish(written) { draft = ""; warning = ""; showingWarning = false }
+                    // The draft is cleared only where it all went. A post that a server refused
+                    // is still written, and losing it is the worst thing this could do.
+                    if await app.publish(going) { draft = ""; warning = ""; showingWarning = false }
                 }
             }
             .buttonStyle(.borderedProminent)
@@ -149,12 +194,19 @@ struct ComposerView: View {
         }
     }
 
+    /// What is written, as the one value everything here reads: the counter, the check and the
+    /// send are three questions about one draft, and building it three times is three chances
+    /// for them to differ.
+    private var written: Draft {
+        Draft(text: draft, audience: audience, warning: showingWarning ? warning : nil)
+    }
+
     /// Nothing to send, no room left, or one already on its way.
     private var canSend: Bool {
         guard !app.isSending else { return false }
         guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         guard let limit = app.postingLimit else { return true }
-        return draft.count + warning.count <= limit
+        return written.length <= limit
     }
 
     /// The same four glyphs a row draws for the same four audiences. One idea, drawn the same
