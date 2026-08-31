@@ -27,6 +27,9 @@ struct InteractionBar: View {
     @Environment(AppState.self) private var app
     @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The reader's text size, because the column a count sits in is measured in digits and a
+    /// digit is whatever size they asked for.
+    @Environment(\.fediqoTextScale) private var scale
     @State private var showingMore = false
 
     /// How a mark moves, or nothing at all where the reader has asked for nothing to move.
@@ -134,14 +137,21 @@ struct InteractionBar: View {
         Button(action: action) {
             HStack(spacing: Space.tight) {
                 glyph(symbol, on: on, sending: sending)
-                if let count {
-                    Text(verbatim: "\(count)")
-                        .fediqoFont(TypeScale.small)
-                        // A count is a quantity, and `numericText` moves the digits that
-                        // changed rather than crossfading one whole number into another.
-                        .contentTransition(.numericText(value: Double(count)))
-                        .animation(motion, value: count)
-                }
+                // The column is here whether or not there is a number for it, and it is the
+                // same width either way. A post nobody has given counts for still draws no
+                // zero — it draws nothing — but it holds the place, so the mark beside it lands
+                // where every other row's does.
+                Text(verbatim: count.map { "\($0)" } ?? "")
+                    .fediqoFont(TypeScale.small)
+                    // Proportional digits are different widths: 1 is narrow and 8 is not, so a
+                    // count going from 3 to 4 moved the whole bar a hair to the right. These
+                    // are all one width, which also gives `numericText` a place to roll in.
+                    .monospacedDigit()
+                    // A count is a quantity, and `numericText` moves the digits that changed
+                    // rather than crossfading one whole number into another.
+                    .contentTransition(.numericText(value: Double(count ?? 0)))
+                    .animation(motion, value: count)
+                    .frame(minWidth: Size.actionCount * scale, alignment: .leading)
             }
             .contentShape(Rectangle())
         }
@@ -174,7 +184,11 @@ struct InteractionBar: View {
     /// and the colour, which is what has to be true for the animation to be decoration.
     @ViewBuilder
     private func glyph(_ symbol: String, on: Bool, sending: Bool) -> some View {
-        let image = Image(systemName: symbol).fediqoSymbol(Glyph.action, weight: .medium)
+        // One box for every mark, so a wide symbol and a narrow one start their control in the
+        // same place — and so a symbol swapped for another cannot move what is beside it.
+        let image = Image(systemName: symbol)
+            .fediqoSymbol(Glyph.action, weight: .medium)
+            .frame(width: Size.actionGlyph)
         if reduceMotion {
             image
         } else {

@@ -137,6 +137,26 @@ enum Size {
     static let thumbnail: CGFloat = 56
     /// A button wide enough not to shrink to its two words.
     static let button: CGFloat = 96
+    /// The box every mark in the interaction bar is drawn in, and the column the count beside
+    /// it sits in. Together they make one control the same width on every row.
+    ///
+    /// A bar that sized itself to its own contents put the star in a different place on every
+    /// post — a reply count of 3 and one of 41 are different widths, and everything after them
+    /// moved — so scrolling a list of forty was a row of marks that would not sit still. These
+    /// two are what hold the columns; nothing in them is centred on its own contents.
+    ///
+    /// The glyph box is a fixed width, and it may be: `Glyph.action` does not follow the
+    /// reader's text size, so the widest action symbol is the widest it will ever be.
+    ///
+    /// The count column is **not** fixed, and that is the whole trick. It is three monospaced
+    /// digits at `TypeScale.small` **and must be multiplied by the reader's text scale**, which
+    /// runs to 1.6 — a column measured in points would hold three digits for one reader and
+    /// less than two for the next, and the bar would go back to drifting for exactly the people
+    /// who set the text larger. Three digits is every count a timeline shows; a bigger number
+    /// widens its own row rather than being cut off or rounded off, because a count this app
+    /// draws is the count it was told.
+    static let actionGlyph: CGFloat = 24
+    static let actionCount: CGFloat = 22
     /// A panel of prose, and the column a page of settings is read in. Wider than either and
     /// the eye loses the start of the next line.
     static let prose: CGFloat = 420
