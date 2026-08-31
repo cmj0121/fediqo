@@ -469,6 +469,9 @@ extension LocalStore {
             attachments: media ?? legacyAttachments(in: row),
             sensitive: (row["sensitive"] as Int?).map { $0 == 1 },
             spoiler: row["spoiler_text"],
+            // A word 009's table allows and this build does not know still reads as never-told
+            // rather than throwing: an older app meeting a newer row must draw the post.
+            audience: (row["visibility"] as String?).flatMap(Audience.init(rawValue:)),
             counts: Counts(replies: row["replies_count"], reblogs: row["reblogs_count"],
                            favourites: row["favourites_count"]),
             application: (row["application"] as String?).map {
@@ -604,13 +607,13 @@ extension LocalStore {
             try db.cachedStatement(sql: """
                 INSERT INTO posts (merge_key, proto, origin_uri, uri, authority_url, source_url, posted_at, author_id,
                                    text, media_urls, web_url, in_reply_to_uri, boosted_by, extras, deleted_at,
-                                   sensitive, spoiler_text, replies_count, reblogs_count, favourites_count,
+                                   sensitive, spoiler_text, visibility, replies_count, reblogs_count, favourites_count,
                                    application, application_url, last_seen_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
                 """).execute(arguments: [key, post.socialProtocol.storeProto, post.originURI, post.uri, authorityURL,
                                          post.sourceURL, postedAt, post.authorId,
                                          post.text, mediaJSON, webURL, post.inReplyToURI, post.boostedById,
-                                         post.sensitive.map { $0 ? 1 : 0 }, post.spoiler,
+                                         post.sensitive.map { $0 ? 1 : 0 }, post.spoiler, post.audience?.rawValue,
                                          post.counts.replies, post.counts.reblogs, post.counts.favourites,
                                          post.application?.name, post.application?.website?.absoluteString,
                                          now, now])

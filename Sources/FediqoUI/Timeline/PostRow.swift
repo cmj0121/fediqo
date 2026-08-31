@@ -250,6 +250,7 @@ struct PostRow: View {
             }
             Spacer(minLength: Space.snug)
             sources
+            audience
             // When it was written is four characters and never gives any of them up: a time
             // squeezed to an ellipsis is a row that has stopped saying when it happened.
             Text(post.createdAt, format: .relative(presentation: .numeric))
@@ -257,6 +258,40 @@ struct PostRow: View {
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
                 .fixedSize()
+        }
+    }
+
+    /// Who the author wrote it for, where the server said so.
+    ///
+    /// Nothing at all where it did not, which is every post stored before 009 and every
+    /// protocol with no such idea. A globe drawn on a post nobody described would be this app
+    /// making a claim about somebody else's audience, and the one it would make — "anybody may
+    /// read this" — is the worst of the four to get wrong.
+    ///
+    /// Beside the time rather than beside the name, because it belongs with where and when the
+    /// post reached the reader rather than with who wrote it. Small and tertiary: it is a fact
+    /// about the post, not a warning about it — the one mark on a row that is a warning is the
+    /// author's own, and it is a band across the words.
+    @ViewBuilder
+    private var audience: some View {
+        if let audience = post.audience {
+            let name = t("post.visibility.\(audience.rawValue)")
+            Image(systemName: Self.mark(for: audience))
+                .fediqoSymbol(Glyph.inline, weight: .medium)
+                .foregroundStyle(.tertiary)
+                .help(name)
+                .accessibilityLabel(Text(name))
+        }
+    }
+
+    /// One glyph each. The name is always beside it -- as help, and as the accessibility label
+    /// -- because four shapes at twelve points is not a thing anybody should have to learn.
+    private static func mark(for audience: Audience) -> String {
+        switch audience {
+        case .everyone: "globe"
+        case .unlisted: "moon"
+        case .followers: "lock"
+        case .mentioned: "at"
         }
     }
 

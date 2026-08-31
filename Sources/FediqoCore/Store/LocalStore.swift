@@ -183,6 +183,12 @@ public final class LocalStore: Sendable {
         migrator.registerMigration("008") { db in
             try db.execute(sql: schema(named: "schema-008"))
         }
+        migrator.registerMigration("009") { db in
+            try db.execute(sql: schema(named: "schema-009"))
+            // One more seeded lookup, stamped the way 004 and 005 stamp theirs: the file writes
+            // the rows, the migration is what knows when they arrived.
+            try db.execute(sql: "UPDATE visibilities SET created_at = ?", arguments: [milliseconds(Date())])
+        }
         return migrator
     }
 
