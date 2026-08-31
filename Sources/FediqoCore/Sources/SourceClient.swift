@@ -34,6 +34,9 @@ public enum SourceFailure: Error, Sendable, Equatable, LocalizedError {
     case transport(String)
     /// The posts arrived and are on the screen, but the local store would not keep them.
     case store(String)
+    /// A draft with nothing in it. Refused here rather than sent for a server to refuse:
+    /// whitespace is not a post, and the round trip would only be a slower way of saying so.
+    case emptyDraft
 
     /// Whether the server answered at all, in spite of this.
     ///
@@ -47,7 +50,8 @@ public enum SourceFailure: Error, Sendable, Equatable, LocalizedError {
     public var arrivedAnyway: Bool {
         switch self {
         case .tokenRejected, .store: true
-        case .badHost, .notThatKind, .unsupported, .needsSignIn, .signInFailed, .notItsPost, .http, .transport: false
+        case .badHost, .notThatKind, .unsupported, .needsSignIn, .signInFailed, .notItsPost,
+             .http, .transport, .emptyDraft: false
         }
     }
 
@@ -72,6 +76,7 @@ public enum SourceFailure: Error, Sendable, Equatable, LocalizedError {
         case .http(let code, _): "The server answered \(code)."
         case .transport(let reason): reason
         case .store(let reason): "The local store could not keep what arrived: \(reason)"
+        case .emptyDraft: "There is nothing written to send."
         }
     }
 }
@@ -166,6 +171,9 @@ public protocol SourceClient: Sendable {
     func setMark(_ action: PostAction, on id: String, as account: ActingAccount,
                  done: Bool) async throws -> Marked
 
+    /// Sends a draft, and hands back the post the server made of it.
+    func publish(_ draft: Draft, as account: ActingAccount) async throws -> Post
+
     /// Mute an author or a whole host on the acting server, or take the mute down.
     func setMute(_ kind: Mute.Kind, _ value: String, as account: ActingAccount, muted: Bool) async throws
 
@@ -197,6 +205,11 @@ public struct InstanceInfo: Sendable, Hashable {
     public let registrationsOpen: Bool?
     /// Its house rules, in the order it lists them.
     public let rules: [InstanceRule]
+    /// How long a post may be here, as the server says. `nil` where it did not — an older
+    /// server, or one that keeps it somewhere this build does not read — and `nil` is never
+    /// drawn as a limit of zero or replaced by a number of ours. A composer that does not know
+    /// says nothing rather than guessing at somebody else's rule.
+    public let maxCharacters: Int?
 
     public init(
         host: String,
@@ -209,7 +222,8 @@ public struct InstanceInfo: Sendable, Hashable {
         posts: Int? = nil,
         version: String? = nil,
         registrationsOpen: Bool? = nil,
-        rules: [InstanceRule] = []
+        rules: [InstanceRule] = [],
+        maxCharacters: Int? = nil
     ) {
         self.host = host
         self.title = title
@@ -222,6 +236,7 @@ public struct InstanceInfo: Sendable, Hashable {
         self.version = version
         self.registrationsOpen = registrationsOpen
         self.rules = rules
+        self.maxCharacters = maxCharacters
     }
 }
 
@@ -309,6 +324,35 @@ public enum Reach: Sendable, Hashable {
     case fetched
 }
 
+/// A post somebody has written and not yet sent.
+///
+/// What a composer holds, and what every network is handed. It is the words and who they are
+/// for, and no more than that: a draft is the reader's, and a server's own ideas about it —
+/// what it will take, how long it may be — are the server's to say when it is asked.
+///
+/// No attachments. #61 leaves them out on purpose rather than by omission: media is a second
+/// API with an upload and a wait in it, and a composer that cannot attach a picture should say
+/// so by not offering one, never by failing after the reader has chosen it.
+public struct Draft: Sendable, Hashable {
+    public let text: String
+    /// Who it is for. The same four `Audience` a post arrives with, so what a reader chooses
+    /// here and what a row shows there are one idea rather than two.
+    public let audience: Audience
+    /// The line to put in front of the words, or nothing. `""` and `nil` are one thing here —
+    /// there is no such thing as a warning that says nothing.
+    public let warning: String?
+
+    public init(text: String, audience: Audience = .everyone, warning: String? = nil) {
+        self.text = text
+        self.audience = audience
+        let trimmed = (warning ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        self.warning = trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// Whether there is anything to send. Whitespace is not a post.
+    public var isEmpty: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+}
+
 /// What the server said about a post once it had done what it was asked.
 ///
 /// A write's answer is a whole status, and two facts in it are ones nothing else here can
@@ -365,6 +409,15 @@ public extension SourceClient {
     /// Favourite, boost or bookmark one post, or take it back.
     func setMark(_ action: PostAction, on id: String, as account: ActingAccount,
                  done: Bool) async throws -> Marked {
+        throw SourceFailure.unsupported(.mastodon)
+    }
+
+    /// Sends a draft, and hands back the post the server made of it.
+    ///
+    /// The post and not a receipt, because what comes back is a post like any other and the
+    /// reader's own timeline should have it without waiting for the next refresh. Default: this
+    /// build cannot write over that protocol.
+    func publish(_ draft: Draft, as account: ActingAccount) async throws -> Post {
         throw SourceFailure.unsupported(.mastodon)
     }
 

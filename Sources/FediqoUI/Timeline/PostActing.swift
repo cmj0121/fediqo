@@ -31,6 +31,60 @@ extension AppState {
                              token: token.accessToken)
     }
 
+    /// Whose account a new post goes as.
+    ///
+    /// The same choosing as `acting(on:)` minus its first step: a new post came from nowhere in
+    /// particular, so there is no server whose own post this is and nothing to prefer. What is
+    /// left is the account the reader chose, or the only one they have.
+    func publishing() async -> ActingAccount? {
+        guard let signIn, let tokens else { return nil }
+        let endpoints = signIn.accounts.keys.sorted()
+        let chosen = preferences.actingServer.flatMap { endpoints.contains($0) ? $0 : nil }
+            ?? (endpoints.count == 1 ? endpoints[0] : nil)
+        guard let chosen, let account = signIn.accounts[chosen],
+              let server = servers.first(where: { $0.endpoint == chosen }),
+              let token = await tokens.tokens(for: [server])[chosen]
+        else { return nil }
+        return ActingAccount(host: server.host, authorId: account.authorId,
+                             token: token.accessToken)
+    }
+
+    /// Asks the server the reader would post to how long a post may be there.
+    ///
+    /// Asked when the composer opens rather than kept, because it is that server's rule and it
+    /// is theirs to change. A server that does not say leaves this nil, and the composer counts
+    /// nothing rather than counting down to a number this app made up.
+    func askTheLimit() async {
+        postingLimit = nil
+        guard let account = await publishing(),
+              let client = registry.client(for: .mastodon) else { return }
+        postingLimit = try? await client.instance(host: account.host).maxCharacters
+    }
+
+    /// Sends what was written, and says whether it went.
+    ///
+    /// The panel closes on the way out rather than on the way in: a draft that could not be
+    /// sent is still written, and losing it is the worst thing this could do to somebody.
+    @discardableResult
+    func publish(_ draft: Draft) async -> Bool {
+        guard !isSending else { return false }
+        guard let account = await publishing() else {
+            actionFailure = .needsSignIn("")
+            return false
+        }
+        isSending = true
+        defer { isSending = false }
+        do {
+            let post = try await postActions.publish(draft, as: account)
+            lastPosted = post.authorHandle
+            setComposing(false)
+            return true
+        } catch {
+            actionFailure = SourceFailure.of(error)
+            return false
+        }
+    }
+
     /// Every account the reader could act as, in a stable order, for the screen that asks them
     /// to choose. One of them is not a choice and is not presented as one.
     var actingChoices: [(endpoint: String, account: SignedInAccount)] {

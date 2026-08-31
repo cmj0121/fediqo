@@ -123,7 +123,8 @@ struct AttachmentDeck: View {
     private func still(_ attachment: Attachment) -> some View {
         ZStack(alignment: .bottomLeading) {
             RemoteImage(url: hidden ? nil : attachment.displayURL,
-                        width: Self.side, height: Self.height)
+                        width: Self.side, height: Self.height,
+                        standing: hidden ? .covered : .picture)
                 .clipShape(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous))
                 .blur(radius: hidden ? 18 : 0)
             if hidden {

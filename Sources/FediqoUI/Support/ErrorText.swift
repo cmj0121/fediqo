@@ -17,6 +17,7 @@ func message(for failure: SourceFailure) -> String {
     case .notItsPost(let uri): t("error.notItsPost", uri)
     case .http(let code, _): t("error.http", String(code))
     case .signInFailed(let reason): t("error.signInFailed", reason)
+    case .emptyDraft: t("error.emptyDraft")
     case .transport(let reason), .store(let reason): reason
     }
 }

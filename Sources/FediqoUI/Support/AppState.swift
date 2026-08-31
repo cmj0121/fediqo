@@ -161,6 +161,13 @@ public final class AppState {
     /// Whether the composer is open. It belongs here rather than to the bar because the
     /// panel is drawn by the shell, over everything, and the bar only asks for it.
     var composing: Bool
+    /// Whether a post is on its way out. What the send button reads, so a second press while
+    /// the first is still out sends nothing — the one failure a composer must not have.
+    var isSending = false
+    /// How long a post may be on the server it would go to, as that server says. `nil` until
+    /// it has been asked, and `nil` for good where the server did not say: a composer that
+    /// does not know says nothing rather than counting down to a number of ours.
+    var postingLimit: Int?
     /// The two sheets the timeline puts up. They live here rather than in the screen for the
     /// same reason `composing` does: a menu item and a key have to be able to ask for them
     /// from outside the screen that draws them. The drawing stays where it was.
@@ -239,6 +246,9 @@ public final class AppState {
     /// else what is being read, and a reader who has allowed it should still see it happen
     /// rather than find out from a changelog.
     var lastReachedOut: String?
+    /// The handle a post just went out as, for the moment it takes to say so. Cleared the way
+    /// `lastReachedOut` is — by the notice, once it has been said.
+    var lastPosted: String?
     /// The steps between a press and the store, which are Core's and not a screen's. Built
     /// once beside the loaders and from the same two things, so an action and a read cannot
     /// come to disagree about which client speaks which protocol.
@@ -307,7 +317,7 @@ public final class AppState {
     /// Who reads each protocol. The standard set in every build anybody ships; the fixture's
     /// invented world when a screenshot is being taken. It is carried here rather than
     /// defaulted at each feed so that one answer covers the timelines and the conversations.
-    private let registry: SourceRegistry
+    let registry: SourceRegistry
 
     public convenience init() {
         let launch = LaunchOptions.fromEnvironment()

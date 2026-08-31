@@ -219,6 +219,13 @@ enum Palette {
 /// three guesses at it.
 enum Motion {
     static let appearing = Animation.easeOut(duration: 0.15)
+    /// What a thing that is still coming does while it waits.
+    ///
+    /// Slow on purpose, and one movement rather than a spinner. A spinner on a thirty-point
+    /// avatar is a machine part in the middle of a face; a shape that breathes says the same
+    /// thing — this is coming — without pretending to be a control. Long enough that a picture
+    /// which arrives quickly is never seen to pulse at all.
+    static let breathing = Animation.easeInOut(duration: 1.1).repeatForever(autoreverses: true)
 }
 
 // MARK: - The room the screen has

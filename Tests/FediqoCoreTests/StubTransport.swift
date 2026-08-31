@@ -23,12 +23,14 @@ final class StubRoutes: @unchecked Sendable {
         lock.withLock { authorizedRoutes["\(host)|\(path)"] = (status, Data(body.utf8)) }
     }
 
-    func answer(for url: URL, method: String, body: Data, authorization: String?) -> (status: Int, body: Data) {
+    func answer(for url: URL, method: String, body: Data, authorization: String?,
+                idempotency: String? = nil) -> (status: Int, body: Data) {
         let key = "\(url.host() ?? "")|\(url.path())"
         return lock.withLock {
             log.append((key, CapturedRequest(method: method, query: Self.query(of: url),
                                              body: String(decoding: body, as: UTF8.self),
-                                             authorization: authorization)))
+                                             authorization: authorization,
+                                             idempotency: idempotency)))
             if authorization != nil, let authorized = authorizedRoutes[key] { return authorized }
             return routes[key] ?? (404, Data("{}".utf8))
         }
@@ -62,6 +64,9 @@ struct CapturedRequest: Sendable {
     let query: [String: String]
     let body: String
     let authorization: String?
+    /// What the request offered as its `Idempotency-Key`, where it offered one. The header a
+    /// composer leans on, so a test can hold it.
+    var idempotency: String?
 
     /// The form body read back into fields, for asserting on what a POST said.
     var fields: [String: String] {
@@ -87,7 +92,8 @@ final class StubURLProtocol: URLProtocol {
             for: url,
             method: request.httpMethod ?? "GET",
             body: requestBody(),
-            authorization: request.value(forHTTPHeaderField: "Authorization")
+            authorization: request.value(forHTTPHeaderField: "Authorization"),
+            idempotency: request.value(forHTTPHeaderField: "Idempotency-Key")
         )
         let response = HTTPURLResponse(url: url, statusCode: answer.status, httpVersion: "HTTP/1.1", headerFields: nil)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)

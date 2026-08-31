@@ -80,7 +80,12 @@ public struct MastodonClient: SourceClient {
                             guard !text.isEmpty else { return nil }
                             let hint = HTMLText.plain(rule.hint ?? "")
                             return InstanceRule(text: text, detail: hint.isEmpty ? nil : hint)
-                        }
+                        },
+                        // v2 first, then the older name some forks still answer with. Nothing
+                        // of ours if neither said: a composer that does not know says nothing
+                        // rather than guessing at somebody else's rule.
+                        maxCharacters: instance.configuration?.statuses?.maxCharacters
+                            ?? instance.maxTootChars
                     )
                 }
             } catch SourceFailure.transport(let reason) {
@@ -304,7 +309,8 @@ enum JSONTransport {
     /// `get` reading: a write turned down while carrying a credential is that credential
     /// having expired, and that is the one thing the reader has to act on.
     static func send(_ method: String, _ url: URL, fields: [String: String] = [:],
-                     on session: URLSession, bearer: String? = nil, timeout: TimeInterval = 15,
+                     on session: URLSession, bearer: String? = nil,
+                     idempotency: String? = nil, timeout: TimeInterval = 15,
                      ledger: APILedger = .shared) async throws -> Data {
         var request = URLRequest(url: url)
         request.httpMethod = method
@@ -312,6 +318,12 @@ enum JSONTransport {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let bearer {
             request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        }
+        // The header for a request that was received and whose answer never got back. A second
+        // send carrying the same key is answered with what the first one made, rather than
+        // making a second post — which is the one failure a composer must not have.
+        if let idempotency {
+            request.setValue(idempotency, forHTTPHeaderField: "Idempotency-Key")
         }
         if !fields.isEmpty {
             request.setValue("application/x-www-form-urlencoded; charset=utf-8", forHTTPHeaderField: "Content-Type")

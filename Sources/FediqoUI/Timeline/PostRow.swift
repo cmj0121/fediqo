@@ -252,7 +252,8 @@ struct PostRow: View {
     /// text would make the text column start in a different place from the row above it.
     private var metadata: some View {
         HStack(spacing: Space.step) {
-            RemoteImage(url: post.authorAvatarURL, width: Size.avatar, height: Size.avatar)
+            RemoteImage(url: post.authorAvatarURL, width: Size.avatar, height: Size.avatar,
+                        standing: .avatar)
             EmojiText(post.authorName, emojis: post.emojis, size: TypeScale.body, weight: .semibold)
                 .lineLimit(1)
                 .layoutPriority(1)
@@ -536,13 +537,68 @@ struct RemoteImage: View {
     let height: CGFloat
     var radius: CGFloat = Radius.thumbnail
 
+    /// What is missing, where something is.
+    ///
+    /// A face and a picture want different marks — a person's silhouette over a missing
+    /// attachment would be worse than no mark at all. And `covered` is a third thing rather
+    /// than a kind of absence: there **is** a picture, the reader is not being shown it, and
+    /// the deck draws its own cover to say so. A mark under that cover would be a second
+    /// answer to a question already answered, smudged by the blur over it.
+    enum Standing { case avatar, picture, covered }
+    var standing: Standing = .picture
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Whether the waiting shape is at the top of its breath. `@State` because it is an
+    /// animation and nothing else reads it.
+    @State private var breathing = false
+
     var body: some View {
-        AsyncImage(url: url) { image in
-            image.resizable().aspectRatio(contentMode: .fill)
-        } placeholder: {
-            Rectangle().fill(Palette.hairline(colorScheme))
+        AsyncImage(url: url, transaction: Transaction(animation: reduceMotion ? nil : Motion.appearing)) { phase in
+            switch phase {
+            case .success(let image):
+                image.resizable().aspectRatio(contentMode: .fill)
+            // Still coming, and there is somewhere for it to come from.
+            case .empty where url != nil && standing != .covered:
+                waiting
+            // Nothing to come, or nothing came. The two are one thing to a reader — there is no
+            // picture here — and they get the same mark, which says which kind of nothing it is.
+            default:
+                absent
+            }
         }
         .frame(width: width, height: height)
         .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+    }
+
+    /// A shape that breathes while the picture is on its way.
+    ///
+    /// The flat fill this used to be was the same flat fill a picture that never arrived left
+    /// behind, so a row full of avatars still loading looked exactly like a row of broken ones.
+    /// Under Reduce Motion it is that flat fill again and the mark below still tells the two
+    /// apart, which is what makes the movement decoration rather than the message.
+    private var waiting: some View {
+        Rectangle()
+            .fill(Palette.hairline(colorScheme))
+            .opacity(breathing ? 0.45 : 1)
+            .onAppear {
+                guard !reduceMotion else { return }
+                withAnimation(Motion.breathing) { breathing = true }
+            }
+    }
+
+    /// Nothing came, and it says which kind of nothing. Quiet: it is a fact about the row and
+    /// not a fault the reader has to do something about.
+    @ViewBuilder
+    private var absent: some View {
+        let fill = Rectangle().fill(Palette.hairline(colorScheme))
+        if standing == .covered {
+            fill
+        } else {
+            fill.overlay {
+                Image(systemName: standing == .avatar ? "person.fill" : "photo")
+                    .fediqoSymbol(min(width, height) * 0.42, weight: .regular)
+                    .foregroundStyle(.tertiary)
+            }
+        }
     }
 }
