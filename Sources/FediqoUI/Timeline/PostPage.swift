@@ -49,6 +49,17 @@ final class ThreadModel {
     /// The post the ring is on, which is what the keys act on while this page is open.
     var selected: Post? { inOrder.first { $0.mergeKey == selection } }
 
+    /// Puts the ring on one post of the conversation, because the reader clicked it.
+    ///
+    /// The same thing `FeedModel.select` is for the list, and here for the same reason: a click
+    /// is the reader saying which post they mean, and every key that acts on "this post" reads
+    /// the ring. Without this a reader could click a reply, press `l`, and favourite whichever
+    /// post `j` had last walked to.
+    func select(_ post: Post) {
+        guard selection != post.mergeKey else { return }
+        selection = post.mergeKey
+    }
+
     /// Moves the ring through the conversation, and says whether it moved. It stops at both
     /// ends for the reason the timeline's does: a conversation has a top and a bottom, and
     /// wrapping from the last reply back to the first would be a jump nobody asked for.
@@ -148,7 +159,10 @@ struct PostPage: View {
                 covers: selected ? app.mediaCovers : 0,
                 revealed: app.preferences.showSensitive,
                 answering: answering,
-                condensed: false)
+                condensed: false,
+                // Clicking one opens nothing — the reader is already looking at the whole of
+                // it — but it does say which post they mean, and the ring has to agree.
+                focus: { app.focus(post) })
             .id(post.mergeKey)
     }
 

@@ -921,6 +921,15 @@ public final class AppState {
         }
     }
 
+    /// Puts the ring on a post the reader clicked inside an open conversation.
+    ///
+    /// The half of `expand` that is left where there is nothing to open. A click says which
+    /// post they mean; every key that acts on "this post" reads the ring; so the two have to
+    /// be the same post, on the page as much as in the list.
+    func focus(_ post: Post) {
+        thread?.select(post)
+    }
+
     /// Opens a post the reader clicked, and puts the ring on it: they have said which post
     /// they mean, and coming back to a list whose ring is somewhere else would be the app
     /// disagreeing with them about where they are.

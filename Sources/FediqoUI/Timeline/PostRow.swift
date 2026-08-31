@@ -75,6 +75,13 @@ struct PostRow: View {
     /// What a click on the row asks for. `nil` in a preview and in the detail page itself,
     /// where opening what you are already looking at means nothing.
     var open: (() -> Void)?
+    /// What a click asks for where it opens nothing: put the ring here.
+    ///
+    /// A click is the reader saying which post they mean, and it means that on every page.
+    /// Where the row opens, the ring goes with it — see `AppState.expand`. Where it does not,
+    /// this is what is left of the same sentence, and without it a reader could click a reply
+    /// in a conversation, press `l`, and favourite whichever post `j` had last walked to.
+    var focus: (() -> Void)?
 
     @Environment(\.openURL) private var openURL
     @Environment(\.fediqoWideRows) private var wide
@@ -190,7 +197,7 @@ struct PostRow: View {
         .background {
             Color.clear
                 .contentShape(Rectangle())
-                .onTapGesture { open?() }
+                .onTapGesture { if let open { open() } else { focus?() } }
         }
         .contextMenu {
             if open != nil { Button(t("post.open")) { open?() } }
