@@ -393,6 +393,91 @@
         }
       }
     },
+    "filter.kind.author": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "posts by"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "來自作者"
+          }
+        }
+      }
+    },
+    "filter.kind.media": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "posts with something attached"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "有附件的貼文"
+          }
+        }
+      }
+    },
+    "filter.kind.mention": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "posts naming"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "提及"
+          }
+        }
+      }
+    },
+    "filter.kind.server": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "posts from"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "來自伺服器"
+          }
+        }
+      }
+    },
+    "filter.kind.tag": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "posts tagged"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "帶有標籤"
+          }
+        }
+      }
+    },
     "kept.soon": {
       "extractionState": "manual",
       "localizations": {
@@ -4146,6 +4231,108 @@
           "stringUnit": {
             "state": "translated",
             "value": "顯示被遮蔽的內容"
+          }
+        }
+      }
+    },
+    "timeline.hidden": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ kept off this page by your rules"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "有 %@ 篇被你的規則擋在這一頁之外"
+          }
+        }
+      }
+    },
+    "timeline.hidden.boosts": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You asked not to be shown boosts"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你選擇不看轉發"
+          }
+        }
+      }
+    },
+    "timeline.hidden.media": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You asked for posts with something attached"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你只要有附件的貼文"
+          }
+        }
+      }
+    },
+    "timeline.hidden.only": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your rule keeps only %1$@ %2$@"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你的規則只留下 %1$@ %2$@"
+          }
+        }
+      }
+    },
+    "timeline.hidden.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "What your rules kept off"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "被你的規則擋掉的"
+          }
+        }
+      }
+    },
+    "timeline.hidden.without": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your rule removes %1$@ %2$@"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你的規則移除 %1$@ %2$@"
           }
         }
       }

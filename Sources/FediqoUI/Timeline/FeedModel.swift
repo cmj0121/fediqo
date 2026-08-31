@@ -134,6 +134,10 @@ final class FeedModel {
         let mediaOnly: Bool
         let posts: [Post]
         let index: [String: Int]
+        /// What these two switches turned away, kept beside what they let through for the same
+        /// reason the list is kept at all: working it out again on every pass of a screen's
+        /// body is a cost paid for nothing.
+        let hidden: [Hidden]
     }
 
     private let preferences: Preferences
@@ -407,6 +411,14 @@ final class FeedModel {
     /// post again on every press of `j` is a cost paid for nothing.
     var visible: [Post] { rules().posts }
 
+    /// Everything that arrived and is not on the screen, and what kept each of them off.
+    ///
+    /// Both halves of it: the rules written on this timeline, which the loader applied on the
+    /// way in, and the two switches, which are applied here. They are the same kind of thing —
+    /// the reader's own, removing and never moving — so a reader asking why a post is missing
+    /// gets one list rather than two.
+    var hidden: [Hidden] { result.hidden + rules().hidden }
+
     private func rules() -> Filtered {
         // Read before the cache is asked rather than after, so that a screen reading `visible`
         // still depends on the posts and on the two rules. A hit that touched neither would
@@ -418,7 +430,8 @@ final class FeedModel {
            filtered.showBoosts == showBoosts, filtered.mediaOnly == mediaOnly {
             return filtered
         }
-        let shown = TimelineLoader.apply(showBoosts: showBoosts, mediaOnly: mediaOnly, to: posts)
+        let sifted = TimelineLoader.sift(showBoosts: showBoosts, mediaOnly: mediaOnly, posts)
+        let shown = sifted.admitted
         var index: [String: Int] = [:]
         index.reserveCapacity(shown.count)
         // The first of a repeated key wins, which is what walking the list to find one did.
@@ -426,7 +439,7 @@ final class FeedModel {
             index[post.mergeKey] = position
         }
         let answer = Filtered(generation: generation, showBoosts: showBoosts, mediaOnly: mediaOnly,
-                              posts: shown, index: index)
+                              posts: shown, index: index, hidden: sifted.hidden)
         filtered = answer
         return answer
     }
