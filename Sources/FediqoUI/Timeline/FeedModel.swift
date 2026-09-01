@@ -218,24 +218,6 @@ final class FeedModel {
 
     // MARK: - Reaching the bottom
 
-    /// How many rounds one reach for the bottom may take.
-    ///
-    /// A round is one page from every server, and on a cold start every one of them lands
-    /// above the reader rather than below. The cursors start empty, so the first page a server
-    /// gives is its newest — which the store already had and the reader has already read — and
-    /// the next is the one before that, on down to wherever they have got to. One round and a
-    /// shrug is "I reached the bottom and nothing happened", so the reach keeps asking until
-    /// something appears beneath them.
-    ///
-    /// Eight, the same handful `TimelineLoader.confirmationsPerPass` is and for its reason: a
-    /// reach already costs a request per server, and eight rounds of a handful of servers is a
-    /// burst somebody else's machine can wear. It does not promise to clear a deep store in
-    /// one reach — a store holding two thousand posts is fifty rounds down. What it promises
-    /// is progress that never unwinds: every round moves every cursor a page further down, so
-    /// the cliff is eight pages shorter after each reach and never grows back, and the foot of
-    /// the list says the app is working rather than finished while it happens.
-    static let roundsPerReach = 8
-
     /// Reaching the bottom asks for the page before what is shown, and keeps a reach that
     /// arrives while one is out rather than dropping it.
     ///
@@ -278,53 +260,28 @@ final class FeedModel {
         announcingTheEnd = false
     }
 
-    /// One reach: the store's page where it has one, and the servers either way.
+    /// One reach, handed to the loader.
     ///
-    /// The store answers first, because it can answer now and the reader is waiting. The
-    /// servers are asked either way — that is the whole of what makes a post one of them has
-    /// stopped handing over noticeable — but where the store had the page they are asked
-    /// behind it rather than in front of it, and for one round rather than eight. What that
-    /// round is for is the evidence it leaves with `reconcile`; whatever of it belongs below
-    /// the reader is appended like any other page, but that is not why it was sent.
-    ///
-    /// The round belongs to the reach rather than to a task alongside it. Detached, it
-    /// outlived the `loadingOlder` that stood for it: the next reach found the store empty,
-    /// ran into the round still out, and was turned away with no page, no spinner and nothing
-    /// coming — a reach swallowed in silence, which is the one thing this must never do.
+    /// What is left here is what is genuinely a screen's: which page joins the shown list, what
+    /// each server's answer does to the lines under the list, and where the ring lands. How many
+    /// times anybody's server is asked, and in what order the store and the servers are asked at
+    /// all, is #66's — it went to `TimelineLoader.reachOlder`, beside the other request budgets
+    /// and out of reach of a main actor.
     private func reach(_ servers: [Server]) async {
         guard let foot = result.posts.last else { return }
-        let page = await loader.storedOlder(than: foot, matching: timeline.query)
-        storeFailure = page.failure
-        if !page.posts.isEmpty { append(page.posts) }
-        // Eight rounds are the answer to one thing only: the store having run out, which is the
-        // cold-start cliff. A store that answered the page has already given the reader
-        // something, and a store that would not answer has not run out — it had a bad moment,
-        // and paying a burst at other people's servers for our own database's bad moment would
-        // be charging them for it. So both of those ask exactly one round, and only an empty
-        // page from a store that was working asks for the rest.
-        let spent = page.posts.isEmpty && page.failure == nil
-        await askServers(servers, rounds: spent ? Self.roundsPerReach : 1)
-    }
-
-    /// The servers asked for what came before, round after round until a page lands below the
-    /// reader — or until the ceiling, or until there is nobody left to ask.
-    ///
-    /// One reach at a time is `loadingOlder`'s to keep and there is no second guard here: the
-    /// round belongs to the reach that started it, so there is never a second one in flight
-    /// for another flag to bound.
-    private func askServers(_ servers: [Server], rounds: Int) async {
-        guard !servers.isEmpty else { return }
-        for _ in 0..<rounds {
-            let older = await loader.loadOlder(servers: servers, query: timeline.query)
-            note(older, from: servers)
-            // Nobody said anything at all — every server is spent, waiting or still out — so
-            // asking again this instant would ask the same nobody. That covers the end of the
-            // reading too: the round in which the last server runs out is a round in which it
-            // was the only one asked and it answered with an empty page.
-            if older.posts.isEmpty, older.failures.isEmpty { break }
-            if append(older.posts) > 0 { break }
+        let gone = await loader.reachOlder(than: foot, matching: timeline.query, servers: servers) { arrival in
+            await MainActor.run {
+                switch arrival {
+                case .fromTheStore(let posts, let failure):
+                    storeFailure = failure
+                    return posts.isEmpty ? 0 : append(posts)
+                case .fromServers(let older):
+                    note(older, from: servers)
+                    return append(older.posts)
+                }
+            }
         }
-        drop(await loader.reconcile())
+        drop(gone)
     }
 
     /// Older posts joining the end of the list, and how many of them did.
