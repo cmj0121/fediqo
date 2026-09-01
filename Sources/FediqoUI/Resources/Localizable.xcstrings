@@ -478,6 +478,91 @@
         }
       }
     },
+    "keepFor.forever": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Forever"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "永遠"
+          }
+        }
+      }
+    },
+    "keepFor.month": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A month"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一個月"
+          }
+        }
+      }
+    },
+    "keepFor.season": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Three months"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "三個月"
+          }
+        }
+      }
+    },
+    "keepFor.week": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A week"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一週"
+          }
+        }
+      }
+    },
+    "keepFor.year": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A year"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一年"
+          }
+        }
+      }
+    },
     "kept.soon": {
       "extractionState": "manual",
       "localizations": {
@@ -3177,6 +3262,57 @@
           "stringUnit": {
             "state": "translated",
             "value": "無法讀取本機資料庫。"
+          }
+        }
+      }
+    },
+    "stats.keepFor": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "How long a post stays"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "貼文會留多久"
+          }
+        }
+      }
+    },
+    "stats.keepFor.explained": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Posts older than this are let go when you open the app. Anything you kept stays, however old, and so does anything you posted from here."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "比這更舊的貼文會在你打開 app 時被放掉。你保留過的不會，不論多舊；你從這裡發出去的也不會。"
+          }
+        }
+      }
+    },
+    "stats.keepFor.forever": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing is ever let go. This device fills up at whatever rate you read."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "什麼都不會被放掉。這台裝置會照你閱讀的速度被填滿。"
           }
         }
       }

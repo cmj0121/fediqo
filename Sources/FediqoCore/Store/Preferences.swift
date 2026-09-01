@@ -23,6 +23,41 @@ public enum TextScale: String, Codable, Sendable, CaseIterable, Identifiable {
     }
 }
 
+/// How long a post nobody kept stays on this device.
+///
+/// #7's second promise: *"Unkept posts age out on a policy you can see and change."* A policy
+/// nobody can see is a machine deciding what somebody remembers, which is the thing this app is
+/// against — so it is a setting, in words, beside the numbers it governs.
+///
+/// The window is measured from when the post was written and not from when it arrived. A post
+/// from last year that reached this device this morning is a year old, and keeping it for a
+/// month because it turned up late would be this app disagreeing with the reader about what
+/// "the last month" means.
+///
+/// `forever` is a real answer and it is the one that costs something. It is offered because
+/// somebody's own machine is theirs to fill, and the Storage page says what it is filling.
+public enum Retention: String, Codable, Sendable, CaseIterable, Identifiable {
+    case week, month, season, year, forever
+
+    public var id: String { rawValue }
+
+    /// How far back the window reaches, or nothing where it does not end.
+    public var days: Int? {
+        switch self {
+        case .week: 7
+        case .month: 30
+        case .season: 90
+        case .year: 365
+        case .forever: nil
+        }
+    }
+
+    /// The instant a post has to be newer than to stay. `nil` where nothing ages out.
+    public func cutoff(from now: Date = Date()) -> Date? {
+        days.map { now.addingTimeInterval(-Double($0) * 24 * 60 * 60) }
+    }
+}
+
 public enum AppLanguage: String, Codable, Sendable, CaseIterable, Identifiable {
     case system
     case english = "en"
@@ -74,6 +109,8 @@ public final class Preferences {
     public var textScale: TextScale { didSet { defaults.set(textScale.rawValue, forKey: Keys.textScale) } }
     public var language: AppLanguage { didSet { defaults.set(language.rawValue, forKey: Keys.language) } }
     public var railExpanded: Bool { didSet { defaults.set(railExpanded, forKey: Keys.railExpanded) } }
+    /// How long a post nobody kept stays here. The reader's, and visible: see `Retention`.
+    public var keepFor: Retention { didSet { defaults.set(keepFor.rawValue, forKey: Keys.keepFor) } }
     public var showBoosts: Bool { didSet { defaults.set(showBoosts, forKey: Keys.showBoosts) } }
     public var showMediaOnly: Bool { didSet { defaults.set(showMediaOnly, forKey: Keys.showMediaOnly) } }
     /// Whether what a post covered arrives uncovered.
@@ -131,6 +168,7 @@ public final class Preferences {
         static let showMediaOnly = "fediqo.showMediaOnly"
         static let showSensitive = "fediqo.showSensitive"
         static let refreshInterval = "fediqo.refreshInterval"
+        static let keepFor = "fediqo.keepFor"
         static let offeredHomeTimeline = "fediqo.offeredHomeTimeline"
         static let clearedSeededWording = "fediqo.clearedSeededWording"
         static let actingServer = "fediqo.actingServer"
@@ -140,7 +178,7 @@ public final class Preferences {
         /// it here is a compile-time-visible omission in one place rather than a preference
         /// that quietly survives a reset.
         static let all = [theme, textScale, language, railExpanded, showBoosts, showMediaOnly,
-                          showSensitive, refreshInterval, offeredHomeTimeline, clearedSeededWording,
+                          showSensitive, refreshInterval, keepFor, offeredHomeTimeline, clearedSeededWording,
                           actingServer, mayFetchToAct]
     }
 
@@ -159,6 +197,7 @@ public final class Preferences {
         showMediaOnly = fresh.showMediaOnly
         showSensitive = fresh.showSensitive
         refreshInterval = fresh.refreshInterval
+        keepFor = fresh.keepFor
         offeredHomeTimeline = fresh.offeredHomeTimeline
         clearedSeededWording = fresh.clearedSeededWording
         actingServer = fresh.actingServer
@@ -180,6 +219,11 @@ public final class Preferences {
         // being read, so it is not a default anybody arrives at by not looking.
         mayFetchToAct = defaults.object(forKey: Keys.mayFetchToAct) as? Bool ?? false
         refreshInterval = defaults.string(forKey: Keys.refreshInterval).flatMap(RefreshInterval.init(rawValue:)) ?? .seconds30
+        // A season, and not `forever`. A default of forever would mean this app quietly filling
+        // somebody's disk on the strength of never having been asked — and a default of a week
+        // would throw away what they had not got round to keeping. Three months is long enough
+        // to go looking for something you half remember, and short enough to have an end.
+        keepFor = defaults.string(forKey: Keys.keepFor).flatMap(Retention.init(rawValue:)) ?? .season
         offeredHomeTimeline = defaults.object(forKey: Keys.offeredHomeTimeline) as? Bool ?? false
         clearedSeededWording = defaults.object(forKey: Keys.clearedSeededWording) as? Bool ?? false
     }
