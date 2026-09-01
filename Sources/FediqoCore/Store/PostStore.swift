@@ -242,17 +242,15 @@ extension LocalStore {
     /// plan holds because nothing here runs ANALYZE, so if `PRAGMA optimize` is ever added,
     /// read this plan again before believing it.
     public func timeline(limit: Int = 200, before: Post? = nil) async throws -> [Post] {
-        let cursor = before.map { (postedAt: Self.milliseconds($0.createdAt), key: $0.mergeKey) }
-        let keyset = cursor == nil ? "" : "AND (p.posted_at < ? OR (p.posted_at = ? AND p.merge_key > ?))"
+        let page = TimelineOrder.cut(before: before)
         return try await read { db in
-            var arguments: [any DatabaseValueConvertible] = []
-            if let cursor { arguments += [cursor.postedAt, cursor.postedAt, cursor.key] }
-            arguments.append(limit)
+            var arguments = page.arguments
+            arguments.append(limit.databaseValue)
             let rows = try Row.fetchAll(db, sql: """
                 \(Self.postSelect)
                 WHERE p.deleted_at IS NULL
-                \(keyset)
-                ORDER BY p.posted_at DESC, p.merge_key
+                \(page.sql)
+                ORDER BY \(TimelineOrder.newestFirst)
                 LIMIT ?
                 """, arguments: StatementArguments(arguments))
             return try Self.posts(from: rows, db)
@@ -285,19 +283,17 @@ extension LocalStore {
         guard !terms.isEmpty else { return [] }
         let match = terms.joined(separator: " AND ")
 
-        let cursor = before.map { (postedAt: Self.milliseconds($0.createdAt), key: $0.mergeKey) }
-        let keyset = cursor == nil ? "" : "AND (p.posted_at < ? OR (p.posted_at = ? AND p.merge_key > ?))"
+        let page = TimelineOrder.cut(before: before)
         return try await read { db in
-            var arguments: [any DatabaseValueConvertible] = [match]
-            if let cursor { arguments += [cursor.postedAt, cursor.postedAt, cursor.key] }
-            arguments.append(limit)
+            var arguments = [match.databaseValue] + page.arguments
+            arguments.append(limit.databaseValue)
             let rows = try Row.fetchAll(db, sql: """
                 \(Self.postSelect)
                 JOIN posts_fts ON posts_fts.rowid = p.id
                 WHERE posts_fts MATCH ?
                   AND p.deleted_at IS NULL
-                \(keyset)
-                ORDER BY p.posted_at DESC, p.merge_key
+                \(page.sql)
+                ORDER BY \(TimelineOrder.newestFirst)
                 LIMIT ?
                 """, arguments: StatementArguments(arguments))
             return try Self.posts(from: rows, db)
@@ -330,15 +326,14 @@ extension LocalStore {
                     WHERE t.last_seen_at >= ? AND t.removed_at IS NULL AND p.deleted_at IS NULL
                     \(rules)
                     GROUP BY p.merge_key
-                    ORDER BY min(t.rank), p.posted_at DESC, p.merge_key
+                    ORDER BY min(t.rank), \(TimelineOrder.newestFirst)
                     LIMIT ?
                     """, arguments: arguments)
                 return try Self.posts(from: rows, db)
             }
         }
 
-        let cursor = before.map { (postedAt: Self.milliseconds($0.createdAt), key: $0.mergeKey) }
-        let keyset = cursor == nil ? "" : "AND (p.posted_at < ? OR (p.posted_at = ? AND p.merge_key > ?))"
+        let page = TimelineOrder.cut(before: before)
         // Which base source carried it, and — where the timeline names one — whose reading it
         // was in. A `home` timeline with no account named is every home this device reads.
         var origin = "AND EXISTS (SELECT 1 FROM post_origins o WHERE o.merge_key = p.merge_key AND o.feed = ?"
@@ -350,10 +345,9 @@ extension LocalStore {
         origin += ")"
         let originClause = origin
 
-        var values: [any DatabaseValueConvertible] = originArguments + ruleArguments
-        if let cursor { values += [cursor.postedAt, cursor.postedAt, cursor.key] }
-        values.append(limit)
-        let arguments = StatementArguments(values.map(\.databaseValue))
+        var values = (originArguments + ruleArguments).map(\.databaseValue) + page.arguments
+        values.append(limit.databaseValue)
+        let arguments = StatementArguments(values)
 
         return try await read { db in
             let rows = try Row.fetchAll(db, sql: """
@@ -361,8 +355,8 @@ extension LocalStore {
                 WHERE p.deleted_at IS NULL
                 \(originClause)
                 \(rules)
-                \(keyset)
-                ORDER BY p.posted_at DESC, p.merge_key
+                \(page.sql)
+                ORDER BY \(TimelineOrder.newestFirst)
                 LIMIT ?
                 """, arguments: arguments)
             return try Self.posts(from: rows, db)
@@ -420,7 +414,7 @@ extension LocalStore {
                 JOIN server_trends t ON t.merge_key = p.merge_key
                 WHERE t.last_seen_at >= ? AND p.deleted_at IS NULL
                 GROUP BY p.merge_key
-                ORDER BY min(t.rank), p.posted_at DESC, p.merge_key
+                ORDER BY min(t.rank), \(TimelineOrder.newestFirst)
                 LIMIT ?
                 """, arguments: [ms, limit])
             return try Self.posts(from: rows, db)
@@ -496,7 +490,7 @@ extension LocalStore {
                 \(Self.postSelect)
                 WHERE p.merge_key IN (\(placeholders))
                   AND p.deleted_at IS NULL AND p.authority_url IS NOT NULL
-                ORDER BY p.posted_at DESC, p.merge_key
+                ORDER BY \(TimelineOrder.newestFirst)
                 """, arguments: StatementArguments(keys))
             // `posts(from:_:)` maps the rows in order, so the two line up pair for pair.
             return zip(try Self.posts(from: rows, db), rows).map {

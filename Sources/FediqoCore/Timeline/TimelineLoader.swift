@@ -110,7 +110,7 @@ public struct TimelineResult: Sendable {
         guard let cut = posts.last else { return servers.isEmpty ? posts : shown }
         let covered = Set(posts.map(\.mergeKey))
         return posts + shown.filter {
-            Post.isOlder($0, than: cut) && !covered.contains($0.mergeKey)
+            TimelineOrder.isOlder($0, than: cut) && !covered.contains($0.mergeKey)
         }
     }
 }
@@ -891,7 +891,7 @@ public struct TimelineLoader: Sendable {
     /// list, a post on several lists takes its best rank and keeps every source, and where
     /// the servers ranked two posts the same the timeline's own order breaks the tie.
     ///
-    /// That tail is `Post.isOlder` and not a fourth spelling of it. Rank is this list's own
+    /// That tail is `TimelineOrder` and not a fourth spelling of it. Rank is this list's own
     /// idea and nothing else has one; the order underneath it is the same order the store
     /// reads a page back in and the same one a merged timeline is in, so it is asked for
     /// rather than written out again.
@@ -904,7 +904,7 @@ public struct TimelineLoader: Sendable {
         }
         return lists.flatMap { $0 }.merged(orderedBy: {
             let (a, b) = (ranks[$0.mergeKey]!, ranks[$1.mergeKey]!)
-            return a == b ? Post.isOlder($1, than: $0) : a < b
+            return a == b ? TimelineOrder.isOlder($1, than: $0) : a < b
         })
     }
 

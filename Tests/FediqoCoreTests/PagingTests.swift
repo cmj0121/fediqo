@@ -124,6 +124,46 @@ struct StorePagingTests {
         #expect(second.map(\.uri) == [uri("3b"), uri("2"), uri("1")])
     }
 
+    /// The order is two spellings of one thing — `TimelineOrder.isOlder` for whoever joins one
+    /// page to the page before it, and the SQL the store reads its pages with. #69 put both on
+    /// one type so they cannot be edited apart; this is what would notice if they ever were.
+    ///
+    /// Every paged reading the store offers, and not only the plain one: a reader who has read
+    /// down through search results asks for what comes next the way they ask everywhere else,
+    /// so a second `ORDER BY` that drifted would put a post between two pages of one of these
+    /// and nowhere at all.
+    @Test("Every paged reading is the one order, cut and tiebreak included",
+          arguments: ["plain", "searched", "ruled"])
+    func everyPagedReadingIsTheOneOrder(_ reading: String) async throws {
+        let store = try await stocked()
+        let page = { (limit: Int, before: Post?) async throws -> [Post] in
+            switch reading {
+            case "searched": try await store.search("hello", limit: limit, before: before)
+            case "ruled": try await store.timeline(matching: .publicPosts, limit: limit, before: before)
+            default: try await store.timeline(limit: limit, before: before)
+            }
+        }
+
+        let whole = try await page(200, nil)
+
+        // The fixture is six posts, two of them sharing a millisecond, so the tiebreak is
+        // exercised rather than merely available.
+        #expect(whole.count == 6)
+        #expect(zip(whole, whole.dropFirst()).allSatisfy { TimelineOrder.isOlder($1, than: $0) })
+
+        // And the cut is the same order as the sort: one row at a time is the boundary falling
+        // everywhere it can fall, including inside that one millisecond.
+        var paged: [Post] = []
+        var cursor: Post?
+        while true {
+            let next = try await page(1, cursor)
+            guard !next.isEmpty else { break }
+            paged += next
+            cursor = next.last
+        }
+        #expect(paged == whole)
+    }
+
     /// What a reach for the bottom actually calls, rather than the store underneath it: the
     /// store's page comes back the size a server's page is, so the list grows by the same step
     /// whichever answered and a reader cannot tell from its length where it came from.
@@ -144,17 +184,16 @@ struct StorePagingTests {
         #expect(past.failure == nil)
     }
 
-    /// The order is written three times — as the store's cut, as its `ORDER BY`, and as
-    /// `Post.isOlder` for whoever joins one page to the page before it. Two of them
-    /// disagreeing is a post falling between the pages and never being read, so the three are
-    /// pinned to each other here rather than kept in step by hand.
-    @Test("The store's pages and Post.isOlder are the one order, tiebreak and all")
+    /// The order the store reads in and the order a screen joins pages with are one thing,
+    /// pinned to each other here rather than kept in step by hand. Two of them disagreeing is
+    /// a post falling between the pages and never being read.
+    @Test("The store's pages and TimelineOrder are the one order, tiebreak and all")
     func oneOrderInThreeSpellings() async throws {
         let store = try await stocked()
 
         let whole = try await store.timeline()
 
-        #expect(zip(whole, whole.dropFirst()).allSatisfy { Post.isOlder($1, than: $0) })
+        #expect(zip(whole, whole.dropFirst()).allSatisfy { TimelineOrder.isOlder($1, than: $0) })
         // And the fold every merged page goes through lands in that same order, so a page
         // from the network and a page from disk cannot disagree about where one ends.
         #expect(whole.shuffled().merged() == whole)

@@ -57,7 +57,7 @@ extension LocalStore {
                 FROM posts p
                 WHERE p.deleted_at IS NULL
                   AND (SELECT count(*) FROM post_origins WHERE merge_key = p.merge_key) > 1
-                ORDER BY p.posted_at DESC, p.merge_key
+                ORDER BY \(TimelineOrder.newestFirst)
                 LIMIT ?
                 """, arguments: [limit])
             guard !rows.isEmpty else { return [] }

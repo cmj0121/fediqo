@@ -350,7 +350,7 @@ final class FeedModel {
         // in it and goes on the end as it stands. Sorting again would be the one thing this
         // must not do.
         let joining = older.filter {
-            Post.isOlder($0, than: foot) && known.insert($0.mergeKey).inserted
+            TimelineOrder.isOlder($0, than: foot) && known.insert($0.mergeKey).inserted
         }
         guard !joining.isEmpty else { return 0 }
         showing(result.posts + joining)
