@@ -126,7 +126,7 @@ extension LocalStore {
             let rows = try Row.fetchAll(db, sql: """
                 \(postSelect)
                 WHERE p.in_reply_to_uri IN (\(placeholders)) AND p.deleted_at IS NULL
-                ORDER BY p.posted_at, p.merge_key
+                ORDER BY \(TimelineOrder.oldestFirst)
                 """, arguments: StatementArguments(frontier))
             let replies = try posts(from: rows, db).filter { seen.insert($0.uri).inserted }
             guard !replies.isEmpty else { break }
@@ -141,6 +141,6 @@ public extension Array where Element == Post {
     /// The same fold `merged()` is, in the other order — a conversation is read from the top
     /// down, and the timeline's order is newest first.
     func merged(oldestFirst: Bool) -> [Post] {
-        oldestFirst ? merged(orderedBy: { Post.isOlder($0, than: $1) }) : merged()
+        oldestFirst ? merged(orderedBy: { TimelineOrder.isOlder($0, than: $1) }) : merged()
     }
 }
