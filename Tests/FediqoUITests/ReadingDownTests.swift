@@ -85,7 +85,7 @@ struct ReadingDownTests {
 
         #expect(names(feed) == ["p6", "p5"])
         #expect(await client.asks == 0)
-        #expect(feed.loadingOlder == false)
+        #expect(feed.bottom.isReading == false)
     }
 
     // MARK: - One reach at a time
@@ -383,7 +383,7 @@ struct TheEndTests {
     /// Reaches until the client has said it has nothing older. Two reaches: the first walks
     /// the run down, the second is answered with an empty page and ends the server.
     private func readToTheEnd(_ feed: FeedModel, servers: [Server]) async {
-        while !feed.reachedTheEnd { await feed.loadOlder(servers: servers) }
+        while !feed.bottom.isTheEnd { await feed.loadOlder(servers: servers) }
     }
 
     // MARK: - The place
@@ -394,15 +394,14 @@ struct TheEndTests {
     func theEndComesFromTheLoader() async {
         let client = PagedClient(Self.all)
         let feed = feedAtTheTop("end-derived", client: client)
-        #expect(feed.reachedTheEnd == false)
-        #expect(feed.atTheEnd == false)
+        #expect(feed.bottom == .idle)
 
         // A reach that brings a page back is a reach that found more, whatever else it found.
         await feed.loadOlder(servers: [server])
-        #expect(feed.reachedTheEnd == false)
+        #expect(feed.bottom == .idle)
 
         await readToTheEnd(feed, servers: [server])
-        #expect(feed.atTheEnd)
+        #expect(feed.bottom.isTheEnd)
     }
 
     /// The two say opposite things about the same foot of the same list, so they must never
@@ -414,16 +413,14 @@ struct TheEndTests {
 
         async let reaching: Void = feed.loadOlder(servers: [server])
         await client.untilAsked()
-        #expect(feed.loadingOlder)
-        #expect(feed.atTheEnd == false)
-        #expect(feed.announcingTheEnd == false)
+        #expect(feed.bottom == .reading(fromTheEnd: false))
 
         await client.letGo()
         await reaching
 
         // And once it is back, the answer it brought stands.
-        #expect(feed.loadingOlder == false)
-        #expect(feed.atTheEnd)
+        #expect(feed.bottom.isReading == false)
+        #expect(feed.bottom.isTheEnd)
     }
 
     /// A source added while the reader sat at the end is a server nobody has asked anything,
@@ -433,13 +430,13 @@ struct TheEndTests {
         let client = PagedClient([])
         let feed = feedAtTheTop("end-server-joins", client: client)
         await readToTheEnd(feed, servers: [server])
-        #expect(feed.atTheEnd)
+        #expect(feed.bottom.isTheEnd)
 
         await feed.load(servers: [server, other])
-        #expect(feed.reachedTheEnd == false)
+        #expect(feed.bottom == .idle)
 
         await readToTheEnd(feed, servers: [server, other])
-        #expect(feed.atTheEnd)
+        #expect(feed.bottom.isTheEnd)
     }
 
     // MARK: - The moment
@@ -448,19 +445,21 @@ struct TheEndTests {
     func theToastFiresOncePerArrival() async {
         let client = PagedClient([])
         let feed = feedAtTheTop("end-announced-once", client: client)
+        // Shortened, not removed: the moment has to be long enough to still be running when
+        // the arrival is checked, and short enough that waiting it out is not a test that
+        // sits for two and a half seconds. Nothing here depends on how long it is.
+        feed.announcementLasts = .milliseconds(200)
 
         await feed.loadOlder(servers: [server])
-        #expect(feed.announcingTheEnd)
+        #expect(feed.bottom == .arrived)
 
-        // Said. What is left is the place.
-        feed.saidTheEnd()
-        #expect(feed.announcingTheEnd == false)
-        #expect(feed.atTheEnd)
+        // Said, and over — by the value itself. Nobody was asked to take anything down.
+        await feed.settling?.value
+        #expect(feed.bottom == .ended)
 
         // Coming back to the foot of the list is not a second arrival.
         await feed.loadOlder(servers: [server])
-        #expect(feed.announcingTheEnd == false)
-        #expect(feed.atTheEnd)
+        #expect(feed.bottom == .ended)
     }
 
     /// A second arrival is a real one — the reading ended, then there was more, then it ended
@@ -469,16 +468,17 @@ struct TheEndTests {
     func aSecondArrivalIsAnnouncedAgain() async {
         let client = PagedClient([])
         let feed = feedAtTheTop("end-announced-twice", client: client)
+        feed.announcementLasts = .milliseconds(200)
 
         await feed.loadOlder(servers: [server])
-        #expect(feed.announcingTheEnd)
-        feed.saidTheEnd()
+        #expect(feed.bottom == .arrived)
+        await feed.settling?.value
 
         await feed.load(servers: [server, other])
-        #expect(feed.reachedTheEnd == false)
+        #expect(feed.bottom == .idle)
 
         await readToTheEnd(feed, servers: [server, other])
-        #expect(feed.announcingTheEnd)
+        #expect(feed.bottom == .arrived)
     }
 
     /// A refresh is about the top of the list. Arriving at the bottom is something the reader
@@ -490,7 +490,7 @@ struct TheEndTests {
         feed.show(Array(Self.all.prefix(2)))
 
         await feed.load(servers: [server])
-        #expect(feed.announcingTheEnd == false)
+        #expect(feed.bottom == .idle)
     }
 
     // MARK: - Trending has no end to reach
@@ -506,8 +506,6 @@ struct TheEndTests {
         await feed.loadOlder(servers: [server])
         await feed.load(servers: [server])
 
-        #expect(feed.reachedTheEnd == false)
-        #expect(feed.atTheEnd == false)
-        #expect(feed.announcingTheEnd == false)
+        #expect(feed.bottom == .idle)
     }
 }
