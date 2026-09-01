@@ -98,6 +98,26 @@ actor ServerPaging {
         places[endpoint]?.inFlight = false
     }
 
+    /// Why each of `servers` cannot be asked for a page right now, for the ones that cannot.
+    ///
+    /// The two facts this actor holds that keep a server out of a round, said as themselves
+    /// rather than folded into a set of names with no reason attached. A wait is not here: that
+    /// is the backoff's, and the loader is where the two meet.
+    ///
+    /// Spent wins over in flight, and both are asked before anybody is claimed — a server that
+    /// has run out has nothing out, so the two never disagree in practice, and where they could
+    /// the lasting fact is the one worth saying.
+    func whyNot(_ servers: [Server]) -> [String: TimelineResult.Unasked] {
+        servers.reduce(into: [:]) { reasons, server in
+            guard let place = places[server.endpoint] else { return }
+            if place.exhausted {
+                reasons[server.endpoint] = .spent
+            } else if place.inFlight {
+                reasons[server.endpoint] = .inFlight
+            }
+        }
+    }
+
     /// This server's cursor was not a post of its own — so it is dropped rather than asked
     /// about a second time, and the next page it is asked for is its newest. Per-server
     /// cursors are meant to make that impossible; this is what happens if one ever gets out.

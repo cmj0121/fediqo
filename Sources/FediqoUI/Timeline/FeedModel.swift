@@ -15,7 +15,7 @@ final class FeedModel {
             // A different question is a different page. What was on the screen was the answer
             // to the old one, and keeping it would leave posts under rules that no longer
             // admit them until something else happened to replace them.
-            result = TimelineResult(posts: [], failures: result.failures, skipped: result.skipped)
+            result = TimelineResult(posts: [], failures: result.failures, unasked: result.unasked)
             loadedFor = nil
         }
     }
@@ -203,11 +203,11 @@ final class FeedModel {
     func load(servers: [Server], refresh: Refresh = .manual) async {
         loading = true
         let loaded = await loader.load(servers: servers, query: timeline.query, refresh: refresh)
-        // The whole result, `skipped` and all: a server inside its wait is neither in the
+        // The whole result, `unasked` and all: a server inside its wait is neither in the
         // posts nor in the failures, and a rebuild that leaves it out of the third place too
         // loses the difference between a server that had nothing to say and one nobody asked.
         result = TimelineResult(posts: loaded.posts(carrying: result.posts, asked: servers),
-                                failures: loaded.failures, skipped: loaded.skipped)
+                                failures: loaded.failures, unasked: loaded.unasked)
         note(loaded, from: servers)
         loadedFor = servers.map(\.id).sorted()
         loading = false
@@ -388,10 +388,10 @@ final class FeedModel {
 
     /// These posts, and everything else about the last load left as it was. What a reach and a
     /// reconcile both do: they change the list and say nothing new about any server, so the
-    /// standing `failures` and `skipped` are not theirs to rewrite — and writing them out by
-    /// hand at each place is how `skipped` came to be dropped once already.
+    /// standing `failures` and `unasked` are not theirs to rewrite — and writing them out by
+    /// hand at each place is how `unasked` came to be dropped once already.
     private func showing(_ posts: [Post]) {
-        result = TimelineResult(posts: posts, failures: result.failures, skipped: result.skipped)
+        result = TimelineResult(posts: posts, failures: result.failures, unasked: result.unasked)
     }
 
     /// The posts this feed is holding, put here rather than loaded.

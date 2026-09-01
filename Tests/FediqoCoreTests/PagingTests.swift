@@ -248,7 +248,7 @@ struct ServerPagingTests {
     }
 
     /// A server that has run out was not asked, and a round that asked nothing about it has
-    /// nothing to say about it. Leaving it out of `skipped` as well as out of `failures` is
+    /// nothing to say about it. Leaving it out of `unasked` as well as out of `failures` is
     /// the round claiming otherwise, and `failures(carrying:of:)` reads that claim as good
     /// news: the reason the server was carrying is struck off the screen until the next
     /// refresh. `.tokenRejected` is the case that reaches it — it counts as having arrived,
@@ -265,12 +265,12 @@ struct ServerPagingTests {
         _ = await loader.loadOlder(servers: [spent, going], query: .publicPosts, now: t0)
         let second = await loader.loadOlder(servers: [spent, going], query: .publicPosts, now: t0.addingTimeInterval(1))
 
-        #expect(second.skipped.contains(spent.endpoint))
+        #expect(second.unasked[spent.endpoint] == .spent)
         #expect(second.failures[spent.endpoint] == nil)
         #expect(second.failures(carrying: standing, of: [spent, going])[spent.endpoint]
                     == .tokenRejected(spent.host))
         // The one that was asked is judged by this round alone, exactly as it always was.
-        #expect(second.skipped.contains(going.endpoint) == false)
+        #expect(second.unasked[going.endpoint] == nil)
     }
 
     @Test("Only when every server has said so is the reading over")
@@ -385,7 +385,7 @@ struct ServerPagingTests {
         // says it — so a screen keeps the reason up rather than blinking it off.
         let waiting = await loader.loadOlder(servers: [server], query: .publicPosts, every: .seconds(30),
                                              now: t0.addingTimeInterval(2))
-        #expect(waiting.skipped == [server.endpoint])
+        #expect(waiting.unasked == [server.endpoint: .waiting])
         #expect(waiting.failures.isEmpty)
 
         stubRoutes.on(host, path, status: 200, body: statusesJSON(["3", "2"], from: host))
@@ -509,5 +509,89 @@ actor RejectingStrayCursorClient: StubClient {
         refusals -= 1
         let refusal: SourceFailure = refusals > 0 ? .tokenRejected(host) : .notItsPost(before.uri)
         throw refusal
+    }
+}
+
+/// Why a server went unasked, and why that is three answers rather than one.
+///
+/// #68. A round used to hand back a bare set of names: waiting, spent and in flight all fell
+/// into it and none of them came out again. The one a screen actually wants — this server is
+/// spent — was then fetched back by asking the paging a second question, which is a caller
+/// paying for a fact the load it was just handed already knew.
+@Suite("Why a server was not asked")
+struct UnaskedReasonTests {
+    private let path = "/api/v1/timelines/public"
+    private let t0 = Date(timeIntervalSince1970: 1_770_000_000)
+
+    /// The two the paging knows, told apart at the source. A page still out and a server that
+    /// has run out are opposites — one will answer and one never will — and folding them
+    /// together is what made the second question necessary.
+    @Test("A page still out is not a server that has run out")
+    func inFlightIsNotSpent() async {
+        let paging = ServerPaging()
+        let server = makeServer("in-flight.reasons.test")
+
+        // Nothing is known about a server nobody has asked, so there is no reason to give: it
+        // is askable, and an entry here would be a claim about a stranger.
+        #expect(await paging.whyNot([server]).isEmpty)
+
+        _ = await paging.claim([server])
+        #expect(await paging.whyNot([server])[server.endpoint] == .inFlight)
+
+        // The page came back carrying something, so the server is free again and has not run
+        // out — the cursor moved, and it is asked from there next time.
+        await paging.gave([handedOver("5", from: server.host)], server.endpoint)
+        #expect(await paging.whyNot([server]).isEmpty)
+    }
+
+    /// Only the empty page ends a server, and the reason it leaves behind is the lasting one.
+    @Test("An empty page is what makes a server spent, and it stays spent")
+    func spentIsTheEmptyPage() async {
+        let paging = ServerPaging()
+        let server = makeServer("spent.reasons.test")
+
+        _ = await paging.claim([server])
+        await paging.gave([], server.endpoint)
+        #expect(await paging.whyNot([server])[server.endpoint] == .spent)
+
+        // And it is not claimable, so a round after this one says the same thing rather than
+        // quietly asking again.
+        #expect(await paging.claim([server]).isEmpty)
+        #expect(await paging.whyNot([server])[server.endpoint] == .spent)
+    }
+
+    /// Silence leaves the server free. A request that never arrived says nothing about where
+    /// that server had got to, so it is neither spent nor still out.
+    @Test("A server that gave nothing is free again, with no reason left on it")
+    func silenceLeavesNoReason() async {
+        let paging = ServerPaging()
+        let server = makeServer("silent.reasons.test")
+
+        _ = await paging.claim([server])
+        await paging.gaveNothing(server.endpoint)
+        #expect(await paging.whyNot([server]).isEmpty)
+    }
+
+    /// The whole of #68 in one result: two servers kept out of one round for two different
+    /// reasons, and the round says which was which without being asked a second time.
+    @Test("One round names the spent and the waiting apart")
+    func oneRoundNamesThemApart() async {
+        let spent = makeServer("ran-out.reasons.test")
+        let hurt = makeServer("gateway-wept.reasons.test")
+        stubRoutes.on(spent.host, path, status: 200, body: "[]")
+        stubRoutes.on(hurt.host, path, status: 503, body: "gateway wept")
+        let loader = stubbedLoader(limit: 2)
+
+        // The first round asks both: one answers with nothing left, the other falls over and
+        // so is left alone for a while.
+        _ = await loader.loadOlder(servers: [spent, hurt], query: .publicPosts,
+                                   every: .seconds(30), now: t0)
+        let second = await loader.loadOlder(servers: [spent, hurt], query: .publicPosts,
+                                            every: .seconds(30), now: t0.addingTimeInterval(1))
+
+        #expect(second.unasked == [spent.endpoint: .spent, hurt.endpoint: .waiting])
+        // Neither is a failure of this round — nobody asked them anything — which is the same
+        // promise the bare set made, kept now with the reasons still attached.
+        #expect(second.failures.isEmpty)
     }
 }
