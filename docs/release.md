@@ -22,6 +22,7 @@ point: a pull request has no credentials and must go on not needing any.
        │
        ├── scripts/metadata.py -- the store text, before anything is built: the language
        │   folders, the lengths, the links, and that this version has release notes
+       ├── setup_ci -- a temporary keychain, on a runner; nothing at all on a laptop
        │
        ├── ask App Store Connect which build numbers it already holds, one platform at a time
        ├── take max(commit count, the highest it holds + 1) -- one number, both platforms
@@ -131,6 +132,39 @@ third-party SDK of any kind.
 The screenshots are not here yet ([#30](https://github.com/cmj0121/fediqo/issues/30)). When they arrive at
 `fastlane/screenshots/<platform>/`, the lane picks them up and uploads them in the same run without being told.
 
+## The tag that runs it
+
+Pushing a tag is the whole of it.
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+[`.github/workflows/release.yml`](../.github/workflows/release.yml) fires on `v*`, and every step in it is
+either a `brew install` or `make publish`. Nothing about releasing is written down in that file: what the build
+is called, which certificate signs it, what the store is told and that nothing is submitted for review are all
+decisions the Fastfile makes, and a laptop makes them the same way.
+
+A release that failed at the upload is run again from the same tag -- **Actions → Release → Run workflow**, and
+pick the tag in the dropdown. Nobody has to invent a `v0.1.1` because the pipeline could not be asked twice.
+
+The runner is handed by its secret store exactly what `.env` hands a laptop:
+
+| secret                          | how it differs from the laptop's                             |
+| ------------------------------- | ------------------------------------------------------------ |
+| `FEDIQO_TEAM_ID`                | the same                                                     |
+| `FEDIQO_BUNDLE_ID`              | the same                                                     |
+| `MATCH_GIT_URL`                 | the HTTPS form -- a runner has no ssh key to clone with      |
+| `MATCH_GIT_BASIC_AUTHORIZATION` | required here, unused on a laptop                            |
+| `MATCH_PASSWORD`                | required here: there is no keychain to have remembered it    |
+| `ASC_KEY_ID`                    | required here -- the Apple ID way needs a person watching    |
+| `ASC_ISSUER_ID`                 | ... its issuer                                               |
+| `ASC_KEY_P8_BASE64`             | ... and the `.p8`, base64, which is why it is not a path     |
+
+`setup_ci` in the publish lane makes the temporary keychain match needs. Off CI it does nothing, which is why
+it can be the same line on both machines.
+
 ## Getting a build to a person
 
 Uploading invites nobody. A build reaches a person only through a TestFlight group with people in it.
@@ -185,10 +219,9 @@ Its default branch is `main`. `fastlane/Matchfile` says so out loud, because mat
 
 ## What is not here yet
 
-The screenshots ([#30](https://github.com/cmj0121/fediqo/issues/30)) and the workflow that fires on a tag
-([#32](https://github.com/cmj0121/fediqo/issues/32)). Until a command takes the pictures, the two stores are
-shown whatever was last uploaded by hand, and the lane uploads no pictures at all rather than uploading none --
-which App Store Connect would read as an answer.
+The screenshots ([#30](https://github.com/cmj0121/fediqo/issues/30)). Until a command takes them, the two stores
+are shown whatever was last uploaded by hand, and the lane uploads no pictures at all rather than uploading none
+-- which App Store Connect would read as an answer.
 
 A release reaches TestFlight and stops there. That is where anything nobody has looked at ought to stop.
 

@@ -226,6 +226,10 @@ lane :publish do
   # costs a second to find here and a whole release to find at the end.
   sh(File.join(ROOT, "scripts", "metadata.py"), "--version", version, "--resolve")
 
+  # A runner has no keychain for match to put a certificate into, so it makes one. Off CI
+  # this action does nothing at all, which is why it can be the same line in both places.
+  setup_ci
+
   build = build_number(version)
   notes = release_notes(version)
   UI.important("Fediqo #{version} (#{build}) -- both platforms, TestFlight only.")

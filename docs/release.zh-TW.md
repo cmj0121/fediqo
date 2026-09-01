@@ -22,6 +22,7 @@ request 手上沒有任何憑據，也必須繼續不需要。
        │
        ├── scripts/metadata.py —— 在建置任何東西之前檢查商店文案：語言資料夾、
        │   長度、連結，以及這個版本有沒有 release notes
+       ├── setup_ci —— 在 runner 上做一個暫時的 keychain；在 laptop 上什麼都不做
        │
        ├── 問 App Store Connect 現在握著哪些 build number，一個平台問一次
        ├── 取 max(commit 數, 它握著的最大值 + 1) —— 一個號碼，兩個平台共用
@@ -124,6 +125,38 @@ scripts/metadata.py --resolve           # ⋯⋯以及那些連結會不會回�
 截圖還沒到（[#30](https://github.com/cmj0121/fediqo/issues/30)）。等它們出現在
 `fastlane/screenshots/<platform>/`，這條 lane 不必被告知就會在同一趟裡把它們一起上傳。
 
+## 觸發它的那個 tag
+
+推一個 tag，就是全部。
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+[`.github/workflows/release.yml`](../.github/workflows/release.yml) 監看 `v*`，而它裡面的每一步不是
+`brew install` 就是 `make publish`。關於發布的事，那個檔案裡一件都沒寫：build 叫什麼、由哪張憑證簽、商店
+被告知什麼、以及任何時候都不送審，全都是 Fastfile 做的決定，而 laptop 用同樣的方式做同樣的決定。
+
+在上傳那一步失敗的發布，用同一個 tag 再跑一次——**Actions → Release → Run workflow**，在下拉選單裡挑那個
+tag。沒有人需要因為管線不能被問第二次，而發明一個 `v0.1.1`。
+
+runner 從它的 secret store 拿到的，正是 `.env` 交給 laptop 的那些：
+
+| secret                          | 與 laptop 上的差別                               |
+| ------------------------------- | ------------------------------------------------ |
+| `FEDIQO_TEAM_ID`                | 一樣                                             |
+| `FEDIQO_BUNDLE_ID`              | 一樣                                             |
+| `MATCH_GIT_URL`                 | HTTPS 形式——runner 沒有 ssh key 可以 clone       |
+| `MATCH_GIT_BASIC_AUTHORIZATION` | 這裡必要，laptop 上用不到                        |
+| `MATCH_PASSWORD`                | 這裡必要：沒有 keychain 幫忙記住它               |
+| `ASC_KEY_ID`                    | 這裡必要——Apple ID 那條路需要有人看著            |
+| `ASC_ISSUER_ID`                 | ⋯⋯它的 issuer                                    |
+| `ASC_KEY_P8_BASE64`             | ⋯⋯以及 `.p8` 本身，base64，所以它不是一個路徑    |
+
+publish lane 裡的 `setup_ci` 會做出 match 需要的暫時 keychain。不在 CI 上時它什麼都不做，這正是它可以在兩
+台機器上都是同一行的原因。
+
 ## 讓 build 抵達一個人
 
 上傳不會邀請任何人。build 只會透過一個「裡面有人」的 TestFlight 群組抵達一個人。
@@ -177,9 +210,9 @@ xcodebuild 按名字挑，而且不說它挑了哪張；這條 lane 改成按指
 
 ## 還不在這裡的東西
 
-截圖（[#30](https://github.com/cmj0121/fediqo/issues/30)），以及 tag 觸發的 workflow
-（[#32](https://github.com/cmj0121/fediqo/issues/32)）。在有指令能拍圖之前，兩個商店看到的是最後一次有人
-手動上傳的東西；而這條 lane 會完全不上傳圖，而不是上傳「零張」—— 後者會被 App Store Connect 讀成一個答案。
+截圖（[#30](https://github.com/cmj0121/fediqo/issues/30)）。在有指令能拍它們之前，兩個商店看到的是最後一
+次有人手動上傳的東西；而這條 lane 會完全不上傳圖，而不是上傳「零張」—— 後者會被 App Store Connect 讀成一
+個答案。
 
 一次發布抵達 TestFlight 就停下。那正是任何還沒被人看過的東西該停的地方。
 
