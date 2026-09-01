@@ -73,7 +73,7 @@ struct TimelineQueryTests {
         let shown = try await store.timeline(matching: TimelineQuery(source: .public, filters: [filter]))
         #expect(Set(shown.map(\.uri)) == Set(kept))
         // Whatever is left is still in the timeline's own order, newest first.
-        #expect(shown == shown.sorted { Post.isOlder($1, than: $0) })
+        #expect(shown == shown.sorted { TimelineOrder.isOlder($1, than: $0) })
     }
 
     @Test("Negating a rule keeps exactly what it did not")
