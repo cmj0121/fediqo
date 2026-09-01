@@ -193,31 +193,36 @@ extension XCUIApplication {
         return false
     }
 
-    /// The page `steps` along the rail, asked for the way a reader asks: ⌃Tab, which rotates
-    /// the four and wraps.
-    func rotatePage(by steps: Int = 1) {
-        for _ in 0..<steps { typeKey(XCUIKeyboardKey.tab, modifierFlags: .control) }
-    }
+    /// The rail's own buttons, by the symbol each is drawn with. Both are unique in the tree —
+    /// `archivebox` is not, because a post's own actions use it too, which is why Kept is not
+    /// the page these leave to.
+    private var statisticsRailItem: XCUIElement { descendants(matching: .button)["chart.bar.xaxis"] }
+    private var timelineRailItem: XCUIElement { descendants(matching: .button)["list.bullet.rectangle"] }
 
     /// Off the timeline, and back once its rows are gone.
+    ///
+    /// Pressed on the rail rather than typed as ⌃Tab, and this is why. Under XCUITest on iOS
+    /// the modifier does not reliably reach `onKeyPress`: on a run where it goes missing every
+    /// ⌃Tab arrives as a bare `Tab`, which is `nextTab` — so the reader stays on the Timeline
+    /// with a different timeline chosen and the ring let go, and the test reports "the timeline
+    /// is still on screen" as though the app had ignored the key. It had not. It answered the
+    /// key it was given, and one run in four was called a failure for it.
+    ///
+    /// Pressing again does not help: when the modifier goes missing it goes missing for the
+    /// whole run — six presses in a row, each one rotating the tabs and none the pages.
+    ///
+    /// The tests using this are about coming back to the post you were on, not about which key
+    /// leaves a page. What ⌃Tab means is `KeyCommandTests`' to say, where it is asked of
+    /// `KeyCommand.from` directly and no keyboard stands between the question and the answer.
     func leaveTheTimeline() -> Bool {
-        rotatePage()
+        statisticsRailItem.tap()
         return postRows.firstMatch.waitForNonExistence(timeout: DrivenApp.patience)
     }
 
-    /// Round the rail until the timeline is in front of the reader again.
-    ///
-    /// Counted presses were what this used to be — three of them, because there are four pages
-    /// — and counting is what made it fragile: a single press that the app never saw leaves the
-    /// reader on Settings, and the test that follows waits ten seconds for rows that were never
-    /// going to be there. Pressing until the destination arrives asks the question the test
-    /// actually has, which is whether the timeline came back and not how many keys it took.
-    func returnToTheTimeline(within presses: Int = 6) -> Bool {
-        for _ in 0..<presses {
-            rotatePage()
-            if postRows.firstMatch.waitForExistence(timeout: 2) { return true }
-        }
-        return false
+    /// Back to the timeline, and back once its rows are there.
+    func returnToTheTimeline() -> Bool {
+        timelineRailItem.tap()
+        return postRows.firstMatch.waitForExistence(timeout: DrivenApp.patience)
     }
 
     /// What the app is saying about the last thing it was asked to do, or nothing.
