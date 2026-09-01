@@ -229,7 +229,7 @@ struct StandingFailureTests {
         let skipped = await loader.load(servers: [server], query: .publicPosts, refresh: every30,
                                         now: t0.addingTimeInterval(10))
 
-        #expect(skipped.skipped == [server.endpoint])
+        #expect(skipped.unasked == [server.endpoint: .waiting])
         #expect(skipped.failures.isEmpty)
         #expect(skipped.failures(carrying: standing, of: [server]) == standing)
     }
@@ -247,7 +247,7 @@ struct StandingFailureTests {
         let answered = await loader.load(servers: [server], query: .publicPosts, refresh: every30,
                                          now: t0.addingTimeInterval(30))
 
-        #expect(answered.skipped.isEmpty)
+        #expect(answered.unasked.isEmpty)
         #expect(answered.failures(carrying: standing, of: [server]).isEmpty)
     }
 
