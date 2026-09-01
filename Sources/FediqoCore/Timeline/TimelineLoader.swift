@@ -136,6 +136,25 @@ public struct TimelineLoader: Sendable {
     /// the reader; larger would turn one changed setting into a burst.
     static let confirmationsPerPass = 8
 
+    /// How many rounds one reach for the bottom is worth.
+    ///
+    /// A server's first page is its newest — which the store already had and the reader has
+    /// already read — and the next is the one before that, on down to wherever they have got to.
+    /// One round and a shrug is "I reached the bottom and nothing happened", so a reach keeps
+    /// asking until something appears beneath them.
+    ///
+    /// Eight, the same handful `confirmationsPerPass` is and for its reason: a reach already
+    /// costs a request per server, and eight rounds of a handful of servers is a burst somebody
+    /// else's machine can wear. It does not promise to clear a deep store in one reach — a store
+    /// holding two thousand posts is fifty rounds down. What it promises is progress that never
+    /// unwinds: every round moves every cursor a page further down, so the cliff is eight pages
+    /// shorter after each reach and never grows back.
+    ///
+    /// It lives here, beside the budget it cites. It spent a while on an `@Observable` view
+    /// model pointing at this file to explain itself, which is the tell that it was in the wrong
+    /// layer: a constant that has to name another one to justify its value belongs in that one.
+    public static let roundsPerReach = 8
+
     /// With a `store`, what each server hands over is kept before it is merged; without one,
     /// nothing is remembered between loads — and nobody is signed in either, so a loader
     /// without a store reads every server as a stranger and never opens `secrets`.
@@ -352,6 +371,62 @@ public struct TimelineLoader: Sendable {
             return LocalStore.host(of: known.authorityURL)
         }
         return post.sourceURL.isEmpty ? nil : LocalStore.host(of: post.sourceURL)
+    }
+
+    /// One page on its way to the screen, and where it came from.
+    ///
+    /// The two are kept apart because a screen does two different things with them: a store's
+    /// failure is this machine's own and is drawn as itself, while a server's rides in a result
+    /// beside the posts that did arrive.
+    public enum Arrival: Sendable {
+        case fromTheStore(posts: [Post], failure: SourceFailure?)
+        case fromServers(TimelineResult)
+    }
+
+    /// Asked with each page as it arrives: how many of it landed below the reader.
+    ///
+    /// The rule for that belongs to the screen — it is the one holding the shown list, and the
+    /// promise that nothing already read moves or is replaced is a promise about that list. What
+    /// the reach needs is only the count, because that is what it steers by: a round that landed
+    /// something is a round the reader can see, and the journey stops there.
+    public typealias Landing = @Sendable (Arrival) async -> Int
+
+    /// One journey towards the bottom of a timeline: the store first, then the servers, round
+    /// after round until something lands below the reader — or until the budget, or until there
+    /// is nobody left to ask. What comes back is what the reconciler settled on the way.
+    ///
+    /// **The store answers first, because it can answer now and the reader is waiting.** The
+    /// servers are asked either way — that is the whole of what makes a post one of them has
+    /// stopped handing over noticeable — but where the store had the page they are asked behind
+    /// it rather than in front of it, and for one round rather than eight.
+    ///
+    /// Eight rounds are the answer to one thing only: the store having run out, which is the
+    /// cold-start cliff. A store that answered the page has already given the reader something,
+    /// and a store that would not answer has not run out — it had a bad moment, and paying a
+    /// burst at other people's servers for our own database's bad moment would be charging them
+    /// for it. So both of those ask exactly one round.
+    ///
+    /// Nothing here touches a screen, and nothing here is isolated to one: the whole of it is
+    /// testable without a main actor, which is what it was not while it lived on a view model.
+    public func reachOlder(than foot: Post, matching query: TimelineQuery, servers: [Server],
+                           landing: Landing) async -> Set<String> {
+        let page = await storedOlder(than: foot, matching: query)
+        _ = await landing(.fromTheStore(posts: page.posts, failure: page.failure))
+        let spent = page.posts.isEmpty && page.failure == nil
+
+        if !servers.isEmpty {
+            for _ in 0..<(spent ? Self.roundsPerReach : 1) {
+                let older = await loadOlder(servers: servers, query: query)
+                let landed = await landing(.fromServers(older))
+                // Nobody said anything at all — every server is spent, waiting or still out — so
+                // asking again this instant would ask the same nobody. That covers the end of
+                // the reading too: the round in which the last server runs out is a round in
+                // which it was the only one asked and it answered with an empty page.
+                if older.posts.isEmpty, older.failures.isEmpty { break }
+                if landed > 0 { break }
+            }
+        }
+        return await reconcile()
     }
 
     /// Every one of `servers` has said it has nothing older, so there is nothing left to reach

@@ -222,7 +222,7 @@ struct ReadingDownTests {
 
         await feed.loadOlder(servers: [server])
 
-        #expect(await client.asks == FeedModel.roundsPerReach)
+        #expect(await client.asks == TimelineLoader.roundsPerReach)
         #expect(names(feed) == ["floor"])
     }
 
