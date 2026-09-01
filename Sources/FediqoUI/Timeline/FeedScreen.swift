@@ -18,10 +18,6 @@ struct FeedScreen: View {
     /// button to do it in one move only exists while that is true — an arrow pointing at
     /// where you already are is a button that does nothing.
     @State private var scrolledAway = false
-    /// Whether the reader has been put back on the post they were on. One screen, one
-    /// restoring: the ring is remembered for as long as the app runs, and this is only the
-    /// once-per-arrival act of scrolling to it.
-    @State private var restored = false
     @State private var editing: TimelineEditor.Subject?
     /// Whether there is room to put a post's attachments beside its words. Measured from the
     /// screen's own width; 560 is the attachment column plus a gap plus enough left for the
@@ -49,7 +45,7 @@ struct FeedScreen: View {
     /// The nothing at the top of the list, so there is something to scroll back to. The
     /// first post cannot serve: it is replaced by every refresh, and the padding above it
     /// would be left off the top of the screen.
-    private static let top = "feed.top"
+    static let top = "feed.top"
 
 
     /// Whether a row is an answer, and whose — as much as a timeline can honestly say.
@@ -105,45 +101,11 @@ struct FeedScreen: View {
                         .transition(.opacity)
                 }
             }
-            // The ring is moved by a key, and a key can move it past the bottom of the
-            // screen — which is most of what holding `j` is for. Without an anchor the list
-            // brings it to the middle, so what you are reading has its own context above and
-            // below it rather than sitting against an edge with the next post already gone.
-            // Near either end there is not enough list to centre against and it settles for
-            // as close as it can get, which is what a reader at the top or bottom expects
-            // anyway.
-            .onChange(of: model.selection) { _, key in
-                guard let key else { return }
-                proxy.scrollTo(key, anchor: .center)
-            }
-            // And once on the way in, to the post the reader was already on.
-            //
-            // The ring itself was never lost: it lives on the feed, and the feeds outlive the
-            // screens that show them. What was lost was the place — `AppShell` gives this
-            // screen the timeline's own id, so coming back builds a new scroll view at the top
-            // of the list while the ring sits wherever the reader left it. Somebody who
-            // stepped away to look at something else and came back was being told two
-            // different places at once.
-            //
-            // Watched rather than done on arrival, because on arrival the answer is not ready:
-            // the ring names a post, and whether this list has that post is a question about a
-            // list a load may still be replacing. `selectedPost` is that question asked
-            // properly — it resolves through the same rules the rows are drawn from — so a
-            // ring on a post the filters now hide scrolls nowhere, and the reader simply
-            // starts at the top, which is where a list with no ring in it starts anyway.
-            //
-            // Once per screen, and then never again. After the first one this is the reader's
-            // own list, and every move in it belongs to the change above.
-            .onChange(of: model.selectedPost?.mergeKey, initial: true) { _, key in
-                guard !restored, let key else { return }
-                restored = true
-                proxy.scrollTo(key, anchor: .center)
-            }
-            // Back to the top, however it was asked for — the key or the button — and with
-            // no animation on the way: a reader a thousand posts down asked to be at the
-            // top, not to watch the thousand go past.
-            .onChange(of: model.topRequests) { _, _ in
-                proxy.scrollTo(Self.top, anchor: .top)
+            // Where the reader is taken, watched somewhere that is not this body. `onChange`
+            // reads its value while the body is being built, so watching the ring here made
+            // every press of `j` a rebuild of the whole screen (#71).
+            .background {
+                ScrollDirector(place: model.place, proxy: proxy)
             }
         }
         // Keyed to the reading as well as to the servers: editing a timeline's rules is a
@@ -289,20 +251,8 @@ struct FeedScreen: View {
                     // scrolling to that id, and there is no second identity to keep in step
                     // with the first.
                     ForEach(posts) { post in
-                        PostRow(post: post,
-                                selected: post.mergeKey == model.selection,
-                                // Only the row the reader is on hears `m`; every other deck
-                                // stays where its own reader left it.
-                                turns: post.mergeKey == model.selection ? app.mediaTurns : 0,
-                                plays: post.mergeKey == model.selection ? app.mediaPlays : 0,
-                                covers: post.mergeKey == model.selection ? app.mediaCovers : 0,
-                                revealed: app.preferences.showSensitive,
-                                answering: Self.answering(post, among: posts),
-                                // A click on the words says which post the reader means even
-                                // where it opens nothing — selectable text takes the press
-                                // before the row behind it ever sees it.
-                                focus: { model.select(post) },
-                                open: { app.expand(post) })
+                        RingedRow(post: post, place: model.place,
+                                  answering: Self.answering(post, among: posts))
                     }
                     // What this device already knows about the page: what each account did to
                     // these posts, and which of them are being kept here. One read for the
@@ -497,6 +447,110 @@ struct HeaderMenuChrome: ViewModifier {
 /// One foot, and it says one thing. A reach still out owns it — a bottom that merely sits there
 /// is indistinguishable from a finished one — and the end is what is left when nothing is
 /// coming.
+/// One row, and whether the ring is on it.
+///
+/// A thin view between the list and the row, and the whole of what it is for is where the ring
+/// is read (#71). While `FeedScreen.body` asked "is this the selected one?" for every row, a
+/// press of `j` — twenty a second with the key held — invalidated the screen: the heading, the
+/// tabs, the foot and every row, to move a ring between two of them.
+///
+/// Here the ring is read one row at a time, so a press rebuilds these — a comparison each — and
+/// then only the rows whose answer actually changed.
+///
+/// The three media counters come with it, and for the same reason: they are only ever read
+/// through the ring, so `m` on one row used to redraw the screen as surely as `j` did.
+private struct RingedRow: View {
+    let post: Post
+    let place: FeedPlace
+    /// What this row says about the post being an answer. The list's fact, not the ring's, so
+    /// it is worked out once where the list is and handed in.
+    let answering: Answering
+
+    @Environment(AppState.self) private var app
+
+    var body: some View {
+        let ringed = post.mergeKey == place.selection
+        PostRow(post: post,
+                selected: ringed,
+                // Only the row the reader is on hears `m`; every other deck stays where its
+                // own reader left it.
+                turns: ringed ? app.mediaTurns : 0,
+                plays: ringed ? app.mediaPlays : 0,
+                covers: ringed ? app.mediaCovers : 0,
+                revealed: app.preferences.showSensitive,
+                answering: answering,
+                // A click on the words says which post the reader means even where it opens
+                // nothing — selectable text takes the press before the row behind it ever
+                // sees it.
+                focus: { place.select(post) },
+                open: { app.expand(post) })
+    }
+}
+
+/// Where the reader is taken, and nothing drawn for it.
+///
+/// The three moves the list makes on its own: to the ring when a key moves it, to the ring once
+/// on the way in, and to the top when it is asked for. Each is an `onChange`, and an `onChange`
+/// reads its value as the body around it is built — so while these were written on the screen's
+/// own body, the screen depended on the ring and every press rebuilt all of it (#71).
+///
+/// Nothing is drawn here. It is a view because that is what it takes to have a body of one's
+/// own, which is the whole point: what these watch changes twenty times a second under a held
+/// key, and what is rebuilt for it should be this and not a timeline.
+private struct ScrollDirector: View {
+    let place: FeedPlace
+    let proxy: ScrollViewProxy
+
+    /// Whether the reader has been put back on the post they were on. One screen, one
+    /// restoring: the ring is remembered for as long as the app runs, and this is only the
+    /// once-per-arrival act of scrolling to it.
+    @State private var restored = false
+
+    var body: some View {
+        Color.clear
+            // The ring is moved by a key, and a key can move it past the bottom of the
+            // screen — which is most of what holding `j` is for. Without an anchor the list
+            // brings it to the middle, so what you are reading has its own context above and
+            // below it rather than sitting against an edge with the next post already gone.
+            // Near either end there is not enough list to centre against and it settles for
+            // as close as it can get, which is what a reader at the top or bottom expects
+            // anyway.
+            .onChange(of: place.selection) { _, key in
+                guard let key else { return }
+                proxy.scrollTo(key, anchor: .center)
+            }
+            // And once on the way in, to the post the reader was already on.
+            //
+            // The ring itself was never lost: it lives on the feed, and the feeds outlive the
+            // screens that show them. What was lost was the place — `AppShell` gives the
+            // screen the timeline's own id, so coming back builds a new scroll view at the top
+            // of the list while the ring sits wherever the reader left it. Somebody who
+            // stepped away to look at something else and came back was being told two
+            // different places at once.
+            //
+            // Watched rather than done on arrival, because on arrival the answer is not ready:
+            // the ring names a post, and whether this list has that post is a question about a
+            // list a load may still be replacing. `selectedPost` is that question asked
+            // properly — it resolves through the same rules the rows are drawn from — so a
+            // ring on a post the filters now hide scrolls nowhere, and the reader simply
+            // starts at the top, which is where a list with no ring in it starts anyway.
+            //
+            // Once per screen, and then never again. After the first one this is the reader's
+            // own list, and every move in it belongs to the change above.
+            .onChange(of: place.selectedPost?.mergeKey, initial: true) { _, key in
+                guard !restored, let key else { return }
+                restored = true
+                proxy.scrollTo(key, anchor: .center)
+            }
+            // Back to the top, however it was asked for — the key or the button — and with
+            // no animation on the way: a reader a thousand posts down asked to be at the
+            // top, not to watch the thousand go past.
+            .onChange(of: place.topRequests) { _, _ in
+                proxy.scrollTo(FeedScreen.top, anchor: .top)
+            }
+    }
+}
+
 /// The page's heading, with the feed's own spinner in it.
 ///
 /// A thin thing to be a view, and the reason is the same as `FeedFoot`'s (#70): `loading` is
