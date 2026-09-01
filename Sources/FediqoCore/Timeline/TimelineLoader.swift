@@ -30,25 +30,43 @@ public struct TimelineResult: Sendable {
     /// two ride alongside posts that did arrive, so a caller reading a server's fate reads
     /// `posts` for whether anything came and `failures` for whether anything needs attention.
     public let failures: [String: SourceFailure]
-    /// The servers this load did not ask at all, by `Server.endpoint`. A refresh leaves out
-    /// whoever is still inside a wait; a reach for the bottom leaves out those and whoever
-    /// has run out of history or has a page still in flight. They are not failing now and
-    /// they are not answering either, so they are in neither `posts` nor `failures` — and a
-    /// caller that draws a server's fate needs to be told the difference between a server
-    /// that had nothing to say and one that was never asked.
-    public let skipped: Set<String>
+    /// Why a server may go unasked. Three facts, and the whole point of the type is that they
+    /// stay three: a server being left alone for a moment, one that has nothing left to give,
+    /// and one that is already being waited for are not the same news about it.
+    public enum Unasked: Sendable, Equatable {
+        /// Inside its wait after a round that gave nothing. It is asked again when the wait
+        /// is up, and nothing about it has gone wrong.
+        case waiting
+        /// It has said it has nothing older. There is no page left to ask it for.
+        case spent
+        /// A page is already out and has not come back. Asking now would be asking twice.
+        case inFlight
+    }
+
+    /// The servers this load did not ask at all, by `Server.endpoint`, and why each one.
+    ///
+    /// A refresh leaves out whoever is still inside a wait; a reach for the bottom leaves out
+    /// those and whoever has run out of history or has a page still in flight. They are not
+    /// failing now and they are not answering either, so they are in neither `posts` nor
+    /// `failures` — and a caller that draws a server's fate needs to be told the difference
+    /// between a server that had nothing to say and one that was never asked.
+    ///
+    /// **The reason is carried and not flattened.** It used to be a bare set, which meant a
+    /// caller wanting the one fact it actually draws on — this server is spent — had to ask
+    /// the paging actor a second question to get back something this load already knew.
+    public let unasked: [String: Unasked]
     /// What arrived and is not in `posts`, and what kept each of them off the screen.
     ///
     /// #6's last promise. Only ever this app's own doing: a post a server never handed over is
     /// not here to say anything about, and that half of the question is answered by `failures`
-    /// and `skipped` above. Empty on a timeline with no rules, which is most of them.
+    /// and `unasked` above. Empty on a timeline with no rules, which is most of them.
     public let hidden: [Hidden]
 
-    public init(posts: [Post], failures: [String: SourceFailure], skipped: Set<String> = [],
-                hidden: [Hidden] = []) {
+    public init(posts: [Post], failures: [String: SourceFailure],
+                unasked: [String: Unasked] = [:], hidden: [Hidden] = []) {
         self.posts = posts
         self.failures = failures
-        self.skipped = skipped
+        self.unasked = unasked
         self.hidden = hidden
     }
 
@@ -65,7 +83,7 @@ public struct TimelineResult: Sendable {
     public func failures(carrying known: [String: SourceFailure],
                          of servers: [Server]) -> [String: SourceFailure] {
         let ours = Set(servers.map(\.endpoint))
-        var standing = known.filter { ours.contains($0.key) && skipped.contains($0.key) }
+        var standing = known.filter { ours.contains($0.key) && unasked[$0.key] != nil }
         for (endpoint, failure) in self.failures where ours.contains(endpoint) {
             standing[endpoint] = failure
         }
@@ -219,9 +237,13 @@ public struct TimelineLoader: Sendable {
                      refresh: Refresh = .manual, now: Date = Date()) async -> TimelineResult {
         // A server still inside its wait is not asked, and is not reported either: it is not
         // failing now, it is being left alone. What it said last time is not lost with it —
-        // it comes back named in `skipped`, so a screen can keep showing the reason rather
+        // it comes back named in `unasked`, so a screen can keep showing the reason rather
         // than blinking it off and on as the server enters and leaves its wait.
-        let (asked, skipped) = await askable(servers, refresh: refresh, now: now)
+        //
+        // A wait is the only thing that keeps anybody out of a refresh — a refresh asks for the
+        // newest page, which a spent server has as much as anybody — so every name here has the
+        // one reason, and it is written down rather than left to be worked out.
+        let (asked, waiting) = await askable(servers, refresh: refresh, now: now)
         // No cursors: a refresh asks everyone for their newest page, which is what it is.
         let round = await fanOut(asked.map { ($0, nil) }, query: query)
         await record(round.failures, from: round.reached, refresh: refresh, now: now)
@@ -237,7 +259,8 @@ public struct TimelineLoader: Sendable {
         // Sifted rather than filtered: what the rules turned away is carried alongside what
         // they let through, so a reader can ask why a post they expected is not here.
         let sifted = query.sifted(posts)
-        return TimelineResult(posts: sifted.admitted, failures: round.failures, skipped: skipped,
+        return TimelineResult(posts: sifted.admitted, failures: round.failures,
+                              unasked: waiting.reduce(into: [:]) { $0[$1] = .waiting },
                               hidden: sifted.hidden)
     }
 
@@ -252,11 +275,12 @@ public struct TimelineLoader: Sendable {
     /// Three kinds of server go unasked, and they are three different facts. One that has said
     /// it has nothing older has reached its end; one whose page is still out is being waited
     /// for, however hard the reader scrolls; one inside its wait is being left alone. The rest
-    /// carry on without them — and all three come back in `skipped`, because whichever of the
-    /// three it was, this round asked them nothing and so has nothing to say about them.
+    /// carry on without them — and all three come back in `unasked`, each under its own name,
+    /// because whichever of the three it was is exactly what a caller wants to know.
     ///
-    /// Whether that was the last page anyone had is `reachedTheEnd(of:)`'s to say, because it
-    /// is a standing fact about the servers rather than something this page brought back.
+    /// Whether *every* server has run out is still `reachedTheEnd(of:)`'s to say. That is a
+    /// standing fact about the whole chosen list, including the servers this round did ask, so
+    /// it is not something one page can carry back however honestly it names what it skipped.
     ///
     /// `every` is how long a server that gives nothing here is left alone before it is asked
     /// for another page — the wait doubles and is forgiven exactly as it is on a refresh.
@@ -265,7 +289,7 @@ public struct TimelineLoader: Sendable {
         // Unlike a refresh, nobody here is saying "ask anyway". Reaching the bottom is the
         // scroll's doing, and a scroll is as tireless as a clock, so a server inside its wait
         // is left alone whoever's finger started this — which is what `.automatic` means.
-        let (notWaiting, _) = await askable(servers, refresh: .automatic(every: every), now: now)
+        let (notWaiting, waiting) = await askable(servers, refresh: .automatic(every: every), now: now)
         // Cold start — the store holds posts but nobody has asked a server for a page yet, so
         // every cursor here is nil and the first page each server gives is its newest. That
         // page sits above the foot the reader has read down to, not below it, and two things
@@ -288,16 +312,22 @@ public struct TimelineLoader: Sendable {
         // nobody reads any more goes, so one dropped and added back inside a run is asked
         // again rather than passed over as spent (decision 9).
         await paging.forget(everyoneBut: servers)
+        // Spent before waiting where a server is both: a wait is a moment and running out is
+        // not, so the lasting fact is the one worth saying.
+        let held = await paging.whyNot(servers)
         let claimed = await paging.claim(notWaiting)
-        // Everyone this round did not ask, whichever of the three reasons kept them out of it —
-        // which is why it is taken from the chosen list against what was claimed rather than
-        // from the wait alone. A spent server and one whose page is still out went unasked as
-        // surely as one inside its wait, and a round that leaves them out of `skipped` as well
-        // as out of `failures` is a round claiming it judged them and found nothing wrong.
-        // `failures(carrying:of:)` would then strike their standing reason off the screen —
-        // and `.tokenRejected` reaches exactly here, since it counts as having arrived, starts
-        // no wait, and so is the one reason a server carries all the way to running out.
-        let unasked = Set(servers.map(\.endpoint)).subtracting(claimed.map(\.server.endpoint))
+        // Everyone this round did not ask, each under the reason that kept them out of it. A
+        // spent server and one whose page is still out went unasked as surely as one inside its
+        // wait, and a round that leaves them out of `unasked` as well as out of `failures` is a
+        // round claiming it judged them and found nothing wrong. `failures(carrying:of:)` would
+        // then strike their standing reason off the screen — and `.tokenRejected` reaches
+        // exactly here, since it counts as having arrived, starts no wait, and so is the one
+        // reason a server carries all the way to running out.
+        //
+        // Asked of the paging before the claim and not after it, because a claim marks a server
+        // in flight: afterwards every server this round *did* ask would name itself as one it
+        // did not. What the round then does to them belongs to the round after this one.
+        let unasked = held.merging(waiting.reduce(into: [:]) { $0[$1] = .waiting }) { held, _ in held }
         // Every claim is given back here and nowhere else. Silence says nothing about where a
         // server had got to, so its cursor stands and it is not counted as having run out;
         // anything that arrived — posts, or posts the store would not keep — moves the cursor
@@ -313,7 +343,7 @@ public struct TimelineLoader: Sendable {
                      refresh: .automatic(every: every), now: now)
 
         let sifted = query.sifted(round.collected.flatMap { $0 }.merged())
-        return TimelineResult(posts: sifted.admitted, failures: round.failures, skipped: unasked,
+        return TimelineResult(posts: sifted.admitted, failures: round.failures, unasked: unasked,
                               hidden: sifted.hidden)
     }
 
@@ -798,7 +828,7 @@ public struct TimelineLoader: Sendable {
     /// where the clock did — which is also everyone, almost always, so the healthy load
     /// does no work, and allocates nothing, to find that out.
     private func askable(_ servers: [Server], refresh: Refresh,
-                         now: Date) async -> (asked: [Server], skipped: Set<String>) {
+                         now: Date) async -> (asked: [Server], waiting: Set<String>) {
         guard case .automatic = refresh else { return (servers, []) }
         let blocked = await backoff.blocked(at: now)
         guard !blocked.isEmpty else { return (servers, []) }

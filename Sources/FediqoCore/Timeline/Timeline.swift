@@ -148,7 +148,7 @@ public struct TimelineQuery: Sendable, Hashable {
 /// It is only ever the reader's own doing. A post a server never handed over is not here to say
 /// anything about, and that half of the sentence is answered somewhere else entirely: a server
 /// that gave nothing is in `TimelineResult.failures`, and one that was never asked is in
-/// `skipped`. What can be attributed post by post is what this app itself took out.
+/// `unasked`. What can be attributed post by post is what this app itself took out.
 public struct Hidden: Sendable, Hashable {
     /// Why a post that arrived is not on the screen.
     public enum Because: Sendable, Hashable {
