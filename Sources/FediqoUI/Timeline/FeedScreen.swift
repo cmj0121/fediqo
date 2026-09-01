@@ -51,8 +51,6 @@ struct FeedScreen: View {
     /// would be left off the top of the screen.
     private static let top = "feed.top"
 
-    /// The line under the last post: a hairline that fades out, ending in a dot.
-    private static let stopLine: CGFloat = 34
 
     /// Whether a row is an answer, and whose — as much as a timeline can honestly say.
     ///
@@ -176,10 +174,10 @@ struct FeedScreen: View {
         // The reader's own sentence, and the template's where they have not written one. A
         // page with tabs always has this line — two words of name are not an explanation —
         // and a timeline made in a hurry should not leave it blank.
-        PageHeader(titleKey: app.railItem.titleKey,
+        FeedHeader(paging: model.paging,
+                   titleKey: app.railItem.titleKey,
                    subtitle: timeline.displaySummary.isEmpty ? t("timeline.noDescription")
-                                                             : timeline.displaySummary,
-                   loading: model.loading) {
+                                                             : timeline.displaySummary) {
             TimelineChips(editing: $editing)
         } controls: {
             controls
@@ -316,11 +314,7 @@ struct FeedScreen: View {
                     // What the reader's own rules kept off this page, said where the page
                     // ends — which is where somebody notices a post they expected is missing.
                     whatIsMissing
-                    if model.bottom.isReading {
-                        readingOn
-                    } else if model.bottom.isTheEnd, let oldest = posts.last {
-                        theEnd(readBackTo: oldest.createdAt)
-                    }
+                    FeedFoot(paging: model.paging, oldest: posts.last?.createdAt)
                 }
                 .padding(Space.gap)
             }
@@ -331,11 +325,8 @@ struct FeedScreen: View {
             // it happened has nothing left to take down when it comes back, and one that is
             // rebuilt mid-moment shows what is still true rather than saying it again.
             .overlay(alignment: .bottom) {
-                if model.bottom == .arrived {
-                    EndToast().padding(.bottom, Space.band)
-                }
+                EndAnnouncement(paging: model.paging, fading: fading)
             }
-            .animation(fading, value: model.bottom)
             // Half a screen, rather than a number of points: what counts as far enough to
             // want a way back depends on how much of the list you can see at once.
             .onScrollGeometryChange(for: Bool.self) { geometry in
@@ -356,75 +347,6 @@ struct FeedScreen: View {
                 Task { await model.loadOlder(servers: app.servers) }
             }
         }
-    }
-
-    /// That the reach for the bottom is still working. A cold start can take several rounds
-    /// before a page lands below the reader, and a bottom that merely sits there is
-    /// indistinguishable from one that is finished — which is a different sentence, and not
-    /// this one's to say.
-    private var readingOn: some View {
-        HStack(spacing: Space.step) {
-            ProgressView().controlSize(.small)
-            Text(t("timeline.older")).fediqoFont(TypeScale.minor).foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, Space.gap)
-    }
-
-    /// Where the timeline stops, and how far back that is.
-    ///
-    /// Every post in this app is a card, so the end of the list is the one place where the
-    /// *shape* of a timeline can be shown rather than described: a hairline comes down off the
-    /// last card, fades as it goes, and stops at a small filled dot. The line stops. No card, no
-    /// icon and no third colour — a marker that read as a post would be a post that never
-    /// arrived.
-    ///
-    /// The sentence says the reach rather than the absence. How far back a reader has got is
-    /// the information; "no more posts" is the templated answer and tells them nothing they
-    /// wanted. It is also the cue that does not depend on seeing a five-point dot, which is why
-    /// the two lines are one thing to a screen reader and the drawing is nothing to it at all.
-    private func theEnd(readBackTo oldest: Date) -> some View {
-        VStack(spacing: Space.gap) {
-            theLineStopping.accessibilityHidden(true)
-            VStack(spacing: Space.tight) {
-                Text(t("timeline.end.reached", reached(oldest))).fediqoFont(TypeScale.small)
-                Text(t("timeline.end.note")).fediqoFont(TypeScale.minor).foregroundStyle(.secondary)
-            }
-            .multilineTextAlignment(.center)
-            .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity)
-        // Nothing above it. The line has to leave the last card rather than start somewhere
-        // below it — a gap between the two is a line that came from nowhere.
-        .padding(.bottom, Space.band)
-        .accessibilityElement(children: .combine)
-    }
-
-    /// The hairline down from the last card, fading, and the dot it stops at.
-    ///
-    /// The dot is drawn in `Palette.focus` rather than `Palette.accent` raw: they are the one
-    /// colour, and `focus` is that colour at the weight a five-point mark needs to hold a white
-    /// page — the reason it exists at all, and the same choice the ring already makes.
-    private var theLineStopping: some View {
-        VStack(spacing: 0) {
-            Rectangle()
-                .fill(LinearGradient(colors: [Palette.hairline(colorScheme),
-                                              Palette.hairline(colorScheme).opacity(0)],
-                                     startPoint: .top, endPoint: .bottom))
-                .frame(width: Size.hairline, height: Self.stopLine)
-            Circle()
-                .fill(Palette.focus(colorScheme))
-                .frame(width: Size.dot, height: Size.dot)
-        }
-    }
-
-    /// The oldest post on the screen, as a date the reader's language would write.
-    ///
-    /// Spelled out rather than abbreviated, because this one is inside a sentence and not in a
-    /// column of metrics. The locale is the app's own — a reader who chose zh-TW gets zh-TW
-    /// dates whatever the machine is set to, which is what `fediqoChrome` carries it down for.
-    private func reached(_ when: Date) -> String {
-        when.formatted(Date.FormatStyle(date: .long, time: .omitted).locale(locale))
     }
 
     /// How many posts the reader's own rules kept off this page, and what each of them was.
@@ -565,6 +487,152 @@ struct HeaderMenuChrome: ViewModifier {
 /// It says the short form of what the marker underneath it says, so the words a reader is
 /// given for this are one set of words rather than two. Hidden from a screen reader for the
 /// same reason: the marker carries the sentence, and it will still be there in a moment.
+/// The foot of the list, and the one thing it says.
+///
+/// Its own view, and that is the point of it (#70). While this lived inside `FeedScreen.body`,
+/// the body read `bottom` — which changes several times a second through a cold start — so a
+/// spinner appearing rebuilt the header, the tabs and every row of the list. Here the only view
+/// that depends on the foot is the foot.
+///
+/// One foot, and it says one thing. A reach still out owns it — a bottom that merely sits there
+/// is indistinguishable from a finished one — and the end is what is left when nothing is
+/// coming.
+/// The page's heading, with the feed's own spinner in it.
+///
+/// A thin thing to be a view, and the reason is the same as `FeedFoot`'s (#70): `loading` is
+/// read here rather than in `FeedScreen.body`, so the spinner beside the title coming and going
+/// redraws the heading and not the list under it. The tabs and the controls are handed in
+/// already built, so they are not rebuilt for it either.
+private struct FeedHeader<Tabs: View, Controls: View>: View {
+    let paging: FeedPaging
+    let titleKey: String
+    let subtitle: String
+    @ViewBuilder var tabs: Tabs
+    @ViewBuilder var controls: Controls
+
+    var body: some View {
+        PageHeader(titleKey: titleKey, subtitle: subtitle, loading: paging.loading) {
+            tabs
+        } controls: {
+            controls
+        }
+    }
+}
+
+private struct FeedFoot: View {
+    let paging: FeedPaging
+    /// The oldest post on the screen, or nothing where there is no list to have an end. Handed
+    /// in rather than read, because it is the list's fact and the list is somebody else's.
+    let oldest: Date?
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.locale) private var locale
+
+    /// The line under the last post: a hairline that fades out, ending in a dot.
+    private static let stopLine: CGFloat = 34
+
+    @ViewBuilder
+    var body: some View {
+        if paging.bottom.isReading {
+            readingOn
+        } else if paging.bottom.isTheEnd, let oldest {
+            theEnd(readBackTo: oldest)
+        }
+    }
+
+    /// That the reach for the bottom is still working. A cold start can take several rounds
+    /// before a page lands below the reader, and a bottom that merely sits there is
+    /// indistinguishable from one that is finished — which is a different sentence, and not
+    /// this one's to say.
+    private var readingOn: some View {
+        HStack(spacing: Space.step) {
+            ProgressView().controlSize(.small)
+            Text(t("timeline.older")).fediqoFont(TypeScale.minor).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, Space.gap)
+    }
+
+    /// Where the timeline stops, and how far back that is.
+    ///
+    /// Every post in this app is a card, so the end of the list is the one place where the
+    /// *shape* of a timeline can be shown rather than described: a hairline comes down off the
+    /// last card, fades as it goes, and stops at a small filled dot. The line stops. No card, no
+    /// icon and no third colour — a marker that read as a post would be a post that never
+    /// arrived.
+    ///
+    /// The sentence says the reach rather than the absence. How far back a reader has got is
+    /// the information; "no more posts" is the templated answer and tells them nothing they
+    /// wanted. It is also the cue that does not depend on seeing a five-point dot, which is why
+    /// the two lines are one thing to a screen reader and the drawing is nothing to it at all.
+    private func theEnd(readBackTo oldest: Date) -> some View {
+        VStack(spacing: Space.gap) {
+            theLineStopping.accessibilityHidden(true)
+            VStack(spacing: Space.tight) {
+                Text(t("timeline.end.reached", reached(oldest))).fediqoFont(TypeScale.small)
+                Text(t("timeline.end.note")).fediqoFont(TypeScale.minor).foregroundStyle(.secondary)
+            }
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity)
+        // Nothing above it. The line has to leave the last card rather than start somewhere
+        // below it — a gap between the two is a line that came from nowhere.
+        .padding(.bottom, Space.band)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// The hairline down from the last card, fading, and the dot it stops at.
+    ///
+    /// The dot is drawn in `Palette.focus` rather than `Palette.accent` raw: they are the one
+    /// colour, and `focus` is that colour at the weight a five-point mark needs to hold a white
+    /// page — the reason it exists at all, and the same choice the ring already makes.
+    private var theLineStopping: some View {
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(LinearGradient(colors: [Palette.hairline(colorScheme),
+                                              Palette.hairline(colorScheme).opacity(0)],
+                                     startPoint: .top, endPoint: .bottom))
+                .frame(width: Size.hairline, height: Self.stopLine)
+            Circle()
+                .fill(Palette.focus(colorScheme))
+                .frame(width: Size.dot, height: Size.dot)
+        }
+    }
+
+    /// The oldest post on the screen, as a date the reader's language would write.
+    ///
+    /// Spelled out rather than abbreviated, because this one is inside a sentence and not in a
+    /// column of metrics. The locale is the app's own — a reader who chose zh-TW gets zh-TW
+    /// dates whatever the machine is set to, which is what `fediqoChrome` carries it down for.
+    private func reached(_ when: Date) -> String {
+        when.formatted(Date.FormatStyle(date: .long, time: .omitted).locale(locale))
+    }
+}
+
+/// The moment at the end of the reading, said once.
+///
+/// Read and not held. The moment belongs to the feed, which starts it on the crossing and ends
+/// it when it is over — so a screen that was on another tab while it happened has nothing left
+/// to take down when it comes back, and one that is rebuilt mid-moment shows what is still true
+/// rather than saying it again.
+///
+/// Its own view for the same reason `FeedFoot` is: the toast is over the foot of the feed and
+/// the list is not what changes when it comes and goes.
+private struct EndAnnouncement: View {
+    let paging: FeedPaging
+    let fading: Animation?
+
+    var body: some View {
+        ZStack {
+            if paging.bottom == .arrived {
+                EndToast().padding(.bottom, Space.band)
+            }
+        }
+        .animation(fading, value: paging.bottom)
+    }
+}
+
 private struct EndToast: View {
     @Environment(\.colorScheme) private var colorScheme
 
