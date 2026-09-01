@@ -22,9 +22,6 @@ struct FeedScreen: View {
     /// restoring: the ring is remembered for as long as the app runs, and this is only the
     /// once-per-arrival act of scrolling to it.
     @State private var restored = false
-    /// Whether the toast is up. The feed decides *that* the end was reached; how long a passing
-    /// message stays and how it goes are the screen's, the way the scrolling already is.
-    @State private var announcing = false
     @State private var editing: TimelineEditor.Subject?
     /// Whether there is room to put a post's attachments beside its words. Measured from the
     /// screen's own width; 560 is the attachment column plus a gap plus enough left for the
@@ -53,10 +50,6 @@ struct FeedScreen: View {
     /// first post cannot serve: it is replaced by every refresh, and the padding above it
     /// would be left off the top of the screen.
     private static let top = "feed.top"
-
-    /// How long the toast stands. Long enough to read four words, short enough that a reader
-    /// who was looking at the marker instead is not covered up for long.
-    private static let announcementLasts = Duration.milliseconds(2500)
 
     /// The line under the last post: a hairline that fades out, ending in a dot.
     private static let stopLine: CGFloat = 34
@@ -323,9 +316,9 @@ struct FeedScreen: View {
                     // What the reader's own rules kept off this page, said where the page
                     // ends — which is where somebody notices a post they expected is missing.
                     whatIsMissing
-                    if model.loadingOlder {
+                    if model.bottom.isReading {
                         readingOn
-                    } else if model.atTheEnd, let oldest = posts.last {
+                    } else if model.bottom.isTheEnd, let oldest = posts.last {
                         theEnd(readBackTo: oldest.createdAt)
                     }
                 }
@@ -333,30 +326,16 @@ struct FeedScreen: View {
             }
             // Over the foot of the feed rather than in it: the marker is the place and this is
             // the moment, and a moment that pushed the list down would be a place too.
+            // Read and not held. The moment belongs to the feed, which starts it on the
+            // crossing and ends it when it is over — so a screen that was on another tab while
+            // it happened has nothing left to take down when it comes back, and one that is
+            // rebuilt mid-moment shows what is still true rather than saying it again.
             .overlay(alignment: .bottom) {
-                if announcing {
+                if model.bottom == .arrived {
                     EndToast().padding(.bottom, Space.band)
                 }
             }
-            // Raised by the feed on the crossing and taken back down here — a reader who comes
-            // back to the foot of the list later finds the marker, and is not told twice.
-            // `initial` because the crossing can happen while nobody is looking: a reach
-            // finishing after the reader has stepped to another tab leaves the flag raised,
-            // and without this the returning screen never takes it down — so it would stay
-            // raised, never change again, and that feed would never say this once.
-            .onChange(of: model.announcingTheEnd, initial: true) { _, arrived in
-                guard arrived else { return }
-                model.saidTheEnd()
-                withAnimation(fading) { announcing = true }
-            }
-            // Structured, so leaving the screen takes the toast with it rather than leaving a
-            // sleep to wake up in a feed nobody is looking at.
-            .task(id: announcing) {
-                guard announcing else { return }
-                try? await Task.sleep(for: Self.announcementLasts)
-                guard !Task.isCancelled else { return }
-                withAnimation(fading) { announcing = false }
-            }
+            .animation(fading, value: model.bottom)
             // Half a screen, rather than a number of points: what counts as far enough to
             // want a way back depends on how much of the list you can see at once.
             .onScrollGeometryChange(for: Bool.self) { geometry in

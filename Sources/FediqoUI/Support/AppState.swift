@@ -895,7 +895,7 @@ public final class AppState {
         // Held down, `j` repeats twenty times a second against a ring that is still at the
         // end, and the reach already out would turn every one of those into nothing. Asking
         // the feed here rather than a task later is what keeps the repeat free.
-        if feed.awaitingOlder, !feed.loadingOlder {
+        if feed.awaitingOlder, !feed.bottom.isReading {
             Task { [servers] in await feed.loadOlder(servers: servers) }
         }
         return moved

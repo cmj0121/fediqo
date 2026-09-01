@@ -35,21 +35,53 @@ final class FeedModel {
     /// moment the server answers one that did, or stops being one of ours.
     private(set) var failures: [String: SourceFailure] = [:]
     private(set) var loading = false
-    /// Whether a reach for the bottom is out — the whole of it, the derived round included.
-    /// The screen shows it at the foot of the list, because a cold start can take several
-    /// rounds before anything lands below the reader and a bottom that merely sits there is
-    /// indistinguishable from a finished one.
+    /// The three things the foot of a list can be, and the moment between two of them.
     ///
-    /// It is also the one guard on the trigger. A scroll is as tireless as a clock: without
-    /// this, crossing the threshold once a frame would ask once a frame. `ServerPaging` keeps
-    /// each server from being asked twice; this keeps the reach itself from stacking, which is
-    /// a page from the store as much as one from the network.
+    /// `arrived` and `ended` are the same place; they differ only in whether it has been said
+    /// yet. Keeping them apart in one value is what makes "announce once" a step the value
+    /// takes rather than a second flag standing beside it for somebody else to lower.
+    enum Bottom: Sendable, Equatable {
+        /// Nothing is out and the reading is not over. The foot of the list says nothing.
+        case idle
+        /// A reach is out — the whole of it, the derived round included.
+        ///
+        /// The screen shows it at the foot of the list, because a cold start can take several
+        /// rounds before anything lands below the reader and a bottom that merely sits there
+        /// is indistinguishable from a finished one.
+        ///
+        /// `fromTheEnd` is where the reach left from, and is what stops the reader being told
+        /// twice: a reach that goes out from the end and comes back to find the same end is
+        /// the reader coming back to the foot of the list, not a second arrival at it.
+        case reading(fromTheEnd: Bool)
+        /// The reading ended on the reach that has just come back, and is being said.
+        case arrived
+        /// The reading is over and has been said. The marker stays; the moment is spent.
+        case ended
+
+        /// A reach is out, wherever it left from.
+        var isReading: Bool { if case .reading = self { true } else { false } }
+        /// Every server has said it has nothing older, and nothing is coming.
+        ///
+        /// The foot of the list is the end of the reading and not a pause on the way to it,
+        /// which is why `reading` is not this however long it has been out: a reach that is
+        /// still out owns the foot, and the end is what is left when nothing is coming.
+        var isTheEnd: Bool { self == .arrived || self == .ended }
+    }
+
+    /// Where the reading has got to at the foot of the list.
     ///
-    /// Because it covers the round as well, it also bounds the `reconcile` pass each round
-    /// ends with. A reader scrolling fast through a well-stocked store would otherwise finish
-    /// a reach every few hundred milliseconds, and each of those spending a pass is a burst of
-    /// single-post requests at other people's servers.
-    private(set) var loadingOlder = false
+    /// One value, because the foot of a list says one thing at a time, and two members that
+    /// can disagree are two things it might say at once.
+    ///
+    /// It is also the one guard on the reach trigger. A scroll is as tireless as a clock:
+    /// without this, crossing the threshold once a frame would ask once a frame. `ServerPaging`
+    /// keeps each server from being asked twice; this keeps the reach itself from stacking,
+    /// which is a page from the store as much as one from the network. Because `reading`
+    /// covers the round as well, it also bounds the `reconcile` pass each round ends with — a
+    /// reader scrolling fast through a well-stocked store would otherwise finish a reach every
+    /// few hundred milliseconds, and each of those spending a pass is a burst of single-post
+    /// requests at other people's servers.
+    private(set) var bottom: Bottom = .idle
     /// A reach that arrived while one was already out, kept rather than dropped.
     ///
     /// The trigger fires on a change and not on a state: `onScrollGeometryChange` says
@@ -61,28 +93,20 @@ final class FeedModel {
     ///
     /// A flag and not a count. Ten crossings while a page is out are one ask, not ten.
     @ObservationIgnored private var reachWaiting = false
-    /// Every server has said it has nothing older, as of the last reach or load that asked.
+    /// How long `arrived` lasts before it settles into `ended`.
     ///
-    /// Read from `TimelineLoader.reachedTheEnd(of:)` rather than guessed from an empty page: a
-    /// round that brings nothing back is a round in which everybody was spent, waiting, or
-    /// still out, and only the first of those three is an end. It is a standing fact about the
-    /// servers, so it is asked afresh each time rather than latched — a server added, or one
-    /// that has more to give after all, takes it down again.
-    private(set) var reachedTheEnd = false
-    /// The foot of the list is the end of the reading, and not a pause on the way to it.
+    /// The moment has a length and the length is the model's, because the moment is. A screen
+    /// that owned it would have to take it down again, and a screen that had stepped away
+    /// while it happened would come back to a moment nobody had ended.
     ///
-    /// The two are one question for a screen and must never be two answers on it: a reach that
-    /// is still out owns the foot of the list — it is what "still reading" is drawn for — and
-    /// the end is only the end once nothing is coming.
-    var atTheEnd: Bool { reachedTheEnd && !loadingOlder }
-    /// The reading has just this moment arrived at its end, and nobody has said so yet.
+    /// A `var` so that a test can shorten it to nothing and await `settling`, rather than
+    /// wait out a toast in real seconds.
+    @ObservationIgnored var announcementLasts = Duration.milliseconds(2500)
+    /// The step from `arrived` to `ended`, in flight.
     ///
-    /// The marker is the place and this is the moment, which is why it is a flag somebody
-    /// takes down rather than a fact anybody may read twice. It goes up on the crossing into
-    /// `reachedTheEnd` and comes down as soon as it has been said, so a reader who scrolls
-    /// away and comes back to the foot of the list finds the marker there and is not told
-    /// again something they were told the first time.
-    private(set) var announcingTheEnd = false
+    /// Kept so that a second arrival can cancel the first one's clock: two moments overlapping
+    /// would have the older one end the newer one early.
+    @ObservationIgnored private(set) var settling: Task<Void, Never>?
     /// Why the stored timeline could not be read for the page under the reader, where that is
     /// what happened, and nothing where the last reach read one fine.
     ///
@@ -227,9 +251,8 @@ final class FeedModel {
     /// that has to be here rather than in the scroll view.
     func loadOlder(servers: [Server]) async {
         guard timeline.source.isThreadOfTime else { return }
-        guard !loadingOlder else { reachWaiting = true; return }
-        loadingOlder = true
-        defer { loadingOlder = false }
+        guard !bottom.isReading else { reachWaiting = true; return }
+        bottom = .reading(fromTheEnd: bottom.isTheEnd)
         // Cleared before the reach rather than after it, so a crossing that arrives while this
         // one is running is kept — clearing afterwards would throw away exactly the ask this
         // exists to catch. One more pass at most per reach that was actually asked for.
@@ -243,21 +266,41 @@ final class FeedModel {
         await noteTheEnd(of: servers, announcing: true)
     }
 
-    /// Whether the reading is over, asked of the loader — and, where this reach is what brought
-    /// it about, the moment raised for somebody to say.
+    /// Where the reach leaves the foot of the list: not reading any more, and at the end or
+    /// not — and, where this reach is what brought the end about, in the moment of saying so.
     ///
-    /// The crossing is what announces, never the state: a reader already at the end who reaches
-    /// again finds the same answer and is told nothing, which is the whole difference between
-    /// the marker and the toast.
+    /// Read from `TimelineLoader.reachedTheEnd(of:)` rather than guessed from an empty page: a
+    /// round that brings nothing back is a round in which everybody was spent, waiting, or
+    /// still out, and only the first of those three is an end. It is a standing fact about the
+    /// servers, so it is asked afresh each time rather than latched — a server added, or one
+    /// that has more to give after all, takes the end away again.
+    ///
+    /// The crossing is what announces, never the state: a reader already at the end who
+    /// reaches again finds the same answer and is told nothing, which is the whole difference
+    /// between the marker and the toast.
     private func noteTheEnd(of servers: [Server], announcing: Bool = false) async {
-        let reached = await loader.reachedTheEnd(of: servers)
-        if announcing, reached, !reachedTheEnd { announcingTheEnd = true }
-        reachedTheEnd = reached
+        guard await loader.reachedTheEnd(of: servers) else { return settle(into: .idle) }
+        let already = switch bottom {
+        case .reading(let fromTheEnd): fromTheEnd
+        case .arrived, .ended: true
+        case .idle: false
+        }
+        guard announcing, !already else { return settle(into: .ended) }
+        settle(into: .arrived)
+        settling = Task { [announcementLasts] in
+            try? await Task.sleep(for: announcementLasts)
+            guard !Task.isCancelled else { return }
+            // Only this arrival's own moment ends here. Anything else that has happened since
+            // is somebody else's value to hold.
+            if self.bottom == .arrived { self.bottom = .ended }
+        }
     }
 
-    /// Said. The moment is over; the place stays.
-    func saidTheEnd() {
-        announcingTheEnd = false
+    /// Puts the foot of the list somewhere, and stops whatever moment was running.
+    private func settle(into place: Bottom) {
+        settling?.cancel()
+        settling = nil
+        bottom = place
     }
 
     /// One reach, handed to the loader.
