@@ -34,9 +34,12 @@ struct BaseSourceTests {
     @Test("Trending is the only source that hands its own order over, and home the only one with an owner")
     func orderAndOwnership() {
         #expect(BaseSource.allCases.filter(\.ranked) == [.trend])
-        #expect(BaseSource.allCases.filter(\.needsAccount) == [.home])
+        // An inbox belongs to somebody as surely as a home timeline does: there is no
+        // anonymous reading of what was aimed at a person.
+        #expect(BaseSource.allCases.filter(\.needsAccount) == [.home, .notice])
         // A ranked list is a snapshot rather than a stretch of time, so nothing pages it and
-        // no page from it is evidence that a post has gone.
-        #expect(BaseSource.allCases.filter { !$0.isThreadOfTime } == [.trend, .thread])
+        // no page from it is evidence that a post has gone. Nor is an inbox: a mention missing
+        // from it says nothing about whether the post is still there.
+        #expect(BaseSource.allCases.filter { !$0.isThreadOfTime } == [.trend, .thread, .notice])
     }
 }

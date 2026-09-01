@@ -803,6 +803,11 @@ public struct TimelineLoader: Sendable {
             // post's own, asked of the one server whose word on that post is final, when a
             // reader opens it. `thread(around:)` is that path; this one never leads there.
             case .thread: []
+            // Nor is an inbox. It belongs to one account on one server, it is read as that
+            // account and never as a stranger, and what comes back is events rather than a
+            // stretch of time. `NoticeLoader` is that path; no template offers this source, so
+            // a timeline cannot be built on it and this line is never reached.
+            case .notice: []
             }
         } catch {
             return ([], SourceFailure.of(error))

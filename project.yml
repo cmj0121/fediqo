@@ -231,6 +231,18 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: dev.mini-poc.fediqo
             CFBundleURLSchemes: [fediqo]
+        # #9: there is no Fediqo server holding a push subscription and there will not be one,
+        # so what reaches a phone in a pocket is whatever the system chooses to wake the app
+        # for. `fetch` is the whole of what that needs -- no remote notification, nothing
+        # registered with anybody, no third party told that this device would like to hear
+        # about you. The app asks iOS to be woken and iOS decides when, which is why the
+        # notifications screen says out loud that they can be late.
+        UIBackgroundModes: [fetch]
+        # The identifier the app registers a refresh task under. iOS refuses to schedule one
+        # that is not listed here, and it refuses quietly at submit time rather than loudly at
+        # build time -- so this line and `AppState.noticeRefresh` are one string in two files
+        # and a test holds them identical.
+        BGTaskSchedulerPermittedIdentifiers: [dev.mini-poc.fediqo.notices]
         # HTTPS and nothing else, which is the exemption every app gets for free. Saying so
         # here is what keeps App Store Connect from stopping to ask a person, once per build,
         # a question whose answer never changes.

@@ -237,7 +237,11 @@ public struct MastodonClient: SourceClient {
 
     /// The one door to the network here. A token becomes the bearer header and nothing else
     /// changes: the same URL, the same endpoint, asked for as somebody rather than as anybody.
-    private func get(host: String, path: String, query: [URLQueryItem], token: String? = nil) async throws -> Data {
+    ///
+    /// `internal` rather than `private`, for the reason `session` and `ledger` are: the reads
+    /// that cannot be made as a stranger live in a file of their own — see
+    /// MastodonNotices.swift — and an extension in another file cannot reach a private one.
+    func get(host: String, path: String, query: [URLQueryItem], token: String? = nil) async throws -> Data {
         var components = URLComponents()
         components.scheme = "https"
         components.host = host

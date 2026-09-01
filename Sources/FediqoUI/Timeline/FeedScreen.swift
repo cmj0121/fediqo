@@ -119,7 +119,7 @@ struct FeedScreen: View {
                 .fediqoChrome(app)
         }
         .sheet(isPresented: $app.showingNotifications) {
-            NotificationsSheet { app.showingNotifications = false }
+            NoticesSheet(model: app.notices) { app.showingNotifications = false }
                 .fediqoChrome(app)
         }
         .sheet(item: $editing) { subject in
@@ -710,31 +710,5 @@ private struct EndToast: View {
                             radius: 10, y: 4)
             }
             .accessibilityHidden(true)
-    }
-}
-
-/// Notifications live inside the timeline. There is nothing to show until #9 lands, and the
-/// reason there will never be a push server is worth saying on the screen that would want one.
-struct NotificationsSheet: View {
-    /// The least a sheet of notifications can be given and still be a list rather than a slot.
-    private static let narrowest = CGSize(width: 320, height: 180)
-
-    let onClose: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Space.pad) {
-            HStack {
-                Text(t("timeline.notifications")).fediqoFont(TypeScale.section, weight: .semibold)
-                Spacer()
-                Button(t("common.close"), action: onClose).buttonStyle(.plain).fediqoFont(TypeScale.small).foregroundStyle(.secondary)
-            }
-            Text(t("timeline.notifications.empty"))
-                .fediqoFont(TypeScale.small)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer()
-        }
-        .padding(Space.room)
-        .frame(minWidth: Self.narrowest.width, minHeight: Self.narrowest.height)
     }
 }

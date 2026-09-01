@@ -67,12 +67,23 @@ final class SignInModel {
     /// server signs each out concurrently — and the one that started last has read the
     /// truest answer, so an older read that comes back afterwards is dropped rather than
     /// allowed to reinstate an account that has since gone.
+    /// Told when the set of signed-in accounts has actually moved — not on every refresh, of
+    /// which there are many, and not when the answer came back the same.
+    ///
+    /// One direction only, like `FeedModel.onTokenRejected`: this model knows who is signed in
+    /// and nothing about what anybody does with that. What listens today is the inbox, which
+    /// holds one connection per signed-in account and has to make them again from what is true
+    /// now — there is no editing a socket.
+    var onAccountsChanged: (() async -> Void)?
+
     func refresh() async {
         generation += 1
         let mine = generation
         let latest = (try? await store.signedInByServer()) ?? [:]
         guard mine == generation else { return }
-        if latest != accounts { accounts = latest }
+        guard latest != accounts else { return }
+        accounts = latest
+        await onAccountsChanged?()
     }
 
     func signIn(to server: Server, authenticate: @escaping @Sendable (URL, String) async throws -> URL) async {

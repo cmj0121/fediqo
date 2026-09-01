@@ -158,6 +158,35 @@ public protocol SourceClient: Sendable {
     /// number for is `notItsPost`, thrown for the same reason.
     func stillHas(_ post: Post, host: String, token: String?) async throws -> Bool
 
+    // MARK: - Notices
+
+    /// The events one server says were aimed at the account signed in to it.
+    ///
+    /// `token` is not optional, for `home`'s reason: there is no such thing as somebody
+    /// else's inbox read as a stranger, and a server with no account on it is not asked at
+    /// all rather than quietly handed something public instead.
+    ///
+    /// `after` is the newest event this device already knows about, in the server's own
+    /// numbering, and what comes back is what happened since. `nil` asks for the newest page,
+    /// which is what a device that has never read this inbox wants. It is the server's own id
+    /// and not a `Notice`, unlike `timeline`'s cursor: an inbox is not a stretch of time
+    /// anybody pages through, so there is no reader's place in it to name.
+    ///
+    /// `owner` is the actor URI of the account being read as. The client knows the token and
+    /// not whose it is; the caller knows both, and a notice has to say which inbox it landed
+    /// in — a reader signed in to three servers has three, and they are not one.
+    func notices(host: String, owner: String, after: String?, limit: Int,
+                 token: String) async throws -> [Notice]
+
+    /// The same events as they happen, over one connection held open for as long as the
+    /// sequence is iterated.
+    ///
+    /// Not polling, which is the whole point of #9: nothing is asked for on a timer while the
+    /// app is in front. The sequence ends when the connection does, and what to do about that
+    /// — wait, back off, try again — belongs to the caller rather than here, so that a client
+    /// stays a way of speaking to one server and never becomes a policy about them.
+    func noticeStream(host: String, owner: String, token: String) -> AsyncThrowingStream<Notice, any Error>
+
     // MARK: - Writing
     //
     // Declared here rather than only in the extension below, and that is not a style choice.
@@ -405,6 +434,20 @@ public struct Located: Sendable, Hashable {
 }
 
 public extension SourceClient {
+    /// The events one server says were aimed at the account signed in to it. Default: this
+    /// build cannot read an inbox over that protocol.
+    func notices(host: String, owner: String, after: String?, limit: Int,
+                 token: String) async throws -> [Notice] {
+        throw SourceFailure.unsupported(.mastodon)
+    }
+
+    /// Those events as they happen. Default: a sequence that ends at once saying why, rather
+    /// than one that stays open forever handing nothing over — a caller waiting on silence
+    /// cannot tell "nothing has happened" from "this will never work".
+    func noticeStream(host: String, owner: String, token: String) -> AsyncThrowingStream<Notice, any Error> {
+        AsyncThrowingStream { $0.finish(throwing: SourceFailure.unsupported(.mastodon)) }
+    }
+
     /// The post on the acting server: its id there, whether that server had to go and get it,
     /// and what it says this account has already done to it.
     ///

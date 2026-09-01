@@ -45,12 +45,13 @@ struct LocalStoreTests {
                            "server_trends", "tag_buckets", "posts_fts", "owned_accounts",
                            "feeds", "post_origins", "post_mentions", "timelines", "filter_kinds",
                            "timeline_filters", "media_kinds", "post_media",
-                           "post_marks", "mutes", "post_emojis", "visibilities", "publications"])
+                           "post_marks", "mutes", "post_emojis", "visibilities", "publications",
+                           "notice_kinds", "notices", "notice_marks"])
         #expect(triggers == ["posts_fts_insert", "posts_fts_delete", "posts_fts_update"])
         #expect(protocols.map(\.0) == ["atproto", "mastodon", "nostr"])
         #expect(protocols.allSatisfy { $0.1 > 0 })
-        #expect(migrations == ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011"])
-        #expect(feeds.map(\.0) == ["home", "public", "thread", "trend"])
+        #expect(migrations == ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"])
+        #expect(feeds.map(\.0) == ["home", "notice", "public", "thread", "trend"])
         // Order is the base source's: only trending is handed over already ranked.
         #expect(feeds.filter { $0.1 }.map(\.0) == ["trend"])
         #expect(seeded)
@@ -90,7 +91,7 @@ struct LocalStoreTests {
 
         #expect(again.0 == first)
         #expect(again.1 == "wal")
-        #expect(again.2 == 11)
+        #expect(again.2 == 12)
     }
 
     @Test("A 001 store upgrades in place: owned_accounts appears, what was there stays")
@@ -128,7 +129,7 @@ struct LocalStoreTests {
         }
         #expect(hasTable)
         #expect(posts == 1)
-        #expect(migrations == ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011"])
+        #expect(migrations == ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"])
     }
 
     @Test("owned_accounts records a fact about an account we have; a ghost is refused")

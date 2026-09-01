@@ -286,3 +286,63 @@ extension MastodonDTO.Status {
         )
     }
 }
+
+extension MastodonDTO {
+    /// One event the server says was aimed at the account asking.
+    ///
+    /// `status` is absent for a follow and present for everything else, which is the same
+    /// shape `Notice` has — a follow is about a person, and there is nothing to quote.
+    struct Notification: Decodable, Sendable {
+        let id: String
+        let type: String
+        let createdAt: Date
+        let account: Account
+        let status: Status?
+
+        /// The notice this is, or nothing where it is a kind this build cannot draw.
+        ///
+        /// Mastodon sends more than the six `NoticeKind` has. `follow_request` is a decision
+        /// to be made rather than an event that happened; `admin.sign_up` and `admin.report`
+        /// belong to a moderation console this app is not; `severed_relationships` and
+        /// `moderation_warning` are a server talking about itself; `status` is somebody the
+        /// reader asked to be told about posting, which is a subscription this build has no
+        /// way to make and so can never receive. Each is dropped here rather than stored as a
+        /// kind with no row to draw it — a screen that cannot say what happened should show
+        /// nothing, never a blank line.
+        ///
+        /// `arrivedAt` is passed in rather than taken here, because it is a fact about this
+        /// device and not about the payload: a catch-up read hands it the moment the page
+        /// landed, and every notice in that page shares it.
+        func asNotice(from host: String, owner: String, arrivedAt: Date) -> Notice? {
+            guard let kind = Self.kind(of: type) else { return nil }
+            return Notice(
+                remoteId: id,
+                serverURL: "https://\(host)",
+                kind: kind,
+                ownerId: owner,
+                actorId: account.authorId(on: host),
+                actorName: account.name,
+                actorHandle: account.handle(on: host),
+                actorAvatarURL: account.avatar.flatMap(URL.init(string:)),
+                post: status?.asPost(from: host),
+                noticedAt: createdAt,
+                arrivedAt: arrivedAt
+            )
+        }
+
+        /// Mastodon's word for the event, as one of ours. `reblog` is the only one spelled
+        /// differently on the two sides: this app says boost everywhere a reader can see, so
+        /// it says boost here too, and the translation happens once, at the edge.
+        static func kind(of type: String) -> NoticeKind? {
+            switch type {
+            case "mention": .mention
+            case "favourite": .favourite
+            case "reblog": .boost
+            case "follow": .follow
+            case "poll": .poll
+            case "update": .update
+            default: nil
+            }
+        }
+    }
+}

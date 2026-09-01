@@ -784,6 +784,142 @@
         }
       }
     },
+    "notices.kind.boost": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "boosted your post"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "轉推了你的貼文"
+          }
+        }
+      }
+    },
+    "notices.kind.favourite": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "favourited your post"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "收藏了你的貼文"
+          }
+        }
+      }
+    },
+    "notices.kind.follow": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "followed you"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "追蹤了你"
+          }
+        }
+      }
+    },
+    "notices.kind.mention": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "wrote to you"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "寫給你"
+          }
+        }
+      }
+    },
+    "notices.kind.poll": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "a poll you were in ended"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你參與的投票結束了"
+          }
+        }
+      }
+    },
+    "notices.kind.update": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "edited a post you saw"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "編輯了你看過的貼文"
+          }
+        }
+      }
+    },
+    "notices.late": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ late"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "晚了 %@"
+          }
+        }
+      }
+    },
+    "notices.why": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Live while Fediqo is open. In the background, they arrive when the system wakes the app, which can be minutes. There is no Fediqo server to push them, and there will not be one."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fediqo 開著的時候是即時的。在背景時，它們會在系統喚醒 app 時才到，可能是幾分鐘。我們沒有伺服器可以推播，以後也不會有。"
+          }
+        }
+      }
+    },
     "onboarding.protocol.activityPub": {
       "extractionState": "manual",
       "localizations": {

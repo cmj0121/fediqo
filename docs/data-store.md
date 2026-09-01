@@ -66,11 +66,11 @@ screen, not a crash**, and the screen has to be readable in the right language.
 ```text
 network   what a server handed over. A refresh writes; only an authority edits.
           protocols, feeds, filter_kinds, servers, accounts, posts, tags, post_tags,
-          post_origins, post_mentions, post_emojis, server_trends
+          post_origins, post_mentions, post_emojis, server_trends, notice_kinds, notices
 
 local     what you decided, and can withdraw. Only you.
           servers.selected_at, servers.position, tags.followed_at, tags.muted_at, owned_accounts,
-          timelines, timeline_filters
+          timelines, timeline_filters, notices.seen_at, notice_marks
 
 record    what was counted here, and kept after the rows it counted are purged.
           tag_buckets
@@ -162,8 +162,8 @@ post that is not the post itself is written beside it, by migration 004:
 | `post_origins`  | `source_url` handed `merge_key` over through base source `feed`, to `author_id` where it has an owner |
 | `post_mentions` | post `merge_key` names the account at `mention_uri`, spelled `handle` by the post's own server |
 
-A base source is what a server can be asked for: `public`, `home` or `trend` today, rows in `feeds` rather
-than cases in an enum, because a server's hashtag timeline and a server's lists are both base sources
+A base source is what a server can be asked for: `public`, `home`, `trend` or `notice` today, rows in `feeds`
+rather than cases in an enum, because a server's hashtag timeline and a server's lists are both base sources
 waiting to happen. Seeing the same post arrive again through another one **adds a row**; being told again
 through the same one moves `last_seen_at` and nothing else.
 
@@ -228,6 +228,36 @@ to read.
 The store answers first. `LocalStore.thread(around:)` walks what is already here — up by address
 through `in_reply_to_uri`, down a generation at a time — and both walks are bounded, because two
 posts answering each other is something a server can write.
+
+## An inbox is a fifth way a post arrives
+
+A notification carries the status it is about, and a status is a post like any other: it is written through
+the one path every post goes through, with `notice` as the base source it arrived by. So a mention read in
+the inbox and the same post read in a timeline are one row in `posts` — the inbox did not make a second copy
+of it, it only said that somebody aimed it at you.
+
+`notices` is a different kind of thing from `posts`, and the difference is worth saying. Two servers carrying
+one post is **one** row, because it is one post. Two servers telling you about it is **two** notices, because
+they are two events on two machines aimed at two accounts you own. Nothing merges them, and nothing should:
+collapsing them would throw away which inbox was written to, which is the one thing a reader signed in to
+three servers needs to know.
+
+| table           | a row says                                                                        |
+| --------------- | --------------------------------------------------------------------------------- |
+| `notices`       | server `server_url` says `actor_id` did `kind` to `owner_id`, about `post_key` where there is one |
+| `notice_marks`  | this device has read `server_url`'s inbox for `owner_id` as far as `remote_id`     |
+
+Three times, and they are three different questions. `noticed_at` is when the server says it happened, and
+is what the list is ordered by. `arrived_at` is when this device learned of it — a live arrival and a
+background wake differ here and nowhere else, which is what lets a screen say **how late** a notice was
+rather than guess. `seen_at` is when the reader looked, and is ours: it is local, it is never sent anywhere,
+and it is the only column of the three that is not a fact about somebody else's server.
+
+An event is written once. `remote_id` is unique on the server that issued it and nowhere else, so the pair
+`(server_url, remote_id)` is the identity — two servers numbering their own events from one is the ordinary
+case, not a collision. Being told the same thing twice, which every reconnect guarantees, writes nothing
+rather than moving `arrived_at`: when this device first heard is a fact about the first time, and there is no
+second first time.
 
 ## A timeline is a filter, not a list
 

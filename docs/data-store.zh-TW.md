@@ -61,11 +61,11 @@ Migration 遵守同一條規則：只增不減。只有 `CREATE`、`ADD COLUMN`�
 ```text
 network   伺服器交過來的。刷新寫入；只有權威方改得動內容。
           protocols、feeds、filter_kinds、servers、accounts、posts、tags、post_tags、
-          post_origins、post_mentions、post_emojis、server_trends
+          post_origins、post_mentions、post_emojis、server_trends、notice_kinds、notices
 
 local     你決定的，可以撤回。只有你動得了。
           servers.selected_at、servers.position、tags.followed_at、tags.muted_at、owned_accounts、
-          timelines、timeline_filters
+          timelines、timeline_filters、notices.seen_at、notice_marks
 
 record    在這裡數出來的，而且被數的列清掉之後它還留著。
           tag_buckets
@@ -154,7 +154,7 @@ token 放在 Keychain，以 `author_id` 為鍵；這一列記的只有事實本�
 | `post_origins`  | 伺服器 `source_url` 透過基底來源 `feed` 交出了貼文 `merge_key`；來源有主人時記在 `author_id`；期間從 `first_seen_at` 到 `last_seen_at` |
 | `post_mentions` | 貼文 `merge_key` 提到了 `mention_uri` 這個帳號，`handle` 是貼文自己的伺服器怎麼拼它 |
 
-基底來源就是「能跟伺服器要的那個東西」：今天是 `public`、`home`、`trend`，它們是 `feeds` 的列而不是 enum
+基底來源就是「能跟伺服器要的那個東西」：今天是 `public`、`home`、`trend`、`notice`，它們是 `feeds` 的列而不是 enum
 的 case，因為伺服器的 hashtag 時間軸與清單時間軸遲早也會是基底來源。同一則貼文再從另一個來源抵達會**多一
 列**；從同一個來源再被告知一次，只會推進 `last_seen_at`，其他什麼都不動。
 
@@ -206,6 +206,31 @@ NULL，這跟 `0` 和 `''` 是不同的事實：畫面只能遮它真的被要�
 
 儲存層先回答。`LocalStore.thread(around:)` 走本機已經有的東西——沿 `in_reply_to_uri` 往上、一代一代往下
 ——而且兩邊都有上限，因為「兩則貼文互相回覆」是伺服器寫得出來的東西。
+
+## 收件匣是貼文抵達的第五種方式
+
+一則通知會帶著它所講的那則貼文，而貼文就是貼文：它走每一則貼文都走的那條路寫進來，抵達的基底來源是
+`notice`。所以在收件匣裡讀到的提及，和在時間軸裡讀到的同一則貼文，是 `posts` 裡的同一列——收件匣沒有多做一
+份副本，它只是說了「有人把這個對著你」。
+
+`notices` 和 `posts` 是不同種類的東西，而這個差別值得講清楚。兩台伺服器帶著同一則貼文，是**一**列，因為它
+就是一則貼文。兩台伺服器分別告訴你這件事，是**兩**則通知，因為那是兩台機器上的兩個事件，對著你擁有的兩個帳
+號。沒有任何東西會合併它們，也不該合併：合併會丟掉「是哪個收件匣被寫進去」，而那正是一個在三台伺服器都登入
+的讀者唯一需要知道的事。
+
+| 表             | 一列在說                                                                     |
+| -------------- | ---------------------------------------------------------------------------- |
+| `notices`      | 伺服器 `server_url` 說 `actor_id` 對 `owner_id` 做了 `kind`，關於 `post_key`（若有） |
+| `notice_marks` | 這台裝置把 `server_url` 上 `owner_id` 的收件匣讀到了 `remote_id`              |
+
+三個時間，是三個不同的問題。`noticed_at` 是伺服器說它發生的時候，清單依它排序。`arrived_at` 是這台裝置知道
+它的時候——即時抵達與背景喚醒的差別只在這一欄，而這正是畫面能說出一則通知**晚了多久**、而不是用猜的原因。
+`seen_at` 是讀者看過的時候，是我們自己的：它是本機的、永遠不會送到任何地方，也是這三欄裡唯一一個不是關於別
+人伺服器的事實。
+
+一個事件只寫一次。`remote_id` 只在發出它的那台伺服器上唯一，所以 `(server_url, remote_id)` 這一對才是身分
+——兩台伺服器各自從 1 開始編號自己的事件是常態，不是碰撞。同一件事被告知第二次（每次重連都保證會發生）不寫
+任何東西，而不是去動 `arrived_at`：這台裝置第一次聽到是關於第一次的事實，而沒有第二個第一次。
 
 ## 時間軸是一個篩選，不是一份清單
 

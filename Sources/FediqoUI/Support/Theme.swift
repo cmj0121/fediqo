@@ -436,6 +436,22 @@ extension SocialProtocol {
     }
 }
 
+/// What happened, as a face. S1 says an action is a glyph; a notice is not an action, but a
+/// list of them is scanned the same way — the eye finds the boosts among the mentions by their
+/// shape long before it reads a word of any row.
+extension NoticeKind {
+    var symbolName: String {
+        switch self {
+        case .mention: "at"
+        case .favourite: "star"
+        case .boost: "arrow.2.squarepath"
+        case .follow: "person.badge.plus"
+        case .poll: "chart.bar"
+        case .update: "pencil"
+        }
+    }
+}
+
 /// Where a suggestion list came from, and how to say so. The picker renders whatever it is
 /// handed rather than branching on which directory answered.
 extension DirectoryOrigin {

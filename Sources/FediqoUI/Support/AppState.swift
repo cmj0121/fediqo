@@ -1,6 +1,9 @@
 import Observation
 import SwiftUI
 import FediqoCore
+#if os(iOS)
+import BackgroundTasks
+#endif
 #if os(macOS)
 import AppKit
 #endif
@@ -85,6 +88,10 @@ struct LaunchOptions {
     /// their template's name, so `trend` names one without anybody having to look it up.
     var timeline: String?
     var composing = false
+    /// Whether to open with the inbox up. The composer's own variable's twin: both open a
+    /// sheet over the timeline, and both exist so that a screen which is a sheet can be looked
+    /// at — by a screenshot, by a driven test — without anybody scripting a press.
+    var showingNotices = false
     /// Whether the landing screen should sit still instead of handing over on its own.
     var holdsLanding = false
     /// Read an invented world instead of the network — see `Fixture`. What a screenshot is
@@ -121,6 +128,7 @@ struct LaunchOptions {
             options.railItem = environment["FEDIQO_RAIL"].flatMap(RailItem.init(rawValue:))
         }
         options.composing = environment["FEDIQO_COMPOSE"] == "1"
+        options.showingNotices = environment["FEDIQO_NOTICES"] == "1"
         options.fixture = environment["FEDIQO_FIXTURE"] == "1"
         return options
         #else
@@ -183,7 +191,11 @@ public final class AppState {
     /// same reason `composing` does: a menu item and a key have to be able to ask for them
     /// from outside the screen that draws them. The drawing stays where it was.
     var addingSource = false
-    var showingNotifications = false
+    var showingNotifications: Bool
+
+    /// The inbox, and the connections that keep it filled. Nil where there is no store — the
+    /// fixture without one, and any build that has none.
+    let notices: NoticeModel?
     /// The conversations being read, oldest first, empty while the reader is in the list.
     ///
     /// A stack rather than one, because a conversation is a place a reader walks *into*.
@@ -373,6 +385,12 @@ public final class AppState {
         self.secrets = secrets
         self.tokens = tokens
         self.registry = registry
+        // The inbox needs all three, and there is no inbox at all without a store to keep it
+        // in: a notification held only in memory is one a relaunch forgets, and a reader who
+        // has to go and find their own mentions on somebody else's website has not been
+        // notified of anything.
+        self.notices = (store.flatMap { store in tokens.map { (store, $0) } })
+            .map { NoticeModel(store: $0.0, tokens: $0.1, registry: registry) }
         // What a fresh install has before the store has answered — and, without a store, what
         // it has for good. The names are words in the reader's language, so they are made here
         // rather than in Core, which has none.
@@ -382,6 +400,7 @@ public final class AppState {
         self.railItem = launch.railItem ?? .timeline
         self.currentTimeline = launch.timeline ?? BaseSource.public.rawValue
         self.composing = launch.composing
+        self.showingNotifications = launch.showingNotices
         self.holdsLanding = launch.holdsLanding
         self.isFixture = launch.fixture
         L10n.use(preferences.language)
@@ -478,6 +497,12 @@ public final class AppState {
     /// It is the root view that calls this, not `init`, so that building an `AppState` —
     /// in a preview, in a test — is not itself a round of network requests.
     func onLaunch() async {
+        // Whoever signs in or out from here on changes which inboxes there are, and an inbox
+        // is a connection rather than a query: they are made again from what is true now.
+        signIn?.onAccountsChanged = { [weak self] in
+            guard let self else { return }
+            await self.notices?.restart(on: self.servers)
+        }
         // Who is signed in, first of all: the timelines are drawn from the first frame, and one
         // of them is readable only where there is an account. Rows only — no Keychain, no
         // network — so this costs a statement, and without it the Home tab would sit greyed out
@@ -487,6 +512,50 @@ public final class AppState {
         await openTimelines()
         guard let signIn else { return }
         await signIn.checkTokens(on: servers)
+        // Last, and only once the credentials have been looked at: a socket opened with a
+        // token the launch check is about to find refused is a socket that will be closed
+        // again a second later.
+        await notices?.start(on: servers)
+    }
+
+    /// What iOS knows the inbox's background wake by.
+    ///
+    /// The same string is in `project.yml` under `BGTaskSchedulerPermittedIdentifiers`, and
+    /// iOS refuses to schedule a task that is not listed there — quietly, at run time, with a
+    /// message nobody reads. A test holds the two identical rather than trusting anybody to
+    /// remember.
+    public static let noticeRefresh = "dev.mini-poc.fediqo.notices"
+
+    /// Asks iOS to wake the app when it next feels like it.
+    ///
+    /// **When it next feels like it**, and no sooner: `earliestBeginDate` is a floor, not an
+    /// appointment. The system decides from how often the reader opens the app, what the
+    /// battery is doing and whether the phone is on a charger, and there is nothing here that
+    /// can argue with any of it. That is the whole reason the notifications screen says out
+    /// loud that a notice can be late — an app that quietly failed to explain this would look
+    /// broken every time the answer was "not for a while".
+    ///
+    /// Nothing at all on macOS: an app that is open is already listening, and one that is
+    /// closed is not running for the system to wake.
+    public static func scheduleNoticeRefresh() {
+        #if os(iOS)
+        let request = BGAppRefreshTaskRequest(identifier: noticeRefresh)
+        // Fifteen minutes is the shortest floor worth asking for. Asking for one minute does
+        // not get one minute; it gets the same answer with a worse reputation, because the
+        // system remembers an app that asks for more than it is given.
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60)
+        do { try BGTaskScheduler.shared.submit(request) } catch {
+            LocalStore.log.info("no background wake scheduled: \(String(describing: error), privacy: .public)")
+        }
+        #endif
+    }
+
+    /// Everything that happened while this device was asleep, read once. What the system's
+    /// background wake gets on iOS — the same catch-up a reconnect does, because they are the
+    /// same question asked after two different silences.
+    @discardableResult
+    public func catchUpOnNotices() async -> Int {
+        await notices?.catchUp(on: servers) ?? 0
     }
 
     /// The feed reading `timeline`, built the first time it is asked for and kept afterwards.
@@ -802,6 +871,9 @@ public final class AppState {
         // where each server had got to, and none of that survives the store it came from.
         feeds = [:]
         await tokens?.invalidate()
+        // The inboxes went with the store. Nothing is listening to anything until somebody
+        // signs in again, and `onAccountsChanged` is what will hear it.
+        notices?.stop()
         await signIn?.refresh()
         timelines = Self.shipped()
         currentTimeline = timelines.first?.id ?? ""

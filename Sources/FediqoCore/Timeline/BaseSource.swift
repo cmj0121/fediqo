@@ -27,6 +27,12 @@ public enum BaseSource: String, Sendable, CaseIterable, Identifiable, Codable {
     /// through. It is here because posts arrive this way and an arrival has to be able to say
     /// how it arrived — `post_origins` keeps a source for every one of them.
     case thread
+    /// A post somebody aimed at the reader, which arrived inside a notification.
+    ///
+    /// Here for the same reason `thread` is: posts arrive this way, and an arrival has to be
+    /// able to say how it arrived. No template offers it either — an inbox is not a stretch of
+    /// time somebody can page through, and a post missing from one is not evidence of anything.
+    case notice
 
     public var id: String { rawValue }
 
@@ -35,8 +41,9 @@ public enum BaseSource: String, Sendable, CaseIterable, Identifiable, Codable {
 
     /// Whether there is nothing to read here without a credential. A server nobody is signed
     /// in to cannot be asked for `home` at all — not as a stranger, not with anything else
-    /// quietly put in its place.
-    public var needsAccount: Bool { self == .home }
+    /// quietly put in its place. An inbox is the same: it belongs to somebody, and there is no
+    /// anonymous reading of what was aimed at a person.
+    public var needsAccount: Bool { self == .home || self == .notice }
 
     /// Whether a page from here is a stretch of time, and so can be evidence that a post the
     /// store holds has gone. A trending list is a snapshot somebody curated and a conversation
