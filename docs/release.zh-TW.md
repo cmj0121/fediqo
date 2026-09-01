@@ -2,7 +2,8 @@
 
 [English](release.md) | [繁體中文](release.zh-TW.md)
 
-> `make publish` 打包兩個 app、簽章，然後交給 TestFlight。任何時候都不會送審。
+> `make publish` 打包兩個 app、簽章、交給 TestFlight，並把這份 checkout 所寫的文案告訴商店。任何時候都
+> 不會送審。
 
 建置與測試這份 checkout 不需要以下任何一樣東西。只有 `make publish` 會讀它們，而這正是重點：一個 pull
 request 手上沒有任何憑據，也必須繼續不需要。
@@ -19,11 +20,14 @@ request 手上沒有任何憑據，也必須繼續不需要。
        ▼
   fastlane publish
        │
+       ├── scripts/metadata.py —— 在建置任何東西之前檢查商店文案：語言資料夾、
+       │   長度、連結，以及這個版本有沒有 release notes
+       │
        ├── 問 App Store Connect 現在握著哪些 build number，一個平台問一次
        ├── 取 max(commit 數, 它握著的最大值 + 1) —— 一個號碼，兩個平台共用
        │
-       ├── iOS     match ──▶ archive ──▶ .ipa ──▶ TestFlight
-       └── macOS   match ──▶ archive ──▶ .pkg ──▶ TestFlight
+       ├── iOS     match ──▶ archive ──▶ .ipa ──▶ TestFlight ──▶ 商店文案
+       └── macOS   match ──▶ archive ──▶ .pkg ──▶ TestFlight ──▶ 商店文案
                                          └─ 由 installer 身分簽章；
                                             Mac App Store 只收這種形狀
 ```
@@ -76,6 +80,49 @@ commit，而商店不收看過的號碼。兩個平台用同一個號碼，因�
 
 **跑這道指令不需要 tag。** tag 是讓一次發布「發生」的東西 —— 是 workflow 將來要監看的訊號 —— 但不是讓
 這道指令能動的東西。laptop 上任何人打下它就會發布。
+
+## 商店被告知什麼
+
+描述、關鍵字、名稱、副標題與兩個連結，都是這份 checkout 裡的檔案。它們就是被上傳的東西，在上傳 build 的
+同一趟裡上傳，沒有任何一項是有人打進瀏覽器的。
+
+```text
+  fastlane/metadata/
+      ios/    en-US/  description.txt keywords.txt name.txt subtitle.txt support_url.txt privacy_url.txt
+              zh-Hant/ …
+      macos/  en-US/  …
+              zh-Hant/ …
+      notes/  0.1.0/  en-US.txt zh-Hant.txt
+```
+
+**語言資料夾叫 `en-US` 與 `zh-Hant`。** 不是 `zh-TW`——那是這個 repository 每份文件用的代碼，而不是 App
+Store Connect 認得的代碼。deliver 遇到不認得的資料夾不會抱怨；它上傳認得的那些，對其餘的一聲不吭，於是一
+次發布只出了一種語言，而有人以為出了兩種。`scripts/metadata.py` 就是那個會拒絕的東西。
+
+```sh
+scripts/metadata.py                     # 樹的形狀、長度、連結
+scripts/metadata.py --version 0.1.0     # ⋯⋯以及這個版本有沒有 release notes
+scripts/metadata.py --resolve           # ⋯⋯以及那些連結會不會回應
+```
+
+它也是一個 pre-commit hook，而 `make publish` 在建置任何東西之前會把三件事都跑一遍——4001 個字的描述會在
+封存四十分鐘之後被 App Store Connect 退回，而那支腳本一秒就能說。
+
+**平台自己的文案是自己的；app 的文案是共用的。** 描述、關鍵字與支援連結屬於某個平台的某個版本。名稱、副
+標題與隱私連結屬於 app 本身，App Store Connect 每個語言只留一份，由最後上傳的那個平台決定——所以兩棵樹都
+帶著它們，而 `metadata.py` 不准這兩份抄本漂開。
+
+**Release notes 以版本命名，不放在語言資料夾裡。** 放在描述旁邊的 `release_notes.txt` 是一個每次發布都被
+覆寫的檔案，而忘記覆寫的那一次，會無聲地把上一次的字送出去。`notes/0.1.0/en-US.txt` 忘不掉：沒有自己資料
+夾的 tag 沒有東西可讀，`make publish` 會在建置之前停下。在下 tag 之前寫好它們。
+
+**隱私問卷是唯一不從這裡上傳的東西。** `deliver` 沒有辦法回答 App Store Connect 的隱私問卷——它帶的是隱私
+*連結*，僅此而已。Fediqo 不蒐集任何東西，所以答案是 **Data Not Collected**，在 App Privacy 底下手動勾一
+次，而只要 [`docs/privacy.zh-TW.md`](privacy.zh-TW.md) 還成立，它就一直成立。程式碼做了什麼是可查的：一
+個相依套件、沒有分析、沒有任何第三方 SDK。
+
+截圖還沒到（[#30](https://github.com/cmj0121/fediqo/issues/30)）。等它們出現在
+`fastlane/screenshots/<platform>/`，這條 lane 不必被告知就會在同一趟裡把它們一起上傳。
 
 ## 讓 build 抵達一個人
 
@@ -130,9 +177,11 @@ xcodebuild 按名字挑，而且不說它挑了哪張；這條 lane 改成按指
 
 ## 還不在這裡的東西
 
-截圖（[#30](https://github.com/cmj0121/fediqo/issues/30)）、商店文案
-（[#31](https://github.com/cmj0121/fediqo/issues/31)），以及 tag 觸發的 workflow，都還在這道指令之外。
-在它們到位以前，一次發布抵達 TestFlight 就停下 —— 而那正是任何還沒被人看過的東西該停的地方。
+截圖（[#30](https://github.com/cmj0121/fediqo/issues/30)），以及 tag 觸發的 workflow
+（[#32](https://github.com/cmj0121/fediqo/issues/32)）。在有指令能拍圖之前，兩個商店看到的是最後一次有人
+手動上傳的東西；而這條 lane 會完全不上傳圖，而不是上傳「零張」—— 後者會被 App Store Connect 讀成一個答案。
+
+一次發布抵達 TestFlight 就停下。那正是任何還沒被人看過的東西該停的地方。
 
 macOS app 跑在 App Sandbox 裡，所以它的資料庫在 `~/Library/Containers/dev.mini-poc.fediqo/`，不在
 `~/Library/Application Support/`。sandbox 之前建的版本看不見之後的版本寫下的東西，而且沒有任何東西會把

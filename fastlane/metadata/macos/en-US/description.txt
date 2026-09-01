@@ -1,0 +1,30 @@
+One timeline. Every network.
+
+Fediqo reads the servers you choose and gives you one stream, in one order. A post that reached you from two
+of them is one row rather than two, and the row says which servers carried it.
+
+Nothing is ranked, scored or re-ordered on the way. The only thing between what arrived and what you see is a
+rule you wrote.
+
+THERE IS NO FEDIQO SERVER
+
+Your Mac talks to your servers and to nobody else. There is no account with us, no analytics, no crash
+reporting and no third-party SDK, so there is nowhere for a profile of you to be kept. The app runs in the
+App Sandbox and asks for outgoing network and nothing else; your access tokens are in the Keychain and your
+timeline is in one database inside its own container.
+
+WHAT IT DOES
+
+• Several servers, merged into one timeline, in one order
+• Every row says which servers handed the post over
+• Write once and send it out, each server you chose told exactly once
+• Threads, profiles, images and video, in a real Mac window, with keyboard shortcuts for what you do most
+• A statistics screen that says what is kept here, and what was asked of other people's servers
+• English and 繁體中文
+
+Today Fediqo speaks Mastodon. It is built so that the next protocol is another source in the same timeline
+rather than another tab.
+
+OPEN SOURCE
+
+AGPL-3.0. Build it from the source it is written about, and check every claim on this page.

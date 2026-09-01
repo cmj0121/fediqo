@@ -1,0 +1,10 @@
+The first build to leave the workshop.
+
+• Add Mastodon servers, sign in to the ones you have an account on, and read them all as one timeline
+• A post carried by several servers is one row, and the row says which ones carried it
+• Write a post and send it to each server you chose, told exactly once
+• Threads, profiles, images and video
+• A statistics screen: what is kept here, and what was asked of other people's servers
+• English and 繁體中文, on the Mac and on the phone
+
+Nothing is collected. There is no Fediqo server for anything to be collected on.

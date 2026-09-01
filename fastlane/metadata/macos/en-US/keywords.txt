@@ -1,0 +1,1 @@
+mastodon,fediverse,activitypub,timeline,social,open source,privacy,no tracking,client,microblog

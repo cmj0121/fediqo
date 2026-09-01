@@ -16,3 +16,15 @@ repos:
     rev: v0.45.0
     hooks:
       - id: markdownlint-fix
+  # What the store is told, checked where checking is free. deliver skips a language folder
+  # it does not recognise without a word, so `zh-TW` -- which is the code every document in
+  # this repository uses and not the one App Store Connect uses -- is a release that went out
+  # in one language while somebody was sure it went out in two. Found here instead.
+  - repo: local
+    hooks:
+      - id: store-text
+        name: store text
+        entry: scripts/metadata.py
+        language: system
+        files: ^fastlane/metadata/
+        pass_filenames: false

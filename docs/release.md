@@ -2,7 +2,8 @@
 
 [English](release.md) | [繁體中文](release.zh-TW.md)
 
-> `make publish` archives both apps, signs them, and hands them to TestFlight. Nothing is ever submitted for review.
+> `make publish` archives both apps, signs them, hands them to TestFlight, and tells the store what this checkout
+> says. Nothing is ever submitted for review.
 
 Building and testing this checkout needs none of what follows. Only `make publish` reads any of it, which is the
 point: a pull request has no credentials and must go on not needing any.
@@ -19,11 +20,14 @@ point: a pull request has no credentials and must go on not needing any.
        ▼
   fastlane publish
        │
+       ├── scripts/metadata.py -- the store text, before anything is built: the language
+       │   folders, the lengths, the links, and that this version has release notes
+       │
        ├── ask App Store Connect which build numbers it already holds, one platform at a time
        ├── take max(commit count, the highest it holds + 1) -- one number, both platforms
        │
-       ├── iOS     match ──▶ archive ──▶ .ipa ──▶ TestFlight
-       └── macOS   match ──▶ archive ──▶ .pkg ──▶ TestFlight
+       ├── iOS     match ──▶ archive ──▶ .ipa ──▶ TestFlight ──▶ store text
+       └── macOS   match ──▶ archive ──▶ .pkg ──▶ TestFlight ──▶ store text
                                          └─ signed by the installer identity;
                                             the Mac App Store takes nothing else
 ```
@@ -79,6 +83,54 @@ number, because a release attempt is one attempt however many stores it reaches.
 **No tag is required to run this.** A tag is what makes a release happen -- it is what the workflow will fire on --
 but it is not what makes the command work. A laptop publishes whenever somebody types it.
 
+## What the store is told
+
+The description, the keywords, the name, the subtitle and the two links are files in this checkout. They are
+what gets uploaded, in the same run that uploaded the build, and nothing about them is ever typed into a browser.
+
+```text
+  fastlane/metadata/
+      ios/    en-US/  description.txt keywords.txt name.txt subtitle.txt support_url.txt privacy_url.txt
+              zh-Hant/ …
+      macos/  en-US/  …
+              zh-Hant/ …
+      notes/  0.1.0/  en-US.txt zh-Hant.txt
+```
+
+**The language folders are `en-US` and `zh-Hant`.** Not `zh-TW`, which is the code every document in this
+repository uses and is not a code App Store Connect knows. deliver does not complain about a folder it does not
+recognise; it uploads the ones it does and says nothing about the rest, which is a release that went out in one
+language while somebody was sure it went out in two. `scripts/metadata.py` is what refuses.
+
+```sh
+scripts/metadata.py                     # the tree, the lengths, the links
+scripts/metadata.py --version 0.1.0     # ... and that this version has release notes
+scripts/metadata.py --resolve           # ... and that the links answer
+```
+
+It also runs as a pre-commit hook, and `make publish` runs all three before it builds anything -- a description
+of 4001 characters is rejected by App Store Connect after forty minutes of archiving, and by that script in a
+second.
+
+**A platform's own text is its own; the app's text is shared.** The description, the keywords and the support
+link belong to a version of one platform. The name, the subtitle and the privacy link belong to the app, and App
+Store Connect keeps one of each per language whichever platform uploaded it last -- so both trees carry them and
+`metadata.py` refuses to let the two copies drift.
+
+**Release notes are named after the version, not left in the language folders.** A `release_notes.txt` beside
+the description is one file overwritten every release, and the release that forgets to overwrite it ships the
+last one's words without a sound. `notes/0.1.0/en-US.txt` cannot be forgotten: a tag with no folder of its own
+has nothing to read, and `make publish` stops before it builds. Write them before the tag.
+
+**The privacy answers are the one thing not uploaded from here.** `deliver` has no way to answer App Store
+Connect's privacy questionnaire -- it carries the privacy *link* and nothing else. Fediqo collects nothing, so
+the answer is **Data Not Collected**, ticked once by hand under App Privacy, and it stays true for as long as
+[`docs/privacy.md`](privacy.md) does. What the code does is checkable: one dependency, no analytics, no
+third-party SDK of any kind.
+
+The screenshots are not here yet ([#30](https://github.com/cmj0121/fediqo/issues/30)). When they arrive at
+`fastlane/screenshots/<platform>/`, the lane picks them up and uploads them in the same run without being told.
+
 ## Getting a build to a person
 
 Uploading invites nobody. A build reaches a person only through a TestFlight group with people in it.
@@ -133,10 +185,12 @@ Its default branch is `main`. `fastlane/Matchfile` says so out loud, because mat
 
 ## What is not here yet
 
-The screenshots ([#30](https://github.com/cmj0121/fediqo/issues/30)), the store text
-([#31](https://github.com/cmj0121/fediqo/issues/31)) and the workflow that fires on a tag are still outside this
-command. Until they arrive, a release reaches TestFlight and stops there, which is where anything that has not been
-looked at ought to stop.
+The screenshots ([#30](https://github.com/cmj0121/fediqo/issues/30)) and the workflow that fires on a tag
+([#32](https://github.com/cmj0121/fediqo/issues/32)). Until a command takes the pictures, the two stores are
+shown whatever was last uploaded by hand, and the lane uploads no pictures at all rather than uploading none --
+which App Store Connect would read as an answer.
+
+A release reaches TestFlight and stops there. That is where anything nobody has looked at ought to stop.
 
 The macOS app runs under App Sandbox, so its database is in `~/Library/Containers/dev.mini-poc.fediqo/` rather than
 in `~/Library/Application Support/`. A build made before the sandbox cannot see what a build made after it writes,

@@ -14,6 +14,14 @@ IOS_SCHEME   = "Fediqo-iOS"
 DERIVED      = File.join(ROOT, ".build", "xcode-release")
 OUTPUT       = File.join(ROOT, ".build", "release")
 
+# What the store is told. A folder per platform because the description of a Mac app is not
+# the description of a phone app, and a folder per language inside it because that is the
+# only shape deliver reads. scripts/metadata.py is what says the shape is right, and it says
+# so before anything is built rather than after everything has been uploaded.
+METADATA     = File.join(ROOT, "fastlane", "metadata")
+SCREENSHOTS  = File.join(ROOT, "fastlane", "screenshots")
+LOCALES      = ["en-US", "zh-Hant"]
+
 # fastlane reads .env itself, and an empty value there is not nothing. `MATCH_PASSWORD=` with
 # nothing after it arrives in Ruby as "", which is truthy -- so match takes the empty string
 # for the passphrase, never looks in the keychain where the real one is, and then blames the
@@ -154,6 +162,57 @@ def identity_for(platform)
   )
 end
 
+# The notes for one version, read out of the folder named after it. They are handed to
+# deliver as a value rather than left in the language folders as a file, because a
+# release_notes.txt in a language folder is one file overwritten every release -- and the
+# release that forgets to overwrite it ships the last one's notes without a word.
+#
+# Nothing here has to check that the folder is there. scripts/metadata.py already refused to
+# let the lane get this far without it.
+def release_notes(version)
+  LOCALES.to_h do |locale|
+    [locale, File.read(File.join(METADATA, "notes", version, "#{locale}.txt")).strip]
+  end
+end
+
+# The pictures for one platform, where somebody has taken any. Absent until #30, and deliver
+# is told to skip them rather than to upload an empty folder -- which it reads as "this app
+# has no screenshots" and acts on.
+def screenshots_for(platform)
+  path = File.join(SCREENSHOTS, platform)
+  Dir.exist?(path) && !Dir.empty?(path) ? path : nil
+end
+
+# Everything the store is told that is not the binary: the text, and the pictures where there
+# are any. Uploaded in the same run that uploaded the build, from this checkout, so there is
+# never a version of these words that only exists in somebody's browser.
+#
+# `submit_for_review` is false and stays false. Reaching App Store Connect and being offered
+# to Apple are two different things, and only one of them is a command anybody can type.
+def upload_store_text(platform, version, notes)
+  pictures = screenshots_for(platform)
+
+  upload_to_app_store(
+    api_key: asc_api_key,
+    username: APPLE_ID,
+    app_identifier: BUNDLE_ID,
+    platform: platform == "ios" ? "ios" : "osx",
+    app_version: version,
+    metadata_path: File.join(METADATA, platform),
+    screenshots_path: pictures,
+    release_notes: notes,
+    skip_binary_upload: true,
+    skip_screenshots: pictures.nil?,
+    submit_for_review: false,
+    # precheck is the pass that reads the text looking for reasons a review would reject it.
+    # It is worth running when something is being submitted, and this never submits.
+    run_precheck_before_submit: false,
+    # Otherwise deliver renders the whole thing as HTML and waits for somebody to say yes,
+    # which is a thing no runner can do and no laptop should have to.
+    force: true,
+  )
+end
+
 desc "Archive, sign and send both apps to TestFlight. Nothing is submitted for review."
 lane :publish do
   # No tag is asked for here. A tag is what makes a release happen -- it is what the workflow
@@ -161,13 +220,20 @@ lane :publish do
   # somebody types this, and takes whatever version scripts/version.sh settled for, saying so
   # out loud when it had to settle. The tag is CI's business, and CI runs this same line.
   version = version_sh("--marketing")
-  build   = build_number(version)
+
+  # Before the archive, not after the upload. Everything below takes minutes and costs a
+  # build number; a language folder spelled wrong or a version with nothing written for it
+  # costs a second to find here and a whole release to find at the end.
+  sh(File.join(ROOT, "scripts", "metadata.py"), "--version", version, "--resolve")
+
+  build = build_number(version)
+  notes = release_notes(version)
   UI.important("Fediqo #{version} (#{build}) -- both platforms, TestFlight only.")
 
-  publish_ios(version: version, build: build)
-  publish_macos(version: version, build: build)
+  publish_ios(version: version, build: build, notes: notes)
+  publish_macos(version: version, build: build, notes: notes)
 
-  UI.success("Fediqo #{version} (#{build}) is on TestFlight. Nothing was submitted for review.")
+  UI.success("Fediqo #{version} (#{build}) is on TestFlight, with what the store is told. Nothing was submitted for review.")
 end
 
 desc "The iPhone and iPad build, as far as TestFlight."
@@ -204,6 +270,8 @@ private_lane :publish_ios do |options|
     skip_submission: true,
     skip_waiting_for_build_processing: true,
   )
+
+  upload_store_text("ios", options[:version], options[:notes])
 end
 
 desc "The Mac build, as a package the installer identity signed, as far as TestFlight."
@@ -245,6 +313,8 @@ private_lane :publish_macos do |options|
     skip_submission: true,
     skip_waiting_for_build_processing: true,
   )
+
+  upload_store_text("macos", options[:version], options[:notes])
 end
 
 # vim: ts=2 sw=2 ft=ruby et :
