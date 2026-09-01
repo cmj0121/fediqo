@@ -185,6 +185,40 @@ extension LocalStore {
         }
     }
 
+    /// Everything nobody kept, older than the window, gone — and says how many.
+    ///
+    /// #7's rotation. Three things it will not touch, and each is one of that issue's promises.
+    ///
+    /// **What the reader kept.** `kept_at` is the whole of it: a kept post survives any
+    /// rotation, whatever its age, and that is checked in SQL rather than trusted to a caller
+    /// passing the right window.
+    ///
+    /// **What this device published.** A post the reader wrote is not somebody else's timeline
+    /// passing through; rotating it out would be this app deleting their own writing to save
+    /// room. `publications` is what knows, and it is asked here.
+    ///
+    /// **The window is measured from when the post was written**, not from when it arrived. A
+    /// post from last year that reached this device this morning is a year old — keeping it for
+    /// a season because it turned up late would be this app disagreeing with the reader about
+    /// what "the last three months" means.
+    ///
+    /// `nil` is `forever`, which is a real answer and does nothing at all rather than a very
+    /// large number of days.
+    @discardableResult
+    public func rotate(keeping: Retention, now: Date = Date()) async throws -> Int {
+        guard let cutoff = keeping.cutoff(from: now) else { return 0 }
+        let ms = Self.milliseconds(cutoff)
+        return try await write { db in
+            try db.execute(sql: """
+                DELETE FROM posts
+                WHERE posted_at < ?
+                  AND kept_at IS NULL
+                  AND merge_key NOT IN (SELECT merge_key FROM publications WHERE merge_key IS NOT NULL)
+                """, arguments: [ms])
+            return db.changesCount
+        }
+    }
+
     // MARK: Reading
 
     /// The timeline: what is stored, newest first, `merge_key` breaking ties so a page lands in

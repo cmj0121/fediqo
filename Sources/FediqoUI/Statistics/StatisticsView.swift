@@ -62,6 +62,7 @@ struct StatisticsView: View {
         switch tab {
         case .storage:
             section(t("stats.stored")) { stored }
+            section(t("stats.keepFor")) { keeping }
             section(t("stats.disk")) { disk }
         case .network:
             section(t("stats.requests")) { requests }
@@ -157,6 +158,29 @@ struct StatisticsView: View {
         } else {
             storeStatus
         }
+    }
+
+    // MARK: - How long it stays
+
+    /// How long a post nobody kept stays here, and what that means in words.
+    ///
+    /// #7 asks for a policy the reader *can see and change*, and both halves are the point: a
+    /// rotation nobody can see is a machine deciding what somebody remembers. It lives on this
+    /// page rather than in Settings because this is where the numbers it governs are — the count
+    /// above it is what the choice below is about.
+    ///
+    /// It is applied when the app is opened, not on a clock, so whatever it removed was always
+    /// something the reader could have gone and kept the last time they looked.
+    private var keeping: some View {
+        @Bindable var preferences = app.preferences
+        return VStack(alignment: .leading, spacing: Space.mid) {
+            SegmentedChoice(Retention.allCases, keyPrefix: "keepFor", selection: $preferences.keepFor)
+            Text(t(app.preferences.keepFor == .forever ? "stats.keepFor.forever" : "stats.keepFor.explained"))
+                .fediqoFont(TypeScale.minor)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Disk

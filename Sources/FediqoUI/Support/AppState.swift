@@ -509,6 +509,22 @@ public final class AppState {
         return feed
     }
 
+    /// Everything nobody kept, older than the window the reader chose, let go.
+    ///
+    /// Once, when the shell appears, and never on a clock. Rotation is not a background job
+    /// here: it is the reader's own policy applied at the moment the app is opened, so what it
+    /// removed is always something they could have gone and kept the last time they looked.
+    ///
+    /// A failure is silent on purpose. Nothing the reader asked for depends on it, the store is
+    /// simply fuller than they chose for one more session, and a message about housekeeping
+    /// they did not ask for would be noise in front of the thing they opened the app to read.
+    func tidy() async {
+        guard let store else { return }
+        let window = preferences.keepFor
+        guard window != .forever else { return }
+        _ = try? await store.rotate(keeping: window)
+    }
+
     /// A loader to ask about one post's conversation with.
     ///
     /// The feed the reader is on, where there is one — its loader already knows the store and

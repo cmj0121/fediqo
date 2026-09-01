@@ -65,6 +65,9 @@ struct AppShell: View {
             .shellKeyPresses()
             .shellKeyCommands()
             .task(id: app.refreshKey) { await app.refreshWhileVisible() }
+            // Once, when the shell arrives. See `tidy`: the reader's own policy, applied when
+            // they open the app rather than on a clock nobody sees.
+            .task { await app.tidy() }
     }
 
     @ViewBuilder
