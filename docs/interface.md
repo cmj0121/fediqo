@@ -71,13 +71,22 @@ something up.
 The same holds for a switch: what nobody has told us about is drawn unfilled, and does not claim to mean "not
 favourited".
 
-## S6 — Every row the same height
+## S6 — A row is bounded, and its columns line up
 
-`AttachmentDeck.height` sets the height of a row in a list. A short post is padded up to it; a long one stops
-at it with an ellipsis, and the ellipsis is the row saying there is more.
+No row grows to hold what is in it. The words stop after a set number of lines with an ellipsis, and the
+ellipsis is the row saying there is more; where there is room for two columns, the attachment column is
+there whether or not anything is in it.
 
-How many lines fit is worked out from that height at the reader's own text scale, never fixed at a count. A
-count that fits at 13 points overflows at 21, and a list whose rows are different heights cannot be scanned.
+How many lines that is follows the reader's text scale and is never a fixed count. A count that fits at 13
+points overflows at 21, and a row that overflowed would be the one row on the screen that is a different
+shape from the rest.
+
+**A short post is not padded up to a tall one.** This rule used to say every row was the same height, and
+the app has never done that: the arrangement that stacks attachments under the words lets a row hug its
+content and always has, which is every phone. What a reader scans by is a row that starts in the same place
+and ends in a predictable one — and that is the clamp and the reserved column, not the padding. Padding
+every row up to the tallest spends most of a screen saying nothing, which is what
+[#79](https://github.com/cmj0121/fediqo/issues/79) measured: five posts became two.
 
 ## S7 — Native controls only
 

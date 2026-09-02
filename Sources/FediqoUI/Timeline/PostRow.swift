@@ -238,9 +238,10 @@ struct PostRow: View {
     ///
     /// **One line, however many things happened.** It used to be two independent `if`s, so a
     /// post that was both an answer and a boost drew two stacked bands — two glyphs, two greys,
-    /// two lines of the row's height spent before a word of the post was read, and one row
-    /// taller than its neighbour, which S6 will not have. A boost of a reply is one sentence
-    /// about how this post got here, and it is said in one.
+    /// and two lines of the row's height spent before a word of the post was read. The height is
+    /// no longer the argument: S6 lets a row be as tall as what is in it now. What is left is the
+    /// better half of the same argument — a boost of a reply is one sentence about how this post
+    /// got here, and two bands say it twice.
     ///
     /// Favourites and the rest arrive with notifications (#9), and when they do this is the
     /// line they are said on rather than a second design for the same idea. Nothing at all is
@@ -313,7 +314,9 @@ struct PostRow: View {
             //
             // Under `Hit.target`, and allowed to be: #44 made an address in a post's words
             // pressable at the size the words are, and this is the same kind of thing. Growing
-            // the band to 44 would grow the row, which S6 will not have.
+            // the band to 44 would add fourteen points to every row in every list to make one
+            // press easier — which is a cost every reader pays for a thing most of them do
+            // rarely. S6 would tolerate the taller row now; the arithmetic still refuses it.
             Button { openAuthor?() } label: {
                 HStack(spacing: Space.step) {
                     RemoteImage(url: post.authorAvatarURL, width: Size.avatar, height: Size.avatar,
