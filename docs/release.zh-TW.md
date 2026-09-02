@@ -146,7 +146,16 @@ scripts/metadata.py --resolve           # ⋯⋯以及那些連結會不會回�
 make -C Apps shots-macos      # 兩種語言，1280x800
 make -C Apps shots-ios        # 兩種語言，手機與 iPad
 make shots                    # 以上兩者
+make -C Apps shots-widths     # 440、700 與 1024 點，最小與最大的字級
 ```
+
+**`shots-widths` 不是給商店的，也不進 git。** 它是商店那份清單裡的每一個畫面，在 S9 被判斷的那四個角落各拍一張，
+輸出在 `.build/shots-widths/`
+（已被 gitignore）—— `fastlane/screenshots/` 是整個資料夾被上傳的，不是按清單，所以多放一張圖就是商店頁面上
+多一張圖。440 是最寬的 iPhone、1024 是 13 吋 iPad；**700 兩者皆非**，而它正是 `Size.wideRows(at:)` 對它的
+回答與另外兩者都不同的那個寬度 —— Split View 裡的 iPad、被拖窄的 Mac 視窗，也就是
+[#80](https://github.com/cmj0121/fediqo/issues/80) 在講的情況。到得了那裡的是 `FEDIQO_SHOOT_SIZE` 與
+`FEDIQO_TEXT_SCALE`，而它們跟其他啟動變數一樣是 `#if DEBUG`，store build 編譯不到。
 
 它們會落在 `fastlane/screenshots/<platform>/<locale>/`，編號就是上傳的順序、也是它們該被讀的順序，而且
 **會被 commit**。人要做的是看它們、判斷它們；沒有人要去拍它們。

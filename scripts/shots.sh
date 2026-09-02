@@ -4,6 +4,7 @@
 #
 #   scripts/shots.sh --macos      # both languages, 1280x800
 #   scripts/shots.sh --ios        # both languages, both devices the store requires
+#   scripts/shots.sh --widths     # the four corners S9 is judged at -- not for the store
 #
 # What a person does is look at them and judge them. Nobody takes them, nobody crops them, and
 # nobody drags a window to the right size -- which is the whole of #30.
@@ -191,8 +192,80 @@ check() {
     done < <(find "fastlane/screenshots/$1" -name '*.png' | sort)
 }
 
+# ── the corners ──────────────────────────────────────────────────────────────────────────────
+
+# Every width the app is judged at, at the widest and narrowest text it offers.
+#
+# **These are not store pictures and they are not committed.** They go under .build/, which is
+# gitignored, because `fastlane/screenshots/` is uploaded whole -- deliver takes the folder, not
+# a list -- and an extra picture there is an extra picture on a store listing. What a person
+# does with these is look at them once and judge whether S9 holds.
+#
+# 440 is the widest iPhone, 1024 the 13" iPad, and 700 is neither: it is an iPad in Split View
+# and a Mac window dragged narrow, and it is the width `Size.wideRows(at:)` answers differently
+# from both of the others. That third one is the whole reason this exists -- #80 asks what a
+# screen does at 700 points, and until now nothing here could take its picture.
+#
+# The Mac app draws itself into a bitmap of whatever size it is given, so every one of these is
+# one build and no simulator. Two things it cannot show, and neither is S9's: the tab bar a
+# phone gets instead of the rail, which a size class decides rather than an arrangement; and
+# anything under 420 points, because `AppShell.columns` has a `minWidth` of `Size.prose` and an
+# iPad that narrow is running the phone's layout anyway.
+WIDTHS=(440 700 1024)
+SCALES=(small larger)
+
+widths() {
+    say "building the Mac app"
+    make -C Apps mac >/dev/null
+
+    local binary="$MACOS_APP/Contents/MacOS/Fediqo"
+    [ -x "$binary" ] || { echo >&2 "shots: no Mac app at $binary"; return 1; }
+
+    local out=".build/shots-widths"
+    rm -rf "$out"; mkdir -p "$out"
+
+    # Every screen, not only the timeline. "Every screen is legible at 440 and at 1024, at
+    # the smallest and the largest text scale" is what #80 asks for, and a rule proved on one
+    # screen is a rule proved on one screen. The same list the stores are shot from, so a
+    # screen added there is a screen checked here without anybody remembering to.
+    local width scale name shot screen rail extra wrote
+    for shot in "${SHOTS[@]}"; do
+        IFS=: read -r screen rail extra <<< "$shot"
+        for width in "${WIDTHS[@]}"; do
+            for scale in "${SCALES[@]}"; do
+                name="${screen}-${width}x${scale}.png"
+                say "  $out/$name"
+                wrote="$(env FEDIQO_FIXTURE=1 \
+                             FEDIQO_ROUTE=shell \
+                             FEDIQO_RAIL="$rail" \
+                             FEDIQO_LANGUAGE=en \
+                             FEDIQO_TEXT_SCALE="$scale" \
+                             FEDIQO_SHOOT="$name" \
+                             FEDIQO_SHOOT_SIZE="${width}x800" \
+                             ${extra:-IGNORED=} \
+                             "$binary" -ApplePersistenceIgnoreState YES 2>/dev/null \
+                         | sed -n 's/^shot: //p')"
+                [ -n "$wrote" ] && [ -f "$wrote" ] || {
+                    echo >&2 "shots: the app took no picture of $screen at ${width}pt, $scale"
+                    return 1
+                }
+                mv "$wrote" "$out/$name"
+            done
+        done
+    done
+
+    say ""
+    say "$out:"
+    local file
+    while IFS= read -r file; do
+        printf '  %-44s %s\n' "${file#$out/}" \
+            "$(sips -g pixelWidth -g pixelHeight "$file" | awk '/pixel/ {printf "%s ", $2}')"
+    done < <(find "$out" -name '*.png' | sort)
+}
+
 case "${1:-}" in
-    --macos) macos ;;
-    --ios)   ios ;;
-    *)       echo >&2 "usage: ${0##*/} [--macos | --ios]"; exit 2 ;;
+    --macos)  macos ;;
+    --ios)    ios ;;
+    --widths) widths ;;
+    *)        echo >&2 "usage: ${0##*/} [--macos | --ios | --widths]"; exit 2 ;;
 esac

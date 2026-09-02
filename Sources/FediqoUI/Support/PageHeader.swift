@@ -40,11 +40,6 @@ struct PageHeader<Tabs: View, Controls: View>: View {
         self.controls = controls()
     }
 
-    /// Whether there is one column's worth of room here rather than two. The shell decides
-    /// it — it is the one place that knows what the platform will say — and this reads the
-    /// answer rather than asking the platform a second time.
-    @Environment(\.fediqoCompact) private var compact
-
     var body: some View {
         VStack(alignment: .leading, spacing: Space.step) {
             HStack(alignment: .firstTextBaseline, spacing: Space.mid) {
@@ -63,34 +58,41 @@ struct PageHeader<Tabs: View, Controls: View>: View {
 
     /// Which tab is showing, and the line saying what that tab is.
     ///
-    /// Given a window's width they sit on one line, the control no wider than its words need.
-    /// A phone has no such width: the control there would take what it was given and leave the
-    /// description a couple of characters, so the two go one above the other and the control
-    /// spreads across the row, which is how a segmented control looks on iOS anyway.
-    @ViewBuilder
+    /// Two arrangements, widest first (S9). Given the width they sit on one line, the control
+    /// no wider than its words need and the description taking what is left. Where that will
+    /// not fit, the control would take what it was given and leave the description a couple of
+    /// characters — so the two go one above the other and the control spreads across the row,
+    /// which is how a segmented control looks on iOS anyway.
+    ///
+    /// Nothing here asks how wide the header is. A phone, an iPad in Slide Over and a Mac
+    /// window being dragged narrower all reach the second arrangement the moment the first
+    /// stops fitting, and not one of them had to be named — which is the half of this a size
+    /// class could not do, because it says `regular` for every width a Mac has.
     private var tabsAndSubtitle: some View {
-        if compact {
-            tabs
-            subtitleLine
-        } else {
+        ViewThatFits(in: .horizontal) {
             HStack(alignment: .firstTextBaseline, spacing: Space.gap) {
                 tabs.fixedSize()
-                subtitleLine
+                subtitleLine(lines: 3)
+            }
+            VStack(alignment: .leading, spacing: Space.step) {
+                tabs
+                subtitleLine(lines: nil)
             }
         }
     }
 
     /// It wraps. Beside the tabs it is given whatever is left of the row and takes as many as
     /// three lines of it before it gives up, which is enough for the sentence a reader writes
-    /// about a timeline they made; on its own row it has the width to say the whole thing.
+    /// about a timeline they made; on its own row it has the width to say the whole thing, so
+    /// it is given no limit at all there.
     ///
     /// Where it does run out, the whole of it is a hover away. A description a reader wrote
     /// and cannot read back is worse than no description, and the tooltip costs a line.
-    private var subtitleLine: some View {
+    private func subtitleLine(lines: Int?) -> some View {
         Text(subtitle)
             .fediqoFont(TypeScale.minor)
             .foregroundStyle(.secondary)
-            .lineLimit(compact ? nil : 3)
+            .lineLimit(lines)
             .multilineTextAlignment(.leading)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)

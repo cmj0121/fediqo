@@ -35,7 +35,8 @@ import UniformTypeIdentifiers
 /// It is not that they are impossible; it is that 1280×800 is what this project ships, decided
 /// once, and a run on any machine produces the same file.
 struct Shooter: ViewModifier {
-    /// What App Store Connect takes, in points, which at 1× is also in pixels.
+    /// What App Store Connect takes, in points, which at 1× is also in pixels. The default,
+    /// and what every committed picture is taken at.
     static let size = CGSize(width: 1280, height: 800)
 
     /// How long the window is given to finish being a window before it is photographed.
@@ -52,11 +53,15 @@ struct Shooter: ViewModifier {
     ///
     /// So the app writes where it may and says where that was, and whoever asked moves it.
     let name: String
+    /// How big to make the window first. The store's size unless a run asked for another --
+    /// see `LaunchOptions.shootSize`, and #80, which needs widths no device in the shot list
+    /// has because what a screen does at 700 points is what neither 440 nor 1024 shows.
+    var size: CGSize = Shooter.size
 
     func body(content: Content) -> some View {
         content.task {
             try? await Task.sleep(for: Self.settle)
-            Self.shoot(named: name)
+            Self.shoot(named: name, at: size)
             NSApp.terminate(nil)
         }
     }
@@ -65,7 +70,7 @@ struct Shooter: ViewModifier {
     /// failure: a screenshot run that quietly produced no file is a release with a blank space
     /// in it, found by a reviewer.
     @MainActor
-    static func shoot(named name: String) {
+    static func shoot(named name: String, at size: CGSize = Shooter.size) {
         guard let window = NSApp.windows.first(where: \.isVisible) else {
             return complain("no window to photograph")
         }
@@ -80,7 +85,7 @@ struct Shooter: ViewModifier {
             colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
         ) else { return complain("could not make a bitmap of \(size)") }
 
-        // The rep is told it is 1280×800 points as well as pixels, which is what pins the
+        // The rep is told its size in points as well as in pixels, which is what pins the
         // render to 1×. Left alone it would take the window's backing scale and a retina
         // laptop would write 2560×1600 while a runner wrote 1280×800 — the same command
         // producing two different files, which is the one thing this must not do.
@@ -116,9 +121,9 @@ extension View {
     /// to have the method, or the one line calling it stops compiling on the platform with
     /// nothing to do.
     @ViewBuilder
-    func shooting(to path: String?) -> some View {
+    func shooting(to path: String?, at size: CGSize? = nil) -> some View {
         #if DEBUG && os(macOS)
-        if let path { modifier(Shooter(name: path)) } else { self }
+        if let path { modifier(Shooter(name: path, size: size ?? Shooter.size)) } else { self }
         #else
         self
         #endif

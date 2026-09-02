@@ -18,7 +18,7 @@ public struct FediqoRootView: View {
             .fixtureWindow(app.isFixture)
             // A screenshot run photographs this window and stops. Nothing at all on any other
             // run, and not compiled into a build anybody ships.
-            .shooting(to: app.shootTo)
+            .shooting(to: app.shootTo, at: app.shootSize)
             .preferredColorScheme(app.preferences.theme.colorScheme)
             // Strings are read through a bundle chosen at runtime, so a language change has
             // to rebuild the tree rather than merely redraw it.

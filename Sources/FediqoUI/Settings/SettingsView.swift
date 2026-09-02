@@ -107,23 +107,47 @@ struct SettingsView: View {
 
     // MARK: - Rows
 
+    /// A label and the control it names: on one row where there is room for one row, and one
+    /// above the other where there is not. S9, and the same two arrangements `PageHeader`
+    /// offers for the same reason.
+    ///
+    /// The control is `fixedSize` and gives up nothing, which is right — a segmented control
+    /// squeezed under its own words is a set of buttons nobody can read or aim at. So what
+    /// gave instead was the label, and at 440 points and 1.6× `Text size` was drawn as `Tex`
+    /// / `t` / `siz` / `e` down four lines and `Refresh` as `Ref` / `res` / `h`. Found by
+    /// `make -C Apps shots-widths`, and by nothing before it: every picture this project had
+    /// ever taken was of a width where the label had room.
+    ///
+    /// Now neither of them gives. A row that will not fit beside its label goes under it,
+    /// which costs a line and keeps every word.
+    private func settingRow(_ titleKey: String, @ViewBuilder control: () -> some View) -> some View {
+        let label = Text(t(titleKey)).fediqoFont(TypeScale.body)
+        let control = control()
+
+        return ViewThatFits(in: .horizontal) {
+            LabeledContent { control } label: { label }
+            VStack(alignment: .leading, spacing: Space.step) {
+                label.frame(maxWidth: .infinity, alignment: .leading)
+                control
+            }
+        }
+    }
+
     /// Every appearance choice is the same row: a label, and the control every choice in the
     /// app is made with — here over the whole enum, since a preference has no case the
     /// reader is not offered.
     private func choiceRow<T>(_ titleKey: String, keyPrefix: String, selection: Binding<T>) -> some View
     where T: CaseIterable & Identifiable & Hashable & RawRepresentable, T.RawValue == String {
-        LabeledContent {
+        settingRow(titleKey) {
             SegmentedChoice(Array(T.allCases), keyPrefix: keyPrefix, selection: selection)
                 .fixedSize()
-        } label: {
-            Text(t(titleKey)).fediqoFont(TypeScale.body)
         }
     }
 
     /// The language row is not one of those: the choices are written in themselves rather
     /// than translated, and there are too few to spend a segmented control on.
     private var languageRow: some View {
-        LabeledContent {
+        settingRow("settings.language") {
             Picker("", selection: Binding(
                 get: { app.preferences.language },
                 set: { app.apply(language: $0) }
@@ -135,8 +159,6 @@ struct SettingsView: View {
             .pickerStyle(.menu)
             .labelsHidden()
             .fixedSize()
-        } label: {
-            Text(t("settings.language")).fediqoFont(TypeScale.body)
         }
     }
 

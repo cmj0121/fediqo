@@ -119,12 +119,35 @@ enum Size {
     /// A popover wide enough for a row of words and narrow enough not to cover the post it
     /// was opened from.
     static let popover: CGFloat = 300
-    /// The width at which a row has room to put its attachments beside its words:
-    /// `AttachmentDeck.side` for the deck, `Space.gap` for the gap, and 348 left for the words.
+    /// The width at which a row has room to put its attachments beside its words. Three
+    /// shares: `AttachmentDeck.side` for the deck, `Space.gap` between them, and `words` left
+    /// over for what the post says.
+    ///
+    /// **Only the last of the three follows the reader's text size.** The deck is a picture
+    /// and a picture is the size it is at every text size; `words` is words, and 348 points
+    /// is a paragraph at 1.0× and a stack of two-word lines at 1.6×. A single number would
+    /// have been right for exactly one reader — which was the second half of what S9 says is
+    /// wrong with a threshold, and this app ships at 1.6× and multiplies whatever Dynamic
+    /// Type the phone was already set to.
+    ///
+    /// So no phone reaches it at 1.6×: 200 + 12 + 557 is 769 points and no phone is that
+    /// wide. That is the honest answer rather than a regression — a reader at the size this
+    /// app ships at has no room on a phone for two columns, and the arrangement that puts the
+    /// attachments under the words is the one that fits.
+    ///
+    /// This is the one threshold S9 allows, and it is allowed for the reason S9 names: every
+    /// row of a list must reach the *same* answer or the list stops being scannable (S6), and
+    /// an arrangement answers per row. `FeedScreen` measures once and hands it down.
     ///
     /// Out here rather than on the screen that measures it, because the closure that asks the
     /// geometry is `Sendable` and a `View`'s own static is isolated to the main actor.
-    static let wideRows: CGFloat = 560
+    static func wideRows(at scale: Double) -> CGFloat {
+        AttachmentDeck.side + Space.gap + words * scale
+    }
+
+    /// What is left for the post's own words once the deck and the gap have had their share.
+    /// Enough to be a paragraph rather than a column of two-word lines.
+    private static let words: CGFloat = 348
     /// One pixel of edge, where a gradient or a shape has to draw it rather than `Hairline`.
     static let hairline: CGFloat = 1
     /// The mark that says a list has ended.
@@ -230,30 +253,18 @@ enum Motion {
 
 // MARK: - The room the screen has
 
-/// A phone held upright, where a header has one column's worth of room and not two.
-///
-/// The shell is the one place that asks the platform how much room there is — a size class
-/// only exists on iOS — and every screen below it reads the answer here rather than working
-/// it out again from an environment value half of them cannot see.
-private struct CompactKey: EnvironmentKey {
-    static let defaultValue = false
-}
-
 /// Whether a row has the width to put its attachments beside its words rather than under them.
 ///
-/// Measured once by the screen that draws the list and read by every row, for the reason
-/// `fediqoCompact` is: a row asking the geometry for itself is the same question answered
-/// however many times there are rows on screen, and they would all answer the same.
+/// The one threshold S9 allows, and it is allowed for the reason S9 names: every row of a list
+/// must reach the *same* answer or the list stops being scannable (S6), and an arrangement
+/// answers per row. So the screen that draws the list measures once and every row reads it —
+/// which also means a row never asks the geometry for itself, a question that would otherwise
+/// be answered once per row on screen with all of them agreeing.
 private struct WideRowsKey: EnvironmentKey {
     static let defaultValue = false
 }
 
 extension EnvironmentValues {
-    var fediqoCompact: Bool {
-        get { self[CompactKey.self] }
-        set { self[CompactKey.self] = newValue }
-    }
-
     var fediqoWideRows: Bool {
         get { self[WideRowsKey.self] }
         set { self[WideRowsKey.self] = newValue }

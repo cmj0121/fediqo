@@ -108,6 +108,17 @@ struct LaunchOptions {
     /// Where to write a picture of this window, after which the app has nothing left to do and
     /// stops. See `Shooter`: this is the whole of how #30 photographs the Mac.
     var shootTo: String?
+    /// How big to make that window before photographing it, where a run wants a width other
+    /// than the store's. The app's own default is what the store takes and stays that.
+    ///
+    /// Here because S9's four corners are widths no device in the shot list has: what a screen
+    /// does at 700 points is different from what it does at 440 and at 1024, and the only way
+    /// to look at 700 is to ask for it (#80).
+    var shootSize: CGSize?
+    /// Which text size to draw at, whatever the reader last chose. The app ships at `larger`
+    /// and every picture ever taken of it has been at that one — so the smallest of the four
+    /// corners had never been looked at until this existed.
+    var textScale: TextScale?
 
     static let none = LaunchOptions()
 
@@ -143,10 +154,24 @@ struct LaunchOptions {
         options.fixture = environment["FEDIQO_FIXTURE"] == "1"
         options.language = environment["FEDIQO_LANGUAGE"].flatMap(AppLanguage.init(rawValue:))
         options.shootTo = environment["FEDIQO_SHOOT"]
+        options.shootSize = environment["FEDIQO_SHOOT_SIZE"].flatMap(size(from:))
+        options.textScale = environment["FEDIQO_TEXT_SCALE"].flatMap(TextScale.init(rawValue:))
         return options
         #else
         .none
         #endif
+    }
+
+    /// `440x800`, and nothing else. A size somebody typed wrong is no size rather than a
+    /// guess: a run that silently photographed the store's width while its filename said 700
+    /// is a picture that proves the opposite of what it claims to.
+    static func size(from text: String) -> CGSize? {
+        let parts = text.lowercased().split(separator: "x")
+        guard parts.count == 2,
+              let width = Double(parts[0]), let height = Double(parts[1]),
+              width > 0, height > 0
+        else { return nil }
+        return CGSize(width: width, height: height)
     }
 }
 
@@ -213,6 +238,8 @@ public final class AppState {
     /// Where this run is to write a picture of itself before stopping, or nothing — which is
     /// every run but a screenshot one. See `Shooter`.
     let shootTo: String?
+    /// What size to make the window before taking that picture, where a run asked for one.
+    let shootSize: CGSize?
 
     /// A post this run was told to open, by the end of its address, or nothing. Read by
     /// `FeedScreen` once it has posts to look through and then never again.
@@ -449,12 +476,15 @@ public final class AppState {
         self.holdsLanding = launch.holdsLanding
         self.isFixture = launch.fixture
         self.shootTo = launch.shootTo
+        self.shootSize = launch.shootSize
         self.openingPost = launch.openingPost
         self.marketingVersion = marketingVersion
         self.buildVersion = buildVersion
         // The language before the first frame, not after it: a screenshot is taken of what was
-        // drawn, and a tree redrawn a moment later is a photograph of the moment before.
+        // drawn, and a tree redrawn a moment later is a photograph of the moment before. The
+        // text size is set here for the same reason and it is the same kind of fact.
         if let language = launch.language { preferences.language = language }
+        if let scale = launch.textScale { preferences.textScale = scale }
         L10n.use(preferences.language)
     }
 
