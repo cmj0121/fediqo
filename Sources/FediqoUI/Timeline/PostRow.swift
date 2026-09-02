@@ -699,22 +699,34 @@ struct RemoteImage: View {
     /// animation and nothing else reads it.
     @State private var breathing = false
 
+    @Environment(\.displayScale) private var displayScale
+    private var cache: PictureCache { .shared }
+
+    /// Drawn from the cache rather than from an `AsyncImage`, which is #91: `AsyncImage` keeps
+    /// its result for the lifetime of this view, so a row rebuilt for any reason went back to
+    /// nothing and started again — and whether a reader ever saw a picture came down to whether
+    /// the rebuilding stopped before they looked. It was measured not stopping.
+    ///
+    /// `.task(id:)` is still cancelled by a rebuild and that no longer matters: what it cancels
+    /// is this view's waiting, and the work belongs to the cache.
     var body: some View {
-        AsyncImage(url: url, transaction: Transaction(animation: reduceMotion ? nil : Motion.appearing)) { phase in
-            switch phase {
-            case .success(let image):
-                image.resizable().aspectRatio(contentMode: .fill)
+        Group {
+            if let picture = cache.picture(url, scale: displayScale) {
+                picture.resizable().aspectRatio(contentMode: .fill)
+                    .transition(.opacity)
             // Still coming, and there is somewhere for it to come from.
-            case .empty where url != nil && standing != .covered:
+            } else if url != nil, standing != .covered, !cache.isMissing(url, scale: displayScale) {
                 waiting
             // Nothing to come, or nothing came. The two are one thing to a reader — there is no
             // picture here — and they get the same mark, which says which kind of nothing it is.
-            default:
+            } else {
                 absent
             }
         }
+        .animation(reduceMotion ? nil : Motion.appearing, value: cache.picture(url, scale: displayScale) == nil)
         .frame(width: width, height: height)
         .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        .task(id: url) { await cache.fetch(url, scale: displayScale) }
     }
 
     /// A shape that breathes while the picture is on its way.
