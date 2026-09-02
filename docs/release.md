@@ -129,8 +129,51 @@ the answer is **Data Not Collected**, ticked once by hand under App Privacy, and
 [`docs/privacy.md`](privacy.md) does. What the code does is checkable: one dependency, no analytics, no
 third-party SDK of any kind.
 
-The screenshots are not here yet ([#30](https://github.com/cmj0121/fediqo/issues/30)). When they arrive at
-`fastlane/screenshots/<platform>/`, the lane picks them up and uploads them in the same run without being told.
+The screenshots are next door, and the lane picks them up from `fastlane/screenshots/<platform>/` in the same
+run without being told.
+
+## The pictures
+
+```sh
+make -C Apps shots-macos      # both languages, 1280x800
+make -C Apps shots-ios        # both languages, the phone and the iPad
+make shots                    # both of the above
+```
+
+They land in `fastlane/screenshots/<platform>/<locale>/`, numbered so that the order they upload in is the
+order they were meant to be read in, and **they are committed**. What a person does is look at them and judge
+them; what nobody does is take them.
+
+**The Mac app photographs itself.** `screencapture` needs the Screen Recording permission, and that is the
+difference between a laptop and a runner rather than a detail of either: a hosted runner is granted it in its
+image, and the Mac this was written on answers `could not create image from display`. A window drawing itself
+into a bitmap needs no permission anywhere, because nothing is being captured — the app renders its own view
+hierarchy, which it may always do. `Sources/FediqoUI/Support/Shooter.swift`, `#if DEBUG`, and the store build
+cannot compile it.
+
+Rendering also settles the size, which `screencapture` could not. App Store Connect takes 16:10 and nothing
+else, and **no display mode a hosted runner offers is 16:10** — measured: 1024×768, 1280×720, 1600×900,
+1920×1080, and not one of them has the shape. A bitmap this app chose the pixel count of makes the display's
+size beside the point. **1280×800** is what this project ships; 2560×1600 and 2880×1800 are a retina display's
+and no hosted runner has one.
+
+The app is sandboxed (#27), so it writes into its own container and prints where. The script moves it out.
+That is the sandbox working, and the box is not going to be opened for a screenshot.
+
+**Nothing is driven into place; everything is launched into it.** A hosted runner will not grant an app the
+accessibility permission UI testing needs — measured, and written up on
+[#30](https://github.com/cmj0121/fediqo/issues/30) — so there is no pressing anything. Every picture is a
+state a launch variable reaches: `FEDIQO_ROUTE`, `FEDIQO_RAIL`, `FEDIQO_LANGUAGE`, `FEDIQO_COMPOSE`,
+`FEDIQO_NOTICES`, `FEDIQO_FIXTURE`. A picture the list needs and they cannot reach is a variable to add, never
+a click to script.
+
+One trap, found on a runner: **`open` does not hand an app the environment of whoever asked for it**.
+`FEDIQO_FIXTURE=1 open Fediqo.app` opens a real, empty store and photographs a first launch. The script runs
+the binary inside the bundle.
+
+The list of screens is the `SHOTS` array at the top of `scripts/shots.sh` and nothing else knows it. Statistics
+is deliberately not among them: that screen reads the store, a run launched straight into it has never loaded
+a timeline, and the picture is a column of zeros.
 
 ## The tag that runs it
 

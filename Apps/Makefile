@@ -35,7 +35,7 @@ VERSION        = $(shell $(ROOT)/scripts/version.sh --marketing)
 BUILD_NUMBER   = $(shell $(ROOT)/scripts/version.sh --build)
 STAMP          = MARKETING_VERSION=$(VERSION) CURRENT_PROJECT_VERSION=$(BUILD_NUMBER)
 
-.PHONY: all run mac ios uitest uitest-ios publish version xcodeproj sync-assets clean test build upgrade help
+.PHONY: all run mac ios uitest uitest-ios publish shots shots-macos shots-ios version xcodeproj sync-assets clean test build upgrade help
 
 all: help			# default action
 
@@ -107,6 +107,19 @@ uitest-ios: xcodeproj	# run the tests that drive the app on an iPad simulator
 # runs this same line. Nothing about the release is written down anywhere else.
 publish: xcodeproj	# archive, sign and send both apps to TestFlight
 	@$(ROOT)/scripts/env.sh -- bundle exec fastlane publish
+
+# The pictures the two stores ask for. Two commands rather than one, because they are two
+# different machines' worth of work: the Mac app photographs itself in a second, and the phone
+# needs two simulators booted and an app installed on each. Nothing here drives anything -- a
+# hosted runner will not grant an app the accessibility permission UI testing needs (#30), so
+# every picture is a state a launch variable reaches.
+shots: shots-macos shots-ios	# take every screenshot both stores ask for
+
+shots-macos: xcodeproj	# photograph the Mac app, both languages, 1280x800
+	@$(ROOT)/scripts/shots.sh --macos
+
+shots-ios: xcodeproj	# photograph the phone and the iPad, both languages
+	@$(ROOT)/scripts/shots.sh --ios
 
 version:			# show the version a build made here would report
 	@echo "$(VERSION) ($(BUILD_NUMBER))"

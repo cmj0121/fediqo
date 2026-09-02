@@ -122,8 +122,44 @@ scripts/metadata.py --resolve           # ⋯⋯以及那些連結會不會回�
 次，而只要 [`docs/privacy.zh-TW.md`](privacy.zh-TW.md) 還成立，它就一直成立。程式碼做了什麼是可查的：一
 個相依套件、沒有分析、沒有任何第三方 SDK。
 
-截圖還沒到（[#30](https://github.com/cmj0121/fediqo/issues/30)）。等它們出現在
-`fastlane/screenshots/<platform>/`，這條 lane 不必被告知就會在同一趟裡把它們一起上傳。
+截圖就在隔壁，這條 lane 不必被告知就會從 `fastlane/screenshots/<platform>/` 把它們在同一趟裡一起上傳。
+
+## 那些圖
+
+```sh
+make -C Apps shots-macos      # 兩種語言，1280x800
+make -C Apps shots-ios        # 兩種語言，手機與 iPad
+make shots                    # 以上兩者
+```
+
+它們會落在 `fastlane/screenshots/<platform>/<locale>/`，編號就是上傳的順序、也是它們該被讀的順序，而且
+**會被 commit**。人要做的是看它們、判斷它們；沒有人要去拍它們。
+
+**Mac app 自己拍自己。** `screencapture` 需要「螢幕錄製」權限，而那是 laptop 與 runner 的差別，不是其中
+一邊的細節：hosted runner 在 image 裡被授權了，寫下這段話的這台 Mac 回的是
+`could not create image from display`。視窗把自己畫進一張點陣圖則哪裡都不需要權限，因為根本沒有東西被
+「擷取」——是 app 在算繪自己的 view 階層，那是它隨時可以做的事。程式在
+`Sources/FediqoUI/Support/Shooter.swift`，`#if DEBUG`，上架的 build 編譯不到它。
+
+自己畫也順便把尺寸定死了，而 `screencapture` 做不到這件事。App Store Connect 只收 16:10，而
+**hosted runner 提供的顯示模式沒有一個是 16:10**——實測過：1024×768、1280×720、1600×900、1920×1080，
+沒有一個是那個形狀。由這個 app 自己決定像素數的點陣圖，讓螢幕多大變得無關緊要。這個專案出的是
+**1280×800**；2560×1600 與 2880×1800 是 retina 螢幕的尺寸，而沒有任何 hosted runner 有 retina 螢幕。
+
+這個 app 在沙盒裡（#27），所以它寫進自己的容器並印出位置，腳本再把檔案搬出來。那是沙盒在做它的事，而盒子
+不會為了一張截圖被打開。
+
+**沒有任何東西被「操作」到位，全部都是「啟動」到位。** hosted runner 不會給 app 做 UI 測試需要的
+accessibility 權限——實測過，寫在 [#30](https://github.com/cmj0121/fediqo/issues/30) 上——所以按不了任何
+東西。每一張圖都是某個 launch 變數到得了的狀態：`FEDIQO_ROUTE`、`FEDIQO_RAIL`、`FEDIQO_LANGUAGE`、
+`FEDIQO_COMPOSE`、`FEDIQO_NOTICES`、`FEDIQO_FIXTURE`。清單需要而它們到不了的狀態，是「再加一個變數」，
+永遠不是「寫一段點擊腳本」。
+
+在 runner 上踩到的一個坑：**`open` 不會把呼叫者的環境變數交給 app**。`FEDIQO_FIXTURE=1 open Fediqo.app`
+開出來的是一個真的、空的 store，拍到的是首次啟動的畫面。腳本改成直接跑 bundle 裡的執行檔。
+
+要拍哪些畫面，是 `scripts/shots.sh` 最上面的 `SHOTS` 陣列，沒有別的地方知道這件事。統計刻意不在裡面：那個
+畫面讀的是 store，而直接啟動到它的那一次從來沒載過時間軸，拍出來會是一排零。
 
 ## 觸發它的那個 tag
 

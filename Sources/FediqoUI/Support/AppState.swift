@@ -98,6 +98,12 @@ struct LaunchOptions {
     /// taken of, and the only launch option that changes where the posts come from rather
     /// than which screen is showing.
     var fixture = false
+    /// Which language to draw in, whatever the machine is set to. A screenshot run needs both,
+    /// one after the other, and neither of them is whatever the person at the keyboard chose.
+    var language: AppLanguage?
+    /// Where to write a picture of this window, after which the app has nothing left to do and
+    /// stops. See `Shooter`: this is the whole of how #30 photographs the Mac.
+    var shootTo: String?
 
     static let none = LaunchOptions()
 
@@ -130,6 +136,8 @@ struct LaunchOptions {
         options.composing = environment["FEDIQO_COMPOSE"] == "1"
         options.showingNotices = environment["FEDIQO_NOTICES"] == "1"
         options.fixture = environment["FEDIQO_FIXTURE"] == "1"
+        options.language = environment["FEDIQO_LANGUAGE"].flatMap(AppLanguage.init(rawValue:))
+        options.shootTo = environment["FEDIQO_SHOOT"]
         return options
         #else
         .none
@@ -196,6 +204,10 @@ public final class AppState {
     /// The inbox, and the connections that keep it filled. Nil where there is no store — the
     /// fixture without one, and any build that has none.
     let notices: NoticeModel?
+
+    /// Where this run is to write a picture of itself before stopping, or nothing — which is
+    /// every run but a screenshot one. See `Shooter`.
+    let shootTo: String?
     /// The conversations being read, oldest first, empty while the reader is in the list.
     ///
     /// A stack rather than one, because a conversation is a place a reader walks *into*.
@@ -403,6 +415,10 @@ public final class AppState {
         self.showingNotifications = launch.showingNotices
         self.holdsLanding = launch.holdsLanding
         self.isFixture = launch.fixture
+        self.shootTo = launch.shootTo
+        // The language before the first frame, not after it: a screenshot is taken of what was
+        // drawn, and a tree redrawn a moment later is a photograph of the moment before.
+        if let language = launch.language { preferences.language = language }
         L10n.use(preferences.language)
     }
 

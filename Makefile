@@ -1,6 +1,6 @@
 SUBDIR := Apps
 
-.PHONY: all clean test run build publish version upgrade help $(SUBDIR)
+.PHONY: all clean test run build publish shots version upgrade help $(SUBDIR)
 
 all: $(SUBDIR) 		# default action
 	@[ -f .git/hooks/pre-commit ] || pre-commit install --install-hooks
@@ -19,6 +19,9 @@ build:				# build the binary/library
 	swift build
 
 publish: $(SUBDIR)	# archive, sign and send both apps to TestFlight
+	@:
+
+shots: $(SUBDIR)	# take the screenshots both stores ask for, in both languages
 	@:
 
 version:			# show the version a build made here would report

@@ -16,6 +16,9 @@ public struct FediqoRootView: View {
             // A fixture run opens the same size in the same place every time, and on the second
             // display where there is one. Nothing at all on a reader's own run.
             .fixtureWindow(app.isFixture)
+            // A screenshot run photographs this window and stops. Nothing at all on any other
+            // run, and not compiled into a build anybody ships.
+            .shooting(to: app.shootTo)
             .preferredColorScheme(app.preferences.theme.colorScheme)
             // Strings are read through a bundle chosen at runtime, so a language change has
             // to rebuild the tree rather than merely redraw it.

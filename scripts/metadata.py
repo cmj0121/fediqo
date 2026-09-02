@@ -33,6 +33,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 METADATA = ROOT / "fastlane" / "metadata"
 NOTES = METADATA / "notes"
+SCREENSHOTS = ROOT / "fastlane" / "screenshots"
 
 # The two the project ships, spelled the way App Store Connect spells them. Traditional
 # Chinese is `zh-Hant` there and `zh-TW` in every filename in docs/; they are not the same
@@ -117,6 +118,42 @@ def check_locales(report: Report) -> None:
 
         for missing in sorted(set(LOCALES) - found):
             report.fail(f"{platform}/{missing}: missing, and it is one of the two we ship")
+
+
+def check_screenshots(report: Report) -> None:
+    """The pictures, where somebody has taken any, in folders deliver recognises.
+
+    The same trap as the text and the same silence: a language folder deliver does not know is
+    a language that ships no pictures, and nothing says so. Absent altogether is fine — the
+    lane uploads none rather than uploading zero, which App Store Connect would read as an
+    answer — so this only has something to say once a folder exists.
+    """
+    if not SCREENSHOTS.is_dir():
+        return
+
+    for platform in PLATFORMS:
+        root = SCREENSHOTS / platform
+        if not root.is_dir():
+            continue
+
+        found = {entry.name for entry in root.iterdir() if entry.is_dir()}
+        for unknown in sorted(found - set(LOCALES)):
+            hint = NEAR_MISSES.get(unknown)
+            said = f" -- App Store Connect calls that one '{hint}'" if hint else ""
+            report.fail(f"screenshots/{platform}/{unknown}: not a language this project ships{said}")
+
+        for locale in sorted(found & set(LOCALES)):
+            pictures = sorted((root / locale).glob("*.png"))
+            if not pictures:
+                report.fail(f"screenshots/{platform}/{locale}: a folder with no pictures in it")
+
+        # Both languages or neither. A release that went out with pictures in one language and
+        # none in the other is the failure this whole file exists to prevent, wearing a
+        # different hat.
+        missing = sorted(set(LOCALES) - found)
+        if found and missing:
+            report.fail(f"screenshots/{platform}: pictures for {', '.join(sorted(found))} "
+                        f"and none for {', '.join(missing)}")
 
 
 def check_files(report: Report) -> None:
@@ -276,6 +313,7 @@ def main() -> int:
     check_locales(report)
     check_files(report)
     check_shared(report)
+    check_screenshots(report)
 
     if arguments.version:
         check_notes(report, arguments.version)
