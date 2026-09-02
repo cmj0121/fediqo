@@ -1,0 +1,19 @@
+Fediqo is a client for the open social web and nothing else. There is no Fediqo account, no
+Fediqo server, and nothing to sign up for here: it reads the servers you point it at, from the
+device it is installed on.
+
+So there is no demo account to hand you, and none is needed to see the app work:
+
+1. Launch it. The first screen asks which protocol to read. Mastodon is the one this build
+   speaks; the others are listed and say they are not ready rather than being hidden.
+2. Pick a server from the suggested list -- mastodon.social is in it -- or type any other
+   Mastodon host.
+3. The timeline fills. Public and Trending are read with no account at all.
+
+Signing in is optional, and adds only what an account can do: the home timeline, and posting.
+It is the server's own OAuth page, opened in a browser; Fediqo never sees a password, and the
+token it is given is kept in the Keychain on the device.
+
+Nothing is collected and nothing is sent anywhere except to the servers you named, which is
+why the privacy answer is Data Not Collected. The source is public and the claim is checkable:
+https://github.com/cmj0121/fediqo

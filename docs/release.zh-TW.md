@@ -21,7 +21,7 @@ request 手上沒有任何憑據，也必須繼續不需要。
   fastlane publish
        │
        ├── scripts/metadata.py —— 在建置任何東西之前檢查商店文案：語言資料夾、
-       │   長度、連結，以及這個版本有沒有 release notes
+       │   長度、連結、這個版本有沒有 release notes，以及審查者有沒有東西可讀
        ├── setup_ci —— 在 runner 上做一個暫時的 keychain；在 laptop 上什麼都不做
        │
        ├── 問 App Store Connect 現在握著哪些 build number，一個平台問一次
@@ -50,6 +50,10 @@ scripts/env.sh --check          # 只說名字 —— 它從不印出值
 | `FEDIQO_TEAM_ID`      | 那些簽章身分所屬的 Apple Developer Program team          |
 | `FEDIQO_BUNDLE_ID`    | 一個識別碼、兩個平台、App Store Connect 上一筆記錄       |
 | `MATCH_GIT_URL`       | 憑證與 profile 加密存放的地方                            |
+| `FEDIQO_REVIEW_FIRST_NAME` | 審查有問題的時候 Apple 找誰                         |
+| `FEDIQO_REVIEW_LAST_NAME`  | ……那個人的姓                                        |
+| `FEDIQO_REVIEW_PHONE`      | ……Apple 撥號的形式，國碼在前                        |
+| `FEDIQO_REVIEW_EMAIL`      | ……以及改用寫的要寫去哪裡                            |
 | `MATCH_PASSWORD`      | 那個 repository 的通關密語，keychain 裡沒有的時候才要填  |
 | `ASC_KEY_ID`          | App Store Connect key：不需要有人在旁邊的那條路          |
 | `ASC_ISSUER_ID`       | ……它的 issuer，一個 team 一組                            |
@@ -94,6 +98,7 @@ commit，而商店不收看過的號碼。兩個平台用同一個號碼，因�
       macos/  en-US/  …
               zh-Hant/ …
       notes/  0.1.0/  en-US.txt zh-Hant.txt
+      review_information/ notes.txt
 ```
 
 **語言資料夾叫 `en-US` 與 `zh-Hant`。** 不是 `zh-TW`——那是這個 repository 每份文件用的代碼，而不是 App
@@ -116,6 +121,17 @@ scripts/metadata.py --resolve           # ⋯⋯以及那些連結會不會回�
 **Release notes 以版本命名，不放在語言資料夾裡。** 放在描述旁邊的 `release_notes.txt` 是一個每次發布都被
 覆寫的檔案，而忘記覆寫的那一次，會無聲地把上一次的字送出去。`notes/0.1.0/en-US.txt` 忘不掉：沒有自己資料
 夾的 tag 沒有東西可讀，`make publish` 會在建置之前停下。在下 tag 之前寫好它們。
+
+**審查者被告知什麼在這裡；他們找誰不在這裡。** `review_information/notes.txt` 是兩個平台、兩種語言共用
+的一份。App Store Connect 是每個平台的*版本*各留一份審查資訊——iOS 那份與 Mac 那份在同一趟裡分別被建
+起來——而要告訴它們的是同一件事，所以第二份抄本只可能因為漂開而不同。旁邊那組聯絡資料——姓名、
+電話、電子郵件——來自環境裡的 `FEDIQO_REVIEW_*`，永遠不來自這份 checkout，因為 checkout 是公開的而那些是
+某個人的。`metadata.py` 不管在哪裡看到叫這些名字的檔案都會拒絕。
+
+**這些都不是選配的，而且跟被不被審查無關。** 這裡的東西從來不會被送去審查；它們之所以必要，是因為
+`deliver` 每次上傳 metadata 都會去讀審查附件，而 App Store Connect 上沒有審查資訊的版本，回答那次讀取的
+字是 `No data`。訊息就只有這樣，它在 archive 之後、TestFlight 之後才出現，而一個 app 的第一次發布正是還
+沒有審查資訊的那一次。把聯絡資料交出去，就是讓它存在的辦法。
 
 **隱私問卷是唯一不從這裡上傳的東西。** `deliver` 沒有辦法回答 App Store Connect 的隱私問卷——它帶的是隱私
 *連結*，僅此而已。Fediqo 不蒐集任何東西，所以答案是 **Data Not Collected**，在 App Privacy 底下手動勾一
@@ -184,6 +200,10 @@ runner 從它的 secret store 拿到的，正是 `.env` 交給 laptop 的那些�
 | `FEDIQO_TEAM_ID`                | 一樣                                             |
 | `FEDIQO_BUNDLE_ID`              | 一樣                                             |
 | `MATCH_GIT_URL`                 | HTTPS 形式——runner 沒有 ssh key 可以 clone       |
+| `FEDIQO_REVIEW_FIRST_NAME`      | 一樣                                             |
+| `FEDIQO_REVIEW_LAST_NAME`       | 一樣                                             |
+| `FEDIQO_REVIEW_PHONE`           | 一樣                                             |
+| `FEDIQO_REVIEW_EMAIL`           | 一樣                                             |
 | `MATCH_GIT_BASIC_AUTHORIZATION` | 這裡必要，laptop 上用不到                        |
 | `MATCH_PASSWORD`                | 這裡必要：沒有 keychain 幫忙記住它               |
 | `ASC_KEY_ID`                    | 這裡必要——Apple ID 那條路需要有人看著            |
@@ -213,6 +233,15 @@ Mac 版透過 macOS 上的 TestFlight app 安裝。它跟手機是 App Store Con
 
 **`Invalid password passed via 'MATCH_PASSWORD'`** —— `.env` 裡有一行空的 `MATCH_PASSWORD=`。空字串在
 Ruby 裡為真，所以 match 拿它當通關密語，keychain 從沒被問過。
+
+**build 已經上了 TestFlight，`upload_to_app_store` 卻回 `No data`** —— 這個版本沒有審查資訊，而
+`deliver` 照樣去讀了它的附件。第一次發布、沒有人填過審查聯絡資料的時候就是這樣；`FEDIQO_REVIEW_*` 與
+`review_information/notes.txt` 是讓那份資訊存在的東西，而 `scripts/env.sh --check` 不跑任何東西就會說出
+少了哪一個。
+
+**紅色的 `Error fetching app store review detail - No data`，而 lane 繼續跑下去** —— 這不是同一件事，也
+不是失敗。那是 `deliver` 在建立審查資訊之前先去找它，每個平台第一次上傳某個版本時都會這樣。會停下來的那
+次只說 `No data`，別的什麼都不說；這一次會說是哪一次讀取失敗，然後往下走。
 
 **iOS 的 lane 跑著跑著出現一個 macOS archive** —— scheme 不是 shared 的。fastlane 找不到收到的那個名
 字，而它不會停下來，它會改用專案裡第一個 scheme。
