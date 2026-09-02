@@ -220,34 +220,50 @@ struct PostRow: View {
 
     /// The band above everything: what happened to this post before it reached the reader.
     ///
-    /// Today that is one thing — somebody boosted it — because a boost is the only such fact
-    /// a timeline read hands over. Favourites and the rest arrive with notifications (#9), and
-    /// when they do this is the line they are said on, rather than a second design for the
-    /// same idea. Nothing at all is drawn when there is nothing to say.
+    /// **One line, however many things happened.** It used to be two independent `if`s, so a
+    /// post that was both an answer and a boost drew two stacked bands — two glyphs, two greys,
+    /// two lines of the row's height spent before a word of the post was read, and one row
+    /// taller than its neighbour, which S6 will not have. A boost of a reply is one sentence
+    /// about how this post got here, and it is said in one.
+    ///
+    /// Favourites and the rest arrive with notifications (#9), and when they do this is the
+    /// line they are said on rather than a second design for the same idea. Nothing at all is
+    /// drawn where there is nothing to say.
     @ViewBuilder
     private var decorator: some View {
-        if answering != .nothing {
-            HStack(spacing: Space.tight) {
-                Image(systemName: "arrowshape.turn.up.left").fediqoSymbol(TypeScale.caption, weight: .regular)
-                // Named where the page can name them, and "an answer" where it cannot. It is
-                // never a name we worked out for ourselves: a reply's first mention is usually
-                // the person it answers and usually is not good enough to print under somebody
-                // else's name.
-                switch answering {
-                case .handle(let handle): Text(t("post.replyingTo", handle)).fediqoFont(TypeScale.caption)
-                default: Text(t("post.isReply")).fediqoFont(TypeScale.caption)
-                }
+        if answering != .nothing || post.boostedBy != nil {
+            HStack(spacing: Space.snug) {
+                if answering != .nothing { answered }
+                if answering != .nothing, post.boostedBy != nil { Text(verbatim: "·") }
+                if let boostedBy = post.boostedBy { boosted(by: boostedBy) }
             }
+            .fediqoFont(TypeScale.caption)
             .foregroundStyle(.secondary)
+            .lineLimit(1)
         }
-        if let boostedBy = post.boostedBy {
-            HStack(spacing: Space.tight) {
-                Image(systemName: "arrow.2.squarepath").fediqoSymbol(TypeScale.caption, weight: .regular)
-                // Not a `Label`: whoever boosted this may have a picture in their name, and a
-                // label takes a string.
-                EmojiText(t("timeline.boostedBy", boostedBy), emojis: post.emojis, size: TypeScale.caption)
+    }
+
+    /// That it answers something, and whom where anybody here holds the answer.
+    private var answered: some View {
+        HStack(spacing: Space.tight) {
+            Image(systemName: "arrowshape.turn.up.left").fediqoSymbol(TypeScale.caption, weight: .regular)
+            // Named where the page or the store can name them, and "an answer" where neither
+            // can. It is never a name this app worked out for itself: a reply's first mention
+            // is usually the person it answers and usually is not good enough to print under
+            // somebody else's name.
+            switch answering {
+            case .handle(let handle): Text(t("post.replyingTo", handle))
+            default: Text(t("post.isReply"))
             }
-            .foregroundStyle(.secondary)
+        }
+    }
+
+    private func boosted(by who: String) -> some View {
+        HStack(spacing: Space.tight) {
+            Image(systemName: "arrow.2.squarepath").fediqoSymbol(TypeScale.caption, weight: .regular)
+            // Not a `Label`: whoever boosted this may have a picture in their name, and a label
+            // takes a string.
+            EmojiText(t("timeline.boostedBy", who), emojis: post.emojis, size: TypeScale.caption)
         }
     }
 

@@ -254,6 +254,19 @@ public final class AppState {
     /// than in the rows because a page is read from the store in one go, and because an action
     /// on the opened post has to move the row in the list behind it.
     var postMarks: [String: PostMarks] = [:]
+
+    /// Who wrote the posts this page's replies are answering, by the address they answer —
+    /// for the ones this device holds, and nothing for the rest.
+    ///
+    /// A reply carries the address of what it answers and nothing about who wrote it. The page
+    /// itself can name the parent when it happens to be on the screen; this is the other half,
+    /// which is the store, read once per page beside the marks. Where neither knows, a row says
+    /// it is a reply and names nobody — a fact, rather than a name worked out from a mention.
+    ///
+    /// Written by `loadMarks(for:)` and by nothing else. Not `private(set)`, for the reason
+    /// `postMarks` beside it is not: the one thing that writes it lives in `PostActing.swift`,
+    /// and `private` does not reach across a file.
+    var parentHandles: [String: String] = [:]
     /// What a post's numbers are now, where a write's own answer has said something newer than
     /// the post arrived with.
     ///

@@ -51,13 +51,22 @@ struct FeedScreen: View {
     /// Whether a row is an answer, and whose — as much as a timeline can honestly say.
     ///
     /// A reply carries the address of what it answers and nothing about who wrote it, so the
-    /// name comes from the page itself where the parent happens to be on it. Where it is not,
-    /// the row says it is an answer and stops: the rest is one press away, where the whole
-    /// conversation is read from the store and the server.
-    static func answering(_ post: Post, among posts: [Post]) -> Answering {
+    /// name has to come from somewhere that holds the parent. Two places do, and they are asked
+    /// in this order because the first is free: the page itself, where the parent happens to be
+    /// on it, and then the store, read once for the whole page beside the marks.
+    ///
+    /// **Never from the post's own mentions**, which is where the name looks like it is. A
+    /// reply's first mention is usually the person it answers, and usually is not good enough
+    /// to print under somebody else's name — a row that is right most of the time about who
+    /// somebody was talking to is a row that is quietly wrong about it the rest of the time.
+    /// Where neither place holds the parent, the row says it is an answer and stops, and the
+    /// rest is one press away.
+    static func answering(_ post: Post, among posts: [Post],
+                          orKnown known: [String: String] = [:]) -> Answering {
         guard let parent = post.inReplyToURI else { return .nothing }
-        guard let above = posts.first(where: { $0.uri == parent }) else { return .somebody }
-        return .handle(above.authorHandle)
+        if let above = posts.first(where: { $0.uri == parent }) { return .handle(above.authorHandle) }
+        if let handle = known[parent] { return .handle(handle) }
+        return .somebody
     }
 
     private var fading: Animation? { reduceMotion ? nil : Motion.appearing }
@@ -261,7 +270,8 @@ struct FeedScreen: View {
                     // with the first.
                     ForEach(posts) { post in
                         RingedRow(post: post, place: model.place,
-                                  answering: Self.answering(post, among: posts))
+                                  answering: Self.answering(post, among: posts,
+                                                            orKnown: app.parentHandles))
                     }
                     // What this device already knows about the page: what each account did to
                     // these posts, and which of them are being kept here. One read for the

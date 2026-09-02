@@ -154,6 +154,34 @@ extension LocalStore {
         }
     }
 
+    /// Who wrote each of these posts, by the address they are named by — for the posts this
+    /// device happens to hold, and nothing at all for the rest.
+    ///
+    /// One read for a page rather than one per row: a list of forty replies each asking the
+    /// store who its parent is would be forty round trips for one answer, which is the same
+    /// rule `loadMarks` follows and for the same reason.
+    ///
+    /// A reply carries the address of what it answers and nothing about who wrote it, so a row
+    /// can only name that person where this device has the parent. Where it does not, the row
+    /// says it is a reply and stops — which is a fact, unlike a name worked out from a post's
+    /// first mention.
+    public func authors(ofPostsAt uris: [String]) async throws -> [String: String] {
+        let wanted = Array(Set(uris))
+        guard !wanted.isEmpty else { return [:] }
+        let placeholders = Array(repeating: "?", count: wanted.count).joined(separator: ", ")
+        return try await read { db in
+            var handles: [String: String] = [:]
+            for row in try Row.fetchAll(db, sql: """
+                SELECT p.uri, a.handle FROM posts p
+                JOIN accounts a ON a.author_id = p.author_id
+                WHERE p.uri IN (\(placeholders)) AND a.handle IS NOT NULL
+                """, arguments: StatementArguments(wanted)) {
+                handles[row["uri"]] = row["handle"]
+            }
+            return handles
+        }
+    }
+
     /// The chain above a post, furthest ancestor first. Each step is one row by `uri`.
     private static func walkUp(_ db: Database, from parent: String?, depth: Int) throws -> [Post] {
         var chain: [Post] = []
