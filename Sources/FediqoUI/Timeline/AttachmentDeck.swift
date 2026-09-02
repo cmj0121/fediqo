@@ -50,12 +50,20 @@ struct AttachmentDeck: View {
     /// "there are more"; past that the edges stop being distinguishable anyway.
     private static let shown = 3
 
-    /// How far each one underneath steps out from the one above it.
+    /// How far each one underneath steps out from the one above it, and how much of an edge
+    /// it is allowed to draw.
     ///
-    /// Half of `Space.tight`, and it is a named number on this view rather than a token
-    /// because it is not a gap between two things — it is the thickness of a sheet of paper,
-    /// and it belongs to this drawing and to nothing else (S8 allows exactly that).
-    private static let leaf: CGFloat = Space.tight / 2
+    /// Named numbers on this view rather than tokens, because neither is a gap between two
+    /// things: they are the thickness of a sheet of paper and the shadow along its edge, and
+    /// they belong to this drawing and to nothing else — which is what S8 allows.
+    ///
+    /// Three quarters of `Space.tight` and half a hairline. The stack used to step out a full
+    /// four points with a whole hairline around each sheet, which drew three bordered slabs
+    /// beside the picture and competed with it; at two points and no border at all the edges
+    /// then said nothing, and a reader learned there were more only from the counter
+    /// underneath. This is the middle: enough paper to see, not enough to look at.
+    private static let leaf: CGFloat = Space.tight * 0.75
+    private static let edge: Double = 0.5
 
     private var showing: Attachment? {
         attachments.isEmpty ? nil : attachments[top % attachments.count]
@@ -102,7 +110,9 @@ struct AttachmentDeck: View {
             ForEach(0..<min(attachments.count - 1, Self.shown), id: \.self) { depth in
                 RoundedRectangle(cornerRadius: Radius.inner, style: .continuous)
                     .fill(Palette.raised(colorScheme))
-                    .opacity(1 - Double(depth) * 0.3)
+                    .overlay(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous)
+                        .strokeBorder(Palette.hairline(colorScheme).opacity(Self.edge)))
+                    .opacity(1 - Double(depth) * 0.25)
                     .frame(width: Self.side, height: Self.height)
                     .offset(x: CGFloat(depth + 1) * Self.leaf, y: CGFloat(depth + 1) * Self.leaf)
             }
