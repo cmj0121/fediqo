@@ -25,11 +25,9 @@ struct ComposerView: View {
 
     var body: some View {
         content
-        // Most of the room, whatever the room is. A fixed panel was a panel sized for one
-        // window: the same 320 points was half a phone and a corner of a Mac, and it had to
-        // hold a post either way. `Self.share` of each side is the same decision at every
-        // size, which is what S9 asks for — nothing here measures a device.
-        .containerRelativeFrame([.horizontal, .vertical]) { length, _ in length * Self.share }
+        // Whatever the panel was given, which is `share` of the room left after the safe area
+        // and the keyboard — see `ComposerPanel`, which is the one place that measures.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .fediqoCard(radius: Radius.panel, shadow: true)
         // A composer you have to reach for the mouse to type in is a composer that failed on
         // a keyboard. `c` opens it and the cursor is already here; `Escape` is how you leave,
@@ -285,7 +283,8 @@ struct ComposerView: View {
         }
     }
 
-    /// How much of the room the composer takes, on both sides.
+    /// How much of the room the composer takes, on both sides. Read by `ComposerPanel`, which
+    /// is what measures the room.
     ///
     /// A share rather than a size. 320 × 250 was most of a phone and a corner of a Mac, and it
     /// was asked to hold the same things in both; four fifths is the same decision wherever it

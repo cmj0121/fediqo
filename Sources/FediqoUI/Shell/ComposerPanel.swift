@@ -38,9 +38,26 @@ struct ComposerPanel: ViewModifier {
                     .onTapGesture { app.setComposing(false) }
                     .transition(.opacity)
 
-                ComposerView()
-                    .fediqoChrome(app)
-                    .transition(.scale(scale: 0.96).combined(with: .opacity))
+                // The room, asked for rather than assumed, and asked **inside** the safe area.
+                //
+                // A share of the window is not a share of the room a reader has. On a phone the
+                // window includes the status bar and whatever the notch takes, and it measured
+                // as tall as the screen while the keyboard stood over the bottom half of it —
+                // so the title was drawn under the clock and the send button was under the
+                // keyboard, which is a composer nobody can send from. Found by photographing a
+                // phone; the Mac shows neither.
+                //
+                // A `GeometryReader` here reads what is left after both, and iOS shrinks that
+                // as the keyboard arrives, so the panel shrinks with it rather than sliding
+                // half of itself off the bottom.
+                GeometryReader { room in
+                    ComposerView()
+                        .fediqoChrome(app)
+                        .frame(width: room.size.width * ComposerView.share,
+                               height: room.size.height * ComposerView.share)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .transition(.scale(scale: 0.96).combined(with: .opacity))
             }
         }
         // Losing focus closes it too. A panel that survives the app going away is a window
