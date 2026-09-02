@@ -207,8 +207,8 @@ final class CountingClient: SourceClient, @unchecked Sendable {
         InstanceInfo(host: host, title: host, summary: "")
     }
 
-    func timeline(host: String, limit: Int, before: Post?, token: String?) async throws -> [Post] { [] }
-    func home(host: String, limit: Int, before: Post?, token: String) async throws -> [Post] { [] }
+    func timeline(host: String, limit: Int, before: Post?, after: Post?, token: String?) async throws -> [Post] { [] }
+    func home(host: String, limit: Int, before: Post?, after: Post?, token: String) async throws -> [Post] { [] }
     func trending(host: String, limit: Int, token: String?) async throws -> [Post] { [] }
     func stillHas(_ post: Post, host: String, token: String?) async throws -> Bool { true }
 }

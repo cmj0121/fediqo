@@ -107,7 +107,12 @@ public protocol SourceClient: Sendable {
     /// Nothing above this line ever learns those words. It is also the cursor the store reads
     /// a page back from, so what came from the network and what came from disk are asked for
     /// with the one thing, and cannot disagree about where the page ended.
-    func timeline(host: String, limit: Int, before: Post?, token: String?) async throws -> [Post]
+    /// `after` is the other end of a stretch — everything newer than that post as well as older
+    /// than `before`. Both together are how a reader's timeline asks about a stretch it already
+    /// holds, which is what #92 says it could not: refreshing covers the top, paging walks away
+    /// from it, and nothing returned to the middle.
+    func timeline(host: String, limit: Int, before: Post?, after: Post?,
+                  token: String?) async throws -> [Post]
 
     /// What the server shows the account signed in to it, paged like `timeline`.
     ///
@@ -115,7 +120,8 @@ public protocol SourceClient: Sendable {
     /// it: there is no such thing as somebody's home timeline read as nobody. A server with
     /// no account on it is not asked at all, and is never quietly handed its public timeline
     /// instead — the same rule #4 set for a server that publishes no public timeline.
-    func home(host: String, limit: Int, before: Post?, token: String) async throws -> [Post]
+    func home(host: String, limit: Int, before: Post?, after: Post?,
+              token: String) async throws -> [Post]
 
     /// What the server says is trending. A separate thing, asked for separately.
     ///

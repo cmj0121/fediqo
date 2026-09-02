@@ -790,14 +790,15 @@ public struct TimelineLoader: Sendable {
     /// One request to one server as `token`'s owner, and what it handed over kept. `before` is
     /// that server's own cursor; a trending list has none and is never given one.
     private func read(_ client: any SourceClient, _ server: Server, query: TimelineQuery,
-                      token: String?, as reader: String?, before: Post?) async -> Answer {
+                      token: String?, as reader: String?, before: Post?,
+                      after: Post? = nil) async -> Answer {
         let posts: [Post]
         do {
             posts = switch query.source {
             case .public: try await client.timeline(host: server.host, limit: limit,
-                                                    before: before, token: token)
+                                                    before: before, after: after, token: token)
             case .home: try await client.home(host: server.host, limit: limit,
-                                              before: before, token: token ?? "")
+                                              before: before, after: after, token: token ?? "")
             case .trend: try await client.trending(host: server.host, limit: limit, token: token)
             // A conversation is not read by fanning out across the chosen servers: it is one
             // post's own, asked of the one server whose word on that post is final, when a
