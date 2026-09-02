@@ -83,13 +83,18 @@ struct NoticesSheet: View {
     }
 }
 
-/// One thing that happened, at the height every other row in this list is.
+/// One thing that happened.
+///
+/// Not "at the height every other row is", which is what this said and what nothing here ever
+/// did: no frame holds a notice to a height, and one whose quoted line wraps is taller than one
+/// whose does not. S6 asks for a row that is bounded rather than one that is uniform, and the
+/// bound is `quotedLines` below.
 struct NoticeRow: View {
     let notice: Notice
 
-    /// One line of what was said, and no more. S6: a list whose rows are different heights
-    /// cannot be scanned, and a mention is read here to decide whether to open it rather than
-    /// to be read here instead of opening it.
+    /// One line of what was said, and no more. S6 says a row is bounded, and this is where the
+    /// bound is here: a mention is read in this list to decide whether to open it, not instead
+    /// of opening it, so one line is the whole of what it has to do.
     private static let quotedLines = 1
 
     var body: some View {

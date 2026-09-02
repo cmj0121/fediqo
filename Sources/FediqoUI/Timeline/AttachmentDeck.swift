@@ -33,6 +33,19 @@ struct AttachmentDeck: View {
     /// Asked when the reader lifts the cover from here. The answer belongs to the row: the
     /// words and the media are covered together and uncovered together, so a deck keeping its
     /// own idea of it would be a second answer to one question.
+    /// How wide to draw, where that is not the reserved column's width.
+    ///
+    /// **Before `uncover`**, which is a closure a call site writes as a trailing one: a
+    /// parameter declared after it takes that closure instead, which `PostRow.open` has a
+    /// comment about and which this got wrong first.
+    ///
+    /// The column is `AttachmentDeck.side` wide and the card fills it exactly — that is what
+    /// reserving it is for. Stacked under the words there is no reserved column, only the row,
+    /// and the row is narrower than the card on a phone: 400 points of picture in 350 points of
+    /// row is the picture drawn over both edges, which is #78's failure returning with a bigger
+    /// card. So the arrangement that has no column says how much it has, and the card is that
+    /// wide or `side`, whichever is less.
+    var width: CGFloat?
     var uncover: () -> Void = {}
 
     @Environment(\.colorScheme) private var colorScheme
@@ -41,11 +54,30 @@ struct AttachmentDeck: View {
     /// leaves a reader who turned to the third one looking at the third one.
     @State private var top = 0
 
-    /// The column's width, and the height of the card in it. Shared, because the words beside
-    /// it are held to the same height: a list where every row is the same height is a list a
-    /// reader can move through without the next post jumping to a different place each time.
-    static let side: CGFloat = 200
-    static var height: CGFloat { side * 0.68 }
+    /// The column's width, and the height of the card in it.
+    ///
+    /// **Twice what it was**, which is the whole of #79's second half. At 200 a photograph was a
+    /// thumbnail, and a reader deciding whether to open it was deciding from something too small
+    /// to decide from.
+    ///
+    /// It could not be doubled while the row was this tall: S6 padded every row up to it, so a
+    /// two-line post with no picture at all became four hundred points of mostly nothing and a
+    /// window held two posts instead of five — measured, and the reason #79 waited for a rule to
+    /// be settled rather than for a number to be picked. S6 says a row is as tall as its content
+    /// now, so the card is a card and not every row's height.
+    ///
+    /// The words beside it are no longer held to this. `PostRow.words` keeps the height they
+    /// were clamped to before, so a bigger picture is a bigger picture and not also a longer
+    /// excerpt.
+    static let side: CGFloat = 400
+
+    /// What this deck is actually drawn at: the reserved column's width, or the room it was
+    /// given where that is narrower. One place, so the six frames below cannot disagree.
+    private var side: CGFloat { min(width ?? Self.side, Self.side) }
+    private var height: CGFloat { side * Self.ratio }
+    static var height: CGFloat { side * ratio }
+    /// The shape of a card, kept apart from its size so that a narrower one is the same shape.
+    static let ratio: CGFloat = 0.68
     /// How many of the ones underneath are drawn behind the top card. Three is enough to say
     /// "there are more"; past that the edges stop being distinguishable anyway.
     private static let shown = 3
@@ -80,7 +112,7 @@ struct AttachmentDeck: View {
                     .foregroundStyle(.tertiary)
             }
         }
-        .frame(width: Self.side, alignment: .leading)
+        .frame(width: side, alignment: .leading)
         .onChange(of: turns) { _, _ in turn() }
         // `p` on the row this deck belongs to plays what is on top of it, or stops it.
         .onChange(of: plays) { _, _ in
@@ -113,13 +145,13 @@ struct AttachmentDeck: View {
                     .overlay(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous)
                         .strokeBorder(Palette.hairline(colorScheme).opacity(Self.edge)))
                     .opacity(1 - Double(depth) * 0.25)
-                    .frame(width: Self.side, height: Self.height)
+                    .frame(width: side, height: height)
                     .offset(x: CGFloat(depth + 1) * Self.leaf, y: CGFloat(depth + 1) * Self.leaf)
             }
             top(showing)
         }
-        .frame(width: Self.side + CGFloat(min(attachments.count - 1, Self.shown)) * Self.leaf,
-               height: Self.height + CGFloat(min(attachments.count - 1, Self.shown)) * Self.leaf,
+        .frame(width: side + CGFloat(min(attachments.count - 1, Self.shown)) * Self.leaf,
+               height: height + CGFloat(min(attachments.count - 1, Self.shown)) * Self.leaf,
                alignment: .topLeading)
     }
 
@@ -129,12 +161,12 @@ struct AttachmentDeck: View {
             ZStack(alignment: .bottomLeading) {
                 if let player = app.playback.player, playing(attachment) {
                     AttachmentPlayer(player: player, audio: attachment.kind == .audio,
-                                     width: Self.side, height: Self.height)
+                                     width: side, height: height)
                 } else {
                     still(attachment)
                 }
             }
-            .frame(width: Self.side, height: Self.height)
+            .frame(width: side, height: height)
             .overlay(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous)
                 .strokeBorder(Palette.hairline(colorScheme)))
             .accessibilityElement()
@@ -148,7 +180,7 @@ struct AttachmentDeck: View {
     private func still(_ attachment: Attachment) -> some View {
         ZStack(alignment: .bottomLeading) {
             RemoteImage(url: hidden ? nil : attachment.displayURL,
-                        width: Self.side, height: Self.height,
+                        width: side, height: height,
                         standing: hidden ? .covered : .picture)
                 .clipShape(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous))
                 .blur(radius: hidden ? 18 : 0)

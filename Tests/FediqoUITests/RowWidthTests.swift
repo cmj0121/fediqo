@@ -18,9 +18,13 @@ struct RowWidthTests {
     /// Dynamic Type the phone was already set to rather than replacing it.
     private let ships = TextScale.larger.factor
 
-    @Test("At the scale it was measured for, it is the number it always was")
-    func unchangedForRegular() {
-        #expect(Size.wideRows(at: TextScale.regular.factor) == 560)
+    /// The sum rather than a total. This used to assert 560 — the number the threshold had been
+    /// for every reader — and #79 doubled the deck, which was always going to move it. What is
+    /// worth pinning is what it is made of: a literal here would only ever be re-typed to
+    /// whatever the code now says, which is a test agreeing with itself.
+    @Test("It is the deck, the gap, and what is left for the words")
+    func isTheSumOfItsShares() {
+        #expect(Size.wideRows(at: 1.0) == AttachmentDeck.side + Space.gap + 348)
     }
 
     /// The whole of unit 3 in one assertion. A threshold that does not move with the text is
@@ -34,9 +38,10 @@ struct RowWidthTests {
 
         #expect(small < regular)
         #expect(regular < larger)
-        // Not a token amount, either: the reader this app ships to needs a third as much
-        // width again as the one the old constant was written for.
-        #expect(larger > regular * 1.3)
+        // Not a token amount either. Stated as points rather than as a ratio: the ratio shrank
+        // when #79 doubled the deck, because the deck's share does not scale — which is the
+        // design working, and an assertion that failed for it was asserting the wrong thing.
+        #expect(larger - regular > 200)
     }
 
     /// The deck's share is a picture, and a picture is the size it is at every text size. Only
@@ -51,23 +56,22 @@ struct RowWidthTests {
         #expect(fixed == AttachmentDeck.side + Space.gap)
     }
 
-    /// What the change is actually for. 440 was under the old number and is under this one, so
-    /// no phone moves; 1024 is over both, so no iPad moves. The band between them is the whole
-    /// of the behaviour change, and it is the case #80 names — what a screen should do at 700
-    /// points that is different from both 440 and 1024.
-    @Test("A phone and a 13-inch iPad keep the answers they had; 700 points does not")
-    func onlyTheBandBetweenThemMoves() {
-        let phone: CGFloat = 440
-        let pad: CGFloat = 1024
-        let between: CGFloat = 700
+    /// Where the two arrangements now part, and how little room is left on the widest iPad the
+    /// stores sell.
+    ///
+    /// **This is the assertion that will fail first.** At the size this app ships at, a 13-inch
+    /// iPad clears the threshold by less than the rail beside the list is wide — so anything
+    /// that takes another sixty points from the feed, or another twenty from the deck, moves
+    /// every iPad to the stacked arrangement. That is not wrong and it is not obvious, and a
+    /// test is a cheaper place to find it than a screenshot.
+    @Test("A phone stacks, an iPad barely does not, and the margin is small enough to name")
+    func whereTheArrangementsPart() {
+        let needed = Size.wideRows(at: ships)
 
-        #expect(phone < Size.wideRows(at: ships))
-        #expect(phone < 560)
-
-        #expect(pad >= Size.wideRows(at: ships))
-        #expect(pad >= 560)
-
-        #expect(between >= 560)
-        #expect(between < Size.wideRows(at: ships))
+        #expect(440 < needed)
+        #expect(700 < needed)
+        #expect(1024 >= needed)
+        // Less than a hundred points of room on the widest iPad there is.
+        #expect(1024 - needed < 100)
     }
 }

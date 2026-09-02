@@ -4,9 +4,11 @@ import FediqoCore
 /// What a link says it is, drawn where the pictures go.
 ///
 /// **In the attachment column, and only where there are no attachments.** The column is already
-/// there on every row, already the row's height, and already the place a reader's eye goes for
-/// "what is in this post besides words" — so a card needs no space of its own and cannot make a
-/// row taller than its neighbour, which S6 would not have. And a post that has both its own
+/// there on every row and is already the place a reader's eye goes for "what is in this post
+/// besides words", so a card needs no space of its own — it costs a row nothing that the row was
+/// not already spending. That is a smaller claim than it used to make here, and the reason is
+/// that S6 stopped promising every row was the same height; what it still promises is that the
+/// columns line up, which is what makes this the right column. And a post that has both its own
 /// pictures and a link shows the pictures: the media is the author's, the card is somebody
 /// else's page, and the author's own comes first.
 ///
@@ -26,8 +28,12 @@ struct LinkCard: View {
     /// The deck's own size, taken from it rather than agreed with it: a row with a card and a
     /// row with pictures have to be the same row, and two numbers that must match are one
     /// number written once.
-    private var side: CGFloat { AttachmentDeck.side }
-    private var height: CGFloat { AttachmentDeck.height }
+    /// How wide to draw, where the row has no reserved column to guarantee it fits. Nil is the
+    /// column's own width — the same shape `AttachmentDeck.width` has, and for the same reason.
+    var width: CGFloat?
+
+    private var side: CGFloat { min(width ?? AttachmentDeck.side, AttachmentDeck.side) }
+    private var height: CGFloat { side * AttachmentDeck.ratio }
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {

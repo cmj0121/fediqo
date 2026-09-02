@@ -118,18 +118,37 @@ struct PostRow: View {
     /// keeps none.
     @State private var reveal: Bool?
 
-    /// How much of a post a row shows before it stops — worked out from the height it has to
-    /// fit in rather than fixed at a number of lines.
+    /// How much of a post a row shows before it stops.
     ///
-    /// The reader's text size moves what a line is, and this app's own default is the largest
-    /// of them: a count that fits at 13 points overflows the card at 21. So the count follows
-    /// the size, and every row still stops at the same place as every other row, which is what
-    /// keeps the list level. 1.35 is the line height a `Text` gives itself around its point
-    /// size; three lines is the floor, because a row that shows one line of a paragraph is not
-    /// showing a post at all.
+    /// **A measure of its own now, and it had to become one.** It used to be the deck's height
+    /// divided by a line, which was exactly right while the row *was* the deck's height: the
+    /// words filled the frame and stopped at the bottom of it. The row is as tall as its content
+    /// now, so that division has nothing to divide — and following the deck anyway would have
+    /// doubled how much of every post is shown the moment #79 doubled the card, which is a
+    /// decision about reading that nobody made.
+    ///
+    /// So the arithmetic is kept and the height it divides is this view's own: `words` is what
+    /// `AttachmentDeck.height` was on the day the row stopped being that tall, so **every reader
+    /// sees exactly what they saw before** — 9 lines at 0.85×, 7 at 1.0×, 4 at the 1.6× this app
+    /// ships at. #79 moves the picture, and how much of a post a reader is given is not #79's to
+    /// move.
+    ///
+    /// The clamp itself is what S6 keeps: a row that grew to hold a long post would be the one
+    /// row on the screen that is a different shape from the rest, and the ellipsis is the row
+    /// saying there is more. It follows the text scale rather than being a fixed count for the
+    /// reason it always did — a count that fits at 13 points overflows at 21. 1.35 is the line
+    /// height a `Text` gives itself around its point size; three is the floor, because a row
+    /// showing one line of a paragraph is not showing a post at all.
     private var lines: Int {
-        max(3, Int(AttachmentDeck.height / (TypeScale.body * scale * 1.35)))
+        max(3, Int(Self.words / (TypeScale.body * scale * 1.35)))
     }
+
+    /// The height the words were clamped to while the row was the attachment card's height.
+    ///
+    /// 136 is `AttachmentDeck.side * 0.68` at the side the deck was before #79 doubled it. Named
+    /// here rather than read from the deck so that a bigger picture stays a bigger picture
+    /// instead of quietly becoming a longer excerpt as well.
+    private static let words: CGFloat = 136
 
     private var spoiler: String { post.spoiler ?? "" }
     /// One answer for both halves, the way the preference is one switch for both: the words
@@ -171,20 +190,30 @@ struct PostRow: View {
                     words
                     attachmentColumn
                 }
-                // Every row the same height, whatever is in it: the attachment card sets it,
-                // a post of two words is padded up to it, and a long one is cut off at it with
-                // an ellipsis saying there is more. The words are clamped to whatever number
-                // of lines fits in that height at the reader's own text size, so nothing is
-                // ever cut mid-line — the ellipsis is the row's, not the frame's.
-                .frame(height: AttachmentDeck.height, alignment: .topLeading)
+                // As tall as what is in it, and no taller. This used to be padded up to
+                // `AttachmentDeck.height` so that every row was one height — which S6 no longer
+                // promises, because the other arrangement never did it and because padding a
+                // two-line post up to the height of a photograph spends most of a screen saying
+                // nothing. What keeps the list scannable is still here: the words are clamped,
+                // and the attachment column is reserved whether or not anything is in it, so
+                // every row's text starts and ends in the same place.
                 .padding(.top, Space.tight)
             } else {
+                // Under the words, where no column is reserved for a picture and so nothing
+                // guarantees the picture fits. The row says how much it has and the card takes
+                // that or its own width, whichever is less.
+                //
+                // Measured, and S9 still holds. This is not a view asking how wide the device is
+                // in order to decide what to draw — what to draw was decided by the arrangement.
+                // It is the picture being told the size of the hole it goes into, which is the
+                // one thing a picture cannot be right about on its own: 400 points of it in a
+                // 350-point row is #78 returning with a bigger card.
                 VStack(alignment: .leading, spacing: Space.step) {
                     words
                     if !post.attachments.isEmpty {
-                        deck
+                        sized { deck(in: $0) }
                     } else if let card = post.card {
-                        LinkCard(card: card, covered: mediaIsCovered)
+                        sized { LinkCard(card: card, covered: mediaIsCovered, width: $0) }
                     }
                 }
                 .padding(.top, Space.tight)
@@ -238,9 +267,10 @@ struct PostRow: View {
     ///
     /// **One line, however many things happened.** It used to be two independent `if`s, so a
     /// post that was both an answer and a boost drew two stacked bands — two glyphs, two greys,
-    /// two lines of the row's height spent before a word of the post was read, and one row
-    /// taller than its neighbour, which S6 will not have. A boost of a reply is one sentence
-    /// about how this post got here, and it is said in one.
+    /// and two lines of the row's height spent before a word of the post was read. The height is
+    /// no longer the argument: S6 lets a row be as tall as what is in it now. What is left is the
+    /// better half of the same argument — a boost of a reply is one sentence about how this post
+    /// got here, and two bands say it twice.
     ///
     /// Favourites and the rest arrive with notifications (#9), and when they do this is the
     /// line they are said on rather than a second design for the same idea. Nothing at all is
@@ -313,7 +343,9 @@ struct PostRow: View {
             //
             // Under `Hit.target`, and allowed to be: #44 made an address in a post's words
             // pressable at the size the words are, and this is the same kind of thing. Growing
-            // the band to 44 would grow the row, which S6 will not have.
+            // the band to 44 would add fourteen points to every row in every list to make one
+            // press easier — which is a cost every reader pays for a thing most of them do
+            // rarely. S6 would tolerate the taller row now; the arithmetic still refuses it.
             Button { openAuthor?() } label: {
                 HStack(spacing: Space.step) {
                     RemoteImage(url: post.authorAvatarURL, width: Size.avatar, height: Size.avatar,
@@ -491,7 +523,7 @@ struct PostRow: View {
     @ViewBuilder
     private var attachmentColumn: some View {
         if !post.attachments.isEmpty {
-            deck
+            deck()
         } else if let card = post.card {
             // The link's own picture goes where the post's would have, because there is no
             // post's — a card and an attachment never both claim this column. The author's
@@ -503,11 +535,27 @@ struct PostRow: View {
         }
     }
 
-    private var deck: some View {
+    private func deck(in width: CGFloat? = nil) -> some View {
         AttachmentDeck(attachments: post.attachments, covered: mediaIsCovered,
-                       turns: turns, plays: plays) {
+                       turns: turns, plays: plays, width: width) {
             withAnimation(Motion.appearing) { reveal = true }
         }
+    }
+
+    /// A box the shape of a card, no wider than one, and never wider than the row — with the
+    /// card drawn into it once its width is known.
+    ///
+    /// A `GeometryReader` hands back whatever it is given rather than what is inside it, so one
+    /// wrapped round the words as well would pad every short post up to the clamp: the padding
+    /// S6 has just stopped promising, put back by the thing that measures. So only the picture
+    /// is measured. `Color.clear` at the card's own ratio is what makes the box hug — it takes
+    /// the narrower of the row and `side`, and its height follows from that rather than being
+    /// stated.
+    private func sized(@ViewBuilder card: @escaping (CGFloat) -> some View) -> some View {
+        Color.clear
+            .frame(maxWidth: AttachmentDeck.side)
+            .aspectRatio(1 / AttachmentDeck.ratio, contentMode: .fit)
+            .overlay { GeometryReader { room in card(room.size.width) } }
     }
 
     /// The foot of the row: what the post was written with.
