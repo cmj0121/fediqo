@@ -74,7 +74,8 @@ enum Fixture {
                  name: "Wren Ashby", handle: "wren",
                  text: "Asking what a timeline is for, and getting three answers. Press Return "
                      + "on this one to read them.",
-                 counts: Counts(replies: 3, reblogs: 2, favourites: 14)),
+                 counts: Counts(replies: 3, reblogs: 2, favourites: 14),
+                 inReplyToURI: address("the-answer", on: hosts[0], by: "ines")),
         ]
     }
 
@@ -143,19 +144,37 @@ enum Fixture {
     static func conversation(around post: Post, now: Date = Date()) -> Conversation {
         guard post.mergeKey == address("the-thread", on: hosts[0], by: "wren")
         else { return Conversation(post: post) }
+        // A way up as well as a way down, and a chain rather than a fan on both sides — a
+        // conversation with no shape to it cannot show that a page has learned to draw one
+        // (#75). `the-question` is answered by `the-answer`, which is answered by the post
+        // this page is about.
+        let ancestors = [
+            Self.post("the-question", host: hosts[0], minutesAgo: 140, now: now,
+                      name: "Bea Lindqvist", handle: "bea",
+                      text: "What is a timeline actually for? Nobody agrees and everybody is sure."),
+            Self.post("the-answer", host: hosts[0], minutesAgo: 118, now: now,
+                      name: "Ines Okafor", handle: "ines",
+                      text: "For reading what you chose to read, in the order it was written.",
+                      inReplyToURI: address("the-question", on: hosts[0], by: "bea")),
+        ]
+
         let replies = [
             ("reply-one", "Ines Okafor", "ines", 88.0,
-             "One order, and nothing between what arrived and what I see except a rule I wrote."),
+             "One order, and nothing between what arrived and what I see except a rule I wrote.",
+             "the-thread", "wren"),
             ("reply-two", "Bea Lindqvist", "bea", 71.0,
-             "Mine is narrower than that. I want the servers I never joined, and no home page."),
+             "Mine is narrower than that. I want the servers I never joined, and no home page.",
+             "the-thread", "wren"),
+            // An answer to an answer, so the way down has a step in it too.
             ("reply-three", "Wren Ashby", "wren", 55.0,
-             "Both of those are the same feature, which is the part I keep failing to explain."),
-        ].map { uri, name, handle, minutes, text in
+             "Both of those are the same feature, which is the part I keep failing to explain.",
+             "reply-two", "bea"),
+        ].map { uri, name, handle, minutes, text, parent, parentHandle in
             Self.post(uri, host: hosts[0], minutesAgo: minutes, now: now, name: name,
                       handle: handle, text: text,
-                      inReplyToURI: address("the-thread", on: hosts[0], by: "wren"))
+                      inReplyToURI: address(parent, on: hosts[0], by: parentHandle))
         }
-        return Conversation(post: post, descendants: replies)
+        return Conversation(ancestors: ancestors, post: post, descendants: replies)
     }
 
     // swiftlint:disable:next function_parameter_count

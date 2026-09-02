@@ -95,13 +95,26 @@ struct FixtureTests {
         #expect(everyPost.contains { $0.counts.areKnown == false })
     }
 
-    @Test("One post has a conversation under it; the others are alone")
+    /// One post has a conversation around it, and it has a **shape** — a way up as well as a
+    /// way down, and a step in each. A flat fan of three replies to one post cannot show that
+    /// a page draws the relationship (#75); it draws the same on a page that has learned to
+    /// and a page that never did.
+    @Test("One post has a conversation around it, and the conversation has a shape")
     func theConversation() throws {
         let head = try #require(everyPost.first { $0.mergeKey.hasSuffix("statuses/the-thread") })
         let thread = Fixture.conversation(around: head, now: Self.now)
-        #expect(thread.descendants.count == 3)
-        #expect(thread.descendants.allSatisfy { $0.inReplyToURI == head.mergeKey })
         #expect(thread.isAlone == false)
+
+        // Two above, in a chain: the second answers the first, and the post answers the second.
+        #expect(thread.ancestors.count == 2)
+        #expect(thread.ancestors[1].inReplyToURI == thread.ancestors[0].uri)
+        #expect(head.inReplyToURI == thread.ancestors[1].uri)
+        #expect(thread.climbed().map(\.depth) == [0, 1])
+        #expect(thread.depthOfPost == 2)
+
+        // Three below, and not all of them at the same depth.
+        #expect(thread.descendants.count == 3)
+        #expect(Set(thread.laidOut().map(\.depth)) == [1, 2])
 
         let plain = try #require(everyPost.first { $0.mergeKey.hasSuffix("the-plain-one") })
         #expect(Fixture.conversation(around: plain, now: Self.now).isAlone)

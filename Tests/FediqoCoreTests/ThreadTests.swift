@@ -138,4 +138,86 @@ struct ThreadTests {
         #expect(laid.count == 2)
         #expect(laid.allSatisfy { $0.depth <= 3 })
     }
+
+    // MARK: - The way up, after the server has answered
+
+    /// #75, as it was reported: X, Y answers X, Z answers Y. Opening Z read `Y X Z`.
+    ///
+    /// The store alone always had it right — `walkUp` reverses — so the bug only appeared once
+    /// the request to the post's own server came back and the two copies were folded together.
+    /// A reader saw the right order for a moment and watched it turn over.
+    @Test("The way up survives the server's answer")
+    func theWayUpSurvivesTheMerge() async throws {
+        let store = try LocalStore.inMemory()
+        let x = post("X", at: 100)
+        let y = post("Y", at: 200, answering: "X")
+        let z = post("Z", at: 300, answering: "Y")
+        try await store.save([x, y, z], from: makeServer(host))
+
+        let fromStore = try await store.thread(around: z)
+        #expect(fromStore.ancestors.map(\.text) == ["X", "Y"])
+
+        let fromServer = Conversation(ancestors: [x, y], post: z, descendants: [])
+        #expect(fromStore.merged(with: fromServer).ancestors.map(\.text) == ["X", "Y"])
+    }
+
+    /// The store holds `X → Y` and stops, because it never saw the post X was answering; the
+    /// server hands back all three. Sorting two lists could only ever return what was already
+    /// in them, and the store's walk had already stopped — walking the union finds the one
+    /// neither of them could reach alone.
+    @Test("Whichever side knows more of the chain is what the reader gets")
+    func theServerCanKnowMore() async throws {
+        let store = try LocalStore.inMemory()
+        // X answers something this device has never been handed, so the store's walk up ends
+        // at X even though X itself says there is more above it.
+        let x = post("X", at: 100, answering: "W")
+        let y = post("Y", at: 200, answering: "X")
+        let z = post("Z", at: 300, answering: "Y")
+        try await store.save([x, y, z], from: makeServer(host))
+
+        let fromStore = try await store.thread(around: z)
+        #expect(fromStore.ancestors.map(\.text) == ["X", "Y"])
+
+        let w = post("W", at: 50)
+        let fromServer = Conversation(ancestors: [w, x, y], post: z, descendants: [])
+        #expect(fromStore.merged(with: fromServer).ancestors.map(\.text) == ["W", "X", "Y"])
+    }
+
+    /// Time is the wrong idea for the way up, not merely the wrong direction. Two ancestors
+    /// sharing a millisecond, and a parent posted after the child it answers — a clock running
+    /// ahead — are both ordinary, and neither may move the chain.
+    @Test("A chain is read from its addresses, whatever the clocks say")
+    func clocksDoNotDecideTheChain() {
+        let x = post("X", at: 500)
+        let y = post("Y", at: 500, answering: "X")
+        let z = post("Z", at: 100, answering: "Y")
+
+        let chain = Conversation.chain(above: z, among: [y, x])
+        #expect(chain.map(\.text) == ["X", "Y"])
+    }
+
+    /// The way up is drawn with the same rule as the way down, so the two halves of the page
+    /// have to speak one coordinate: `climbed()` counts from the top and `laidOut()` from the
+    /// post, and they meet at `depthOfPost`.
+    @Test("The way up has a shape, and it says whom each one answers")
+    func theWayUpHasAShape() {
+        let x = post("X", at: 100, by: "a")
+        let y = post("Y", at: 200, answering: "X", by: "b")
+        let z = post("Z", at: 300, answering: "Y", by: "c")
+        let whole = Conversation(ancestors: [x, y], post: z, descendants: [])
+
+        let up = whole.climbed()
+        #expect(up.map(\.depth) == [0, 1])
+        // The furthest one answers nobody this page holds, and says so with silence.
+        #expect(up.map(\.answering) == [nil, "@a@\(host)"])
+        #expect(whole.depthOfPost == 2)
+    }
+
+    /// A post cannot be its own ancestor. A server that says otherwise gets one pass.
+    @Test("A chain that eats its own tail stops")
+    func aCycleIsBounded() {
+        let x = post("X", at: 100, answering: "Y")
+        let y = post("Y", at: 200, answering: "X")
+        #expect(Conversation.chain(above: y, among: [x, y]).map(\.text) == ["X"])
+    }
 }

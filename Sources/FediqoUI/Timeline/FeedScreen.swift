@@ -93,6 +93,15 @@ struct FeedScreen: View {
                 self.wide = wide
             }
             .environment(\.fediqoWideRows, wide)
+            // A run told to open a post does it as soon as there is one to open, and never
+            // again — `expand` clears the stack, so a second attempt would throw away
+            // whatever the reader had walked into. Nothing at all on a reader's own run.
+            .task(id: model.visible.isEmpty) {
+                guard let wanted = app.openingPost, app.expanded == nil,
+                      let post = model.visible.first(where: { $0.mergeKey.hasSuffix(wanted) })
+                else { return }
+                app.expand(post)
+            }
             // The opened post, over the list rather than instead of it: underneath, the
             // scroll position and the ring stay exactly where the reader left them.
             .overlay {

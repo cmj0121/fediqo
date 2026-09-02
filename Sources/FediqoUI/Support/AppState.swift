@@ -98,6 +98,10 @@ struct LaunchOptions {
     /// taken of, and the only launch option that changes where the posts come from rather
     /// than which screen is showing.
     var fixture = false
+    /// A post to open as soon as the timeline has one, named by the end of its address. The
+    /// composer's and the inbox's twin: a page that can only be reached by pressing something
+    /// cannot be photographed on a runner, where nothing may press anything (#30).
+    var openingPost: String?
     /// Which language to draw in, whatever the machine is set to. A screenshot run needs both,
     /// one after the other, and neither of them is whatever the person at the keyboard chose.
     var language: AppLanguage?
@@ -135,6 +139,7 @@ struct LaunchOptions {
         }
         options.composing = environment["FEDIQO_COMPOSE"] == "1"
         options.showingNotices = environment["FEDIQO_NOTICES"] == "1"
+        options.openingPost = environment["FEDIQO_OPEN"]
         options.fixture = environment["FEDIQO_FIXTURE"] == "1"
         options.language = environment["FEDIQO_LANGUAGE"].flatMap(AppLanguage.init(rawValue:))
         options.shootTo = environment["FEDIQO_SHOOT"]
@@ -208,6 +213,10 @@ public final class AppState {
     /// Where this run is to write a picture of itself before stopping, or nothing — which is
     /// every run but a screenshot one. See `Shooter`.
     let shootTo: String?
+
+    /// A post this run was told to open, by the end of its address, or nothing. Read by
+    /// `FeedScreen` once it has posts to look through and then never again.
+    let openingPost: String?
     /// The conversations being read, oldest first, empty while the reader is in the list.
     ///
     /// A stack rather than one, because a conversation is a place a reader walks *into*.
@@ -416,6 +425,7 @@ public final class AppState {
         self.holdsLanding = launch.holdsLanding
         self.isFixture = launch.fixture
         self.shootTo = launch.shootTo
+        self.openingPost = launch.openingPost
         // The language before the first frame, not after it: a screenshot is taken of what was
         // drawn, and a tree redrawn a moment later is a photograph of the moment before.
         if let language = launch.language { preferences.language = language }

@@ -66,9 +66,64 @@ public struct Conversation: Sendable, Hashable {
     /// newer than the row we held. Everything else collapses on `mergeKey` the way two servers
     /// carrying one post always have.
     public func merged(with other: Conversation) -> Conversation {
-        Conversation(ancestors: (ancestors + other.ancestors).merged(),
+        Conversation(ancestors: Self.chain(above: other.post, among: ancestors + other.ancestors),
                      post: other.post,
                      descendants: (descendants + other.descendants).merged(oldestFirst: true))
+    }
+
+    /// The way up, rebuilt from the addresses rather than sorted by anything.
+    ///
+    /// **Time is the wrong idea here, not merely the wrong direction.** A conversation going down
+    /// is a stretch of time and sorts by it; a conversation going up is a *chain*, and which post
+    /// is above which is written in `in_reply_to_uri` and nowhere else. Two ancestors can share a
+    /// millisecond, a server's clock can run ahead of the one it is answering, and an old post
+    /// answered a year later is above the answer whatever the timestamps say.
+    ///
+    /// It used to fold the two lists with `[Post].merged()`, which is newest-first because that
+    /// is what a timeline wants — so opening a reply to a reply drew the way up backwards the
+    /// moment the server's copy arrived, and the reader watched it turn over. The line below it
+    /// had already passed `oldestFirst:` for the way down; this one was left on the default.
+    ///
+    /// Rebuilding also takes whichever side knows more. The store may hold `X → Y` while the
+    /// server hands back `W → X → Y`; walking the union from the post upwards finds all three,
+    /// where any sort of two lists could only ever return what was already in them.
+    ///
+    /// Bounded like every other walk here: a post cannot be its own ancestor, and a server that
+    /// says otherwise gets one pass and no more.
+    static func chain(above post: Post, among posts: [Post]) -> [Post] {
+        let known = posts.merged(oldestFirst: true)
+        let byURI = Dictionary(known.map { ($0.uri, $0) }, uniquingKeysWith: { first, _ in first })
+
+        var chain: [Post] = []
+        var next = post.inReplyToURI
+        var seen: Set<String> = [post.uri]
+        while let uri = next, chain.count < known.count, seen.insert(uri).inserted,
+              let above = byURI[uri] {
+            chain.append(above)
+            next = above.inReplyToURI
+        }
+        return chain.reversed()
+    }
+
+    /// How far from the left edge the opened post itself is drawn, once the way up is drawn as
+    /// the shape it is: one step per ancestor.
+    public var depthOfPost: Int { ancestors.count }
+
+    /// The way up, as `Reply` — the same shape `laidOut()` gives the way down, so a screen draws
+    /// both with one rule instead of drawing one and listing the other.
+    ///
+    /// **`depth` is counted from the furthest ancestor here**, where `laidOut()` counts from the
+    /// post: these are the two halves of one page and the numbers meet at `depthOfPost`. The
+    /// chain is already in order, so the depth is the position — there is nothing to work out.
+    ///
+    /// The furthest one answers nobody as far as this page knows. That is not the same as
+    /// answering nothing, and it is drawn as silence rather than as a claim: what it replied to
+    /// is a post neither the store nor the server handed over.
+    public func climbed() -> [Reply] {
+        ancestors.enumerated().map { step, above in
+            Reply(post: above, depth: step,
+                  answering: step == 0 ? nil : ancestors[step - 1].authorHandle)
+        }
     }
 }
 

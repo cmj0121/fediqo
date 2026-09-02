@@ -182,10 +182,16 @@ struct PostPage: View {
     /// It is what says "these belong together" without saying it in colour, and it is the one
     /// mark here that survives a reader who cannot tell the indent apart from the edge of the
     /// card — which, at four levels in a narrow window, is most readers.
+    @ViewBuilder
     private func rail(_ depth: Int) -> some View {
-        Hairline(axis: .vertical)
-            .padding(.leading, indent(depth) - Space.mid)
-            .padding(.vertical, Space.hair)
+        // Nothing at the left edge. The line stands in the gutter a row was pushed out of, and
+        // a row that was pushed out of nothing has no gutter to stand in — the furthest
+        // ancestor, and the post on a page that has no way up at all.
+        if depth > 0 {
+            Hairline(axis: .vertical)
+                .padding(.leading, indent(depth) - Space.mid)
+                .padding(.vertical, Space.hair)
+        }
     }
 
     private var thread: some View {
@@ -193,17 +199,37 @@ struct PostPage: View {
             LazyVStack(alignment: .leading, spacing: Space.step) {
                 let conversation = model?.conversation ?? Conversation(post: post)
                 let ring = model?.selection
-                ForEach(conversation.ancestors) { above in
-                    row(above, selected: above.mergeKey == ring).opacity(0.85)
+                // The way up, drawn as the shape it is. It used to be a flat list above the
+                // post — the same rows, in a column, saying nothing about which answered
+                // which — while the way down had been indented since #43. One page, two
+                // drawings of one idea.
+                //
+                // Dimmer than the post, because they are the way to it rather than the thing
+                // the reader opened.
+                ForEach(conversation.climbed()) { above in
+                    row(above.post, selected: above.post.mergeKey == ring,
+                        // The furthest one answers a post nobody handed us. Silence, not a
+                        // claim: `.nothing` says "no line here", and inventing one would name
+                        // somebody this page has never seen.
+                        answering: above.answering.map(Answering.handle) ?? .nothing)
+                        .opacity(0.85)
+                        .padding(.leading, indent(above.depth))
+                        .overlay(alignment: .leading) { rail(above.depth) }
                 }
+                // One step past the last ancestor: the post is the deepest thing on the way
+                // down to it, and everything answering it goes deeper still.
                 row(conversation.post, selected: conversation.post.mergeKey == ring)
+                    .padding(.leading, indent(conversation.depthOfPost))
+                    .overlay(alignment: .leading) { rail(conversation.depthOfPost) }
                 ForEach(conversation.laidOut()) { reply in
                     row(reply.post, selected: reply.post.mergeKey == ring,
                         // A direct answer to the post says nothing: the post is above it, and
                         // the page is the conversation.
                         answering: reply.answering.map(Answering.handle) ?? .nothing)
-                        .padding(.leading, indent(reply.depth))
-                        .overlay(alignment: .leading) { rail(reply.depth) }
+                        // `laidOut` counts from the post and `climbed` from the top; they meet
+                        // here, so the whole page is drawn against one left edge.
+                        .padding(.leading, indent(conversation.depthOfPost + reply.depth))
+                        .overlay(alignment: .leading) { rail(conversation.depthOfPost + reply.depth) }
                 }
                 if conversation.isAlone, model?.loading != true {
                     Text(t("post.alone"))
