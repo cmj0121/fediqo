@@ -530,11 +530,23 @@ struct PostRow: View {
             }
             if shownSources.count > 1 { carriedByTheRest }
         }
-        // Where the room runs out it is the name that gives, not this — hence the higher
-        // priority of the two. A name cut short is still the person; a host cut short is not
-        // a server, and where a post came from is the one thing on this row that the merge
-        // exists to keep honest.
-        .layoutPriority(2)
+        // The same priority as the name beside it, which in an `HStack` means the name is
+        // served first because it comes first. That is the intended order and not an accident
+        // of the arithmetic: **this used to outrank the name, and at 440 points and 1.6× it
+        // drew the author as a single apostrophe** — found by `make -C Apps shots-widths`,
+        // which exists to look at exactly that corner.
+        //
+        // The argument for the old order was that a host cut short is not a server while a
+        // name cut short is still the person. It is a good argument at a width where the name
+        // still has some, and it is not one for spending a row's last points on everything
+        // except who wrote the post. What settles it is what each of them has behind it: a
+        // truncated host has the `+n`, the press, the hover and an accessibility label naming
+        // every server outright, and a name that is gone has nothing anywhere.
+        //
+        // At 440 and 1.6× the pill is still cut to `c…ple`, and that is honest rather than
+        // fixed: the band has about 310 points and the timestamp takes 120 of them and yields
+        // none, so there is no ordering of the two that leaves both whole. See #80.
+        .layoutPriority(1)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text("\(t("post.sources")): \(shownSources.joined(separator: ", "))"))
     }
