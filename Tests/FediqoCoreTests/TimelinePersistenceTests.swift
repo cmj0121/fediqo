@@ -127,6 +127,7 @@ private struct TableClient: StubClient {
     let lists: [String: [Post]]
 
     func instance(host: String) async throws -> InstanceInfo { throw SourceFailure.badHost(host) }
-    func timeline(host: String, limit: Int, before: Post?, token: String?) async throws -> [Post] { lists[host] ?? [] }
+    func timeline(host: String, limit: Int, before: Post?, after: Post?, token: String?) async throws -> [Post] { lists[host] ?? [] }
+    func home(host: String, limit: Int, before: Post?, after: Post?, token: String) async throws -> [Post] { [] }
     func trending(host: String, limit: Int, token: String?) async throws -> [Post] { lists[host] ?? [] }
 }

@@ -149,7 +149,7 @@ extension StubClient {
     /// These suites read the public timeline. A double that answered somebody's home timeline
     /// would put reading on a screen no test asked for it on — and would hide the one thing
     /// worth watching, which is that a home read is only ever sent where there is a credential.
-    func home(host: String, limit: Int, before: Post?, token: String) async throws -> [Post] { [] }
+    func home(host: String, limit: Int, before: Post?, after: Post?, token: String) async throws -> [Post] { [] }
 
     /// These suites read timelines. A double that invented a trending list would put posts on
     /// a screen no test asked for them on.

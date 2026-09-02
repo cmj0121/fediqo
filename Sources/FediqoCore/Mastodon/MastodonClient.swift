@@ -97,12 +97,16 @@ public struct MastodonClient: SourceClient {
         throw SourceFailure.notThatKind(.mastodon, host)
     }
 
-    public func timeline(host: String, limit: Int, before: Post?, token: String?) async throws -> [Post] {
-        try await posts(host: host, path: "/api/v1/timelines/public", limit: limit, before: before, token: token)
+    public func timeline(host: String, limit: Int, before: Post?, after: Post? = nil,
+                         token: String?) async throws -> [Post] {
+        try await posts(host: host, path: "/api/v1/timelines/public", limit: limit,
+                        before: before, after: after, token: token)
     }
 
-    public func home(host: String, limit: Int, before: Post?, token: String) async throws -> [Post] {
-        try await posts(host: host, path: "/api/v1/timelines/home", limit: limit, before: before, token: token)
+    public func home(host: String, limit: Int, before: Post?, after: Post? = nil,
+                     token: String) async throws -> [Post] {
+        try await posts(host: host, path: "/api/v1/timelines/home", limit: limit,
+                        before: before, after: after, token: token)
     }
 
     public func trending(host: String, limit: Int, token: String?) async throws -> [Post] {
@@ -155,8 +159,8 @@ public struct MastodonClient: SourceClient {
     /// `extra` is whatever one endpoint wants and the others do not — `exclude_replies` on an
     /// account's own posts, and nothing anywhere else. Internal rather than private because the
     /// people this app can open live in their own file and page exactly the way a timeline does.
-    func posts(host rawHost: String, path: String, limit: Int, before: Post?, token: String?,
-               query extra: [URLQueryItem] = []) async throws -> [Post] {
+    func posts(host rawHost: String, path: String, limit: Int, before: Post?, after: Post? = nil,
+               token: String?, query extra: [URLQueryItem] = []) async throws -> [Post] {
         let host = Server.normalise(rawHost)
         var query = [URLQueryItem(name: "limit", value: String(limit))] + extra
         // `max_id` is Mastodon's word for "older than", and it is spoken here and nowhere
@@ -164,6 +168,15 @@ public struct MastodonClient: SourceClient {
         // quietly dropping the parameter, which would fetch the newest page all over again.
         if let before {
             query.append(URLQueryItem(name: "max_id", value: try Self.statusId(of: before, on: host)))
+        }
+        // And `min_id` is its other end: "newer than". The two together are a **stretch**, which
+        // is the question #92 says this app could not ask — it had the word already, in
+        // `notices`, and no way to put it to a timeline.
+        //
+        // Refused the same way and for the same reason: a number another server gave a post is
+        // not a number this one can be asked about, and sending it asks for a page nobody wanted.
+        if let after {
+            query.append(URLQueryItem(name: "min_id", value: try Self.statusId(of: after, on: host)))
         }
         let data = try await get(host: host, path: path, query: query, token: token)
         return try Self.decoder.decode([MastodonDTO.Status].self, from: data).map { $0.asPost(from: host) }

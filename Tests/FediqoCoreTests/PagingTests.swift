@@ -492,7 +492,7 @@ actor HeldClient: StubClient {
     private var release: CheckedContinuation<Void, Never>?
     private var arrival: CheckedContinuation<Void, Never>?
 
-    func timeline(host: String, limit: Int, before: Post?, token: String?) async throws -> [Post] {
+    func timeline(host: String, limit: Int, before: Post?, after: Post?, token: String?) async throws -> [Post] {
         cursors.append(before)
         arrival?.resume()
         arrival = nil
@@ -522,7 +522,7 @@ actor StrayCursorClient: StubClient {
 
     init(pages: [[Post]]) { self.pages = pages }
 
-    func timeline(host: String, limit: Int, before: Post?, token: String?) async throws -> [Post] {
+    func timeline(host: String, limit: Int, before: Post?, after: Post?, token: String?) async throws -> [Post] {
         cursors.append(before)
         // Refused by the real rule rather than a copy of it, so the belt in `TimelineLoader`
         // is tested against what a client actually turns down.
@@ -542,7 +542,7 @@ actor RejectingStrayCursorClient: StubClient {
 
     init(page: [Post]) { self.page = page }
 
-    func timeline(host: String, limit: Int, before: Post?, token: String?) async throws -> [Post] {
+    func timeline(host: String, limit: Int, before: Post?, after: Post?, token: String?) async throws -> [Post] {
         cursors.append(before)
         guard let before else { return page }
         refusals -= 1

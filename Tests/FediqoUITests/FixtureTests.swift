@@ -126,13 +126,13 @@ struct FixtureTests {
     @Test("The source answers a page, and nothing behind it")
     func theSource() async throws {
         let source = FixtureSource()
-        let first = try await source.timeline(host: Fixture.hosts[0], limit: 40, before: nil, token: nil)
+        let first = try await source.timeline(host: Fixture.hosts[0], limit: 40, before: nil, after: nil, token: nil)
         #expect(!first.isEmpty)
 
-        let older = try await source.timeline(host: Fixture.hosts[0], limit: 40, before: first.last, token: nil)
+        let older = try await source.timeline(host: Fixture.hosts[0], limit: 40, before: first.last, after: nil, token: nil)
         #expect(older.isEmpty)
 
-        let home = try await source.home(host: Fixture.hosts[0], limit: 40, before: nil, token: "t")
+        let home = try await source.home(host: Fixture.hosts[0], limit: 40, before: nil, after: nil, token: "t")
         #expect(home.isEmpty)
 
         #expect(try await source.stillHas(first[0], host: Fixture.hosts[0], token: nil))

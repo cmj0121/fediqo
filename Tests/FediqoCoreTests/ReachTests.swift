@@ -37,7 +37,7 @@ struct ReachTests {
             return arrivals.filter { $0 == "servers" }.count >= 2 ? 1 : 0
         }
 
-        func timeline(host: String, limit: Int, before: Post?, token: String?) async throws -> [Post] {
+        func timeline(host: String, limit: Int, before: Post?, after: Post?, token: String?) async throws -> [Post] {
             defer { asks += 1 }
             return asks < pages.count ? pages[asks] : []
         }

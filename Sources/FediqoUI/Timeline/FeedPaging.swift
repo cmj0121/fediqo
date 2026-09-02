@@ -153,7 +153,35 @@ final class FeedPaging {
         }
         let signature = servers.map(\.id).sorted()
         guard signature != loadedFor else { return }
+        let known = Set(loadedFor ?? [])
         await load(servers: servers)
+        // A load asks everyone for their newest page, which for a server just added is the top
+        // of a timeline the reader has already scrolled past. Everything that server carried
+        // inside the stretch they are holding would sit below the fold and be reached only by
+        // scrolling to the bottom and back (#92).
+        //
+        // So the added ones are walked back to where the reader is. Only the added ones: the
+        // servers that were already being read have been read down to here already.
+        let added = servers.filter { !known.contains($0.id) }
+        if !known.isEmpty, !added.isEmpty { await catchUp(added) }
+    }
+
+    /// Walks servers the reader has just added back to the foot of what they are already
+    /// holding, and shows what that turns up.
+    ///
+    /// Nothing happens where there is nothing to catch up to — a feed with no posts is one the
+    /// ordinary load has just filled, and the newest page is the whole of it.
+    private func catchUp(_ added: [Server]) async {
+        guard let oldest = posts.visible.last?.createdAt else { return }
+        for server in added {
+            _ = await loader.catchUp(server, downTo: oldest, query: posts.timeline.query)
+        }
+        // Asked of the store rather than merged from the answers: what came back is that
+        // server's own page order, and one stream out of several is the store's job — the same
+        // fold that makes two servers carrying one post into one row.
+        if let filled = try? await loader.stored(posts.timeline.query), !filled.isEmpty {
+            posts.showing(filled)
+        }
     }
 
     /// `refresh` says who asked. The reader by default — the refresh button, and the first

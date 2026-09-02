@@ -264,6 +264,41 @@ public struct TimelineLoader: Sendable {
                               hidden: sifted.hidden)
     }
 
+    /// One server, walked back until it has covered a stretch the reader already holds (#92).
+    ///
+    /// **This is what a newly added server needs, and `min_id` cannot give it.** A stretch is
+    /// asked for with that server's own numbers, and a server that has just been added has never
+    /// handed this device anything — there is no id of its to name either end with. What there
+    /// is, is a time: the oldest post the reader is holding. So this asks for the newest page,
+    /// then the page before that, and so on, until what comes back is older than that time or
+    /// the server runs out.
+    ///
+    /// It is bounded. `rounds` is how many pages are worth spending on somebody who has just
+    /// been added: a reader who has scrolled for an hour has a stretch nobody should backfill in
+    /// one go, and stopping short leaves a gap that reaching the bottom fills the ordinary way.
+    /// Stopping short is not a failure and is not reported as one.
+    ///
+    /// Nothing is sifted here and nothing is merged with anything: what comes back is written to
+    /// the store, and the caller asks the store for the stretch afterwards. A server's own page
+    /// order is not the timeline's order, and the fold that makes one stream out of several
+    /// already lives on the other side of the store.
+    public func catchUp(_ server: Server, downTo oldest: Date, query: TimelineQuery,
+                        rounds: Int = 4) async -> [SourceFailure] {
+        var cursor: Post?
+        var failures: [SourceFailure] = []
+        for _ in 0..<rounds {
+            let round = await fanOut([(server, cursor)], query: query)
+            failures.append(contentsOf: round.failures.values)
+            let page = round.collected.flatMap { $0 }
+            // Nothing came back, so there is nothing older to walk towards.
+            guard let last = page.last else { break }
+            // Far enough: this page has reached past what the reader is holding.
+            if last.createdAt <= oldest { break }
+            cursor = last
+        }
+        return failures
+    }
+
     /// Every server asked at once for the page before what it last handed over, merged into
     /// one stream the way `load` merges it.
     ///
@@ -790,14 +825,15 @@ public struct TimelineLoader: Sendable {
     /// One request to one server as `token`'s owner, and what it handed over kept. `before` is
     /// that server's own cursor; a trending list has none and is never given one.
     private func read(_ client: any SourceClient, _ server: Server, query: TimelineQuery,
-                      token: String?, as reader: String?, before: Post?) async -> Answer {
+                      token: String?, as reader: String?, before: Post?,
+                      after: Post? = nil) async -> Answer {
         let posts: [Post]
         do {
             posts = switch query.source {
             case .public: try await client.timeline(host: server.host, limit: limit,
-                                                    before: before, token: token)
+                                                    before: before, after: after, token: token)
             case .home: try await client.home(host: server.host, limit: limit,
-                                              before: before, token: token ?? "")
+                                              before: before, after: after, token: token ?? "")
             case .trend: try await client.trending(host: server.host, limit: limit, token: token)
             // A conversation is not read by fanning out across the chosen servers: it is one
             // post's own, asked of the one server whose word on that post is final, when a

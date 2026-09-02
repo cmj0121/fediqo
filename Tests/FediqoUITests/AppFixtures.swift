@@ -156,7 +156,7 @@ actor PagedClient: SourceClient {
     func trending(host: String, limit: Int, token: String?) async throws -> [Post] { [] }
 
     /// Nothing here is signed in anywhere, so nothing here asks for a home timeline.
-    func home(host: String, limit: Int, before: Post?, token: String) async throws -> [Post] { [] }
+    func home(host: String, limit: Int, before: Post?, after: Post?, token: String) async throws -> [Post] { [] }
 
     /// Nothing here opens a post, so there is no conversation to invent.
     func context(of post: Post, host: String, token: String?) async throws -> Conversation {
@@ -167,7 +167,7 @@ actor PagedClient: SourceClient {
     /// no test asked it to.
     func stillHas(_ post: Post, host: String, token: String?) async throws -> Bool { true }
 
-    func timeline(host: String, limit: Int, before: Post?, token: String?) async throws -> [Post] {
+    func timeline(host: String, limit: Int, before: Post?, after: Post?, token: String?) async throws -> [Post] {
         asks += 1
         arrival?.resume()
         arrival = nil

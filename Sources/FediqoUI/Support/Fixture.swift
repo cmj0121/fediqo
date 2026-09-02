@@ -371,12 +371,17 @@ struct FixtureSource: SourceClient {
 
     /// One page and no more. A fixture that handed over history for ever would be a fixture
     /// nobody could photograph the end of the timeline on.
-    func timeline(host: String, limit: Int, before: Post?, token: String?) async throws -> [Post] {
-        before == nil ? Fixture.timeline(of: host) : []
+    /// One page and no more, and one stretch and no more: a fixture asked for what is between
+    /// two posts it has already handed over has nothing further to say, which is the honest
+    /// answer for an invented world where nothing arrives late.
+    func timeline(host: String, limit: Int, before: Post?, after: Post?,
+                  token: String?) async throws -> [Post] {
+        before == nil && after == nil ? Fixture.timeline(of: host) : []
     }
 
     /// Nobody is signed in to an invented server, so nobody has a home on one.
-    func home(host: String, limit: Int, before: Post?, token: String) async throws -> [Post] { [] }
+    func home(host: String, limit: Int, before: Post?, after: Post?,
+              token: String) async throws -> [Post] { [] }
 
     func trending(host: String, limit: Int, token: String?) async throws -> [Post] {
         Fixture.trending(of: host)
