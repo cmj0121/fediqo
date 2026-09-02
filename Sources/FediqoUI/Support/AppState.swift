@@ -613,6 +613,12 @@ public final class AppState {
         signIn?.onAccountsChanged = { [weak self] in
             guard let self else { return }
             await self.notices?.restart(on: self.servers)
+            // A timeline read as somebody is not the timeline read as a stranger, and the
+            // difference is not only at the top: everything a server would have shown an account
+            // is missing from the whole stretch the reader has already read (#92). The stretch is
+            // asked again rather than the timeline being thrown away and read from the top,
+            // which would take the reader's place with it.
+            await self.readingFeed?.refill(self.servers)
         }
         // Who is signed in, first of all: the timelines are drawn from the first frame, and one
         // of them is readable only where there is an account. Rows only — no Keychain, no

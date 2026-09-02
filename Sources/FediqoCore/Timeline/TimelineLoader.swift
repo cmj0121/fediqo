@@ -264,6 +264,27 @@ public struct TimelineLoader: Sendable {
                               hidden: sifted.hidden)
     }
 
+    /// One server asked again about a stretch it has already answered (#92).
+    ///
+    /// **The other half of the same problem, and the half `min_id` is for.** A server the reader
+    /// has already been reading *has* handed this device numbers, so both ends of the stretch can
+    /// be named — and what it says about that stretch can change without anything being written:
+    /// a reader signs in and a server that was answering a stranger starts answering an account,
+    /// or a server federates with another and backfills posts written days ago.
+    ///
+    /// Both ends are that server's own posts. Handing it somebody else's would be refused, and
+    /// rightly — see `catchUp`, which exists because a server that has given us nothing has no
+    /// end to name.
+    ///
+    /// One round and no walking. What is between two posts the reader is holding is a bounded
+    /// thing, and a server with more of it than one page will hand back its newest — which is
+    /// the part nearest what the reader is looking at, and the part worth having first.
+    public func refill(_ server: Server, between newest: Post, and oldest: Post,
+                       query: TimelineQuery) async -> [SourceFailure] {
+        let round = await fanOut([(server, newest)], query: query, after: oldest)
+        return Array(round.failures.values)
+    }
+
     /// One server, walked back until it has covered a stretch the reader already holds (#92).
     ///
     /// **This is what a newly added server needs, and `min_id` cannot give it.** A stretch is
@@ -705,8 +726,10 @@ public struct TimelineLoader: Sendable {
     /// which asks everyone for their newest page. `answered` is told what each one gave as it
     /// gives it, which is where a paging load writes down where that server has got to; a
     /// refresh has nothing to write down and passes nothing.
+    /// `after` is the far end of a stretch, where one is being asked for — the same post for
+    /// every target, because the only caller asking for a stretch asks one server at a time.
     private func fanOut(
-        _ targets: [(server: Server, cursor: Post?)], query: TimelineQuery,
+        _ targets: [(server: Server, cursor: Post?)], query: TimelineQuery, after: Post? = nil,
         answered: (String, Answer) async -> Void = { _, _ in }
     ) async -> (collected: [[Post]], failures: [String: SourceFailure], reached: Set<String>) {
         var failures: [String: SourceFailure] = [:]
@@ -749,7 +772,8 @@ public struct TimelineLoader: Sendable {
                 reached.insert(server.endpoint)
                 group.addTask {
                     (server.endpoint,
-                     await ask(client, server, query: query, token: token, as: reader, before: cursor))
+                     await ask(client, server, query: query, token: token, as: reader,
+                               before: cursor, after: after))
                 }
             }
             for await (endpoint, answer) in group {
@@ -775,8 +799,10 @@ public struct TimelineLoader: Sendable {
     /// retry policy is here, so the fan-outs above only have to name the servers and collect
     /// what each one answered.
     private func ask(_ client: any SourceClient, _ server: Server, query: TimelineQuery,
-                     token: String?, as reader: String?, before: Post?) async -> Answer {
-        let answer = await attempt(client, server, query: query, token: token, as: reader, before: before)
+                     token: String?, as reader: String?, before: Post?,
+                     after: Post? = nil) async -> Answer {
+        let answer = await attempt(client, server, query: query, token: token, as: reader,
+                                   before: before, after: after)
         // A cursor a server cannot be asked about is our wiring, not their machine: per-server
         // cursors mean a post from somewhere else can never become one, so this is the belt.
         // It goes in the log, where a mistake of ours belongs; the bad cursor is dropped so it
@@ -801,8 +827,10 @@ public struct TimelineLoader: Sendable {
     /// The read itself, tried as `token`'s owner and once more as a stranger where the
     /// credential is turned down — everything `ask` does but the belt around the cursor.
     private func attempt(_ client: any SourceClient, _ server: Server, query: TimelineQuery,
-                         token: String?, as reader: String?, before: Post?) async -> Answer {
-        let signedIn = await read(client, server, query: query, token: token, as: reader, before: before)
+                         token: String?, as reader: String?, before: Post?,
+                         after: Post? = nil) async -> Answer {
+        let signedIn = await read(client, server, query: query, token: token, as: reader,
+                                  before: before, after: after)
         // A token the server turned down is the account's problem, not the server's, so the
         // same read goes out once more as a stranger and the column shows whatever anyone
         // would see. What is reported stays `.tokenRejected`, so the screen marks the account
@@ -812,7 +840,8 @@ public struct TimelineLoader: Sendable {
         // A source with an owner has nowhere to fall back to: read as nobody it is not this
         // timeline at all. So the refusal stands, and it stands as the account's problem.
         guard !query.source.needsAccount else { return signedIn }
-        let anonymous = await read(client, server, query: query, token: nil, as: nil, before: before)
+        let anonymous = await read(client, server, query: query, token: nil, as: nil,
+                                   before: before, after: after)
         // A retry that read fine but would not store replaces `.tokenRejected` with `.store`,
         // and the account goes unmarked this round. That is the trade taken knowingly: one
         // host can only carry one reason, and the store failing is the newer news. It heals

@@ -166,6 +166,29 @@ final class FeedPaging {
         if !known.isEmpty, !added.isEmpty { await catchUp(added) }
     }
 
+    /// Asks a server again about the stretch the reader is already holding of it (#92).
+    ///
+    /// The other half of `catchUp` and the half `min_id` is for. This one has been read before,
+    /// so both ends of the stretch can be named with its own numbers — and what it says about
+    /// that stretch changes without anything being written: a reader signs in and a server that
+    /// was answering a stranger starts answering an account.
+    ///
+    /// Both ends are that server's own posts, taken from what is on the screen. A server that has
+    /// handed over only one post has no stretch and is left alone; there is nothing between one
+    /// post and itself.
+    func refill(_ servers: [Server]) async {
+        for server in servers {
+            let theirs = posts.visible.filter { $0.sourceURL == server.endpoint }
+            guard let newest = theirs.first, let oldest = theirs.last, newest.uri != oldest.uri
+            else { continue }
+            _ = await loader.refill(server, between: newest, and: oldest,
+                                    query: posts.timeline.query)
+        }
+        if let filled = try? await loader.stored(posts.timeline.query), !filled.isEmpty {
+            posts.showing(filled)
+        }
+    }
+
     /// Walks servers the reader has just added back to the foot of what they are already
     /// holding, and shows what that turns up.
     ///

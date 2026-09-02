@@ -100,4 +100,7 @@ final class FeedModel {
         await paging.load(servers: servers, refresh: refresh)
     }
     func loadOlder(servers: [Server]) async { await paging.loadOlder(servers: servers) }
+    /// Asks these servers again about the stretch this feed is already holding of them — for
+    /// when what they would say about it has changed and nothing about the reading has (#92).
+    func refill(_ servers: [Server]) async { await paging.refill(servers) }
 }
