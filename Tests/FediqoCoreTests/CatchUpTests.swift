@@ -96,8 +96,51 @@ struct CatchUpTests {
     }
 }
 
+/// The other half: a server already read, asked again about the stretch it has already answered.
+///
+/// This is what `min_id` is for, and what it can be used for — unlike a server just added, one
+/// that has been read has handed over numbers this app may name either end with.
+@Suite("Asking a server again about a stretch it has answered")
+struct RefillTests {
+    private let host = "refill.example"
+
+    private func post(_ id: Int, at seconds: TimeInterval) -> Post {
+        makePost(uri: "https://\(host)/api/v1/statuses/\(id)",
+                 originURI: "https://\(host)/users/a/statuses/\(id)", at: seconds)
+    }
+
+    @Test("Both ends are sent, and they are that server's own numbers")
+    func bothEndsAreSent() async throws {
+        let client = CountingPages(pages: [[]])
+        let reading = TimelineLoader(registry: SourceRegistry(clients: [.mastodon: client]),
+                                     limit: 40, store: nil, secrets: InMemorySecretStore())
+
+        _ = await reading.refill(Server(host: host, socialProtocol: .mastodon),
+                                 between: post(9, at: 900), and: post(1, at: 100),
+                                 query: TimelineQuery(source: .public))
+
+        #expect(await client.cursors == ["9"])
+        #expect(await client.farEnds == ["1"])
+    }
+
+    /// One round and no walking: what is between two posts the reader is holding is bounded, and
+    /// a server with more of it than a page hands back the part nearest what they are looking at.
+    @Test("It asks once rather than walking")
+    func oneRound() async throws {
+        let client = CountingPages(pages: [[post(5, at: 500)], [post(4, at: 400)]])
+        let reading = TimelineLoader(registry: SourceRegistry(clients: [.mastodon: client]),
+                                     limit: 40, store: nil, secrets: InMemorySecretStore())
+
+        _ = await reading.refill(Server(host: host, socialProtocol: .mastodon),
+                                 between: post(9, at: 900), and: post(1, at: 100),
+                                 query: TimelineQuery(source: .public))
+
+        #expect(await client.asks == 1)
+    }
+}
+
 /// A server with a fixed set of pages, which remembers what it was asked for.
-private actor CountingPages: StubClient {
+actor CountingPages: StubClient {
     private(set) var asks = 0
     /// The `max_id` of each request in order, as the server's own number, or nothing where the
     /// newest page was asked for.
@@ -106,9 +149,13 @@ private actor CountingPages: StubClient {
 
     init(pages: [[Post]]) { self.pages = pages }
 
+    /// The `min_id` of each request, where one was sent — the far end of a stretch.
+    private(set) var farEnds: [String?] = []
+
     func timeline(host: String, limit: Int, before: Post?, after: Post?,
                   token: String?) async throws -> [Post] {
         cursors.append(before.flatMap { try? MastodonClient.statusId(of: $0, on: host) })
+        farEnds.append(after.flatMap { try? MastodonClient.statusId(of: $0, on: host) })
         defer { asks += 1 }
         return asks < pages.count ? pages[asks] : []
     }
