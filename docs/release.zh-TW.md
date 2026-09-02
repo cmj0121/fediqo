@@ -149,7 +149,8 @@ make shots                    # 以上兩者
 make -C Apps shots-widths     # 440、700 與 1024 點，最小與最大的字級
 ```
 
-**`shots-widths` 不是給商店的，也不進 git。** 它是 S9 被判斷的那四個角落，輸出在 `.build/shots-widths/`
+**`shots-widths` 不是給商店的，也不進 git。** 它是商店那份清單裡的每一個畫面，在 S9 被判斷的那四個角落各拍一張，
+輸出在 `.build/shots-widths/`
 （已被 gitignore）—— `fastlane/screenshots/` 是整個資料夾被上傳的，不是按清單，所以多放一張圖就是商店頁面上
 多一張圖。440 是最寬的 iPhone、1024 是 13 吋 iPad；**700 兩者皆非**，而它正是 `Size.wideRows(at:)` 對它的
 回答與另外兩者都不同的那個寬度 —— Split View 裡的 iPad、被拖窄的 Mac 視窗，也就是

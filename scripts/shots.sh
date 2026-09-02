@@ -206,10 +206,11 @@ check() {
 # from both of the others. That third one is the whole reason this exists -- #80 asks what a
 # screen does at 700 points, and until now nothing here could take its picture.
 #
-# The Mac app draws itself into a bitmap of whatever size it is given, so all six are one build
-# and no simulator. What it cannot show is the tab bar a phone gets instead of the rail, and it
-# does not have to: that is a navigation idiom the size class decides, not an arrangement S9
-# governs.
+# The Mac app draws itself into a bitmap of whatever size it is given, so every one of these is
+# one build and no simulator. Two things it cannot show, and neither is S9's: the tab bar a
+# phone gets instead of the rail, which a size class decides rather than an arrangement; and
+# anything under 420 points, because `AppShell.columns` has a `minWidth` of `Size.prose` and an
+# iPad that narrow is running the phone's layout anyway.
 WIDTHS=(440 700 1024)
 SCALES=(small larger)
 
@@ -223,25 +224,33 @@ widths() {
     local out=".build/shots-widths"
     rm -rf "$out"; mkdir -p "$out"
 
-    local width scale name wrote
-    for width in "${WIDTHS[@]}"; do
-        for scale in "${SCALES[@]}"; do
-            name="timeline-${width}x${scale}.png"
-            say "  $out/$name"
-            wrote="$(env FEDIQO_FIXTURE=1 \
-                         FEDIQO_ROUTE=shell \
-                         FEDIQO_RAIL=timeline \
-                         FEDIQO_LANGUAGE=en \
-                         FEDIQO_TEXT_SCALE="$scale" \
-                         FEDIQO_SHOOT="$name" \
-                         FEDIQO_SHOOT_SIZE="${width}x800" \
-                         "$binary" -ApplePersistenceIgnoreState YES 2>/dev/null \
-                     | sed -n 's/^shot: //p')"
-            [ -n "$wrote" ] && [ -f "$wrote" ] || {
-                echo >&2 "shots: the app took no picture at ${width}pt, $scale"
-                return 1
-            }
-            mv "$wrote" "$out/$name"
+    # Every screen, not only the timeline. "Every screen is legible at 440 and at 1024, at
+    # the smallest and the largest text scale" is what #80 asks for, and a rule proved on one
+    # screen is a rule proved on one screen. The same list the stores are shot from, so a
+    # screen added there is a screen checked here without anybody remembering to.
+    local width scale name shot screen rail extra wrote
+    for shot in "${SHOTS[@]}"; do
+        IFS=: read -r screen rail extra <<< "$shot"
+        for width in "${WIDTHS[@]}"; do
+            for scale in "${SCALES[@]}"; do
+                name="${screen}-${width}x${scale}.png"
+                say "  $out/$name"
+                wrote="$(env FEDIQO_FIXTURE=1 \
+                             FEDIQO_ROUTE=shell \
+                             FEDIQO_RAIL="$rail" \
+                             FEDIQO_LANGUAGE=en \
+                             FEDIQO_TEXT_SCALE="$scale" \
+                             FEDIQO_SHOOT="$name" \
+                             FEDIQO_SHOOT_SIZE="${width}x800" \
+                             ${extra:-IGNORED=} \
+                             "$binary" -ApplePersistenceIgnoreState YES 2>/dev/null \
+                         | sed -n 's/^shot: //p')"
+                [ -n "$wrote" ] && [ -f "$wrote" ] || {
+                    echo >&2 "shots: the app took no picture of $screen at ${width}pt, $scale"
+                    return 1
+                }
+                mv "$wrote" "$out/$name"
+            done
         done
     done
 

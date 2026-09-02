@@ -164,9 +164,9 @@ They land in `fastlane/screenshots/<platform>/<locale>/`, numbered so that the o
 order they were meant to be read in, and **they are committed**. What a person does is look at them and judge
 them; what nobody does is take them.
 
-**`shots-widths` is not for a store and is not committed.** It is the four corners S9 is judged
-at, and it goes to `.build/shots-widths/`, which is gitignored — `fastlane/screenshots/` is uploaded
-whole rather than by a list, so an extra picture there is an extra picture on a listing. 440 is the
+**`shots-widths` is not for a store and is not committed.** It is every screen the stores are shot from, at the
+four corners S9 is judged at, and it goes to `.build/shots-widths/`, which is gitignored — `fastlane/screenshots/`
+is uploaded whole rather than by a list, so an extra picture there is an extra picture on a listing. 440 is the
 widest iPhone and 1024 the 13" iPad; **700 is neither**, and it is the width at which
 `Size.wideRows(at:)` gives a different answer from both — an iPad in Split View, a Mac window dragged
 narrow, and the case [#80](https://github.com/cmj0121/fediqo/issues/80) is about. `FEDIQO_SHOOT_SIZE`
