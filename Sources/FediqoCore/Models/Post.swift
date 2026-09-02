@@ -275,6 +275,29 @@ public enum Audience: String, Sendable, Hashable, Codable, CaseIterable {
     case followers = "private"
     /// The accounts it names, and nobody else.
     case mentioned = "direct"
+
+    /// How far this reaches, smallest first. Not the declaration order by accident — the order
+    /// *is* the fact, and it is what lets one audience be compared with another.
+    private var reach: Int {
+        switch self {
+        case .mentioned: 0
+        case .followers: 1
+        case .unlisted: 2
+        case .everyone: 3
+        }
+    }
+
+    /// The narrower of two, and the chosen one where the other is unknown.
+    ///
+    /// A reply may not be wider than what it answers (#87). Where the post being answered never
+    /// said how far it reached — every post stored before 009, and every protocol with no such
+    /// idea — there is nothing to be narrower than, and the reader's own choice stands: guessing
+    /// `mentioned` would quietly turn a public answer into a private one, and guessing
+    /// `everyone` would be the mistake this is here to prevent.
+    public static func narrower(of chosen: Audience, _ other: Audience?) -> Audience {
+        guard let other else { return chosen }
+        return chosen.reach <= other.reach ? chosen : other
+    }
 }
 
 /// An account a post names.

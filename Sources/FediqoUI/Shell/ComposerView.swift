@@ -15,15 +15,21 @@ struct ComposerView: View {
     @State private var warning = ""
     @State private var showingWarning = false
     @State private var audience: Audience = .everyone
+    /// Whether there is an account that could send this answer. `nil` until it has been asked —
+    /// which is not the same as `false`, and drawing the refusal for it would accuse a reader of
+    /// having no account before anybody had looked.
+    @State private var canAnswer: Bool?
     /// The keyboard, and where it is. SwiftUI will not say whether a text field somewhere
     /// has it, so this says it for the one field that could.
     @FocusState private var typing: Bool
 
     var body: some View {
-        ScrollView {
-            content
-        }
-        .frame(width: Self.size.width, height: Self.size.height)
+        content
+        // Most of the room, whatever the room is. A fixed panel was a panel sized for one
+        // window: the same 320 points was half a phone and a corner of a Mac, and it had to
+        // hold a post either way. `Self.share` of each side is the same decision at every
+        // size, which is what S9 asks for — nothing here measures a device.
+        .containerRelativeFrame([.horizontal, .vertical]) { length, _ in length * Self.share }
         .fediqoCard(radius: Radius.panel, shadow: true)
         // A composer you have to reach for the mouse to type in is a composer that failed on
         // a keyboard. `c` opens it and the cursor is already here; `Escape` is how you leave,
@@ -32,6 +38,21 @@ struct ComposerView: View {
         // That server's rule, asked of it rather than written here, and asked when the panel
         // opens because it is theirs to change between one post and the next.
         .task { await app.askTheLimit() }
+        // And whether there is anybody to answer as, asked at the same moment and for the same
+        // reason: both are things a reader should be told before writing rather than after.
+        .task {
+            guard let parent = app.answering else { return }
+            canAnswer = await app.acting(on: parent) != nil
+        }
+        // The audience a reply may not be wider than. Set once when the panel opens rather than
+        // clamped at the send, so what the picker shows is what will go — `Draft` narrows it
+        // again anyway, and a composer whose picker disagreed with the post it sent would be
+        // telling the reader one thing and the server another.
+        .task {
+            if let parent = app.answering {
+                audience = Audience.narrower(of: audience, parent.audience)
+            }
+        }
     }
 
     /// Asks the field for the keyboard until it has it.
@@ -55,11 +76,16 @@ struct ComposerView: View {
     private var content: some View {
         VStack(alignment: .leading, spacing: Space.gap) {
             HStack(spacing: Space.step) {
-                Image(systemName: "square.and.pencil").foregroundStyle(Palette.accent)
-                Text(t("compose.title")).fediqoFont(TypeScale.lead, weight: .semibold)
+                Image(systemName: app.answering == nil ? "square.and.pencil" : "arrowshape.turn.up.left")
+                    .foregroundStyle(Palette.accent)
+                Text(t(app.answering == nil ? "compose.title" : "compose.replying"))
+                    .fediqoFont(TypeScale.lead, weight: .semibold)
                 Spacer()
                 room
             }
+
+            answering
+            cannotAnswer
 
             if showingWarning {
                 TextField(t("composer.warning"), text: $warning)
@@ -74,7 +100,10 @@ struct ComposerView: View {
                 .focused($typing)
                 .fediqoFont(TypeScale.small)
                 .padding(Space.mid)
-                .frame(maxWidth: .infinity, minHeight: 72, alignment: .topLeading)
+                // Into whatever the panel has left. The composer is most of the window now, and
+                // a field that stayed 72 points tall in it would be a small box with a field of
+                // empty card under it — which is what a corner panel had no room to be.
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .fediqoCard(radius: Radius.inner, raised: false)
                 .onChange(of: typing) { _, now in app.setTyping(now) }
 
@@ -82,7 +111,7 @@ struct ComposerView: View {
             controls
         }
         .padding(Space.pad)
-        .frame(width: Self.size.width, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     /// How much room is left, or nothing at all where the server never said.
@@ -194,11 +223,47 @@ struct ComposerView: View {
         }
     }
 
+    /// The post this answers, whole, above what is being written.
+    ///
+    /// Whole rather than a line naming its author, because a reader who pressed reply from a
+    /// timeline may have scrolled past it, and "who am I answering" and "what am I answering"
+    /// are two questions. It is the same `PostRow` the list draws, so what is quoted here and
+    /// what was pressed there cannot come to look like two different posts.
+    ///
+    /// There is room for it because the composer is most of the window now. It was a corner
+    /// panel of 320 points, and a post in it would have left a line and a half to type in.
+    @ViewBuilder
+    private var answering: some View {
+        if let parent = app.answering {
+            PostRow(post: parent, condensed: true, acting: false)
+                .fediqoCard(raised: false)
+                .allowsHitTesting(false)
+                .accessibilityLabel(Text(t("compose.replyingTo", parent.authorHandle)))
+        }
+    }
+
+    /// Said before a word is typed, and that is the whole of it.
+    ///
+    /// A reply goes as the account `acting(on:)` chooses, and where the reader has none anywhere
+    /// there is no such account. Finding that out on the send is finding it out after writing an
+    /// answer, which is the one moment it is most expensive to be told — so the composer asks
+    /// when it opens and says so at the top of the empty field.
+    @ViewBuilder
+    private var cannotAnswer: some View {
+        if app.answering != nil, canAnswer == false {
+            Label(t("compose.noAccount"), systemImage: "person.slash")
+                .fediqoFont(TypeScale.small)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     /// What is written, as the one value everything here reads: the counter, the check and the
     /// send are three questions about one draft, and building it three times is three chances
     /// for them to differ.
     private var written: Draft {
-        Draft(text: draft, audience: audience, warning: showingWarning ? warning : nil)
+        Draft(text: draft, audience: audience, warning: showingWarning ? warning : nil,
+              answering: app.answering)
     }
 
     /// Nothing to send, no room left, or one already on its way.
@@ -220,9 +285,13 @@ struct ComposerView: View {
         }
     }
 
-    /// Fixed, and scrolled if the chosen text size overflows it, so the panel is the same
-    /// shape at every text size and the shell can place it without asking how tall it is.
-    static let size = CGSize(width: 320, height: 250)
+    /// How much of the room the composer takes, on both sides.
+    ///
+    /// A share rather than a size. 320 × 250 was most of a phone and a corner of a Mac, and it
+    /// was asked to hold the same things in both; four fifths is the same decision wherever it
+    /// is made. What is left round the edges is what says this is over something rather than
+    /// instead of it.
+    static let share: CGFloat = 0.8
 
     /// Eight asks, 25ms apart: 200ms in all, comfortably past the 0.15s the panel animates
     /// for, in steps short enough that the cursor is there before anybody has begun to type.

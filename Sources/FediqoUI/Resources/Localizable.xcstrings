@@ -70,6 +70,23 @@
         }
       }
     },
+    "compose.noAccount": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You have no account on a server that can answer this. Sign in to one first."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你在能回覆這則貼文的 server 上沒有帳號。先登入一個。"
+          }
+        }
+      }
+    },
     "compose.placeholder": {
       "extractionState": "manual",
       "localizations": {
@@ -83,6 +100,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "一個編輯器，數個網路。"
+          }
+        }
+      }
+    },
+    "compose.replying": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reply"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "回覆"
+          }
+        }
+      }
+    },
+    "compose.replyingTo": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Replying to %@"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "回覆 %@"
           }
         }
       }
@@ -2201,13 +2252,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Reply on the server it came from"
+            "value": "Reply"
           }
         },
         "zh-TW": {
           "stringUnit": {
             "state": "translated",
-            "value": "在它來的伺服器上回覆"
+            "value": "回覆"
           }
         }
       }

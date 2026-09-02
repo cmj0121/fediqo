@@ -105,6 +105,10 @@ struct LaunchOptions {
     /// Whether to open the author of the first post the timeline has, for the same reason: the
     /// page about somebody is reached by pressing a name, and nothing on a runner may press.
     var openingPerson = false
+    /// Whether to open the composer answering the first post the timeline has. The composer as a
+    /// reply is a different screen from the composer as a new post, and a screen that cannot be
+    /// photographed is a screen nobody looks at.
+    var openingReply = false
     /// Which language to draw in, whatever the machine is set to. A screenshot run needs both,
     /// one after the other, and neither of them is whatever the person at the keyboard chose.
     var language: AppLanguage?
@@ -155,6 +159,7 @@ struct LaunchOptions {
         options.showingNotices = environment["FEDIQO_NOTICES"] == "1"
         options.openingPost = environment["FEDIQO_OPEN"]
         options.openingPerson = environment["FEDIQO_PERSON"] == "1"
+        options.openingReply = environment["FEDIQO_REPLY"] == "1"
         options.fixture = environment["FEDIQO_FIXTURE"] == "1"
         options.language = environment["FEDIQO_LANGUAGE"].flatMap(AppLanguage.init(rawValue:))
         options.shootTo = environment["FEDIQO_SHOOT"]
@@ -211,6 +216,12 @@ public final class AppState {
     /// Whether the composer is open. It belongs here rather than to the bar because the
     /// panel is drawn by the shell, over everything, and the bar only asks for it.
     var composing: Bool
+    /// What the composer is answering, where it is answering anything.
+    ///
+    /// Set when the composer is opened as a reply and cleared when it closes, so that the button
+    /// that opens it plainly always opens a new post. A composer that remembered the last thing
+    /// it answered would send somebody an answer they were never part of.
+    private(set) var answering: Post?
     /// Whether a post is on its way out. What the send button reads, so a second press while
     /// the first is still out sends nothing — the one failure a composer must not have.
     var isSending = false
@@ -251,6 +262,8 @@ public final class AppState {
     /// Whether this run opens the author of the first post it is given. A screenshot's way in to
     /// a page whose only other way in is a press (#30: nothing on a runner may press anything).
     let openingPerson: Bool
+    /// Whether this run opens the composer as an answer to the first post it is given.
+    let openingReply: Bool
     /// The conversations being read, oldest first, empty while the reader is in the list.
     ///
     /// A stack rather than one, because a conversation is a place a reader walks *into*.
@@ -493,6 +506,7 @@ public final class AppState {
         self.shootSize = launch.shootSize
         self.openingPost = launch.openingPost
         self.openingPerson = launch.openingPerson
+        self.openingReply = launch.openingReply
         self.marketingVersion = marketingVersion
         self.buildVersion = buildVersion
         // The language before the first frame, not after it: a screenshot is taken of what was
@@ -993,10 +1007,24 @@ public final class AppState {
         // The editor goes away with the panel, and it cannot report losing a keyboard it is
         // no longer there to hold. A signal left standing would leave every single key dead.
         if !open { isTyping = false }
+        // And what it was answering goes with it. A composer opened again from the button is a
+        // new post, and one that quietly remembered the last thing it was replying to would
+        // send an answer to somebody who was never mentioned.
+        if !open { answering = nil }
     }
 
     func toggleComposer() {
         setComposing(!composing)
+    }
+
+    /// Opens the composer as an answer to one post.
+    ///
+    /// The post and not its address, because the composer has to draw it and the sending has to
+    /// read three things off it: which server wrote it, that server's own number for it, and the
+    /// audience the answer may not be wider than.
+    func reply(to post: Post) {
+        answering = post
+        setComposing(true)
     }
 
     /// One owner for the list of keys, so the `?` key, the scrim behind it and its own Close
