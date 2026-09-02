@@ -19,15 +19,19 @@ struct FeedScreen: View {
     /// where you already are is a button that does nothing.
     @State private var scrolledAway = false
     @State private var editing: TimelineEditor.Subject?
-    /// Whether there is room to put a post's attachments beside its words. Measured from the
-    /// screen's own width; 560 is the attachment column plus a gap plus enough left for the
-    /// words to still be a paragraph rather than a stack of two-word lines.
-    @State private var wide = false
+    /// How wide this screen is. The width itself and not the answer worked out from it: the
+    /// answer also depends on the reader's text size, which changes without the screen being
+    /// resized, and a stored `Bool` would go on saying what it said at the old size until
+    /// somebody dragged a window.
+    @State private var width: CGFloat = 0
     /// Whether the list of what the rules kept off this page is up.
     @State private var showingHidden = false
     /// The colour scheme, for the two marks drawn by hand at the foot of the list. Everything
     /// else here is `fediqoCard` or `Hairline`, which read it themselves.
     @Environment(\.colorScheme) private var colorScheme
+    /// The reader's text size, because the width at which a row can hold two columns depends
+    /// on it: the deck's share of that width is a picture and the rest of it is words.
+    @Environment(\.fediqoTextScale) private var scale
     /// The app's language, carried down by `fediqoChrome`, so the date at the foot of the list
     /// is written the way the reader's own language writes one.
     @Environment(\.locale) private var locale
@@ -96,12 +100,16 @@ struct FeedScreen: View {
             // Measured once here and read by every row: a row asking the geometry for itself
             // is the same question answered once per row on screen, and they all answer the
             // same. Below this there is no room to spend on an empty attachment column.
-            .onGeometryChange(for: Bool.self) { geometry in
-                geometry.size.width >= Size.wideRows
-            } action: { wide in
-                self.wide = wide
+            //
+            // The threshold S9 allows, and the comparison is made here rather than in the
+            // closure so that it is remade whenever the reader's text size changes — see
+            // `Size.wideRows(at:)` for why the answer moves with it.
+            .onGeometryChange(for: CGFloat.self) { geometry in
+                geometry.size.width
+            } action: { width in
+                self.width = width
             }
-            .environment(\.fediqoWideRows, wide)
+            .environment(\.fediqoWideRows, width >= Size.wideRows(at: scale))
             // A run told to open a post does it as soon as there is one to open, and never
             // again — `expand` clears the stack, so a second attempt would throw away
             // whatever the reader had walked into. Nothing at all on a reader's own run.
