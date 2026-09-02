@@ -230,30 +230,18 @@ enum Motion {
 
 // MARK: - The room the screen has
 
-/// A phone held upright, where a header has one column's worth of room and not two.
-///
-/// The shell is the one place that asks the platform how much room there is — a size class
-/// only exists on iOS — and every screen below it reads the answer here rather than working
-/// it out again from an environment value half of them cannot see.
-private struct CompactKey: EnvironmentKey {
-    static let defaultValue = false
-}
-
 /// Whether a row has the width to put its attachments beside its words rather than under them.
 ///
-/// Measured once by the screen that draws the list and read by every row, for the reason
-/// `fediqoCompact` is: a row asking the geometry for itself is the same question answered
-/// however many times there are rows on screen, and they would all answer the same.
+/// The one threshold S9 allows, and it is allowed for the reason S9 names: every row of a list
+/// must reach the *same* answer or the list stops being scannable (S6), and an arrangement
+/// answers per row. So the screen that draws the list measures once and every row reads it —
+/// which also means a row never asks the geometry for itself, a question that would otherwise
+/// be answered once per row on screen with all of them agreeing.
 private struct WideRowsKey: EnvironmentKey {
     static let defaultValue = false
 }
 
 extension EnvironmentValues {
-    var fediqoCompact: Bool {
-        get { self[CompactKey.self] }
-        set { self[CompactKey.self] = newValue }
-    }
-
     var fediqoWideRows: Bool {
         get { self[WideRowsKey.self] }
         set { self[WideRowsKey.self] = newValue }

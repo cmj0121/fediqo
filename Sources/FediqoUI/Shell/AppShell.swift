@@ -31,9 +31,12 @@ struct AppShell: View {
         app.preferences.railExpanded ? RailView.expandedWidth : RailView.collapsedWidth
     }
 
-    /// How much room there is, decided once and handed down. A size class only exists on iOS,
-    /// so this is where the platform is asked and every screen below reads the answer out of
-    /// the environment instead.
+    /// Whether the destinations are a tab bar or a rail. **The only thing this answer decides**,
+    /// and the reason it is still a boolean while S9 has done away with the rest of them: a tab
+    /// bar and a sidebar are two navigation idioms rather than two arrangements of one, they
+    /// hold different state, and which of them a device expects is Apple's answer to give and
+    /// not a width to measure. No screen below reads it; every one of them fits the room it is
+    /// given instead.
     private var compact: Bool {
         #if os(iOS)
         sizeClass == .compact
@@ -49,7 +52,6 @@ struct AppShell: View {
         // goes away — so there is never a second one, and never one left running for a feed
         // nobody is looking at.
         layout
-            .environment(\.fediqoCompact, compact)
             // Over everything the shell draws, including the composer: what the reader asked
             // to look at is the thing in front of them until they leave it.
             .overlay { MediaViewer() }

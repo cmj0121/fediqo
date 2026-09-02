@@ -88,7 +88,6 @@ struct PostRow: View {
 
     @Environment(\.openURL) private var openURL
     @Environment(\.fediqoWideRows) private var wide
-    @Environment(\.fediqoCompact) private var compact
     /// The reader's text size, because how many lines fit in a card depends on it.
     @Environment(\.fediqoTextScale) private var scale
     @Environment(\.colorScheme) private var colorScheme
@@ -270,21 +269,35 @@ struct PostRow: View {
     /// Who wrote it, where it reached us, and when. The whole width, above both columns: it
     /// is about the post rather than about its words, and an avatar in a gutter beside the
     /// text would make the text column start in a different place from the row above it.
+    ///
+    /// Two arrangements, widest first, and nothing here asks how wide the row is (S9). The
+    /// band has four things to say and not always the room for four; the handle and the word
+    /// before the server are what it gives up, together, because they are the two a reader
+    /// can do without — the handle is usually the name again in lower case and the opened
+    /// post says it in full, and a pill reading `birch.example` says "via" by itself.
+    ///
+    /// They go together because they went together before, when a size class dropped both at
+    /// once on a phone. Which of the two should go first is a question nobody has asked, and
+    /// this is not the change that answers it.
     private var metadata: some View {
+        ViewThatFits(in: .horizontal) {
+            metadataBand(verbose: true)
+            metadataBand(verbose: false)
+        }
+    }
+
+    private func metadataBand(verbose: Bool) -> some View {
         HStack(spacing: Space.step) {
             RemoteImage(url: post.authorAvatarURL, width: Size.avatar, height: Size.avatar,
                         standing: .avatar)
             EmojiText(post.authorName, emojis: post.emojis, size: TypeScale.body, weight: .semibold)
                 .lineLimit(1)
                 .layoutPriority(1)
-            // Not on a phone. The band has four things to say and room for three, and the
-            // handle is the one the reader can do without: it is usually the name again in
-            // lower case, and the opened post says it in full.
-            if !compact {
+            if verbose {
                 Text(post.authorHandle).fediqoFont(TypeScale.minor).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: Space.snug)
-            sources
+            sources(verbose: verbose)
             // When it was written is four characters and never gives any of them up: a time
             // squeezed to an ellipsis is a row that has stopped saying when it happened.
             Text(post.createdAt, format: .relative(presentation: .numeric))
@@ -494,11 +507,16 @@ struct PostRow: View {
     /// post drew three pills, and the row was a third as wide again for a fact most readers
     /// never ask. So it is said once, and the rest is one hover or one press away — and a screen
     /// reader, which can neither hover nor see the mark, is told every one of them outright.
-    private var sources: some View {
+    ///
+    /// `verbose` is the band's answer rather than this view's own: the word before the pill
+    /// and the author's handle are given up together, by whichever arrangement of the band
+    /// fitted the room it was given.
+    private func sources(verbose: Bool) -> some View {
         HStack(spacing: Space.snug) {
-            // The word is worth a column on a screen that has one to spare and is the first
-            // thing to go on a phone, where a pill saying `birch.example` says it anyway.
-            if !compact {
+            // The word is worth a column on a screen that has one to spare, and is the first
+            // thing to go where there is not, because a pill saying `birch.example` says it
+            // anyway.
+            if verbose {
                 Text(t("timeline.via")).fediqoFont(TypeScale.caption).foregroundStyle(.tertiary)
             }
             if let first = shownSources.first {
