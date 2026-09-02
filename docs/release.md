@@ -21,7 +21,8 @@ point: a pull request has no credentials and must go on not needing any.
   fastlane publish
        │
        ├── scripts/metadata.py -- the store text, before anything is built: the language
-       │   folders, the lengths, the links, and that this version has release notes
+       │   folders, the lengths, the links, that this version has release notes, and
+       │   that the reviewer has something to read
        ├── setup_ci -- a temporary keychain, on a runner; nothing at all on a laptop
        │
        ├── ask App Store Connect which build numbers it already holds, one platform at a time
@@ -50,6 +51,10 @@ two of three names filled is not a way in, and it will say so rather than find o
 | `FEDIQO_TEAM_ID`      | the Apple Developer Program team the identities belong to           |
 | `FEDIQO_BUNDLE_ID`    | one identifier, both platforms, one record in App Store Connect     |
 | `MATCH_GIT_URL`       | where the certificates and profiles live, encrypted                 |
+| `FEDIQO_REVIEW_FIRST_NAME` | who Apple asks when the review has a question                  |
+| `FEDIQO_REVIEW_LAST_NAME`  | ... their surname                                              |
+| `FEDIQO_REVIEW_PHONE`      | ... the number in the form Apple dials it, country code first  |
+| `FEDIQO_REVIEW_EMAIL`      | ... and where to write instead                                 |
 | `MATCH_PASSWORD`      | that repository's passphrase, if the keychain does not already hold it |
 | `ASC_KEY_ID`          | the App Store Connect key: the way in that needs nobody             |
 | `ASC_ISSUER_ID`       | ... its issuer, one per team                                        |
@@ -96,6 +101,7 @@ what gets uploaded, in the same run that uploaded the build, and nothing about t
       macos/  en-US/  …
               zh-Hant/ …
       notes/  0.1.0/  en-US.txt zh-Hant.txt
+      review_information/ notes.txt
 ```
 
 **The language folders are `en-US` and `zh-Hant`.** Not `zh-TW`, which is the code every document in this
@@ -122,6 +128,19 @@ Store Connect keeps one of each per language whichever platform uploaded it last
 the description is one file overwritten every release, and the release that forgets to overwrite it ships the
 last one's words without a sound. `notes/0.1.0/en-US.txt` cannot be forgotten: a tag with no folder of its own
 has nothing to read, and `make publish` stops before it builds. Write them before the tag.
+
+**What the reviewer is told is here; who they ask is not.** `review_information/notes.txt` is one file for both
+platforms and both languages. App Store Connect keeps a review detail per platform's *version* -- the iOS one and
+the Mac one are created separately, in the same run -- and there is one thing to tell them both, so a second copy
+of the words could only ever differ by drifting. The contact beside it -- a name, a telephone number, an address -- comes from
+`FEDIQO_REVIEW_*` in the environment and never from this checkout, because the checkout is public and those are a
+person's. `metadata.py` refuses a file with any of those names in it, wherever it finds one.
+
+**None of that is optional, and none of it is about being reviewed.** Nothing here is ever submitted; the reason
+it is required is that `deliver` reads the review attachment on every metadata upload, and a version App Store
+Connect holds no review detail for answers that read with `No data`. That is the whole message, it arrives after
+the archive and after TestFlight, and the first release of an app is the one that has no detail yet. Handing over
+the contact is what creates it.
 
 **The privacy answers are the one thing not uploaded from here.** `deliver` has no way to answer App Store
 Connect's privacy questionnaire -- it carries the privacy *link* and nothing else. Fediqo collects nothing, so
@@ -199,6 +218,10 @@ The runner is handed by its secret store exactly what `.env` hands a laptop:
 | `FEDIQO_TEAM_ID`                | the same                                                     |
 | `FEDIQO_BUNDLE_ID`              | the same                                                     |
 | `MATCH_GIT_URL`                 | the HTTPS form -- a runner has no ssh key to clone with      |
+| `FEDIQO_REVIEW_FIRST_NAME`      | the same                                                     |
+| `FEDIQO_REVIEW_LAST_NAME`       | the same                                                     |
+| `FEDIQO_REVIEW_PHONE`           | the same                                                     |
+| `FEDIQO_REVIEW_EMAIL`           | the same                                                     |
 | `MATCH_GIT_BASIC_AUTHORIZATION` | required here, unused on a laptop                            |
 | `MATCH_PASSWORD`                | required here: there is no keychain to have remembered it    |
 | `ASC_KEY_ID`                    | required here -- the Apple ID way needs a person watching    |
@@ -229,6 +252,16 @@ Most of what breaks here breaks somewhere other than where it is reported.
 
 **`Invalid password passed via 'MATCH_PASSWORD'`** -- an empty `MATCH_PASSWORD=` in `.env`. Empty is true in
 Ruby, so match took it for the passphrase and never asked the keychain.
+
+**`No data` at `upload_to_app_store`, with the build already on TestFlight** -- the version has no review detail
+and `deliver` read its attachment anyway. It is what a first release does when nobody has filled in the review
+contact; `FEDIQO_REVIEW_*` and `review_information/notes.txt` are what create the detail, and `scripts/env.sh
+--check` says which of them is missing without running anything.
+
+**`Error fetching app store review detail - No data`, in red, and the lane carries on** -- not the same thing, and
+not a failure. That is `deliver` looking for a review detail before creating one, on each platform's first upload
+of a version. The run that stops says `No data` and nothing else; this one says which fetch failed and keeps
+going.
 
 **A macOS archive appears while an iOS lane is running** -- a scheme that is not shared. fastlane cannot find the
 name it was given, and rather than stopping it takes the first scheme in the project.

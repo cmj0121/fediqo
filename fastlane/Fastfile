@@ -22,6 +22,16 @@ METADATA     = File.join(ROOT, "fastlane", "metadata")
 SCREENSHOTS  = File.join(ROOT, "fastlane", "screenshots")
 LOCALES      = ["en-US", "zh-Hant"]
 
+# What the review is told, which is not what the store is told: nobody reading the App Store
+# ever sees a word of it.
+#
+# It sits beside the two platform trees rather than inside them because there is one thing to
+# say and two places to say it. App Store Connect keeps a review detail per platform's
+# version, not one per version -- measured, in the run that fixed this: the Mac lane found
+# nothing where the iOS lane had just created one, and created its own. Two copies of the
+# words could only ever differ by drifting, so there is one.
+REVIEW       = File.join(METADATA, "review_information")
+
 # fastlane reads .env itself, and an empty value there is not nothing. `MATCH_PASSWORD=` with
 # nothing after it arrives in Ruby as "", which is truthy -- so match takes the empty string
 # for the passphrase, never looks in the keychain where the real one is, and then blames the
@@ -34,6 +44,10 @@ LOCALES      = ["en-US", "zh-Hant"]
   ASC_KEY_P8_BASE64
   FEDIQO_APPLE_ID
   FASTLANE_APPLE_APPLICATION_SPECIFIC_PASSWORD
+  FEDIQO_REVIEW_FIRST_NAME
+  FEDIQO_REVIEW_LAST_NAME
+  FEDIQO_REVIEW_PHONE
+  FEDIQO_REVIEW_EMAIL
 ].each { |name| ENV.delete(name) if ENV[name].to_s.empty? }
 
 BUNDLE_ID = ENV.fetch("FEDIQO_BUNDLE_ID")
@@ -183,6 +197,32 @@ def screenshots_for(platform)
   Dir.exist?(path) && !Dir.empty?(path) ? path : nil
 end
 
+# Who Apple asks when the review has a question, and what it is told before it asks.
+#
+# It reads like something a lane that never submits could do without, and it is not. deliver
+# reads the review attachment on every metadata upload, and a version App Store Connect holds
+# no review detail for answers that read with `No data` and takes the release down -- after
+# the archive, after TestFlight, with the whole cost of the run already spent. Handing it the
+# contact is what makes the detail exist; the first release of an app is the one that has none.
+#
+# The contact is a person's name, telephone number and address, and this repository is public.
+# So it comes from the environment, where the signing key comes from, and never from a file in
+# the checkout. The notes are about the app rather than about anybody, so they are a file --
+# what a reviewer is told is a thing to read a diff of, not a string in somebody's .env.
+#
+# No demo account is named, so App Store Connect is told none is required. That is not a gap
+# to fill later: an app with no account of its own has nothing to hand out, and the notes say
+# so and say what to do instead.
+def review_information
+  {
+    first_name: ENV.fetch("FEDIQO_REVIEW_FIRST_NAME"),
+    last_name: ENV.fetch("FEDIQO_REVIEW_LAST_NAME"),
+    phone_number: ENV.fetch("FEDIQO_REVIEW_PHONE"),
+    email_address: ENV.fetch("FEDIQO_REVIEW_EMAIL"),
+    notes: File.read(File.join(REVIEW, "notes.txt")).strip,
+  }
+end
+
 # Everything the store is told that is not the binary: the text, and the pictures where there
 # are any. Uploaded in the same run that uploaded the build, from this checkout, so there is
 # never a version of these words that only exists in somebody's browser.
@@ -201,6 +241,7 @@ def upload_store_text(platform, version, notes)
     metadata_path: File.join(METADATA, platform),
     screenshots_path: pictures,
     release_notes: notes,
+    app_review_information: review_information,
     skip_binary_upload: true,
     skip_screenshots: pictures.nil?,
     submit_for_review: false,

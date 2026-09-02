@@ -20,6 +20,11 @@ Release notes are not in the language folders. They belong to a version rather t
 app, and a file that is overwritten each release is a file that quietly ships the last
 release's notes when somebody forgets. They live under `notes/<version>/` instead, so a tag
 with nothing written for it has nowhere to read from and the release stops.
+
+What the reviewer is told is not in them either. It belongs to the version rather than to a
+platform or a language, so it lives under `review_information/` beside them -- and the
+contact Apple would ask does not live in this checkout at all, because this repository is
+public and that is somebody's telephone number.
 """
 
 from __future__ import annotations
@@ -33,6 +38,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 METADATA = ROOT / "fastlane" / "metadata"
 NOTES = METADATA / "notes"
+REVIEW = METADATA / "review_information"
 SCREENSHOTS = ROOT / "fastlane" / "screenshots"
 
 # The two the project ships, spelled the way App Store Connect spells them. Traditional
@@ -51,6 +57,7 @@ LIMITS = {
     "description": 4000,
     "promotional_text": 170,
     "release_notes": 4000,
+    "review_notes": 4000,
 }
 
 REQUIRED = ("name", "subtitle", "description", "keywords", "support_url", "privacy_url")
@@ -63,6 +70,28 @@ OPTIONAL = ("promotional_text", "marketing_url")
 SHARED = ("name", "subtitle", "privacy_url")
 
 URLS = ("support_url", "privacy_url", "marketing_url")
+
+# The review contact deliver would read out of a folder, and this project does not keep in
+# one. The name, the telephone number and the address are a person's, this repository is
+# public, and they are handed to the lane by the environment instead -- so a file with one of
+# these names in it is somebody's contact details on their way to being published, and it
+# uploads nothing either. Both halves of that are worth stopping for.
+CONTACT_FIELDS = (
+    "first_name",
+    "last_name",
+    "phone_number",
+    "email_address",
+    "demo_user",
+    "demo_password",
+    # What deliver called these before App Store Connect renamed them. It still reads them,
+    # so they are still a way to publish a telephone number by accident.
+    "review_first_name",
+    "review_last_name",
+    "review_phone_number",
+    "review_email",
+    "review_demo_user",
+    "review_demo_password",
+)
 
 # The mistakes worth naming, rather than answering with a list of every language Apple has.
 NEAR_MISSES = {
@@ -108,7 +137,8 @@ def check_locales(report: Report) -> None:
 
         found = {entry.name for entry in root.iterdir() if entry.is_dir()}
 
-        for unknown in sorted(found - set(LOCALES)):
+        # check_review has something better to say about this one than "not a language".
+        for unknown in sorted(found - set(LOCALES) - {REVIEW.name}):
             hint = NEAR_MISSES.get(unknown)
             said = f" -- App Store Connect calls that one '{hint}'" if hint else ""
             report.fail(
@@ -253,6 +283,49 @@ def check_notes(report: Report, version: str) -> None:
             check_length(report, f"notes/{version}/{locale}.txt", "release_notes", read(path))
 
 
+def check_review(report: Report) -> None:
+    """What the reviewer is told, and that nobody's telephone number is in the checkout.
+
+    App Store Connect keeps a review detail per platform's version, and there is one thing to
+    tell both of them -- so this folder sits beside the two trees rather than inside them, and
+    the lane reads it itself and hands the same words to each. A version with no review detail
+    at all is what `No data` means at the very end of a release, and the notes are what create
+    it.
+    """
+    path = REVIEW / "notes.txt"
+    if not path.is_file():
+        report.fail(
+            f"review_information/notes.txt: missing. It is what the reviewer is told, and "
+            f"the release stops on `No data` at the upload without it -- see docs/release.md."
+        )
+    elif not read(path):
+        report.fail("review_information/notes.txt: empty, and a reviewer opens the app with nothing to go on")
+    else:
+        check_length(report, "review_information/notes.txt", "review_notes", read(path))
+
+    for entry in sorted(REVIEW.iterdir()) if REVIEW.is_dir() else []:
+        if entry.name == "notes.txt":
+            continue
+        if entry.stem in CONTACT_FIELDS:
+            report.fail(
+                f"review_information/{entry.name}: the review contact comes from the "
+                f"environment, not from a file -- this repository is public. See .env.example."
+            )
+        else:
+            report.fail(f"review_information/{entry.name}: nothing reads this")
+
+    # And the same folder in the place deliver would have looked: there it is read, and what
+    # it is read for is uploading a name and a telephone number this project keeps out of git.
+    for platform in PLATFORMS:
+        stray = METADATA / platform / REVIEW.name
+        if stray.exists():
+            report.fail(
+                f"{platform}/{REVIEW.name}/: one level too deep. App Store Connect keeps one "
+                f"of these per version, so it belongs at fastlane/metadata/{REVIEW.name}/ -- "
+                f"and deliver reads it where it is now, contact files and all."
+            )
+
+
 def check_resolve(report: Report) -> None:
     """That the links answer. Apple checks them too, and later.
 
@@ -314,6 +387,7 @@ def main() -> int:
     check_files(report)
     check_shared(report)
     check_screenshots(report)
+    check_review(report)
 
     if arguments.version:
         check_notes(report, arguments.version)

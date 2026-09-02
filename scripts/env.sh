@@ -24,10 +24,20 @@ cd "$(dirname "$0")/.."
 ENV_FILE=".env"
 
 # What the release lane cannot work without, whichever way it proves who is asking.
+#
+# The four review names are here rather than in a file because this repository is public and
+# they are a person's: their name, their telephone number, their address. They are required
+# for the same reason the team is -- App Store Connect will not hold a version without a
+# review detail, and the release that discovers this discovers it after the archive, after
+# TestFlight, and calls it `No data`.
 REQUIRED=(
     FEDIQO_TEAM_ID
     FEDIQO_BUNDLE_ID
     MATCH_GIT_URL
+    FEDIQO_REVIEW_FIRST_NAME
+    FEDIQO_REVIEW_LAST_NAME
+    FEDIQO_REVIEW_PHONE
+    FEDIQO_REVIEW_EMAIL
 )
 
 # And then one of two ways to sign in to Apple, whole or not at all.
