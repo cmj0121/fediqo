@@ -2,7 +2,7 @@
 
 [English](interface.md) | [繁體中文](interface.zh-TW.md)
 
-> The look is not a taste. It is eight rules, and a screen is judged against them rather than against an opinion.
+> The look is not a taste. It is nine rules, and a screen is judged against them rather than against an opinion.
 
 Fediqo draws with the platform's own controls and the platform's own chrome. That is a premise, not a preference:
 a control the system draws is one the reader already knows, already reaches by keyboard, and already hears read
@@ -108,11 +108,31 @@ What the rule forbids is an **unnamed** number, not a number. A measure that bel
 nothing else — the width of the attachment column, the size of the composer panel, the rail's two widths —
 is a named, documented `static let` on that view. It goes in `Size` when a second screen needs it.
 
+## S9 — Fit the room, do not measure it
+
+A view offers its arrangements widest first and takes the first that fits. It does not ask how many points it
+has and decide from the answer.
+
+A measured width is a guess about a device; `ViewThatFits` is an answer about this window. A phone, an iPad in
+Slide Over, a Mac window being dragged narrower — each takes the widest arrangement it can hold, and a screen
+size nobody has shipped yet is handled by construction rather than by a number somebody adds after the bug is
+filed. A threshold has a second fault as well: it does not know the reader's text size. 560 points is a
+comfortable row at 0.85× and an overflowing one at 1.6×, and on iOS this app's scale multiplies whatever
+Dynamic Type the phone was already set to rather than replacing it.
+
+A threshold is allowed where an arrangement cannot express the choice — where every row of a list must reach
+the *same* answer, S6 being the reason, and an arrangement answers per row. Then it is a named `static let`
+with its derivation written beside it, and **the part of it that is text is multiplied by the reader's
+scale**. The part that is a picture is not: a picture is the size it is at every text size.
+
+What this rule forbids is a screen that knows how wide it is. Adding a screen is not adding a boolean, and a
+new device is not a new threshold.
+
 ## When a rule is in the way
 
 A rule that is wrong is changed here, in the open, and the change is argued in
 [#35](https://github.com/cmj0121/fediqo/issues/35). A screen that breaks one quietly is a screen that has
-decided on everybody's behalf, which is the thing these eight sentences exist to stop.
+decided on everybody's behalf, which is the thing these nine sentences exist to stop.
 
 ## What this is not
 
