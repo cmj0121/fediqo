@@ -66,7 +66,8 @@ screen, not a crash**, and the screen has to be readable in the right language.
 ```text
 network   what a server handed over. A refresh writes; only an authority edits.
           protocols, feeds, filter_kinds, servers, accounts, posts, tags, post_tags,
-          post_origins, post_mentions, post_emojis, server_trends, notice_kinds, notices
+          post_origins, post_mentions, post_emojis, post_cards, server_trends, notice_kinds,
+          notices
 
 local     what you decided, and can withdraw. Only you.
           servers.selected_at, servers.position, tags.followed_at, tags.muted_at, owned_accounts,
@@ -258,6 +259,34 @@ An event is written once. `remote_id` is unique on the server that issued it and
 case, not a collision. Being told the same thing twice, which every reconnect guarantees, writes nothing
 rather than moving `arrived_at`: when this device first heard is a fact about the first time, and there is no
 second first time.
+
+## What a link says it is
+
+A post that is mostly an address carries a card: a title, a line about it, what the site calls
+itself, and a picture. All of it is in `post_cards`, one row per post at most, and **all of it came
+from the server that handed the post over**.
+
+That is the whole design rather than an implementation note. Mastodon fetches the Open Graph tags
+itself and sends the result inside the status, and the picture it sends is served from its own media
+storage rather than from the site being linked to. So drawing a card costs no new host: every byte
+comes from a server the reader was already reading.
+
+Fetching those tags here would be the opposite, and it is the one thing this must never do. A
+request to the linked host tells that host — and whoever it sells to — that this device read this
+post, from this address, at this time. [`docs/privacy.md`](privacy.md) says that never happens.
+**There is no code anywhere that builds a card out of a URL, and there must not be.** A server that
+sends no card means no card is drawn.
+
+Every column but the address may be empty, and empty is what a server said nothing about. A title
+nobody sent is not the URL wearing a title's clothes and a provider nobody sent is not worked out
+from the host — a card that invents half of itself is one a reader cannot trust the other half of.
+A card carrying an address and nothing else is dropped before it is stored: it is the link the words
+already carry, in a box.
+
+It is the one per-post table that is **upserted rather than ignored on conflict**. Tags, mentions
+and emoji are what the post said when it was written; a card is what a server made of a link, and
+servers re-read links. A card that has since been corrected should be the corrected one — while a
+picture a newer sighting did not carry does not erase one an earlier sighting did.
 
 ## A timeline is a filter, not a list
 

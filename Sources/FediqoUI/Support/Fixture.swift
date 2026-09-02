@@ -127,6 +127,22 @@ enum Fixture {
                      + "them leaves you reading the shortcode :cog: instead.",
                  counts: Counts(replies: 2, reblogs: 6, favourites: 23),
                  emojis: [emoji("spark", seed: 1), emoji("cog", seed: 4)]),
+            // A post that is mostly a link, with the card its own server made of it. Nothing
+            // here fetched anything from `slowweb.example`: the picture is drawn from a file
+            // beside the rest of the fixture, exactly as a real card is drawn from the
+            // *server's* copy rather than from the site — see #77.
+            post("the-link", host: hosts[2], minutesAgo: 33, now: now,
+                 name: "Ines Okafor", handle: "ines",
+                 text: "Somebody finally wrote the piece about reading at the pace things were "
+                     + "written. https://slowweb.example/at-the-pace-things-were-written",
+                 counts: Counts(replies: 6, reblogs: 12, favourites: 58),
+                 card: Card(
+                     url: URL(string: "https://slowweb.example/at-the-pace-things-were-written")!,
+                     title: "At the pace things were written",
+                     summary: "A timeline that does not rank you is a timeline you can finish.",
+                     provider: "The Slow Web",
+                     imageURL: FixtureImages.url("card", seed: 9, width: 640, height: 436),
+                     imageAlt: "A reading room with the light coming in from one side.")),
             // An answer to a post on the same page, so the row can name whom it answers, and
             // an answer to something nobody handed us, where it can only say that much.
             post("the-plain-one", host: hosts[2], minutesAgo: 18, now: now,
@@ -188,7 +204,7 @@ enum Fixture {
         attachments: [Attachment] = [], sensitive: Bool? = nil, spoiler: String? = nil,
         audience: Audience? = .everyone,
         counts: Counts = Counts(), tags: [String] = [], emojis: [CustomEmoji] = [],
-        boostedBy: String? = nil, inReplyToURI: String? = nil
+        card: Card? = nil, boostedBy: String? = nil, inReplyToURI: String? = nil
     ) -> Post {
         Post(
             uri: address(uri, on: host, by: handle),
@@ -211,6 +227,7 @@ enum Fixture {
             inReplyToURI: inReplyToURI,
             tags: tags,
             emojis: emojis,
+            card: card,
             boostedBy: boostedBy,
             boostedById: boostedBy.map { "https://\(host)/users/\($0.lowercased())" },
             sources: [host]
