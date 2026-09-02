@@ -119,6 +119,14 @@ struct FeedScreen: View {
                 else { return }
                 app.expand(post)
             }
+            // And the author of the first post, for a run told to open a person. The same shape
+            // and the same reason: a page reached only by pressing something cannot be
+            // photographed where nothing may press (#30).
+            .task(id: model.visible.isEmpty) {
+                guard app.openingPerson, app.person == nil, let post = model.visible.first
+                else { return }
+                app.openPerson(of: post)
+            }
             // The opened post, over the list rather than instead of it: underneath, the
             // scroll position and the ring stay exactly where the reader left them.
             .overlay {

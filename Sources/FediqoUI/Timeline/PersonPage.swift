@@ -40,7 +40,28 @@ struct PersonPage: View {
 
     // MARK: - the way back
 
+    /// Which server this page is somebody's account of, where there is room to say it.
+    ///
+    /// Widest first (S9), and **the whole row is what is offered** rather than only the line at
+    /// the end of it. Wrapping the line alone measured it against the space the row happened to
+    /// have and answered "it fits", after which the row took the difference out of everything
+    /// else: `Back` and `Person` were drawn broken across two lines each. An arrangement has to
+    /// be a whole arrangement or it is only a suggestion.
+    ///
+    /// The narrow one drops the line rather than cutting it. `As cedar.example has t…` is a
+    /// sentence that has stopped being one, and half a caveat is worse than none — the same
+    /// fact is on the page below, in the handle.
     private var header: some View {
+        ViewThatFits(in: .horizontal) {
+            headerRow(sayingWhere: true)
+            headerRow(sayingWhere: false)
+        }
+        .padding(.horizontal, Space.pad)
+        .padding(.vertical, Space.mid)
+        .background(PageHeaderBackground())
+    }
+
+    private func headerRow(sayingWhere: Bool) -> some View {
         HStack(spacing: Space.mid) {
             Button(action: done) {
                 Label(t("person.back"), systemImage: "chevron.left")
@@ -49,21 +70,26 @@ struct PersonPage: View {
             .buttonStyle(.plain)
             .foregroundStyle(Palette.accent)
             .keyboardShortcut(.escape, modifiers: [])
+            // Neither of these may give: a way out and the name of the page are the two things
+            // a header cannot be without, and a word broken across two lines is worse than the
+            // caveat that was dropped to make room for it.
+            .fixedSize()
 
-            Text(t("person.title")).fediqoFont(TypeScale.lead, weight: .semibold)
+            Text(t("person.title"))
+                .fediqoFont(TypeScale.lead, weight: .semibold)
+                .fixedSize()
             if model.loading { ProgressView().controlSize(.small) }
             Spacer(minLength: Space.snug)
-            // Which server this page is somebody's account of. The page is one server's view of
-            // a person and never the truth about them, and saying so is cheaper than pretending
-            // otherwise.
-            Text(t("person.readFrom", model.subject.host))
-                .fediqoFont(TypeScale.caption)
-                .foregroundStyle(.tertiary)
-                .lineLimit(1)
+            if sayingWhere { readFrom }
         }
-        .padding(.horizontal, Space.pad)
-        .padding(.vertical, Space.mid)
-        .background(PageHeaderBackground())
+    }
+
+    private var readFrom: some View {
+        Text(t("person.readFrom", model.subject.host))
+            .fediqoFont(TypeScale.caption)
+            .foregroundStyle(.tertiary)
+            .lineLimit(1)
+            .fixedSize()
     }
 
     // MARK: - who they are
@@ -77,7 +103,7 @@ struct PersonPage: View {
                 VStack(alignment: .leading, spacing: Space.gap) { portrait; names }
             }
             if !note.isEmpty {
-                EmojiText(note, emojis: model.profile?.emojis ?? [], size: TypeScale.body)
+                EmojiText(note, emojis: model.emojis, size: TypeScale.body)
                     .fixedSize(horizontal: false, vertical: true)
             }
             counts
@@ -92,7 +118,7 @@ struct PersonPage: View {
 
     private var names: some View {
         VStack(alignment: .leading, spacing: Space.tight) {
-            EmojiText(model.name, emojis: model.profile?.emojis ?? [],
+            EmojiText(model.name, emojis: model.emojis,
                       size: TypeScale.title, weight: .semibold)
                 .fixedSize(horizontal: false, vertical: true)
             Text(model.handle)

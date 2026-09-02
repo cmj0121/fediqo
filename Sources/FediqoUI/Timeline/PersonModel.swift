@@ -16,6 +16,13 @@ struct PersonSubject: Hashable, Identifiable {
     let authorId: String
     let name: String
     let avatarURL: URL?
+    /// The custom emoji that name is partly written in.
+    ///
+    /// Carried because the name is. A page that took the words from the row and the pictures
+    /// from a profile that has not arrived draws `Tove :spark: Rasmussen` for as long as the
+    /// request is out — which is #39's whole complaint, reintroduced by a page that thought it
+    /// only needed the words.
+    let emojis: [CustomEmoji]
 
     var id: String { "\(host)|\(handle)" }
 
@@ -25,6 +32,7 @@ struct PersonSubject: Hashable, Identifiable {
         self.authorId = post.authorId
         self.name = post.authorName
         self.avatarURL = post.authorAvatarURL
+        self.emojis = post.emojis
     }
 }
 
@@ -56,13 +64,18 @@ final class PersonModel {
 
     private let client: any SourceClient
     private let acting: () async -> ActingAccount?
+    /// Told when a follow has landed, so that home stops being answered by what it said before
+    /// there was anybody to read. Nothing on an unfollow that failed and nothing on a read.
+    private let changed: () async -> Void
     private var hasRead = false
 
     init(subject: PersonSubject, client: any SourceClient,
-         acting: @escaping () async -> ActingAccount?) {
+         acting: @escaping () async -> ActingAccount?,
+         changed: @escaping () async -> Void = {}) {
         self.subject = subject
         self.client = client
         self.acting = acting
+        self.changed = changed
     }
 
     /// Everything the page needs, once per opening. Asked when the page appears, and a second
@@ -122,6 +135,10 @@ final class PersonModel {
         do {
             relationship = try await client.setFollow(wanted, with: subject.handle, as: account)
             known = true
+            // Both ways round: following somebody puts their posts into home and unfollowing
+            // takes them out, and a home still holding somebody the reader has just let go is
+            // as wrong as one that never gained them.
+            await changed()
         } catch {
             failure = SourceFailure.of(error)
         }
@@ -131,6 +148,10 @@ final class PersonModel {
     var name: String { profile?.name ?? subject.name }
     var handle: String { profile?.handle ?? subject.handle }
     var avatarURL: URL? { profile?.avatarURL ?? subject.avatarURL }
+    /// The pictures the name is written in, from whichever of the two answered. A profile that
+    /// arrived carrying none of its own is a server that sent none, so the row's are not kept
+    /// alongside — it is one answer or the other, the way the name itself is.
+    var emojis: [CustomEmoji] { profile.map(\.emojis) ?? subject.emojis }
 
     /// Whether the acting server has an answer about this person at all. `false` covers both
     /// "nobody is signed in" and "the server has never heard of them" — the control offers to

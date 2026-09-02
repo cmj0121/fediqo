@@ -18,10 +18,13 @@ struct PersonPageTests {
              authorHandle: "@\(who)@\(host)", text: "one")
     }
 
-    private func model(_ client: PersonDouble, signedIn: Bool = true) -> PersonModel {
+    private func model(_ client: PersonDouble, signedIn: Bool = true,
+                       changed: Counter? = nil) -> PersonModel {
         PersonModel(subject: PersonSubject(post: post()), client: client) {
             signedIn ? ActingAccount(host: "birch.example",
                                      authorId: "https://birch.example/@me", token: "t") : nil
+        } changed: {
+            changed?.bump()
         }
     }
 
@@ -133,6 +136,50 @@ struct PersonPageTests {
         #expect(page.failure != nil)
     }
 
+    /// The complaint #88 opens with, arriving one step later: `loadIfNeeded` re-asks only when
+    /// the servers differ, and following somebody changes nothing about the servers and
+    /// everything about what they will say. Without this the reader follows their first person,
+    /// goes to Home, and is shown the empty page all over again.
+    @Test("A follow that landed says home is no longer answered")
+    func aLandedFollowStalesHome() async {
+        let counter = Counter()
+        let client = PersonDouble(profile: Profile(id: "10", authorId: "a", name: "T", handle: "@t@h"),
+                                  relationship: Relationship())
+        let page = model(client, changed: counter)
+        await page.read()
+        await page.setFollow(true)
+
+        #expect(counter.count == 1)
+    }
+
+    /// And the other way round, which is the same fact: a home still holding somebody the reader
+    /// has just let go is as wrong as one that never gained them.
+    @Test("So does an unfollow that landed")
+    func anUnfollowStalesHomeToo() async {
+        let counter = Counter()
+        let client = PersonDouble(profile: Profile(id: "10", authorId: "a", name: "T", handle: "@t@h"),
+                                  relationship: Relationship(following: true))
+        let page = model(client, changed: counter)
+        await page.read()
+        await page.setFollow(false)
+
+        #expect(counter.count == 1)
+    }
+
+    /// A press the server refused changed nothing, so nothing about home changed either. Telling
+    /// it otherwise would spend a round of requests on every failed press.
+    @Test("A refused follow says nothing about home")
+    func refusedFollowLeavesHomeAlone() async {
+        let counter = Counter()
+        let client = PersonDouble(profile: Profile(id: "10", authorId: "a", name: "T", handle: "@t@h"),
+                                  relationship: Relationship(), refusing: true)
+        let page = model(client, changed: counter)
+        await page.read()
+        await page.setFollow(true)
+
+        #expect(counter.count == 0)
+    }
+
     @Test("Following with no account anywhere is refused before anything is sent")
     func followNeedsAnAccount() async {
         let client = PersonDouble(profile: Profile(id: "10", authorId: "a", name: "T", handle: "@t@h"))
@@ -142,6 +189,13 @@ struct PersonPageTests {
         #expect(client.followsSent == 0)
         #expect(page.failure != nil)
     }
+}
+
+/// How many times something was said, for the callbacks that have no other evidence.
+@MainActor
+final class Counter {
+    private(set) var count = 0
+    func bump() { count += 1 }
 }
 
 /// A source that answers about one person, and counts who was asked what.
