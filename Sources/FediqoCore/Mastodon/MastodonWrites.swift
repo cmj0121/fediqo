@@ -172,7 +172,10 @@ extension MastodonClient {
                               bookmarked: status["bookmarked"] as? Bool))
     }
 
-    private func searchAccount(_ authorId: String, as account: ActingAccount) async throws -> String? {
+    /// Internal rather than private: following somebody needs the same resolution, for the same
+    /// reason and at the same cost, and a second copy of it would be a second place for the
+    /// question "may this reach out" to be answered differently.
+    func searchAccount(_ authorId: String, as account: ActingAccount) async throws -> String? {
         // An actor URI is always resolvable by a server that already holds the post, and the
         // post is what got us here — so this never reaches further than the status did.
         let found = try await search(authorId, type: "accounts", as: account)
@@ -203,8 +206,11 @@ extension MastodonClient {
         return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
     }
 
-    private func write(_ method: String, _ path: String, fields: [String: String] = [:],
-                       as account: ActingAccount, idempotency: String? = nil) async throws -> Data {
+    /// Every request this app makes that asks a server to *do* something, so that the header,
+    /// the credential and the body are written once. Internal for the reason `searchAccount` is:
+    /// following is one of those requests and lives in its own file.
+    func write(_ method: String, _ path: String, fields: [String: String] = [:],
+               as account: ActingAccount, idempotency: String? = nil) async throws -> Data {
         var components = URLComponents()
         components.scheme = "https"
         components.host = account.host

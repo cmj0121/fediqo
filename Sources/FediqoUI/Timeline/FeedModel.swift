@@ -91,6 +91,11 @@ final class FeedModel {
     }
 
     func loadIfNeeded(servers: [Server]) async { await paging.loadIfNeeded(servers: servers) }
+    /// The next `loadIfNeeded` asks again even though the servers have not changed.
+    ///
+    /// For the one case where they are the same servers and the answer is not: somebody has been
+    /// followed, so what home holds is different without anything about the reading being (#88).
+    func forgetTheLoad() { paging.forgetTheLoad() }
     func load(servers: [Server], refresh: Refresh = .manual) async {
         await paging.load(servers: servers, refresh: refresh)
     }

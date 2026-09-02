@@ -390,6 +390,46 @@ struct FixtureSource: SourceClient {
     /// photograph differently depending on how long the app had been open.
     func stillHas(_ post: Post, host: String, token: String?) async throws -> Bool { true }
 
+    // MARK: - People
+
+    /// What an invented person says about themselves. One line, in the fixture's own voice, so
+    /// that the page has words on it without a screenshot pretending to have read anybody's real
+    /// self-description.
+    private static func note(for handle: String) -> String {
+        "Reading rooms, mostly. The one at the top of the hill has the light and none of the chairs."
+    }
+
+    /// Somebody, invented out of what this server's own timeline says about them.
+    ///
+    /// Built from a post rather than from a second list, so the name, the handle and the emoji
+    /// on the page are the ones on the rows behind it — a fixture whose person disagreed with
+    /// their own posts would photograph as a bug.
+    ///
+    /// The counts are here because their absence is what a screenshot would otherwise show, and
+    /// "this server did not say" is a state worth being able to photograph but not the one every
+    /// picture should be of.
+    func profile(handle: String, host: String, token: String?) async throws -> Profile? {
+        guard let post = Fixture.timeline(of: host).first(where: { $0.authorHandle == handle })
+        else { return nil }
+        return Profile(id: handle, authorId: post.authorId, name: post.authorName,
+                       handle: post.authorHandle, avatarURL: post.authorAvatarURL,
+                       note: Self.note(for: post.authorHandle), emojis: post.emojis,
+                       posts: 412, followers: 89, following: 130,
+                       joined: Date(timeIntervalSince1970: 1_710_000_000))
+    }
+
+    func posts(by id: String, host: String, limit: Int, before: Post?,
+               token: String?) async throws -> [Post] {
+        before == nil ? Fixture.timeline(of: host).filter { $0.authorHandle == id } : []
+    }
+
+    /// Nobody is signed in to an invented server, so there is no account to have a relationship
+    /// from. `nil` and not a made-up "not following": the page has a state for being unable to
+    /// say, and it is the honest one here.
+    func relationship(with handle: String, as account: ActingAccount) async throws -> Relationship? {
+        nil
+    }
+
     // MARK: - Writing
     //
     // Every one of these agrees at once and sends nothing. An invented server that refused

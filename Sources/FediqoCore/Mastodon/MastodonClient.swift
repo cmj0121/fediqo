@@ -152,10 +152,13 @@ public struct MastodonClient: SourceClient {
 
     // MARK: - Transport
 
-    private func posts(host rawHost: String, path: String, limit: Int,
-                       before: Post?, token: String?) async throws -> [Post] {
+    /// `extra` is whatever one endpoint wants and the others do not — `exclude_replies` on an
+    /// account's own posts, and nothing anywhere else. Internal rather than private because the
+    /// people this app can open live in their own file and page exactly the way a timeline does.
+    func posts(host rawHost: String, path: String, limit: Int, before: Post?, token: String?,
+               query extra: [URLQueryItem] = []) async throws -> [Post] {
         let host = Server.normalise(rawHost)
-        var query = [URLQueryItem(name: "limit", value: String(limit))]
+        var query = [URLQueryItem(name: "limit", value: String(limit))] + extra
         // `max_id` is Mastodon's word for "older than", and it is spoken here and nowhere
         // else. A cursor this server cannot be asked about stops the request rather than
         // quietly dropping the parameter, which would fetch the newest page all over again.

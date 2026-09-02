@@ -40,6 +40,11 @@ struct BaseSourceTests {
         // A ranked list is a snapshot rather than a stretch of time, so nothing pages it and
         // no page from it is evidence that a post has gone. Nor is an inbox: a mention missing
         // from it says nothing about whether the post is still there.
-        #expect(BaseSource.allCases.filter { !$0.isThreadOfTime } == [.trend, .thread, .notice])
+        //
+        // `author` is the one here that is a stretch of time and is listed anyway. A page of
+        // somebody's posts leaves out what they deleted, so the evidence is real — what is not
+        // yet established is that it would be read against the right stretch, and being wrong
+        // means telling a reader a post is gone when it is not. See `BaseSource.author`.
+        #expect(BaseSource.allCases.filter { !$0.isThreadOfTime } == [.trend, .thread, .notice, .author])
     }
 }

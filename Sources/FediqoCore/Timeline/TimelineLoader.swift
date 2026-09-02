@@ -808,6 +808,12 @@ public struct TimelineLoader: Sendable {
             // stretch of time. `NoticeLoader` is that path; no template offers this source, so
             // a timeline cannot be built on it and this line is never reached.
             case .notice: []
+            // Nor is one person's posts. They are asked of the one server that handed the post
+            // over, when a reader opens its author, and never fanned out across the servers a
+            // timeline reads — a person is not a place, and asking six servers about somebody
+            // would be six servers told who is being looked at. #88's own path is that one; no
+            // template offers this source either, so this line is never reached.
+            case .author: []
             }
         } catch {
             return ([], SourceFailure.of(error))

@@ -74,7 +74,9 @@ enum MastodonDTO {
 
         func asMention(on host: String) -> FediqoCore.Mention? {
             let uri = url ?? Account(id: "", url: nil, username: username, acct: acct,
-                                     displayName: "", avatar: nil, emojis: nil).authorId(on: host)
+                                     displayName: "", avatar: nil, emojis: nil, note: nil,
+                                     statusesCount: nil, followersCount: nil, followingCount: nil,
+                                     createdAt: nil, locked: nil).authorId(on: host)
             let handle = acct.contains("@") ? "@\(acct)" : "@\(acct)@\(host)"
             return uri.isEmpty ? nil : FediqoCore.Mention(uri: uri, handle: handle)
         }
@@ -90,6 +92,16 @@ enum MastodonDTO {
         let avatar: String?
         /// The custom emoji the display name is partly written in.
         let emojis: [Emoji]?
+        /// What a profile carries and a status's copy of an account does not. All optional,
+        /// because a status carries the same shape with these left out and the one decoder
+        /// reads both — a missing count is a server that did not say, which `Profile` keeps
+        /// apart from a zero.
+        let note: String?
+        let statusesCount: Int?
+        let followersCount: Int?
+        let followingCount: Int?
+        let createdAt: Date?
+        let locked: Bool?
 
         var name: String { displayName.isEmpty ? username : displayName }
 

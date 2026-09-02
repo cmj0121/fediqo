@@ -119,11 +119,27 @@ struct FeedScreen: View {
                 else { return }
                 app.expand(post)
             }
+            // And the author of the first post, for a run told to open a person. The same shape
+            // and the same reason: a page reached only by pressing something cannot be
+            // photographed where nothing may press (#30).
+            .task(id: model.visible.isEmpty) {
+                guard app.openingPerson, app.person == nil, let post = model.visible.first
+                else { return }
+                app.openPerson(of: post)
+            }
             // The opened post, over the list rather than instead of it: underneath, the
             // scroll position and the ring stay exactly where the reader left them.
             .overlay {
                 if let opened = app.expanded {
                     PostPage(post: opened) { app.perform(.dismiss) }
+                        .transition(.opacity)
+                }
+            }
+            // A person over the post as well as over the list: the author is pressable on an
+            // opened post too, and what was underneath keeps its place either way.
+            .overlay {
+                if let person = app.person {
+                    PersonPage(model: person) { app.closePerson() }
                         .transition(.opacity)
                 }
             }
@@ -510,6 +526,7 @@ private struct RingedRow: View {
                 // nothing — selectable text takes the press before the row behind it ever
                 // sees it.
                 focus: { place.select(post) },
+                openAuthor: { app.openPerson(of: post) },
                 open: { app.expand(post) })
     }
 }

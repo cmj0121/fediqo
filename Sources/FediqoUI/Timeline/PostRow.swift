@@ -79,6 +79,14 @@ struct PostRow: View {
     /// click landed. Most of a row is selectable words and buttons that want their own presses,
     /// and a reader who clicked one of those has still said which post they mean.
     var focus: (() -> Void)?
+    /// What a press on the author's picture and name asks for — their page. Nothing where
+    /// there is none to open, which is that page's own rows: they are already theirs.
+    ///
+    /// **Before `open` and not after it**, which the comment below is about: a call site writes
+    /// `open` as a trailing closure, and a parameter declared after it takes that closure
+    /// instead. Adding this at the end compiled, and quietly turned every `PostRow { … }` in
+    /// the app into a row that opened a person when it was pressed.
+    var openAuthor: (() -> Void)?
     /// What a click on the row asks for **beyond** that. `nil` in a preview and in the
     /// conversation page, where opening what you are already looking at means nothing.
     ///
@@ -288,11 +296,29 @@ struct PostRow: View {
 
     private func metadataBand(verbose: Bool) -> some View {
         HStack(spacing: Space.step) {
-            RemoteImage(url: post.authorAvatarURL, width: Size.avatar, height: Size.avatar,
-                        standing: .avatar)
-            EmojiText(post.authorName, emojis: post.emojis, size: TypeScale.body, weight: .semibold)
-                .lineLimit(1)
-                .layoutPriority(1)
+            // The picture and the name are one press and not two: they are the same fact, and
+            // splitting them would leave a reader guessing which half is the door. It takes the
+            // press the row would have taken — the row's own tap opens the post — while the
+            // `simultaneousGesture` that moves the ring still fires, so pressing an author still
+            // says which post you mean (#55).
+            //
+            // Under `Hit.target`, and allowed to be: #44 made an address in a post's words
+            // pressable at the size the words are, and this is the same kind of thing. Growing
+            // the band to 44 would grow the row, which S6 will not have.
+            Button { openAuthor?() } label: {
+                HStack(spacing: Space.step) {
+                    RemoteImage(url: post.authorAvatarURL, width: Size.avatar, height: Size.avatar,
+                                standing: .avatar)
+                    EmojiText(post.authorName, emojis: post.emojis, size: TypeScale.body,
+                              weight: .semibold)
+                        .lineLimit(1)
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(openAuthor == nil)
+            .layoutPriority(1)
+            .accessibilityLabel(Text(post.authorName))
+            .accessibilityHint(Text(t("person.title")))
             if verbose {
                 Text(post.authorHandle).fediqoFont(TypeScale.minor).foregroundStyle(.secondary).lineLimit(1)
             }

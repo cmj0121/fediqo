@@ -62,6 +62,7 @@ SHOTS=(
     "02-trending:trend:"
     "03-composer:timeline:FEDIQO_COMPOSE=1"
     "04-settings:settings:"
+    "05-person:timeline:FEDIQO_PERSON=1"
 )
 
 MACOS_APP=".build/xcode/Build/Products/Debug/Fediqo.app"

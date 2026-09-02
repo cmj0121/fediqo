@@ -213,6 +213,32 @@ public protocol SourceClient: Sendable {
     /// Report a post to the acting server. There is no local half of this: a report that goes
     /// nowhere is not a report.
     func report(_ post: Post, id: String, as account: ActingAccount, comment: String) async throws
+
+    /// Somebody as one server holds them, or nothing where it has never heard of them.
+    ///
+    /// Asked of a server that already handed one of their posts over, never of their own: that
+    /// is a server the reader added, and opening a person is not a reason to introduce their
+    /// home server to a new visitor (#88).
+    ///
+    /// Nothing is thrown where the server does not know them. That is an answer — it is what the
+    /// reader's own server says about every stranger — and a page shows it rather than an error.
+    func profile(handle: String, host: String, token: String?) async throws -> Profile?
+
+    /// What one person has written, as one server holds it, paged the way every other stretch
+    /// of posts is paged.
+    func posts(by id: String, host: String, limit: Int, before: Post?, token: String?) async throws -> [Post]
+
+    /// What the reader is to somebody, asked of the reader's own server, which is the only place
+    /// a relationship exists. Nothing where that server has never heard of them — which is not
+    /// the same fact as "you do not follow them", and is not to be drawn as though it were.
+    func relationship(with handle: String, as account: ActingAccount) async throws -> Relationship?
+
+    /// Follow somebody, or stop, and hand back the relationship as it now stands.
+    ///
+    /// The answer is read off the server rather than assumed from what was asked: a locked
+    /// account answers `requested` and not `following`, and claiming the second would be this
+    /// app announcing an approval nobody has given.
+    func setFollow(_ following: Bool, with handle: String, as account: ActingAccount) async throws -> Relationship
 }
 
 /// What a server says about itself, to somebody who has not joined it. Everything here came
@@ -461,6 +487,28 @@ public extension SourceClient {
     /// Favourite, boost or bookmark one post, or take it back.
     func setMark(_ action: PostAction, on id: String, as account: ActingAccount,
                  done: Bool) async throws -> Marked {
+        throw SourceFailure.unsupported(.mastodon)
+    }
+
+    /// Default: this build cannot read a person over that protocol. `nil` is reserved for the
+    /// server that answered and does not know them, so a protocol with no client throws instead
+    /// — a page saying "nobody here has heard of them" about a protocol this build cannot speak
+    /// would be blaming the wrong thing.
+    func profile(handle: String, host: String, token: String?) async throws -> Profile? {
+        throw SourceFailure.unsupported(.mastodon)
+    }
+
+    func posts(by id: String, host: String, limit: Int, before: Post?,
+               token: String?) async throws -> [Post] {
+        throw SourceFailure.unsupported(.mastodon)
+    }
+
+    func relationship(with handle: String, as account: ActingAccount) async throws -> Relationship? {
+        throw SourceFailure.unsupported(.mastodon)
+    }
+
+    func setFollow(_ following: Bool, with handle: String,
+                   as account: ActingAccount) async throws -> Relationship {
         throw SourceFailure.unsupported(.mastodon)
     }
 

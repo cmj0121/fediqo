@@ -102,6 +102,9 @@ struct LaunchOptions {
     /// composer's and the inbox's twin: a page that can only be reached by pressing something
     /// cannot be photographed on a runner, where nothing may press anything (#30).
     var openingPost: String?
+    /// Whether to open the author of the first post the timeline has, for the same reason: the
+    /// page about somebody is reached by pressing a name, and nothing on a runner may press.
+    var openingPerson = false
     /// Which language to draw in, whatever the machine is set to. A screenshot run needs both,
     /// one after the other, and neither of them is whatever the person at the keyboard chose.
     var language: AppLanguage?
@@ -151,6 +154,7 @@ struct LaunchOptions {
         options.composing = environment["FEDIQO_COMPOSE"] == "1"
         options.showingNotices = environment["FEDIQO_NOTICES"] == "1"
         options.openingPost = environment["FEDIQO_OPEN"]
+        options.openingPerson = environment["FEDIQO_PERSON"] == "1"
         options.fixture = environment["FEDIQO_FIXTURE"] == "1"
         options.language = environment["FEDIQO_LANGUAGE"].flatMap(AppLanguage.init(rawValue:))
         options.shootTo = environment["FEDIQO_SHOOT"]
@@ -244,6 +248,9 @@ public final class AppState {
     /// A post this run was told to open, by the end of its address, or nothing. Read by
     /// `FeedScreen` once it has posts to look through and then never again.
     let openingPost: String?
+    /// Whether this run opens the author of the first post it is given. A screenshot's way in to
+    /// a page whose only other way in is a press (#30: nothing on a runner may press anything).
+    let openingPerson: Bool
     /// The conversations being read, oldest first, empty while the reader is in the list.
     ///
     /// A stack rather than one, because a conversation is a place a reader walks *into*.
@@ -265,6 +272,13 @@ public final class AppState {
     /// whichever one the top of the stack is a conversation around, and two places holding
     /// that answer would be two places to get it wrong.
     var expanded: Post? { threads.last?.root }
+
+    /// The person open over everything, or nobody.
+    ///
+    /// One at a time and not a stack: walking from a person to one of their posts to that post's
+    /// author is a walk this page can support later, and a stack held for a walk nobody has asked
+    /// for is state that can be wrong for no benefit. A second opening replaces the first.
+    private(set) var person: PersonModel?
     /// How many times the reader has asked the deck on the selected row to turn over.
     private(set) var mediaTurns = 0
     /// The same, for asking it to play. Two counters rather than one command with an argument,
@@ -478,6 +492,7 @@ public final class AppState {
         self.shootTo = launch.shootTo
         self.shootSize = launch.shootSize
         self.openingPost = launch.openingPost
+        self.openingPerson = launch.openingPerson
         self.marketingVersion = marketingVersion
         self.buildVersion = buildVersion
         // The language before the first frame, not after it: a screenshot is taken of what was
@@ -1131,6 +1146,44 @@ public final class AppState {
         readingFeed?.select(post)
         threads = []
         open(post)
+    }
+
+    /// Opens the author of a post: who they are, what they wrote, and what this reader is to
+    /// them.
+    ///
+    /// The subject carries what the row already knew — a name, a handle, a picture — so the page
+    /// is drawn before anybody is asked anything, and the server fills it in. Which server is the
+    /// one that handed this post over, which is a server the reader already reads (#88).
+    func openPerson(of post: Post) {
+        let subject = PersonSubject(post: post)
+        guard person?.subject != subject else { return }
+        guard let client = registry.client(for: post.socialProtocol) else { return }
+        person = PersonModel(subject: subject, client: client) { [weak self] in
+            await self?.acting(on: post)
+        } changed: { [weak self] in
+            await self?.homeChanged()
+        }
+    }
+
+    /// Closes it, leaving whatever was underneath exactly as it was.
+    func closePerson() { person = nil }
+
+    /// Following somebody changed what the home timeline is, so home stops being answered.
+    ///
+    /// `loadIfNeeded` re-asks only when the set of servers differs from the last load's, which
+    /// is right for every other reason a reader arrives at a feed and wrong for this one: the
+    /// servers are the same and what they will say has changed. Without this, a reader follows
+    /// their first person, goes to Home, and is shown the empty page they were shown before —
+    /// which is #88's whole complaint, arriving one step later than it used to.
+    ///
+    /// Nothing is thrown away. The feed is told to ask again next time it is looked at, and is
+    /// asked now only where it is the feed being looked at — a reader who follows somebody from
+    /// their own timeline should not have that timeline replaced under them.
+    func homeChanged() async {
+        guard let home = timelines.first(where: { $0.source == .home }),
+              let feed = feeds[home.id] else { return }
+        feed.forgetTheLoad()
+        if readingTimeline?.id == home.id { await feed.load(servers: servers) }
     }
 
     /// Turns the deck of attachments on the post the ring is on. An event rather than a state:

@@ -1,0 +1,29 @@
+-- Fediqo — the local store, migration 014. Appended after 001–013; the rules there still hold:
+-- STRICT, every *_at in INTEGER milliseconds, append-only, nothing backfilled.
+--
+-- ── author — the posts one person wrote ──────────────────────────────────────
+--
+-- #88 asks for a page about a person, and a page about a person shows what they have written.
+-- Those posts arrive the way every other post arrives and are written down the way every other
+-- post is written down, so they need a `feed` to be an origin of — `post_origins.feed` is a
+-- foreign key into this table, and a post cannot be recorded as having arrived by a route the
+-- store has never heard of.
+--
+-- ── it is a way posts arrive, not a timeline anybody can build ────────────────
+--
+-- `thread` (005) and `notice` (012) are here for exactly this reason and this one joins them.
+-- A `feeds` row is not a promise that a reader can make one: `public`, `home` and `trend` have
+-- templates behind them and can be named, ordered, given rules and deleted, and these three
+-- cannot. They are how a post got here, which every arrival has to be able to say.
+--
+-- The concept table in #1 does promise a timeline "by author", and this is not that promise
+-- being kept. That one is a timeline a reader builds and keeps, with a name and a position and
+-- rules of its own, and it will need a template rather than only a row here. This is the
+-- narrower thing the page needs: somewhere for one person's posts to have come from.
+--
+-- `ranked` is 0 — an author's posts are in the order they were written, like everything else
+-- this app draws, and never in an order a server chose. `needs_account` is 0 because reading
+-- what somebody published needs nobody's credential: a reader signed in nowhere can still open
+-- a person and see what they wrote, and only the relationship half of that page needs an
+-- account to have an answer at all.
+INSERT INTO feeds (feed, label, ranked, needs_account, created_at) VALUES ('author', 'Author', 0, 0, 0);

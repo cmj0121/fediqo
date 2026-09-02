@@ -33,6 +33,14 @@ public enum BaseSource: String, Sendable, CaseIterable, Identifiable, Codable {
     /// able to say how it arrived. No template offers it either — an inbox is not a stretch of
     /// time somebody can page through, and a post missing from one is not evidence of anything.
     case notice
+    /// What one person has written, asked for when a reader opens them (#88).
+    ///
+    /// The third with no template, for the reason the two above have none: posts arrive this
+    /// way and an arrival has to be able to say how it arrived, but nobody can build a
+    /// timeline out of it. #1 does promise a timeline "by author" — one a reader names, orders
+    /// and gives rules to — and this is not that promise being kept. It is the narrower thing
+    /// a page about somebody needs: an origin for the posts on it.
+    case author
 
     public var id: String { rawValue }
 
@@ -49,5 +57,12 @@ public enum BaseSource: String, Sendable, CaseIterable, Identifiable, Codable {
     /// store holds has gone. A trending list is a snapshot somebody curated and a conversation
     /// is a shape of its own: neither covers a stretch, neither leaves anything out of one,
     /// and neither pages anywhere.
+    ///
+    /// **`author` is a stretch of time and is still not counted as one.** A page of somebody's
+    /// posts really is chronological and really does leave out what they deleted — the evidence
+    /// is there. What is not there yet is the certainty that `suspectMissing` reads it against
+    /// the right stretch, and the cost of being wrong is this app deciding somebody's post is
+    /// gone when it is not. A post the author deleted waits for rotation instead, which is what
+    /// a post seen only in a thread already does.
     public var isThreadOfTime: Bool { self == .public || self == .home }
 }
