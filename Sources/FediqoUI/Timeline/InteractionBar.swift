@@ -34,20 +34,51 @@ struct InteractionBar: View {
     /// one post that have to agree.
     private var counts: Counts { app.counts(of: post) }
 
+    /// The three groups, as roomy as the row can afford.
+    ///
+    /// **This bar does not fit a phone at its full spacing, and never did.** Measured on a 6.9"
+    /// iPhone: the row has 388 points for its content and the bar wants 451 at the text size
+    /// this app ships at — and 421 even at the smallest. So it overflowed the card and the
+    /// words were clipped at both edges, which is #78.
+    ///
+    /// `ViewThatFits` is the answer rather than a width somebody measured: it takes the first
+    /// of these that fits the room it is actually given, so a Mac window, a 13" iPad, a phone
+    /// and an iPad in Slide Over each get the widest arrangement they can hold, and none of
+    /// them gets one that overflows. Nothing here asks how wide anything is.
+    ///
+    /// S3 is kept at every step: groups sit at least twice as far apart as the controls inside
+    /// them. The steps tighten both numbers together rather than closing the groups up into one
+    /// another, because it is the grouping that carries the meaning — what others did, what I
+    /// did, where this goes — and a bar that has lost its groups has lost the argument.
+    ///
+    /// The last step drops the conversation mark, and only that one. Opening the post is the
+    /// one thing on this bar that the row already does when a reader presses it anywhere else,
+    /// so it is the only mark whose absence costs a reader nothing — and this step is only ever
+    /// reached on a screen too narrow to have shown it well anyway.
     var body: some View {
-        HStack(spacing: Space.betweenGroups) {
-            theirs
-            mine
-            leaving
-            Spacer(minLength: 0)
+        ViewThatFits(in: .horizontal) {
+            bar(within: Space.withinGroup, between: Space.betweenGroups)
+            bar(within: Space.step, between: Space.withinGroup)
+            bar(within: Space.tight, between: Space.step)
+            bar(within: Space.tight, between: Space.step, leavingTheConversation: false)
         }
         .foregroundStyle(.secondary)
         .padding(.top, Space.tight)
     }
 
+    private func bar(within: CGFloat, between: CGFloat,
+                     leavingTheConversation: Bool = true) -> some View {
+        HStack(spacing: between) {
+            theirs(within: within)
+            mine(within: within)
+            leaving(within: within, conversation: leavingTheConversation)
+            Spacer(minLength: 0)
+        }
+    }
+
     /// What everybody else did, with the numbers the servers gave us.
-    private var theirs: some View {
-        HStack(spacing: Space.withinGroup) {
+    private func theirs(within: CGFloat) -> some View {
+        HStack(spacing: within) {
             // Replying makes a new post rather than marking this one, and this app has no
             // composer that can send one yet — so it still leaves, and says so by doing
             // nothing else. When #8 lands it stops leaving and nothing else here changes.
@@ -69,8 +100,8 @@ struct InteractionBar: View {
     /// What I did. No counts here, and there never will be: how many other people bookmarked
     /// something is not a thing any server tells anybody, and what this device keeps is
     /// nobody's business but this device's.
-    private var mine: some View {
-        HStack(spacing: Space.withinGroup) {
+    private func mine(within: CGFloat) -> some View {
+        HStack(spacing: within) {
             switching(marks.bookmarked == true ? "bookmark.fill" : "bookmark",
                       labelKey: "post.bookmark", on: marks.bookmarked == true, tint: .blue,
                       sending: app.isActing(.bookmark, on: post)) {
@@ -89,9 +120,9 @@ struct InteractionBar: View {
     /// the way out of the app, which makes it the rarest thing on the row and the one a reader
     /// scanning a long list never wants — and it is one row down in `⋯` under **General**,
     /// beside Copy link, which is the other thing you do with an address.
-    private var leaving: some View {
-        HStack(spacing: Space.withinGroup) {
-            if let open {
+    private func leaving(within: CGFloat, conversation: Bool) -> some View {
+        HStack(spacing: within) {
+            if let open, conversation {
                 // The conversation, which is what opening a post here shows: the post and
                 // everything around it. Not an arrow — nothing is being sent anywhere.
                 switching("bubble.left.and.bubble.right", labelKey: "post.open",
