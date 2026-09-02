@@ -165,7 +165,11 @@ struct PostRow: View {
             } else {
                 VStack(alignment: .leading, spacing: Space.step) {
                     words
-                    if !post.attachments.isEmpty { deck }
+                    if !post.attachments.isEmpty {
+                        deck
+                    } else if let card = post.card {
+                        LinkCard(card: card, covered: mediaIsCovered)
+                    }
                 }
                 .padding(.top, Space.tight)
             }
@@ -414,10 +418,16 @@ struct PostRow: View {
     /// reads as something broken.
     @ViewBuilder
     private var attachmentColumn: some View {
-        if post.attachments.isEmpty {
-            Color.clear.frame(width: AttachmentDeck.side, height: 0)
-        } else {
+        if !post.attachments.isEmpty {
             deck
+        } else if let card = post.card {
+            // The link's own picture goes where the post's would have, because there is no
+            // post's — a card and an attachment never both claim this column. The author's
+            // media comes first where there is any: it is theirs, and the card is somebody
+            // else's page.
+            LinkCard(card: card, covered: mediaIsCovered)
+        } else {
+            Color.clear.frame(width: AttachmentDeck.side, height: 0)
         }
     }
 

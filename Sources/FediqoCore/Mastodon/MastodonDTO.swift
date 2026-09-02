@@ -36,6 +36,10 @@ enum MastodonDTO {
         /// The custom emoji the words are partly written in. Absent on the odd server, for the
         /// same reason as `tags`.
         let emojis: [Emoji]?
+        /// What the server made of the one link in the post, having fetched the Open Graph
+        /// tags itself. Absent on a post with no link, and on a server that has not got round
+        /// to reading one yet — both of which are simply no card.
+        let card: Card?
     }
 
     /// One custom emoji: the name between the colons, and the picture it stands for. A row
@@ -107,6 +111,36 @@ enum MastodonDTO {
 
     struct Tag: Decodable, Sendable {
         let name: String
+    }
+
+    /// A link, as the server read it. `image` is on that server's own storage rather than on
+    /// the site being linked to, which is the whole reason a card costs no new host.
+    ///
+    /// `type` is `link`, `photo`, `video` or `rich`, and it is not read: this app draws a card
+    /// and never an embed, so a video card is a link with a picture on it like any other. An
+    /// embed is somebody else's HTML running in the reader's app, which is not a thing this
+    /// app does.
+    struct Card: Decodable, Sendable {
+        let url: String
+        let title: String?
+        let description: String?
+        let providerName: String?
+        let image: String?
+        let imageDescription: String?
+
+        /// The card this is, or nothing where there is no address to point at — which is not a
+        /// card, whatever else the payload carried.
+        var asCard: FediqoCore.Card? {
+            guard let address = URL(string: url) else { return nil }
+            return FediqoCore.Card(
+                url: address,
+                title: title ?? "",
+                summary: description ?? "",
+                provider: providerName ?? "",
+                imageURL: image.flatMap(URL.init(string:)),
+                imageAlt: imageDescription ?? ""
+            )
+        }
     }
 
     /// What came attached. `type` is Mastodon's word for what it is — `image`, `gifv`,
@@ -280,6 +314,10 @@ extension MastodonDTO.Status {
             // The words' own emoji first, then the author's: where a server spells one
             // shortcode two ways, what the post says wins over what the name does.
             emojis: ((subject.emojis ?? []) + (subject.account.emojis ?? [])).compactMap(\.asEmoji),
+            // The boost's own card is the boosted post's, because a boost has no words of its
+            // own to have put a link in — `subject` is already whichever of the two carries the
+            // post, and the card follows it.
+            card: subject.card?.asCard,
             boostedBy: reblog == nil ? nil : account.name,
             boostedById: reblog == nil ? nil : account.authorId(on: host),
             sources: [host]

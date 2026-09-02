@@ -564,15 +564,31 @@ extension LocalStore {
                 shortcode: row["shortcode"], url: address,
                 staticURL: (row["static_url"] as String?).flatMap(URL.init(string:))))
         }
+        // What the link in each of them says it is, as the server that handed the post over
+        // read it. At most one per post, which is why this is a dictionary of one rather than
+        // of many — see migration 013.
+        var cards: [String: Card] = [:]
+        for row in try Row.fetchAll(db, sql: """
+            SELECT merge_key, url, title, summary, provider, image_url, image_alt FROM post_cards
+            WHERE merge_key IN (\(placeholders))
+            """, arguments: StatementArguments(keys)) {
+            guard let address = URL(string: row["url"]) else { continue }
+            cards[row["merge_key"]] = Card(
+                url: address, title: row["title"], summary: row["summary"],
+                provider: row["provider"],
+                imageURL: (row["image_url"] as String?).flatMap(URL.init(string:)),
+                imageAlt: row["image_alt"])
+        }
         return rows.map { post(from: $0, tags: tags[$0["merge_key"]] ?? [],
                                mentions: mentions[$0["merge_key"]] ?? [],
                                emojis: emojis[$0["merge_key"]] ?? [],
                                media: media[$0["merge_key"]],
+                               card: cards[$0["merge_key"]],
                                carriedBy: carriedBy[$0["merge_key"]] ?? []) }
     }
 
     private static func post(from row: Row, tags: [String], mentions: [Mention],
-                             emojis: [CustomEmoji], media: [Attachment]?,
+                             emojis: [CustomEmoji], media: [Attachment]?, card: Card?,
                              carriedBy: [String]) -> Post {
         let sourceURL: String = row["source_url"]
         return Post(
@@ -602,6 +618,7 @@ extension LocalStore {
             tags: tags,
             mentions: mentions,
             emojis: emojis,
+            card: card,
             boostedBy: row["booster_name"],
             boostedById: row["boosted_by"],
             // Every server that carried it, and the one the row was written under where
@@ -743,6 +760,7 @@ extension LocalStore {
             try insertTags(db, post.tags, for: key, now: now)
             try insertMentions(db, post.mentions, for: key, now: now)
             try insertEmojis(db, post.emojis, for: key, now: now)
+            try insertCard(db, post.card, for: key, now: now)
             try insertMedia(db, post.attachments, for: key, now: now)
             return postedAt
         }
@@ -808,11 +826,39 @@ extension LocalStore {
             try db.cachedStatement(sql: "DELETE FROM post_emojis WHERE merge_key = ?").execute(arguments: [key])
             try insertEmojis(db, post.emojis, for: key, now: now)
         }
+        // Whether or not anything else moved. A server re-reads a link's Open Graph tags on its
+        // own schedule, so a card can be corrected under a post whose words never changed —
+        // there is nothing above it to compare against, and the write is one upsert that a post
+        // without a card never reaches at all.
+        try insertCard(db, post.card, for: key, now: now)
         return postedAt
     }
 
     /// The pictures the post is partly written in. `OR IGNORE` and not a merge: the primary
     /// key is (post, shortcode), so a server that named one shortcode twice has named it once.
+    /// The card, where the server sent one.
+    ///
+    /// Upserted rather than ignored on conflict, unlike the emojis and the tags beside it: a
+    /// server re-reads a link's tags and a card that has since been corrected should be the
+    /// corrected one. A NULL picture never erases one a fuller sighting wrote, which is the
+    /// rule `accounts` already follows.
+    private static func insertCard(_ db: Database, _ card: Card?, for key: String, now: Int64) throws {
+        guard let card else { return }
+        try db.execute(sql: """
+            INSERT INTO post_cards (merge_key, url, title, summary, provider, image_url, image_alt, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (merge_key) DO UPDATE SET
+                url        = excluded.url,
+                title      = excluded.title,
+                summary    = excluded.summary,
+                provider   = excluded.provider,
+                image_url  = coalesce(excluded.image_url, image_url),
+                image_alt  = excluded.image_alt,
+                updated_at = ?
+            """, arguments: [key, card.url.absoluteString, card.title, card.summary,
+                             card.provider, card.imageURL?.absoluteString, card.imageAlt, now, now])
+    }
+
     private static func insertEmojis(_ db: Database, _ emojis: [CustomEmoji], for key: String, now: Int64) throws {
         guard !emojis.isEmpty else { return }
         let insert = try db.cachedStatement(sql: """

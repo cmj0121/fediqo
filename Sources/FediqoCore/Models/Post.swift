@@ -58,6 +58,9 @@ public struct Post: Sendable, Hashable, Identifiable {
     /// one picture on one server, so `:blobcat:` in a display name is `:blobcat:` in the words
     /// under it. Empty where the source said nothing, which is every post stored before 008.
     public let emojis: [CustomEmoji]
+    /// What the one link in it says it is, where the server that handed the post over read it
+    /// and said so. Nothing here ever asks the link itself — see `Card`.
+    public let card: Card?
     /// The booster's display name — what the row shows.
     public let boostedBy: String?
     /// The booster's `authorId` — what identity is built on.
@@ -110,6 +113,7 @@ public struct Post: Sendable, Hashable, Identifiable {
         tags: [String] = [],
         mentions: [Mention] = [],
         emojis: [CustomEmoji] = [],
+        card: Card? = nil,
         boostedBy: String? = nil,
         boostedById: String? = nil,
         sources: [String] = []
@@ -135,6 +139,9 @@ public struct Post: Sendable, Hashable, Identifiable {
         self.tags = Self.normalisedTags(tags)
         self.mentions = Mention.folded(mentions)
         self.emojis = CustomEmoji.folded(emojis)
+        // A card with an address and nothing else is the link the words already carry, drawn a
+        // second time in a box. Dropped here rather than at every screen that might draw one.
+        self.card = card.flatMap { $0.saysAnything ? $0 : nil }
         self.boostedBy = boostedBy
         self.boostedById = boostedById
         self.sources = sources
@@ -325,6 +332,50 @@ public extension Array where Element == Post {
         }
         return order.compactMap { merged[$0] }.sorted(by: areInOrder)
     }
+}
+
+/// What a link says it is, as the server that handed the post over read it.
+///
+/// **It came from that server and from nowhere else.** Mastodon fetches the Open Graph tags
+/// itself and sends the result inside the status; `imageURL` is served from that instance's own
+/// media storage rather than from the site being linked to. So drawing one of these costs no
+/// new host — every byte comes from a server the reader was already reading.
+///
+/// Fetching the tags here would be the opposite, and it is the thing this app must never do: a
+/// request to the linked host tells that host, and whoever it sells to, that this device read
+/// this post at this time. There is no code anywhere that builds one of these from a URL, and
+/// there must not be. A server that sent no card means no card.
+///
+/// Everything but the address may be empty, and empty is what a server said nothing about. A
+/// title nobody sent is not the URL wearing a title's clothes, and a provider nobody sent is not
+/// worked out from the host — a card that invents half of itself is one a reader cannot trust
+/// the other half of.
+public struct Card: Sendable, Hashable, Codable {
+    /// Where it points, as the server gave it.
+    public let url: URL
+    public let title: String
+    /// What the site said about itself, as far as the server read it.
+    public let summary: String
+    /// What the site calls itself. Never derived from the host.
+    public let provider: String
+    /// The picture, on the server's own storage. Nil where it sent none.
+    public let imageURL: URL?
+    /// The server's own alt text for that picture, and never ours.
+    public let imageAlt: String
+
+    public init(url: URL, title: String = "", summary: String = "", provider: String = "",
+                imageURL: URL? = nil, imageAlt: String = "") {
+        self.url = url
+        self.title = title
+        self.summary = summary
+        self.provider = provider
+        self.imageURL = imageURL
+        self.imageAlt = imageAlt
+    }
+
+    /// Whether there is anything here worth drawing. A card with an address and nothing else is
+    /// the link the words already carry, drawn twice.
+    public var saysAnything: Bool { !title.isEmpty || !summary.isEmpty || imageURL != nil }
 }
 
 /// One picture a post is partly written in, and the shortcode it is spelled by.

@@ -61,7 +61,8 @@ Migration 遵守同一條規則：只增不減。只有 `CREATE`、`ADD COLUMN`�
 ```text
 network   伺服器交過來的。刷新寫入；只有權威方改得動內容。
           protocols、feeds、filter_kinds、servers、accounts、posts、tags、post_tags、
-          post_origins、post_mentions、post_emojis、server_trends、notice_kinds、notices
+          post_origins、post_mentions、post_emojis、post_cards、server_trends、notice_kinds、
+          notices
 
 local     你決定的，可以撤回。只有你動得了。
           servers.selected_at、servers.position、tags.followed_at、tags.muted_at、owned_accounts、
@@ -231,6 +232,27 @@ NULL，這跟 `0` 和 `''` 是不同的事實：畫面只能遮它真的被要�
 一個事件只寫一次。`remote_id` 只在發出它的那台伺服器上唯一，所以 `(server_url, remote_id)` 這一對才是身分
 ——兩台伺服器各自從 1 開始編號自己的事件是常態，不是碰撞。同一件事被告知第二次（每次重連都保證會發生）不寫
 任何東西，而不是去動 `arrived_at`：這台裝置第一次聽到是關於第一次的事實，而沒有第二個第一次。
+
+## 一個連結說它自己是什麼
+
+一則以位址為主的貼文會帶著一張卡片：標題、一句關於它的話、網站怎麼稱呼自己，以及一張圖。全部放在
+`post_cards`，一則貼文最多一列，而且**全部來自交出這則貼文的那台伺服器**。
+
+這是整個設計本身，不是實作細節。Mastodon 自己去抓 Open Graph 標籤，把結果放在 status 裡送過來；它送的圖是
+從它自己的媒體儲存供應的，不是從被連結的網站。所以畫一張卡片不會多出任何一台主機：每一個位元組都來自讀者本
+來就在讀的伺服器。
+
+在這裡自己去抓那些標籤是相反的做法，而那是絕對不能做的一件事。一個對被連結主機的請求，會告訴那台主機——以及
+它賣給誰——這台裝置在這個時間、從這個位址讀了這則貼文。[`docs/privacy.zh-TW.md`](privacy.zh-TW.md) 說那永遠
+不會發生。**沒有任何一行程式會從一個 URL 生出卡片，也不可以有。** 伺服器沒送卡片，就是不畫卡片。
+
+除了位址以外每一欄都可以是空的，而空的意思是伺服器對它什麼都沒說。沒人送來的標題不會拿 URL 頂替，沒人送來
+的來源名稱也不會從主機名推導出來——一張自己編造了一半的卡片，讀者連另外一半也沒辦法相信。只帶著位址、其餘什
+麼都沒有的卡片在寫入前就被丟掉：那是文字裡已經有的那個連結，裝進一個框裡再畫一次。
+
+它是唯一一個**用 upsert 而不是 conflict 就忽略**的 per-post 表。標籤、提及與表情符號是貼文寫下時說的話；卡片
+是伺服器對一個連結所做的判讀，而伺服器會重讀連結。已經被更正的卡片就該是更正後的那張——但比較新的那次沒帶
+圖，不會抹掉比較早那次帶來的圖。
 
 ## 時間軸是一個篩選，不是一份清單
 

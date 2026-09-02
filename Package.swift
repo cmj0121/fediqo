@@ -27,7 +27,8 @@ let package = Package(
                         .copy("Resources/schema-009.sql"),
                         .copy("Resources/schema-010.sql"),
                         .copy("Resources/schema-011.sql"),
-                        .copy("Resources/schema-012.sql")],
+                        .copy("Resources/schema-012.sql"),
+                        .copy("Resources/schema-013.sql")],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(
