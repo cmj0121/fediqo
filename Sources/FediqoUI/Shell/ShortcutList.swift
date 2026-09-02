@@ -2,10 +2,10 @@ import SwiftUI
 
 /// The keys, written down.
 ///
-/// One view, and both places that show the keys show this one: the overlay `?` puts up, and
-/// the card at the foot of Settings for a reader who has never pressed `?`. The lines come
-/// from `KeyCommand.shortcuts` rather than from anything typed here, so the list cannot come
-/// to disagree with the keys that actually work.
+/// One view, shown wherever the list is asked for: the overlay `?` puts up, and the Mac
+/// Help menu item that opens the same overlay. The lines come from `KeyCommand.shortcuts`
+/// rather than from anything typed here, so the list cannot come to disagree with the keys
+/// that actually work.
 struct ShortcutList: View {
     private let groups = KeyCommand.ShortcutGroup.allCases
 

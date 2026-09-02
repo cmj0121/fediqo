@@ -248,11 +248,11 @@ struct CommandTests {
         #expect(app.perform(.nextTab))
         #expect(app.settingsTab == .sources)
         #expect(app.perform(.nextTab))
-        #expect(app.settingsTab == .keyboard)
+        #expect(app.settingsTab == .about)
         #expect(app.perform(.nextTab))
         #expect(app.settingsTab == .appearance)
         #expect(app.perform(.previousTab))
-        #expect(app.settingsTab == .keyboard)
+        #expect(app.settingsTab == .about)
     }
 
     /// Each page keeps its own place. Rotating the tabs of one page is not a fact about any

@@ -43,8 +43,10 @@ final class EmptyServerStore: ServerStore {
 }
 
 @MainActor
-func freshApp(_ name: String, launch: LaunchOptions = .none) -> AppState {
-    AppState(preferences: Preferences(defaults: scratch(name)), serverStore: EmptyServerStore(), launch: launch)
+func freshApp(_ name: String, launch: LaunchOptions = .none,
+              marketingVersion: String = "", buildVersion: String = "") -> AppState {
+    AppState(preferences: Preferences(defaults: scratch(name)), serverStore: EmptyServerStore(),
+             launch: launch, marketingVersion: marketingVersion, buildVersion: buildVersion)
 }
 
 /// An app with one account signed in to one server, and `posts` already in its store and on

@@ -59,7 +59,7 @@ enum StatisticsTab: String, CaseIterable, Identifiable, Hashable {
 /// reader is looking at the servers they have added, which is what it is about, so it sits
 /// under Sources rather than somewhere they would have to be sent.
 enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
-    case appearance, sources, keyboard
+    case appearance, sources, about
 
     var id: String { rawValue }
 }
@@ -348,6 +348,10 @@ public final class AppState {
     /// exists to be photographed, or driven by a test, wants to open the same size in the same
     /// place every time, and a reader's window wants to open where they left it.
     let isFixture: Bool
+    /// The two numbers a bug report needs. Handed in at launch rather than read from
+    /// `Bundle.main` here, so a test can name them without asking the test host.
+    let marketingVersion: String
+    let buildVersion: String
 
     private(set) var servers: [Server]
 
@@ -378,6 +382,10 @@ public final class AppState {
 
     public convenience init() {
         let launch = LaunchOptions.fromEnvironment()
+        // The Info.plist of the app that launched, not of whoever is running the tests.
+        // Tests construct via the designated init and inject what About should show.
+        let marketing = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
         #if DEBUG
         if launch.fixture, let store = try? LocalStore.inMemory() {
             // A store nobody's disk holds, preferences nobody's machine has set, and servers
@@ -387,16 +395,19 @@ public final class AppState {
             defaults?.removePersistentDomain(forName: "fediqo.fixture")
             self.init(preferences: Preferences(defaults: defaults ?? .standard),
                       serverStore: FixtureServerStore(), store: store, launch: launch,
-                      registry: SourceRegistry(clients: [.mastodon: FixtureSource()]))
+                      registry: SourceRegistry(clients: [.mastodon: FixtureSource()]),
+                      marketingVersion: marketing, buildVersion: build)
             return
         }
         #endif
-        self.init(store: LocalStore.openDefault(), launch: launch)
+        self.init(store: LocalStore.openDefault(), launch: launch,
+                  marketingVersion: marketing, buildVersion: build)
     }
 
     init(preferences: Preferences = Preferences(), serverStore: (any ServerStore)? = nil,
          store: LocalStore? = nil, launch: LaunchOptions = .none,
-         registry: SourceRegistry = .standard(), secrets: (any SecretStore)? = nil) {
+         registry: SourceRegistry = .standard(), secrets: (any SecretStore)? = nil,
+         marketingVersion: String = "", buildVersion: String = "") {
         // Counting starts when the app does, so that "since" is a moment the screen can name
         // rather than whichever request happened to be sent first.
         _ = APILedger.shared
@@ -439,6 +450,8 @@ public final class AppState {
         self.isFixture = launch.fixture
         self.shootTo = launch.shootTo
         self.openingPost = launch.openingPost
+        self.marketingVersion = marketingVersion
+        self.buildVersion = buildVersion
         // The language before the first frame, not after it: a screenshot is taken of what was
         // drawn, and a tree redrawn a moment later is a photograph of the moment before.
         if let language = launch.language { preferences.language = language }

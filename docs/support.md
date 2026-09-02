@@ -14,7 +14,7 @@ instead.
 
 | Tell us               | Because                                                          |
 | --------------------- | ---------------------------------------------------------------- |
-| the version and build | About Fediqo on the Mac, the build page in TestFlight on the phone |
+| the version and build | Settings → About, on both platforms                              |
 | macOS or iOS          | the two apps share a timeline and not their bugs                 |
 | which server          | protocols are implemented per server, and servers differ         |
 | what you expected     | half the reports here turn out to be a disagreement, not a bug   |

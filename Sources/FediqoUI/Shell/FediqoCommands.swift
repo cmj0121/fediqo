@@ -32,8 +32,8 @@ public struct FediqoCommands: Commands {
         CommandMenu(t("menu.go")) { pages }
         CommandMenu(t("rail.timeline")) { timelineItems }
         // Where a Mac user goes looking for a key they do not know yet. `?` opens the same
-        // list, but `?` is itself written down only inside the list it opens and in
-        // Settings, so without this the way in has to be known before it can be found.
+        // list, but `?` is itself written down only inside the list it opens and as a cap
+        // on About, so without this the way in has to be known before it can be found.
         CommandGroup(after: .help) {
             Button(t("menu.shortcuts")) { app.setShowingShortcuts(true) }
                 .keyboardShortcut("/")

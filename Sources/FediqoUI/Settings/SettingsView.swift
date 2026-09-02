@@ -2,7 +2,8 @@ import AuthenticationServices
 import SwiftUI
 import FediqoCore
 
-/// The general preferences: how it looks, what language it speaks, and what it reads.
+/// The general preferences: how it looks, what language it speaks, what it reads, and
+/// what this build is.
 ///
 /// Three tabs. What Fediqo does not do with what it reads is under Sources rather than on a
 /// tab of its own — it is about the servers, and the moment a reader thinks of it is the
@@ -50,10 +51,40 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-        case .keyboard:
-            // The same list `?` puts up, in the one place a reader who has never pressed `?`
-            // would go looking. One view, so the two cannot drift apart.
-            section(t("shortcut.title")) { ShortcutList() }
+        case .about:
+            // The numbers a report needs, and a pointer at `?` — not the map itself.
+            // The map lives on the overlay; drawing it here was a second copy of one list.
+            section(t("settings.version")) { version }
+            section(t("settings.shortcuts")) { shortcutHint }
+        }
+    }
+
+    /// Two numbers, not one: the name of the release is not which attempt it was, and a
+    /// report that sends only one of them leaves the other to be guessed.
+    @ViewBuilder
+    private var version: some View {
+        LabeledContent {
+            Text(verbatim: app.marketingVersion).fediqoFont(TypeScale.body)
+        } label: {
+            Text(t("settings.version.marketing")).fediqoFont(TypeScale.body)
+        }
+        Divider().opacity(0.4)
+        LabeledContent {
+            Text(verbatim: app.buildVersion).fediqoFont(TypeScale.body)
+        } label: {
+            Text(t("settings.version.build")).fediqoFont(TypeScale.body)
+        }
+    }
+
+    /// The cap `ShortcutList` draws for a key, and nothing else — no control, no map.
+    /// A reader who has never pressed `?` still has to be able to find out that it exists.
+    private var shortcutHint: some View {
+        HStack(alignment: .top, spacing: Space.gap) {
+            // A string literal here would be a localisation key; the cap is what is printed on the key.
+            Text(verbatim: "?").fediqoFont(TypeScale.minor, design: .monospaced).fediqoPill()
+            Text(t("settings.shortcuts.hint"))
+                .fediqoFont(TypeScale.small)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
