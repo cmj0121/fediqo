@@ -265,6 +265,13 @@ public final class AppState {
     /// whichever one the top of the stack is a conversation around, and two places holding
     /// that answer would be two places to get it wrong.
     var expanded: Post? { threads.last?.root }
+
+    /// The person open over everything, or nobody.
+    ///
+    /// One at a time and not a stack: walking from a person to one of their posts to that post's
+    /// author is a walk this page can support later, and a stack held for a walk nobody has asked
+    /// for is state that can be wrong for no benefit. A second opening replaces the first.
+    private(set) var person: PersonModel?
     /// How many times the reader has asked the deck on the selected row to turn over.
     private(set) var mediaTurns = 0
     /// The same, for asking it to play. Two counters rather than one command with an argument,
@@ -1132,6 +1139,24 @@ public final class AppState {
         threads = []
         open(post)
     }
+
+    /// Opens the author of a post: who they are, what they wrote, and what this reader is to
+    /// them.
+    ///
+    /// The subject carries what the row already knew — a name, a handle, a picture — so the page
+    /// is drawn before anybody is asked anything, and the server fills it in. Which server is the
+    /// one that handed this post over, which is a server the reader already reads (#88).
+    func openPerson(of post: Post) {
+        let subject = PersonSubject(post: post)
+        guard person?.subject != subject else { return }
+        guard let client = registry.client(for: post.socialProtocol) else { return }
+        person = PersonModel(subject: subject, client: client) { [weak self] in
+            await self?.acting(on: post)
+        }
+    }
+
+    /// Closes it, leaving whatever was underneath exactly as it was.
+    func closePerson() { person = nil }
 
     /// Turns the deck of attachments on the post the ring is on. An event rather than a state:
     /// which attachment is on top belongs to the row that draws it, and pressing `m` twice

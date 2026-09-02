@@ -127,6 +127,14 @@ struct FeedScreen: View {
                         .transition(.opacity)
                 }
             }
+            // A person over the post as well as over the list: the author is pressable on an
+            // opened post too, and what was underneath keeps its place either way.
+            .overlay {
+                if let person = app.person {
+                    PersonPage(model: person) { app.closePerson() }
+                        .transition(.opacity)
+                }
+            }
             // Where the reader is taken, watched somewhere that is not this body. `onChange`
             // reads its value while the body is being built, so watching the ring here made
             // every press of `j` a rebuild of the whole screen (#71).
@@ -510,6 +518,7 @@ private struct RingedRow: View {
                 // nothing — selectable text takes the press before the row behind it ever
                 // sees it.
                 focus: { place.select(post) },
+                openAuthor: { app.openPerson(of: post) },
                 open: { app.expand(post) })
     }
 }
