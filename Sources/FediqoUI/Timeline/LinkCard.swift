@@ -28,8 +28,12 @@ struct LinkCard: View {
     /// The deck's own size, taken from it rather than agreed with it: a row with a card and a
     /// row with pictures have to be the same row, and two numbers that must match are one
     /// number written once.
-    private var side: CGFloat { AttachmentDeck.side }
-    private var height: CGFloat { AttachmentDeck.height }
+    /// How wide to draw, where the row has no reserved column to guarantee it fits. Nil is the
+    /// column's own width — the same shape `AttachmentDeck.width` has, and for the same reason.
+    var width: CGFloat?
+
+    private var side: CGFloat { min(width ?? AttachmentDeck.side, AttachmentDeck.side) }
+    private var height: CGFloat { side * AttachmentDeck.ratio }
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
