@@ -298,9 +298,17 @@ struct PostRow: View {
             }
             Spacer(minLength: Space.snug)
             sources(verbose: verbose)
-            // When it was written is four characters and never gives any of them up: a time
-            // squeezed to an ellipsis is a row that has stopped saying when it happened.
-            Text(post.createdAt, format: .relative(presentation: .numeric))
+            // When it was written never gives any of it up: a time squeezed to an ellipsis is
+            // a row that has stopped saying when it happened. What it costs to keep is the
+            // band's answer, though, and not one number — this comment said "four characters"
+            // and named `5m`, `18m` and `2h` while the format beside it was drawing
+            // `5 minutes ago`, which is thirteen. At 440 points and 1.6× those thirteen were
+            // 120 of the band's 310, taken before the author's name was offered any.
+            //
+            // So the narrow arrangement gets the short form, which is what the comment always
+            // said this was. A row with the room says it in words.
+            Text(post.createdAt, format: .relative(presentation: .numeric,
+                                                   unitsStyle: verbose ? .wide : .narrow))
                 .fediqoFont(TypeScale.caption)
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
