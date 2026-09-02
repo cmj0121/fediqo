@@ -102,11 +102,21 @@ enum Fixture {
                  audience: .unlisted,
                  counts: Counts(replies: 1, reblogs: 0, favourites: 5),
                  inReplyToURI: "https://elm.example/api/v1/statuses/nobody-handed-us-this"),
-            post("the-boost", host: hosts[1], minutesAgo: 128, now: now,
+            // Both an answer and a boost, which is the case #76 was about: two things happened
+            // to this post before it reached the reader, and they are one line rather than two
+            // stacked bands. A post that is only one of the two cannot show that.
+            // Near the top on purpose. A case that is always below the fold is a case the
+            // fixture is not presenting: this world exists to be photographed, and a screenshot
+            // that cannot reach a row proves nothing about it.
+            post("the-boost", host: hosts[1], minutesAgo: 15, now: now,
                  name: "Mira Halvorsen", handle: "mira",
                  text: "A quiet argument for reading things in the order they were written.",
                  counts: Counts(replies: 0, reblogs: 8, favourites: 22),
-                 boostedBy: "Dag Solheim"),
+                 boostedBy: "Dag Solheim",
+                 // Not `carried-by-two`: two servers carry that one, the merge keeps whichever
+                 // address arrived first, and a reply pointing at the other one names nobody.
+                 // That is a real edge and not this fixture's to demonstrate.
+                 inReplyToURI: address("the-emoji", on: hosts[2], by: "tove")),
         ]
     }
 

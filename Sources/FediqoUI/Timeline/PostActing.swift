@@ -178,6 +178,13 @@ extension AppState {
         guard let store, !posts.isEmpty else { return }
         let keys = posts.map(\.mergeKey)
         if let kept = try? await store.kept(among: keys) { keptPosts = kept }
+        // Who wrote what these replies are answering, for the ones this device holds. One read
+        // for the page, beside the marks and for the same reason — and only for the rows that
+        // are answers at all, so a page of ordinary posts asks nothing.
+        let parents = posts.compactMap(\.inReplyToURI)
+        if !parents.isEmpty, let handles = try? await store.authors(ofPostsAt: parents) {
+            parentHandles = handles
+        }
         guard let account = await acting(on: posts[0]),
               let found = try? await store.marks(of: keys, as: account.authorId) else { return }
         // What the store holds — except for a post an action is still out for. In that gap this

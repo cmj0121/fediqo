@@ -220,4 +220,30 @@ struct ThreadTests {
         let y = post("Y", at: 200, answering: "X")
         #expect(Conversation.chain(above: y, among: [x, y]).map(\.text) == ["X"])
     }
+
+    // MARK: - Who wrote the post a reply is answering
+
+    /// A reply carries the address of what it answers and nothing about who wrote it. A row can
+    /// name that person only where this device holds the parent — and it asks once for a page
+    /// rather than once per row.
+    @Test("The store says who wrote the posts it holds, and nothing about the ones it does not")
+    func whoWroteTheParents() async throws {
+        let store = try LocalStore.inMemory()
+        let one = post("1", at: 100, by: "wren")
+        let two = post("2", at: 200, answering: "1", by: "ines")
+        try await store.save([one, two], from: makeServer(host))
+
+        let asked = [one.uri, "https://elm.example/api/v1/statuses/nobody-handed-us-this"]
+        let handles = try await store.authors(ofPostsAt: asked)
+
+        #expect(handles[one.uri] == "@wren@\(host)")
+        // Silence about the one it has never seen, rather than a guess.
+        #expect(handles.count == 1)
+    }
+
+    @Test("Asking about nothing asks the store nothing")
+    func askingAboutNothing() async throws {
+        let store = try LocalStore.inMemory()
+        #expect(try await store.authors(ofPostsAt: []).isEmpty)
+    }
 }
