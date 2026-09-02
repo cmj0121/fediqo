@@ -177,7 +177,12 @@ final class EmojiCache {
 
     private var frames: [Key: Frames] = [:]
     /// What is already on its way, so a screenful of the same emoji is one request.
-    private var inFlight: Set<Key> = []
+    /// The task drawing each picture, while it is being drawn. A set of keys before — which
+    /// could say that somebody was working and not who, so nobody could wait for them.
+    ///
+    /// `@ObservationIgnored`: a task starting or finishing is not a reason to redraw anything.
+    /// What a view watches is `frames`, and it changes once, when there is a picture.
+    @ObservationIgnored private var inFlight: [Key: Task<Void, Never>] = [:]
 
     static func metrics(size: CGFloat) -> Metrics {
         #if os(macOS)
@@ -218,19 +223,49 @@ final class EmojiCache {
     /// `still` is the reader's answer about movement: it asks for the copy the server says does
     /// not move, and where a server offered none the moving one is decoded and its first frame
     /// drawn — which is the same picture, standing still.
+    /// **The work belongs to the cache and not to the view that asked for it.**
+    ///
+    /// This used to run inside the caller's `.task(id:)`, and a `.task(id:)` is cancelled every
+    /// time the view is laid out again with a different id — which, on a screen whose rows are
+    /// re-measured, is often. Two things came of that and they compounded:
+    ///
+    /// - the view that got there first put the key in `inFlight`, so every other view asking for
+    ///   the same picture skipped it and never asked again;
+    /// - and when that first view was cancelled mid-request, it took the key back out of
+    ///   `inFlight` without ever putting a picture in `frames`.
+    ///
+    /// So the one view doing the work gave up, the ones waiting on it had already moved on, and
+    /// nothing retried: the shortcode stood there for good. It is worse the larger the reader's
+    /// text is, because every scale is a fresh set of keys and a bigger row is re-laid-out more.
+    ///
+    /// Now `inFlight` holds the task rather than the fact of one, every caller awaits the same
+    /// task, and cancelling a view cancels only that view's waiting. The work is finished by
+    /// whoever started it whether or not anybody is still watching, which is what a shared cache
+    /// is for.
     func fetch(_ emojis: [CustomEmoji], metrics: Metrics, scale: CGFloat, still: Bool) async {
         for emoji in emojis {
             let address = still ? (emoji.staticURL ?? emoji.url) : emoji.url
             let key = Key(url: address, metrics: metrics, scale: scale)
-            guard frames[key] == nil, inFlight.insert(key).inserted else { continue }
-            defer { inFlight.remove(key) }
-            guard let data = try? await URLSession.shared.data(from: address).0 else { continue }
+            guard frames[key] == nil else { continue }
+            await work(for: key, address: address, metrics: metrics, scale: scale, still: still).value
+        }
+    }
+
+    /// The one task drawing this picture at this size, started if nobody has started it.
+    private func work(for key: Key, address: URL, metrics: Metrics,
+                      scale: CGFloat, still: Bool) -> Task<Void, Never> {
+        if let running = inFlight[key] { return running }
+        let started = Task { @MainActor [weak self] in
+            defer { self?.inFlight[key] = nil }
+            guard let data = try? await URLSession.shared.data(from: address).0 else { return }
             let decoded = await Task.detached(priority: .utility) {
                 Self.decode(data, metrics: metrics, scale: scale, firstFrameOnly: still)
             }.value
-            guard let decoded else { continue }
-            frames[key] = decoded
+            guard let decoded else { return }
+            self?.frames[key] = decoded
         }
+        inFlight[key] = started
+        return started
     }
 
     // MARK: - Decoding
