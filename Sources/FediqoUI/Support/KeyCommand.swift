@@ -259,9 +259,8 @@ extension KeyCommand {
         var detailKey: String { "shortcut.\(name)" }
     }
 
-    /// Every key this app answers, written down once. The `?` overlay and the card in
-    /// Settings both draw this — there is one list, and it is the same list the commands
-    /// above are decided from.
+    /// Every key this app answers, written down once. The `?` overlay draws this — there
+    /// is one list, and it is the same list the commands above are decided from.
     static let shortcuts: [Shortcut] = [
         Shortcut(group: .moving, keys: ["⌃Tab", "⌃⇧Tab"], name: "pages",
                  commands: [.nextPage, .previousPage]),

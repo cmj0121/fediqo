@@ -2,6 +2,23 @@
   "sourceLanguage": "en",
   "version": "1.0",
   "strings": {
+    "about.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The version a report needs, and how to see the keys."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "回報問題時需要的版本，以及怎麼看到按鍵。"
+          }
+        }
+      }
+    },
     "appearance.subtitle": {
       "extractionState": "manual",
       "localizations": {
@@ -593,23 +610,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "已保留"
-          }
-        }
-      }
-    },
-    "keyboard.subtitle": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Every key this app answers, written down."
-          }
-        },
-        "zh-TW": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "這個 app 認得的每一個按鍵，都寫在這裡。"
           }
         }
       }
@@ -2535,6 +2535,40 @@
         }
       }
     },
+    "settings.shortcuts": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shortcuts"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "快速鍵"
+          }
+        }
+      }
+    },
+    "settings.shortcuts.hint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shows every key this app answers."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "顯示這個 app 認得的每一個按鍵。"
+          }
+        }
+      }
+    },
     "settings.signIn": {
       "extractionState": "manual",
       "localizations": {
@@ -2803,6 +2837,57 @@
           "stringUnit": {
             "state": "translated",
             "value": "設定"
+          }
+        }
+      }
+    },
+    "settings.version": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Version"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "版本"
+          }
+        }
+      }
+    },
+    "settings.version.build": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Build"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "build"
+          }
+        }
+      }
+    },
+    "settings.version.marketing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Version"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "版本"
           }
         }
       }
@@ -3810,6 +3895,23 @@
         }
       }
     },
+    "tab.about": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "About"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "關於"
+          }
+        }
+      }
+    },
     "tab.appearance": {
       "extractionState": "manual",
       "localizations": {
@@ -3823,23 +3925,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "外觀"
-          }
-        }
-      }
-    },
-    "tab.keyboard": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Keyboard"
-          }
-        },
-        "zh-TW": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "鍵盤"
           }
         }
       }
