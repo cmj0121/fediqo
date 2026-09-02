@@ -99,9 +99,19 @@ extension AppState {
     @discardableResult
     func publish(_ draft: Draft) async -> Bool {
         guard !isSending else { return false }
-        let accounts = await postingAccounts()
+        // A reply goes to one account and every other draft may go to several. That is not a
+        // restriction on replying but what replying is: an answer in one conversation, and
+        // three accounts sending it would be three people answering. The account is chosen the
+        // way it is for every other act on a post — the post's own server where the reader has
+        // one there, and their chosen account otherwise.
+        let accounts: [ActingAccount]
+        if let parent = draft.answering {
+            accounts = [await acting(on: parent)].compactMap { $0 }
+        } else {
+            accounts = await postingAccounts()
+        }
         guard !accounts.isEmpty else {
-            actionFailure = .needsSignIn("")
+            actionFailure = .needsSignIn(draft.answering?.sources.first ?? "")
             return false
         }
         isSending = true
@@ -122,6 +132,12 @@ extension AppState {
         lastSent = Dictionary(uniqueKeysWithValues: sent.map { ($0.host, $0) })
         let went = sent.filter(\.went)
         if !went.isEmpty { lastPosted = went.map(\.host).joined(separator: ", ") }
+        // An answer joins the conversation it answered, without waiting for a refresh. The
+        // server has already handed back the post it made, so this is not a guess about what
+        // the thread holds — it is the one part of it this device has been told about (#87).
+        if draft.answering != nil, let made = went.first?.post {
+            for level in threads { level.joined(by: made) }
+        }
         guard let refused = sent.first(where: { !$0.went }) else {
             lastSent = [:]
             setComposing(false)

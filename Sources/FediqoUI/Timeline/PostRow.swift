@@ -79,6 +79,15 @@ struct PostRow: View {
     /// click landed. Most of a row is selectable words and buttons that want their own presses,
     /// and a reader who clicked one of those has still said which post they mean.
     var focus: (() -> Void)?
+    /// Whether the row carries the things that can be done to the post.
+    ///
+    /// False where the row is being quoted rather than read — the composer draws the post being
+    /// answered, and a star and a boost inside a draft are controls that belong to a row
+    /// somewhere else. Not hittable is not enough: they would still be six marks and three
+    /// numbers asking to be read, above the field somebody is trying to write in.
+    ///
+    /// **Before `open` for the reason `openAuthor` is**, which the comment below is about.
+    var acting = true
     /// What a press on the author's picture and name asks for — their page. Nothing where
     /// there is none to open, which is that page's own rows: they are already theirs.
     ///
@@ -180,7 +189,7 @@ struct PostRow: View {
                 }
                 .padding(.top, Space.tight)
             }
-            InteractionBar(post: post, open: open)
+            if acting { InteractionBar(post: post, open: open) }
             footer
         }
         .padding(Space.pad)

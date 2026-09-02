@@ -21,6 +21,20 @@ public struct Conversation: Sendable, Hashable {
 
     public var isAlone: Bool { ancestors.isEmpty && descendants.isEmpty }
 
+    /// The same conversation with one more answer in it, in the order a conversation is read.
+    ///
+    /// For the reply the reader has just sent (#87). The server has already answered with the
+    /// post it made, so this is not a guess about what the conversation now holds — it is the
+    /// one part of it this device was told about before anybody asked again. A reply that only
+    /// appeared on the next refresh would leave a reader wondering whether it went.
+    ///
+    /// A post already here replaces itself rather than arriving twice: a refresh that lands
+    /// between the send and this would otherwise leave the answer in the conversation twice.
+    public func with(_ reply: Post) -> Conversation {
+        Conversation(ancestors: ancestors, post: post,
+                     descendants: descendants.filter { $0.mergeKey != reply.mergeKey } + [reply])
+    }
+
     /// One reply, and where it sits in the conversation.
     public struct Reply: Sendable, Hashable, Identifiable {
         public let post: Post

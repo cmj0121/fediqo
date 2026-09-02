@@ -127,6 +127,13 @@ struct FeedScreen: View {
                 else { return }
                 app.openPerson(of: post)
             }
+            // And the composer as an answer to it, which is a different screen from the composer
+            // as a new post and so is a picture of its own.
+            .task(id: model.visible.isEmpty) {
+                guard app.openingReply, !app.composing, let post = model.visible.first
+                else { return }
+                app.reply(to: post)
+            }
             // The opened post, over the list rather than instead of it: underneath, the
             // scroll position and the ring stay exactly where the reader left them.
             .overlay {

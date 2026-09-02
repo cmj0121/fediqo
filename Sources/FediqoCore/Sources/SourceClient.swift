@@ -400,12 +400,29 @@ public struct Draft: Sendable, Hashable {
     /// The line to put in front of the words, or nothing. `""` and `nil` are one thing here —
     /// there is no such thing as a warning that says nothing.
     public let warning: String?
+    /// The post this answers, where it answers one.
+    ///
+    /// The whole post and not its address, because everything the sending needs is on it: which
+    /// server wrote it, that server's own number for it, and the audience this reply may not be
+    /// wider than. A draft carrying only an id would have to be handed the post again at every
+    /// step that asked one of those.
+    ///
+    /// **A reply goes to one account.** Every other draft may go to several — that is what "post
+    /// once" is — but a reply is an answer to somebody in one conversation, and sending it from
+    /// three accounts would be three people answering.
+    public let answering: Post?
 
-    public init(text: String, audience: Audience = .everyone, warning: String? = nil) {
+    public init(text: String, audience: Audience = .everyone, warning: String? = nil,
+                answering: Post? = nil) {
         self.text = text
-        self.audience = audience
-        let trimmed = (warning ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        self.warning = trimmed.isEmpty ? nil : trimmed
+        self.warning = { let trimmed = ($0 ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                         return trimmed.isEmpty ? nil : trimmed }(warning)
+        self.answering = answering
+        // Never wider than what it answers. A reply to a post only the people mentioned in it
+        // can read is not a post for everybody, whatever the composer was last set to — and a
+        // reader who widened it by accident would have handed somebody's private words to a
+        // timeline. Narrower is theirs to choose; wider is not.
+        self.audience = answering.flatMap { Audience.narrower(of: audience, $0.audience) } ?? audience
     }
 
     /// Whether there is anything to send. Whitespace is not a post.

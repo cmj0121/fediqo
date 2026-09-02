@@ -63,6 +63,7 @@ SHOTS=(
     "03-composer:timeline:FEDIQO_COMPOSE=1"
     "04-settings:settings:"
     "05-person:timeline:FEDIQO_PERSON=1"
+    "06-reply:timeline:FEDIQO_REPLY=1"
 )
 
 MACOS_APP=".build/xcode/Build/Products/Debug/Fediqo.app"

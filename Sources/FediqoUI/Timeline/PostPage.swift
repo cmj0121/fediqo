@@ -46,6 +46,16 @@ final class ThreadModel {
     /// The conversation in the order it is drawn: what is answered, the post, the answers.
     var inOrder: [Post] { conversation.ancestors + [conversation.post] + conversation.descendants }
 
+    /// An answer the reader has just sent, put where it belongs without asking anybody again.
+    ///
+    /// Only where it answers something in this conversation. A reply sent from the timeline to a
+    /// post that is not what this page is about belongs in somebody else's thread, and putting it
+    /// here would draw an answer under a post it is not an answer to.
+    func joined(by reply: Post) {
+        guard inOrder.contains(where: { $0.uri == reply.inReplyToURI }) else { return }
+        conversation = conversation.with(reply)
+    }
+
     /// The post the ring is on, which is what the keys act on while this page is open.
     var selected: Post? { inOrder.first { $0.mergeKey == selection } }
 

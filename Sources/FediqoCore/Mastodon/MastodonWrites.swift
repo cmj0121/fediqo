@@ -102,6 +102,17 @@ extension MastodonClient {
         // warning and it is empty, which is not the same as not being told.
         if let warning = draft.warning { fields["spoiler_text"] = warning }
 
+        // What it answers, by this server's own number for it (#87).
+        //
+        // The same finding every mark on a post goes through, and `fetching: false` on purpose:
+        // a reply to a post this server has never heard of is not something to fetch a stranger
+        // for. Where it cannot be found, the reply is refused rather than sent as a new post of
+        // its own — a post that was meant as an answer and arrives as an announcement is worse
+        // than one that did not arrive.
+        if let parent = draft.answering {
+            fields["in_reply_to_id"] = try await localId(of: parent, as: account, fetching: false).id
+        }
+
         let data = try await write("POST", "/api/v1/statuses", fields: fields, as: account,
                                    idempotency: Self.key(for: draft, as: account))
         let status = try Self.decoder.decode(MastodonDTO.Status.self, from: data)

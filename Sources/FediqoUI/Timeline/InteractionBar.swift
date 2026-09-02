@@ -79,11 +79,13 @@ struct InteractionBar: View {
     /// What everybody else did, with the numbers the servers gave us.
     private func theirs(within: CGFloat) -> some View {
         HStack(spacing: within) {
-            // Replying makes a new post rather than marking this one, and this app has no
-            // composer that can send one yet — so it still leaves, and says so by doing
-            // nothing else. When #8 lands it stops leaving and nothing else here changes.
+            // Replying makes a new post rather than marking this one, so for as long as this
+            // app had no composer that could send one, this control left for the server's own
+            // website. The comment here said it would stop leaving when #8 landed and that
+            // nothing else would change, and that is what happened: one call, and the bar is
+            // otherwise the bar it was (#87).
             counted("arrowshape.turn.up.left", count: counts.replies,
-                    labelKey: "post.reply", on: false, tint: .secondary) { hand() }
+                    labelKey: "post.reply", on: false, tint: .secondary) { app.reply(to: post) }
             counted("arrow.2.squarepath", count: counts.reblogs,
                     labelKey: "post.reblog", on: marks.reblogged == true, tint: .green,
                     sending: app.isActing(.reblog, on: post)) {
@@ -157,6 +159,9 @@ struct InteractionBar: View {
                    tint: tint, sending: sending, action: action)
     }
 
+    /// Opening the post where it lives. Not what the reply mark does any more — it is what
+    /// `MoreActions` offers under its own words, and it is left here because the row's menu is
+    /// not the only thing that may want it.
     private func hand() {
         guard let url = post.webURL else { return }
         openURL(url)
