@@ -50,6 +50,13 @@ struct AttachmentDeck: View {
     /// "there are more"; past that the edges stop being distinguishable anyway.
     private static let shown = 3
 
+    /// How far each one underneath steps out from the one above it.
+    ///
+    /// Half of `Space.tight`, and it is a named number on this view rather than a token
+    /// because it is not a gap between two things — it is the thickness of a sheet of paper,
+    /// and it belongs to this drawing and to nothing else (S8 allows exactly that).
+    private static let leaf: CGFloat = Space.tight / 2
+
     private var showing: Attachment? {
         attachments.isEmpty ? nil : attachments[top % attachments.count]
     }
@@ -79,22 +86,30 @@ struct AttachmentDeck: View {
 
     private var deck: some View {
         ZStack(alignment: .topLeading) {
-            // The ones underneath, offset by a few points each so the stack has a thickness.
-            // They are drawn as plain cards rather than as their own pictures: what is under
-            // the top one is not something the reader can see anyway, and loading three more
-            // images to show six points of each is a request nobody asked for.
+            // The ones underneath, offset by a couple of points each so the stack has a
+            // thickness. They are drawn as plain cards rather than as their own pictures:
+            // what is under the top one is not something the reader can see anyway, and
+            // loading three more images to show a few points of each is a request nobody
+            // asked for.
+            //
+            // **Paper under a photograph, not cards of their own** (#79). They used to step
+            // out four points each with a hairline around every one, which drew three
+            // bordered slabs beside the picture — a shape that competed with the picture for
+            // the eye, on every post with more than one attachment. Now they step out two,
+            // each fainter than the one above it, and none of them has a border insisting on
+            // itself. What a reader sees is the photograph; what the edges tell them is only
+            // that there are more.
             ForEach(0..<min(attachments.count - 1, Self.shown), id: \.self) { depth in
                 RoundedRectangle(cornerRadius: Radius.inner, style: .continuous)
                     .fill(Palette.raised(colorScheme))
-                    .overlay(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous)
-                        .strokeBorder(Palette.hairline(colorScheme)))
+                    .opacity(1 - Double(depth) * 0.3)
                     .frame(width: Self.side, height: Self.height)
-                    .offset(x: CGFloat(depth + 1) * Space.tight, y: CGFloat(depth + 1) * Space.tight)
+                    .offset(x: CGFloat(depth + 1) * Self.leaf, y: CGFloat(depth + 1) * Self.leaf)
             }
             top(showing)
         }
-        .frame(width: Self.side + CGFloat(min(attachments.count - 1, Self.shown)) * Space.tight,
-               height: Self.height + CGFloat(min(attachments.count - 1, Self.shown)) * Space.tight,
+        .frame(width: Self.side + CGFloat(min(attachments.count - 1, Self.shown)) * Self.leaf,
+               height: Self.height + CGFloat(min(attachments.count - 1, Self.shown)) * Self.leaf,
                alignment: .topLeading)
     }
 
