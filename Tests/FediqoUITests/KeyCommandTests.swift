@@ -231,6 +231,22 @@ struct CommandTests {
         #expect(listed?.keys == ["u"])
     }
 
+
+    /// **`Return` belongs to the draft.** This app's half of a composer that can hold more than
+    /// one line: while a draft has the keyboard, `Return` means nothing here and is handed back,
+    /// so whatever is in the field gets it. The other half is the field being a `TextEditor` —
+    /// a vertical `TextField` submits on `Return` rather than starting a paragraph, which is
+    /// what made a reader unable to write a second line.
+    @Test("Return in a draft is the draft's, not ours")
+    func returnBelongsToTheDraft() {
+        #expect(KeyCommand.from(KeyEquivalent.return.character, modifiers: [], typing: true) == nil)
+        #expect(!KeyCommand.handles(KeyEquivalent.return.character, modifiers: [],
+                                    typing: true) { _ in true })
+        // And outside a draft it is still what opens a post.
+        #expect(KeyCommand.from(KeyEquivalent.return.character, modifiers: [],
+                                typing: false) == .expandPost)
+    }
+
     @Test("⌃Tab goes round the four pages and comes back to where it started")
     func pagesRotateForwards() {
         let app = freshApp("pages-forwards")

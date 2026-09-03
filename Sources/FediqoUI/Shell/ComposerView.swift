@@ -141,17 +141,7 @@ struct ComposerView: View {
                     .fediqoCard(radius: Radius.inner, raised: false)
             }
 
-            TextField(t("compose.placeholder"), text: $draft, axis: .vertical)
-                .textFieldStyle(.plain)
-                .focused($typing)
-                .fediqoFont(TypeScale.small)
-                .padding(Space.mid)
-                // Into whatever the panel has left. The composer is most of the window now, and
-                // a field that stayed 72 points tall in it would be a small box with a field of
-                // empty card under it — which is what a corner panel had no room to be.
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .fediqoCard(radius: Radius.inner, raised: false)
-                .onChange(of: typing) { _, now in app.setTyping(now) }
+            field
 
             offered
             attached
@@ -160,6 +150,44 @@ struct ComposerView: View {
         }
         .padding(Space.pad)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    /// Where the post is written.
+    ///
+    /// **A `TextEditor` and not a `TextField(axis: .vertical)`**, which is the whole of why
+    /// `Return` did nothing: a vertical text field grows to fit what is typed into it, but the
+    /// key that would start a paragraph submits the field instead — so a reader writing more
+    /// than one line could not. `KeyCommand` has said all along that "`Return` starts a
+    /// paragraph and `j` is a letter"; this is the field finally agreeing with it.
+    ///
+    /// The placeholder is drawn rather than given, because a text editor has none. It is laid
+    /// out with the same insets as the text so the first character lands where the prompt was,
+    /// and it is not hittable — a press anywhere in the box belongs to the editor under it.
+    private var field: some View {
+        TextEditor(text: $draft)
+            .textEditorStyle(.plain)
+            // The card behind it is the app's, not the platform's default sheet of white.
+            .scrollContentBackground(.hidden)
+            .focused($typing)
+            .fediqoFont(TypeScale.small)
+            .padding(Space.mid)
+            // Into whatever the panel has left. The composer is most of the window now, and
+            // a field that stayed 72 points tall in it would be a small box with a field of
+            // empty card under it — which is what a corner panel had no room to be.
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .fediqoCard(radius: Radius.inner, raised: false)
+            .overlay(alignment: .topLeading) {
+                if draft.isEmpty {
+                    Text(t("compose.placeholder"))
+                        .fediqoFont(TypeScale.small)
+                        .foregroundStyle(.tertiary)
+                        .padding(Space.mid)
+                        // The editor's own inset, which a text field did not have.
+                        .padding(.leading, Space.hair)
+                        .allowsHitTesting(false)
+                }
+            }
+            .onChange(of: typing) { _, now in app.setTyping(now) }
     }
 
     // MARK: - the handle being typed (#98)
