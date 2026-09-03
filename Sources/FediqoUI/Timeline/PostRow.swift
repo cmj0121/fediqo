@@ -211,10 +211,7 @@ struct PostRow: View {
                 VStack(alignment: .leading, spacing: Space.step) {
                     words
                     if !post.attachments.isEmpty {
-                        // The shape the deck will draw at, so the box measured for it is the
-                        // box it fills. A card that took the picture's shape inside a box that
-                        // did not would be #95's fault again, in the other direction.
-                        sized(AttachmentDeck.shape(of: post.attachments.first)) { deck(in: $0) }
+                        sized { deck(in: $0) }
                     } else if let card = post.card {
                         sized { LinkCard(card: card, covered: mediaIsCovered, width: $0) }
                     }
@@ -554,11 +551,10 @@ struct PostRow: View {
     /// is measured. `Color.clear` at the card's own ratio is what makes the box hug — it takes
     /// the narrower of the row and `side`, and its height follows from that rather than being
     /// stated.
-    private func sized(_ shape: CGFloat = AttachmentDeck.ratio,
-                       @ViewBuilder card: @escaping (CGFloat) -> some View) -> some View {
+    private func sized(@ViewBuilder card: @escaping (CGFloat) -> some View) -> some View {
         Color.clear
             .frame(maxWidth: AttachmentDeck.side)
-            .aspectRatio(1 / shape, contentMode: .fit)
+            .aspectRatio(1 / AttachmentDeck.ratio, contentMode: .fit)
             .overlay { GeometryReader { room in card(room.size.width) } }
     }
 

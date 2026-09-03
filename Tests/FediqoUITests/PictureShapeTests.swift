@@ -4,82 +4,78 @@ import SwiftUI
 import FediqoCore
 @testable import FediqoUI
 
-/// What shape a picture is drawn at (#101, S10).
+/// How a picture goes into a row (#101, S10).
 ///
-/// The decision is that a card takes the picture's own shape within a bound, and that **nothing
-/// outside the bound is cut** — the card takes the nearest shape it is allowed and the picture is
-/// fitted into it. So a reader looking at a row and a reader looking at the opened picture are
-/// looking at the same photograph, which is the half of this that S5 would ask for anyway.
-@Suite("What shape a picture is drawn at")
+/// **Every row that carries one is the same height.** A timeline is a list somebody is going down,
+/// and a list whose rows are all different heights is one the eye has to re-find its place in on
+/// every post. So the card is one shape whatever shape the picture is, the picture is scaled to
+/// fill it and cut where it does not fit — never stretched — and where enough was lost to matter
+/// the row says so rather than passing off the middle of somebody's photograph as the whole of it.
+@Suite("How a picture goes into a row")
 @MainActor
 struct PictureShapeTests {
     private func picture(_ width: Int?, _ height: Int?) -> FediqoCore.Attachment {
         FediqoCore.Attachment(kind: .image, url: URL(string: "https://one.example/p.png"),
-                   previewURL: URL(string: "https://one.example/p.png"), alt: "",
-                   width: width, height: height)
+                              previewURL: URL(string: "https://one.example/p.png"), alt: "",
+                              width: width, height: height)
     }
 
-    // MARK: - the shape a server sent
+    // MARK: - one height
 
-    @Test("A landscape photograph is drawn landscape, and a portrait one portrait")
-    func itTakesTheShapeItWasGiven() {
-        let landscape: CGFloat = AttachmentDeck.shape(of: picture(1600, 900))
-        let portrait: CGFloat = AttachmentDeck.shape(of: picture(1000, 1200))
-        #expect(landscape == CGFloat(900) / CGFloat(1600))
-        #expect(portrait == CGFloat(1.2))
+    /// The whole of what was asked for: a row with a picture is a row with a picture, whatever
+    /// the picture is. Asserted on the number every card is drawn from, because there is only one
+    /// of it — a card that read the picture's shape would be a second number by another name.
+    @Test("Every card is the same shape, whatever it holds")
+    func onecardShape() {
+        #expect(AttachmentDeck.ratio == 0.68)
+        #expect(AttachmentDeck.height == AttachmentDeck.side * AttachmentDeck.ratio)
     }
 
-    /// The two shapes that would break a row: a slit nobody can see, and a card taller than the
-    /// screen with the words above it pushed off the top.
-    @Test("A shape past the bound is held at the bound")
-    func theBoundHolds() {
-        #expect(AttachmentDeck.shape(of: picture(4000, 500)) == AttachmentDeck.shapes.lowerBound)
-        #expect(AttachmentDeck.shape(of: picture(1080, 1920)) == AttachmentDeck.shapes.upperBound)
+    // MARK: - what is lost, and when it is worth saying
+
+    /// How much of a picture survives the cut, as the share of its longer dimension still on the
+    /// screen. One is a picture the card's own shape; the further from the card, the less of it.
+    @Test("A picture the card's own shape loses nothing")
+    func thecardsOwnShapeLosesNothing() {
+        #expect(AttachmentDeck.shown(of: picture(1000, 680)) == 1)
+        #expect(!AttachmentDeck.cuts(picture(1000, 680)))
     }
 
-    /// **A row is a row.** The tallest a card gets is about a square and a quarter, because a
-    /// timeline is a list somebody is going down and one post taking the whole of it is one post
-    /// deciding how much of their reading it gets.
-    @Test("The tallest a row can be is still plainly a row")
-    func arowStaysARow() {
-        #expect(AttachmentDeck.shapes.upperBound == 1.25)
-        // A 9:16 screenshot, which is the shape that started this: cut to the bound rather than
-        // drawn at 1.78 of the card's width.
-        #expect(AttachmentDeck.shape(of: picture(1080, 1920)) == 1.25)
+    /// The shapes a camera makes, in the order of how much they cost. A 3:2 photograph loses a
+    /// hair; a phone screenshot loses most of itself.
+    @Test("The further from the card, the less of the picture is left")
+    func thefurtherTheLess() {
+        let threeByTwo = AttachmentDeck.shown(of: picture(3000, 2000))
+        let square = AttachmentDeck.shown(of: picture(1000, 1000))
+        let screenshot = AttachmentDeck.shown(of: picture(1080, 1920))
+
+        #expect(threeByTwo > square)
+        #expect(square > screenshot)
+        #expect(screenshot < 0.5)
     }
 
-    /// The other half of cutting one: the row says there is more, so it is not claiming that
-    /// the middle of somebody's photograph is the whole of it (S5).
-    @Test("A picture the card had to cut is marked, and one it did not is not")
-    func cuttingIsSaid() {
+    /// A mark on every picture would be noise standing where a fact should be, so it is drawn
+    /// where something was actually lost.
+    @Test("A picture is marked when enough of it is gone, and not before")
+    func markedWhenEnoughIsGone() {
+        #expect(!AttachmentDeck.cuts(picture(3000, 2000)))
+        #expect(!AttachmentDeck.cuts(picture(1600, 900)))
+        #expect(AttachmentDeck.cuts(picture(1000, 1000)))
         #expect(AttachmentDeck.cuts(picture(1080, 1920)))
         #expect(AttachmentDeck.cuts(picture(4000, 500)))
-        #expect(!AttachmentDeck.cuts(picture(1000, 1250)))
-        #expect(!AttachmentDeck.cuts(picture(1600, 900)))
-        // Nothing to cut and nothing to say where nobody sent a shape: the card has its own.
-        #expect(!AttachmentDeck.cuts(picture(nil, nil)))
-    }
-
-    /// The ordinary photographs are inside it, which is what makes the bound a bound rather than
-    /// a second fixed shape.
-    @Test("The shapes a camera makes are inside the bound")
-    func theOrdinaryOnesAreTrue() {
-        for (width, height) in [(3, 2), (16, 9), (4, 3), (4, 5), (1, 1)] {
-            let wanted = CGFloat(height) / CGFloat(width)
-            #expect(AttachmentDeck.shape(of: picture(width * 400, height * 400)) == wanted,
-                    "\(width):\(height) should be drawn true")
-        }
+        #expect(AttachmentDeck.mostOfIt == 0.8)
     }
 
     // MARK: - the shape nobody sent
 
-    /// A server that did not say has not said square, and it has not said anything else either.
-    /// The card has its own shape then, which is what this app did before it could know better.
-    @Test("A shape nobody sent leaves the card its own")
-    func silenceLeavesTheCardItsOwn() {
-        #expect(AttachmentDeck.shape(of: picture(nil, nil)) == AttachmentDeck.ratio)
+    /// A server that did not say has not said anything, so there is nothing to claim was lost.
+    /// The picture fills the card as it always did, and the row says nothing about it.
+    @Test("A shape nobody sent is not a picture anybody can say was cut")
+    func silenceIsNotALoss() {
+        #expect(AttachmentDeck.shown(of: picture(nil, nil)) == 1)
+        #expect(!AttachmentDeck.cuts(picture(nil, nil)))
         let nothing: FediqoCore.Attachment? = nil
-        #expect(AttachmentDeck.shape(of: nothing) == AttachmentDeck.ratio)
+        #expect(!AttachmentDeck.cuts(nothing))
     }
 
     /// Half a shape is not a shape, and a zero is a server that said something useless rather
@@ -90,26 +86,14 @@ struct PictureShapeTests {
         #expect(picture(nil, 900).aspect == nil)
         #expect(picture(1600, 0).aspect == nil)
         #expect(picture(0, 900).aspect == nil)
-        #expect(AttachmentDeck.shape(of: picture(1600, 0)) == AttachmentDeck.ratio)
+        #expect(!AttachmentDeck.cuts(picture(1600, 0)))
     }
 
-    /// Height over width, the same terms the card's own shape is written in, so the two can be
-    /// compared without anybody remembering which way round they are.
-    @Test("The aspect is height over width, as the card's own shape is")
+    /// Height over width, the same terms the card is written in, so the two can be compared
+    /// without anybody remembering which way round they are.
+    @Test("The aspect is height over width, as the card is")
     func aspectIsHeightOverWidth() {
         #expect(picture(1000, 680).aspect == 0.68)
         #expect(AttachmentDeck.ratio == 0.68)
-    }
-
-    // MARK: - what is never done
-
-    /// The rule S10 exists for: a card takes the shape it can, and where it cannot it says so
-    /// rather than passing off the middle of somebody's photograph as the whole of it.
-    @Test("A picture inside the bound is not cut at all")
-    func insideTheBoundNothingIsCut() {
-        // Card shape and picture shape are one number, so there is nothing to crop away.
-        let portrait = picture(1000, 1250)
-        #expect(AttachmentDeck.shape(of: portrait) == portrait.aspect)
-        #expect(!AttachmentDeck.cuts(portrait))
     }
 }

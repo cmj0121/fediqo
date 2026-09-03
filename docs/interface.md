@@ -137,31 +137,33 @@ scale**. The part that is a picture is not: a picture is the size it is at every
 What this rule forbids is a screen that knows how wide it is. Adding a screen is not adding a boolean, and a
 new device is not a new threshold.
 
-## S10 — A picture is the shape it is
+## S10 — A row with a picture is one height
 
-A card takes the picture's own shape, within a bound. It does not cut a picture to a shape this app chose.
+Every row that carries a picture is the same height as every other. The picture is scaled to fill that
+and cut where it does not fit, and the row says when enough was lost to matter.
 
-A photograph has a shape because somebody framed it that way, and a card of a fixed shape keeps the middle of
-it — which is not where a subject reliably is. A portrait photograph in a landscape card loses its top and its
-bottom, and the reader is left deciding whether to open something they have not been shown.
+A timeline is a list somebody is going down. A list whose rows are all different heights is one the eye
+has to re-find its place in on every post, and one tall photograph decides how much of somebody's
+reading it gets. So the card is one shape — `AttachmentDeck.ratio` — whatever shape the picture is.
 
-Mastodon sends `meta.original.width` and `height` for every attachment. Where a server said, the card is that
-shape. Where it said nothing, the card has its own shape and fills it, which is what this app did before it
-could know any better.
+**Scaled, never stretched.** A picture keeps its own proportions and is made big enough to cover the
+card; what falls outside is cut. A picture squashed to fit would be a different picture, which is the
+one thing that is not allowed here.
 
-The bound is `AttachmentDeck.shapes`, and it exists because **a row is a row**: an 8:1 panorama would be a slit
-nobody can see, a 9:16 screenshot a card taller than the screen, and a timeline is a list somebody is going
-down — one post that takes the whole of it is one post deciding how much of their reading it gets. Between the
-bounds a picture is drawn true, and 4:5 and 16:9 are both inside.
+**And where it is cut, the row says so.** Mastodon sends `meta.original.width` and `height`, and this
+app keeps them, so a row knows what it is not showing: below `AttachmentDeck.mostOfIt` a mark says
+there is more, and what the mark means is *open it*. Above it, what was trimmed is the edge of a
+photograph rather than a piece of it — a 3:2 photograph loses a hair in this card, and a mark on every
+picture would be noise standing where a fact should be. Saying it is what S5 would ask for anyway: a
+row showing the middle of somebody's photograph and saying nothing is a row inventing what the picture
+is.
 
-**Outside the bound the picture is cut, and the row says so.** The card takes the nearest shape it is allowed
-and the picture fills it; a mark says there is more, and what the mark means is *open it*. Cutting rather than
-letter-boxing, because letter-boxing spends the same row height on ground: a 9:16 screenshot inside a 1.25
-card is a small picture with bars above and below, which is neither the whole photograph nor a legible piece
-of one. Saying so is the half of this rule S5 would ask for anyway — a row that showed a third of a picture
-and said nothing would be inventing what the picture is.
+A row with no picture is still as tall as its words. This rule is about the rows that carry one; S6 is
+still what says a row is bounded rather than uniform, and nothing pads a two-line post up to the height
+of a photograph.
 
-What this rule forbids is a screen deciding what part of somebody's photograph is the important part.
+What this rule forbids is a list that moves under the reader, and a screen that quietly passes off part
+of somebody's photograph as the whole of it.
 
 ## When a rule is in the way
 

@@ -74,7 +74,7 @@ struct AttachmentDeck: View {
     /// What this deck is actually drawn at: the reserved column's width, or the room it was
     /// given where that is narrower. One place, so the six frames below cannot disagree.
     private var side: CGFloat { min(width ?? Self.side, Self.side) }
-    private var height: CGFloat { side * Self.shape(of: showing) }
+    private var height: CGFloat { side * Self.ratio }
     /// What the top card is drawn at, which is the whole of it where there is nothing under it.
     ///
     /// The deck used to frame itself `side + overhang` across while every caller reserved `side`
@@ -86,46 +86,36 @@ struct AttachmentDeck: View {
     static func faceSide(under count: Int, on side: CGFloat) -> CGFloat {
         side - overhang(under: count, on: side)
     }
-    private var faceHeight: CGFloat { faceSide * Self.shape(of: showing) }
+    private var faceHeight: CGFloat { faceSide * Self.ratio }
     static var height: CGFloat { side * ratio }
-    /// The shape of a card where nobody said what shape the picture is, kept apart from its size
-    /// so that a narrower one is the same shape.
+    /// The shape of every card, kept apart from its size so that a narrower one is the same shape.
     ///
-    /// **A fallback now rather than the rule** (#101). A card takes the picture's own shape where
-    /// the server said one; this is what it does when the server said nothing, which is every
-    /// attachment written down before migration 015 and every server that does not send `meta`.
+    /// **One shape, and not the picture's own.** A timeline is a list somebody is going down, and
+    /// a list whose rows are all different heights is one the eye has to re-find its place in on
+    /// every post. So every row that carries a picture is the same height as every other, and the
+    /// picture is scaled to fill that and cut where it does not fit — never stretched, which is
+    /// the one thing that would make it a different picture.
+    ///
+    /// A row with no picture is still as tall as its words. S6 is about a row being bounded rather
+    /// than uniform, and nothing here pads a two-line post up to the height of a photograph.
     static let ratio: CGFloat = 0.68
 
-    /// The shapes a card is allowed to be, as height over width.
-    ///
-    /// Bounded because **a row is a row**: an 8:1 panorama would be a slit nobody can see, and a
-    /// 9:16 screenshot a card taller than the screen it is drawn on, with the words above it
-    /// pushed off the top. A timeline is a list somebody is going down, and one post that takes
-    /// the whole of it is one post deciding how much of their reading it gets.
-    ///
-    /// The upper end is 1.25 rather than the 1.5 it first was, which was measured rather than
-    /// argued: 1.5 of a 350-point row on a phone is 525 points of picture, most of a screen, for
-    /// one post. At 1.25 a 4:5 portrait is drawn true and the tallest row is about a square card
-    /// and a quarter — still plainly a row.
-    ///
-    /// **Outside them the picture is cut**, and the row says so — see `moreThanFits`. It is cut
-    /// rather than fitted because the alternative keeps the same row height and spends it on
-    /// ground: a 9:16 screenshot letter-boxed into a 1.25 card is a small picture with bars
-    /// above and below, which is neither the whole photograph nor a legible piece of one.
-    static let shapes: ClosedRange<CGFloat> = 0.5...1.25
-
-    /// Whether the card had to cut this to fit the shapes a row allows.
-    static func cuts(_ attachment: Attachment?) -> Bool {
-        guard let aspect = attachment?.aspect else { return false }
-        return !shapes.contains(aspect)
+    /// How much of a picture survives being cut to the card, as the share of its longer dimension
+    /// that is still on the screen. 1 is a picture the card's own shape, and the further from it
+    /// the more was lost.
+    static func shown(of attachment: Attachment?) -> CGFloat {
+        guard let aspect = attachment?.aspect, aspect > 0 else { return 1 }
+        return min(ratio, aspect) / max(ratio, aspect)
     }
 
-    /// What shape a card is for what is on it: the picture's own, held inside `shapes`, or the
-    /// card's own where the server never said.
-    static func shape(of attachment: Attachment?) -> CGFloat {
-        guard let aspect = attachment?.aspect else { return ratio }
-        return min(max(aspect, shapes.lowerBound), shapes.upperBound)
-    }
+    /// Below this, the row says there is more. Above it, what was trimmed is the edge of a
+    /// photograph rather than a piece of it — a 3:2 photograph in this card loses a hair, and a
+    /// mark on every picture in the timeline would be noise standing where a fact should be.
+    static let mostOfIt: CGFloat = 0.8
+
+    /// Whether enough was cut to be worth saying so.
+    static func cuts(_ attachment: Attachment?) -> Bool { shown(of: attachment) < mostOfIt }
+
     /// How many of the ones underneath are drawn behind the top card. Three is enough to say
     /// "there are more"; past that the edges stop being distinguishable anyway.
     private static let shown = 3
