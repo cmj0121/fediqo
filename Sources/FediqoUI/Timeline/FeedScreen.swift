@@ -557,7 +557,9 @@ private struct RingedRow: View {
 /// Nothing is drawn here. It is a view because that is what it takes to have a body of one's
 /// own, which is the whole point: what these watch changes twenty times a second under a held
 /// key, and what is rebuilt for it should be this and not a timeline.
-private struct ScrollDirector: View {
+/// Not private: the page about somebody is a list with the same ring in it, and a reader taken
+/// to the ring on one screen and left behind it on the other has learned two things (#94).
+struct ScrollDirector: View {
     let place: FeedPlace
     let proxy: ScrollViewProxy
 

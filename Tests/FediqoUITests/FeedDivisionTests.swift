@@ -51,7 +51,7 @@ struct FeedDivisionTests {
     func thePlaceAnswersAlone() {
         let posts = list("division-place")
         posts.show([a, b, c])
-        let place = FeedPlace(posts: posts, preferences: Preferences(defaults: scratch("division-place")))
+        let place = FeedPlace(rows: posts)
 
         #expect(place.moveSelection(by: 1))
         #expect(place.selectedPost?.uri == "a")

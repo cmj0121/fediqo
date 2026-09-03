@@ -74,6 +74,13 @@ final class PersonModel {
     private(set) var following = false
     private(set) var failure: SourceFailure?
 
+    /// Where the reader is standing among what this person wrote — the same ring the timeline
+    /// has, in the same object, so `j` and `k` mean here what they mean there (#94).
+    ///
+    /// Built after `self`, because the ring reads its rows back off this model. `lazy` rather
+    /// than a second stored list: there is one list of posts and the ring names a key in it.
+    @ObservationIgnored lazy var place = FeedPlace(rows: self)
+
     private let client: any SourceClient
     private let acting: () async -> ActingAccount?
     /// Told when a follow has landed, so that home stops being answered by what it said before
@@ -169,4 +176,22 @@ final class PersonModel {
     /// "nobody is signed in" and "the server has never heard of them" — the control offers to
     /// follow in either case, and following is what resolves the second.
     var hasRelationship: Bool { known && relationship != nil }
+}
+
+/// A page about somebody, as a list a ring can stand in.
+///
+/// Their own posts, unfiltered. The reader's two switches are what they want their timeline to
+/// be; a page about one person showing eleven of their nineteen posts because eight were boosts
+/// would be this app deciding what somebody's page is.
+extension PersonModel: RingRows {
+    func ringRows() -> (posts: [Post], index: [String: Int]) {
+        var index: [String: Int] = [:]
+        index.reserveCapacity(posts.count)
+        for (position, post) in posts.enumerated() where index[post.mergeKey] == nil {
+            index[post.mergeKey] = position
+        }
+        return (posts, index)
+    }
+
+    func landable(_ joining: [Post]) -> [Post] { joining }
 }

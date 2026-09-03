@@ -187,3 +187,19 @@ final class FeedPosts {
         showing(result.posts.filter { !gone.contains($0.mergeKey) })
     }
 }
+
+/// A timeline, as a list a ring can stand in.
+///
+/// The rows are what the reader's two switches leave, and what the ring may land on is the same
+/// question asked of a page that has not been merged in yet.
+extension FeedPosts: RingRows {
+    func ringRows() -> (posts: [Post], index: [String: Int]) {
+        let shown = rules()
+        return (shown.posts, shown.index)
+    }
+
+    func landable(_ joining: [Post]) -> [Post] {
+        TimelineLoader.apply(showBoosts: preferences.showBoosts,
+                             mediaOnly: preferences.showMediaOnly, to: joining)
+    }
+}

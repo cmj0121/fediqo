@@ -1111,6 +1111,10 @@ public final class AppState {
         // While a post is open, the keys belong to the conversation in front of the reader.
         // Moving the ring in the list behind it would be moving something they cannot see.
         if let thread { return thread.move(by: steps) }
+        // A page about somebody is a list of posts standing over the timeline, and the keys
+        // belong to what is in front of the reader. Moving the ring in the list behind it
+        // would be moving something they cannot see (#94).
+        if let person { return person.place.moveSelection(by: steps) }
         guard let feed = readingFeed else { return false }
         let moved = feed.moveSelection(by: steps)
         // Held down, `j` repeats twenty times a second against a ring that is still at the
@@ -1396,7 +1400,7 @@ public final class AppState {
     /// post is open, and the one in the list otherwise. Every key that acts on "this post"
     /// asks here, so none of them can disagree about which post that is.
     private var postUnderTheRing: Post? {
-        thread?.selected ?? readingFeed?.selectedPost
+        thread?.selected ?? person?.place.selectedPost ?? readingFeed?.selectedPost
     }
 
     /// Back to the top of the feed being read. The screen does the scrolling; what happens

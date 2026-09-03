@@ -27,7 +27,7 @@ final class FeedModel {
 
     init(timeline: Timeline, preferences: Preferences, loader: TimelineLoader = TimelineLoader()) {
         let posts = FeedPosts(timeline: timeline, preferences: preferences)
-        let place = FeedPlace(posts: posts, preferences: preferences)
+        let place = FeedPlace(rows: posts)
         self.posts = posts
         self.place = place
         self.paging = FeedPaging(posts: posts, place: place, loader: loader)
