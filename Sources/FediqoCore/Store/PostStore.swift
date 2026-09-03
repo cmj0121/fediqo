@@ -698,6 +698,46 @@ extension LocalStore {
         "updated_at = CASE WHEN \(unchanged) THEN updated_at ELSE excluded.created_at END"
     }
 
+    /// People met somewhere that is not a post (#90).
+    ///
+    /// Everybody in `accounts` until now arrived by writing something this device read — the
+    /// author of a post, upserted alongside it. A follower list is full of people who have
+    /// written nothing this device has ever seen, and they are the first rows to arrive from a
+    /// source that is not a post.
+    ///
+    /// Written the way a sighting writes one, so a fuller sighting later fills in what this one
+    /// left blank and a blank never erases what a fuller one wrote. The server they were seen on
+    /// is recorded too — a foreign key without it would be refused, and it is true besides: it is
+    /// the server that told us about them.
+    public func saw(_ people: [Profile], on server: Server, now: Date = Date()) async throws {
+        guard !people.isEmpty else { return }
+        let ms = Self.milliseconds(now)
+        let endpoint = server.endpoint
+        let title = server.title
+        try await write { db in
+            try Self.upsertServer(db, ServerRow(url: endpoint, proto: SocialProtocol.mastodon.rawValue,
+                                                title: title), now: ms)
+            for person in people {
+                // Empty is nothing here, not a value. The upsert's rule is that a NULL never
+                // erases what a fuller sighting wrote — and an empty string is not a NULL, so a
+                // sighting that knew no name would have written the blank over the name. Found
+                // by the test that says a blanker sighting does not erase a fuller one.
+                try Self.upsertAccount(db, AccountRow(id: person.authorId,
+                                                      proto: SocialProtocol.mastodon.rawValue,
+                                                      serverURL: endpoint,
+                                                      handle: Self.something(person.handle),
+                                                      displayName: Self.something(person.name),
+                                                      avatarURL: person.avatarURL?.absoluteString),
+                                       now: ms)
+            }
+        }
+    }
+
+    /// A value, or nothing where there is nothing. What the upserts below mean by NULL.
+    private static func something(_ text: String) -> String? {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : text
+    }
+
     static func upsertServer(_ db: Database, _ server: ServerRow, now: Int64) throws {
         // A title fills in once known and is never blanked; selected_at and position are local
         // and never touched here.

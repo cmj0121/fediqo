@@ -26,6 +26,18 @@ struct PersonSubject: Hashable, Identifiable {
 
     var id: String { "\(host)|\(handle)" }
 
+    /// From a row in one of somebody's lists (#90), where there is no post — which is the new
+    /// thing about those lists: everybody this app had seen until now arrived by writing
+    /// something. `host` is whose list they were found in, and so the server their page asks.
+    init(profile: Profile, host: String) {
+        self.handle = profile.handle
+        self.host = host
+        self.authorId = profile.authorId
+        self.name = profile.name
+        self.avatarURL = profile.avatarURL
+        self.emojis = profile.emojis
+    }
+
     init(post: Post) {
         self.handle = post.authorHandle
         self.host = URL(string: post.sourceURL)?.host() ?? ""

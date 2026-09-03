@@ -92,3 +92,50 @@ public struct Relationship: Sendable, Hashable {
     /// is a withdrawal, which Mastodon takes on the same `unfollow` it takes for a real one.
     public var isOn: Bool { following || requested }
 }
+
+/// A list of people, and which list it is.
+///
+/// The two are one screen with one difference, and the difference is worth naming rather than
+/// carrying as a `Bool`: a caller writing `people(true, of:)` is a caller nobody can read.
+public enum People: Sendable, Hashable {
+    public enum Kind: String, Sendable, Hashable, CaseIterable, Identifiable {
+        /// The people this person follows.
+        case following
+        /// The people who follow them.
+        case followers
+
+        public var id: String { rawValue }
+        /// What Mastodon calls it in an address. The same word, and said here so that a screen
+        /// naming the list and a request asking for it cannot come to disagree.
+        public var path: String { rawValue }
+    }
+
+    /// Why a list is empty, which is not a thing a list can say about itself.
+    ///
+    /// Somebody who has asked their server not to publish their network is answered with an empty
+    /// array and a 200, exactly as somebody who follows nobody is — the endpoint cannot tell them
+    /// apart and neither can the profile. What can is the count beside it: a server that publishes
+    /// *89 followers* and then hands over none of them has been told not to.
+    ///
+    /// S5 lives here. Drawing "nobody" over a hidden list would be this app inventing a fact about
+    /// somebody, and drawing "hidden" over a genuinely empty one would be inventing a different
+    /// one — so a count nobody sent leaves this `unknown` rather than picking.
+    public enum Reason: Sendable, Hashable {
+        /// There are people, and here they are.
+        case some
+        /// The server published a count above zero and handed over nobody: they have chosen not
+        /// to publish this list.
+        case withheld
+        /// The server published a count of zero, so the list is empty because it is empty.
+        case none
+        /// No count was sent, so why the list is empty is not something this device knows.
+        case unknown
+    }
+
+    /// Which of the four an empty list is, given what the profile says about it.
+    public static func reason(forEmpty kind: Kind, on profile: Profile?) -> Reason {
+        let count = kind == .following ? profile?.following : profile?.followers
+        guard let count else { return .unknown }
+        return count > 0 ? .withheld : .none
+    }
+}

@@ -36,6 +36,13 @@ struct PersonPage: View {
         }
         .background(Palette.surface(colorScheme))
         .task { await model.read() }
+        // A run told to open one of the two lists does it once the page has an id to ask by.
+        // The same shape every other launch variable has, and the same reason (#30).
+        .task(id: model.profile?.id) {
+            guard let kind = app.openingPeople, app.people == nil, model.profile != nil
+            else { return }
+            app.openPeople(kind)
+        }
     }
 
     // MARK: - the way back
@@ -154,12 +161,27 @@ struct PersonPage: View {
         if !numbers.isEmpty {
             HStack(spacing: Space.betweenGroups) {
                 ForEach(numbers, id: \.1) { count, key in
-                    VStack(alignment: .leading, spacing: Space.hair) {
-                        Text(count, format: .number)
-                            .fediqoFont(TypeScale.lead, weight: .semibold)
-                            .contentTransition(.numericText())
-                        Text(t(key)).fediqoFont(TypeScale.caption).foregroundStyle(.secondary)
+                    // Two of the three are the way out to a list, and the count is the control:
+                    // it is already the words for it, and a button beside it saying "Followers"
+                    // again would be the same label twice. The posts count is not a way anywhere
+                    // — the posts are on this page already.
+                    let kind: People.Kind? = switch key {
+                    case "person.followers": .followers
+                    case "person.following": .following
+                    default: nil
                     }
+                    Button { if let kind { app.openPeople(kind) } } label: {
+                        VStack(alignment: .leading, spacing: Space.hair) {
+                            Text(count, format: .number)
+                                .fediqoFont(TypeScale.lead, weight: .semibold)
+                                .contentTransition(.numericText())
+                            Text(t(key)).fediqoFont(TypeScale.caption)
+                                .foregroundStyle(kind == nil ? .secondary : Palette.accent)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(kind == nil || model.profile == nil)
                 }
             }
         }

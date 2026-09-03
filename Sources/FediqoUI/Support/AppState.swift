@@ -109,6 +109,9 @@ struct LaunchOptions {
     /// reply is a different screen from the composer as a new post, and a screen that cannot be
     /// photographed is a screen nobody looks at.
     var openingReply = false
+    /// Which of a person's two lists to open, where a run was told to open one. A screen reached
+    /// only by pressing something cannot be photographed where nothing may press (#30).
+    var openingPeople: People.Kind?
     /// Which language to draw in, whatever the machine is set to. A screenshot run needs both,
     /// one after the other, and neither of them is whatever the person at the keyboard chose.
     var language: AppLanguage?
@@ -160,6 +163,7 @@ struct LaunchOptions {
         options.openingPost = environment["FEDIQO_OPEN"]
         options.openingPerson = environment["FEDIQO_PERSON"] == "1"
         options.openingReply = environment["FEDIQO_REPLY"] == "1"
+        options.openingPeople = environment["FEDIQO_PEOPLE"].flatMap(People.Kind.init(rawValue:))
         options.fixture = environment["FEDIQO_FIXTURE"] == "1"
         options.language = environment["FEDIQO_LANGUAGE"].flatMap(AppLanguage.init(rawValue:))
         options.shootTo = environment["FEDIQO_SHOOT"]
@@ -264,6 +268,8 @@ public final class AppState {
     let openingPerson: Bool
     /// Whether this run opens the composer as an answer to the first post it is given.
     let openingReply: Bool
+    /// Which of a person's lists this run opens, where it opens one.
+    let openingPeople: People.Kind?
     /// The conversations being read, oldest first, empty while the reader is in the list.
     ///
     /// A stack rather than one, because a conversation is a place a reader walks *into*.
@@ -292,6 +298,8 @@ public final class AppState {
     /// author is a walk this page can support later, and a stack held for a walk nobody has asked
     /// for is state that can be wrong for no benefit. A second opening replaces the first.
     private(set) var person: PersonModel?
+    /// One of that person's two lists, over their page. One at a time, like the page itself.
+    private(set) var people: PeopleListModel?
     /// How many times the reader has asked the deck on the selected row to turn over.
     private(set) var mediaTurns = 0
     /// The same, for asking it to play. Two counters rather than one command with an argument,
@@ -507,6 +515,7 @@ public final class AppState {
         self.openingPost = launch.openingPost
         self.openingPerson = launch.openingPerson
         self.openingReply = launch.openingReply
+        self.openingPeople = launch.openingPeople
         self.marketingVersion = marketingVersion
         self.buildVersion = buildVersion
         // The language before the first frame, not after it: a screenshot is taken of what was
@@ -1199,8 +1208,45 @@ public final class AppState {
         }
     }
 
-    /// Closes it, leaving whatever was underneath exactly as it was.
-    func closePerson() { person = nil }
+    /// Closes it, leaving whatever was underneath exactly as it was. The list over it goes with
+    /// it: a list of somebody's followers with nobody's page under it is a screen about nobody.
+    func closePerson() {
+        people = nil
+        person = nil
+    }
+
+    /// Opens somebody found in one of these lists, rather than on a post.
+    ///
+    /// A row in a follower list carries everything a subject needs and no post — which is the new
+    /// thing about these lists: everybody in `accounts` until now arrived by writing something
+    /// this device read. The host is the one whose list they were found in, which is the server
+    /// the page will ask about them, and is a server the reader already reads.
+    func openPerson(_ person: Profile, from host: String) {
+        guard let client = registry.client(for: .mastodon) else { return }
+        let subject = PersonSubject(profile: person, host: host)
+        guard self.person?.subject != subject else { return }
+        people = nil
+        self.person = PersonModel(subject: subject, client: client) { [weak self] in
+            await self?.publishing()
+        } changed: { [weak self] in
+            await self?.homeChanged()
+        }
+    }
+
+    /// Opens one of the open person's two lists.
+    ///
+    /// Their id on the server being asked comes from the profile that page has already read — the
+    /// lists are addressed by it, and there is no asking for them before the page has answered.
+    func openPeople(_ kind: People.Kind) {
+        guard let person, let profile = person.profile,
+              let client = registry.client(for: .mastodon) else { return }
+        people = PeopleListModel(kind: kind, subject: person.subject, profile: profile,
+                                 id: profile.id, client: client, store: store) { [weak self] in
+            await self?.publishing()
+        }
+    }
+
+    func closePeople() { people = nil }
 
     /// Following somebody changed what the home timeline is, so home stops being answered.
     ///

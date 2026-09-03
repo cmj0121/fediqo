@@ -55,6 +55,32 @@ extension MastodonClient {
                         query: [URLQueryItem(name: "exclude_replies", value: "true")])
     }
 
+    /// Who somebody follows, or who follows them, as one server holds it (#90).
+    ///
+    /// **A hidden list and an empty one come back the same**, and that is the endpoint's doing:
+    /// somebody who has asked their server not to publish their network gets an empty array and a
+    /// 200, exactly as somebody who follows nobody does. Nothing in the profile says which it is
+    /// either.
+    ///
+    /// So this hands back what it was given and says nothing about why. Telling the two apart is
+    /// done where both facts are in hand — a `Profile` carries the count the server publishes, and
+    /// **a count above zero beside an empty list is somebody who has chosen not to publish it**.
+    /// That is an inference and it is drawn once, in `People.reason`, rather than guessed at by
+    /// whoever draws a screen.
+    ///
+    /// `before` is the last row of the page before, and its id is that server's own — the same
+    /// cursor rule every page in this app follows.
+    public func people(_ kind: People.Kind, of id: String, host rawHost: String, limit: Int,
+                       before: Profile?, token: String?) async throws -> [Profile] {
+        let host = Server.normalise(rawHost)
+        var query = [URLQueryItem(name: "limit", value: String(limit))]
+        if let before { query.append(URLQueryItem(name: "max_id", value: before.id)) }
+        let data = try await get(host: host, path: "/api/v1/accounts/\(id)/\(kind.path)",
+                                 query: query, token: token)
+        return try Self.decoder.decode([MastodonDTO.Account].self, from: data)
+            .map { $0.asProfile(on: host) }
+    }
+
     /// What the reader is to somebody, asked of the reader's own server and of nothing else.
     ///
     /// Two requests and both of them local: the lookup above, which does not fetch, and then

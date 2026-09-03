@@ -64,6 +64,7 @@ SHOTS=(
     "04-settings:settings:"
     "05-person:timeline:FEDIQO_PERSON=1"
     "06-reply:timeline:FEDIQO_REPLY=1"
+    "07-people:timeline:FEDIQO_PERSON=1 FEDIQO_PEOPLE=following"
 )
 
 MACOS_APP=".build/xcode/Build/Products/Debug/Fediqo.app"
@@ -155,11 +156,17 @@ ios() {
                 IFS=: read -r name rail extra <<< "$shot"
                 say "  ios/$locale/$index-$name"
                 xcrun simctl terminate "$udid" "$BUNDLE_ID" >/dev/null 2>&1 || true
+                # Every one of them prefixed, not the first. `simctl` passes a variable to the
+                # app only under `SIMCTL_CHILD_`, and `SIMCTL_CHILD_$extra` prefixes exactly one
+                # word — so a screen needing two launch variables silently got one of them, and
+                # the picture would have been of some other screen entirely.
+                local child=()
+                for one in $extra; do child+=("SIMCTL_CHILD_$one"); done
                 env SIMCTL_CHILD_FEDIQO_FIXTURE=1 \
                     SIMCTL_CHILD_FEDIQO_ROUTE=shell \
                     SIMCTL_CHILD_FEDIQO_RAIL="$rail" \
                     SIMCTL_CHILD_FEDIQO_LANGUAGE="$language" \
-                    ${extra:+SIMCTL_CHILD_$extra} \
+                    "${child[@]}" \
                     xcrun simctl launch "$udid" "$BUNDLE_ID" >/dev/null
                 # The same wait `Shooter` gives the Mac, and for the same reason: layout, and
                 # an `AsyncImage` reading a file out of the fixture's own directory.

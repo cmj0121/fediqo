@@ -234,6 +234,14 @@ public protocol SourceClient: Sendable {
     /// of posts is paged.
     func posts(by id: String, host: String, limit: Int, before: Post?, token: String?) async throws -> [Post]
 
+    /// Who somebody follows, or who follows them, one page at a time (#90).
+    ///
+    /// Asked of the same server the profile was, and of no other. A hidden list and an empty one
+    /// come back the same — see `People.reason(forEmpty:on:)`, which is where the two are told
+    /// apart and the only place they are.
+    func people(_ kind: People.Kind, of id: String, host: String, limit: Int,
+                before: Profile?, token: String?) async throws -> [Profile]
+
     /// What the reader is to somebody, asked of the reader's own server, which is the only place
     /// a relationship exists. Nothing where that server has never heard of them — which is not
     /// the same fact as "you do not follow them", and is not to be drawn as though it were.
@@ -527,6 +535,11 @@ public extension SourceClient {
     }
 
     func relationship(with handle: String, as account: ActingAccount) async throws -> Relationship? {
+        throw SourceFailure.unsupported(.mastodon)
+    }
+
+    func people(_ kind: People.Kind, of id: String, host: String, limit: Int,
+                before: Profile?, token: String?) async throws -> [Profile] {
         throw SourceFailure.unsupported(.mastodon)
     }
 

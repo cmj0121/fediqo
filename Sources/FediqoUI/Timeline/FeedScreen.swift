@@ -150,6 +150,14 @@ struct FeedScreen: View {
                         .transition(.opacity)
                 }
             }
+            // And one of their two lists over that, because a list of somebody's followers is
+            // somewhere you go from their page and come back to it from (#90).
+            .overlay {
+                if let people = app.people {
+                    PeopleList(model: people) { app.closePeople() }
+                        .transition(.opacity)
+                }
+            }
             // Where the reader is taken, watched somewhere that is not this body. `onChange`
             // reads its value while the body is being built, so watching the ring here made
             // every press of `j` a rebuild of the whole screen (#71).

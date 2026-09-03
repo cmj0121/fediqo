@@ -435,6 +435,27 @@ struct FixtureSource: SourceClient {
         nil
     }
 
+    /// Who somebody follows, and who follows them (#90), invented out of the same timeline the
+    /// rest of this fixture is — so a person on a list and the same person on a row are one
+    /// person, and pressing through from one to the other lands somewhere real.
+    ///
+    /// **`following` is answered and `followers` is withheld**, on purpose. The two empties a
+    /// list can have are the whole of what #90 is careful about, and a fixture that only ever
+    /// showed the easy one would leave the honest state of the other unphotographed: the profile
+    /// publishes 89 followers and this hands over none of them, which is exactly what a server
+    /// told not to publish a list does.
+    func people(_ kind: People.Kind, of id: String, host: String, limit: Int,
+                before: Profile?, token: String?) async throws -> [Profile] {
+        guard kind == .following, before == nil else { return [] }
+        var seen: Set<String> = []
+        return Fixture.timeline(of: host).compactMap { post in
+            guard post.authorHandle != id, seen.insert(post.authorId).inserted else { return nil }
+            return Profile(id: post.authorHandle, authorId: post.authorId, name: post.authorName,
+                           handle: post.authorHandle, avatarURL: post.authorAvatarURL,
+                           emojis: post.emojis)
+        }
+    }
+
     // MARK: - Writing
     //
     // Every one of these agrees at once and sends nothing. An invented server that refused
