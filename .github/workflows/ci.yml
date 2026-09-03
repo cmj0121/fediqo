@@ -118,6 +118,19 @@ jobs:
           key: xcode-spm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
           restore-keys: xcode-spm-${{ runner.os }}-
 
+      # Booted, and waited for, before anything is asked to launch on it. `xcodebuild` will
+      # boot one itself, and then the app's first launch competes with a simulator that is
+      # still settling — which is what "Timed out attempting to launch app" was, after 93
+      # seconds, on a runner where the same test takes 13 on a laptop. The suite already
+      # spends a throwaway launch for the app's own cold start; this is the machine's.
+      - name: Warm the simulator the tests will use
+        run: |
+          id="$(xcrun simctl list devices available | grep -m1 -E '^ *iPad' \
+                | sed -E 's/.*\(([0-9A-F-]{36})\).*/\1/')"
+          echo "warming $id"
+          xcrun simctl boot "$id" || true
+          xcrun simctl bootstatus "$id" -b
+
       - name: Drive the app on a simulator
         run: make -C Apps uitest-ios
 
