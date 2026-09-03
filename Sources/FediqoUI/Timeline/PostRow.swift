@@ -408,7 +408,11 @@ struct PostRow: View {
         if let audience = post.audience {
             let name = t("post.visibility.\(audience.rawValue)")
             Image(systemName: Self.mark(for: audience))
-                .fediqoSymbol(Glyph.inline, weight: .medium)
+                // A rung up from `inline`, which is what a mark beside words takes. This one is
+                // not beside words: it is four shapes a reader has to tell apart, at the far
+                // end of a row, and the comment below already said twelve points was not a
+                // thing anybody should have to learn. `column` is the next size there is.
+                .fediqoSymbol(Glyph.column, weight: .medium)
                 .foregroundStyle(Self.tint(for: audience))
                 // A box to hover over. An `Image` is only as hoverable as its own ink, and a
                 // twelve-point glyph is a few strokes with holes in it — a pointer between them

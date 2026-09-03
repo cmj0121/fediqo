@@ -365,7 +365,9 @@ struct ComposerView: View {
                 }
                 .labelsHidden()
             } label: {
-                Image(systemName: Self.mark(for: audience)).fediqoSymbol(Glyph.inline, weight: .medium)
+                // The same size the row draws it at, so the mark a reader learns on a row is
+                // the mark they press in the composer.
+                Image(systemName: Self.mark(for: audience)).fediqoSymbol(Glyph.column, weight: .medium)
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
