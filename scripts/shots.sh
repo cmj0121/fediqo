@@ -215,12 +215,22 @@ check() {
 # from both of the others. That third one is the whole reason this exists -- #80 asks what a
 # screen does at 700 points, and until now nothing here could take its picture.
 #
+# 420 is `Size.prose`, which is the narrowest this app will let a Mac window be -- see
+# `AppShell.columns`. Swept because a floor nobody has photographed is a floor nobody has
+# checked, and the one width where a refusal to go narrower has to be worth what it costs.
+#
+# **320 is not here and #86 is why.** It is an iPad in Slide Over, which draws the phone's
+# layout rather than this one, and macOS cannot draw that layout at all. Photographed here it
+# would be the two-column shell at 320, which clips at both edges -- measured -- and is exactly
+# what the floor exists to refuse. A picture of it would be a picture of something no reader
+# can reach.
+#
 # The Mac app draws itself into a bitmap of whatever size it is given, so every one of these is
 # one build and no simulator. Two things it cannot show, and neither is S9's: the tab bar a
 # phone gets instead of the rail, which a size class decides rather than an arrangement; and
 # anything under 420 points, because `AppShell.columns` has a `minWidth` of `Size.prose` and an
 # iPad that narrow is running the phone's layout anyway.
-WIDTHS=(440 700 1024)
+WIDTHS=(420 440 700 1024)
 SCALES=(small larger)
 
 widths() {
