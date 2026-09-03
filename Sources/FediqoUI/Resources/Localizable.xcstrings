@@ -70,6 +70,40 @@
         }
       }
     },
+    "compose.addPicture": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add a picture"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "加一張圖"
+          }
+        }
+      }
+    },
+    "compose.describe": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Describe this picture"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "描述這張圖"
+          }
+        }
+      }
+    },
     "compose.noAccount": {
       "extractionState": "manual",
       "localizations": {
@@ -100,6 +134,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "一個編輯器，數個網路。"
+          }
+        }
+      }
+    },
+    "compose.removePicture": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Take it off"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拿掉"
           }
         }
       }
@@ -168,6 +219,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "發新文"
+          }
+        }
+      }
+    },
+    "compose.undescribed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No description"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "沒有描述"
           }
         }
       }
@@ -393,6 +461,40 @@
         }
       }
     },
+    "error.pictureNotTaken": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ does not take that kind of file."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ 不收這種檔案。"
+          }
+        }
+      }
+    },
+    "error.pictureTooLarge": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ is larger than %2$@ takes."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ 比 %2$@ 接受的還大。"
+          }
+        }
+      }
+    },
     "error.signInFailed": {
       "extractionState": "manual",
       "localizations": {
@@ -440,6 +542,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "%1$@ 只收 %2$@ 個字，這篇超過了。"
+          }
+        }
+      }
+    },
+    "error.tooManyPictures": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ takes %2$@ pictures on a post."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ 一則貼文最多放 %2$@ 張圖。"
           }
         }
       }

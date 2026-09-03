@@ -19,6 +19,13 @@ func message(for failure: SourceFailure) -> String {
     case .signInFailed(let reason): t("error.signInFailed", reason)
     case .emptyDraft: t("error.emptyDraft")
     case .tooLong(let host, let limit): t("error.tooLong", host, String(limit))
+    case .tooManyPictures(let host, let most): t("error.tooManyPictures", host, String(most))
+    // The size in what a reader reads sizes in, not in bytes: nobody knows what 8388608 is, and
+    // a limit somebody cannot picture is a limit they cannot act on.
+    case .pictureTooLarge(let host, let name, let limit):
+        t("error.pictureTooLarge", name,
+          "\(host) (\(ByteCountFormatStyle().format(Int64(limit))))")
+    case .pictureNotTaken(let host, let name, _): t("error.pictureNotTaken", host) + " (\(name))"
     case .transport(let reason), .store(let reason): reason
     }
 }

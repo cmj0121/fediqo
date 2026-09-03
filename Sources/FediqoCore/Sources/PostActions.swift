@@ -214,12 +214,45 @@ public struct PostActions: Sendable {
         guard let client = registry.client(for: socialProtocol) else { return [:] }
         var refused: [String: SourceFailure] = [:]
         for account in accounts {
-            guard let limit = try? await client.instance(host: account.host).maxCharacters else { continue }
-            if draft.length > limit {
-                refused[account.host] = .tooLong(account.host, limit)
+            guard let rules = try? await client.instance(host: account.host) else { continue }
+            if let refusal = Self.refusal(of: draft, against: rules) {
+                refused[account.host] = refusal
             }
         }
         return refused
+    }
+
+    /// What one server would refuse about one draft, or nothing where it would take it.
+    ///
+    /// Separated from the asking so that the rule and the request are two things: this needs no
+    /// network, which is what makes it something a test can hold to account rather than something
+    /// a test has to imitate.
+    ///
+    /// **Every rule is skipped where the server did not state it.** The same care `maxCharacters`
+    /// gets, and for the same reason: a server that did not say has not said zero, and a composer
+    /// refusing a picture because it had not been told a limit is enforcing a rule nobody made.
+    /// An empty list of kinds is a server that said nothing useful, not one that takes nothing.
+    ///
+    /// The first refusal is the answer. A reader told three things at once about one picture is
+    /// a reader reading a list instead of fixing the thing.
+    public static func refusal(of draft: Draft, against rules: InstanceInfo) -> SourceFailure? {
+        if let limit = rules.maxCharacters, draft.length > limit {
+            return .tooLong(rules.host, limit)
+        }
+        // Asked before a byte goes up (#89): a reader who has waited for three photographs and
+        // is then told the server takes two has spent their connection on being refused.
+        if let most = rules.maxAttachments, draft.pictures.count > most {
+            return .tooManyPictures(rules.host, most)
+        }
+        for picture in draft.pictures {
+            if let kinds = rules.mediaKinds, !kinds.isEmpty, !kinds.contains(picture.mime) {
+                return .pictureNotTaken(rules.host, picture.filename, kinds)
+            }
+            if let biggest = rules.mediaSizeLimit, picture.size > biggest {
+                return .pictureTooLarge(rules.host, picture.filename, biggest)
+            }
+        }
+        return nil
     }
 
     /// A mute, put up or taken down, in one or both of the two places it can live.

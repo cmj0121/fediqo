@@ -85,7 +85,12 @@ public struct MastodonClient: SourceClient {
                         // of ours if neither said: a composer that does not know says nothing
                         // rather than guessing at somebody else's rule.
                         maxCharacters: instance.configuration?.statuses?.maxCharacters
-                            ?? instance.maxTootChars
+                            ?? instance.maxTootChars,
+                        // The same rule again: what this server said, and nothing where it
+                        // said nothing.
+                        mediaKinds: instance.configuration?.mediaAttachments?.supportedMimeTypes,
+                        mediaSizeLimit: instance.configuration?.mediaAttachments?.imageSizeLimit,
+                        maxAttachments: instance.configuration?.statuses?.maxMediaAttachments
                     )
                 }
             } catch SourceFailure.transport(let reason) {
@@ -328,7 +333,11 @@ enum JSONTransport {
     /// `POST` and comes down with a `DELETE`, and it takes a bearer, which brings back the
     /// `get` reading: a write turned down while carrying a credential is that credential
     /// having expired, and that is the one thing the reader has to act on.
+    /// `file` is a picture going up (#89), and a request carrying one is a different kind of
+    /// request: multipart rather than a form of text, and given longer, because a photograph on
+    /// a telephone's connection is not a sentence.
     static func send(_ method: String, _ url: URL, fields: [String: String] = [:],
+                     file: Upload? = nil,
                      on session: URLSession, bearer: String? = nil,
                      idempotency: String? = nil, timeout: TimeInterval = 15,
                      ledger: APILedger = .shared) async throws -> Data {
@@ -345,7 +354,16 @@ enum JSONTransport {
         if let idempotency {
             request.setValue(idempotency, forHTTPHeaderField: "Idempotency-Key")
         }
-        if !fields.isEmpty {
+        if let file {
+            // The one request in this app that is not a form of text. A picture cannot be
+            // percent-encoded into a field, so it is a multipart body — and the fields ride
+            // along inside it rather than beside it, because a multipart request has no other
+            // place to put them.
+            let boundary = "fediqo.\(UUID().uuidString)"
+            request.setValue("multipart/form-data; boundary=\(boundary)",
+                             forHTTPHeaderField: "Content-Type")
+            request.httpBody = multipart(file: file, fields: fields, boundary: boundary)
+        } else if !fields.isEmpty {
             request.setValue("application/x-www-form-urlencoded; charset=utf-8", forHTTPHeaderField: "Content-Type")
             request.httpBody = formEncode(fields)
         }
@@ -383,6 +401,36 @@ enum JSONTransport {
 
     /// Sorted so the same fields make the same bytes, and escaped by hand: URLComponents
     /// leaves `+` alone, which a form reader would take for a space.
+    /// One file on its way up: what it is, what it is called, and what is in it.
+    struct Upload: Sendable {
+        let field: String
+        let filename: String
+        let mime: String
+        let bytes: Data
+    }
+
+    /// A multipart body, written out by hand.
+    ///
+    /// Every boundary is `--boundary`, the last is `--boundary--`, and every line ends CRLF —
+    /// which is the whole of the format and the whole of what a server will reject a body for.
+    /// The fields go first so that a server reading in order has the description before the
+    /// picture it belongs to.
+    static func multipart(file: Upload, fields: [String: String], boundary: String) -> Data {
+        var body = Data()
+        func add(_ text: String) { body.append(Data(text.utf8)) }
+        for (name, value) in fields.sorted(by: { $0.key < $1.key }) {
+            add("--\(boundary)\r\n")
+            add("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n")
+            add("\(value)\r\n")
+        }
+        add("--\(boundary)\r\n")
+        add("Content-Disposition: form-data; name=\"\(file.field)\"; filename=\"\(file.filename)\"\r\n")
+        add("Content-Type: \(file.mime)\r\n\r\n")
+        body.append(file.bytes)
+        add("\r\n--\(boundary)--\r\n")
+        return body
+    }
+
     static func formEncode(_ fields: [String: String]) -> Data {
         let body = fields.sorted { $0.key < $1.key }
             .map { "\(formEscape($0.key))=\(formEscape($0.value))" }

@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import FediqoCore
 
 /// What the New Post button opens. It is deliberately not a screen: composing is something
@@ -19,6 +20,10 @@ struct ComposerView: View {
     /// which is not the same as `false`, and drawing the refusal for it would accuse a reader of
     /// having no account before anybody had looked.
     @State private var canAnswer: Bool?
+    /// The pictures on this draft, in the order they were put on (#89). Held here rather than on
+    /// the app: a draft is this panel's, and one that is never sent is gone with it.
+    @State private var pictures: [Draft.Picture] = []
+    @State private var choosing = false
     /// The keyboard, and where it is. SwiftUI will not say whether a text field somewhere
     /// has it, so this says it for the one field that could.
     @FocusState private var typing: Bool
@@ -105,6 +110,7 @@ struct ComposerView: View {
                 .fediqoCard(radius: Radius.inner, raised: false)
                 .onChange(of: typing) { _, now in app.setTyping(now) }
 
+            attached
             destinations
             controls
         }
@@ -191,6 +197,22 @@ struct ComposerView: View {
             .fixedSize()
             .help(t("post.visibility.\(audience.rawValue)"))
 
+            // A picture, chosen from the files this reader already has. `fileImporter` and not
+            // a photo library: it is the one picker both platforms draw, and it asks for the one
+            // thing being asked for rather than for a standing permission to look at everything.
+            Button { choosing = true } label: {
+                Image(systemName: "photo.badge.plus").fediqoSymbol(Glyph.inline, weight: .medium)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Palette.accent)
+            .help(t("compose.addPicture"))
+            .accessibilityLabel(Text(t("compose.addPicture")))
+            .fileImporter(isPresented: $choosing, allowedContentTypes: [.image],
+                          allowsMultipleSelection: true) { picked in
+                guard case .success(let files) = picked else { return }
+                pictures += files.compactMap(Self.read)
+            }
+
             // The warning is a field that is not there until it is asked for: most posts have
             // none, and an empty box above every draft is a question nobody was asking.
             Button {
@@ -256,18 +278,86 @@ struct ComposerView: View {
         }
     }
 
+    /// The pictures on the draft, each with the place to describe it.
+    ///
+    /// **The description is asked for beside the picture and not behind a second press.** This
+    /// app says out loud when a server sent a picture with no description; a composer that made
+    /// writing one an extra step it is easy not to take would be holding other people to a rule
+    /// it makes easy to break here.
+    @ViewBuilder
+    private var attached: some View {
+        if !pictures.isEmpty {
+            VStack(spacing: Space.step) {
+                ForEach($pictures) { $picture in
+                    HStack(alignment: .top, spacing: Space.gap) {
+                        RemoteImage(url: nil, width: Size.thumbnail, height: Size.thumbnail,
+                                    standing: .picture)
+                            .overlay { thumbnail(picture) }
+                        VStack(alignment: .leading, spacing: Space.tight) {
+                            Text(picture.filename)
+                                .fediqoFont(TypeScale.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            TextField(t("compose.describe"), text: $picture.description, axis: .vertical)
+                                .textFieldStyle(.plain)
+                                .fediqoFont(TypeScale.small)
+                                .padding(Space.snug)
+                                .fediqoCard(radius: Radius.inner, raised: false)
+                        }
+                        IconButton(symbol: "xmark", labelKey: "compose.removePicture") {
+                            pictures.removeAll { $0.id == picture.id }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// One chosen file, read in.
+    ///
+    /// The bytes now rather than the address: a reader may move or delete the file between
+    /// choosing it and sending, and a composer holding a path would send nothing and say a
+    /// server refused it. What it is is asked of the file itself rather than of its extension.
+    ///
+    /// A file that cannot be read is simply not added. There is nothing useful to say about it
+    /// that the picker did not already know, and a draft is not the place to explain a
+    /// filesystem.
+    private static func read(_ file: URL) -> Draft.Picture? {
+        let opened = file.startAccessingSecurityScopedResource()
+        defer { if opened { file.stopAccessingSecurityScopedResource() } }
+        guard let bytes = try? Data(contentsOf: file), !bytes.isEmpty else { return nil }
+        let mime = (try? file.resourceValues(forKeys: [.contentTypeKey]).contentType)?
+            .preferredMIMEType ?? "application/octet-stream"
+        return Draft.Picture(bytes: bytes, filename: file.lastPathComponent, mime: mime)
+    }
+
+    /// The picture itself, drawn from the bytes in hand. No address and nothing to fetch: it has
+    /// not been anywhere yet and will not until this is sent.
+    @ViewBuilder
+    private func thumbnail(_ picture: Draft.Picture) -> some View {
+        if let image = PictureCache.decode(picture.bytes) {
+            Image(decorative: image, scale: 1)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .clipShape(RoundedRectangle(cornerRadius: Radius.thumbnail, style: .continuous))
+        }
+    }
+
     /// What is written, as the one value everything here reads: the counter, the check and the
     /// send are three questions about one draft, and building it three times is three chances
     /// for them to differ.
     private var written: Draft {
         Draft(text: draft, audience: audience, warning: showingWarning ? warning : nil,
-              answering: app.answering)
+              answering: app.answering, pictures: pictures)
     }
 
     /// Nothing to send, no room left, or one already on its way.
     private var canSend: Bool {
         guard !app.isSending else { return false }
-        guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        // A picture with no words is a post. What is refused is a draft with nothing in it at
+        // all, which is what `carries` means.
+        guard written.carries else { return false }
         guard let limit = app.postingLimit else { return true }
         return written.length <= limit
     }
