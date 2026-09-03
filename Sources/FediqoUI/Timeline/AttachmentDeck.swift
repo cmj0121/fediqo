@@ -74,7 +74,7 @@ struct AttachmentDeck: View {
     /// What this deck is actually drawn at: the reserved column's width, or the room it was
     /// given where that is narrower. One place, so the six frames below cannot disagree.
     private var side: CGFloat { min(width ?? Self.side, Self.side) }
-    private var height: CGFloat { side * Self.ratio }
+    private var height: CGFloat { side * Self.shape(of: showing) }
     /// What the top card is drawn at, which is the whole of it where there is nothing under it.
     ///
     /// The deck used to frame itself `side + overhang` across while every caller reserved `side`
@@ -86,10 +86,34 @@ struct AttachmentDeck: View {
     static func faceSide(under count: Int, on side: CGFloat) -> CGFloat {
         side - overhang(under: count, on: side)
     }
-    private var faceHeight: CGFloat { faceSide * Self.ratio }
+    private var faceHeight: CGFloat { faceSide * Self.shape(of: showing) }
     static var height: CGFloat { side * ratio }
-    /// The shape of a card, kept apart from its size so that a narrower one is the same shape.
+    /// The shape of a card where nobody said what shape the picture is, kept apart from its size
+    /// so that a narrower one is the same shape.
+    ///
+    /// **A fallback now rather than the rule** (#101). A card takes the picture's own shape where
+    /// the server said one; this is what it does when the server said nothing, which is every
+    /// attachment written down before migration 015 and every server that does not send `meta`.
     static let ratio: CGFloat = 0.68
+
+    /// The shapes a card is allowed to be, as height over width.
+    ///
+    /// Bounded because a row is a row: an 8:1 panorama would be a slit nobody can see, and a
+    /// phone screenshot at 9:16 would be a card taller than the screen it is drawn on, with the
+    /// words above it pushed off the top. Between these two a picture is drawn true — 2:3 is a
+    /// portrait photograph and 16:9 a landscape one, and both are inside.
+    ///
+    /// Outside them nothing is cut. The card takes the nearest shape it is allowed and the
+    /// picture is *fitted* into it, so a panorama is a panorama with ground either side of it
+    /// rather than its ends removed. See `RemoteImage.cropping`.
+    static let shapes: ClosedRange<CGFloat> = 0.5...1.5
+
+    /// What shape a card is for what is on it: the picture's own, held inside `shapes`, or the
+    /// card's own where the server never said.
+    static func shape(of attachment: Attachment?) -> CGFloat {
+        guard let aspect = attachment?.aspect else { return ratio }
+        return min(max(aspect, shapes.lowerBound), shapes.upperBound)
+    }
     /// How many of the ones underneath are drawn behind the top card. Three is enough to say
     /// "there are more"; past that the edges stop being distinguishable anyway.
     private static let shown = 3
@@ -239,7 +263,11 @@ struct AttachmentDeck: View {
         ZStack(alignment: .bottomLeading) {
             RemoteImage(url: hidden ? nil : attachment.displayURL,
                         width: faceSide, height: faceHeight,
-                        standing: hidden ? .covered : .picture)
+                        standing: hidden ? .covered : .picture,
+                        // Never cut where the shape is known: the card has already taken it,
+                        // so within the bound this is the same picture either way — and past
+                        // it, fitting keeps the whole photograph (#101).
+                        cropping: attachment.aspect == nil)
                 .clipShape(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous))
                 .blur(radius: hidden ? 18 : 0)
             if hidden {

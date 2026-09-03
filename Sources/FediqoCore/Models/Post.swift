@@ -188,12 +188,38 @@ public struct Attachment: Sendable, Hashable, Codable {
     public let previewURL: URL?
     /// What the author wrote for somebody who cannot see it. Empty where they wrote none.
     public let alt: String
+    /// What shape it is, in the pixels the server said, or nothing where it said nothing (#101).
+    ///
+    /// Pixels rather than an aspect, because pixels are what a server sends: an aspect is what a
+    /// view wants, and the arithmetic belongs where it is used rather than stored already divided
+    /// where nobody can check it against the file.
+    ///
+    /// **Nothing is not a square and it is not the card's shape** — it is a server that did not
+    /// say, and what a view does about that is the view's decision. See `aspect`.
+    public let width: Int?
+    public let height: Int?
 
-    public init(kind: Kind, url: URL? = nil, previewURL: URL? = nil, alt: String = "") {
+    public init(kind: Kind, url: URL? = nil, previewURL: URL? = nil, alt: String = "",
+                width: Int? = nil, height: Int? = nil) {
         self.kind = kind
         self.url = url
         self.previewURL = previewURL
         self.alt = alt
+        // A shape needs both halves and both of them positive. One number, or a zero, is a
+        // server that said something useless rather than one that said a shape.
+        let both = (width ?? 0) > 0 && (height ?? 0) > 0
+        self.width = both ? width : nil
+        self.height = both ? height : nil
+    }
+
+    /// How tall it is for its width, or nothing where the server did not say.
+    ///
+    /// The one number a card needs, in the same terms `AttachmentDeck.ratio` is written in:
+    /// height over width, so 0.68 is the landscape card this app drew before it knew any better
+    /// and 1.5 is a portrait photograph.
+    public var aspect: CGFloat? {
+        guard let width, let height, width > 0 else { return nil }
+        return CGFloat(height) / CGFloat(width)
     }
 
     /// What to draw: the still where there is one, the file otherwise.

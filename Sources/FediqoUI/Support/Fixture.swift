@@ -89,7 +89,11 @@ enum Fixture {
                  name: "Ines Okafor", handle: "ines",
                  text: "Three things came attached. They are a deck, not a row of thumbnails — "
                      + "click the top one and the stack turns over.",
-                 attachments: (0..<3).map { image("deck-\($0)", seed: $0) },
+                 // Three shapes rather than three of one, so what a card does with a
+                 // photograph that is not the card's shape can be looked at (#101).
+                 attachments: [image("deck-0", seed: 0, shape: 0.68),
+                               image("deck-1", seed: 1, shape: 1.4),
+                               image("deck-2", seed: 2, shape: 1.0)],
                  counts: Counts(replies: 1, reblogs: 3, favourites: 19)),
             post("the-thread", host: hosts[0], minutesAgo: 96, now: now,
                  name: "Wren Ashby", handle: "wren",
@@ -147,7 +151,7 @@ enum Fixture {
                  name: "Yusuf Adeyemi", handle: "yusuf",
                  text: "Reading rooms, mostly. The one at the top of the hill has the light "
                      + "and none of the chairs. https://cedar.example/rooms",
-                 attachments: [image("room", seed: 3)],
+                 attachments: [image("room", seed: 3, shape: 1.35)],
                  counts: Counts(replies: 2, reblogs: 5, favourites: 41),
                  tags: ["libraries", "slowweb"]),
             // Written partly in pictures, in the words and in the name above them: a
@@ -246,7 +250,7 @@ enum Fixture {
             authorId: "https://\(host)/users/\(handle)",
             authorName: name,
             authorHandle: "@\(handle)@\(host)",
-            authorAvatarURL: image("avatar-\(handle)", seed: abs(handle.hashValue % 6), side: 96).url,
+            authorAvatarURL: image("avatar-\(handle)", seed: abs(handle.hashValue % 6), side: 96, shape: 1).url,
             text: text,
             attachments: attachments,
             sensitive: sensitive,
@@ -290,10 +294,23 @@ enum Fixture {
     /// so the fixture's pictures are real files in the temporary directory and the drawing
     /// code above them is untouched. Nothing is committed: an invented photograph would be a
     /// binary in the repository that no test can check and nobody can regenerate.
-    private static func image(_ name: String, seed: Int, side: Int = 640) -> Attachment {
-        let url = FixtureImages.url(name, seed: seed, width: side, height: side * 68 / 100)
+    /// One invented picture, at a shape.
+    ///
+    /// **The shape is passed to `Attachment` as well as drawn**, because that is what a server
+    /// sends and what the card now reads (#101). A fixture that drew a portrait block and then
+    /// told the app nothing about its shape would photograph the fallback rather than the rule.
+    private static func image(_ name: String, seed: Int, side: Int = 640,
+                              shape: CGFloat = 0.68) -> Attachment {
+        let height = Int(CGFloat(side) * shape)
+        // The shape is in the name. These are drawn once and kept for the run — kept between
+        // runs, in fact, in the app's own directory — so a name that did not say what shape it
+        // was would hand back yesterday's picture at yesterday's shape while the attachment
+        // beside it said something else.
+        let url = FixtureImages.url("\(name)-\(side)x\(height)", seed: seed,
+                                    width: side, height: height)
         return Attachment(kind: .image, url: url, previewURL: url,
-                          alt: "An invented picture, drawn by the app so that nothing is fetched.")
+                          alt: "An invented picture, drawn by the app so that nothing is fetched.",
+                          width: side, height: height)
     }
 }
 

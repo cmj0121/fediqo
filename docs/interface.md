@@ -2,7 +2,7 @@
 
 [English](interface.md) | [繁體中文](interface.zh-TW.md)
 
-> The look is not a taste. It is nine rules, and a screen is judged against them rather than against an opinion.
+> The look is not a taste. It is ten rules, and a screen is judged against them rather than against an opinion.
 
 Fediqo draws with the platform's own controls and the platform's own chrome. That is a premise, not a preference:
 a control the system draws is one the reader already knows, already reaches by keyboard, and already hears read
@@ -137,11 +137,34 @@ scale**. The part that is a picture is not: a picture is the size it is at every
 What this rule forbids is a screen that knows how wide it is. Adding a screen is not adding a boolean, and a
 new device is not a new threshold.
 
+## S10 — A picture is the shape it is
+
+A card takes the picture's own shape, within a bound. It does not cut a picture to a shape this app chose.
+
+A photograph has a shape because somebody framed it that way, and a card of a fixed shape keeps the middle of
+it — which is not where a subject reliably is. A portrait photograph in a landscape card loses its top and its
+bottom, and the reader is left deciding whether to open something they have not been shown.
+
+Mastodon sends `meta.original.width` and `height` for every attachment. Where a server said, the card is that
+shape. Where it said nothing, the card has its own shape and fills it, which is what this app did before it
+could know any better.
+
+The bound is `AttachmentDeck.shapes`, and it exists because a row is a row: an 8:1 panorama would be a slit
+nobody can see, and a 9:16 screenshot would be a card taller than the screen, pushing the words above it off
+the top. Between them a picture is drawn true — 2:3 and 16:9 are both inside.
+
+**Outside the bound nothing is cut.** The card takes the nearest shape it is allowed and the picture is fitted
+into it, with ground either side. A reader looking at a row and a reader looking at the opened picture are
+looking at the same photograph, which is the half of this rule that S5 would ask for anyway: a row that showed
+a third of a picture without saying so is a row inventing what the picture is.
+
+What this rule forbids is a screen deciding what part of somebody's photograph is the important part.
+
 ## When a rule is in the way
 
 A rule that is wrong is changed here, in the open, and the change is argued in
 [#35](https://github.com/cmj0121/fediqo/issues/35). A screen that breaks one quietly is a screen that has
-decided on everybody's behalf, which is the thing these nine sentences exist to stop.
+decided on everybody's behalf, which is the thing these ten sentences exist to stop.
 
 ## What this is not
 

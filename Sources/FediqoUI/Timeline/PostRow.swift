@@ -211,7 +211,10 @@ struct PostRow: View {
                 VStack(alignment: .leading, spacing: Space.step) {
                     words
                     if !post.attachments.isEmpty {
-                        sized { deck(in: $0) }
+                        // The shape the deck will draw at, so the box measured for it is the
+                        // box it fills. A card that took the picture's shape inside a box that
+                        // did not would be #95's fault again, in the other direction.
+                        sized(AttachmentDeck.shape(of: post.attachments.first)) { deck(in: $0) }
                     } else if let card = post.card {
                         sized { LinkCard(card: card, covered: mediaIsCovered, width: $0) }
                     }
@@ -551,10 +554,11 @@ struct PostRow: View {
     /// is measured. `Color.clear` at the card's own ratio is what makes the box hug — it takes
     /// the narrower of the row and `side`, and its height follows from that rather than being
     /// stated.
-    private func sized(@ViewBuilder card: @escaping (CGFloat) -> some View) -> some View {
+    private func sized(_ shape: CGFloat = AttachmentDeck.ratio,
+                       @ViewBuilder card: @escaping (CGFloat) -> some View) -> some View {
         Color.clear
             .frame(maxWidth: AttachmentDeck.side)
-            .aspectRatio(1 / AttachmentDeck.ratio, contentMode: .fit)
+            .aspectRatio(1 / shape, contentMode: .fit)
             .overlay { GeometryReader { room in card(room.size.width) } }
     }
 
@@ -694,6 +698,19 @@ struct RemoteImage: View {
     enum Standing { case avatar, picture, covered }
     var standing: Standing = .picture
 
+    /// Whether the picture is allowed to be cut to fill this box (#101).
+    ///
+    /// **False wherever the shape is known**, which is the whole of the decision: a card takes
+    /// the picture's own shape, so within the bound fitting and filling are the same picture
+    /// and nothing is lost either way — and outside it, where the card could not take the shape,
+    /// fitting shows the whole photograph with ground above and below rather than cutting the
+    /// top and bottom off it.
+    ///
+    /// True for a face, where a square crop of the middle is what a portrait wants, and for a
+    /// picture whose shape nobody sent — the card has its own shape then, and filling it is what
+    /// this app did before it could know any better.
+    var cropping = true
+
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Whether the waiting shape is at the top of its breath. `@State` because it is an
     /// animation and nothing else reads it.
@@ -712,7 +729,7 @@ struct RemoteImage: View {
     var body: some View {
         Group {
             if let picture = cache.picture(url, scale: displayScale) {
-                picture.resizable().aspectRatio(contentMode: .fill)
+                picture.resizable().aspectRatio(contentMode: cropping ? .fill : .fit)
                     .transition(.opacity)
             // Still coming, and there is somewhere for it to come from.
             } else if url != nil, standing != .covered, !cache.isMissing(url, scale: displayScale) {
