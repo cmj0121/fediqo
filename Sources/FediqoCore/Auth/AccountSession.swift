@@ -91,6 +91,37 @@ public struct SignInCoordinator: Sendable {
         return account
     }
 
+#if DEBUG
+    /// Signed in without a handshake, for a run that has no server to shake hands with (#100).
+    ///
+    /// The local half of `signIn` above and nothing else: the same three rows in the same
+    /// transaction, and the token into whatever `secrets` is. There is no browser, no exchange
+    /// and no `verify_credentials`, because there is nobody on the other end of any of them.
+    ///
+    /// **`#if DEBUG`, so the build that goes to the store cannot compile a way to be signed in
+    /// without signing in.** What makes it safe beyond that is the caller: a fixture run holds
+    /// an in-memory store and an in-memory `SecretStore`, so this writes to nobody's disk and
+    /// nobody's Keychain, and the servers it names are `.example` and answer nothing.
+    public func signInWithoutAsking(_ account: SignedInAccount, on server: Server,
+                                    token: OAuthToken) async throws {
+        try secrets.setToken(token, for: account.authorId)
+
+        let serverRow = LocalStore.serverRow(server)
+        let accountRow = LocalStore.AccountRow(id: account.authorId, proto: serverRow.proto,
+                                               serverURL: serverRow.url, handle: account.handle,
+                                               displayName: account.displayName,
+                                               avatarURL: account.avatarURL?.absoluteString)
+        let ms = LocalStore.milliseconds(Date())
+        try await store.write { db in
+            try LocalStore.upsertServer(db, serverRow, now: ms)
+            try LocalStore.upsertAccount(db, accountRow, now: ms)
+            try db.execute(sql: "INSERT INTO owned_accounts (author_id, server_url, created_at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
+                           arguments: [accountRow.id, serverRow.url, ms])
+        }
+        await tokens.invalidate()
+    }
+#endif
+
     /// Signing out. The revoke is best-effort (decision 6 — a server that cannot be reached
     /// cannot keep you signed in); the local half always completes: the token leaves the
     /// Keychain and the `owned_accounts` row goes. What fails is logged, never thrown.

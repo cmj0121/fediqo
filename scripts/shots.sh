@@ -65,6 +65,13 @@ SHOTS=(
     "05-person:timeline:FEDIQO_PERSON=1"
     "06-reply:timeline:FEDIQO_REPLY=1"
     "07-people:timeline:FEDIQO_PERSON=1 FEDIQO_PEOPLE=following"
+    # The offer of who a part-typed handle could be exists only while somebody is typing one,
+    # and nothing may press a key here -- so the run arrives already part-way through (#100).
+    #
+    # No spaces in a value. `extra` is split on whitespace below so that every variable in it
+    # gets its own `SIMCTL_CHILD_` prefix, which means a value with a space in it becomes two
+    # variables and neither is the one that was meant.
+    "08-mention:timeline:FEDIQO_COMPOSE=1 FEDIQO_DRAFT=@to"
 )
 
 MACOS_APP=".build/xcode/Build/Products/Debug/Fediqo.app"
@@ -111,6 +118,7 @@ macos() {
             # stdout is that path; moving it out here is the whole of the difference.
             local wrote
             wrote="$(env FEDIQO_FIXTURE=1 \
+                         FEDIQO_SIGNED_IN=1 \
                          FEDIQO_ROUTE=shell \
                          FEDIQO_RAIL="$rail" \
                          FEDIQO_LANGUAGE="$language" \
@@ -163,6 +171,7 @@ ios() {
                 local child=()
                 for one in $extra; do child+=("SIMCTL_CHILD_$one"); done
                 env SIMCTL_CHILD_FEDIQO_FIXTURE=1 \
+                    SIMCTL_CHILD_FEDIQO_SIGNED_IN=1 \
                     SIMCTL_CHILD_FEDIQO_ROUTE=shell \
                     SIMCTL_CHILD_FEDIQO_RAIL="$rail" \
                     SIMCTL_CHILD_FEDIQO_LANGUAGE="$language" \

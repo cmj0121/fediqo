@@ -38,6 +38,12 @@ struct ComposerView: View {
         // a keyboard. `c` opens it and the cursor is already here; `Escape` is how you leave,
         // and it is the one key that still works while this has the keyboard.
         .task { await takeTheKeyboard() }
+        // What a fixture run was told to open holding, so that a screen which only exists
+        // while somebody is typing can be photographed on a run where nothing may type (#100).
+        // Nil on every other run.
+        .task {
+            if let seeded = app.launchedDraft, draft.isEmpty { draft = seeded }
+        }
         // That server's rule, asked of it rather than written here, and asked when the panel
         // opens because it is theirs to change between one post and the next.
         .task { await app.askTheLimit() }
@@ -169,29 +175,14 @@ struct ComposerView: View {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(app.mentions.people, id: \.authorId) { person in
                     Button { app.mentions.chosen = person } label: {
-                        HStack(spacing: Space.step) {
-                            RemoteImage(url: person.avatarURL, width: Size.iconColumn,
-                                        height: Size.iconColumn, standing: .avatar)
-                            EmojiText(person.name, emojis: person.emojis,
-                                      size: TypeScale.small, weight: .medium)
-                                .lineLimit(1)
-                            Text(person.handle)
-                                .fediqoFont(TypeScale.minor)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                            Spacer(minLength: Space.tight)
-                            // Which one `Tab` takes, said on the row it would take rather than
-                            // left for a reader to guess from the order.
-                            if person.authorId == app.mentions.first?.authorId {
-                                Text(verbatim: "⇥")
-                                    .fediqoFont(TypeScale.minor, design: .monospaced)
-                                    .foregroundStyle(.tertiary)
-                            }
+                        // Widest first (S9), and the whole row is the arrangement. **The handle
+                        // is what survives**: it is the thing being typed and the thing that
+                        // goes into the post, and a row offering `Ra…` beside `@tove…xample`
+                        // has cut up the only part that had to be readable.
+                        ViewThatFits(in: .horizontal) {
+                            offer(person, naming: true)
+                            offer(person, naming: false)
                         }
-                        .padding(.vertical, Space.tight)
-                        .padding(.horizontal, Space.mid)
-                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }
@@ -199,6 +190,37 @@ struct ComposerView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .fediqoCard(radius: Radius.inner, raised: false)
         }
+    }
+
+    /// One of them, with the name where there is room for it and without where there is not.
+    private func offer(_ person: Profile, naming: Bool) -> some View {
+        HStack(spacing: Space.step) {
+            RemoteImage(url: person.avatarURL, width: Size.iconColumn,
+                        height: Size.iconColumn, standing: .avatar)
+            if naming {
+                EmojiText(person.name, emojis: person.emojis,
+                          size: TypeScale.small, weight: .medium)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+            Text(person.handle)
+                .fediqoFont(TypeScale.minor)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .fixedSize()
+            Spacer(minLength: Space.tight)
+            // Which one `Tab` takes, said on the row it would take rather than left for a
+            // reader to guess from the order.
+            if person.authorId == app.mentions.first?.authorId {
+                Text(verbatim: "⇥")
+                    .fediqoFont(TypeScale.minor, design: .monospaced)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.vertical, Space.tight)
+        .padding(.horizontal, Space.mid)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 
     /// What is being typed at the end of the draft, or nothing. Watched rather than computed at

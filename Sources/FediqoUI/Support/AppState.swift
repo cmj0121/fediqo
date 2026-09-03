@@ -98,6 +98,19 @@ struct LaunchOptions {
     /// taken of, and the only launch option that changes where the posts come from rather
     /// than which screen is showing.
     var fixture = false
+    /// Whether that invented world has the reader signed in to it (#100).
+    ///
+    /// Only ever together with `fixture`, and worth nothing on its own: half of this app exists
+    /// because somebody is signed in — the composer, what a reader is to somebody, who a
+    /// part-typed handle could be — and none of it could be photographed at all.
+    var signedIn = false
+    /// What the composer opens holding, on a fixture run (#100).
+    ///
+    /// The offer of who a part-typed handle could be exists only while somebody is part-way
+    /// through typing one, and nothing may press a key on a screenshot run — so a run that
+    /// wants to photograph it has to arrive already part-way through. Ignored anywhere but a
+    /// fixture: seeding a reader's own composer would be this app writing in their draft.
+    var draft: String?
     /// A post to open as soon as the timeline has one, named by the end of its address. The
     /// composer's and the inbox's twin: a page that can only be reached by pressing something
     /// cannot be photographed on a runner, where nothing may press anything (#30).
@@ -165,6 +178,8 @@ struct LaunchOptions {
         options.openingReply = environment["FEDIQO_REPLY"] == "1"
         options.openingPeople = environment["FEDIQO_PEOPLE"].flatMap(People.Kind.init(rawValue:))
         options.fixture = environment["FEDIQO_FIXTURE"] == "1"
+        options.signedIn = environment["FEDIQO_SIGNED_IN"] == "1"
+        options.draft = environment["FEDIQO_DRAFT"]
         options.language = environment["FEDIQO_LANGUAGE"].flatMap(AppLanguage.init(rawValue:))
         options.shootTo = environment["FEDIQO_SHOOT"]
         options.shootSize = environment["FEDIQO_SHOOT_SIZE"].flatMap(size(from:))
@@ -413,6 +428,10 @@ public final class AppState {
     /// exists to be photographed, or driven by a test, wants to open the same size in the same
     /// place every time, and a reader's window wants to open where they left it.
     let isFixture: Bool
+    /// Whether this fixture run was told to be signed in (#100). False everywhere else.
+    let launchedSignedIn: Bool
+    /// What a fixture run was told to open the composer holding (#100). Nil everywhere else.
+    let launchedDraft: String?
     /// The two numbers a bug report needs. Handed in at launch rather than read from
     /// `Bundle.main` here, so a test can name them without asking the test host.
     let marketingVersion: String
@@ -461,6 +480,10 @@ public final class AppState {
             self.init(preferences: Preferences(defaults: defaults ?? .standard),
                       serverStore: FixtureServerStore(), store: store, launch: launch,
                       registry: SourceRegistry(clients: [.mastodon: FixtureSource()]),
+                      // Credentials nobody's Keychain holds. A fixture run has no business
+                      // reading the reader's, and with #100 it writes one — into memory, which
+                      // is gone when the run is.
+                      secrets: InMemorySecretStore(),
                       marketingVersion: marketing, buildVersion: build)
             return
         }
@@ -515,6 +538,8 @@ public final class AppState {
         self.showingNotifications = launch.showingNotices
         self.holdsLanding = launch.holdsLanding
         self.isFixture = launch.fixture
+        self.launchedSignedIn = launch.signedIn
+        self.launchedDraft = launch.fixture ? launch.draft : nil
         self.shootTo = launch.shootTo
         self.shootSize = launch.shootSize
         self.openingPost = launch.openingPost
@@ -638,6 +663,12 @@ public final class AppState {
         // of them is readable only where there is an account. Rows only — no Keychain, no
         // network — so this costs a statement, and without it the Home tab would sit greyed out
         // on a device that has been signed in for months, until somebody opened Settings.
+        #if DEBUG
+        // Before the first question about who is signed in, because every one of them is
+        // answered from the rows this writes (#100). Nothing here can reach anywhere: the store
+        // is in memory, the `SecretStore` is in memory, and the server is `.example`.
+        await signInForTheFixture()
+        #endif
         await signIn?.refresh()
         // Then the timelines, because they are the tabs of the page about to be looked at.
         await openTimelines()
@@ -1422,6 +1453,23 @@ public final class AppState {
         openPerson(of: post)
         return true
     }
+
+#if DEBUG
+    /// Signs the fixture run in, where it was told to be (#100).
+    ///
+    /// Not compiled into a build anybody ships, and it does nothing at all unless this run is
+    /// already a fixture — being signed in without an invented world to be signed in to would
+    /// be a credential for a server the reader actually reads.
+    private func signInForTheFixture() async {
+        guard isFixture, launchedSignedIn, let signIn else { return }
+        do {
+            try await signIn.session.signInWithoutAsking(Fixture.reader, on: Fixture.readerServer,
+                                                         token: Fixture.readerToken)
+        } catch {
+            LocalStore.log.error("fixture sign-in: \(String(describing: error), privacy: .public)")
+        }
+    }
+#endif
 
     /// Takes the handle the composer is offering (#98).
     ///

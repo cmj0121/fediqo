@@ -11,6 +11,12 @@ import FediqoCore
 final class SignInModel {
     private let store: LocalStore
     private let registry: SourceRegistry
+#if DEBUG
+    /// The coordinator itself, for the one caller that needs the local half of signing in
+    /// without the handshake: a fixture run, which has no server to shake hands with (#100).
+    var session: SignInCoordinator { coordinator }
+#endif
+
     private let coordinator: SignInCoordinator
 
     /// Who is signed in, keyed by `Server.endpoint` — one account per server (decision 9).

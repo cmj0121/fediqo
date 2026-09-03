@@ -31,6 +31,27 @@ enum Fixture {
         }
     }
 
+    /// Who the reader is, on a run that is signed in (#100).
+    ///
+    /// Somebody who has written nothing in this timeline, which is the ordinary case: a reader
+    /// looking at a public timeline is not usually in it. Their server is `cedar.example`, which
+    /// is the host most of what is here came from, so a reply has somewhere to go and a person
+    /// page has a server that has heard of the person it is about.
+    static let reader = SignedInAccount(
+        authorId: "https://cedar.example/@ada", handle: "@ada@cedar.example",
+        displayName: "Ada Lindqvist",
+        avatarURL: FixtureImages.url("avatar-reader", seed: 4, width: 96, height: 96))
+
+    static var readerServer: Server {
+        servers.first { $0.host == "cedar.example" } ?? servers[0]
+    }
+
+    /// A credential for a server that cannot be reached and would not check it if it could.
+    static var readerToken: OAuthToken {
+        OAuthToken(accessToken: "fixture", scope: "read write follow",
+                   createdAt: Date(timeIntervalSince1970: 1_700_000_000))
+    }
+
     static func title(of host: String) -> String {
         host.split(separator: ".").first.map { $0.prefix(1).uppercased() + $0.dropFirst() } ?? host
     }
@@ -428,11 +449,46 @@ struct FixtureSource: SourceClient {
         before == nil ? Fixture.timeline(of: host).filter { $0.authorHandle == id } : []
     }
 
-    /// Nobody is signed in to an invented server, so there is no account to have a relationship
-    /// from. `nil` and not a made-up "not following": the page has a state for being unable to
-    /// say, and it is the honest one here.
+    /// What the reader is to somebody, where the acting server has heard of them.
+    ///
+    /// **A server knows the accounts it has seen and no others**, which is the rule this follows
+    /// rather than a rule invented for the fixture: somebody who has written on the acting host's
+    /// own timeline is somebody it can answer about, and anybody else it cannot. So both states
+    /// stay photographable — the relationship, and the honest "this server has never heard of
+    /// them", which is what #88 is careful about and what a fixture answering everything would
+    /// have made unphotographable.
+    ///
+    /// Before #100 this answered `nil` always, because nobody was ever signed in to an invented
+    /// server. Somebody is now.
     func relationship(with handle: String, as account: ActingAccount) async throws -> Relationship? {
-        nil
+        let known = Fixture.timeline(of: account.host).contains { $0.authorHandle == handle }
+        guard known else { return nil }
+        // Followed, and following back — a page with something on both sides of it, which is
+        // what makes the two lines under the control worth photographing.
+        return Relationship(following: true, followedBy: true)
+    }
+
+    /// Who a part-typed handle could be (#98), out of the people this server has seen.
+    ///
+    /// The same list `people(_:of:...)` is built from, matched the way a server matches: on the
+    /// handle and on the name, either end. Nothing is fetched, because there is nowhere to fetch
+    /// from and because the real one does not fetch either.
+    func searchPeople(matching query: String, limit: Int,
+                      as account: ActingAccount) async throws -> [Profile] {
+        let wanted = query.lowercased()
+        var seen: Set<String> = []
+        return Fixture.hosts.flatMap { Fixture.timeline(of: $0) }
+            .compactMap { post in
+                guard seen.insert(post.authorId).inserted,
+                      post.authorHandle.lowercased().contains(wanted)
+                        || post.authorName.lowercased().contains(wanted)
+                else { return nil }
+                return Profile(id: post.authorHandle, authorId: post.authorId,
+                               name: post.authorName, handle: post.authorHandle,
+                               avatarURL: post.authorAvatarURL, emojis: post.emojis)
+            }
+            .prefix(limit)
+            .map { $0 }
     }
 
     /// Who somebody follows, and who follows them (#90), invented out of the same timeline the
