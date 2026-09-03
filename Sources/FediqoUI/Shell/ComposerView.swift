@@ -45,7 +45,16 @@ struct ComposerView: View {
         // reason: both are things a reader should be told before writing rather than after.
         .task {
             guard let parent = app.answering else { return }
-            canAnswer = await app.acting(on: parent) != nil
+            let account = await app.acting(on: parent)
+            canAnswer = account != nil
+            // Who the reply opens with (#97). Once, and only into a draft nobody has written
+            // in: the acting account is asked over the network, and a reader who started
+            // typing while it was out must not have their first words pushed along by a
+            // handle arriving late.
+            if draft.isEmpty {
+                draft = app.preferences.carryMentions.opening(answering: parent,
+                                                              as: account?.authorId)
+            }
         }
         // The audience a reply may not be wider than. Set once when the panel opens rather than
         // clamped at the send, so what the picker shows is what will go — `Draft` narrows it

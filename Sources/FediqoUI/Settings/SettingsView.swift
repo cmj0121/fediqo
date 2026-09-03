@@ -43,6 +43,9 @@ struct SettingsView: View {
         switch tab {
         case .appearance:
             section(t("settings.appearance")) { appearance }
+            // Its own section rather than a fifth row under "Appearance": who a reply carries
+            // is not how the app looks, it is what it writes on the reader's behalf (#97).
+            section(t("settings.writing")) { writing }
         case .sources:
             section(t("settings.sources")) { sources }
             section(t("settings.privacy")) {
@@ -103,6 +106,21 @@ struct SettingsView: View {
             .fediqoFont(TypeScale.body)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// What this app writes for the reader before they have written anything.
+    private var writing: some View {
+        @Bindable var preferences = app.preferences
+        return VStack(alignment: .leading, spacing: Space.step) {
+            choiceRow("settings.carryMentions", keyPrefix: "settings.carryMentions",
+                      selection: $preferences.carryMentions)
+            // Said under the control, because the three words on it are short enough to be
+            // read two ways and the difference between them is the whole point.
+            Text(t("settings.carryMentions.body"))
+                .fediqoFont(TypeScale.minor)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     // MARK: - Rows

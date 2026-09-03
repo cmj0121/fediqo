@@ -75,7 +75,7 @@ struct NoticeScreenTests {
     }
 
     /// What one key says, per language, straight out of the catalogue in the repository.
-    private static func wording(for key: String) throws -> [String: String] {
+    static func wording(for key: String) throws -> [String: String] {
         let data = try Data(contentsOf: root.appendingPathComponent(
             "Sources/FediqoUI/Resources/Localizable.xcstrings"))
         let catalogue = try JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -212,4 +212,45 @@ final class InboxDouble: SourceClient, @unchecked Sendable {
         Conversation(post: post)
     }
     func stillHas(_ post: Post, host: String, token: String?) async throws -> Bool { true }
+}
+
+/// The setting behind #97, and the wording that has to exist for it to be choosable.
+@Suite("The reply setting, kept and said")
+@MainActor
+struct CarryMentionsSettingTests {
+    /// The one nobody is surprised by. A fresh install that carried everybody would be this app
+    /// speaking to eleven people on a reader's behalf before they had chosen anything.
+    @Test("A fresh install carries the person being answered and nobody else")
+    func theDefaultIsThem() {
+        #expect(Preferences(defaults: scratch("carry-default")).carryMentions == .replied)
+    }
+
+    @Test("The choice survives a launch")
+    func itSurvivesALaunch() {
+        let defaults = scratch("carry-kept")
+        Preferences(defaults: defaults).carryMentions = .everyone
+        #expect(Preferences(defaults: defaults).carryMentions == .everyone)
+    }
+
+    @Test("Starting again goes back to the default")
+    func startingAgainResets() {
+        let preferences = Preferences(defaults: scratch("carry-reset"))
+        preferences.carryMentions = .nobody
+
+        preferences.resetToDefaults()
+
+        #expect(preferences.carryMentions == .replied)
+    }
+
+    /// Every choice has to be sayable, or the control offers a reader a blank to pick.
+    @Test("Every answer is written in both languages")
+    func everyAnswerIsSayable() throws {
+        var keys = ["settings.writing", "settings.carryMentions", "settings.carryMentions.body"]
+        keys += CarriedMentions.allCases.map { "settings.carryMentions.\($0.rawValue)" }
+        for key in keys {
+            let wording = try NoticeScreenTests.wording(for: key)
+            #expect(wording["en"]?.isEmpty == false, "no English wording for \(key)")
+            #expect(wording["zh-TW"]?.isEmpty == false, "no 繁體中文 wording for \(key)")
+        }
+    }
 }

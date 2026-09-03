@@ -169,6 +169,10 @@ public final class Preferences {
     /// exact sentence #9 exists to prevent.
     public var lastHeard: Date? { didSet { defaults.set(lastHeard, forKey: Keys.lastHeard) } }
 
+    /// Who a reply opens with (#97). See `CarriedMentions` for why this is the reader's to
+    /// choose rather than a rule this app makes for them.
+    public var carryMentions: CarriedMentions { didSet { defaults.set(carryMentions.rawValue, forKey: Keys.carryMentions) } }
+
     private enum Keys {
         static let theme = "fediqo.theme"
         static let textScale = "fediqo.textScale"
@@ -184,13 +188,14 @@ public final class Preferences {
         static let actingServer = "fediqo.actingServer"
         static let mayFetchToAct = "fediqo.mayFetchToAct"
         static let lastHeard = "fediqo.lastHeard"
+        static let carryMentions = "fediqo.carryMentions"
 
         /// Every key above. Written out rather than derived, so that adding one and forgetting
         /// it here is a compile-time-visible omission in one place rather than a preference
         /// that quietly survives a reset.
         static let all = [theme, textScale, language, railExpanded, showBoosts, showMediaOnly,
                           showSensitive, refreshInterval, keepFor, offeredHomeTimeline, clearedSeededWording,
-                          actingServer, mayFetchToAct, lastHeard]
+                          actingServer, mayFetchToAct, lastHeard, carryMentions]
     }
 
     /// Every preference back to the value a first launch would have given it, and the stored
@@ -214,6 +219,7 @@ public final class Preferences {
         actingServer = fresh.actingServer
         mayFetchToAct = fresh.mayFetchToAct
         lastHeard = fresh.lastHeard
+        carryMentions = fresh.carryMentions
     }
 
     public init(defaults: UserDefaults = .standard) {
@@ -231,6 +237,9 @@ public final class Preferences {
         // being read, so it is not a default anybody arrives at by not looking.
         mayFetchToAct = defaults.object(forKey: Keys.mayFetchToAct) as? Bool ?? false
         lastHeard = defaults.object(forKey: Keys.lastHeard) as? Date
+        // The one mention a reply cannot be without, and the one nobody is surprised by.
+        carryMentions = defaults.string(forKey: Keys.carryMentions)
+            .flatMap(CarriedMentions.init(rawValue:)) ?? .replied
         refreshInterval = defaults.string(forKey: Keys.refreshInterval).flatMap(RefreshInterval.init(rawValue:)) ?? .seconds30
         // A season, and not `forever`. A default of forever would mean this app quietly filling
         // somebody's disk on the strength of never having been asked — and a default of a week
