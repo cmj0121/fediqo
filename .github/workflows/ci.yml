@@ -45,6 +45,15 @@ jobs:
       - name: Tests, and the coverage they leave behind
         run: ./scripts/coverage.sh 85
 
+      # Everything above this line is a Debug build, and so is every `make -C Apps` below it.
+      # Code kept out of a release by `#if DEBUG` — the fixture, the shooter, the launch
+      # options — is compiled in one of them and not the other, so a call from a screen into
+      # something that only exists in Debug passes every check here and fails in the archive,
+      # which is the one build nobody makes until `make publish`. It has happened; this is the
+      # cheapest place to catch the next one.
+      - name: The same code, built the way a release is
+        run: swift build -c release
+
   build:
     name: Both apps, from a clean checkout
     runs-on: macos-15

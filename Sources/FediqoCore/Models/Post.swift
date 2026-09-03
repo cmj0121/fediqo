@@ -514,9 +514,14 @@ private extension Character {
     var isShortcodeCharacter: Bool { isASCII && (isLetter || isNumber || self == "_") }
 }
 
-#if DEBUG
 public extension Post {
     /// The post a screenshot run named, out of the ones on the screen.
+    ///
+    /// **Not `#if DEBUG`, and it was.** The launch options themselves are compiled into every
+    /// build — only reading them from the environment is kept out — so the three screens that
+    /// act on one call this unconditionally and simply never fire where nothing set it. Under
+    /// `#if DEBUG` that compiled here and failed in the archive, which is the one build neither
+    /// `swift test` nor `make mac` makes.
     ///
     /// One rule for three launch variables, so that naming a post means the same thing whether a
     /// run is opening it, opening its author, or answering it. `1` is the first post there is —
@@ -526,4 +531,3 @@ public extension Post {
         wanted == "1" ? posts.first : posts.first { $0.mergeKey.hasSuffix(wanted) }
     }
 }
-#endif
