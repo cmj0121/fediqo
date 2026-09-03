@@ -536,17 +536,20 @@ struct ComposerView: View {
     /// that fits is the one that says what it is (S9).
     private var audienceChoice: some View {
         Menu {
-            Picker("", selection: $audience) {
-                ForEach(Audience.allCases, id: \.self) { choice in
+            // **Buttons and not a `Picker`.** A picker inside a menu is drawn as a submenu on
+            // macOS: its own label becomes a row and the choices hide behind it — and this one
+            // had no label, so the menu opened on a blank row that had to be hovered before
+            // anything appeared. Four buttons are four rows.
+            //
+            // What is given up with the picker is its checkmark. The control below says which
+            // one is current, in words and in the mark, which is where a reader was going to
+            // look anyway — and it says it without the menu being open.
+            ForEach(Audience.allCases, id: \.self) { choice in
+                Button { audience = choice } label: {
                     Label(t("post.visibility.\(choice.rawValue)"),
                           systemImage: Self.mark(for: choice))
-                        .tag(choice)
                 }
             }
-            .labelsHidden()
-            // Both halves, and said out loud: a menu handed a `Label` may draw the words alone
-            // unless it is told otherwise, which is what left the list bare.
-            .labelStyle(.titleAndIcon)
         } label: {
             // Named as well as drawn, and not as an arrangement that gives the name up when
             // the room is tight: a `ViewThatFits` inside a menu's label is measured against
