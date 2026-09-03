@@ -357,21 +357,7 @@ struct ComposerView: View {
     /// Who it is for, whether there is a warning, and the press that sends it.
     private var controls: some View {
         HStack(spacing: Space.step) {
-            Menu {
-                Picker("", selection: $audience) {
-                    ForEach(Audience.allCases, id: \.self) { choice in
-                        Text(t("post.visibility.\(choice.rawValue)")).tag(choice)
-                    }
-                }
-                .labelsHidden()
-            } label: {
-                // The same size the row draws it at, so the mark a reader learns on a row is
-                // the mark they press in the composer.
-                Image(systemName: Self.mark(for: audience)).fediqoSymbol(Glyph.column, weight: .medium)
-            }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
-            .help(t("post.visibility.\(audience.rawValue)"))
+            audienceChoice
 
             // A picture, chosen from the files this reader already has. `fileImporter` and not
             // a photo library: it is the one picker both platforms draw, and it asks for the one
@@ -536,6 +522,46 @@ struct ComposerView: View {
         guard written.carries else { return false }
         guard let limit = app.postingLimit else { return true }
         return written.length <= limit
+    }
+
+    /// Who the post is for: the four choices, each as its own mark and its own words.
+    ///
+    /// **The list carries the marks.** It was four lines of text, so a reader was choosing
+    /// between names while the thing they see afterwards is a glyph — and the glyph is the only
+    /// part of the choice that ever appears on a row. A list showing both teaches the mark
+    /// while it is being used.
+    ///
+    /// The one being closed on is named as well as drawn, where there is room for it. A lone
+    /// twelve-point glyph is a control a reader has to already know, and the widest arrangement
+    /// that fits is the one that says what it is (S9).
+    private var audienceChoice: some View {
+        Menu {
+            Picker("", selection: $audience) {
+                ForEach(Audience.allCases, id: \.self) { choice in
+                    Label(t("post.visibility.\(choice.rawValue)"),
+                          systemImage: Self.mark(for: choice))
+                        .tag(choice)
+                }
+            }
+            .labelsHidden()
+            // Both halves, and said out loud: a menu handed a `Label` may draw the words alone
+            // unless it is told otherwise, which is what left the list bare.
+            .labelStyle(.titleAndIcon)
+        } label: {
+            // Named as well as drawn, and not as an arrangement that gives the name up when
+            // the room is tight: a `ViewThatFits` inside a menu's label is measured against
+            // what the menu proposes rather than against the row, which is nothing, so it took
+            // the narrow one every time. The four names are two or three words; the row this
+            // sits in has an empty half.
+            Label(t("post.visibility.\(audience.rawValue)"),
+                  systemImage: Self.mark(for: audience))
+                .fediqoFont(TypeScale.caption, weight: .medium)
+                .labelStyle(.titleAndIcon)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help(t("post.visibility.\(audience.rawValue)"))
+        .accessibilityLabel(Text(t("post.visibility.\(audience.rawValue)")))
     }
 
     /// The same four glyphs a row draws for the same four audiences. One idea, drawn the same
