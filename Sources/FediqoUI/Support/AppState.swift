@@ -194,6 +194,9 @@ struct LaunchOptions {
 @Observable
 public final class AppState {
     public let preferences: Preferences
+    /// Who the handle being typed could be (#98). Built here rather than in the composer,
+    /// because a key press is answered here and the offer is what `Tab` takes.
+    let mentions: MentionSuggestions
     let serverStore: any ServerStore
     /// The store itself, for the one screen that asks about the store rather than through
     /// it. Nothing else here reads it: posts go in and out via the feeds. `nil` when the
@@ -486,6 +489,7 @@ public final class AppState {
         let tokens = store.map { TokenSource(store: $0, secrets: secrets) }
         let signIn = store.map { SignInModel(store: $0, secrets: secrets, tokens: tokens) }
         self.preferences = preferences
+        self.mentions = MentionSuggestions(registry: registry)
         self.serverStore = servers
         self.store = store
         self.signIn = signIn
@@ -1094,6 +1098,7 @@ public final class AppState {
         case .bookmarkPost: return mark(.bookmark)
         case .keepPost: return keepThePost()
         case .openAuthor: return openTheAuthor()
+        case .completeMention: return takeTheOfferedHandle()
         case .backToTop: return goToTop()
         case .showShortcuts: setShowingShortcuts(true); return true
         }
@@ -1415,6 +1420,21 @@ public final class AppState {
     private func openTheAuthor() -> Bool {
         guard let post = postUnderTheRing else { return false }
         openPerson(of: post)
+        return true
+    }
+
+    /// Takes the handle the composer is offering (#98).
+    ///
+    /// Nothing is written here. The offer is the model's and the draft is the composer's, so
+    /// this only says which one was taken — the composer watches for it and does the writing,
+    /// which is what keeps this app from ever editing somebody's draft from two places.
+    /// Whether there is a handle on offer for `Tab` to take. Asked at the press, so a `Tab`
+    /// with nothing being offered is still the nothing it was before (#98).
+    var isOfferingHandle: Bool { mentions.first != nil }
+
+    private func takeTheOfferedHandle() -> Bool {
+        guard let first = mentions.first else { return false }
+        mentions.chosen = first
         return true
     }
 

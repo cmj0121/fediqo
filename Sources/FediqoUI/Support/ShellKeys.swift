@@ -60,7 +60,8 @@ private struct ShellKeyPresses: ViewModifier {
             }
             .onKeyPress(keys: KeyCommand.listened, phases: .down) { press in
                 let handled = KeyCommand.handles(press.key.character, modifiers: press.modifiers,
-                                                 typing: app.isTyping) { app.perform($0) }
+                                                 typing: app.isTyping,
+                                                 offering: app.isOfferingHandle) { app.perform($0) }
                 return handled ? .handled : .ignored
             }
     }
@@ -214,7 +215,8 @@ private struct ShellKeyMonitor: ViewModifier {
                     // hop, since an `NSEvent` cannot cross one.
                     let handled = MainActor.assumeIsolated {
                         KeyCommand.handles(character, modifiers: modifiers,
-                                           typing: app.isTyping) { app.perform($0) }
+                                           typing: app.isTyping,
+                                           offering: app.isOfferingHandle) { app.perform($0) }
                     }
                     return handled ? nil : event
                 }

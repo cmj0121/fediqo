@@ -174,3 +174,27 @@ extension MastodonDTO.Account {
                 locked: locked ?? false)
     }
 }
+
+extension MastodonClient {
+    /// Who a part-typed handle could be, asked of the server the draft will be posted from (#98).
+    ///
+    /// **`resolve=false`, and that is the whole difference between this and every other search in
+    /// this app.** The other two ask a server to go and *fetch* somebody, because they are asking
+    /// about an address a reader has already given. This is asked on a keystroke, and a server
+    /// sent out to the rest of the network on every letter somebody types is a cost nobody asked
+    /// it to pay. So it answers from what it already knows — which is who the reader follows and
+    /// who they have talked to, and that is who a reader is nearly always typing.
+    ///
+    /// The reader's own server and no other: an account is offered so it can be written into a
+    /// post that server will send, and one it has never heard of is one it cannot address.
+    public func searchPeople(matching query: String, limit: Int,
+                             as account: ActingAccount) async throws -> [Profile] {
+        let data = try await get(host: account.host, path: "/api/v1/accounts/search",
+                                 query: [URLQueryItem(name: "q", value: query),
+                                         URLQueryItem(name: "limit", value: String(limit)),
+                                         URLQueryItem(name: "resolve", value: "false")],
+                                 token: account.token)
+        return try Self.decoder.decode([MastodonDTO.Account].self, from: data)
+            .map { $0.asProfile(on: account.host) }
+    }
+}

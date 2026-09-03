@@ -49,6 +49,12 @@ enum KeyCommand: Hashable, CaseIterable {
     /// On a boost it opens whoever wrote the post, not whoever boosted it. The boost line
     /// already names the one and the post names the other, and the key belongs to the post.
     case openAuthor
+    /// Take the handle the composer is offering (#98).
+    ///
+    /// The one thing a key means while a draft has the keyboard, besides leaving. `Tab` is the
+    /// completion key everywhere a completion exists, it is not a character a draft wants, and
+    /// mid-draft it was already being kept and spent on nothing.
+    case completeMention
     case backToTop
     case showShortcuts
 
@@ -67,7 +73,8 @@ enum KeyCommand: Hashable, CaseIterable {
     /// it is still never handed back — `handles(_:modifiers:typing:perform:)` is where that
     /// is said and why — it simply does not navigate. With no draft open it is an ordinary
     /// key of the shared kind, kept where it moved something and given back where it did not.
-    static func from(_ character: Character, modifiers: EventModifiers, typing: Bool) -> KeyCommand? {
+    static func from(_ character: Character, modifiers: EventModifiers, typing: Bool,
+                     offering: Bool = false) -> KeyCommand? {
         // The ⌘ forms belong to the menu bar, which is where a Mac user reads them. Claiming
         // them here as well would mean two owners for one key.
         guard !modifiers.contains(.command) else { return nil }
@@ -85,7 +92,11 @@ enum KeyCommand: Hashable, CaseIterable {
         // system on both platforms, so it is not asked for, and the guard above has already
         // turned it away. A draft has the moves off it entirely, in either form.
         if character == KeyEquivalent.tab.character {
-            guard !typing else { return nil }
+            // The one exception to the gate below, and it is not a move: with a handle being
+            // offered, `Tab` finishes the word somebody is in the middle of. It is what the key
+            // does in every field that completes anything, and mid-draft it was being swallowed
+            // and spent on nothing anyway.
+            if typing { return offering ? .completeMention : nil }
             return modifiers.contains(.control)
                 ? (shift ? .previousPage : .nextPage)
                 : (shift ? .previousTab : .nextTab)
@@ -211,8 +222,9 @@ enum KeyCommand: Hashable, CaseIterable {
     /// would buy the writer no move; what it would buy is AppKit's focus loop taking the
     /// keyboard off the field they are typing into.
     static func handles(_ character: Character, modifiers: EventModifiers, typing: Bool,
-                        perform: (KeyCommand) -> Bool) -> Bool {
-        guard let command = from(character, modifiers: modifiers, typing: typing) else {
+                        offering: Bool = false, perform: (KeyCommand) -> Bool) -> Bool {
+        guard let command = from(character, modifiers: modifiers, typing: typing,
+                                 offering: offering) else {
             return typing && character == KeyEquivalent.tab.character
         }
         return consumes(spelledWith: character, did: perform(command))
@@ -287,6 +299,7 @@ extension KeyCommand {
         Shortcut(group: .doing, keys: ["r"], name: "readAgain", commands: [.refreshNow]),
         Shortcut(group: .doing, keys: ["R"], name: "interval", commands: [.cycleRefreshInterval]),
         Shortcut(group: .doing, keys: ["c"], name: "compose", commands: [.compose]),
+        Shortcut(group: .doing, keys: ["Tab"], name: "complete", commands: [.completeMention]),
         Shortcut(group: .doing, keys: ["Return", "Space"], name: "expand", commands: [.expandPost]),
         Shortcut(group: .doing, keys: ["o"], name: "browser", commands: [.openInBrowser]),
         Shortcut(group: .doing, keys: ["l"], name: "favourite", commands: [.favouritePost]),

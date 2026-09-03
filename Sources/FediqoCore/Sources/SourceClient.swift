@@ -198,6 +198,14 @@ public protocol SourceClient: Sendable {
     func notices(host: String, owner: String, after: String?, limit: Int,
                  token: String) async throws -> [Notice]
 
+    /// Who a part-typed handle could be, asked of the server a draft will be posted from (#98).
+    ///
+    /// A requirement and not only a default, because a default in an extension is dispatched
+    /// where it is written rather than where it is called: a client that answered this would
+    /// be walked straight past.
+    func searchPeople(matching query: String, limit: Int,
+                      as account: ActingAccount) async throws -> [Profile]
+
     /// The same events as they happen, over one connection held open for as long as the
     /// sequence is iterated.
     ///
@@ -566,6 +574,13 @@ public extension SourceClient {
     /// build cannot read an inbox over that protocol.
     func notices(host: String, owner: String, after: String?, limit: Int,
                  token: String) async throws -> [Notice] {
+        throw SourceFailure.unsupported(.mastodon)
+    }
+
+    /// Who a part-typed handle could be (#98). Default: this build cannot ask that over this
+    /// protocol, and an offer of nobody is what a composer draws when nobody can be asked.
+    func searchPeople(matching query: String, limit: Int,
+                      as account: ActingAccount) async throws -> [Profile] {
         throw SourceFailure.unsupported(.mastodon)
     }
 

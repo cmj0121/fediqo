@@ -3657,6 +3657,23 @@
         }
       }
     },
+    "shortcut.complete": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Take the handle the composer is offering"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "採用編輯器提供的帳號"
+          }
+        }
+      }
+    },
     "shortcut.compose": {
       "extractionState": "manual",
       "localizations": {

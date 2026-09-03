@@ -56,6 +56,34 @@ struct ComposerView: View {
                                                               as: account?.authorId)
             }
         }
+        // Who the handle being typed could be (#98). `.task(id:)` rather than a task of its
+        // own: changing the id cancels the wait and the question with it, so a reader typing
+        // quickly asks once at the end rather than once per letter — and closing the panel
+        // cancels it too.
+        .task(id: typedHandle) {
+            guard let typed = typedHandle else { return app.mentions.clear() }
+            try? await Task.sleep(for: Self.settle)
+            guard !Task.isCancelled else { return }
+            // Asked of the server this draft will be posted from, and of no other: an account
+            // is offered so it can be written into a post that server will send, and one it
+            // has never heard of is one it cannot address.
+            let account = if let parent = app.answering {
+                await app.acting(on: parent)
+            } else {
+                await app.publishing()
+            }
+            await app.mentions.look(for: typed, as: account)
+        }
+        // What the reader took, written into the draft here and nowhere else. The offer is the
+        // model's and the draft is this view's, so there is one place that edits what somebody
+        // wrote (#98).
+        .onChange(of: app.mentions.chosen) { _, taken in
+            guard let taken, let query = MentionQuery.trailing(in: draft) else { return }
+            draft = query.accepting(taken.handle, in: draft)
+            app.mentions.chosen = nil
+            app.mentions.clear()
+        }
+        .onDisappear { app.mentions.clear() }
         // The audience a reply may not be wider than. Set once when the panel opens rather than
         // clamped at the send, so what the picker shows is what will go — `Draft` narrows it
         // again anyway, and a composer whose picker disagreed with the post it sent would be
@@ -119,6 +147,7 @@ struct ComposerView: View {
                 .fediqoCard(radius: Radius.inner, raised: false)
                 .onChange(of: typing) { _, now in app.setTyping(now) }
 
+            offered
             attached
             destinations
             controls
@@ -126,6 +155,61 @@ struct ComposerView: View {
         .padding(Space.pad)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
+
+    // MARK: - the handle being typed (#98)
+
+    /// Who the handle at the end of the draft could be.
+    ///
+    /// Under the field rather than over it, because it appears and goes as somebody types: a
+    /// list that opened above the field would push the words they are writing down the panel
+    /// on every third letter.
+    @ViewBuilder
+    private var offered: some View {
+        if !app.mentions.people.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(app.mentions.people, id: \.authorId) { person in
+                    Button { app.mentions.chosen = person } label: {
+                        HStack(spacing: Space.step) {
+                            RemoteImage(url: person.avatarURL, width: Size.iconColumn,
+                                        height: Size.iconColumn, standing: .avatar)
+                            EmojiText(person.name, emojis: person.emojis,
+                                      size: TypeScale.small, weight: .medium)
+                                .lineLimit(1)
+                            Text(person.handle)
+                                .fediqoFont(TypeScale.minor)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Spacer(minLength: Space.tight)
+                            // Which one `Tab` takes, said on the row it would take rather than
+                            // left for a reader to guess from the order.
+                            if person.authorId == app.mentions.first?.authorId {
+                                Text(verbatim: "⇥")
+                                    .fediqoFont(TypeScale.minor, design: .monospaced)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                        .padding(.vertical, Space.tight)
+                        .padding(.horizontal, Space.mid)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fediqoCard(radius: Radius.inner, raised: false)
+        }
+    }
+
+    /// What is being typed at the end of the draft, or nothing. Watched rather than computed at
+    /// the ask, so the wait below is keyed to the question and not to every keystroke.
+    private var typedHandle: String? { MentionQuery.trailing(in: draft)?.text }
+
+    /// How long a reader has to stop typing before anybody is asked.
+    ///
+    /// Not a throttle on our side but a courtesy to theirs: a question per letter would have
+    /// somebody else's server answering eleven times about a handle that was only ever one.
+    private static let settle = Duration.milliseconds(250)
 
     /// How much room is left, or nothing at all where the server never said.
     ///
