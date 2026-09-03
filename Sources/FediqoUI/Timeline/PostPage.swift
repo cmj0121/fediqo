@@ -177,6 +177,18 @@ struct PostPage: View {
             .id(post.mergeKey)
     }
 
+    /// Whom a row answers: what the conversation worked out, or what the post itself carries,
+    /// or nothing.
+    ///
+    /// The conversation's answer first, because it is the surer one — it is a post this page is
+    /// holding. The post's own is what a reply from a server the reader has not joined carries,
+    /// and it is the only answer there is when the post answered was never handed over (#87).
+    private func named(_ known: String?, on post: Post) -> Answering {
+        if let known { return .handle(known) }
+        if let carried = post.answering, !carried.isEmpty { return .handle(carried) }
+        return post.inReplyToURI == nil ? .nothing : .somebody
+    }
+
     /// How far in a reply sits, and where that stops.
     ///
     /// One step per generation, up to four. Past that the indent stops growing: a conversation
@@ -219,24 +231,30 @@ struct PostPage: View {
                 // the reader opened.
                 ForEach(conversation.climbed()) { above in
                     row(above.post, selected: above.post.mergeKey == ring,
-                        // The furthest one answers a post nobody handed us. Silence, not a
-                        // claim: `.nothing` says "no line here", and inventing one would name
-                        // somebody this page has never seen.
-                        answering: above.answering.map(Answering.handle) ?? .nothing)
+                        // Whom it answers where the page cannot show it — the furthest one
+                        // answers a post nobody handed us. That used to be silence, because
+                        // there was nothing to say; the post itself carries a name now where
+                        // its server sent one, and where it does not it is silence still.
+                        answering: named(above.answering, on: above.post))
                         .opacity(0.85)
                         .padding(.leading, indent(above.depth))
                         .overlay(alignment: .leading) { rail(above.depth) }
                 }
                 // One step past the last ancestor: the post is the deepest thing on the way
                 // down to it, and everything answering it goes deeper still.
-                row(conversation.post, selected: conversation.post.mergeKey == ring)
+                // The post itself says whom it answers only where nothing above it does. With
+                // ancestors on the page the way up is drawn, and a line naming what is one row
+                // higher would be the page saying twice what it already shows.
+                row(conversation.post, selected: conversation.post.mergeKey == ring,
+                    answering: conversation.climbed().isEmpty
+                        ? named(nil, on: conversation.post) : .nothing)
                     .padding(.leading, indent(conversation.depthOfPost))
                     .overlay(alignment: .leading) { rail(conversation.depthOfPost) }
                 ForEach(conversation.laidOut()) { reply in
                     row(reply.post, selected: reply.post.mergeKey == ring,
                         // A direct answer to the post says nothing: the post is above it, and
                         // the page is the conversation.
-                        answering: reply.answering.map(Answering.handle) ?? .nothing)
+                        answering: named(reply.answering, on: reply.post))
                         // `laidOut` counts from the post and `climbed` from the top; they meet
                         // here, so the whole page is drawn against one left edge.
                         .padding(.leading, indent(conversation.depthOfPost + reply.depth))

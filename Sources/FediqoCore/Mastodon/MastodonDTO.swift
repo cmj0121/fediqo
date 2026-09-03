@@ -14,6 +14,14 @@ enum MastodonDTO {
         let mediaAttachments: [MediaAttachment]
         let reblog: Box<Status>?
         let inReplyToId: String?
+        /// Whose post this answers, by that server's own number for the account.
+        ///
+        /// Kept because it is half of the only way a row can say *whom* a post answers when the
+        /// post it answers is not here — which is the ordinary case for a reply that arrived from
+        /// a server the reader has not joined. The other half is `mentions`, which maps that
+        /// number to a handle, and both halves are in this one payload: nothing is fetched and no
+        /// server the reader has not added is asked anything.
+        let inReplyToAccountId: String?
         /// Absent on the odd server; one strange status must never fail the whole page.
         let tags: [Tag]?
         /// Who the status names. Absent on the odd server, for the same reason as `tags`.
@@ -68,17 +76,24 @@ enum MastodonDTO {
     /// One account a status names. `url` is the actor URI — the same name the account itself
     /// is keyed by — and `acct` is how this server spells the handle.
     struct Mention: Decodable, Sendable {
+        /// This server's own number for the account, which is what `inReplyToAccountId` is
+        /// written in. It never leaves this file: what is kept is the handle it resolves to.
+        let id: String?
         let url: String?
         let username: String
         let acct: String
+
+        /// `@user@host`, as this server spells it.
+        func handle(on host: String) -> String {
+            acct.contains("@") ? "@\(acct)" : "@\(acct)@\(host)"
+        }
 
         func asMention(on host: String) -> FediqoCore.Mention? {
             let uri = url ?? Account(id: "", url: nil, username: username, acct: acct,
                                      displayName: "", avatar: nil, emojis: nil, note: nil,
                                      statusesCount: nil, followersCount: nil, followingCount: nil,
                                      createdAt: nil, locked: nil).authorId(on: host)
-            let handle = acct.contains("@") ? "@\(acct)" : "@\(acct)@\(host)"
-            return uri.isEmpty ? nil : FediqoCore.Mention(uri: uri, handle: handle)
+            return uri.isEmpty ? nil : FediqoCore.Mention(uri: uri, handle: handle(on: host))
         }
     }
 
@@ -348,6 +363,13 @@ extension MastodonDTO.Status {
             inReplyToURI: subject.inReplyToId.map { "https://\(host)/api/v1/statuses/\($0)" },
             tags: (subject.tags ?? []).map(\.name),
             mentions: (subject.mentions ?? []).compactMap { $0.asMention(on: host) },
+            // Whom it answers, resolved here rather than kept as a number: an account id means
+            // something on one server and nothing anywhere else, so what the model carries is
+            // the handle it resolved to. A reply whose author took the mention out has the id
+            // and no name to match it against, and the row says "in reply" and stops there.
+            answering: subject.inReplyToAccountId.flatMap { id in
+                (subject.mentions ?? []).first { $0.id == id }?.handle(on: host)
+            },
             // The words' own emoji first, then the author's: where a server spells one
             // shortcode two ways, what the post says wins over what the name does.
             emojis: ((subject.emojis ?? []) + (subject.account.emojis ?? [])).compactMap(\.asEmoji),

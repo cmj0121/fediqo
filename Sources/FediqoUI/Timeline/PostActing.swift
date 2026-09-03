@@ -31,6 +31,14 @@ extension AppState {
                              token: token.accessToken)
     }
 
+    /// How that account is spelled to a reader: `@name@host`, as the server it is on spells it.
+    ///
+    /// Read off the signed-in accounts rather than built from the `authorId`, because a handle is
+    /// that server's own spelling and taking it apart would be this app guessing at one.
+    func handle(of account: ActingAccount) -> String? {
+        signIn?.accounts.values.first { $0.authorId == account.authorId }?.handle
+    }
+
     /// Whose account a new post goes as.
     ///
     /// The same choosing as `acting(on:)` minus its first step: a new post came from nowhere in

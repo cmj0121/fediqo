@@ -87,6 +87,23 @@
         }
       }
     },
+    "compose.as": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Answering as %@"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "以 %@ 回覆"
+          }
+        }
+      }
+    },
     "compose.describe": {
       "extractionState": "manual",
       "localizations": {

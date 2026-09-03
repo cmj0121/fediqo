@@ -76,8 +76,26 @@ struct WordsTests {
         let path = directory.appendingPathComponent("store.sqlite").path
 
         let old = try LocalStore(path: path, upTo: "009")
-        try await old.save([post("1", saying: "一個伺服器公開給所有人的貼文")],
-                           from: Server(host: "one.example", socialProtocol: .mastodon))
+        // Written the way a build of that age wrote it — the columns 009 had and no others.
+        // `save` is today's, and today's names columns later migrations added, so a store this
+        // old cannot take it. That is not a fault in either: it is what "yesterday's database"
+        // means, and writing the row by hand is what makes this test about 010 rather than
+        // about whichever migration came last.
+        let server = Server(host: "one.example", socialProtocol: .mastodon)
+        try await old.write { db in
+            let now = LocalStore.milliseconds(Date())
+            try LocalStore.upsertServer(db, LocalStore.serverRow(server), now: now)
+            try LocalStore.upsertAccount(db, LocalStore.AccountRow(
+                id: "https://one.example/@a", proto: "mastodon", serverURL: "https://one.example",
+                handle: "@a@one.example", displayName: "A", avatarURL: nil), now: now)
+            try db.execute(sql: """
+                INSERT INTO posts (merge_key, proto, uri, source_url, posted_at, author_id,
+                                   text, last_seen_at, created_at)
+                VALUES (?, 'mastodon', ?, ?, ?, ?, ?, ?, ?)
+                """, arguments: ["1", "1", "https://one.example", now,
+                                 "https://one.example/@a",
+                                 "一個伺服器公開給所有人的貼文", now, now])
+        }
         let before = try await old.read { db in
             try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations ORDER BY identifier")
         }

@@ -358,3 +358,56 @@ final class PersonDouble: SourceClient, @unchecked Sendable {
     }
     func stillHas(_ post: Post, host: String, token: String?) async throws -> Bool { true }
 }
+
+/// What a row says a post answers, and which account a reply goes as (#87).
+@Suite("A reply says who, and as whom")
+@MainActor
+struct ReplySaysWhoTests {
+    private func post(_ id: String, answering handle: String? = nil,
+                      inReplyTo parent: String? = nil) -> Post {
+        Post(uri: "https://one.example/api/v1/statuses/\(id)", socialProtocol: .mastodon,
+             sourceURL: "https://one.example", createdAt: Date(timeIntervalSince1970: 100),
+             authorId: "https://one.example/@\(id)", authorName: id.capitalized,
+             authorHandle: "@\(id)@one.example", text: id,
+             inReplyToURI: parent, answering: handle)
+    }
+
+    /// The parent in the same list is the most certain answer there is, so it still wins.
+    @Test("A parent on the screen is who the row names")
+    func theParentOnScreenWins() {
+        let parent = post("tove")
+        let reply = post("ines", answering: "@somebody@else.example", inReplyTo: parent.uri)
+
+        #expect(FeedScreen.answering(reply, among: [parent, reply])
+                == .handle("@tove@one.example"))
+    }
+
+    /// **The case this is for.** The post it answers is on a server the reader has not joined,
+    /// so it is not in the list and never will be — and the reply itself carries the answer.
+    @Test("A reply from elsewhere names whom it answers")
+    func areplyFromElsewhereNamesWhom() {
+        let reply = post("ines", answering: "@wren@alder.example",
+                         inReplyTo: "https://alder.example/api/v1/statuses/8")
+
+        #expect(FeedScreen.answering(reply, among: [reply]) == .handle("@wren@alder.example"))
+    }
+
+    /// And where nothing says who, the row says it is an answer and stops there rather than
+    /// inventing whose.
+    @Test("With nothing to go on, the row says it is an answer and no more")
+    func nothingToGoOn() {
+        let reply = post("ines", inReplyTo: "https://alder.example/api/v1/statuses/8")
+        #expect(FeedScreen.answering(reply, among: [reply]) == .somebody)
+
+        let plain = post("ines")
+        #expect(FeedScreen.answering(plain, among: [plain]) == .nothing)
+    }
+
+    /// An empty handle is a server that sent something useless, not somebody with no name.
+    @Test("An empty handle is nothing to name")
+    func anemptyHandleNamesNobody() {
+        let reply = post("ines", answering: "",
+                         inReplyTo: "https://alder.example/api/v1/statuses/8")
+        #expect(FeedScreen.answering(reply, among: [reply]) == .somebody)
+    }
+}

@@ -1,0 +1,21 @@
+-- Fediqo — the local store, migration 016. Appended after 001–015; the rules there still hold:
+-- STRICT, every *_at in INTEGER milliseconds, append-only, nothing backfilled.
+--
+-- ── whom a post answers ──────────────────────────────────────────────────────
+--
+-- A row already says that a post is an answer. Saying *whose* it is needs the post it answers,
+-- and for a reply that arrived from a server the reader has not joined that post is not here
+-- and never will be — which is the ordinary case, not a corner of one.
+--
+-- Both halves of the answer arrive in the status itself: `in_reply_to_account_id`, and the
+-- `mentions` that map that number to a handle. They are matched where they arrive and what is
+-- kept is the handle, because an account id means something on one server and nothing anywhere
+-- else. Nothing is fetched and no server the reader has not added is asked anything.
+--
+-- ── nullable, and nothing backfilled ─────────────────────────────────────────
+--
+-- Null is three things a row must not tell apart by guessing: a post that answers nobody, a
+-- server that did not say, and a reply whose author took the mention out so there is a number
+-- with no name against it. All three draw "in reply" and stop there. Everything stored before
+-- this migration is null and stays null until the post is read again.
+ALTER TABLE posts ADD COLUMN answering TEXT;
