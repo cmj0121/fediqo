@@ -148,7 +148,9 @@ struct PostRow: View {
     /// 136 is `AttachmentDeck.side * 0.68` at the side the deck was before #79 doubled it. Named
     /// here rather than read from the deck so that a bigger picture stays a bigger picture
     /// instead of quietly becoming a longer excerpt as well.
-    private static let words: CGFloat = 136
+    /// Also what `AttachmentDeck.tall` is, so that the picture beside the words is as tall as the
+    /// words are allowed to be and a row with a picture is nearly a row without one.
+    static let words: CGFloat = 136
 
     private var spoiler: String { post.spoiler ?? "" }
     /// One answer for both halves, the way the preference is one switch for both: the words

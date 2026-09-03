@@ -146,6 +146,12 @@ A timeline is a list somebody is going down. A list whose rows are all different
 has to re-find its place in on every post, and one tall photograph decides how much of somebody's
 reading it gets. So the card is one shape — `AttachmentDeck.ratio` — whatever shape the picture is.
 
+**And one size, chosen so that a row with a picture is nearly a row without one.** The card is as tall
+as `PostRow.words`, which is the height an excerpt is clamped to: the picture beside the words is as
+tall as the words are allowed to be. Measured in the timeline at 1280 points, that is 275 against 210;
+at twice the size it was 410 against 215. It is also where shrinking stops helping — below it the words
+decide the row on their own, and a smaller picture buys nothing but a smaller picture.
+
 **Scaled, never stretched.** A picture keeps its own proportions and is made big enough to cover the
 card; what falls outside is cut. A picture squashed to fit would be a different picture, which is the
 one thing that is not allowed here.

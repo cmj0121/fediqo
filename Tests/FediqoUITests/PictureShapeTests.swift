@@ -31,6 +31,19 @@ struct PictureShapeTests {
         #expect(AttachmentDeck.height == AttachmentDeck.side * AttachmentDeck.ratio)
     }
 
+    /// **A row with a picture is nearly a row without one.** The card is as tall as the words are
+    /// allowed to be, so the picture beside them does not decide the row's height on its own —
+    /// measured in the timeline at 275 points against 210, where a card twice this gave 410
+    /// against 215. Asserted as the relation rather than as the number, because the number is
+    /// only right while the two agree.
+    @Test("A card is as tall as the words are allowed to be")
+    func acardIsAsTallAsTheWords() {
+        #expect(AttachmentDeck.tall == PostRow.words)
+        // Rounded, and the rounding is the point: dividing by 0.68 lands a hair under 200.
+        #expect(AttachmentDeck.side == (AttachmentDeck.tall / AttachmentDeck.ratio).rounded())
+        #expect(AttachmentDeck.side == 200)
+    }
+
     // MARK: - what is lost, and when it is worth saying
 
     /// How much of a picture survives the cut, as the share of its longer dimension still on the

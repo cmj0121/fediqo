@@ -161,6 +161,7 @@ enum Fixture {
                  name: "Tove :spark: Rasmussen", handle: "tove",
                  text: "Custom emoji are :spark: a server's own, and a client that cannot draw "
                      + "them leaves you reading the shortcode :cog: instead.",
+                 attachments: [image("peek", seed: 5, shape: 0.68)],
                  counts: Counts(replies: 2, reblogs: 6, favourites: 23),
                  emojis: [emoji("spark", seed: 1), emoji("cog", seed: 4)]),
             // A post that is mostly a link, with the card its own server made of it. Nothing

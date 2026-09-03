@@ -54,22 +54,33 @@ struct AttachmentDeck: View {
     /// leaves a reader who turned to the third one looking at the third one.
     @State private var top = 0
 
-    /// The column's width, and the height of the card in it.
+    /// The column's width, which follows from the height rather than the other way round.
     ///
-    /// **Twice what it was**, which is the whole of #79's second half. At 200 a photograph was a
-    /// thumbnail, and a reader deciding whether to open it was deciding from something too small
-    /// to decide from.
+    /// It was 200, then #79 doubled it to 400 because at 200 a photograph was a thumbnail and a
+    /// reader deciding whether to open it was deciding from something too small to decide from.
+    /// 400 was too far the other way: it made every row with a picture twice the height of a row
+    /// without one, and a timeline of two kinds of row is a timeline the eye has to keep
+    /// re-measuring. See `tall`, which is the number now being chosen.
+    /// Rounded, because dividing by 0.68 does not land on a whole number and a width of
+    /// 199.99999999999997 is a width that fails an equality nobody expected to be about floats.
+    static let side: CGFloat = (tall / ratio).rounded()
+
+    /// **How tall a card is, which is what actually decides the row** — the width follows from it
+    /// and from `ratio`, rather than the other way round.
     ///
-    /// It could not be doubled while the row was this tall: S6 padded every row up to it, so a
-    /// two-line post with no picture at all became four hundred points of mostly nothing and a
-    /// window held two posts instead of five — measured, and the reason #79 waited for a rule to
-    /// be settled rather than for a number to be picked. S6 says a row is as tall as its content
-    /// now, so the card is a card and not every row's height.
+    /// `PostRow.words`, and that is not a coincidence: it is the height an excerpt is clamped to,
+    /// so the picture beside the words is as tall as the words are allowed to be, and a row with
+    /// a picture is nearly a row without one. Measured in the timeline at 1280 points: 275 against
+    /// 210, where 400 across gave 410 against 215.
     ///
-    /// The words beside it are no longer held to this. `PostRow.words` keeps the height they
-    /// were clamped to before, so a bigger picture is a bigger picture and not also a longer
-    /// excerpt.
-    static let side: CGFloat = 400
+    /// **And it is where shrinking stops helping.** Below this the card is shorter than the text
+    /// block beside it, the words decide the row's height on their own, and a smaller picture buys
+    /// nothing but a smaller picture.
+    ///
+    /// It was 200 across, then #79 doubled it to 400 because a photograph at 200 was a thumbnail.
+    /// This is 200 again, by a different road: what 400 cost was a timeline of two kinds of row,
+    /// and that cost more. #79 is still open and this is the number it has to argue with.
+    static let tall: CGFloat = PostRow.words
 
     /// What this deck is actually drawn at: the reserved column's width, or the room it was
     /// given where that is narrower. One place, so the six frames below cannot disagree.
