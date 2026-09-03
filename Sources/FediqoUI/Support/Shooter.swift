@@ -58,12 +58,30 @@ struct Shooter: ViewModifier {
     /// has because what a screen does at 700 points is what neither 440 nor 1024 shows.
     var size: CGSize = Shooter.size
 
+    /// How long the ask to stop is given before the process stops anyway.
+    ///
+    /// `NSApp.terminate` is an ask, and a window running a modal session can refuse it — which
+    /// is how a screen presented as a sheet used to hang a screenshot run for ever, with the
+    /// file already written and the runner waiting on a process that would never end (#99).
+    /// The ask is still made, politely, and then this.
+    static let patience: DispatchTimeInterval = .seconds(2)
+
     func body(content: Content) -> some View {
         content.task {
             try? await Task.sleep(for: Self.settle)
             Self.shoot(named: name, at: size)
-            NSApp.terminate(nil)
+            Self.leave()
         }
+    }
+
+    /// Stops, one way or the other.
+    ///
+    /// The watchdog is armed before the ask and on a queue of its own, because the thing that
+    /// would swallow the ask is a modal loop on the main one.
+    @MainActor
+    static func leave() {
+        DispatchQueue.global().asyncAfter(deadline: .now() + patience) { exit(EXIT_SUCCESS) }
+        NSApp.terminate(nil)
     }
 
     /// The frontmost window, sized and written. Says nothing on success and complains loudly on
@@ -71,7 +89,13 @@ struct Shooter: ViewModifier {
     /// in it, found by a reviewer.
     @MainActor
     static func shoot(named name: String, at size: CGSize = Shooter.size) {
-        guard let window = NSApp.windows.first(where: \.isVisible) else {
+        // **Not simply the first visible window** (#99). A sheet on macOS is its own window
+        // attached to the one behind it, so with one up the first visible window is as likely
+        // to be the sheet as the window it is over — and a sheet resized to 1280×800 and
+        // photographed alone is neither the screen anybody meant nor a shape a sheet has.
+        // The window to photograph is the one that is nobody's sheet.
+        guard let window = NSApp.windows.first(where: { $0.isVisible && $0.sheetParent == nil })
+        else {
             return complain("no window to photograph")
         }
         window.setContentSize(size)
@@ -91,6 +115,10 @@ struct Shooter: ViewModifier {
         // producing two different files, which is the one thing this must not do.
         rep.size = size
         view.cacheDisplay(in: view.bounds, to: rep)
+        // And whatever is standing in front of it. Every screen this app presents as a sheet —
+        // the inbox, the list of keys — was unphotographable on the Mac without this, and so
+        // checked on one platform out of two (#99).
+        draw(window.attachedSheet, over: rep, of: window)
 
         guard let png = rep.representation(using: .png, properties: [:]) else {
             return complain("could not encode a PNG")
@@ -103,9 +131,73 @@ struct Shooter: ViewModifier {
         do {
             try png.write(to: url)
             print("shot: \(url.path)")
+            // Flushed here rather than left to the exit. stdout to a pipe is block-buffered,
+            // and this line sitting in that buffer when the process is killed is a run that
+            // wrote its file and told nobody — which is what a hang looked like from outside.
+            fflush(stdout)
         } catch {
             complain("could not write \(url.path): \(error.localizedDescription)")
         }
+    }
+
+    /// The sheet standing over a window, drawn into the picture of that window.
+    ///
+    /// Where it goes is the one thing worth being careful about: both frames are in screen
+    /// coordinates, and the bitmap is of the *content* view, so the offset is measured from
+    /// the content rectangle rather than from the frame — the difference is the title bar, and
+    /// getting it wrong would put every sheet a few points too high.
+    @MainActor
+    private static func draw(_ sheet: NSWindow?, over rep: NSBitmapImageRep, of window: NSWindow) {
+        guard let sheet, let sheetView = sheet.contentView else { return }
+        sheet.displayIfNeeded()
+
+        // **Its layer, and not `cacheDisplay`** — which is what the window behind it is drawn
+        // with, and which came back a blank white rectangle here. A sheet's content view is
+        // layer-backed, and `cacheDisplay` asks a view hierarchy to draw itself: what is in a
+        // layer tree is not in that hierarchy, so it drew the one thing it had, the background.
+        guard let layer = sheetView.layer else { return complain("the sheet has no layer") }
+
+        let content = window.contentRect(forFrameRect: window.frame)
+        guard let context = NSGraphicsContext(bitmapImageRep: rep) else { return }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        let cg = context.cgContext
+        cg.saveGState()
+        // Where the sheet is over the window, measured from the *content* rectangle rather than
+        // from the frame — the difference is the title bar, and taking the wrong one would put
+        // every sheet a few points too high.
+        cg.translateBy(x: sheet.frame.minX - content.minX, y: sheet.frame.minY - content.minY)
+        // The ground under it. A window's background is drawn by the window and not by the view
+        // in it, so rendering the layer alone left the sheet transparent and the timeline
+        // reading through its words.
+        background(of: sheet).setFill()
+        // Rounded to whatever the sheet's own corner is, so the picture has the shape the
+        // screen has rather than a rectangle where the app draws a panel.
+        let corner = layer.cornerRadius
+        NSBezierPath(roundedRect: NSRect(origin: .zero, size: sheetView.bounds.size),
+                     xRadius: corner, yRadius: corner).fill()
+        // A layer renders from its own top-left downwards, and this bitmap counts from the
+        // bottom up, so the last thing done before drawing is to turn it over.
+        cg.translateBy(x: 0, y: sheetView.bounds.height)
+        cg.scaleBy(x: 1, y: -1)
+        layer.render(in: cg)
+        cg.restoreGState()
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    /// What is under a sheet, in the appearance the run is being photographed in.
+    ///
+    /// The window's own colour where it has an opaque one, and this app's surface where it does
+    /// not — a sheet whose background is `clear` is one whose ground is drawn by something else
+    /// entirely, and a screenshot cannot ask that something else to draw itself.
+    @MainActor
+    private static func background(of sheet: NSWindow) -> NSColor {
+        let dark = sheet.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        // Resolved into a plain colour space rather than left dynamic: a colour that decides
+        // what it is from the appearance of whatever is drawing it has nothing to decide from
+        // here, and one that answered `clear` would leave the sheet see-through again.
+        return NSColor(Palette.surface(dark ? .dark : .light))
+            .usingColorSpace(.sRGB) ?? (dark ? .black : .white)
     }
 
     private static func complain(_ what: String) {

@@ -254,3 +254,48 @@ struct CarryMentionsSettingTests {
         }
     }
 }
+
+/// The shooter and the sheet (#99).
+///
+/// There is no unit test for AppKit drawing a window into a bitmap — the test for that is the
+/// picture, and it is looked at. What can be held here is that the coverage does not quietly
+/// disappear: a screen presented as a sheet is in the shot list, so `make shots` photographs one
+/// on every run, and a change that broke it again would fail there rather than in a release.
+@Suite("The shooter and the sheet")
+@MainActor
+struct SheetShotTests {
+    private static var script: String {
+        (try? String(contentsOf: NoticeScreenTests.root.appendingPathComponent("scripts/shots.sh"),
+                     encoding: .utf8)) ?? ""
+    }
+
+    @Test("A screen that lives in a sheet is photographed on every run")
+    func asheetIsInTheShotList() {
+        #expect(Self.script.contains("FEDIQO_NOTICES=1"))
+    }
+
+    /// It hung before, with the file already written, and a runner would have waited for ever.
+    /// The ask to stop is still made politely; this is the bound on how long politeness gets.
+    @Test("A run that will not stop when asked is stopped anyway")
+    func itIsBounded() {
+        #if os(macOS)
+        #expect(Shooter.patience == .seconds(2))
+        #endif
+    }
+
+    /// Every shot's variables are split on whitespace so each gets its own `SIMCTL_CHILD_`
+    /// prefix, so a value with a space in it silently becomes two variables and neither is the
+    /// one that was meant — the same trap the prefixing itself had.
+    @Test("No shot smuggles a space into a value")
+    func novalueHasASpace() {
+        let shots = Self.script
+            .split(separator: "\n")
+            .filter { $0.contains("\":") || ($0.contains("\"") && $0.contains(":")) }
+            .filter { $0.contains("FEDIQO_") }
+        for line in shots {
+            for pair in line.split(separator: " ") where pair.contains("FEDIQO_") {
+                #expect(!pair.hasSuffix("="), "a shot has an empty value: \(line)")
+            }
+        }
+    }
+}

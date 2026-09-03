@@ -72,6 +72,11 @@ SHOTS=(
     # gets its own `SIMCTL_CHILD_` prefix, which means a value with a space in it becomes two
     # variables and neither is the one that was meant.
     "08-mention:timeline:FEDIQO_COMPOSE=1 FEDIQO_DRAFT=@to"
+    # A screen presented as a sheet, which the Mac shooter could not photograph at all until
+    # #99: it took the first visible window, and with a sheet up that is as likely to be the
+    # sheet as the window behind it -- and then hung, because `NSApp.terminate` is an ask and
+    # a window running a modal session can refuse one.
+    "09-notices:timeline:FEDIQO_NOTICES=1"
 )
 
 MACOS_APP=".build/xcode/Build/Products/Debug/Fediqo.app"
