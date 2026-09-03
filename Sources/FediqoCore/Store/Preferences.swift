@@ -159,6 +159,20 @@ public final class Preferences {
     /// read, and this app does not send that one without being asked to.
     public var mayFetchToAct: Bool { didSet { defaults.set(mayFetchToAct, forKey: Keys.mayFetchToAct) } }
 
+    /// When this device last managed to ask a server what had happened — whether or not
+    /// anything had.
+    ///
+    /// Kept on disk rather than in the model that sets it, because the reason for saying it at
+    /// all is the times nobody is looking. A background wake asks, writes what it found, and the
+    /// process is gone a second later; a value living only in memory would have the inbox
+    /// reopen saying it had never asked, on a morning when it had asked four times. That is the
+    /// exact sentence #9 exists to prevent.
+    public var lastHeard: Date? { didSet { defaults.set(lastHeard, forKey: Keys.lastHeard) } }
+
+    /// Who a reply opens with (#97). See `CarriedMentions` for why this is the reader's to
+    /// choose rather than a rule this app makes for them.
+    public var carryMentions: CarriedMentions { didSet { defaults.set(carryMentions.rawValue, forKey: Keys.carryMentions) } }
+
     private enum Keys {
         static let theme = "fediqo.theme"
         static let textScale = "fediqo.textScale"
@@ -173,13 +187,15 @@ public final class Preferences {
         static let clearedSeededWording = "fediqo.clearedSeededWording"
         static let actingServer = "fediqo.actingServer"
         static let mayFetchToAct = "fediqo.mayFetchToAct"
+        static let lastHeard = "fediqo.lastHeard"
+        static let carryMentions = "fediqo.carryMentions"
 
         /// Every key above. Written out rather than derived, so that adding one and forgetting
         /// it here is a compile-time-visible omission in one place rather than a preference
         /// that quietly survives a reset.
         static let all = [theme, textScale, language, railExpanded, showBoosts, showMediaOnly,
                           showSensitive, refreshInterval, keepFor, offeredHomeTimeline, clearedSeededWording,
-                          actingServer, mayFetchToAct]
+                          actingServer, mayFetchToAct, lastHeard, carryMentions]
     }
 
     /// Every preference back to the value a first launch would have given it, and the stored
@@ -202,6 +218,8 @@ public final class Preferences {
         clearedSeededWording = fresh.clearedSeededWording
         actingServer = fresh.actingServer
         mayFetchToAct = fresh.mayFetchToAct
+        lastHeard = fresh.lastHeard
+        carryMentions = fresh.carryMentions
     }
 
     public init(defaults: UserDefaults = .standard) {
@@ -218,6 +236,10 @@ public final class Preferences {
         // Off until asked. The request this permits is the one that tells somebody what is
         // being read, so it is not a default anybody arrives at by not looking.
         mayFetchToAct = defaults.object(forKey: Keys.mayFetchToAct) as? Bool ?? false
+        lastHeard = defaults.object(forKey: Keys.lastHeard) as? Date
+        // The one mention a reply cannot be without, and the one nobody is surprised by.
+        carryMentions = defaults.string(forKey: Keys.carryMentions)
+            .flatMap(CarriedMentions.init(rawValue:)) ?? .replied
         refreshInterval = defaults.string(forKey: Keys.refreshInterval).flatMap(RefreshInterval.init(rawValue:)) ?? .seconds30
         // A season, and not `forever`. A default of forever would mean this app quietly filling
         // somebody's disk on the strength of never having been asked — and a default of a week

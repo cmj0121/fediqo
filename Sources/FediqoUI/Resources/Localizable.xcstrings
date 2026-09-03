@@ -25,13 +25,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "How Fediqo looks and reads, and how often it reads again."
+            "value": "How Fediqo looks and reads, how often it reads again, and what it writes for you."
           }
         },
         "zh-TW": {
           "stringUnit": {
             "state": "translated",
-            "value": "Fediqo 看起來如何、讀起來如何，以及多久重讀一次。"
+            "value": "Fediqo 看起來如何、讀起來如何、多久重讀一次，以及它替你寫些什麼。"
           }
         }
       }
@@ -835,6 +835,23 @@
         }
       }
     },
+    "media.more": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "There is more of this picture — open it to see all of it"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這張照片還有沒顯示到的部分 —— 打開它可以看到全部"
+          }
+        }
+      }
+    },
     "menu.go": {
       "extractionState": "manual",
       "localizations": {
@@ -954,6 +971,40 @@
         }
       }
     },
+    "notices.ask": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ask now"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "現在問"
+          }
+        }
+      }
+    },
+    "notices.asked": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last asked a server %@."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上次問到伺服器是%@。"
+          }
+        }
+      }
+    },
     "notices.kind.boost": {
       "extractionState": "manual",
       "localizations": {
@@ -1069,6 +1120,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "晚了 %@"
+          }
+        }
+      }
+    },
+    "notices.never": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This device has not managed to ask a server yet."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這台裝置還沒問到過伺服器。"
           }
         }
       }
@@ -2807,6 +2875,91 @@
         }
       }
     },
+    "settings.carryMentions": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A reply opens with"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "回覆開頭帶"
+          }
+        }
+      }
+    },
+    "settings.carryMentions.body": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Answering somebody usually starts with their handle. A post that named other people can carry those too — which is right in a thread of three and wrong in a thread of thirty. You are never carried into your own reply."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "回覆一個人通常會從他的帳號開頭。那則貼文提到的其他人也可以一起帶上 —— 三個人的討論串裡這樣是對的，三十個人的討論串裡就不是。你自己永遠不會被帶進自己的回覆裡。"
+          }
+        }
+      }
+    },
+    "settings.carryMentions.everyone": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Everyone"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所有人"
+          }
+        }
+      }
+    },
+    "settings.carryMentions.nobody": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nobody"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不帶人"
+          }
+        }
+      }
+    },
+    "settings.carryMentions.replied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Them"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "對方"
+          }
+        }
+      }
+    },
     "settings.language": {
       "extractionState": "manual",
       "localizations": {
@@ -3436,6 +3589,40 @@
         }
       }
     },
+    "settings.writing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Writing"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "書寫"
+          }
+        }
+      }
+    },
+    "shortcut.author": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open whoever wrote the post you are on"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "開啟你所在那則貼文的作者"
+          }
+        }
+      }
+    },
     "shortcut.bookmark": {
       "extractionState": "manual",
       "localizations": {
@@ -3483,6 +3670,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "在它的伺服器上打開"
+          }
+        }
+      }
+    },
+    "shortcut.complete": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Take the handle the composer is offering"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "採用編輯器提供的帳號"
           }
         }
       }
@@ -5380,13 +5584,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Nothing yet. Replies and mentions arrive while Fediqo is open — there is no server of ours to push them, and there will not be one."
+            "value": "Nothing yet."
           }
         },
         "zh-TW": {
           "stringUnit": {
             "state": "translated",
-            "value": "目前沒有。回覆與提及會在 Fediqo 開著的時候送達 —— 我們沒有伺服器可以推播，以後也不會有。"
+            "value": "目前沒有。"
           }
         }
       }

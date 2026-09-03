@@ -10,6 +10,11 @@ import FediqoCore
 /// It reads the list to answer any of it — a ring is a place in a list — and it never writes
 /// one. That is the whole of the relation: moving the ring cannot change what is on the screen,
 /// which is why a press of `j` has no business redrawing the header.
+///
+/// The list it stands in is `RingRows` rather than a feed, because a timeline is not the only
+/// list of posts in this app: a page about somebody is one too, and a reader who has learned
+/// what `j` does has learned it for the app rather than for one screen (#94). One ring, so the
+/// rule that `k` at the top stops rather than wraps cannot come to be two rules.
 @MainActor
 @Observable
 final class FeedPlace {
@@ -40,12 +45,10 @@ final class FeedPlace {
     /// is no longer waiting and the page that arrives leaves their ring alone.
     @ObservationIgnored private(set) var awaitingOlder = false
 
-    private let posts: FeedPosts
-    private let preferences: Preferences
+    private let rows: any RingRows
 
-    init(posts: FeedPosts, preferences: Preferences) {
-        self.posts = posts
-        self.preferences = preferences
+    init(rows: any RingRows) {
+        self.rows = rows
     }
 
     /// The post the ring is on, if the list still has it.
@@ -56,7 +59,7 @@ final class FeedPlace {
     /// comes back with it, which is what a reader who turned a filter on and off again
     /// would expect. What does not happen either way is the list moving under them.
     var selectedPost: Post? {
-        let shown = posts.rules()
+        let shown = rows.ringRows()
         return selection.flatMap { shown.index[$0] }.map { shown.posts[$0] }
     }
 
@@ -83,7 +86,7 @@ final class FeedPlace {
     /// counterpart: what is above the newest post is a refresh, and refreshing already exists.
     @discardableResult
     func moveSelection(by steps: Int) -> Bool {
-        let shown = posts.rules()
+        let shown = rows.ringRows()
         let here = selection.flatMap { shown.index[$0] }
         // One write, and every press makes it: an empty list and a ring the list no longer
         // has both fall to false, which is right — neither is a reader standing at the end.
@@ -119,14 +122,29 @@ final class FeedPlace {
     /// it waiting for the next one.
     ///
     /// The rules are applied to the arriving page rather than read off the shown list, because
-    /// the shown list has just changed under it: asking `rules()` here is a guaranteed miss and
-    /// a rebuild of the whole index, to answer a question about forty posts.
+    /// the shown list has just changed under it: asking for the rows here is a guaranteed miss
+    /// and a rebuild of the whole index, to answer a question about forty posts. Which of them
+    /// the ring may land on is the list's own answer — a timeline has the reader's standing
+    /// filters to apply and a page about one person has none.
     func land(theRingOn joining: [Post]) {
         guard awaitingOlder else { return }
-        let visible = TimelineLoader.apply(showBoosts: preferences.showBoosts,
-                                           mediaOnly: preferences.showMediaOnly, to: joining)
-        guard let landing = visible.first else { return }
+        guard let landing = rows.landable(joining).first else { return }
         selection = landing.mergeKey
         awaitingOlder = false
     }
+}
+
+/// A list a ring can stand in.
+///
+/// Two questions, and a timeline and a page about somebody answer them differently: which rows
+/// are on the screen right now, and — when a page arrives under a ring that was waiting at the
+/// bottom — which of the arriving posts the reader can actually see.
+@MainActor
+protocol RingRows {
+    /// The rows in the order they are drawn, and where each key is among them. The index comes
+    /// with them because the ring asks "where is this key" on every press of a held `j`.
+    func ringRows() -> (posts: [Post], index: [String: Int])
+
+    /// Which of an arriving page the ring may land on.
+    func landable(_ joining: [Post]) -> [Post]
 }

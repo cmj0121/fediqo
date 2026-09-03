@@ -25,13 +25,19 @@ struct PersonPage: View {
         VStack(spacing: 0) {
             header
             Hairline()
-            ScrollView {
-                VStack(alignment: .leading, spacing: Space.band) {
-                    who
-                    theirPosts
+            // The ring moving where nobody can see it is the key doing nothing, as far as the
+            // reader is concerned — so the same director the timeline has, watching from a
+            // body of its own rather than from this one (#71).
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: Space.band) {
+                        who
+                        theirPosts
+                    }
+                    .padding(Space.pad)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .padding(Space.pad)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .background { ScrollDirector(place: model.place, proxy: proxy) }
             }
         }
         .background(Palette.surface(colorScheme))
@@ -236,6 +242,22 @@ struct PersonPage: View {
         return what.requested ? "clock" : "checkmark"
     }
 
+    /// One of their posts, drawn the way that same post is drawn in the timeline.
+    private func theirs(_ post: Post) -> some View {
+        let ringed = post.mergeKey == model.place.selection
+        return PostRow(post: post,
+                       selected: ringed,
+                       turns: ringed ? app.mediaTurns : 0,
+                       plays: ringed ? app.mediaPlays : 0,
+                       covers: ringed ? app.mediaCovers : 0,
+                       revealed: app.preferences.showSensitive,
+                       answering: FeedScreen.answering(post, among: model.posts,
+                                                       orKnown: app.parentHandles),
+                       focus: { model.place.select(post) },
+                       openAuthor: { app.openPerson(of: post) },
+                       open: { app.expand(post) })
+    }
+
     // MARK: - what they wrote
 
     @ViewBuilder
@@ -247,8 +269,12 @@ struct PersonPage: View {
         } else {
             LazyVStack(spacing: Space.gap) {
                 ForEach(model.posts, id: \.mergeKey) { post in
-                    PostRow(post: post, condensed: true) { app.expand(post) }
-                        .fediqoCard()
+                    // Everything the timeline hands a row, because it is the same row: this
+                    // drew a card inside a card — `PostRow` already carries one — and passed
+                    // none of the rest, so a post on somebody's page had no ring, ignored the
+                    // reader's standing answer about what an author covered, never said it was
+                    // a reply, and had a name that could not be pressed (#94).
+                    theirs(post)
                 }
             }
         }

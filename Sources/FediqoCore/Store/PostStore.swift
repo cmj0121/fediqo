@@ -538,14 +538,17 @@ extension LocalStore {
         // 005 has no rows here at all; `post(from:…)` falls back to the one column 001 kept.
         var media: [String: [Attachment]] = [:]
         for row in try Row.fetchAll(db, sql: """
-            SELECT merge_key, kind, url, preview_url, alt FROM post_media
+            SELECT merge_key, kind, url, preview_url, alt, width, height FROM post_media
             WHERE merge_key IN (\(placeholders)) ORDER BY merge_key, position
             """, arguments: StatementArguments(keys)) {
             media[row["merge_key"], default: []].append(Attachment(
                 kind: Attachment.Kind(rawValue: row["kind"]) ?? .unknown,
                 url: (row["url"] as String?).flatMap(URL.init(string:)),
                 previewURL: (row["preview_url"] as String?).flatMap(URL.init(string:)),
-                alt: row["alt"]))
+                alt: row["alt"],
+                // Null for everything written before 015, which is a shape nobody said rather
+                // than a square: the card draws at its own shape until the post is read again.
+                width: row["width"], height: row["height"]))
         }
         var mentions: [String: [Mention]] = [:]
         for row in try Row.fetchAll(db, sql: """
@@ -1000,15 +1003,21 @@ extension LocalStore {
     /// again writes the same rows rather than growing new ones.
     private static func insertMedia(_ db: Database, _ attachments: [Attachment],
                                     for key: String, now: Int64) throws {
+        // Nothing to write, nothing to prepare. Preparing is where a statement is checked
+        // against the schema, so a post with no attachments was failing on a store older than
+        // the columns it names — which is not a thing a post with no attachments can care about.
+        guard attachments.contains(where: { !$0.isEmpty }) else { return }
         let insert = try db.cachedStatement(sql: """
-            INSERT OR REPLACE INTO post_media (merge_key, position, kind, url, preview_url, alt, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO post_media
+                (merge_key, position, kind, url, preview_url, alt, width, height, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """)
         for (position, attachment) in attachments.enumerated() where !attachment.isEmpty {
             try insert.execute(arguments: [key, position, attachment.kind.rawValue,
                                            attachment.url?.absoluteString,
                                            attachment.previewURL?.absoluteString,
-                                           attachment.alt, now])
+                                           attachment.alt,
+                                           attachment.width, attachment.height, now])
         }
     }
 

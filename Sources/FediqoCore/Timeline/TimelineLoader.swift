@@ -304,8 +304,10 @@ public struct TimelineLoader: Sendable {
     /// order is not the timeline's order, and the fold that makes one stream out of several
     /// already lives on the other side of the store.
     public func catchUp(_ server: Server, downTo oldest: Date, query: TimelineQuery,
-                        rounds: Int = 4) async -> [SourceFailure] {
-        var cursor: Post?
+                        from: Post? = nil, rounds: Int = 4) async -> [SourceFailure] {
+        // Where the walk starts, which is the foot of what the caller already holds. Without it
+        // the first round asks for the newest page again — a page it has just been given.
+        var cursor: Post? = from
         var failures: [SourceFailure] = []
         for _ in 0..<rounds {
             let round = await fanOut([(server, cursor)], query: query)

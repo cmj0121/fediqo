@@ -172,6 +172,81 @@ struct KeyOwnershipTests {
 @Suite("Steering the app from the keyboard")
 @MainActor
 struct CommandTests {
+
+    // MARK: - one key to whoever wrote it (#96)
+
+    /// A post and the boost of it, so the key can be asked the one question that has two
+    /// plausible answers.
+    private func written(_ id: String, by who: String, boostedBy booster: String? = nil) -> Post {
+        Post(uri: "https://one.example/api/v1/statuses/\(id)",
+             originURI: "https://one.example/users/\(who)/statuses/\(id)",
+             socialProtocol: .mastodon, sourceURL: "https://one.example",
+             createdAt: Date(timeIntervalSince1970: 100),
+             authorId: "https://one.example/@\(who)", authorName: who.capitalized,
+             authorHandle: "@\(who)@one.example", text: id,
+             boostedBy: booster?.capitalized,
+             boostedById: booster.map { "https://one.example/@\($0)" })
+    }
+
+    @Test("u opens whoever wrote the post the reader is on")
+    func theKeyOpensTheAuthor() async throws {
+        let posts = [written("a", by: "tove")]
+        let app = try await signedInApp("author-key", posts: posts, client: WriteDouble())
+        #expect(app.presses("j"))
+
+        #expect(app.presses("u"))
+
+        #expect(app.person?.subject.handle == "@tove@one.example")
+    }
+
+    /// The fork this issue had to decide. The boost line already names who boosted it and the
+    /// post names who wrote it; the key belongs to the post.
+    @Test("On a boost it opens the author and not the booster")
+    func aBoostOpensItsAuthor() async throws {
+        let posts = [written("b", by: "tove", boostedBy: "ines")]
+        let app = try await signedInApp("author-boost", posts: posts, client: WriteDouble())
+        #expect(app.presses("j"))
+
+        #expect(app.presses("u"))
+
+        #expect(app.person?.subject.handle == "@tove@one.example")
+    }
+
+    /// With nothing under the ring there is nobody to open, and the press says so rather than
+    /// being swallowed on a screen where it did nothing.
+    @Test("With no post selected it opens nobody and says so")
+    func nothingSelectedOpensNobody() {
+        let app = freshApp("author-none")
+        app.railItem = .timeline
+
+        #expect(!app.perform(.openAuthor))
+        #expect(app.person == nil)
+    }
+
+    /// It is in the list, because the list is the keys: a shortcut nobody can find is one that
+    /// only its author has.
+    @Test("The key is written down where the keys are written down")
+    func theKeyIsListed() {
+        let listed = KeyCommand.shortcuts.first { $0.commands.contains(.openAuthor) }
+        #expect(listed?.keys == ["u"])
+    }
+
+
+    /// **`Return` belongs to the draft.** This app's half of a composer that can hold more than
+    /// one line: while a draft has the keyboard, `Return` means nothing here and is handed back,
+    /// so whatever is in the field gets it. The other half is the field being a `TextEditor` —
+    /// a vertical `TextField` submits on `Return` rather than starting a paragraph, which is
+    /// what made a reader unable to write a second line.
+    @Test("Return in a draft is the draft's, not ours")
+    func returnBelongsToTheDraft() {
+        #expect(KeyCommand.from(KeyEquivalent.return.character, modifiers: [], typing: true) == nil)
+        #expect(!KeyCommand.handles(KeyEquivalent.return.character, modifiers: [],
+                                    typing: true) { _ in true })
+        // And outside a draft it is still what opens a post.
+        #expect(KeyCommand.from(KeyEquivalent.return.character, modifiers: [],
+                                typing: false) == .expandPost)
+    }
+
     @Test("⌃Tab goes round the four pages and comes back to where it started")
     func pagesRotateForwards() {
         let app = freshApp("pages-forwards")

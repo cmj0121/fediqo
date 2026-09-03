@@ -38,6 +38,12 @@ struct ComposerView: View {
         // a keyboard. `c` opens it and the cursor is already here; `Escape` is how you leave,
         // and it is the one key that still works while this has the keyboard.
         .task { await takeTheKeyboard() }
+        // What a fixture run was told to open holding, so that a screen which only exists
+        // while somebody is typing can be photographed on a run where nothing may type (#100).
+        // Nil on every other run.
+        .task {
+            if let seeded = app.launchedDraft, draft.isEmpty { draft = seeded }
+        }
         // That server's rule, asked of it rather than written here, and asked when the panel
         // opens because it is theirs to change between one post and the next.
         .task { await app.askTheLimit() }
@@ -45,8 +51,45 @@ struct ComposerView: View {
         // reason: both are things a reader should be told before writing rather than after.
         .task {
             guard let parent = app.answering else { return }
-            canAnswer = await app.acting(on: parent) != nil
+            let account = await app.acting(on: parent)
+            canAnswer = account != nil
+            // Who the reply opens with (#97). Once, and only into a draft nobody has written
+            // in: the acting account is asked over the network, and a reader who started
+            // typing while it was out must not have their first words pushed along by a
+            // handle arriving late.
+            if draft.isEmpty {
+                draft = app.preferences.carryMentions.opening(answering: parent,
+                                                              as: account?.authorId)
+            }
         }
+        // Who the handle being typed could be (#98). `.task(id:)` rather than a task of its
+        // own: changing the id cancels the wait and the question with it, so a reader typing
+        // quickly asks once at the end rather than once per letter — and closing the panel
+        // cancels it too.
+        .task(id: typedHandle) {
+            guard let typed = typedHandle else { return app.mentions.clear() }
+            try? await Task.sleep(for: Self.settle)
+            guard !Task.isCancelled else { return }
+            // Asked of the server this draft will be posted from, and of no other: an account
+            // is offered so it can be written into a post that server will send, and one it
+            // has never heard of is one it cannot address.
+            let account = if let parent = app.answering {
+                await app.acting(on: parent)
+            } else {
+                await app.publishing()
+            }
+            await app.mentions.look(for: typed, as: account)
+        }
+        // What the reader took, written into the draft here and nowhere else. The offer is the
+        // model's and the draft is this view's, so there is one place that edits what somebody
+        // wrote (#98).
+        .onChange(of: app.mentions.chosen) { _, taken in
+            guard let taken, let query = MentionQuery.trailing(in: draft) else { return }
+            draft = query.accepting(taken.handle, in: draft)
+            app.mentions.chosen = nil
+            app.mentions.clear()
+        }
+        .onDisappear { app.mentions.clear() }
         // The audience a reply may not be wider than. Set once when the panel opens rather than
         // clamped at the send, so what the picker shows is what will go — `Draft` narrows it
         // again anyway, and a composer whose picker disagreed with the post it sent would be
@@ -98,18 +141,9 @@ struct ComposerView: View {
                     .fediqoCard(radius: Radius.inner, raised: false)
             }
 
-            TextField(t("compose.placeholder"), text: $draft, axis: .vertical)
-                .textFieldStyle(.plain)
-                .focused($typing)
-                .fediqoFont(TypeScale.small)
-                .padding(Space.mid)
-                // Into whatever the panel has left. The composer is most of the window now, and
-                // a field that stayed 72 points tall in it would be a small box with a field of
-                // empty card under it — which is what a corner panel had no room to be.
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .fediqoCard(radius: Radius.inner, raised: false)
-                .onChange(of: typing) { _, now in app.setTyping(now) }
+            field
 
+            offered
             attached
             destinations
             controls
@@ -117,6 +151,115 @@ struct ComposerView: View {
         .padding(Space.pad)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
+
+    /// Where the post is written.
+    ///
+    /// **A `TextEditor` and not a `TextField(axis: .vertical)`**, which is the whole of why
+    /// `Return` did nothing: a vertical text field grows to fit what is typed into it, but the
+    /// key that would start a paragraph submits the field instead — so a reader writing more
+    /// than one line could not. `KeyCommand` has said all along that "`Return` starts a
+    /// paragraph and `j` is a letter"; this is the field finally agreeing with it.
+    ///
+    /// The placeholder is drawn rather than given, because a text editor has none. It is laid
+    /// out with the same insets as the text so the first character lands where the prompt was,
+    /// and it is not hittable — a press anywhere in the box belongs to the editor under it.
+    private var field: some View {
+        TextEditor(text: $draft)
+            .textEditorStyle(.plain)
+            // The card behind it is the app's, not the platform's default sheet of white.
+            .scrollContentBackground(.hidden)
+            .focused($typing)
+            .fediqoFont(TypeScale.small)
+            .padding(Space.mid)
+            // Into whatever the panel has left. The composer is most of the window now, and
+            // a field that stayed 72 points tall in it would be a small box with a field of
+            // empty card under it — which is what a corner panel had no room to be.
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .fediqoCard(radius: Radius.inner, raised: false)
+            .overlay(alignment: .topLeading) {
+                if draft.isEmpty {
+                    Text(t("compose.placeholder"))
+                        .fediqoFont(TypeScale.small)
+                        .foregroundStyle(.tertiary)
+                        .padding(Space.mid)
+                        // The editor's own inset, which a text field did not have.
+                        .padding(.leading, Space.hair)
+                        .allowsHitTesting(false)
+                }
+            }
+            .onChange(of: typing) { _, now in app.setTyping(now) }
+    }
+
+    // MARK: - the handle being typed (#98)
+
+    /// Who the handle at the end of the draft could be.
+    ///
+    /// Under the field rather than over it, because it appears and goes as somebody types: a
+    /// list that opened above the field would push the words they are writing down the panel
+    /// on every third letter.
+    @ViewBuilder
+    private var offered: some View {
+        if !app.mentions.people.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(app.mentions.people, id: \.authorId) { person in
+                    Button { app.mentions.chosen = person } label: {
+                        // Widest first (S9), and the whole row is the arrangement. **The handle
+                        // is what survives**: it is the thing being typed and the thing that
+                        // goes into the post, and a row offering `Ra…` beside `@tove…xample`
+                        // has cut up the only part that had to be readable.
+                        ViewThatFits(in: .horizontal) {
+                            offer(person, naming: true)
+                            offer(person, naming: false)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fediqoCard(radius: Radius.inner, raised: false)
+        }
+    }
+
+    /// One of them, with the name where there is room for it and without where there is not.
+    private func offer(_ person: Profile, naming: Bool) -> some View {
+        HStack(spacing: Space.step) {
+            RemoteImage(url: person.avatarURL, width: Size.iconColumn,
+                        height: Size.iconColumn, standing: .avatar)
+            if naming {
+                EmojiText(person.name, emojis: person.emojis,
+                          size: TypeScale.small, weight: .medium)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+            Text(person.handle)
+                .fediqoFont(TypeScale.minor)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .fixedSize()
+            Spacer(minLength: Space.tight)
+            // Which one `Tab` takes, said on the row it would take rather than left for a
+            // reader to guess from the order.
+            if person.authorId == app.mentions.first?.authorId {
+                Text(verbatim: "⇥")
+                    .fediqoFont(TypeScale.minor, design: .monospaced)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.vertical, Space.tight)
+        .padding(.horizontal, Space.mid)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+
+    /// What is being typed at the end of the draft, or nothing. Watched rather than computed at
+    /// the ask, so the wait below is keyed to the question and not to every keystroke.
+    private var typedHandle: String? { MentionQuery.trailing(in: draft)?.text }
+
+    /// How long a reader has to stop typing before anybody is asked.
+    ///
+    /// Not a throttle on our side but a courtesy to theirs: a question per letter would have
+    /// somebody else's server answering eleven times about a handle that was only ever one.
+    private static let settle = Duration.milliseconds(250)
 
     /// How much room is left, or nothing at all where the server never said.
     ///

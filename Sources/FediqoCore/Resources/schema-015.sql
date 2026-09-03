@@ -1,0 +1,23 @@
+-- Fediqo — the local store, migration 015. Appended after 001–014; the rules there still hold:
+-- STRICT, every *_at in INTEGER milliseconds, append-only, nothing backfilled.
+--
+-- ── what shape a picture is ──────────────────────────────────────────────────
+--
+-- #101 decides that a card takes the picture's own shape rather than cropping it to a fixed
+-- one, and a row cannot do that without knowing the shape. Mastodon has been sending it all
+-- along — `meta.original.width` and `height` on every attachment — and this app kept none of
+-- it, so a row had no way of knowing what shape a picture was until the bytes arrived, by
+-- which time it had already been laid out.
+--
+-- ── nullable, and nothing backfilled ─────────────────────────────────────────
+--
+-- A server that did not say has not said zero, which is the same care `maxCharacters` and the
+-- three counts are treated with. Every attachment written before this migration has no shape
+-- and gets none: the row draws at the card's own shape, which is what it did yesterday. What
+-- arrives after it is written down, and the next read of an old post fills its rows in.
+--
+-- Pixels rather than an aspect, because pixels are what a server sends and an aspect is what
+-- a view wants — the arithmetic belongs where it is used, and a number stored already divided
+-- is a number nobody can check against the file.
+ALTER TABLE post_media ADD COLUMN width  INTEGER;
+ALTER TABLE post_media ADD COLUMN height INTEGER;

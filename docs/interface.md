@@ -2,7 +2,7 @@
 
 [English](interface.md) | [繁體中文](interface.zh-TW.md)
 
-> The look is not a taste. It is nine rules, and a screen is judged against them rather than against an opinion.
+> The look is not a taste. It is ten rules, and a screen is judged against them rather than against an opinion.
 
 Fediqo draws with the platform's own controls and the platform's own chrome. That is a premise, not a preference:
 a control the system draws is one the reader already knows, already reaches by keyboard, and already hears read
@@ -137,11 +137,45 @@ scale**. The part that is a picture is not: a picture is the size it is at every
 What this rule forbids is a screen that knows how wide it is. Adding a screen is not adding a boolean, and a
 new device is not a new threshold.
 
+## S10 — A row with a picture is one height
+
+Every row that carries a picture is the same height as every other. The picture is scaled to fill that
+and cut where it does not fit, and the row says when enough was lost to matter.
+
+A timeline is a list somebody is going down. A list whose rows are all different heights is one the eye
+has to re-find its place in on every post, and one tall photograph decides how much of somebody's
+reading it gets. So the card is one shape — `AttachmentDeck.ratio` — whatever shape the picture is.
+
+**And one size, chosen so that a row with a picture is nearly a row without one.** The card is as tall
+as `PostRow.words`, which is the height an excerpt is clamped to: the picture beside the words is as
+tall as the words are allowed to be. Measured in the timeline at 1280 points, that is 275 against 210;
+at twice the size it was 410 against 215. It is also where shrinking stops helping — below it the words
+decide the row on their own, and a smaller picture buys nothing but a smaller picture.
+
+**Scaled, never stretched.** A picture keeps its own proportions and is made big enough to cover the
+card; what falls outside is cut. A picture squashed to fit would be a different picture, which is the
+one thing that is not allowed here.
+
+**And where it is cut, the row says so.** Mastodon sends `meta.original.width` and `height`, and this
+app keeps them, so a row knows what it is not showing: below `AttachmentDeck.mostOfIt` a mark says
+there is more, and what the mark means is *open it*. Above it, what was trimmed is the edge of a
+photograph rather than a piece of it — a 3:2 photograph loses a hair in this card, and a mark on every
+picture would be noise standing where a fact should be. Saying it is what S5 would ask for anyway: a
+row showing the middle of somebody's photograph and saying nothing is a row inventing what the picture
+is.
+
+A row with no picture is still as tall as its words. This rule is about the rows that carry one; S6 is
+still what says a row is bounded rather than uniform, and nothing pads a two-line post up to the height
+of a photograph.
+
+What this rule forbids is a list that moves under the reader, and a screen that quietly passes off part
+of somebody's photograph as the whole of it.
+
 ## When a rule is in the way
 
 A rule that is wrong is changed here, in the open, and the change is argued in
 [#35](https://github.com/cmj0121/fediqo/issues/35). A screen that breaks one quietly is a screen that has
-decided on everybody's behalf, which is the thing these nine sentences exist to stop.
+decided on everybody's behalf, which is the thing these ten sentences exist to stop.
 
 ## What this is not
 

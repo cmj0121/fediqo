@@ -28,6 +28,112 @@ struct PersonPageTests {
         }
     }
 
+
+    // MARK: - the ring, on somebody's page (#94)
+
+    /// Three of theirs, so the ring has somewhere to go.
+    private func wrote(_ ids: [String], on host: String = "cedar.example") -> [Post] {
+        ids.map { id in
+            Post(uri: "https://\(host)/api/v1/statuses/\(id)", socialProtocol: .mastodon,
+                 sourceURL: "https://\(host)", createdAt: Date(timeIntervalSince1970: 100),
+                 authorId: "https://\(host)/@tove", authorName: "Tove",
+                 authorHandle: "@tove@\(host)", text: id)
+        }
+    }
+
+    private func read(_ posts: [Post]) async -> PersonModel {
+        let page = model(PersonDouble(profile: Profile(id: "10", authorId: "https://cedar.example/@tove",
+                                                       name: "Tove", handle: "@tove@cedar.example"),
+                                      wrote: posts))
+        await page.read()
+        return page
+    }
+
+    /// The whole of the issue: the keys work here, and they are the same keys.
+    @Test("j and k move through what somebody wrote")
+    func theRingMovesOnTheirPage() async {
+        let page = await read(wrote(["a", "b", "c"]))
+
+        #expect(page.place.moveSelection(by: 1))
+        #expect(page.place.selectedPost?.text == "a")
+        #expect(page.place.moveSelection(by: 1))
+        #expect(page.place.selectedPost?.text == "b")
+        #expect(page.place.moveSelection(by: -1))
+        #expect(page.place.selectedPost?.text == "a")
+    }
+
+    /// The same ring and therefore the same rule, which is why it is the same object: `k` at the
+    /// top stops rather than throwing the reader to the oldest post there is.
+    @Test("It stops at the top rather than wrapping")
+    func itStopsAtTheTop() async {
+        let page = await read(wrote(["a", "b"]))
+
+        #expect(page.place.moveSelection(by: 1))
+        #expect(!page.place.moveSelection(by: -1))
+        #expect(page.place.selectedPost?.text == "a")
+    }
+
+    /// Their page is theirs. The reader's two switches are what they want their *timeline* to be,
+    /// and a page showing eleven of somebody's nineteen posts because eight were boosts would be
+    /// this app deciding what somebody's page is.
+    @Test("Their own posts are not filtered by the reader's timeline switches")
+    func theirPageIsNotFiltered() async {
+        let page = await read(wrote(["a", "b", "c"]))
+        #expect(page.ringRows().posts.count == 3)
+        #expect(page.landable(wrote(["d"])).count == 1)
+    }
+
+    /// A page with nobody's posts on it has nowhere for the ring to go, and says so rather than
+    /// claiming to have moved.
+    @Test("A press on an empty page moves nothing")
+    func nothingToMoveThrough() async {
+        let page = await read([])
+        #expect(!page.place.moveSelection(by: 1))
+        #expect(page.place.selectedPost == nil)
+    }
+
+    /// Opening somebody else starts a page of their own, and a ring on somebody else's post is
+    /// not carried onto it.
+    @Test("A new page does not open holding the last one's ring")
+    func eachPageHasItsOwnRing() async {
+        let first = await read(wrote(["a", "b"]))
+        #expect(first.place.moveSelection(by: 1))
+
+        let second = await read(wrote(["x", "y"]))
+        #expect(second.place.selectedPost == nil)
+    }
+
+
+    /// The routing, which is where a second ring would have gone wrong first. A page about
+    /// somebody stands over the timeline, and the keys belong to what is in front of the reader
+    /// — moving the ring in the list behind it would be moving something they cannot see.
+    @Test("With a page open, the keys move that page's ring and not the timeline's")
+    @MainActor
+    func theKeysGoToWhatIsInFront() async throws {
+        let posts = wrote(["a", "b", "c"])
+        let app = try await signedInApp("person-ring", posts: posts,
+                                        client: PersonDouble(
+                                            profile: Profile(id: "10",
+                                                             authorId: "https://cedar.example/@tove",
+                                                             name: "Tove",
+                                                             handle: "@tove@cedar.example"),
+                                            wrote: posts),
+                                        host: "cedar.example")
+        // The reader is on the second post in the timeline before they open anybody.
+        #expect(app.presses("j"))
+        #expect(app.presses("j"))
+        let behind = app.feed(for: .publicFixture).place.selection
+
+        app.openPerson(of: posts[0])
+        let page = try #require(app.person)
+        await page.read()
+
+        #expect(app.presses("j"))
+        #expect(page.place.selectedPost?.text == "a")
+        // And the list behind it did not move under them.
+        #expect(app.feed(for: .publicFixture).place.selection == behind)
+    }
+
     /// The row already knows a name and a picture, so the page opens drawn rather than empty and
     /// the server fills it in. A page that waited would flash blank on every press.
     @Test("It is drawn from what the row already knew, before anybody is asked")
@@ -201,6 +307,8 @@ final class Counter {
 /// A source that answers about one person, and counts who was asked what.
 final class PersonDouble: SourceClient, @unchecked Sendable {
     private let stored: Profile?
+    /// What this person has written, for the ring to move over (#94).
+    private let wrote: [Post]
     private let related: Relationship?
     private let afterFollow: Relationship
     private let refusing: Bool
@@ -211,7 +319,9 @@ final class PersonDouble: SourceClient, @unchecked Sendable {
     private(set) var followsSent = 0
 
     init(profile: Profile? = nil, relationship: Relationship? = nil,
-         afterFollow: Relationship = Relationship(following: true), refusing: Bool = false) {
+         afterFollow: Relationship = Relationship(following: true), refusing: Bool = false,
+         wrote: [Post] = []) {
+        self.wrote = wrote
         self.stored = profile
         self.related = relationship
         self.afterFollow = afterFollow
@@ -224,7 +334,7 @@ final class PersonDouble: SourceClient, @unchecked Sendable {
     }
 
     func posts(by id: String, host: String, limit: Int, before: Post?,
-               token: String?) async throws -> [Post] { [] }
+               token: String?) async throws -> [Post] { wrote }
 
     func relationship(with handle: String, as account: ActingAccount) async throws -> Relationship? {
         related

@@ -31,6 +31,27 @@ enum Fixture {
         }
     }
 
+    /// Who the reader is, on a run that is signed in (#100).
+    ///
+    /// Somebody who has written nothing in this timeline, which is the ordinary case: a reader
+    /// looking at a public timeline is not usually in it. Their server is `cedar.example`, which
+    /// is the host most of what is here came from, so a reply has somewhere to go and a person
+    /// page has a server that has heard of the person it is about.
+    static let reader = SignedInAccount(
+        authorId: "https://cedar.example/@ada", handle: "@ada@cedar.example",
+        displayName: "Ada Lindqvist",
+        avatarURL: FixtureImages.url("avatar-reader", seed: 4, width: 96, height: 96))
+
+    static var readerServer: Server {
+        servers.first { $0.host == "cedar.example" } ?? servers[0]
+    }
+
+    /// A credential for a server that cannot be reached and would not check it if it could.
+    static var readerToken: OAuthToken {
+        OAuthToken(accessToken: "fixture", scope: "read write follow",
+                   createdAt: Date(timeIntervalSince1970: 1_700_000_000))
+    }
+
     static func title(of host: String) -> String {
         host.split(separator: ".").first.map { $0.prefix(1).uppercased() + $0.dropFirst() } ?? host
     }
@@ -68,7 +89,12 @@ enum Fixture {
                  name: "Ines Okafor", handle: "ines",
                  text: "Three things came attached. They are a deck, not a row of thumbnails — "
                      + "click the top one and the stack turns over.",
-                 attachments: (0..<3).map { image("deck-\($0)", seed: $0) },
+                 // Three shapes rather than three of one, so what a card does with a
+                 // photograph that is not the card's shape can be looked at (#101) — including
+                 // one past the bound, which is cut and says so.
+                 attachments: [image("deck-0", seed: 0, shape: 0.68),
+                               image("deck-1", seed: 1, shape: 1.78),
+                               image("deck-2", seed: 2, shape: 1.0)],
                  counts: Counts(replies: 1, reblogs: 3, favourites: 19)),
             post("the-thread", host: hosts[0], minutesAgo: 96, now: now,
                  name: "Wren Ashby", handle: "wren",
@@ -126,7 +152,7 @@ enum Fixture {
                  name: "Yusuf Adeyemi", handle: "yusuf",
                  text: "Reading rooms, mostly. The one at the top of the hill has the light "
                      + "and none of the chairs. https://cedar.example/rooms",
-                 attachments: [image("room", seed: 3)],
+                 attachments: [image("room", seed: 3, shape: 1.2)],
                  counts: Counts(replies: 2, reblogs: 5, favourites: 41),
                  tags: ["libraries", "slowweb"]),
             // Written partly in pictures, in the words and in the name above them: a
@@ -135,6 +161,7 @@ enum Fixture {
                  name: "Tove :spark: Rasmussen", handle: "tove",
                  text: "Custom emoji are :spark: a server's own, and a client that cannot draw "
                      + "them leaves you reading the shortcode :cog: instead.",
+                 attachments: [image("peek", seed: 5, shape: 0.68)],
                  counts: Counts(replies: 2, reblogs: 6, favourites: 23),
                  emojis: [emoji("spark", seed: 1), emoji("cog", seed: 4)]),
             // A post that is mostly a link, with the card its own server made of it. Nothing
@@ -225,7 +252,7 @@ enum Fixture {
             authorId: "https://\(host)/users/\(handle)",
             authorName: name,
             authorHandle: "@\(handle)@\(host)",
-            authorAvatarURL: image("avatar-\(handle)", seed: abs(handle.hashValue % 6), side: 96).url,
+            authorAvatarURL: image("avatar-\(handle)", seed: abs(handle.hashValue % 6), side: 96, shape: 1).url,
             text: text,
             attachments: attachments,
             sensitive: sensitive,
@@ -269,10 +296,23 @@ enum Fixture {
     /// so the fixture's pictures are real files in the temporary directory and the drawing
     /// code above them is untouched. Nothing is committed: an invented photograph would be a
     /// binary in the repository that no test can check and nobody can regenerate.
-    private static func image(_ name: String, seed: Int, side: Int = 640) -> Attachment {
-        let url = FixtureImages.url(name, seed: seed, width: side, height: side * 68 / 100)
+    /// One invented picture, at a shape.
+    ///
+    /// **The shape is passed to `Attachment` as well as drawn**, because that is what a server
+    /// sends and what the card now reads (#101). A fixture that drew a portrait block and then
+    /// told the app nothing about its shape would photograph the fallback rather than the rule.
+    private static func image(_ name: String, seed: Int, side: Int = 640,
+                              shape: CGFloat = 0.68) -> Attachment {
+        let height = Int(CGFloat(side) * shape)
+        // The shape is in the name. These are drawn once and kept for the run — kept between
+        // runs, in fact, in the app's own directory — so a name that did not say what shape it
+        // was would hand back yesterday's picture at yesterday's shape while the attachment
+        // beside it said something else.
+        let url = FixtureImages.url("\(name)-\(side)x\(height)", seed: seed,
+                                    width: side, height: height)
         return Attachment(kind: .image, url: url, previewURL: url,
-                          alt: "An invented picture, drawn by the app so that nothing is fetched.")
+                          alt: "An invented picture, drawn by the app so that nothing is fetched.",
+                          width: side, height: height)
     }
 }
 
@@ -428,11 +468,46 @@ struct FixtureSource: SourceClient {
         before == nil ? Fixture.timeline(of: host).filter { $0.authorHandle == id } : []
     }
 
-    /// Nobody is signed in to an invented server, so there is no account to have a relationship
-    /// from. `nil` and not a made-up "not following": the page has a state for being unable to
-    /// say, and it is the honest one here.
+    /// What the reader is to somebody, where the acting server has heard of them.
+    ///
+    /// **A server knows the accounts it has seen and no others**, which is the rule this follows
+    /// rather than a rule invented for the fixture: somebody who has written on the acting host's
+    /// own timeline is somebody it can answer about, and anybody else it cannot. So both states
+    /// stay photographable — the relationship, and the honest "this server has never heard of
+    /// them", which is what #88 is careful about and what a fixture answering everything would
+    /// have made unphotographable.
+    ///
+    /// Before #100 this answered `nil` always, because nobody was ever signed in to an invented
+    /// server. Somebody is now.
     func relationship(with handle: String, as account: ActingAccount) async throws -> Relationship? {
-        nil
+        let known = Fixture.timeline(of: account.host).contains { $0.authorHandle == handle }
+        guard known else { return nil }
+        // Followed, and following back — a page with something on both sides of it, which is
+        // what makes the two lines under the control worth photographing.
+        return Relationship(following: true, followedBy: true)
+    }
+
+    /// Who a part-typed handle could be (#98), out of the people this server has seen.
+    ///
+    /// The same list `people(_:of:...)` is built from, matched the way a server matches: on the
+    /// handle and on the name, either end. Nothing is fetched, because there is nowhere to fetch
+    /// from and because the real one does not fetch either.
+    func searchPeople(matching query: String, limit: Int,
+                      as account: ActingAccount) async throws -> [Profile] {
+        let wanted = query.lowercased()
+        var seen: Set<String> = []
+        return Fixture.hosts.flatMap { Fixture.timeline(of: $0) }
+            .compactMap { post in
+                guard seen.insert(post.authorId).inserted,
+                      post.authorHandle.lowercased().contains(wanted)
+                        || post.authorName.lowercased().contains(wanted)
+                else { return nil }
+                return Profile(id: post.authorHandle, authorId: post.authorId,
+                               name: post.authorName, handle: post.authorHandle,
+                               avatarURL: post.authorAvatarURL, emojis: post.emojis)
+            }
+            .prefix(limit)
+            .map { $0 }
     }
 
     /// Who somebody follows, and who follows them (#90), invented out of the same timeline the

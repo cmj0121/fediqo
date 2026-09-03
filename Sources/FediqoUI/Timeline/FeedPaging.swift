@@ -147,14 +147,29 @@ final class FeedPaging {
     /// than the changed one. Before the first load, what the store holds is shown before any
     /// server is asked; a store that cannot be read is simply skipped on the way there.
     func loadIfNeeded(servers: [Server]) async {
+        // The newest thing the last run left behind, which is where this one has to reach down
+        // to. Read before anything is asked of anybody, because the load below writes into the
+        // same store and would make this the answer to a different question.
+        var lastTime: Date?
         if loadedFor == nil, posts.isEmpty,
            let stored = try? await loader.stored(posts.timeline.query), !stored.isEmpty {
             posts.stocked(with: stored)
+            lastTime = stored.first?.createdAt
         }
         let signature = servers.map(\.id).sorted()
         guard signature != loadedFor else { return }
         let known = Set(loadedFor ?? [])
-        await load(servers: servers)
+        let arrived = await load(servers: servers)
+        // The hole a launch leaves. A load asks every server for its newest page, and the reader
+        // is coming back to wherever they closed the app — so between the foot of that page and
+        // the head of what was already here is a stretch nobody has asked about. It was reported
+        // as a timeline reading "35 minutes ago" and then "a week ago", with the week missing.
+        //
+        // Only where there is one: a reader who was here half an hour ago is landed on top of
+        // what they had, and asking anyway would spend somebody's server on nothing.
+        if known.isEmpty, let lastTime {
+            await close(theHoleAbove: lastTime, on: servers, given: arrived)
+        }
         // A load asks everyone for their newest page, which for a server just added is the top
         // of a timeline the reader has already scrolled past. Everything that server carried
         // inside the stretch they are holding would sit below the fold and be reached only by
@@ -164,6 +179,36 @@ final class FeedPaging {
         // servers that were already being read have been read down to here already.
         let added = servers.filter { !known.contains($0.id) }
         if !known.isEmpty, !added.isEmpty { await catchUp(added) }
+    }
+
+    /// Walks each server down to what the last run left behind, where this one did not reach it.
+    ///
+    /// The same walk `catchUp` makes for a server that has just been added, made for the same
+    /// reason: what is on the screen and what a server has just handed over are two ends of a
+    /// stretch, and the reader can see both ends of it.
+    ///
+    /// Started from the foot of what came back rather than from the top, so the first round is
+    /// not a second ask for the page this just received.
+    private func close(theHoleAbove lastTime: Date, on servers: [Server],
+                       given arrived: [Post]) async {
+        for server in servers {
+            // What this launch was handed by this server, and not what is on the screen — the
+            // screen is the two ends of the hole with the hole between them, so a foot taken
+            // from it would be the far side and the walk would start below what it is walking
+            // towards. A cursor is that server's own post; a server that handed nothing over
+            // has nothing to walk from.
+            let mine = arrived.filter { $0.sources.contains(server.host) }
+            guard let foot = mine.last else { continue }
+            // And it already reached: a reader who was here half an hour ago is landed on top
+            // of what they had, and asking anyway would spend somebody's server on nothing.
+            guard foot.createdAt > lastTime else { continue }
+            _ = await loader.catchUp(server, downTo: lastTime, query: posts.timeline.query,
+                                     from: foot)
+        }
+        // Asked of the store rather than merged from the answers, for the reason `catchUp` says.
+        if let filled = try? await loader.stored(posts.timeline.query), !filled.isEmpty {
+            posts.showing(filled)
+        }
     }
 
     /// Asks a server again about the stretch the reader is already holding of it (#92).
@@ -209,7 +254,8 @@ final class FeedPaging {
 
     /// `refresh` says who asked. The reader by default — the refresh button, and the first
     /// load of a screen — so that everything is asked at once, whatever it did last time.
-    func load(servers: [Server], refresh: Refresh = .manual) async {
+    @discardableResult
+    func load(servers: [Server], refresh: Refresh = .manual) async -> [Post] {
         loading = true
         let loaded = await loader.load(servers: servers, query: posts.timeline.query, refresh: refresh)
         posts.replace(with: loaded, asked: servers)
@@ -230,6 +276,9 @@ final class FeedPaging {
             // the reader does rather than something that happens to them.
             await noteTheEnd(of: servers)
         }
+        // What the servers actually handed over this time, which is not what is on the screen:
+        // the screen is this and whatever was already here, folded together.
+        return loaded.posts
     }
 
     /// What a load said about the servers, whichever kind of load it was: the standing reason

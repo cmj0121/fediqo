@@ -98,17 +98,35 @@ struct LaunchOptions {
     /// taken of, and the only launch option that changes where the posts come from rather
     /// than which screen is showing.
     var fixture = false
-    /// A post to open as soon as the timeline has one, named by the end of its address. The
-    /// composer's and the inbox's twin: a page that can only be reached by pressing something
-    /// cannot be photographed on a runner, where nothing may press anything (#30).
+    /// Whether that invented world has the reader signed in to it (#100).
+    ///
+    /// Only ever together with `fixture`, and worth nothing on its own: half of this app exists
+    /// because somebody is signed in — the composer, what a reader is to somebody, who a
+    /// part-typed handle could be — and none of it could be photographed at all.
+    var signedIn = false
+    /// What the composer opens holding, on a fixture run (#100).
+    ///
+    /// The offer of who a part-typed handle could be exists only while somebody is part-way
+    /// through typing one, and nothing may press a key on a screenshot run — so a run that
+    /// wants to photograph it has to arrive already part-way through. Ignored anywhere but a
+    /// fixture: seeding a reader's own composer would be this app writing in their draft.
+    var draft: String?
+    /// A post to open as soon as the timeline has one, named by `Post.named(_:among:)`. A page
+    /// that can only be reached by pressing something cannot be photographed on a runner, where
+    /// nothing may press anything (#30).
     var openingPost: String?
-    /// Whether to open the author of the first post the timeline has, for the same reason: the
-    /// page about somebody is reached by pressing a name, and nothing on a runner may press.
-    var openingPerson = false
-    /// Whether to open the composer answering the first post the timeline has. The composer as a
-    /// reply is a different screen from the composer as a new post, and a screen that cannot be
-    /// photographed is a screen nobody looks at.
-    var openingReply = false
+    /// Whose page to open, named the same way, for the same reason: the page about somebody is
+    /// reached by pressing a name.
+    ///
+    /// **Which post is named matters and used to be unaskable.** It was a flag meaning "the
+    /// first", and the first post is on whichever server happens to be newest — so the state
+    /// where the acting server has never heard of somebody, which is the honest half of what
+    /// this page says, could not be photographed at all.
+    var openingPerson: String?
+    /// Which post to answer, named the same way. The composer as a reply is a different screen
+    /// from the composer as a new post, and answering a post on a server the reader has no
+    /// account on is a third — the one that says so before anything is typed.
+    var openingReply: String?
     /// Which of a person's two lists to open, where a run was told to open one. A screen reached
     /// only by pressing something cannot be photographed where nothing may press (#30).
     var openingPeople: People.Kind?
@@ -161,10 +179,12 @@ struct LaunchOptions {
         options.composing = environment["FEDIQO_COMPOSE"] == "1"
         options.showingNotices = environment["FEDIQO_NOTICES"] == "1"
         options.openingPost = environment["FEDIQO_OPEN"]
-        options.openingPerson = environment["FEDIQO_PERSON"] == "1"
-        options.openingReply = environment["FEDIQO_REPLY"] == "1"
+        options.openingPerson = environment["FEDIQO_PERSON"]
+        options.openingReply = environment["FEDIQO_REPLY"]
         options.openingPeople = environment["FEDIQO_PEOPLE"].flatMap(People.Kind.init(rawValue:))
         options.fixture = environment["FEDIQO_FIXTURE"] == "1"
+        options.signedIn = environment["FEDIQO_SIGNED_IN"] == "1"
+        options.draft = environment["FEDIQO_DRAFT"]
         options.language = environment["FEDIQO_LANGUAGE"].flatMap(AppLanguage.init(rawValue:))
         options.shootTo = environment["FEDIQO_SHOOT"]
         options.shootSize = environment["FEDIQO_SHOOT_SIZE"].flatMap(size(from:))
@@ -194,6 +214,9 @@ struct LaunchOptions {
 @Observable
 public final class AppState {
     public let preferences: Preferences
+    /// Who the handle being typed could be (#98). Built here rather than in the composer,
+    /// because a key press is answered here and the offer is what `Tab` takes.
+    let mentions: MentionSuggestions
     let serverStore: any ServerStore
     /// The store itself, for the one screen that asks about the store rather than through
     /// it. Nothing else here reads it: posts go in and out via the feeds. `nil` when the
@@ -265,9 +288,9 @@ public final class AppState {
     let openingPost: String?
     /// Whether this run opens the author of the first post it is given. A screenshot's way in to
     /// a page whose only other way in is a press (#30: nothing on a runner may press anything).
-    let openingPerson: Bool
+    let openingPerson: String?
     /// Whether this run opens the composer as an answer to the first post it is given.
-    let openingReply: Bool
+    let openingReply: String?
     /// Which of a person's lists this run opens, where it opens one.
     let openingPeople: People.Kind?
     /// The conversations being read, oldest first, empty while the reader is in the list.
@@ -410,6 +433,10 @@ public final class AppState {
     /// exists to be photographed, or driven by a test, wants to open the same size in the same
     /// place every time, and a reader's window wants to open where they left it.
     let isFixture: Bool
+    /// Whether this fixture run was told to be signed in (#100). False everywhere else.
+    let launchedSignedIn: Bool
+    /// What a fixture run was told to open the composer holding (#100). Nil everywhere else.
+    let launchedDraft: String?
     /// The two numbers a bug report needs. Handed in at launch rather than read from
     /// `Bundle.main` here, so a test can name them without asking the test host.
     let marketingVersion: String
@@ -458,6 +485,10 @@ public final class AppState {
             self.init(preferences: Preferences(defaults: defaults ?? .standard),
                       serverStore: FixtureServerStore(), store: store, launch: launch,
                       registry: SourceRegistry(clients: [.mastodon: FixtureSource()]),
+                      // Credentials nobody's Keychain holds. A fixture run has no business
+                      // reading the reader's, and with #100 it writes one — into memory, which
+                      // is gone when the run is.
+                      secrets: InMemorySecretStore(),
                       marketingVersion: marketing, buildVersion: build)
             return
         }
@@ -486,6 +517,7 @@ public final class AppState {
         let tokens = store.map { TokenSource(store: $0, secrets: secrets) }
         let signIn = store.map { SignInModel(store: $0, secrets: secrets, tokens: tokens) }
         self.preferences = preferences
+        self.mentions = MentionSuggestions(registry: registry)
         self.serverStore = servers
         self.store = store
         self.signIn = signIn
@@ -497,7 +529,8 @@ public final class AppState {
         // has to go and find their own mentions on somebody else's website has not been
         // notified of anything.
         self.notices = (store.flatMap { store in tokens.map { (store, $0) } })
-            .map { NoticeModel(store: $0.0, tokens: $0.1, registry: registry) }
+            .map { NoticeModel(store: $0.0, tokens: $0.1, registry: registry,
+                               remembering: preferences) }
         // What a fresh install has before the store has answered — and, without a store, what
         // it has for good. The names are words in the reader's language, so they are made here
         // rather than in Core, which has none.
@@ -510,6 +543,8 @@ public final class AppState {
         self.showingNotifications = launch.showingNotices
         self.holdsLanding = launch.holdsLanding
         self.isFixture = launch.fixture
+        self.launchedSignedIn = launch.signedIn
+        self.launchedDraft = launch.fixture ? launch.draft : nil
         self.shootTo = launch.shootTo
         self.shootSize = launch.shootSize
         self.openingPost = launch.openingPost
@@ -633,6 +668,12 @@ public final class AppState {
         // of them is readable only where there is an account. Rows only — no Keychain, no
         // network — so this costs a statement, and without it the Home tab would sit greyed out
         // on a device that has been signed in for months, until somebody opened Settings.
+        #if DEBUG
+        // Before the first question about who is signed in, because every one of them is
+        // answered from the rows this writes (#100). Nothing here can reach anywhere: the store
+        // is in memory, the `SecretStore` is in memory, and the server is `.example`.
+        await signInForTheFixture()
+        #endif
         await signIn?.refresh()
         // Then the timelines, because they are the tabs of the page about to be looked at.
         await openTimelines()
@@ -682,6 +723,14 @@ public final class AppState {
     @discardableResult
     public func catchUpOnNotices() async -> Int {
         await notices?.catchUp(on: servers) ?? 0
+    }
+
+    /// The same question, put by the reader instead of by the schedule.
+    ///
+    /// Separate from the above only in that the screen is waiting on this one, and so the model
+    /// is told somebody is waiting. Nothing about the ask itself is different.
+    func askForNotices() async {
+        await notices?.askNow(on: servers)
     }
 
     /// The feed reading `timeline`, built the first time it is asked for and kept afterwards.
@@ -1084,6 +1133,8 @@ public final class AppState {
         case .boostPost: return mark(.reblog)
         case .bookmarkPost: return mark(.bookmark)
         case .keepPost: return keepThePost()
+        case .openAuthor: return openTheAuthor()
+        case .completeMention: return takeTheOfferedHandle()
         case .backToTop: return goToTop()
         case .showShortcuts: setShowingShortcuts(true); return true
         }
@@ -1102,6 +1153,10 @@ public final class AppState {
         // While a post is open, the keys belong to the conversation in front of the reader.
         // Moving the ring in the list behind it would be moving something they cannot see.
         if let thread { return thread.move(by: steps) }
+        // A page about somebody is a list of posts standing over the timeline, and the keys
+        // belong to what is in front of the reader. Moving the ring in the list behind it
+        // would be moving something they cannot see (#94).
+        if let person { return person.place.moveSelection(by: steps) }
         guard let feed = readingFeed else { return false }
         let moved = feed.moveSelection(by: steps)
         // Held down, `j` repeats twenty times a second against a ring that is still at the
@@ -1387,7 +1442,53 @@ public final class AppState {
     /// post is open, and the one in the list otherwise. Every key that acts on "this post"
     /// asks here, so none of them can disagree about which post that is.
     private var postUnderTheRing: Post? {
-        thread?.selected ?? readingFeed?.selectedPost
+        thread?.selected ?? person?.place.selectedPost ?? readingFeed?.selectedPost
+    }
+
+    /// Opens the page of whoever wrote the post the ring is on (#96).
+    ///
+    /// `postUnderTheRing`, so it means the same thing wherever the reader is: in the timeline,
+    /// inside an opened conversation, and on somebody's page — where it is how a reader walks
+    /// from one person to the next through what they wrote.
+    ///
+    /// Whoever wrote it and not whoever boosted it. A boost carries the post it is of, and the
+    /// row says who boosted it on its own line; the key belongs to the post.
+    private func openTheAuthor() -> Bool {
+        guard let post = postUnderTheRing else { return false }
+        openPerson(of: post)
+        return true
+    }
+
+#if DEBUG
+    /// Signs the fixture run in, where it was told to be (#100).
+    ///
+    /// Not compiled into a build anybody ships, and it does nothing at all unless this run is
+    /// already a fixture — being signed in without an invented world to be signed in to would
+    /// be a credential for a server the reader actually reads.
+    private func signInForTheFixture() async {
+        guard isFixture, launchedSignedIn, let signIn else { return }
+        do {
+            try await signIn.session.signInWithoutAsking(Fixture.reader, on: Fixture.readerServer,
+                                                         token: Fixture.readerToken)
+        } catch {
+            LocalStore.log.error("fixture sign-in: \(String(describing: error), privacy: .public)")
+        }
+    }
+#endif
+
+    /// Takes the handle the composer is offering (#98).
+    ///
+    /// Nothing is written here. The offer is the model's and the draft is the composer's, so
+    /// this only says which one was taken — the composer watches for it and does the writing,
+    /// which is what keeps this app from ever editing somebody's draft from two places.
+    /// Whether there is a handle on offer for `Tab` to take. Asked at the press, so a `Tab`
+    /// with nothing being offered is still the nothing it was before (#98).
+    var isOfferingHandle: Bool { mentions.first != nil }
+
+    private func takeTheOfferedHandle() -> Bool {
+        guard let first = mentions.first else { return false }
+        mentions.chosen = first
+        return true
     }
 
     /// Back to the top of the feed being read. The screen does the scrolling; what happens

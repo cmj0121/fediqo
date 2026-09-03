@@ -56,22 +56,26 @@ struct RowWidthTests {
         #expect(fixed == AttachmentDeck.side + Space.gap)
     }
 
-    /// Where the two arrangements now part, and how little room is left on the widest iPad the
-    /// stores sell.
+    /// Where the two arrangements part, and how much room is left on the widest iPad the stores
+    /// sell.
     ///
-    /// **This is the assertion that will fail first.** At the size this app ships at, a 13-inch
-    /// iPad clears the threshold by less than the rail beside the list is wide — so anything
-    /// that takes another sixty points from the feed, or another twenty from the deck, moves
-    /// every iPad to the stacked arrangement. That is not wrong and it is not obvious, and a
-    /// test is a cheaper place to find it than a screenshot.
-    @Test("A phone stacks, an iPad barely does not, and the margin is small enough to name")
+    /// **This used to be the assertion that would fail first**, and it did its job: it said that
+    /// at 400 across the deck left a 13-inch iPad clearing the threshold by less than the rail
+    /// beside the list is wide, so twenty points more anywhere moved every iPad to the stacked
+    /// arrangement. Then the deck went to 200 — not for this, but so that a row with a picture
+    /// is nearly a row without one — and the margin went with it.
+    ///
+    /// So the guard turns round. It now says the iPad has room to spare, and a change that takes
+    /// the spare back is a change that puts every iPad on the edge again.
+    @Test("A phone stacks, an iPad does not, and there is room to spare")
     func whereTheArrangementsPart() {
         let needed = Size.wideRows(at: ships)
 
         #expect(440 < needed)
         #expect(700 < needed)
         #expect(1024 >= needed)
-        // Less than a hundred points of room on the widest iPad there is.
-        #expect(1024 - needed < 100)
+        // Two hundred points of room on the widest iPad there is, where there were fewer than
+        // a hundred while the deck was twice this size.
+        #expect(1024 - needed > 200)
     }
 }

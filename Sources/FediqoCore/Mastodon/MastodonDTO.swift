@@ -164,12 +164,25 @@ enum MastodonDTO {
         let previewUrl: String?
         /// What the author wrote for somebody who cannot see it.
         let description: String?
+        /// What shape the file is, which Mastodon has been sending all along (#101).
+        let meta: Meta?
+
+        struct Meta: Decodable, Sendable {
+            let original: Size?
+
+            struct Size: Decodable, Sendable {
+                let width: Int?
+                let height: Int?
+            }
+        }
 
         var asAttachment: Attachment? {
             let attachment = Attachment(kind: Self.kind(of: type),
                                         url: url.flatMap(URL.init(string:)),
                                         previewURL: previewUrl.flatMap(URL.init(string:)),
-                                        alt: description ?? "")
+                                        alt: description ?? "",
+                                        width: meta?.original?.width,
+                                        height: meta?.original?.height)
             return attachment.isEmpty ? nil : attachment
         }
 
