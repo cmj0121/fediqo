@@ -89,4 +89,127 @@ struct NoticeScreenTests {
             (($0 as? [String: Any])?["stringUnit"] as? [String: Any])?["value"] as? String
         }
     }
+
+    // MARK: - when it last managed to ask (#9)
+
+    /// Something the reader wrote, so there is an account for them to be signed in as: a
+    /// signed-in account is a row that points at one, and `owned_accounts` will not hold a
+    /// person nobody has seen write anything.
+    static let written = Post(uri: "https://one.example/api/v1/statuses/1",
+                              originURI: "https://one.example/users/a/statuses/1",
+                              socialProtocol: .mastodon, sourceURL: "https://one.example",
+                              createdAt: Date(timeIntervalSince1970: 100),
+                              authorId: "https://one.example/@a", authorName: "A",
+                              authorHandle: "@a@one.example", text: "hello")
+
+    /// The line that makes an empty inbox readable. Without it "nothing has happened" and
+    /// "nothing has been asked" are the same screen, and a reader cannot tell which they have.
+    @Test("The screen says when it last managed to ask, in both languages")
+    func theScreenSaysWhenItAsked() throws {
+        for key in ["notices.asked", "notices.never", "notices.ask"] {
+            let wording = try Self.wording(for: key)
+            #expect(wording["en"]?.isEmpty == false, "no English wording for \(key)")
+            #expect(wording["zh-TW"]?.isEmpty == false, "no 繁體中文 wording for \(key)")
+        }
+        // The time goes in the sentence, in both languages. A translation that dropped the
+        // placeholder would draw the sentence without the one fact it is there to carry.
+        let asked = try Self.wording(for: "notices.asked")
+        #expect(asked["en"]?.contains("%@") == true)
+        #expect(asked["zh-TW"]?.contains("%@") == true)
+    }
+
+    /// **The reason it is on disk.** A background wake asks, writes what it found, and the
+    /// process is gone; a time held only in the model would have the next launch say it had
+    /// never asked, on a morning when it had asked four times.
+    @Test("A time one launch wrote down is shown by the next")
+    func theTimeSurvivesALaunch() async throws {
+        let defaults = scratch("notices-last-heard")
+        let woken = Preferences(defaults: defaults)
+        let asked = Date(timeIntervalSince1970: 1_700_000_000)
+        woken.lastHeard = asked
+
+        // A second launch, over the same disk, building the model the way the app does.
+        let relaunched = NoticeModel(store: try LocalStore.inMemory(),
+                                     tokens: TokenSource(store: try LocalStore.inMemory(),
+                                                         secrets: InMemorySecretStore()),
+                                     registry: SourceRegistry(clients: [:]),
+                                     remembering: Preferences(defaults: defaults))
+        #expect(relaunched.lastHeard == asked)
+    }
+
+    /// Nil is not a long time ago and it is not zero. A device that has never managed to ask
+    /// says so in words, because a blank where a fact belongs gets read as one.
+    @Test("A device that has never asked has no time to show")
+    func neverAskedIsNotATime() async throws {
+        let fresh = NoticeModel(store: try LocalStore.inMemory(),
+                                tokens: TokenSource(store: try LocalStore.inMemory(),
+                                                    secrets: InMemorySecretStore()),
+                                registry: SourceRegistry(clients: [:]),
+                                remembering: Preferences(defaults: scratch("notices-never")))
+        #expect(fresh.lastHeard == nil)
+    }
+
+    /// **A quiet morning and a broken evening are different mornings.** A server that answered
+    /// with nothing was still asked, and the time is written down; a server that refused was
+    /// not, and it is not.
+    @Test("A server that answered with nothing was still asked")
+    func answeringNothingIsStillAnswering() async throws {
+        let app = try await signedInApp("notices-quiet", posts: [Self.written],
+                                        client: InboxDouble())
+        #expect(app.notices?.lastHeard == nil)
+
+        await app.askForNotices()
+
+        #expect(app.notices?.lastHeard != nil)
+    }
+
+    @Test("A server nobody could reach is not a server this device asked")
+    func refusedIsNotAsked() async throws {
+        let app = try await signedInApp("notices-refused", posts: [Self.written],
+                                        client: InboxDouble(refusing: true))
+
+        await app.askForNotices()
+
+        #expect(app.notices?.lastHeard == nil)
+    }
+
+    /// A fresh install has never asked anybody anything, so neither has a device somebody has
+    /// just reset. The time is a record of what happened here, and nothing happened here.
+    @Test("Starting again forgets when it last asked")
+    func startingAgainForgets() {
+        let preferences = Preferences(defaults: scratch("notices-reset"))
+        preferences.lastHeard = Date()
+
+        preferences.resetToDefaults()
+
+        #expect(preferences.lastHeard == nil)
+    }
+}
+
+/// A server with an inbox, which either answers or cannot be reached.
+///
+/// The two answers worth telling apart: one that hands over nothing — the commonest answer
+/// there is — and one that never replies at all. They used to reach the screen as the same
+/// zero.
+final class InboxDouble: SourceClient, @unchecked Sendable {
+    private let refusing: Bool
+
+    init(refusing: Bool = false) { self.refusing = refusing }
+
+    func notices(host: String, owner: String, after: String?, limit: Int,
+                 token: String) async throws -> [Notice] {
+        if refusing { throw SourceFailure.badHost(host) }
+        return []
+    }
+
+    func instance(host: String) async throws -> InstanceInfo {
+        InstanceInfo(host: host, title: host, summary: "", maxCharacters: 500)
+    }
+    func timeline(host: String, limit: Int, before: Post?, after: Post?, token: String?) async throws -> [Post] { [] }
+    func home(host: String, limit: Int, before: Post?, after: Post?, token: String) async throws -> [Post] { [] }
+    func trending(host: String, limit: Int, token: String?) async throws -> [Post] { [] }
+    func context(of post: Post, host: String, token: String?) async throws -> Conversation {
+        Conversation(post: post)
+    }
+    func stillHas(_ post: Post, host: String, token: String?) async throws -> Bool { true }
 }

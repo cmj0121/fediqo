@@ -14,21 +14,32 @@ final class NoticeModel {
     private let store: LocalStore
     private let tokens: TokenSource
     private let loader: NoticeLoader
+    /// Where the last-asked time is kept. On disk rather than here, because the times worth
+    /// saying are the ones nobody was looking at — see `Preferences.lastHeard`.
+    private let remembering: Preferences
 
     /// The inbox, newest first. What the sheet draws.
     private(set) var notices: [Notice] = []
     /// How many nobody has looked at. What the bell would show.
     private(set) var unseen = 0
     /// When this device last heard anything at all — an arrival, or a catch-up that found
-    /// nothing. Nil until the first one. Shown as a fact, never as a promise.
-    private(set) var lastHeard: Date?
+    /// nothing. Nil until the first one, on this device, ever. Shown as a fact, never as a
+    /// promise: it says when the asking last worked, and nothing about when it will next.
+    var lastHeard: Date? { remembering.lastHeard }
+
+    /// Whether an ask the reader made themselves is still out. Only theirs: the listening and
+    /// the background wake are not things anybody is waiting on, and a spinner for them would
+    /// be the screen twitching at its own accord.
+    private(set) var asking = false
 
     /// The listening. One task for every inbox at once; cancelled when the app goes away.
     @ObservationIgnored private var listening: Task<Void, Never>?
 
-    init(store: LocalStore, tokens: TokenSource, registry: SourceRegistry) {
+    init(store: LocalStore, tokens: TokenSource, registry: SourceRegistry,
+         remembering: Preferences) {
         self.store = store
         self.tokens = tokens
+        self.remembering = remembering
         self.loader = NoticeLoader(registry: registry, store: store)
     }
 
@@ -69,9 +80,23 @@ final class NoticeModel {
     func catchUp(on servers: [Server]) async -> Int {
         let inboxes = await self.inboxes(among: servers)
         guard !inboxes.isEmpty else { return 0 }
-        let arrived = await loader.catchUp(on: inboxes)
-        await heard(arrived)
-        return arrived
+        let round = await loader.catchUp(on: inboxes)
+        // Nothing answered is not a quiet morning. Writing the time down here would have the
+        // screen say a server was reached on an evening when none was, which is the one thing
+        // this line must never do.
+        guard round.reached else { return 0 }
+        await heard(round.arrived)
+        return round.arrived
+    }
+
+    /// The reader asked, rather than the schedule. The same catch-up the background wake makes,
+    /// which is the point: asking by hand is not a lesser path that exists because the scheduled
+    /// one is unreliable — it is the same question, put at a moment somebody chose.
+    func askNow(on servers: [Server]) async {
+        guard !asking else { return }
+        asking = true
+        defer { asking = false }
+        await catchUp(on: servers)
     }
 
     /// Reads the store again. Every path that changes anything ends here, so what is drawn is
@@ -90,7 +115,7 @@ final class NoticeModel {
     }
 
     private func heard(_ arrived: Int) async {
-        lastHeard = Date()
+        remembering.lastHeard = Date()
         guard arrived > 0 else { return }
         await refresh()
     }

@@ -497,7 +497,8 @@ public final class AppState {
         // has to go and find their own mentions on somebody else's website has not been
         // notified of anything.
         self.notices = (store.flatMap { store in tokens.map { (store, $0) } })
-            .map { NoticeModel(store: $0.0, tokens: $0.1, registry: registry) }
+            .map { NoticeModel(store: $0.0, tokens: $0.1, registry: registry,
+                               remembering: preferences) }
         // What a fresh install has before the store has answered — and, without a store, what
         // it has for good. The names are words in the reader's language, so they are made here
         // rather than in Core, which has none.
@@ -682,6 +683,14 @@ public final class AppState {
     @discardableResult
     public func catchUpOnNotices() async -> Int {
         await notices?.catchUp(on: servers) ?? 0
+    }
+
+    /// The same question, put by the reader instead of by the schedule.
+    ///
+    /// Separate from the above only in that the screen is waiting on this one, and so the model
+    /// is told somebody is waiting. Nothing about the ask itself is different.
+    func askForNotices() async {
+        await notices?.askNow(on: servers)
     }
 
     /// The feed reading `timeline`, built the first time it is asked for and kept afterwards.

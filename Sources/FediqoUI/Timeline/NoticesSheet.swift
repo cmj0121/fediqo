@@ -22,6 +22,9 @@ struct NoticesSheet: View {
 
     let model: NoticeModel?
     let onClose: () -> Void
+    /// Asking the servers, now, because somebody said so. Handed in rather than reached for,
+    /// so this screen can be drawn in a preview and in a test without an app around it.
+    var onAsk: () async -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.pad) {
@@ -33,6 +36,10 @@ struct NoticesSheet: View {
                 // as tall as the platform makes it, and a line of text pinned to the top of
                 // one leaves a void underneath that reads as a list that failed to load —
                 // which is the one thing an empty inbox must not look like.
+                //
+                // Two words, because the footer explains. This said the whole of "there is no
+                // server of ours to push them" and then the footer said it again, on one
+                // screen, in one colour — a reader told a thing twice reads neither time.
                 Text(t("timeline.notifications.empty"))
                     .fediqoFont(TypeScale.small)
                     .foregroundStyle(.secondary)
@@ -41,7 +48,11 @@ struct NoticesSheet: View {
                     .frame(maxWidth: Size.prose, maxHeight: .infinity, alignment: .center)
                     .frame(maxWidth: .infinity)
             }
-            why
+            VStack(alignment: .leading, spacing: Space.gap) {
+                Hairline()
+                asked
+                why
+            }
         }
         .padding(Space.room)
         .frame(minWidth: Self.narrowest.width, minHeight: Self.narrowest.height)
@@ -67,6 +78,39 @@ struct NoticesSheet: View {
         }
         .frame(maxHeight: Self.tallest)
         .scrollBounceBehavior(.basedOnSize)
+    }
+
+    /// When the asking last worked, and a way to make it work now.
+    ///
+    /// The sentence under this one says notices can be late. On its own that leaves a reader
+    /// with an empty inbox holding two readings and no way to tell them apart: nothing has
+    /// happened, or nothing has been asked. This says which — **the time is when a server last
+    /// answered, whether or not it had anything to say**, so a quiet morning that was asked
+    /// about four times reads as a quiet morning rather than as an app that stopped.
+    ///
+    /// The button beside it is the same catch-up the schedule makes. It is here because a
+    /// reader who has just been told the system decides when to wake this app should not have
+    /// to close it and open it again to overrule that.
+    private var asked: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Space.step) {
+            Text(heard)
+                .fediqoFont(TypeScale.minor)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: Space.tight)
+            Button(t("notices.ask")) { Task { await onAsk() } }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .fediqoFont(TypeScale.minor)
+                .disabled(model?.asking ?? true)
+        }
+    }
+
+    /// Nil is not "a long time ago". A device that has never managed to ask says so, because
+    /// the alternative is a blank where a fact belongs and a reader reading it as zero.
+    private var heard: String {
+        guard let when = model?.lastHeard else { return t("notices.never") }
+        return t("notices.asked", when.formatted(.relative(presentation: .numeric)))
     }
 
     /// Why a notice can be late, in the fewest words that are still true.

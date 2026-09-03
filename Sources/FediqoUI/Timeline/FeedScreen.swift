@@ -176,7 +176,8 @@ struct FeedScreen: View {
                 .fediqoChrome(app)
         }
         .sheet(isPresented: $app.showingNotifications) {
-            NoticesSheet(model: app.notices) { app.showingNotifications = false }
+            NoticesSheet(model: app.notices, onClose: { app.showingNotifications = false },
+                         onAsk: { await app.askForNotices() })
                 .fediqoChrome(app)
         }
         .sheet(item: $editing) { subject in

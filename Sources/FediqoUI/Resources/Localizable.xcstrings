@@ -954,6 +954,40 @@
         }
       }
     },
+    "notices.ask": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ask now"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "現在問"
+          }
+        }
+      }
+    },
+    "notices.asked": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last asked a server %@."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上次問到伺服器是%@。"
+          }
+        }
+      }
+    },
     "notices.kind.boost": {
       "extractionState": "manual",
       "localizations": {
@@ -1069,6 +1103,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "晚了 %@"
+          }
+        }
+      }
+    },
+    "notices.never": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This device has not managed to ask a server yet."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這台裝置還沒問到過伺服器。"
           }
         }
       }
@@ -5380,13 +5431,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Nothing yet. Replies and mentions arrive while Fediqo is open — there is no server of ours to push them, and there will not be one."
+            "value": "Nothing yet."
           }
         },
         "zh-TW": {
           "stringUnit": {
             "state": "translated",
-            "value": "目前沒有。回覆與提及會在 Fediqo 開著的時候送達 —— 我們沒有伺服器可以推播，以後也不會有。"
+            "value": "目前沒有。"
           }
         }
       }

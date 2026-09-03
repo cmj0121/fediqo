@@ -72,14 +72,43 @@ public actor NoticeLoader {
     /// One inbox failing is that inbox's failure. The others are still read: a server that is
     /// down has said nothing about anybody else's.
     @discardableResult
-    public func catchUp(on inboxes: [Inbox], now: Date = Date()) async -> Int {
+    public func catchUp(on inboxes: [Inbox], now: Date = Date()) async -> CatchUp {
         var new = 0
+        var answered = 0
         for inbox in inboxes {
-            do { new += try await catchUp(on: inbox, now: now) } catch {
+            do {
+                new += try await catchUp(on: inbox, now: now)
+                answered += 1
+            } catch {
                 Self.log.info("catch-up failed for \(inbox.server.endpoint, privacy: .public): \(String(describing: error), privacy: .public)")
             }
         }
-        return new
+        return CatchUp(arrived: new, answered: answered, asked: inboxes.count)
+    }
+
+    /// What one round of asking came to.
+    ///
+    /// It carries `answered` and not only `arrived` because those two zeroes are different
+    /// zeroes and a screen has to tell them apart: nothing new is a quiet morning, and nothing
+    /// **answered** is a device that did not manage to ask anybody. A caller that saw only the
+    /// count would write down "last asked just now" on the strength of every server refusing.
+    public struct CatchUp: Sendable, Equatable {
+        /// How many were new to this device.
+        public let arrived: Int
+        /// How many inboxes answered at all, whether or not they had anything to say.
+        public let answered: Int
+        /// How many were asked.
+        public let asked: Int
+
+        /// Whether this device managed to ask anybody. One server out of three is enough:
+        /// something was heard, and what it was heard about is on the screen.
+        public var reached: Bool { answered > 0 }
+
+        public init(arrived: Int, answered: Int, asked: Int) {
+            self.arrived = arrived
+            self.answered = answered
+            self.asked = asked
+        }
     }
 
     /// Reads what was missed and then listens, for every inbox at once, until cancelled.
