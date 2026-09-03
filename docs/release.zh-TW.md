@@ -222,6 +222,15 @@ runner 從它的 secret store 拿到的，正是 `.env` 交給 laptop 的那些�
 publish lane 裡的 `setup_ci` 會做出 match 需要的暫時 keychain。不在 CI 上時它什麼都不做，這正是它可以在兩
 台機器上都是同一行的原因。
 
+**兩份清單會互相檢查。** `scripts/env.sh` 放著這條發布線缺不得的名字，`release.yml` 放著提供它們的
+secrets —— 而它們已經漂開過一次：加入審查聯絡資料的那一天，`REQUIRED` 多了四個名字而 workflow 沒有，
+於是那之後推的 tag 會在 runner 上跑了幾分鐘之後停在 `refusing to run`。
+`scripts/env.sh --covers .github/workflows/release.yml` 會說這件事有沒有再度發生，而 CI 每次推送都跑它：
+
+```sh
+scripts/env.sh --covers .github/workflows/release.yml
+```
+
 ## 讓 build 抵達一個人
 
 上傳不會邀請任何人。build 只會透過一個「裡面有人」的 TestFlight 群組抵達一個人。

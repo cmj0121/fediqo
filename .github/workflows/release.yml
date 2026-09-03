@@ -66,6 +66,15 @@ jobs:
           FEDIQO_TEAM_ID: ${{ secrets.FEDIQO_TEAM_ID }}
           FEDIQO_BUNDLE_ID: ${{ secrets.FEDIQO_BUNDLE_ID }}
 
+          # Who Apple asks when the review has a question. App Store Connect will not hold a
+          # version without a review detail, and the upload that finds it missing finds it
+          # after the archive and after TestFlight -- see docs/release.md. A person's name and
+          # telephone number, so they are secrets here and never in the checkout.
+          FEDIQO_REVIEW_FIRST_NAME: ${{ secrets.FEDIQO_REVIEW_FIRST_NAME }}
+          FEDIQO_REVIEW_LAST_NAME: ${{ secrets.FEDIQO_REVIEW_LAST_NAME }}
+          FEDIQO_REVIEW_PHONE: ${{ secrets.FEDIQO_REVIEW_PHONE }}
+          FEDIQO_REVIEW_EMAIL: ${{ secrets.FEDIQO_REVIEW_EMAIL }}
+
           # Over HTTPS here, because a runner has no ssh key to clone with -- the same
           # repository the laptop reaches over ssh, named the other way.
           MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
