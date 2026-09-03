@@ -53,6 +53,16 @@ public struct Post: Sendable, Hashable, Identifiable {
     /// The accounts the post names, in the order the source gave them. Carried from the first
     /// read like everything else here: the store writes a post once and never backfills it.
     public let mentions: [Mention]
+    /// Whose post this answers, where the source said and this app could resolve it (#87).
+    ///
+    /// A handle and not an account id, because an id means something on one server and nothing
+    /// anywhere else. It is resolved where the two halves of the answer arrive together — the
+    /// id of the account answered, and the mentions that map it to a handle — so nothing is
+    /// fetched and no server the reader has not added is asked anything.
+    ///
+    /// Nil is a post that answers nobody, a server that did not say, or a reply whose author
+    /// took the mention out. A row draws "in reply" for all three rather than inventing a name.
+    public let answering: String?
     /// The pictures this post is partly written in: a shortcode, and the address of what it
     /// means. Both the status's own and its author's, folded into one list — a shortcode means
     /// one picture on one server, so `:blobcat:` in a display name is `:blobcat:` in the words
@@ -112,6 +122,7 @@ public struct Post: Sendable, Hashable, Identifiable {
         inReplyToURI: String? = nil,
         tags: [String] = [],
         mentions: [Mention] = [],
+        answering: String? = nil,
         emojis: [CustomEmoji] = [],
         card: Card? = nil,
         boostedBy: String? = nil,
@@ -138,6 +149,7 @@ public struct Post: Sendable, Hashable, Identifiable {
         self.inReplyToURI = inReplyToURI
         self.tags = Self.normalisedTags(tags)
         self.mentions = Mention.folded(mentions)
+        self.answering = answering
         self.emojis = CustomEmoji.folded(emojis)
         // A card with an address and nothing else is the link the words already carry, drawn a
         // second time in a box. Dropped here rather than at every screen that might draw one.

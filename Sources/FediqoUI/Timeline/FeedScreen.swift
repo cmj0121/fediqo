@@ -70,6 +70,11 @@ struct FeedScreen: View {
         guard let parent = post.inReplyToURI else { return .nothing }
         if let above = posts.first(where: { $0.uri == parent }) { return .handle(above.authorHandle) }
         if let handle = known[parent] { return .handle(handle) }
+        // What the post itself says, which is the only answer there is when the post it answers
+        // is not here — a reply that arrived from a server the reader has not joined, which is
+        // the ordinary case rather than a corner of one. Resolved where it arrived; see
+        // `Post.answering`.
+        if let handle = post.answering, !handle.isEmpty { return .handle(handle) }
         return .somebody
     }
 

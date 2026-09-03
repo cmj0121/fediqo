@@ -128,6 +128,16 @@ enum Fixture {
                  audience: .unlisted,
                  counts: Counts(replies: 1, reblogs: 0, favourites: 5),
                  inReplyToURI: "https://elm.example/api/v1/statuses/nobody-handed-us-this"),
+            // Its pair. The same shape — an answer to something no timeline here carried — and
+            // this one the server named: `in_reply_to_account_id` matched a mention, so the row
+            // says whom without anybody being asked and without anything being guessed (#87).
+            post("the-named-answer", host: hosts[1], minutesAgo: 21, now: now,
+                 name: "Dag Solheim", handle: "dag",
+                 text: "Answering somebody whose post never came past here either. This row "
+                     + "names them, because the post itself carried who they are.",
+                 counts: Counts(replies: 0, reblogs: 1, favourites: 8),
+                 inReplyToURI: "https://elm.example/api/v1/statuses/also-not-here",
+                 answering: "@juniper@elm.example"),
             // Both an answer and a boost, which is the case #76 was about: two things happened
             // to this post before it reached the reader, and they are one line rather than two
             // stacked bands. A post that is only one of the two cannot show that.
@@ -241,7 +251,8 @@ enum Fixture {
         attachments: [Attachment] = [], sensitive: Bool? = nil, spoiler: String? = nil,
         audience: Audience? = .everyone,
         counts: Counts = Counts(), tags: [String] = [], emojis: [CustomEmoji] = [],
-        card: Card? = nil, boostedBy: String? = nil, inReplyToURI: String? = nil
+        card: Card? = nil, boostedBy: String? = nil, inReplyToURI: String? = nil,
+        answering: String? = nil
     ) -> Post {
         Post(
             uri: address(uri, on: host, by: handle),
@@ -263,6 +274,7 @@ enum Fixture {
             webURL: URL(string: "https://\(host)/@\(handle)/\(uri)"),
             inReplyToURI: inReplyToURI,
             tags: tags,
+            answering: answering,
             emojis: emojis,
             card: card,
             boostedBy: boostedBy,

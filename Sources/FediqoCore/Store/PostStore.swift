@@ -620,6 +620,9 @@ extension LocalStore {
             inReplyToURI: row["in_reply_to_uri"],
             tags: tags,
             mentions: mentions,
+            // Null for everything written before 016, and null is three things a row must not
+            // tell apart by guessing — see the migration. All three draw "in reply" and stop.
+            answering: row["answering"],
             emojis: emojis,
             card: card,
             boostedBy: row["booster_name"],
@@ -791,15 +794,15 @@ extension LocalStore {
                 INSERT INTO posts (merge_key, proto, origin_uri, uri, authority_url, source_url, posted_at, author_id,
                                    text, media_urls, web_url, in_reply_to_uri, boosted_by, extras, deleted_at,
                                    sensitive, spoiler_text, visibility, replies_count, reblogs_count, favourites_count,
-                                   application, application_url, last_seen_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                                   application, application_url, answering, last_seen_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
                 """).execute(arguments: [key, post.socialProtocol.storeProto, post.originURI, post.uri, authorityURL,
                                          post.sourceURL, postedAt, post.authorId,
                                          post.text, mediaJSON, webURL, post.inReplyToURI, post.boostedById,
                                          post.sensitive.map { $0 ? 1 : 0 }, post.spoiler, post.audience?.rawValue,
                                          post.counts.replies, post.counts.reblogs, post.counts.favourites,
                                          post.application?.name, post.application?.website?.absoluteString,
-                                         now, now])
+                                         post.answering, now, now])
             try insertTags(db, post.tags, for: key, now: now)
             try insertMentions(db, post.mentions, for: key, now: now)
             try insertEmojis(db, post.emojis, for: key, now: now)

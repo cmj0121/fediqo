@@ -20,6 +20,9 @@ struct ComposerView: View {
     /// which is not the same as `false`, and drawing the refusal for it would accuse a reader of
     /// having no account before anybody had looked.
     @State private var canAnswer: Bool?
+    /// The handle the reply will go as, asked when the panel opens and of the same door the
+    /// sending uses. Nil while the answer is out, and where there is nobody to answer as.
+    @State private var replyingAs: String?
     /// The pictures on this draft, in the order they were put on (#89). Held here rather than on
     /// the app: a draft is this panel's, and one that is never sent is gone with it.
     @State private var pictures: [Draft.Picture] = []
@@ -53,6 +56,7 @@ struct ComposerView: View {
             guard let parent = app.answering else { return }
             let account = await app.acting(on: parent)
             canAnswer = account != nil
+            replyingAs = account.flatMap { app.handle(of: $0) }
             // Who the reply opens with (#97). Once, and only into a draft nobody has written
             // in: the acting account is asked over the network, and a reader who started
             // typing while it was out must not have their first words pushed along by a
@@ -291,7 +295,13 @@ struct ComposerView: View {
     @ViewBuilder
     private var destinations: some View {
         let choices = app.actingChoices
-        if choices.count > 1 {
+        // **A reply goes as one account, so it is said rather than offered.** This drew the same
+        // multi-select as a new post whenever there was more than one account — a row of pills a
+        // reader could press, on a draft that goes to exactly one place whatever they press. Not
+        // saying which was the complaint; saying it with a control that does nothing was worse.
+        if app.answering != nil {
+            answeringAs
+        } else if choices.count > 1 {
             FlowRow(spacing: Space.tight) {
                 ForEach(choices, id: \.endpoint) { choice in
                     let host = Server.normalise(choice.endpoint)
@@ -320,6 +330,27 @@ struct ComposerView: View {
                     .foregroundStyle(chosen ? Palette.accent : Color.secondary)
                 }
             }
+        }
+    }
+
+    /// Which account the reply will go as, before anything is typed.
+    ///
+    /// The post's own server where the reader has an account there, and their chosen account
+    /// otherwise — `acting(on:)`, which is what the sending itself uses, asked here so that the
+    /// line and the send cannot come to disagree. With one account it is a quiet statement; with
+    /// several it is the one fact a reader needs before writing a word, because a reply is
+    /// somebody speaking and it should not be a person they did not pick.
+    @ViewBuilder
+    private var answeringAs: some View {
+        if let handle = replyingAs {
+            HStack(spacing: Space.tight) {
+                Image(systemName: "person.crop.circle").fediqoSymbol(Glyph.badge)
+                Text(t("compose.as", handle))
+                    .fediqoFont(TypeScale.caption)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .foregroundStyle(.secondary)
         }
     }
 
