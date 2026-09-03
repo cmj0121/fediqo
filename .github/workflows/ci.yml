@@ -19,6 +19,15 @@ jobs:
       - name: Show the toolchain
         run: swift --version
 
+      # Not a test of the code, and here because it is the cheapest place a release can be
+      # broken without anybody noticing. `scripts/env.sh` holds the names the release cannot
+      # run without, and the release workflow holds the secrets that supply them; the two
+      # drifted the day `FEDIQO_REVIEW_*` was added, and a tag pushed after that would have
+      # stopped at `refusing to run` — on a runner, minutes in, for a reason nobody would look
+      # for in a YAML file. It costs a second here.
+      - name: The release workflow is handed what the release needs
+        run: ./scripts/env.sh --covers .github/workflows/release.yml
+
       # GRDB is fetched from the network once per Package.resolved, not once per run.
       - name: Cache the package build
         uses: actions/cache@v4

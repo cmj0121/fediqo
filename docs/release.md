@@ -241,6 +241,16 @@ The runner is handed by its secret store exactly what `.env` hands a laptop:
 `setup_ci` in the publish lane makes the temporary keychain match needs. Off CI it does nothing, which is why
 it can be the same line on both machines.
 
+**The two lists are checked against each other.** `scripts/env.sh` holds the names the release cannot run
+without and `release.yml` holds the secrets that supply them, and they drifted once already — the day the
+review contact was added, `REQUIRED` grew by four and the workflow did not, so a pushed tag would have
+stopped at `refusing to run` minutes into a runner. `scripts/env.sh --covers .github/workflows/release.yml`
+says whether that has happened again, and CI runs it on every push:
+
+```sh
+scripts/env.sh --covers .github/workflows/release.yml
+```
+
 ## Getting a build to a person
 
 Uploading invites nobody. A build reaches a person only through a TestFlight group with people in it.
