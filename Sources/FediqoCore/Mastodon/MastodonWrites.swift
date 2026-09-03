@@ -102,6 +102,16 @@ extension MastodonClient {
         // warning and it is empty, which is not the same as not being told.
         if let warning = draft.warning { fields["spoiler_text"] = warning }
 
+        // The pictures first, because a status cannot name what has not been uploaded (#89).
+        //
+        // One at a time and in order: `media_ids[]` is a list a server reads in the order it is
+        // given, and that order is the order the reader put them in. A picture that will not go
+        // up stops the whole post rather than sending it without — a post that quietly lost a
+        // picture is worse than one that did not go.
+        for (index, picture) in draft.pictures.enumerated() {
+            fields["media_ids[\(index)]"] = try await upload(picture, as: account)
+        }
+
         // What it answers, by this server's own number for it (#87).
         //
         // The same finding every mark on a post goes through, and `fetching: false` on purpose:
@@ -117,6 +127,39 @@ extension MastodonClient {
                                    idempotency: Self.key(for: draft, as: account))
         let status = try Self.decoder.decode(MastodonDTO.Status.self, from: data)
         return status.asPost(from: account.host)
+    }
+
+    /// One picture up, and the id the server gave it.
+    ///
+    /// `/api/v2/media` and not `/api/v1/media`: the older one answers only when the file is ready
+    /// and the newer answers at once with `202` while the server is still working, which is what
+    /// a large photograph does. Either way the id is usable in a status straight away — Mastodon
+    /// holds the post until the file is ready — so this does not wait around to be told twice.
+    ///
+    /// The description rides in the same request. It is not an afterthought that can be added
+    /// later and forgotten: this app says out loud when a server sent a picture without one.
+    public func upload(_ picture: Draft.Picture, as account: ActingAccount) async throws -> String {
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = account.host
+        components.path = "/api/v2/media"
+        guard let url = components.url else { throw SourceFailure.badHost(account.host) }
+
+        let described = picture.description.trimmingCharacters(in: .whitespacesAndNewlines)
+        let data = try await JSONTransport.send(
+            "POST", url,
+            fields: described.isEmpty ? [:] : ["description": described],
+            file: JSONTransport.Upload(field: "file", filename: picture.filename,
+                                       mime: picture.mime, bytes: picture.bytes),
+            on: session, bearer: account.token,
+            // A photograph on a telephone's connection is not a sentence, and the ordinary
+            // fifteen seconds is a limit written for a sentence.
+            timeout: 120, ledger: ledger)
+
+        guard let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let id = body["id"] as? String
+        else { throw SourceFailure.http(200, data) }
+        return id
     }
 
     /// One draft, one account, one key. Stable for as long as the draft is, and different the

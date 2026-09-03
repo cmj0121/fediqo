@@ -131,6 +131,14 @@ targets:
         # on purpose: a container that breaks the app should break it here, not at upload.
         ENABLE_APP_SANDBOX: YES
         ENABLE_OUTGOING_NETWORK_CONNECTIONS: YES
+        # And the one file a reader hands over, read-only, for the picture going on a post
+        # (#89). `readonly` and not `readwrite`: this app has nothing to write into anybody's
+        # documents, and the picker's own grant covers exactly what was chosen and nothing
+        # else — which is the whole of the access, rather than a standing look at a library.
+        #
+        # It would compile without this and fail at the moment somebody chose a file, which is
+        # the kind of hole a sandbox is for and the kind of failure it is expensive to find.
+        ENABLE_USER_SELECTED_FILES: readonly
         GENERATE_INFOPLIST_FILE: NO
         COMBINE_HIDPI_IMAGES: YES
         ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS: NO

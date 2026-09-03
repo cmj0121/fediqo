@@ -34,6 +34,14 @@ public enum SourceFailure: Error, Sendable, Equatable, LocalizedError {
     case transport(String)
     /// The posts arrived and are on the screen, but the local store would not keep them.
     case store(String)
+    /// More pictures than that server takes, and how many it does. Refused before the first of
+    /// them goes up: a reader who has waited for three photographs to upload and is then told
+    /// the server takes two has spent their connection on being refused.
+    case tooManyPictures(String, Int)
+    /// A picture bigger than that server takes, named, with the limit in bytes. Same reason.
+    case pictureTooLarge(String, String, Int)
+    /// A kind of file that server does not take, named, with what it does take.
+    case pictureNotTaken(String, String, [String])
     /// A draft with nothing in it. Refused here rather than sent for a server to refuse:
     /// whitespace is not a post, and the round trip would only be a slower way of saying so.
     case emptyDraft
@@ -54,7 +62,8 @@ public enum SourceFailure: Error, Sendable, Equatable, LocalizedError {
         switch self {
         case .tokenRejected, .store: true
         case .badHost, .notThatKind, .unsupported, .needsSignIn, .signInFailed, .notItsPost,
-             .http, .transport, .emptyDraft, .tooLong: false
+             .http, .transport, .emptyDraft, .tooLong,
+             .tooManyPictures, .pictureTooLarge, .pictureNotTaken: false
         }
     }
 
@@ -81,6 +90,11 @@ public enum SourceFailure: Error, Sendable, Equatable, LocalizedError {
         case .store(let reason): "The local store could not keep what arrived: \(reason)"
         case .emptyDraft: "There is nothing written to send."
         case .tooLong(let host, let limit): "\(host) takes \(limit) characters, and this is longer."
+        case .tooManyPictures(let host, let most): "\(host) takes \(most) pictures on a post."
+        case .pictureTooLarge(let host, let name, let limit):
+            "\(name) is larger than the \(limit) bytes \(host) takes."
+        case .pictureNotTaken(let host, let name, let kinds):
+            "\(host) does not take \(name)'s kind of file. It takes: \(kinds.joined(separator: ", "))."
         }
     }
 }
@@ -284,6 +298,17 @@ public struct InstanceInfo: Sendable, Hashable {
     /// says nothing rather than guessing at somebody else's rule.
     public let maxCharacters: Int?
 
+    /// What this server will take a picture as, how big, and how many — its own rules, asked of
+    /// it rather than written here (#89).
+    ///
+    /// Every one of them is optional and for the reason `maxCharacters` is: **a server that did
+    /// not say has not said zero.** A composer that refused a picture because it had not been
+    /// told a limit would be enforcing a rule nobody made, and one that invented a list of kinds
+    /// would refuse a file the server would have taken.
+    public let mediaKinds: [String]?
+    public let mediaSizeLimit: Int?
+    public let maxAttachments: Int?
+
     public init(
         host: String,
         title: String,
@@ -296,8 +321,14 @@ public struct InstanceInfo: Sendable, Hashable {
         version: String? = nil,
         registrationsOpen: Bool? = nil,
         rules: [InstanceRule] = [],
-        maxCharacters: Int? = nil
+        maxCharacters: Int? = nil,
+        mediaKinds: [String]? = nil,
+        mediaSizeLimit: Int? = nil,
+        maxAttachments: Int? = nil
     ) {
+        self.mediaKinds = mediaKinds
+        self.mediaSizeLimit = mediaSizeLimit
+        self.maxAttachments = maxAttachments
         self.host = host
         self.title = title
         self.summary = summary
@@ -425,9 +456,17 @@ public struct Draft: Sendable, Hashable {
     /// once" is — but a reply is an answer to somebody in one conversation, and sending it from
     /// three accounts would be three people answering.
     public let answering: Post?
+    /// The pictures going with it (#89), in the order they were put on.
+    ///
+    /// The bytes and not an id: a draft is a thing a reader is still writing, and a picture is
+    /// part of it until it is sent. Uploading is what publishing does with them, so a draft that
+    /// is never sent has cost nobody's server anything and a picture taken off before sending
+    /// was never anywhere but here.
+    public let pictures: [Picture]
 
     public init(text: String, audience: Audience = .everyone, warning: String? = nil,
-                answering: Post? = nil) {
+                answering: Post? = nil, pictures: [Picture] = []) {
+        self.pictures = pictures
         self.text = text
         self.warning = { let trimmed = ($0 ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                          return trimmed.isEmpty ? nil : trimmed }(warning)
@@ -441,6 +480,38 @@ public struct Draft: Sendable, Hashable {
 
     /// Whether there is anything to send. Whitespace is not a post.
     public var isEmpty: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    /// Whether there is anything to send. A picture with no words is a post.
+    public var carries: Bool { !isEmpty || !pictures.isEmpty }
+
+    /// A picture on its way into a post, as the reader put it there.
+    ///
+    /// The description is beside the bytes and not optional-by-omission: **this app says out loud
+    /// when a server sent a picture with no description**, so it would be a poor thing for it to
+    /// send one. Empty is allowed — a reader may decline — and what is not allowed is the question
+    /// never being asked.
+    public struct Picture: Sendable, Hashable, Identifiable {
+        public let id: UUID
+        public let bytes: Data
+        /// What the file was called, which is what a server is told and what a reader recognises the
+        /// row by while they are writing.
+        public let filename: String
+        public let mime: String
+        /// What its author wrote for somebody who cannot see it.
+        public var description: String
+
+        public init(id: UUID = UUID(), bytes: Data, filename: String, mime: String,
+                    description: String = "") {
+            self.id = id
+            self.bytes = bytes
+            self.filename = filename
+            self.mime = mime
+            self.description = description
+        }
+
+        /// How many bytes it is, which is what a server's own size limit is measured against.
+        public var size: Int { bytes.count }
+    }
 
     /// What a server's limit is counted against. Written once so the number the composer counts
     /// down and the number the check compares cannot come to disagree — the warning counts,

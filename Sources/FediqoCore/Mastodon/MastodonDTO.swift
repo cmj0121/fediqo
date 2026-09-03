@@ -215,8 +215,20 @@ enum MastodonDTO {
         let maxTootChars: Int?
 
         struct Configuration: Decodable, Sendable {
-            struct Statuses: Decodable, Sendable { let maxCharacters: Int? }
+            struct Statuses: Decodable, Sendable {
+                let maxCharacters: Int?
+                /// How many pictures one post may carry here, as this server says.
+                let maxMediaAttachments: Int?
+            }
+            /// What this server will take a picture as, and how big. Every field optional for
+            /// the reason `maxCharacters` is: a server that did not say has not said zero.
+            struct MediaAttachments: Decodable, Sendable {
+                let supportedMimeTypes: [String]?
+                let imageSizeLimit: Int?
+                let videoSizeLimit: Int?
+            }
             let statuses: Statuses?
+            let mediaAttachments: MediaAttachments?
         }
 
         /// v2 hands back an object with the picture inside it and v1 the address on its own.
