@@ -75,6 +75,18 @@ struct AttachmentDeck: View {
     /// given where that is narrower. One place, so the six frames below cannot disagree.
     private var side: CGFloat { min(width ?? Self.side, Self.side) }
     private var height: CGFloat { side * Self.ratio }
+    /// What the top card is drawn at, which is the whole of it where there is nothing under it.
+    ///
+    /// The deck used to frame itself `side + overhang` across while every caller reserved `side`
+    /// — the reserved column is exactly that wide, and the stacked arrangement measures a box at
+    /// exactly the card's ratio. So the fan and the counter under it were drawn outside the room
+    /// anybody had given them, and on a phone the reader saw neither: three attachments, and the
+    /// screen said nothing about two of them (#95).
+    private var faceSide: CGFloat { side - overhang }
+    static func faceSide(under count: Int, on side: CGFloat) -> CGFloat {
+        side - overhang(under: count, on: side)
+    }
+    private var faceHeight: CGFloat { faceSide * Self.ratio }
     static var height: CGFloat { side * ratio }
     /// The shape of a card, kept apart from its size so that a narrower one is the same shape.
     static let ratio: CGFloat = 0.68
@@ -89,13 +101,44 @@ struct AttachmentDeck: View {
     /// things: they are the thickness of a sheet of paper and the shadow along its edge, and
     /// they belong to this drawing and to nothing else — which is what S8 allows.
     ///
-    /// Three quarters of `Space.tight` and half a hairline. The stack used to step out a full
-    /// four points with a whole hairline around each sheet, which drew three bordered slabs
-    /// beside the picture and competed with it; at two points and no border at all the edges
-    /// then said nothing, and a reader learned there were more only from the counter
-    /// underneath. This is the middle: enough paper to see, not enough to look at.
-    private static let leaf: CGFloat = Space.tight * 0.75
-    private static let edge: Double = 0.5
+    /// **A share of the card rather than a number of points** (#95). It was three points, fixed,
+    /// when the card was 200 wide; #79 doubled the card to 400 and left it there, so the stack
+    /// halved in visibility on the day the picture grew — three points of paper under four
+    /// hundred points of photograph is nothing at all, and a reader was left learning there were
+    /// more only from the counter.
+    ///
+    /// Proportional, so this cannot happen again to whoever next changes `side`. And still
+    /// calmer than the version that was rejected: a full four points on a 200-point card drew
+    /// three bordered slabs that competed with the picture, and this is a smaller share of a
+    /// bigger card than that was.
+    private var leaf: CGFloat { Self.leaf(on: side) }
+    static func leaf(on side: CGFloat) -> CGFloat { side * leafShare }
+    private static let leafShare: CGFloat = 0.022
+
+    /// How strongly a sheet draws its own edge.
+    ///
+    /// A whole hairline, where it was half of one. The sheets are filled with the same colour
+    /// the card behind them is — that is what makes them read as paper rather than as objects —
+    /// so the edge is the only thing distinguishing one from the next, and at half strength it
+    /// was distinguishing nothing. What made the four-point version too loud was three bordered
+    /// slabs the size of the picture, not the borders; at this share of this card they are the
+    /// edges of a stack.
+    private static let edge: Double = 1
+
+    /// How far the fan reaches from the top card's corner — what the sheets underneath cost the
+    /// card they are under.
+    private var overhang: CGFloat { Self.overhang(under: attachments.count, on: side) }
+
+    /// How far the fan reaches, for a given number of attachments on a card of a given width.
+    ///
+    /// Pure and static so the one rule that matters can be asserted without drawing anything:
+    /// **the fan comes out of the card, never out of the room around it.** Every caller reserves
+    /// `side` — the wide arrangement's column is exactly that, and the stacked one measures a box
+    /// at exactly the card's ratio — so a deck that drew wider than `side` drew where nobody had
+    /// left it room, which is what #95 turned out to be.
+    static func overhang(under count: Int, on side: CGFloat) -> CGFloat {
+        CGFloat(min(max(count - 1, 0), shown)) * leaf(on: side)
+    }
 
     private var showing: Attachment? {
         attachments.isEmpty ? nil : attachments[top % attachments.count]
@@ -104,29 +147,42 @@ struct AttachmentDeck: View {
     private var hidden: Bool { covered }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Space.snug) {
-            deck
-            if attachments.count > 1 {
-                Text(verbatim: "\(top % attachments.count + 1) / \(attachments.count)")
-                    .fediqoFont(TypeScale.caption)
-                    .foregroundStyle(.tertiary)
+        deck
+            .frame(width: side, alignment: .leading)
+            .onChange(of: turns) { _, _ in turn() }
+            // `p` on the row this deck belongs to plays what is on top of it, or stops it.
+            .onChange(of: plays) { _, _ in
+                guard let showing, showing.isPlayable else { return }
+                play(showing)
             }
+            // A deck that goes off the screen — the reader scrolled, or closed the post they
+            // had opened — takes its sound with it. Nothing here plays out of sight.
+            .onDisappear { if playing(showing) { app.playback.stop() } }
+    }
+
+    /// Which one of how many, on the card rather than under it.
+    ///
+    /// It was a line below the deck, in a `VStack` — which the reserved column and the measured
+    /// box both sized to the card alone, so it was drawn outside the room it had and a reader
+    /// on a phone never saw it. On the card it needs no room of its own, and it is where a
+    /// count of photographs is looked for anyway.
+    @ViewBuilder
+    private var howMany: some View {
+        if attachments.count > 1 {
+            Text(verbatim: "\(top % attachments.count + 1) / \(attachments.count)")
+                .fediqoFont(TypeScale.caption, weight: .medium)
+                .foregroundStyle(.white)
+                .padding(.horizontal, Space.step)
+                .padding(.vertical, Space.hair)
+                .background(Capsule().fill(Color.black.opacity(0.55)))
+                .padding(Space.step)
+                .accessibilityHidden(true)
         }
-        .frame(width: side, alignment: .leading)
-        .onChange(of: turns) { _, _ in turn() }
-        // `p` on the row this deck belongs to plays what is on top of it, or stops it.
-        .onChange(of: plays) { _, _ in
-            guard let showing, showing.isPlayable else { return }
-            play(showing)
-        }
-        // A deck that goes off the screen — the reader scrolled, or closed the post they had
-        // opened — takes its sound with it. Nothing here is allowed to play out of sight.
-        .onDisappear { if playing(showing) { app.playback.stop() } }
     }
 
     private var deck: some View {
         ZStack(alignment: .topLeading) {
-            // The ones underneath, offset by a couple of points each so the stack has a
+            // The ones underneath, stepping out from the top card so the stack has a
             // thickness. They are drawn as plain cards rather than as their own pictures:
             // what is under the top one is not something the reader can see anyway, and
             // loading three more images to show a few points of each is a request nobody
@@ -135,24 +191,25 @@ struct AttachmentDeck: View {
             // **Paper under a photograph, not cards of their own** (#79). They used to step
             // out four points each with a hairline around every one, which drew three
             // bordered slabs beside the picture — a shape that competed with the picture for
-            // the eye, on every post with more than one attachment. Now they step out two,
-            // each fainter than the one above it, and none of them has a border insisting on
-            // itself. What a reader sees is the photograph; what the edges tell them is only
-            // that there are more.
+            // the eye. What replaced it said nothing at all, which is #95: three fixed points
+            // under a card that had doubled to four hundred. Now the step is a share of the
+            // card, each sheet fainter than the one above it, and the edge is a whole hairline
+            // because on cards of the same colour it is the only thing there is to see. What a
+            // reader sees is the photograph; what the edges tell them is that there are more.
             ForEach(0..<min(attachments.count - 1, Self.shown), id: \.self) { depth in
                 RoundedRectangle(cornerRadius: Radius.inner, style: .continuous)
                     .fill(Palette.raised(colorScheme))
                     .overlay(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous)
                         .strokeBorder(Palette.hairline(colorScheme).opacity(Self.edge)))
                     .opacity(1 - Double(depth) * 0.25)
-                    .frame(width: side, height: height)
-                    .offset(x: CGFloat(depth + 1) * Self.leaf, y: CGFloat(depth + 1) * Self.leaf)
+                    .frame(width: faceSide, height: faceHeight)
+                    .offset(x: CGFloat(depth + 1) * leaf, y: CGFloat(depth + 1) * leaf)
             }
             top(showing)
         }
-        .frame(width: side + CGFloat(min(attachments.count - 1, Self.shown)) * Self.leaf,
-               height: height + CGFloat(min(attachments.count - 1, Self.shown)) * Self.leaf,
-               alignment: .topLeading)
+        // The card's own footprint and no more. What the sheets take, they take out of the
+        // photograph rather than out of the row.
+        .frame(width: side, height: height, alignment: .topLeading)
     }
 
     @ViewBuilder
@@ -161,14 +218,15 @@ struct AttachmentDeck: View {
             ZStack(alignment: .bottomLeading) {
                 if let player = app.playback.player, playing(attachment) {
                     AttachmentPlayer(player: player, audio: attachment.kind == .audio,
-                                     width: side, height: height)
+                                     width: faceSide, height: faceHeight)
                 } else {
                     still(attachment)
                 }
             }
-            .frame(width: side, height: height)
+            .frame(width: faceSide, height: faceHeight)
             .overlay(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous)
                 .strokeBorder(Palette.hairline(colorScheme)))
+            .overlay(alignment: .topTrailing) { howMany }
             .accessibilityElement()
             .accessibilityLabel(Text(label(for: attachment)))
             .accessibilityAddTraits(.isButton)
@@ -180,7 +238,7 @@ struct AttachmentDeck: View {
     private func still(_ attachment: Attachment) -> some View {
         ZStack(alignment: .bottomLeading) {
             RemoteImage(url: hidden ? nil : attachment.displayURL,
-                        width: side, height: height,
+                        width: faceSide, height: faceHeight,
                         standing: hidden ? .covered : .picture)
                 .clipShape(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous))
                 .blur(radius: hidden ? 18 : 0)
