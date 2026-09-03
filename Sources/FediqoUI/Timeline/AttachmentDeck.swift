@@ -61,9 +61,10 @@ struct AttachmentDeck: View {
     /// 400 was too far the other way: it made every row with a picture twice the height of a row
     /// without one, and a timeline of two kinds of row is a timeline the eye has to keep
     /// re-measuring. See `tall`, which is the number now being chosen.
-    /// Rounded, because dividing by 0.68 does not land on a whole number and a width of
-    /// 199.99999999999997 is a width that fails an equality nobody expected to be about floats.
-    static let side: CGFloat = (tall / ratio).rounded()
+    /// `Size.card`, which is where the number lives — a `View`'s statics are isolated to the
+    /// main actor and the threshold that needs this one is not. It is still `tall / ratio`
+    /// rounded, and a test is what holds it to that.
+    static let side: CGFloat = Size.card
 
     /// **How tall a card is, which is what actually decides the row** — the width follows from it
     /// and from `ratio`, rather than the other way round.

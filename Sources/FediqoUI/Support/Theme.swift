@@ -119,9 +119,23 @@ enum Size {
     /// A popover wide enough for a row of words and narrow enough not to cover the post it
     /// was opened from.
     static let popover: CGFloat = 300
+    /// How wide a card of attachments is drawn.
+    ///
+    /// **Here rather than on `AttachmentDeck`, and that is not tidiness.** A `View`'s statics
+    /// are isolated to the main actor, and `wideRows` below is not — so a threshold that read
+    /// the deck's own number compiled on one Swift and not on another. It did: the runner's
+    /// 6.1.2 refused it while 6.3 here allowed it, and CI was red for a day before anybody
+    /// looked. The number lives where the numbers live (S8) and the deck reads it from here.
+    ///
+    /// It follows from a height rather than the other way round — see `AttachmentDeck.tall`,
+    /// which is the height an excerpt is clamped to, so a row with a picture is nearly a row
+    /// without one. A test holds the two together, because the arithmetic cannot be written
+    /// here without dragging the isolation back in.
+    static let card: CGFloat = 200
+
     /// The width at which a row has room to put its attachments beside its words. Three
-    /// shares: `AttachmentDeck.side` for the deck, `Space.gap` between them, and `words` left
-    /// over for what the post says.
+    /// shares: `card` for the deck, `Space.gap` between them, and `words` left over for what
+    /// the post says.
     ///
     /// **Only the last of the three follows the reader's text size.** The deck is a picture
     /// and a picture is the size it is at every text size; `words` is words, and 348 points
@@ -142,7 +156,7 @@ enum Size {
     /// Out here rather than on the screen that measures it, because the closure that asks the
     /// geometry is `Sendable` and a `View`'s own static is isolated to the main actor.
     static func wideRows(at scale: Double) -> CGFloat {
-        AttachmentDeck.side + Space.gap + words * scale
+        card + Space.gap + words * scale
     }
 
     /// What is left for the post's own words once the deck and the gap have had their share.

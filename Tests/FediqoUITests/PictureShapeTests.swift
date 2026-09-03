@@ -39,9 +39,11 @@ struct PictureShapeTests {
     @Test("A card is as tall as the words are allowed to be")
     func acardIsAsTallAsTheWords() {
         #expect(AttachmentDeck.tall == PostRow.words)
-        // Rounded, and the rounding is the point: dividing by 0.68 lands a hair under 200.
-        #expect(AttachmentDeck.side == (AttachmentDeck.tall / AttachmentDeck.ratio).rounded())
-        #expect(AttachmentDeck.side == 200)
+        // The arithmetic cannot be written where the number is — `Size.card` is out among the
+        // tokens because a `View`'s statics are isolated to the main actor and the threshold
+        // that needs it is not — so this is what holds the number to the arithmetic.
+        #expect(Size.card == (AttachmentDeck.tall / AttachmentDeck.ratio).rounded())
+        #expect(AttachmentDeck.side == Size.card)
     }
 
     // MARK: - what is lost, and when it is worth saying
