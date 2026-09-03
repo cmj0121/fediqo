@@ -3487,6 +3487,23 @@
         }
       }
     },
+    "shortcut.author": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open whoever wrote the post you are on"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "開啟你所在那則貼文的作者"
+          }
+        }
+      }
+    },
     "shortcut.bookmark": {
       "extractionState": "manual",
       "localizations": {

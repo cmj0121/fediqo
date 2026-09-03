@@ -1093,6 +1093,7 @@ public final class AppState {
         case .boostPost: return mark(.reblog)
         case .bookmarkPost: return mark(.bookmark)
         case .keepPost: return keepThePost()
+        case .openAuthor: return openTheAuthor()
         case .backToTop: return goToTop()
         case .showShortcuts: setShowingShortcuts(true); return true
         }
@@ -1401,6 +1402,20 @@ public final class AppState {
     /// asks here, so none of them can disagree about which post that is.
     private var postUnderTheRing: Post? {
         thread?.selected ?? person?.place.selectedPost ?? readingFeed?.selectedPost
+    }
+
+    /// Opens the page of whoever wrote the post the ring is on (#96).
+    ///
+    /// `postUnderTheRing`, so it means the same thing wherever the reader is: in the timeline,
+    /// inside an opened conversation, and on somebody's page — where it is how a reader walks
+    /// from one person to the next through what they wrote.
+    ///
+    /// Whoever wrote it and not whoever boosted it. A boost carries the post it is of, and the
+    /// row says who boosted it on its own line; the key belongs to the post.
+    private func openTheAuthor() -> Bool {
+        guard let post = postUnderTheRing else { return false }
+        openPerson(of: post)
+        return true
     }
 
     /// Back to the top of the feed being read. The screen does the scrolling; what happens

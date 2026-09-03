@@ -40,6 +40,15 @@ enum KeyCommand: Hashable, CaseIterable {
     case boostPost
     case bookmarkPost
     case keepPost
+    /// Open the page of whoever wrote the post the reader is on.
+    ///
+    /// The name in a row can be pressed and there was no key for it, so a reader working from
+    /// the keyboard had to reach for the pointer to do the one thing this app is otherwise
+    /// built to do without one (#96).
+    ///
+    /// On a boost it opens whoever wrote the post, not whoever boosted it. The boost line
+    /// already names the one and the post names the other, and the key belongs to the post.
+    case openAuthor
     case backToTop
     case showShortcuts
 
@@ -138,6 +147,9 @@ enum KeyCommand: Hashable, CaseIterable {
         case "b": return .boostPost
         case "d": return .bookmarkPost
         case "a": return .keepPost
+        // `u` for the person, `p` having gone to the media long ago. Every other letter near
+        // the meaning was taken: `a` keeps a post and `p` plays one.
+        case "u": return .openAuthor
         case "?": return .showShortcuts
         // A slash on its own asks for nothing. It is here only as the other half of `?`.
         default: return nil
@@ -180,7 +192,7 @@ enum KeyCommand: Hashable, CaseIterable {
     static let listened: Set<KeyEquivalent> = [
         .tab, .escape, .return, .upArrow, .downArrow, .space,
         "r", "R", "c", "j", "k", "g", "m", "o", "p", "s", "v", "f", "?", "/",
-        "l", "b", "d", "a",
+        "l", "b", "d", "a", "u",
     ]
 
     /// The same list, in the spelling a press arrives in, so that a key nobody listens for
@@ -269,6 +281,9 @@ extension KeyCommand {
         Shortcut(group: .moving, keys: ["j", "k", "↓", "↑"], name: "posts",
                  commands: [.nextPost, .previousPost]),
         Shortcut(group: .moving, keys: ["g"], name: "top", commands: [.backToTop]),
+        // Among the moves rather than the doings: it takes the reader somewhere, and what
+        // they do when they get there is that page's business.
+        Shortcut(group: .moving, keys: ["u"], name: "author", commands: [.openAuthor]),
         Shortcut(group: .doing, keys: ["r"], name: "readAgain", commands: [.refreshNow]),
         Shortcut(group: .doing, keys: ["R"], name: "interval", commands: [.cycleRefreshInterval]),
         Shortcut(group: .doing, keys: ["c"], name: "compose", commands: [.compose]),
