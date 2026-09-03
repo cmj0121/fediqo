@@ -487,3 +487,17 @@ extension CustomEmoji {
 private extension Character {
     var isShortcodeCharacter: Bool { isASCII && (isLetter || isNumber || self == "_") }
 }
+
+#if DEBUG
+public extension Post {
+    /// The post a screenshot run named, out of the ones on the screen.
+    ///
+    /// One rule for three launch variables, so that naming a post means the same thing whether a
+    /// run is opening it, opening its author, or answering it. `1` is the first post there is —
+    /// which is what those variables used to mean and all they could mean — and anything else is
+    /// the end of a post's own address, which is how the fixture's posts are named.
+    static func named(_ wanted: String, among posts: [Post]) -> Post? {
+        wanted == "1" ? posts.first : posts.first { $0.mergeKey.hasSuffix(wanted) }
+    }
+}
+#endif

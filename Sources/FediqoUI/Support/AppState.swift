@@ -111,17 +111,22 @@ struct LaunchOptions {
     /// wants to photograph it has to arrive already part-way through. Ignored anywhere but a
     /// fixture: seeding a reader's own composer would be this app writing in their draft.
     var draft: String?
-    /// A post to open as soon as the timeline has one, named by the end of its address. The
-    /// composer's and the inbox's twin: a page that can only be reached by pressing something
-    /// cannot be photographed on a runner, where nothing may press anything (#30).
+    /// A post to open as soon as the timeline has one, named by `Post.named(_:among:)`. A page
+    /// that can only be reached by pressing something cannot be photographed on a runner, where
+    /// nothing may press anything (#30).
     var openingPost: String?
-    /// Whether to open the author of the first post the timeline has, for the same reason: the
-    /// page about somebody is reached by pressing a name, and nothing on a runner may press.
-    var openingPerson = false
-    /// Whether to open the composer answering the first post the timeline has. The composer as a
-    /// reply is a different screen from the composer as a new post, and a screen that cannot be
-    /// photographed is a screen nobody looks at.
-    var openingReply = false
+    /// Whose page to open, named the same way, for the same reason: the page about somebody is
+    /// reached by pressing a name.
+    ///
+    /// **Which post is named matters and used to be unaskable.** It was a flag meaning "the
+    /// first", and the first post is on whichever server happens to be newest — so the state
+    /// where the acting server has never heard of somebody, which is the honest half of what
+    /// this page says, could not be photographed at all.
+    var openingPerson: String?
+    /// Which post to answer, named the same way. The composer as a reply is a different screen
+    /// from the composer as a new post, and answering a post on a server the reader has no
+    /// account on is a third — the one that says so before anything is typed.
+    var openingReply: String?
     /// Which of a person's two lists to open, where a run was told to open one. A screen reached
     /// only by pressing something cannot be photographed where nothing may press (#30).
     var openingPeople: People.Kind?
@@ -174,8 +179,8 @@ struct LaunchOptions {
         options.composing = environment["FEDIQO_COMPOSE"] == "1"
         options.showingNotices = environment["FEDIQO_NOTICES"] == "1"
         options.openingPost = environment["FEDIQO_OPEN"]
-        options.openingPerson = environment["FEDIQO_PERSON"] == "1"
-        options.openingReply = environment["FEDIQO_REPLY"] == "1"
+        options.openingPerson = environment["FEDIQO_PERSON"]
+        options.openingReply = environment["FEDIQO_REPLY"]
         options.openingPeople = environment["FEDIQO_PEOPLE"].flatMap(People.Kind.init(rawValue:))
         options.fixture = environment["FEDIQO_FIXTURE"] == "1"
         options.signedIn = environment["FEDIQO_SIGNED_IN"] == "1"
@@ -283,9 +288,9 @@ public final class AppState {
     let openingPost: String?
     /// Whether this run opens the author of the first post it is given. A screenshot's way in to
     /// a page whose only other way in is a press (#30: nothing on a runner may press anything).
-    let openingPerson: Bool
+    let openingPerson: String?
     /// Whether this run opens the composer as an answer to the first post it is given.
-    let openingReply: Bool
+    let openingReply: String?
     /// Which of a person's lists this run opens, where it opens one.
     let openingPeople: People.Kind?
     /// The conversations being read, oldest first, empty while the reader is in the list.

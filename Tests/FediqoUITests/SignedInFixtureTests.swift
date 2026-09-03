@@ -121,3 +121,50 @@ struct SignedInFixtureTests {
         #expect(Set(found.map(\.authorId)).count == found.count)
     }
 }
+
+/// Naming which post a screenshot run is about.
+///
+/// Three launch variables and one rule, so that naming a post means the same thing whether a run
+/// is opening it, opening its author, or answering it. Two of them used to be flags meaning "the
+/// first post there is" — and the first post is on whichever server happens to be newest, so the
+/// states that depend on *which* server a post came from could not be photographed at all.
+@Suite("Naming the post a shot is about")
+@MainActor
+struct NamingAPostTests {
+    private func post(_ id: String, on host: String) -> Post {
+        Post(uri: "https://\(host)/api/v1/statuses/\(id)", socialProtocol: .mastodon,
+             sourceURL: "https://\(host)", createdAt: Date(timeIntervalSince1970: 100),
+             authorId: "https://\(host)/@a", authorName: "A", authorHandle: "@a@\(host)",
+             text: id)
+    }
+
+    @Test("1 is the first post there is, which is what it always meant")
+    func oneIsTheFirst() {
+        let posts = [post("a", on: "one.example"), post("b", on: "two.example")]
+        #expect(Post.named("1", among: posts)?.text == "a")
+    }
+
+    @Test("Anything else names a post by the end of its address")
+    func aNameIsAnAddress() {
+        let posts = [post("a", on: "one.example"), post("b", on: "two.example")]
+        #expect(Post.named("statuses/b", among: posts)?.text == "b")
+        #expect(Post.named("b", among: posts)?.text == "b")
+    }
+
+    @Test("A name nothing answers to opens nothing")
+    func anameNobodyHasOpensNothing() {
+        #expect(Post.named("nowhere", among: [post("a", on: "one.example")]) == nil)
+        #expect(Post.named("1", among: []) == nil)
+    }
+
+    /// All three read the same way, which is the point of there being one of them.
+    @Test("The three launch variables all name a post")
+    func allThreeName() {
+        let options = LaunchOptions.fromEnvironment(["FEDIQO_OPEN": "the-deck",
+                                                     "FEDIQO_PERSON": "the-thread",
+                                                     "FEDIQO_REPLY": "1"])
+        #expect(options.openingPost == "the-deck")
+        #expect(options.openingPerson == "the-thread")
+        #expect(options.openingReply == "1")
+    }
+}

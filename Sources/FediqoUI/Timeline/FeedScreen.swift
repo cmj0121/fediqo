@@ -115,7 +115,7 @@ struct FeedScreen: View {
             // whatever the reader had walked into. Nothing at all on a reader's own run.
             .task(id: model.visible.isEmpty) {
                 guard let wanted = app.openingPost, app.expanded == nil,
-                      let post = model.visible.first(where: { $0.mergeKey.hasSuffix(wanted) })
+                      let post = Post.named(wanted, among: model.visible)
                 else { return }
                 app.expand(post)
             }
@@ -123,14 +123,16 @@ struct FeedScreen: View {
             // and the same reason: a page reached only by pressing something cannot be
             // photographed where nothing may press (#30).
             .task(id: model.visible.isEmpty) {
-                guard app.openingPerson, app.person == nil, let post = model.visible.first
+                guard let wanted = app.openingPerson, app.person == nil,
+                      let post = Post.named(wanted, among: model.visible)
                 else { return }
                 app.openPerson(of: post)
             }
             // And the composer as an answer to it, which is a different screen from the composer
             // as a new post and so is a picture of its own.
             .task(id: model.visible.isEmpty) {
-                guard app.openingReply, !app.composing, let post = model.visible.first
+                guard let wanted = app.openingReply, !app.composing,
+                      let post = Post.named(wanted, among: model.visible)
                 else { return }
                 app.reply(to: post)
             }
