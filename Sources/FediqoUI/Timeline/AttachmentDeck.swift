@@ -98,15 +98,27 @@ struct AttachmentDeck: View {
 
     /// The shapes a card is allowed to be, as height over width.
     ///
-    /// Bounded because a row is a row: an 8:1 panorama would be a slit nobody can see, and a
-    /// phone screenshot at 9:16 would be a card taller than the screen it is drawn on, with the
-    /// words above it pushed off the top. Between these two a picture is drawn true — 2:3 is a
-    /// portrait photograph and 16:9 a landscape one, and both are inside.
+    /// Bounded because **a row is a row**: an 8:1 panorama would be a slit nobody can see, and a
+    /// 9:16 screenshot a card taller than the screen it is drawn on, with the words above it
+    /// pushed off the top. A timeline is a list somebody is going down, and one post that takes
+    /// the whole of it is one post deciding how much of their reading it gets.
     ///
-    /// Outside them nothing is cut. The card takes the nearest shape it is allowed and the
-    /// picture is *fitted* into it, so a panorama is a panorama with ground either side of it
-    /// rather than its ends removed. See `RemoteImage.cropping`.
-    static let shapes: ClosedRange<CGFloat> = 0.5...1.5
+    /// The upper end is 1.25 rather than the 1.5 it first was, which was measured rather than
+    /// argued: 1.5 of a 350-point row on a phone is 525 points of picture, most of a screen, for
+    /// one post. At 1.25 a 4:5 portrait is drawn true and the tallest row is about a square card
+    /// and a quarter — still plainly a row.
+    ///
+    /// **Outside them the picture is cut**, and the row says so — see `moreThanFits`. It is cut
+    /// rather than fitted because the alternative keeps the same row height and spends it on
+    /// ground: a 9:16 screenshot letter-boxed into a 1.25 card is a small picture with bars
+    /// above and below, which is neither the whole photograph nor a legible piece of one.
+    static let shapes: ClosedRange<CGFloat> = 0.5...1.25
+
+    /// Whether the card had to cut this to fit the shapes a row allows.
+    static func cuts(_ attachment: Attachment?) -> Bool {
+        guard let aspect = attachment?.aspect else { return false }
+        return !shapes.contains(aspect)
+    }
 
     /// What shape a card is for what is on it: the picture's own, held inside `shapes`, or the
     /// card's own where the server never said.
@@ -204,6 +216,24 @@ struct AttachmentDeck: View {
         }
     }
 
+    /// That there is more of this picture than the row is showing.
+    ///
+    /// The other half of cutting it. A row that showed the middle third of a photograph and said
+    /// nothing would be inventing what the picture is, which is what S5 is for — so where the
+    /// card could not take the shape, it says so, and what the mark means is *open it*.
+    @ViewBuilder
+    private var moreThanFits: some View {
+        if Self.cuts(showing), !hidden {
+            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                .fediqoSymbol(TypeScale.caption)
+                .foregroundStyle(.white)
+                .padding(Space.tight)
+                .background(Circle().fill(Color.black.opacity(0.55)))
+                .padding(Space.step)
+                .accessibilityLabel(Text(t("media.more")))
+        }
+    }
+
     private var deck: some View {
         ZStack(alignment: .topLeading) {
             // The ones underneath, stepping out from the top card so the stack has a
@@ -251,6 +281,7 @@ struct AttachmentDeck: View {
             .overlay(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous)
                 .strokeBorder(Palette.hairline(colorScheme)))
             .overlay(alignment: .topTrailing) { howMany }
+            .overlay(alignment: .bottomTrailing) { moreThanFits }
             .accessibilityElement()
             .accessibilityLabel(Text(label(for: attachment)))
             .accessibilityAddTraits(.isButton)
@@ -263,11 +294,7 @@ struct AttachmentDeck: View {
         ZStack(alignment: .bottomLeading) {
             RemoteImage(url: hidden ? nil : attachment.displayURL,
                         width: faceSide, height: faceHeight,
-                        standing: hidden ? .covered : .picture,
-                        // Never cut where the shape is known: the card has already taken it,
-                        // so within the bound this is the same picture either way — and past
-                        // it, fitting keeps the whole photograph (#101).
-                        cropping: attachment.aspect == nil)
+                        standing: hidden ? .covered : .picture)
                 .clipShape(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous))
                 .blur(radius: hidden ? 18 : 0)
             if hidden {

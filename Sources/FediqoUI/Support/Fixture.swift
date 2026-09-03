@@ -90,9 +90,10 @@ enum Fixture {
                  text: "Three things came attached. They are a deck, not a row of thumbnails — "
                      + "click the top one and the stack turns over.",
                  // Three shapes rather than three of one, so what a card does with a
-                 // photograph that is not the card's shape can be looked at (#101).
+                 // photograph that is not the card's shape can be looked at (#101) — including
+                 // one past the bound, which is cut and says so.
                  attachments: [image("deck-0", seed: 0, shape: 0.68),
-                               image("deck-1", seed: 1, shape: 1.4),
+                               image("deck-1", seed: 1, shape: 1.78),
                                image("deck-2", seed: 2, shape: 1.0)],
                  counts: Counts(replies: 1, reblogs: 3, favourites: 19)),
             post("the-thread", host: hosts[0], minutesAgo: 96, now: now,
@@ -151,7 +152,7 @@ enum Fixture {
                  name: "Yusuf Adeyemi", handle: "yusuf",
                  text: "Reading rooms, mostly. The one at the top of the hill has the light "
                      + "and none of the chairs. https://cedar.example/rooms",
-                 attachments: [image("room", seed: 3, shape: 1.35)],
+                 attachments: [image("room", seed: 3, shape: 1.2)],
                  counts: Counts(replies: 2, reblogs: 5, favourites: 41),
                  tags: ["libraries", "slowweb"]),
             // Written partly in pictures, in the words and in the name above them: a

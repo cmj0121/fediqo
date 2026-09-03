@@ -835,6 +835,23 @@
         }
       }
     },
+    "media.more": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "There is more of this picture — open it to see all of it"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這張照片還有沒顯示到的部分 —— 打開它可以看到全部"
+          }
+        }
+      }
+    },
     "menu.go": {
       "extractionState": "manual",
       "localizations": {

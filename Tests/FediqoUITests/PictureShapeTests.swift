@@ -24,9 +24,9 @@ struct PictureShapeTests {
     @Test("A landscape photograph is drawn landscape, and a portrait one portrait")
     func itTakesTheShapeItWasGiven() {
         let landscape: CGFloat = AttachmentDeck.shape(of: picture(1600, 900))
-        let portrait: CGFloat = AttachmentDeck.shape(of: picture(1000, 1500))
+        let portrait: CGFloat = AttachmentDeck.shape(of: picture(1000, 1200))
         #expect(landscape == CGFloat(900) / CGFloat(1600))
-        #expect(portrait == CGFloat(1.5))
+        #expect(portrait == CGFloat(1.2))
     }
 
     /// The two shapes that would break a row: a slit nobody can see, and a card taller than the
@@ -37,11 +37,34 @@ struct PictureShapeTests {
         #expect(AttachmentDeck.shape(of: picture(1080, 1920)) == AttachmentDeck.shapes.upperBound)
     }
 
+    /// **A row is a row.** The tallest a card gets is about a square and a quarter, because a
+    /// timeline is a list somebody is going down and one post taking the whole of it is one post
+    /// deciding how much of their reading it gets.
+    @Test("The tallest a row can be is still plainly a row")
+    func arowStaysARow() {
+        #expect(AttachmentDeck.shapes.upperBound == 1.25)
+        // A 9:16 screenshot, which is the shape that started this: cut to the bound rather than
+        // drawn at 1.78 of the card's width.
+        #expect(AttachmentDeck.shape(of: picture(1080, 1920)) == 1.25)
+    }
+
+    /// The other half of cutting one: the row says there is more, so it is not claiming that
+    /// the middle of somebody's photograph is the whole of it (S5).
+    @Test("A picture the card had to cut is marked, and one it did not is not")
+    func cuttingIsSaid() {
+        #expect(AttachmentDeck.cuts(picture(1080, 1920)))
+        #expect(AttachmentDeck.cuts(picture(4000, 500)))
+        #expect(!AttachmentDeck.cuts(picture(1000, 1250)))
+        #expect(!AttachmentDeck.cuts(picture(1600, 900)))
+        // Nothing to cut and nothing to say where nobody sent a shape: the card has its own.
+        #expect(!AttachmentDeck.cuts(picture(nil, nil)))
+    }
+
     /// The ordinary photographs are inside it, which is what makes the bound a bound rather than
     /// a second fixed shape.
     @Test("The shapes a camera makes are inside the bound")
     func theOrdinaryOnesAreTrue() {
-        for (width, height) in [(3, 2), (2, 3), (16, 9), (4, 3), (3, 4), (1, 1)] {
+        for (width, height) in [(3, 2), (16, 9), (4, 3), (4, 5), (1, 1)] {
             let wanted = CGFloat(height) / CGFloat(width)
             #expect(AttachmentDeck.shape(of: picture(width * 400, height * 400)) == wanted,
                     "\(width):\(height) should be drawn true")
@@ -80,13 +103,13 @@ struct PictureShapeTests {
 
     // MARK: - what is never done
 
-    /// The rule S10 exists for. A card that could not take the shape does not get to choose
-    /// which third of somebody's photograph was the important one.
-    @Test("A picture whose shape is known is never cut")
-    func aknownShapeIsNeverCut() {
-        // `cropping` is false wherever the shape is known — inside the bound it changes nothing,
-        // and outside it, it is the difference between letter-boxing and cutting.
-        #expect(picture(1080, 1920).aspect != nil)
-        #expect(picture(nil, nil).aspect == nil)
+    /// The rule S10 exists for: a card takes the shape it can, and where it cannot it says so
+    /// rather than passing off the middle of somebody's photograph as the whole of it.
+    @Test("A picture inside the bound is not cut at all")
+    func insideTheBoundNothingIsCut() {
+        // Card shape and picture shape are one number, so there is nothing to crop away.
+        let portrait = picture(1000, 1250)
+        #expect(AttachmentDeck.shape(of: portrait) == portrait.aspect)
+        #expect(!AttachmentDeck.cuts(portrait))
     }
 }

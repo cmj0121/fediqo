@@ -149,14 +149,17 @@ Mastodon sends `meta.original.width` and `height` for every attachment. Where a 
 shape. Where it said nothing, the card has its own shape and fills it, which is what this app did before it
 could know any better.
 
-The bound is `AttachmentDeck.shapes`, and it exists because a row is a row: an 8:1 panorama would be a slit
-nobody can see, and a 9:16 screenshot would be a card taller than the screen, pushing the words above it off
-the top. Between them a picture is drawn true — 2:3 and 16:9 are both inside.
+The bound is `AttachmentDeck.shapes`, and it exists because **a row is a row**: an 8:1 panorama would be a slit
+nobody can see, a 9:16 screenshot a card taller than the screen, and a timeline is a list somebody is going
+down — one post that takes the whole of it is one post deciding how much of their reading it gets. Between the
+bounds a picture is drawn true, and 4:5 and 16:9 are both inside.
 
-**Outside the bound nothing is cut.** The card takes the nearest shape it is allowed and the picture is fitted
-into it, with ground either side. A reader looking at a row and a reader looking at the opened picture are
-looking at the same photograph, which is the half of this rule that S5 would ask for anyway: a row that showed
-a third of a picture without saying so is a row inventing what the picture is.
+**Outside the bound the picture is cut, and the row says so.** The card takes the nearest shape it is allowed
+and the picture fills it; a mark says there is more, and what the mark means is *open it*. Cutting rather than
+letter-boxing, because letter-boxing spends the same row height on ground: a 9:16 screenshot inside a 1.25
+card is a small picture with bars above and below, which is neither the whole photograph nor a legible piece
+of one. Saying so is the half of this rule S5 would ask for anyway — a row that showed a third of a picture
+and said nothing would be inventing what the picture is.
 
 What this rule forbids is a screen deciding what part of somebody's photograph is the important part.
 

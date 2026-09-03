@@ -698,18 +698,6 @@ struct RemoteImage: View {
     enum Standing { case avatar, picture, covered }
     var standing: Standing = .picture
 
-    /// Whether the picture is allowed to be cut to fill this box (#101).
-    ///
-    /// **False wherever the shape is known**, which is the whole of the decision: a card takes
-    /// the picture's own shape, so within the bound fitting and filling are the same picture
-    /// and nothing is lost either way — and outside it, where the card could not take the shape,
-    /// fitting shows the whole photograph with ground above and below rather than cutting the
-    /// top and bottom off it.
-    ///
-    /// True for a face, where a square crop of the middle is what a portrait wants, and for a
-    /// picture whose shape nobody sent — the card has its own shape then, and filling it is what
-    /// this app did before it could know any better.
-    var cropping = true
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Whether the waiting shape is at the top of its breath. `@State` because it is an
@@ -729,7 +717,7 @@ struct RemoteImage: View {
     var body: some View {
         Group {
             if let picture = cache.picture(url, scale: displayScale) {
-                picture.resizable().aspectRatio(contentMode: cropping ? .fill : .fit)
+                picture.resizable().aspectRatio(contentMode: .fill)
                     .transition(.opacity)
             // Still coming, and there is somewhere for it to come from.
             } else if url != nil, standing != .covered, !cache.isMissing(url, scale: displayScale) {
