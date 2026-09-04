@@ -92,7 +92,7 @@ struct ServerSearchTests {
     /// empty — a request with an empty query still tells the server somebody is searching.
     @Test("Nothing typed asks nobody anything")
     func nothingTypedAsksNobody() async throws {
-        let host = "quiet.test"
+        let host = "silent.search.test"
         #expect(try await client.search("   ", host: host, limit: 20, token: nil).isEmpty)
         #expect(stubRoutes.paths(for: host).isEmpty)
     }
