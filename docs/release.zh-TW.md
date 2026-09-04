@@ -195,41 +195,28 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-[`.github/workflows/release.yml`](../.github/workflows/release.yml) 監看 `v*`，而它裡面的每一步不是
-`brew install` 就是 `make publish`。關於發布的事，那個檔案裡一件都沒寫：build 叫什麼、由哪張憑證簽、商店
-被告知什麼、以及任何時候都不送審，全都是 Fastfile 做的決定，而 laptop 用同樣的方式做同樣的決定。
+**tag 是一個名字，而發版是在筆電上跑 `make publish`。** 曾經有一條監看 `v*` 的 workflow，它已經被刪掉了。
+不是因為它寫錯 —— 它裡面每一步不是 `brew install` 就是 `make publish`，做出來的會是筆電做的同一個 build ——
+而是因為從它被寫下來到被刪掉那天，**沒有人給過它任何東西**。它的 secret 一個都沒有設過，所以唯一一次推 tag，
+它在還沒開始建置之前就停在 `refusing to run`。
 
-在上傳那一步失敗的發布，用同一個 tag 再跑一次——**Actions → Release → Run workflow**，在下拉選單裡挑那個
-tag。沒有人需要因為管線不能被問第二次，而發明一個 `v0.1.1`。
+剩下的東西是誠實的，不是次一等的。發版需要 Apple 的憑證、簽章用的證書、以及一個人的電話號碼；那些東西住在
+一個人的一台機器上，而把它們複製一份放進代管的 runner，是為了少打一個指令而多開一個外洩的地方。
 
-runner 從它的 secret store 拿到的，正是 `.env` 交給 laptop 的那些：
-
-| secret                          | 與 laptop 上的差別                               |
-| ------------------------------- | ------------------------------------------------ |
-| `FEDIQO_TEAM_ID`                | 一樣                                             |
-| `FEDIQO_BUNDLE_ID`              | 一樣                                             |
-| `MATCH_GIT_URL`                 | HTTPS 形式——runner 沒有 ssh key 可以 clone       |
-| `FEDIQO_REVIEW_FIRST_NAME`      | 一樣                                             |
-| `FEDIQO_REVIEW_LAST_NAME`       | 一樣                                             |
-| `FEDIQO_REVIEW_PHONE`           | 一樣                                             |
-| `FEDIQO_REVIEW_EMAIL`           | 一樣                                             |
-| `MATCH_GIT_BASIC_AUTHORIZATION` | 這裡必要，laptop 上用不到                        |
-| `MATCH_PASSWORD`                | 這裡必要：沒有 keychain 幫忙記住它               |
-| `ASC_KEY_ID`                    | 這裡必要——Apple ID 那條路需要有人看著            |
-| `ASC_ISSUER_ID`                 | ⋯⋯它的 issuer                                    |
-| `ASC_KEY_P8_BASE64`             | ⋯⋯以及 `.p8` 本身，base64，所以它不是一個路徑    |
-
-publish lane 裡的 `setup_ci` 會做出 match 需要的暫時 keychain。不在 CI 上時它什麼都不做，這正是它可以在兩
-台機器上都是同一行的原因。
-
-**兩份清單會互相檢查。** `scripts/env.sh` 放著這條發布線缺不得的名字，`release.yml` 放著提供它們的
-secrets —— 而它們已經漂開過一次：加入審查聯絡資料的那一天，`REQUIRED` 多了四個名字而 workflow 沒有，
-於是那之後推的 tag 會在 runner 上跑了幾分鐘之後停在 `refusing to run`。
-`scripts/env.sh --covers .github/workflows/release.yml` 會說這件事有沒有再度發生，而 CI 每次推送都跑它：
+所以：把發出去的那個 commit 標上 tag，然後在這裡發版。
 
 ```sh
-scripts/env.sh --covers .github/workflows/release.yml
+git tag -a v0.1.0 -m "..."
+git push origin v0.1.0
+make publish
 ```
+
+tag 說的是這個 build 來自哪個 commit。它不啟動任何東西。
+
+## 一台筆電被交給什麼
+
+`scripts/env.sh` 放著這條發版線缺不得的名字，缺了就拒絕執行 —— 在建置之前，而不是上傳到一半。`.env.example`
+就是那份清單；`scripts/env.sh --check` 會在不執行任何東西的情況下說出少了什麼。
 
 ## 讓 build 抵達一個人
 

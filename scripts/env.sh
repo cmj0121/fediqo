@@ -3,7 +3,6 @@
 # What the release lane is allowed to know, and where it learned it.
 #
 #   scripts/env.sh --check                    # which names are set, never what they hold
-#   scripts/env.sh --covers WORKFLOW          # whether a workflow hands the release all of them
 #   scripts/env.sh -- bundle exec fastlane …  # run that, with .env loaded first
 #
 # A laptop keeps these in .env at the root; a runner already has them in its environment
@@ -211,40 +210,9 @@ run() {
 
 load
 
-# Whether a workflow hands the release every name it cannot run without.
-#
-# The two lists drifted the day `FEDIQO_REVIEW_*` was added: `REQUIRED` above grew by four and
-# the workflow did not, so a tag pushed after that would have stopped at `refusing to run` --
-# on a runner, minutes in, for a reason nobody would look for in a YAML file. This is that
-# check, and it reads the list above rather than a second copy of it.
-covers() {
-    local file="$1" name missing=0
-
-    [ -f "$file" ] || { echo >&2 "env.sh: no such file: $file"; return 1; }
-    echo "$file: does it hand the release what it cannot run without?"
-    for name in "${REQUIRED[@]}"; do
-        if grep -q "^[[:space:]]*$name:" "$file"; then
-            printf '  %-46s handed over\n' "$name"
-        else
-            printf '  %-46s MISSING\n' "$name"
-            missing=1
-        fi
-    done
-    [ "$missing" -eq 0 ] || {
-        echo >&2
-        echo >&2 "env.sh: $file would reach 'refusing to run' -- add the names above to its env."
-        return 1
-    }
-}
-
 case "${1:-}" in
     --check)
         check
-        ;;
-    --covers)
-        shift
-        [ $# -gt 0 ] || { echo >&2 "env.sh: '--covers' wants a workflow file"; exit 2; }
-        covers "$1"
         ;;
     --)
         shift
@@ -252,7 +220,7 @@ case "${1:-}" in
         run "$@"
         ;;
     *)
-        echo >&2 "usage: ${0##*/} [--check | --covers FILE | -- COMMAND [ARG…]]"
+        echo >&2 "usage: ${0##*/} [--check | -- COMMAND [ARG…]]"
         exit 2
         ;;
 esac
