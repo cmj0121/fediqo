@@ -173,6 +173,7 @@ struct AppShell: View {
         // lives on the `FeedModel`, and `FeedScreen` scrolls to it once on the way in — so
         // the swap is still clean, and coming back is still a screen built from nothing.
         case .notices: NoticesScreen()
+        case .talks: TalksScreen()
         case .timeline:
             if let timeline = app.readingTimeline {
                 FeedScreen(timeline: timeline).id(timeline.id)

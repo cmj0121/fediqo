@@ -6427,6 +6427,125 @@
           }
         }
       }
+    },
+    "rail.talks": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conversations"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "對話"
+          }
+        }
+      }
+    },
+    "talks.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Who you are talking to, and what was last said. The order is the conversation's, not time's."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你正在跟誰說話，以及最後說了什麼。順序是對話的，不是時間的。"
+          }
+        }
+      }
+    },
+    "talks.empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nobody is talking to you privately just now."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "目前沒有人在私下跟你說話。"
+          }
+        }
+      }
+    },
+    "talks.refused": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No server would answer about conversations."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "沒有伺服器願意回答關於對話的事。"
+          }
+        }
+      }
+    },
+    "talks.unread": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not read"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未讀"
+          }
+        }
+      }
+    },
+    "talks.nothingSaid": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The last post here is gone."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這裡最後那則貼文已經不在了。"
+          }
+        }
+      }
+    },
+    "talks.justYou": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only you"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "只有你"
+          }
+        }
+      }
     }
   }
 }

@@ -509,6 +509,28 @@ struct FixtureSource: SourceClient {
     /// newest-first list it would be at the bottom where nobody scrolls.
     /// Two posts the fixture's reader has written and not sent, so the band can be
     /// photographed — one with something attached, one without (#110).
+    /// Two conversations, so the page can be photographed: one unread with two people in it,
+    /// one read whose last post has gone (#109).
+    func conversations(as account: ActingAccount) async throws -> [Talk] {
+        let recent = Fixture.timeline(of: account.host).first
+        return [
+            Talk(id: "1", host: account.host,
+                 people: Fixture.timeline(of: account.host).prefix(2).map {
+                     Profile(id: $0.authorHandle, authorId: $0.authorId, name: $0.authorName,
+                             handle: $0.authorHandle, avatarURL: $0.authorAvatarURL,
+                             emojis: $0.emojis)
+                 },
+                 last: recent, unread: true),
+            Talk(id: "2", host: account.host,
+                 people: Fixture.timeline(of: account.host).dropFirst(2).prefix(1).map {
+                     Profile(id: $0.authorHandle, authorId: $0.authorId, name: $0.authorName,
+                             handle: $0.authorHandle, avatarURL: $0.authorAvatarURL,
+                             emojis: $0.emojis)
+                 },
+                 last: nil, unread: false),
+        ]
+    }
+
     func scheduled(as account: ActingAccount) async throws -> [ScheduledPost] {
         let now = Date()
         return [

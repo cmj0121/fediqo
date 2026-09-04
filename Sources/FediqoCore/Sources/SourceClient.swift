@@ -262,6 +262,13 @@ public protocol SourceClient: Sendable {
     func searchTags(matching query: String, limit: Int,
                     as account: ActingAccount) async throws -> [String]
 
+    /// The conversations this account is in (#109).
+    ///
+    /// Theirs and nobody else's, and not fanned out: a conversation belongs to one account on
+    /// one server, and two servers' conversations are two conversations even where the same
+    /// people are in both.
+    func conversations(as account: ActingAccount) async throws -> [Talk]
+
     /// The posts this account has written and not sent yet (#110).
     ///
     /// Theirs and nobody else's: there is no reading of somebody else's unsent posts, and the
@@ -701,6 +708,11 @@ public extension SourceClient {
                     as account: ActingAccount) async throws -> [String] {
         throw SourceFailure.unsupported(.mastodon)
     }
+
+    /// Default: a protocol with no private conversations has none to list, and an empty answer
+    /// is the true one rather than a refusal — unlike the unsent posts below, where nobody
+    /// having looked and nothing being queued are different facts a reader is shown differently.
+    func conversations(as account: ActingAccount) async throws -> [Talk] { [] }
 
     /// Default: this build cannot ask that over this protocol, which is different from an
     /// account that has scheduled nothing — so it throws and the page leaves the part absent

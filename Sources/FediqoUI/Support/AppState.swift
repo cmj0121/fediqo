@@ -25,7 +25,7 @@ enum RailItem: String, CaseIterable, Identifiable, Hashable {
     /// The inbox is here rather than behind a bell (#122). It is the one reading that arrives
     /// while nobody is looking, and it was the only one with no page of its own — so the reader
     /// could not tell it was there without opening something.
-    case timeline, notices, kept, statistics, settings
+    case timeline, notices, talks, kept, statistics, settings
 
     var id: String { rawValue }
 
@@ -35,6 +35,7 @@ enum RailItem: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .timeline: "list.bullet.rectangle"
         case .notices: "bell"
+        case .talks: "bubble.left.and.bubble.right"
         case .kept: "archivebox"
         // The rising line belongs to the Trending tab, and it means "what is happening out
         // there". This page is the other kind of chart: bars of what is already here.
@@ -313,6 +314,24 @@ public final class AppState {
     /// ring's place is: the keys reach it from outside the screen that draws it.
     /// How many notices the reader has not looked at, for the rail to say (#122).
     var unseenNotices: Int { notices?.unseen ?? 0 }
+
+    /// Who the reader is talking to (#109). Built once and kept, the way the feeds are: the page
+    /// is rebuilt on every visit and what it holds should not be re-asked with it.
+    @ObservationIgnored lazy var talks = TalksModel { [weak self] in
+        await self?.everyAccount() ?? []
+    } client: { [weak self] _ in
+        self?.registry.client(for: .mastodon)
+    }
+
+    /// Every account the reader is signed in as, as itself. A conversation belongs to one
+    /// account on one server, so each of them is asked separately (#109).
+    func everyAccount() async -> [ActingAccount] {
+        var found: [ActingAccount] = []
+        for handle in yourAccounts {
+            if let account = await acting(as: handle) { found.append(account) }
+        }
+        return found
+    }
 
     @ObservationIgnored lazy var noticePlace = NoticePlace(rows: { [weak self] in
         self?.notices?.notices ?? []
@@ -1697,7 +1716,7 @@ public final class AppState {
         case .settings: rotate(&settingsTab, by: steps)
         // Neither has tabs to rotate through: one list each, and `Tab` is handed back to the
         // focus system rather than kept for nothing.
-        case .kept, .notices: false
+        case .kept, .notices, .talks: false
         }
     }
 
