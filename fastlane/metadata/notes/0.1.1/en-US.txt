@@ -1,0 +1,7 @@
+Three things a row got wrong.
+
+• Somebody's posts on their own page are laid out the way the timeline lays them out — the picture beside the words wherever there is room for it, and rows no taller than the ones you came from
+• A display name that looks like a web address is a name, not a link. Nobody's name is something this app hands to your browser
+• A picture no longer holds room it does not use, so an opened post shows the post, what can be done to it, and the conversation underneath
+
+Nothing is collected. There is no Fediqo server for anything to be collected on.
