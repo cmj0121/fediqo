@@ -351,6 +351,13 @@ public final class AppState {
 
     /// Who the reader is talking to (#109). Built once and kept, the way the feeds are: the page
     /// is rebuilt on every visit and what it holds should not be re-asked with it.
+    /// What each server is hiding for the reader (#114).
+    @ObservationIgnored lazy var hiding = HidingModel { [weak self] in
+        await self?.everyAccount() ?? []
+    } client: { [weak self] in
+        self?.registry.client(for: .mastodon)
+    }
+
     @ObservationIgnored lazy var talks = TalksModel { [weak self] in
         await self?.everyAccount() ?? []
     } client: { [weak self] _ in

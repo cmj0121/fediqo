@@ -646,6 +646,23 @@ struct FixtureSource: SourceClient {
     }
     func setMute(_ kind: Mute.Kind, _ value: String, as account: ActingAccount, muted: Bool) async throws {}
 
+    /// What the fixture's server says it is hiding, so the section can be photographed with
+    /// something in it — one of each kind, because the row differs by kind (#114).
+    func hidden(_ which: Hiding, as account: ActingAccount) async throws -> [Hidden.Subject] {
+        let people = Fixture.timeline(of: account.host).map {
+            Profile(id: $0.authorHandle, authorId: $0.authorId, name: $0.authorName,
+                    handle: $0.authorHandle, avatarURL: $0.authorAvatarURL, emojis: $0.emojis)
+        }
+        switch which {
+        case .muted: return Array(people.prefix(1)).map(Hidden.Subject.person)
+        case .blocked: return Array(people.dropFirst(1).prefix(1)).map(Hidden.Subject.person)
+        case .blockedServers: return [.server("shouting.example")]
+        }
+    }
+
+    func stopHiding(_ which: Hiding, _ subject: Hidden.Subject,
+                    as account: ActingAccount) async throws {}
+
     func report(_ post: Post, id: String, as account: ActingAccount, comment: String) async throws {}
 }
 

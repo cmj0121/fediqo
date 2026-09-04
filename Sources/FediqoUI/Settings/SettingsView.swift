@@ -49,6 +49,11 @@ struct SettingsView: View {
         case .sources:
             section(t("settings.sources")) { sources }
             section(t("settings.muted")) { muted }
+            section(t("settings.hiding")) { hiding }
+                // Keyed on the accounts, not on the screen appearing: who is signed in arrives
+                // over the keychain after the shell is drawn, so asking once on appear asks
+                // before there is anybody to ask as (#109 found this the same way).
+                .task(id: app.yourAccounts) { await app.hiding.readIfNeeded() }
             section(t("settings.privacy")) {
                 Text(t("settings.privacy.body"))
                     .fediqoFont(TypeScale.minor)
@@ -193,6 +198,67 @@ struct SettingsView: View {
             .pickerStyle(.menu)
             .labelsHidden()
             .fixedSize()
+        }
+    }
+
+    /// What each of the reader's servers says it is hiding for them, and the way to stop (#114).
+    ///
+    /// **The server's answer, not this device's record.** The section above is what this device
+    /// asked for; this one is what is actually standing — a mute made on a phone is a mute this
+    /// app has never heard of, and a reader could not undo what it could not see.
+    ///
+    /// One list per account, because a reader signed in to three servers has three: muting
+    /// somebody on one does not mute them on another, and a merged list would offer to undo
+    /// something on a server that was never doing it.
+    @ViewBuilder
+    private var hiding: some View {
+        let model = app.hiding
+        if model.hosts.isEmpty {
+            Text(t(model.loading ? "settings.hiding.asking" : "settings.hiding.none"))
+                .fediqoFont(TypeScale.minor)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            ForEach(model.hosts, id: \.self) { host in
+                ForEach(Hiding.allCases) { which in
+                    if let list = model.found[host]?[which], !list.isEmpty {
+                        Text(t("settings.hiding.\(which.rawValue)", host))
+                            .fediqoFont(TypeScale.caption)
+                            .foregroundStyle(.tertiary)
+                        ForEach(list) { subject in
+                            hidden(subject, which: which, on: host)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func hidden(_ subject: Hidden.Subject, which: Hiding, on host: String) -> some View {
+        HStack(spacing: Space.step) {
+            Image(systemName: which.isAboutPeople ? "person.slash" : "network.slash")
+                .fediqoSymbol(Glyph.inline)
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: Space.hair) {
+                // A name can be written partly in pictures, and `:spark:` is what the server
+                // sends. The plain init, because a name is not prose (#119).
+                EmojiText(subject.name, emojis: subject.emojis, size: TypeScale.small)
+                    .lineLimit(1)
+                if let detail = subject.detail {
+                    Text(detail)
+                        .fediqoFont(TypeScale.caption)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            Spacer(minLength: Space.step)
+            Button(t("settings.hiding.stop")) {
+                Task { await app.hiding.stop(which, subject, on: host) }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .fediqoFont(TypeScale.minor)
         }
     }
 
