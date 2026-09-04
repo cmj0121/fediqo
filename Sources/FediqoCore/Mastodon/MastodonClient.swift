@@ -223,15 +223,28 @@ public struct MastodonClient: SourceClient {
     /// discuss the post, not a server saying it is gone, and reading one as `false` would
     /// turn every private post into a deleted one.
     public func stillHas(_ post: Post, host rawHost: String, token: String?) async throws -> Bool {
-        let host = Server.normalise(rawHost)
-        let id = try Self.canonicalStatusId(of: post, on: host)
         do {
-            _ = try await get(host: host, path: "/api/v1/statuses/\(id)", query: [], token: token)
+            _ = try await status(of: post, host: rawHost, token: token)
             return true
         } catch let failure as SourceFailure {
             guard case .http(let status, _) = failure, status == 404 || status == 410 else { throw failure }
             return false
         }
+    }
+
+    /// `GET /api/v1/statuses/:id` — what the server says about this post **now** (#125).
+    ///
+    /// The same request `stillHas` makes, keeping the answer instead of throwing it away. That
+    /// is the whole of what was missing: the counts, the words as they stand after an edit, and
+    /// what is attached were all read and discarded a line later.
+    ///
+    /// A post that has gone throws `.http(404, _)` or `.http(410, _)`, which is a different
+    /// answer from a request that failed and is drawn differently.
+    public func status(of post: Post, host rawHost: String, token: String?) async throws -> Post {
+        let host = Server.normalise(rawHost)
+        let id = try Self.canonicalStatusId(of: post, on: host)
+        let data = try await get(host: host, path: "/api/v1/statuses/\(id)", query: [], token: token)
+        return try Self.decoder.decode(MastodonDTO.Status.self, from: data).asPost(from: host)
     }
 
     // MARK: - Transport

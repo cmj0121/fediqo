@@ -8,7 +8,27 @@ import FediqoCore
 /// whose does not. S6 asks for a row that is bounded rather than one that is uniform, and the
 /// bound is `quotedLines` below.
 struct NoticeRow: View {
-    let notice: Notice
+    let group: NoticeGroup
+
+    /// The newest of them, which is what everything but the sentence is drawn from: the avatar,
+    /// the quoted line and the time all belong to the most recent thing that happened.
+    private var notice: Notice { group.newest }
+
+    /// The app's language, carried down by `fediqoChrome`. Read here because the two times on
+    /// this row are built as strings rather than drawn by `Text(date, format:)`.
+    @Environment(\.locale) private var locale
+
+    /// Who did it, in the fewest words that are still true: one name where one person did it,
+    /// and a name and a number where several did.
+    ///
+    /// The newest first, because that is the one the reader has not seen and the one the time
+    /// beside it belongs to.
+    private var who: String {
+        let names = group.actors
+        guard let first = names.first else { return "" }
+        guard names.count > 1 else { return first }
+        return t("notices.andOthers", first, "\(names.count - 1)")
+    }
 
     /// One line of what was said, and no more. S6 says a row is bounded, and this is where the
     /// bound is here: a mention is read in this list to decide whether to open it, not instead
@@ -19,7 +39,9 @@ struct NoticeRow: View {
         HStack(alignment: .top, spacing: Space.step) {
             Image(systemName: notice.kind.symbolName)
                 .fediqoSymbol(Glyph.lead)
-                .foregroundStyle(notice.isUnseen ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
+                // Any of them unseen makes the row unseen: a reader who has read five of six
+                // has not read the sixth.
+                .foregroundStyle(group.isUnseen ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
                 .frame(width: Size.iconColumn)
                 .accessibilityHidden(true)
 
@@ -47,7 +69,9 @@ struct NoticeRow: View {
     /// differently rather than run together into one grey sentence.
     private var said: some View {
         HStack(spacing: Space.tight) {
-            Text(notice.actorName.isEmpty ? notice.actorHandle : notice.actorName)
+            // A name and *and five others* reads as a sentence; six avatars in a line is a
+            // shape a reader has to work out (#124).
+            Text(who)
                 .fediqoFont(TypeScale.body, weight: .medium)
                 .lineLimit(1)
             Text(t("notices.kind.\(notice.kind.rawValue)"))
@@ -70,7 +94,7 @@ struct NoticeRow: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             if notice.lateness >= NoticeRow.worthSaying {
-                Text(t("notices.late", NoticeRow.spelled(notice.lateness)))
+                Text(t("notices.late", NoticeRow.spelled(notice.lateness, in: locale)))
                     .fediqoFont(TypeScale.caption)
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
@@ -85,11 +109,16 @@ struct NoticeRow: View {
     /// A duration in the coarsest unit that is still true. Minutes, or hours where minutes
     /// would be three digits: "arrived 94 minutes late" is a number a reader has to do
     /// arithmetic on to understand.
-    static func spelled(_ seconds: TimeInterval) -> String {
-        let style = Duration.UnitsFormatStyle(
+    /// **The language is handed in.** A style built without one follows the *system's*
+    /// language, not the one the reader chose in this app — which is how `4分 late` came to be
+    /// drawn on a screen every other word of which was English. `Text(date, format:)` reads the
+    /// environment and gets this right on its own; a string built out here does not.
+    static func spelled(_ seconds: TimeInterval, in locale: Locale) -> String {
+        var style = Duration.UnitsFormatStyle(
             allowedUnits: seconds >= 3600 ? [.hours] : [.minutes],
             width: .narrow
         )
+        style.locale = locale
         return Duration.seconds(seconds).formatted(style)
     }
 }

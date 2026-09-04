@@ -7005,6 +7005,227 @@
           }
         }
       }
+    },
+    "notices.andOthers": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ and %2$@ others"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ 和另外 %2$@ 人"
+          }
+        }
+      }
+    },
+    "post.reload": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "What it says now"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "它現在說什麼"
+          }
+        }
+      }
+    },
+    "post.gone": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This post has gone"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這則貼文已經不在了"
+          }
+        }
+      }
+    },
+    "post.about": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "About this post"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "關於這則貼文"
+          }
+        }
+      }
+    },
+    "post.about.tab.favourited": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Favourited"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "按讚"
+          }
+        }
+      }
+    },
+    "post.about.tab.boosted": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Boosted"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "轉推"
+          }
+        }
+      }
+    },
+    "post.about.favourited": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Who favourited it, as the server that keeps the list gave them."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "誰按了讚，由保存這份清單的伺服器給出。"
+          }
+        }
+      }
+    },
+    "post.about.boosted": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Who boosted it, as the server that keeps the list gave them."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "誰轉推了，由保存這份清單的伺服器給出。"
+          }
+        }
+      }
+    },
+    "post.about.nobody": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nobody yet."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "還沒有人。"
+          }
+        }
+      }
+    },
+    "post.about.withheld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The count says there are some, and the server handed over none — it has chosen not to publish this list."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "計數說有人，但伺服器一個也沒給——它選擇不公開這份清單。"
+          }
+        }
+      }
+    },
+    "post.about.unknown": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The server sent no count, so why this list is empty is not something this device knows."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "伺服器沒有給計數，所以這份清單為什麼是空的，這台裝置並不知道。"
+          }
+        }
+      }
+    },
+    "post.aboutIt": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "About this post"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "關於這則貼文"
+          }
+        }
+      }
+    },
+    "post.about.refused": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The server did not answer, so nothing is known about this list either way."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "伺服器沒有回答，所以這份清單是怎麼回事，兩邊都不知道。"
+          }
+        }
+      }
     }
   }
 }

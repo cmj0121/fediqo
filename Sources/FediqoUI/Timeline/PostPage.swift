@@ -19,6 +19,10 @@ final class ThreadModel {
     /// Why the server could not be asked, where that happened. The thread already on screen
     /// is not taken away for it: what the store held is still true.
     private(set) var failure: SourceFailure?
+    /// Whether the post this page is about has gone. **Not a failure** — a post the author
+    /// deleted while the reader was looking at it is a real answer, and it must not read as a
+    /// page that would not load (#125).
+    private(set) var isGone = false
 
     /// The post this conversation is around, as it was when the reader opened it.
     ///
@@ -97,6 +101,36 @@ final class ThreadModel {
         if asked.failure == nil { conversation = conversation.merged(with: asked.conversation) }
         loading = false
     }
+
+    /// What all of this says now, asked because the reader asked (#125).
+    ///
+    /// **Both halves, because both are on the screen.** The post's own status carries the counts
+    /// and the words as they stand after an edit; the conversation carries every reply, which is
+    /// what the rest of the page is. `context` is one call for all of them rather than one call
+    /// per post.
+    ///
+    /// Nothing here is on a clock. This is a reader asking what a post says at this moment, and
+    /// a page that polled would be telling somebody else's server how long somebody sat here.
+    func reload() async {
+        guard !loading else { return }
+        loading = true
+        defer { loading = false }
+
+        let again = await loader.reread(conversation.post)
+        if again.gone {
+            isGone = true
+            failure = nil
+            return
+        }
+        isGone = false
+        // The conversation second and regardless: a post that could not be re-read may still
+        // have replies that can be, and half the page arriving beats none of it.
+        let asked = await loader.conversation(around: again.post ?? conversation.post)
+        failure = again.failure ?? asked.failure
+        var next = asked.failure == nil ? conversation.merged(with: asked.conversation) : conversation
+        if let fresh = again.post { next = next.replacing(fresh) }
+        conversation = next
+    }
 }
 
 /// A post, opened: the whole of it, and the conversation it sits in.
@@ -131,6 +165,16 @@ struct PostPage: View {
         .task(id: post.mergeKey) { await app.thread?.read() }
     }
 
+    /// A run told to open the page about this post does it once it has one. The same shape
+    /// every other launch variable has, and the same reason (#30).
+    private var openingAbout: some View {
+        Color.clear.frame(width: 0, height: 0)
+            .task {
+                guard app.launchedOnAbout, app.about == nil else { return }
+                app.openAbout(model?.conversation.post ?? post)
+            }
+    }
+
     private var header: some View {
         HStack(spacing: Space.mid) {
             Button(action: done) {
@@ -144,16 +188,34 @@ struct PostPage: View {
             Text(t("post.title")).fediqoFont(TypeScale.lead, weight: .semibold)
             if model?.loading == true { ProgressView().controlSize(.small) }
             Spacer(minLength: Space.snug)
-            if let failure = model?.failure {
+            // A post the author deleted while the reader was looking at it. Said here rather
+            // than by closing the page out from under them: they are still looking at what it
+            // said, and being told it has gone is the news (#125).
+            if model?.isGone == true {
+                Label(t("post.gone"), systemImage: "trash")
+                    .fediqoFont(TypeScale.caption)
+                    .foregroundStyle(.orange)
+                    .lineLimit(1)
+            } else if let failure = model?.failure {
                 Label(message(for: failure), systemImage: "exclamationmark.triangle")
                     .fediqoFont(TypeScale.caption)
                     .foregroundStyle(.orange)
                     .lineLimit(1)
             }
+            // What it says now, asked because the reader asked. `r` is the same press, so the
+            // key that refreshes a timeline refreshes the thing in front of it here (#125).
+            IconButton(symbol: "arrow.clockwise", labelKey: "post.reload") {
+                Task { await model?.reload() }
+            }
+            // The numbers on the row below are numbers; this is where they have names (#126).
+            IconButton(symbol: "info.circle", labelKey: "post.aboutIt") {
+                app.openAbout(model?.conversation.post ?? post)
+            }
         }
         .padding(.horizontal, Space.pad)
         .padding(.vertical, Space.mid)
         .background(PageHeaderBackground())
+        .background { openingAbout }
     }
 
     /// The chain above, the post, and everything under it. The post itself is drawn as the

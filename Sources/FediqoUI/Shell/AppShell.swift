@@ -110,6 +110,7 @@ struct AppShell: View {
             view(for: app.railItem)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Palette.surface(colorScheme))
+                .pagesOverThePage()
         }
         // The floor, and only the floor. Anything larger is the reader's business, and
         // anything that made this bigger than it needs to be was a bug.
@@ -128,6 +129,9 @@ struct AppShell: View {
             ForEach(RailItem.allCases) { item in
                 view(for: item)
                     .background(Palette.surface(colorScheme))
+                    // Inside the tab rather than over the bar, for the reason it is inside the
+                    // rail on the Mac: an opened post does not take the app's furniture away.
+                    .pagesOverThePage()
                     .tabItem { Label(t(item.titleKey), systemImage: item.symbolName) }
                     .tag(item)
             }
@@ -187,4 +191,62 @@ struct AppShell: View {
         case .settings: SettingsView()
         }
     }
+}
+
+
+/// An opened post, a person, and one of their lists — over whichever page the reader was on.
+///
+/// **The shell's and not one screen's.** These were three overlays on `FeedScreen`, which was
+/// invisible the moment the inbox stopped being a sheet over the timeline and became a page
+/// beside it — so a reader told that somebody had replied to them could press the line and
+/// nothing at all happened (#123). An opened post over the inbox is the same opened post, and a
+/// second stack of these on the second page would be two stacks to keep in step.
+///
+/// **Over the page and not over the shell**, which is the whole of where this goes. Put outside
+/// the rail it covered the rail, and a reader with a post open could not reach another page
+/// without closing it first — the furniture of the app is not a thing an opened post is allowed
+/// to take away.
+///
+/// Over the list rather than instead of it: underneath, whichever page it was, the scroll
+/// position and the ring stay exactly where the reader left them, so closing it gives back the
+/// page they came from and never moves them to another one.
+private struct PagesOverThePage: ViewModifier {
+    @Environment(AppState.self) private var app
+
+    func body(content: Content) -> some View {
+        content
+            .overlay {
+                if let opened = app.expanded {
+                    PostPage(post: opened) { app.perform(.dismiss) }
+                        .transition(.opacity)
+                }
+            }
+            // A person over the post as well: the author is pressable on an opened post too, and
+            // what was underneath keeps its place either way.
+            .overlay {
+                if let person = app.person {
+                    PersonPage(model: person) { app.closePerson() }
+                        .transition(.opacity)
+                }
+            }
+            // And one of their two lists over that, because a list of somebody's followers is
+            // somewhere you go from their page and come back to it from (#90).
+            .overlay {
+                if let people = app.people {
+                    PeopleList(model: people) { app.closePeople() }
+                        .transition(.opacity)
+                }
+            }
+            // What a post can tell you about itself, over the post it is about (#126).
+            .overlay {
+                if let about = app.about {
+                    PostAboutPage(model: about) { app.closeAbout() }
+                        .transition(.opacity)
+                }
+            }
+    }
+}
+
+extension View {
+    func pagesOverThePage() -> some View { modifier(PagesOverThePage()) }
 }

@@ -20,7 +20,7 @@ import FediqoCore
 @MainActor
 @Observable
 final class NoticePlace {
-    /// Which notice the ring is on, by `Notice.id`, or nothing.
+    /// Which row the ring is on, by `NoticeGroup.id`, or nothing.
     private(set) var selection: String?
     /// Bumped when something asks to be scrolled back to the top, the way the timeline's is.
     private(set) var topRequests = 0
@@ -28,20 +28,20 @@ final class NoticePlace {
     /// The list the ring is moving through. Handed in on every move rather than held, because
     /// the inbox's list is the model's and a second copy of it here is a second answer to
     /// "what is on the screen".
-    private var rows: () -> [Notice]
+    private var rows: () -> [NoticeGroup]
 
-    init(rows: @escaping () -> [Notice]) {
+    init(rows: @escaping () -> [NoticeGroup]) {
         self.rows = rows
     }
 
     /// The notice the ring is on, if it is still in the list. A notice can leave — rotation
     /// takes old ones — and a ring pointing at one that has gone is a ring pointing at nothing.
-    var selected: Notice? {
+    var selected: NoticeGroup? {
         selection.flatMap { key in rows().first { $0.id == key } }
     }
 
-    func select(_ notice: Notice) {
-        selection = notice.id
+    func select(_ row: NoticeGroup) {
+        selection = row.id
     }
 
     /// Moves the ring, and says whether it moved. From nothing it lands on the first, whichever

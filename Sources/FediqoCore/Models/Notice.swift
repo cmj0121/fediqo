@@ -28,7 +28,19 @@ public struct Notice: Sendable, Hashable, Identifiable {
     public let actorAvatarURL: URL?
 
     /// The post it is about, where there is one. A follow is about nobody's post.
+    ///
+    /// Nil for a second reason as well, and the two must not be confused: **the event is about a
+    /// post this device does not hold.** The store keeps the key on the notice's own row and
+    /// joins to `posts`; a post that has rotated away, or one that never arrived, leaves this
+    /// nil while the event still knows perfectly well which post it was about.
     public let post: Post?
+    /// Which post it is about, whether or not this device holds it (#124).
+    ///
+    /// The key and not the post, because the key is what the notice itself carries. Two
+    /// favourites are on the same post when they name the same key — asking `post?.mergeKey`
+    /// would have said *no* for every post the store had let go of, and drawn six rows where
+    /// there was one thing that happened.
+    public let postKey: String?
 
     /// When the server says it happened. What a list is ordered by.
     public let noticedAt: Date
@@ -63,6 +75,7 @@ public struct Notice: Sendable, Hashable, Identifiable {
         actorHandle: String = "",
         actorAvatarURL: URL? = nil,
         post: Post? = nil,
+        postKey: String? = nil,
         noticedAt: Date,
         arrivedAt: Date,
         seenAt: Date? = nil
@@ -76,6 +89,9 @@ public struct Notice: Sendable, Hashable, Identifiable {
         self.actorHandle = actorHandle
         self.actorAvatarURL = actorAvatarURL
         self.post = post
+        // What was handed in, or the post's own where it was handed a post. One of the two is
+        // always known and they never disagree.
+        self.postKey = postKey ?? post?.mergeKey
         self.noticedAt = noticedAt
         self.arrivedAt = arrivedAt
         self.seenAt = seenAt

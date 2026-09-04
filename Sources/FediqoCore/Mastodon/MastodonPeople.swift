@@ -55,6 +55,22 @@ extension MastodonClient {
                         query: [URLQueryItem(name: "exclude_replies", value: "true")])
     }
 
+    /// Who favourited or boosted a post — `/api/v1/statuses/:id/favourited_by` and
+    /// `.../reblogged_by` (#126).
+    ///
+    /// Asked of the server whose word on the post is final, which is the one that keeps the
+    /// list; another server's copy of the post knows only what reached it.
+    public func people(_ which: People.AboutAPost, of post: Post, host rawHost: String,
+                       limit: Int, token: String?) async throws -> [Profile] {
+        let host = Server.normalise(rawHost)
+        let id = try Self.canonicalStatusId(of: post, on: host)
+        let data = try await get(host: host, path: "/api/v1/statuses/\(id)/\(which.path)",
+                                 query: [URLQueryItem(name: "limit", value: String(limit))],
+                                 token: token)
+        return try Self.decoder.decode([MastodonDTO.Account].self, from: data)
+            .map { $0.asProfile(on: host) }
+    }
+
     /// What somebody asked you to read first — `?pinned=true` (#112).
     ///
     /// A separate ask, because it is a separate answer: `exclude_replies` and a cursor mean

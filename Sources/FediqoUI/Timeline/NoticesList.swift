@@ -15,12 +15,14 @@ import FediqoCore
 struct NoticesList: View {
     @Environment(AppState.self) private var app
     @Environment(\.colorScheme) private var colorScheme
+    /// The app's language, carried down by `fediqoChrome`.
+    @Environment(\.locale) private var locale
 
     private var model: NoticeModel? { app.notices }
 
     var body: some View {
         VStack(spacing: 0) {
-            body(for: model?.notices ?? [])
+            body(for: Notice.grouped(model?.notices ?? []))
             Hairline()
             foot
         }
@@ -63,14 +65,30 @@ struct NoticesList: View {
         .background(Palette.raised(colorScheme))
     }
 
+    /// What a notice opens.
+    ///
+    /// The post it is about, where it has one. **Where it has none it opens the person**, which
+    /// is not a fallback: somebody following you is an event about them, and their page is the
+    /// whole of what there is to look at (#123).
+    private func open(_ notice: Notice) {
+        if let post = notice.post {
+            app.expand(post)
+        } else {
+            app.openPerson(notice.actorHandle, on: notice.serverURL)
+        }
+    }
+
     private var heard: String {
         guard let when = model?.lastHeard else { return t("notices.never") }
-        return t("notices.asked", when.formatted(.relative(presentation: .numeric)))
+        // The reader's language and not the system's, for the reason `NoticeRow.spelled` says:
+        // a string built out here does not read the environment that `Text(date, format:)` does.
+        return t("notices.asked",
+                 when.formatted(.relative(presentation: .numeric).locale(locale)))
     }
 
     @ViewBuilder
-    private func body(for notices: [Notice]) -> some View {
-        if notices.isEmpty {
+    private func body(for rows: [NoticeGroup]) -> some View {
+        if rows.isEmpty {
             VStack(spacing: Space.mid) {
                 Image(systemName: "bell")
                     .fediqoSymbol(Glyph.big, weight: .light)
@@ -85,15 +103,21 @@ struct NoticesList: View {
             .padding(Space.room)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            ScrollViewReader { rows in
+            ScrollViewReader { scroller in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(notices) { notice in
-                            NoticeRow(notice: notice)
-                                .fediqoFocusRing(notice.id == app.noticePlace.selection)
+                        ForEach(rows) { row in
+                            NoticeRow(group: row)
+                                .fediqoFocusRing(row.id == app.noticePlace.selection)
                                 .contentShape(Rectangle())
-                                .onTapGesture { app.noticePlace.select(notice) }
-                                .id(notice.id)
+                                // One press says which one they mean and opens it, because a
+                                // line telling somebody they were replied to that goes nowhere
+                                // is the inbox being a dead end (#123).
+                                .onTapGesture {
+                                    app.noticePlace.select(row)
+                                    open(row.newest)
+                                }
+                                .id(row.id)
                         }
                     }
                     .padding(Space.gap)
@@ -102,10 +126,10 @@ struct NoticesList: View {
                 // has: the key moves the ring and the ring says where it went.
                 .onChange(of: app.noticePlace.selection) { _, key in
                     guard let key else { return }
-                    withAnimation(Motion.appearing) { rows.scrollTo(key, anchor: .center) }
+                    withAnimation(Motion.appearing) { scroller.scrollTo(key, anchor: .center) }
                 }
                 .onChange(of: app.noticePlace.topRequests) { _, _ in
-                    withAnimation(Motion.appearing) { rows.scrollTo(notices.first?.id, anchor: .top) }
+                    withAnimation(Motion.appearing) { scroller.scrollTo(rows.first?.id, anchor: .top) }
                 }
             }
         }

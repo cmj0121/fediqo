@@ -451,6 +451,63 @@ public struct TimelineLoader: Sendable {
         }
     }
 
+    /// What one post says now, asked of the server whose word on it is final (#125).
+    ///
+    /// **What comes back is written down**, so the list underneath the opened post says the same
+    /// thing. An updated post that only one page knew about would be two answers to one question.
+    ///
+    /// `gone` is not a failure. A post the author deleted while the reader was looking at it is a
+    /// real answer and a rare one, and it must not read as a page that failed to load.
+    public func reread(_ post: Post) async -> (post: Post?, gone: Bool, failure: SourceFailure?) {
+        guard let authority = await authorityHost(of: post),
+              let client = registry.client(for: post.socialProtocol)
+        else { return (nil, false, nil) }
+        let server = Server(host: authority, socialProtocol: post.socialProtocol, title: authority)
+        let token = await tokensByEndpoint(for: [server])[server.endpoint]
+        do {
+            let fresh = try await client.status(of: post, host: authority, token: token)
+            do {
+                // Into the reading it already belongs to. A re-read is the same post arriving
+                // again, not a new way for it to have arrived.
+                try await store?.save([fresh], from: server, into: .thread)
+            } catch {
+                LocalStore.log.error("keeping a re-read post failed: \(String(describing: error), privacy: .public)")
+            }
+            return (fresh, false, nil)
+        } catch let failure as SourceFailure {
+            if case .http(let status, _) = failure, status == 404 || status == 410 {
+                return (nil, true, nil)
+            }
+            return (nil, false, failure)
+        } catch {
+            return (nil, false, SourceFailure.of(error))
+        }
+    }
+
+    /// Who favourited or boosted a post, asked of the server whose word on it is final (#126).
+    ///
+    /// Nothing is written down. These are people rather than posts, and a list of who did
+    /// something is a question about this moment — the store keeps what a reader reads, not who
+    /// was standing near it.
+    public func people(_ which: People.AboutAPost, of post: Post,
+                       limit: Int = 80) async -> (people: [Profile], host: String,
+                                                  asked: Bool, failure: SourceFailure?) {
+        // **`asked` and not an empty list.** Nobody having been asked and a server handing over
+        // nobody are different facts, and a page that could not tell them apart said *the server
+        // chose not to publish this* about a post nothing had been asked about.
+        guard let authority = await authorityHost(of: post),
+              let client = registry.client(for: post.socialProtocol)
+        else { return ([], "", false, nil) }
+        let server = Server(host: authority, socialProtocol: post.socialProtocol, title: authority)
+        let token = await tokensByEndpoint(for: [server])[server.endpoint]
+        do {
+            return (try await client.people(which, of: post, host: authority,
+                                            limit: limit, token: token), authority, true, nil)
+        } catch {
+            return ([], authority, true, SourceFailure.of(error))
+        }
+    }
+
     /// The host whose word on this post is final: the store's `authority_url` where it has one,
     /// and the server that handed the post over where it does not — which is a preview, a test,
     /// or a protocol that names no authority at all.
