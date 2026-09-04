@@ -162,6 +162,18 @@ struct PostPage: View {
     /// One post in the conversation. It is the same row the timeline draws — a reader who
     /// pressed `Return` on a post should find the same thing here — and clicking one opens
     /// nothing, because they are already looking at the whole of it.
+    ///
+    /// **This page does not measure, and that is the answer rather than the oversight #118 found
+    /// elsewhere.** Two columns is an arrangement for a scannable list: the words are clamped to
+    /// a few lines, so a 200-point card beside them is the taller of two comparable things. Here
+    /// nothing is clamped — `condensed` is false, because a reader who opened a post came to read
+    /// all of it — and a reply sits further in for every generation above it. Beside a column of
+    /// words that may run for a screen, and inside an indent, the same card is a stamp in the
+    /// corner of a page. Under the words the picture keeps its own scale and the page keeps its
+    /// shape, which is the lesser wrong of the two.
+    ///
+    /// It is not the right one, and #120 is what is left: stacked, the card is still the width of
+    /// the column the timeline reserves for it, which is a share of a row this page is not.
     private func row(_ post: Post, selected: Bool, answering: Answering = .nothing) -> some View {
         PostRow(post: post, selected: selected,
                 turns: selected ? app.mediaTurns : 0,

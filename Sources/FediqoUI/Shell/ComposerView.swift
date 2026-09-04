@@ -417,6 +417,9 @@ struct ComposerView: View {
     @ViewBuilder
     private var answering: some View {
         if let parent = app.answering {
+            // No measuring here either (#118). This is not a list and it is not the post — it is
+            // a reminder of what is being answered, in a sheet narrower than the threshold at the
+            // text size this app ships at. Stacked is what fits, and it is what it would measure.
             PostRow(post: parent, condensed: true, acting: false)
                 .fediqoCard(raised: false)
                 .allowsHitTesting(false)
