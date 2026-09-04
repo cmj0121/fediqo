@@ -1491,6 +1491,31 @@ public final class AppState {
         }
     }
 
+    /// Opens somebody named by a notice rather than by a post (#123).
+    ///
+    /// A notice about somebody following you has no post to open, and their page is the whole of
+    /// what there is to look at. The host is the server whose inbox it arrived in, which is a
+    /// server the reader has an account on — so it is one they already read.
+    func openPerson(_ handle: String, on serverURL: String) {
+        guard let host = URL(string: serverURL)?.host() ?? serverURL.split(separator: "/").last.map(String.init),
+              let client = registry.client(for: .mastodon)
+        else { return }
+        // Only the handle is known here: a notice carries who did it, not their profile. The
+        // page asks the server for the rest, which is what it does for everybody.
+        let subject = PersonSubject(profile: Profile(id: handle, authorId: handle,
+                                                     name: "", handle: handle),
+                                    host: Server.normalise(host))
+        guard person?.subject != subject else { return }
+        people = nil
+        person = PersonModel(subject: subject, client: client) { [weak self] in
+            await self?.publishing()
+        } spelling: { [weak self] account in
+            self?.handle(of: account)
+        } changed: { [weak self] in
+            await self?.homeChanged()
+        }
+    }
+
     /// Closes it, leaving whatever was underneath exactly as it was. The list over it goes with
     /// it: a list of somebody's followers with nobody's page under it is a screen about nobody.
     func closePerson() {

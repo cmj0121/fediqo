@@ -128,30 +128,6 @@ struct FeedScreen: View {
                 else { return }
                 app.reply(to: post)
             }
-            // The opened post, over the list rather than instead of it: underneath, the
-            // scroll position and the ring stay exactly where the reader left them.
-            .overlay {
-                if let opened = app.expanded {
-                    PostPage(post: opened) { app.perform(.dismiss) }
-                        .transition(.opacity)
-                }
-            }
-            // A person over the post as well as over the list: the author is pressable on an
-            // opened post too, and what was underneath keeps its place either way.
-            .overlay {
-                if let person = app.person {
-                    PersonPage(model: person) { app.closePerson() }
-                        .transition(.opacity)
-                }
-            }
-            // And one of their two lists over that, because a list of somebody's followers is
-            // somewhere you go from their page and come back to it from (#90).
-            .overlay {
-                if let people = app.people {
-                    PeopleList(model: people) { app.closePeople() }
-                        .transition(.opacity)
-                }
-            }
             // Where the reader is taken, watched somewhere that is not this body. `onChange`
             // reads its value while the body is being built, so watching the ring here made
             // every press of `j` a rebuild of the whole screen (#71).

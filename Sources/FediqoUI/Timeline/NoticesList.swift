@@ -63,6 +63,19 @@ struct NoticesList: View {
         .background(Palette.raised(colorScheme))
     }
 
+    /// What a notice opens.
+    ///
+    /// The post it is about, where it has one. **Where it has none it opens the person**, which
+    /// is not a fallback: somebody following you is an event about them, and their page is the
+    /// whole of what there is to look at (#123).
+    private func open(_ notice: Notice) {
+        if let post = notice.post {
+            app.expand(post)
+        } else {
+            app.openPerson(notice.actorHandle, on: notice.serverURL)
+        }
+    }
+
     private var heard: String {
         guard let when = model?.lastHeard else { return t("notices.never") }
         return t("notices.asked", when.formatted(.relative(presentation: .numeric)))
@@ -92,7 +105,13 @@ struct NoticesList: View {
                             NoticeRow(notice: notice)
                                 .fediqoFocusRing(notice.id == app.noticePlace.selection)
                                 .contentShape(Rectangle())
-                                .onTapGesture { app.noticePlace.select(notice) }
+                                // One press says which one they mean and opens it, because a
+                                // line telling somebody they were replied to that goes nowhere
+                                // is the inbox being a dead end (#123).
+                                .onTapGesture {
+                                    app.noticePlace.select(notice)
+                                    open(notice)
+                                }
                                 .id(notice.id)
                         }
                     }
