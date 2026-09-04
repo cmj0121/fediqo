@@ -72,6 +72,9 @@ struct PostRow: View {
     /// ellipsis — which is the row saying there is more, and `Return` is how to get it. The
     /// opened post is where the whole of it lives, so nothing is clamped there.
     var condensed = true
+    /// The widest a picture under the words may be drawn. The column the timeline reserves,
+    /// unless the page that draws this row is one post rather than a list of them (#120).
+    var widest: CGFloat = Size.card
     /// What a click on the row means: this one. Put the ring here.
     ///
     /// Every page passes it, because a click means that on every page — and it is a
@@ -213,9 +216,10 @@ struct PostRow: View {
                 VStack(alignment: .leading, spacing: Space.step) {
                     words
                     if !post.attachments.isEmpty {
-                        sized { deck(in: $0) }
+                        sized { deck(in: $0, widest: widest) }
                     } else if let card = post.card {
-                        sized { LinkCard(card: card, covered: mediaIsCovered, width: $0) }
+                        sized { LinkCard(card: card, covered: mediaIsCovered,
+                                         width: $0, widest: widest) }
                     }
                 }
                 .padding(.top, Space.tight)
@@ -545,9 +549,9 @@ struct PostRow: View {
         }
     }
 
-    private func deck(in width: CGFloat? = nil) -> some View {
+    private func deck(in width: CGFloat? = nil, widest: CGFloat = Size.card) -> some View {
         AttachmentDeck(attachments: post.attachments, covered: mediaIsCovered,
-                       turns: turns, plays: plays, width: width) {
+                       turns: turns, plays: plays, width: width, widest: widest) {
             withAnimation(Motion.appearing) { reveal = true }
         }
     }
@@ -561,9 +565,18 @@ struct PostRow: View {
     /// is measured. `Color.clear` at the card's own ratio is what makes the box hug — it takes
     /// the narrower of the row and `side`, and its height follows from that rather than being
     /// stated.
+    /// The room a picture under the words is given: the card's own shape, no wider than the
+    /// card may be drawn and no taller than the card is at that width.
+    ///
+    /// **Both bounds, and that is not belt and braces.** With only the width, `aspectRatio` sat
+    /// outside the cap and fitted its box to the width the *row* offered before the frame clipped
+    /// that to the card's — so the card was drawn at 200 by 136 inside a box as tall as
+    /// `row width × ratio`, and the hole under it grew with the row. At 1024 points the hole was
+    /// deep enough to push the buttons and the whole conversation off the bottom of the window,
+    /// and the timeline had the same hole at 700 with the largest text (#120).
     private func sized(@ViewBuilder card: @escaping (CGFloat) -> some View) -> some View {
         Color.clear
-            .frame(maxWidth: AttachmentDeck.side)
+            .frame(maxWidth: widest, maxHeight: widest * AttachmentDeck.ratio)
             .aspectRatio(1 / AttachmentDeck.ratio, contentMode: .fit)
             .overlay { GeometryReader { room in card(room.size.width) } }
     }

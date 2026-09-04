@@ -182,6 +182,10 @@ struct PostPage: View {
                 revealed: app.preferences.showSensitive,
                 answering: answering,
                 condensed: false,
+                // The post this page is about gets a picture the page can justify; the
+                // conversation around it keeps the timeline's card, because the chain above and
+                // the replies below are a list again and a list is scanned (#120).
+                widest: selected ? Size.openedCard : Size.card,
                 // Clicking one opens nothing — the reader is already looking at the whole of
                 // it — but it does say which post they mean, and the ring has to agree.
                 focus: { app.focus(post) },

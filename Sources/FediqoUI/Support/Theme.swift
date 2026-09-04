@@ -133,6 +133,21 @@ enum Size {
     /// here without dragging the isolation back in.
     static let card: CGFloat = 200
 
+    /// How wide a picture may be drawn where the page is one post rather than one of forty.
+    ///
+    /// `card` is a *share of a row in a list* — the column the timeline reserves so that every
+    /// row's words start and end in the same place. The opened post is neither a share nor a
+    /// list, and drawing the reader's picture at the scanning size on a page whose whole job is
+    /// that one post was the second half of #120.
+    ///
+    /// Twice the column, and **bounded rather than free**, which is the whole of the choice. A
+    /// picture that simply takes the width of a wide window is 900 points across and 600 down,
+    /// and it pushes the buttons and the conversation off the bottom — which is the fault this
+    /// number exists to fix, arriving again in better clothes. At 400 the picture is four times
+    /// the area it was and an 800-point window still holds the post, its bar, and the first
+    /// replies under it.
+    static let openedCard: CGFloat = card * 2
+
     /// The width at which a row has room to put its attachments beside its words. Three
     /// shares: `card` for the deck, `Space.gap` between them, and `words` left over for what
     /// the post says.

@@ -31,8 +31,11 @@ struct LinkCard: View {
     /// How wide to draw, where the row has no reserved column to guarantee it fits. Nil is the
     /// column's own width — the same shape `AttachmentDeck.width` has, and for the same reason.
     var width: CGFloat?
+    /// The widest this card may be drawn — `AttachmentDeck.widest`'s twin, and raised by the
+    /// same page for the same reason: a link's picture is a picture (#120).
+    var widest: CGFloat = Size.card
 
-    private var side: CGFloat { min(width ?? AttachmentDeck.side, AttachmentDeck.side) }
+    private var side: CGFloat { min(width ?? widest, widest) }
     private var height: CGFloat { side * AttachmentDeck.ratio }
 
     var body: some View {

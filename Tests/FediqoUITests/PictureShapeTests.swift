@@ -46,6 +46,22 @@ struct PictureShapeTests {
         #expect(AttachmentDeck.side == Size.card)
     }
 
+    /// The page that is one post draws a bigger picture than the column a list reserves — and
+    /// still a bounded one, which is the whole of the choice.
+    ///
+    /// `Size.card` is a *share of a row in a list*, and drawing the reader's picture at the
+    /// scanning size on a page whose only job is that one post was half of #120. The other half
+    /// is what happens if the bound comes off: a picture that simply takes a wide window's width
+    /// is 600 points down, and it pushes the buttons and the conversation off the bottom — the
+    /// fault this number exists to fix, arriving again in better clothes.
+    @Test("The page that is one post draws a bigger picture, and still a bounded one")
+    func theOpenedPostIsNotAList() {
+        #expect(Size.openedCard > Size.card)
+        // Every picture in this repository is taken on an 800-point window, and the post's own
+        // words, its buttons and the first reply have to be on it as well.
+        #expect(Size.openedCard * AttachmentDeck.ratio < 800 / 2)
+    }
+
     // MARK: - what is lost, and when it is worth saying
 
     /// How much of a picture survives the cut, as the share of its longer dimension still on the

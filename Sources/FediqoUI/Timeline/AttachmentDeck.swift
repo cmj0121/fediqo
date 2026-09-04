@@ -46,6 +46,12 @@ struct AttachmentDeck: View {
     /// card. So the arrangement that has no column says how much it has, and the card is that
     /// wide or `side`, whichever is less.
     var width: CGFloat?
+    /// The widest this deck may be drawn, where that is not the column the timeline reserves.
+    ///
+    /// The stacked arrangement asks for the room it has and gets `min(room, widest)`. A page
+    /// that is one post raises this, because 200 points is the width of a share of a row in a
+    /// list and that page is not one (#120). Everything that draws rows leaves it alone.
+    var widest: CGFloat = Size.card
     var uncover: () -> Void = {}
 
     @Environment(\.colorScheme) private var colorScheme
@@ -85,7 +91,7 @@ struct AttachmentDeck: View {
 
     /// What this deck is actually drawn at: the reserved column's width, or the room it was
     /// given where that is narrower. One place, so the six frames below cannot disagree.
-    private var side: CGFloat { min(width ?? Self.side, Self.side) }
+    private var side: CGFloat { min(width ?? widest, widest) }
     private var height: CGFloat { side * Self.ratio }
     /// What the top card is drawn at, which is the whole of it where there is nothing under it.
     ///
