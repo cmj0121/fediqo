@@ -509,6 +509,32 @@ struct FixtureSource: SourceClient {
     /// newest-first list it would be at the bottom where nobody scrolls.
     /// Two posts the fixture's reader has written and not sent, so the band can be
     /// photographed — one with something attached, one without (#110).
+    /// What reached the fixture's reader, so the inbox can be photographed with something in it
+    /// — including **three favourites on one post**, which is the case #124 is about: without it
+    /// the grouped row is a thing no screenshot has ever shown.
+    func notices(host: String, owner: String, after: String?, limit: Int,
+                 token: String) async throws -> [Notice] {
+        let now = Date()
+        let posts = Fixture.timeline(of: host)
+        guard let favoured = posts.first, let mentioned = posts.dropFirst().first else { return [] }
+        func made(_ id: String, _ kind: NoticeKind, by who: Post, about post: Post?,
+                  minutesAgo: Int) -> Notice {
+            Notice(remoteId: id, serverURL: "https://\(host)", kind: kind, ownerId: owner,
+                   actorId: who.authorId, actorName: who.authorName,
+                   actorHandle: who.authorHandle, actorAvatarURL: who.authorAvatarURL,
+                   post: post,
+                   noticedAt: now.addingTimeInterval(-Double(minutesAgo) * 60),
+                   arrivedAt: now)
+        }
+        return [
+            made("1", .mention, by: mentioned, about: mentioned, minutesAgo: 4),
+            made("2", .favourite, by: posts[0], about: favoured, minutesAgo: 9),
+            made("3", .favourite, by: posts[min(1, posts.count - 1)], about: favoured, minutesAgo: 21),
+            made("4", .favourite, by: posts[min(2, posts.count - 1)], about: favoured, minutesAgo: 40),
+            made("5", .follow, by: posts[min(3, posts.count - 1)], about: nil, minutesAgo: 96),
+        ]
+    }
+
     /// Two conversations, so the page can be photographed: one unread with two people in it,
     /// one read whose last post has gone (#109).
     func conversations(as account: ActingAccount) async throws -> [Talk] {

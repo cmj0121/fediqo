@@ -7005,6 +7005,23 @@
           }
         }
       }
+    },
+    "notices.andOthers": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ and %2$@ others"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ 和另外 %2$@ 人"
+          }
+        }
+      }
     }
   }
 }

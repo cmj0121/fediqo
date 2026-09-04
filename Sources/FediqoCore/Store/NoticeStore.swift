@@ -172,6 +172,10 @@ extension LocalStore {
                     actorHandle: row["handle"] ?? "",
                     actorAvatarURL: (row["avatar_url"] as String?).flatMap(URL.init(string:)),
                     post: key.flatMap { byKey[$0] },
+                    // The key the notice's own row carries, kept whether or not the post it
+                    // names is still here — which is what lets two events about one post be one
+                    // row after the post has rotated away (#124).
+                    postKey: key,
                     noticedAt: Self.date(row["noticed_at"]),
                     arrivedAt: Self.date(row["arrived_at"]),
                     seenAt: (row["seen_at"] as Int64?).map(Self.date)

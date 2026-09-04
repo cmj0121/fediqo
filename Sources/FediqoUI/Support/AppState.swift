@@ -357,7 +357,7 @@ public final class AppState {
     }
 
     @ObservationIgnored lazy var noticePlace = NoticePlace(rows: { [weak self] in
-        self?.notices?.notices ?? []
+        Notice.grouped(self?.notices?.notices ?? [])
     })
 
 
