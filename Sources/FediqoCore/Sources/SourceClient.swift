@@ -323,6 +323,32 @@ public protocol SourceClient: Sendable {
     /// nowhere is not a report.
     func report(_ post: Post, id: String, as account: ActingAccount, comment: String) async throws
 
+    /// What the server says about one post now (#125).
+    ///
+    /// **A requirement and not only a default**, which is the rule `searchPeople` below already
+    /// states and which these four had to learn the hard way: a default in an extension is
+    /// dispatched where it is written rather than where it is called, so a client's own answer
+    /// is walked straight past. Every one of them was silently doing nothing — a re-read that
+    /// always said "unsupported", and lists that were always empty.
+    func status(of post: Post, host: String, token: String?) async throws -> Post
+
+    /// Who favourited or boosted one post (#126). Asked of the server whose word on the post is
+    /// final, and only when a reader asks: the numbers on a row are free, and the names behind
+    /// them are a request.
+    func people(_ which: People.AboutAPost, of post: Post, host: String,
+                limit: Int, token: String?) async throws -> [Profile]
+
+    /// What this account's server says it is hiding for them (#114).
+    ///
+    /// The server's own answer, not this device's record of what it asked for: a mute made on a
+    /// phone is a mute this app has never heard of, and a list showing only what this device did
+    /// would leave the reader unable to undo most of what is standing.
+    func hidden(_ which: Hiding, as account: ActingAccount) async throws -> [Hidden.Subject]
+
+    /// Stop hiding one of them, on the server that is doing it.
+    func stopHiding(_ which: Hiding, _ subject: Hidden.Subject,
+                    as account: ActingAccount) async throws
+
     /// Somebody as one server holds them, or nothing where it has never heard of them.
     ///
     /// Asked of a server that already handed one of their posts over, never of their own: that
@@ -726,6 +752,15 @@ public extension SourceClient {
     /// count on the post disagreeing with it (#126).
     func people(_ which: People.AboutAPost, of post: Post, host: String,
                 limit: Int, token: String?) async throws -> [Profile] { [] }
+
+    /// Default: a protocol that hides nothing on the reader's behalf has nothing to list, and
+    /// nothing to stop doing (#114).
+    func hidden(_ which: Hiding, as account: ActingAccount) async throws -> [Hidden.Subject] { [] }
+
+    func stopHiding(_ which: Hiding, _ subject: Hidden.Subject,
+                    as account: ActingAccount) async throws {
+        throw SourceFailure.unsupported(.mastodon)
+    }
 
     /// Default: this build cannot ask that over this protocol, which is different from an
     /// account that has scheduled nothing — so it throws and the page leaves the part absent
