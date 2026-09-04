@@ -1282,6 +1282,8 @@ public final class AppState {
         guard let client = registry.client(for: post.socialProtocol) else { return }
         person = PersonModel(subject: subject, client: client) { [weak self] in
             await self?.acting(on: post)
+        } spelling: { [weak self] account in
+            self?.handle(of: account)
         } changed: { [weak self] in
             await self?.homeChanged()
         }
@@ -1307,6 +1309,8 @@ public final class AppState {
         people = nil
         self.person = PersonModel(subject: subject, client: client) { [weak self] in
             await self?.publishing()
+        } spelling: { [weak self] account in
+            self?.handle(of: account)
         } changed: { [weak self] in
             await self?.homeChanged()
         }

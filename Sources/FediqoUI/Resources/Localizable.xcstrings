@@ -1770,6 +1770,23 @@
         }
       }
     },
+    "person.as": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "as %@"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "以 %@"
+          }
+        }
+      }
+    },
     "person.back": {
       "extractionState": "manual",
       "localizations": {
