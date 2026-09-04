@@ -28,7 +28,7 @@ struct RailView: View {
                     // count is a fact, and a reader who can see it is eleven has been told
                     // enough to decide whether to go (#122).
                     .overlay(alignment: .topTrailing) {
-                        if item == .notices, app.unseenNotices > 0 {
+                        if item == .inbox, app.unseenNotices > 0 {
                             Text(app.unseenNotices > 99 ? "99+" : "\(app.unseenNotices)")
                                 .fediqoFont(TypeScale.caption, weight: .semibold)
                                 .foregroundStyle(.white)

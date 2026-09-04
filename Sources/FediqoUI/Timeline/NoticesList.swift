@@ -1,7 +1,7 @@
 import SwiftUI
 import FediqoCore
 
-/// The inbox, as a page (#122).
+/// What reached you — one half of the inbox page (#122).
 ///
 /// It was a sheet put up from a bell in the timeline's own header — so the one reading that
 /// arrives *while nobody is looking* was the only one with no page of its own, and closing
@@ -12,7 +12,7 @@ import FediqoCore
 /// evidence of anything. What it takes from the other pages is the furniture — a header that says
 /// what the page is, the ring, `j`, `k` and `g` — and what it keeps of its own is everything
 /// underneath: a live connection, catching up on what happened while nobody was here, and *seen*.
-struct NoticesScreen: View {
+struct NoticesList: View {
     @Environment(AppState.self) private var app
     @Environment(\.colorScheme) private var colorScheme
 
@@ -20,13 +20,10 @@ struct NoticesScreen: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
-            Hairline()
             body(for: model?.notices ?? [])
             Hairline()
             foot
         }
-        .background(Palette.surface(colorScheme))
         // Marked seen on arriving, which is what arriving means here. Not on every redraw: the
         // task runs when the page appears and the count it writes is the newest it has.
         .task { await model?.markSeen() }
@@ -35,20 +32,6 @@ struct NoticesScreen: View {
         .onDisappear { app.noticePlace.clear() }
     }
 
-    private var header: some View {
-        // `PageHeader` rather than `FeedHeader`: the spinner a feed's header draws is its
-        // paging, and this page does not page. What is out is a connection that is meant to
-        // stay out, and a header that spun while it was up would spin for ever.
-        PageHeader(titleKey: RailItem.notices.titleKey,
-                   subtitle: t("notices.subtitle"),
-                   loading: model?.asking ?? false) {
-            EmptyView()
-        } controls: {
-            IconButton(symbol: "arrow.clockwise", labelKey: "timeline.refresh") {
-                Task { await app.askForNotices() }
-            }
-        }
-    }
 
     /// When this device last managed to ask, and why a notice can be late.
     ///

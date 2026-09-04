@@ -25,7 +25,13 @@ enum RailItem: String, CaseIterable, Identifiable, Hashable {
     /// The inbox is here rather than behind a bell (#122). It is the one reading that arrives
     /// while nobody is looking, and it was the only one with no page of its own — so the reader
     /// could not tell it was there without opening something.
-    case timeline, notices, talks, kept, statistics, settings
+    /// The inbox is one page with two tabs: what reached you, and who you are talking to.
+    ///
+    /// **They are one place because they are one question asked two ways** — *who has been in
+    /// touch* — and two rail entries for it would have a reader checking two lists to find out
+    /// whether anybody had. Neither is a timeline, which is why neither is a tab of the Timeline
+    /// page; both are somebody addressing you, which is why they are tabs of each other.
+    case timeline, inbox, kept, statistics, settings
 
     var id: String { rawValue }
 
@@ -34,8 +40,7 @@ enum RailItem: String, CaseIterable, Identifiable, Hashable {
     var symbolName: String {
         switch self {
         case .timeline: "list.bullet.rectangle"
-        case .notices: "bell"
-        case .talks: "bubble.left.and.bubble.right"
+        case .inbox: "bell"
         case .kept: "archivebox"
         // The rising line belongs to the Trending tab, and it means "what is happening out
         // there". This page is the other kind of chart: bars of what is already here.
@@ -52,6 +57,18 @@ enum RailItem: String, CaseIterable, Identifiable, Hashable {
 /// other people and how much of it came back. How the numbers are counted is not a third: it
 /// is a note, and a note belongs beside the number it explains rather than on a page of its
 /// own that nobody would go to.
+/// The tabs of the Inbox page.
+///
+/// Two, and they are the two ways somebody reaches you: an event about you, and a conversation
+/// you are in. Neither is a timeline — an inbox is not a stretch of time and a conversation is
+/// ordered by the conversation — so neither is a tab of the Timeline page, and each says which
+/// it is in the line under the title.
+enum InboxTab: String, CaseIterable, Identifiable, Hashable {
+    case notices, talks
+
+    var id: String { rawValue }
+}
+
 enum StatisticsTab: String, CaseIterable, Identifiable, Hashable {
     case storage, network, merges
 
@@ -129,6 +146,9 @@ struct LaunchOptions {
     /// Whether this run opens the reader's own page. The page has a door now and a runner still
     /// cannot press it (#30, #110).
     var openingYourPage: Bool = false
+    /// Which half of the inbox this run opens. A tab reached by a press is a tab nothing on a
+    /// runner can reach (#30).
+    var inboxTab: InboxTab?
     /// Whose page to open, named the same way, for the same reason: the page about somebody is
     /// reached by pressing a name.
     ///
@@ -196,6 +216,7 @@ struct LaunchOptions {
         options.editingTimeline = environment["FEDIQO_EDIT"] == "1"
         options.searchingFor = environment["FEDIQO_SEARCH"]
         options.openingYourPage = environment["FEDIQO_ME"] == "1"
+        options.inboxTab = environment["FEDIQO_INBOX_TAB"].flatMap(InboxTab.init(rawValue:))
         options.openingPerson = environment["FEDIQO_PERSON"]
         options.openingReply = environment["FEDIQO_REPLY"]
         options.openingPeople = environment["FEDIQO_PEOPLE"].flatMap(People.Kind.init(rawValue:))
@@ -314,6 +335,8 @@ public final class AppState {
     /// ring's place is: the keys reach it from outside the screen that draws it.
     /// How many notices the reader has not looked at, for the rail to say (#122).
     var unseenNotices: Int { notices?.unseen ?? 0 }
+    /// Which half of the inbox is being read.
+    var inboxTab: InboxTab = .notices
 
     /// Who the reader is talking to (#109). Built once and kept, the way the feeds are: the page
     /// is rebuilt on every visit and what it holds should not be re-asked with it.
@@ -631,7 +654,11 @@ public final class AppState {
         // already the whole of what it does, so there is nothing left to read it later.
         // The inbox is a page now, so a run told to open it lands on the page rather than
         // putting a sheet over the timeline (#122, #30).
-        if launch.showingNotices { railItem = .notices }
+        if launch.showingNotices { railItem = .inbox }
+        if let tab = launch.inboxTab {
+            railItem = .inbox
+            inboxTab = tab
+        }
         if let words = launch.searchingFor, !words.isEmpty {
             showingSearch = true
             searching = words
@@ -1355,7 +1382,7 @@ public final class AppState {
         if let person { return person.place.moveSelection(by: steps) }
         // The inbox is a page of its own now, and the ring in it names a notice rather than a
         // post — a notice can be somebody following you, with no post at all (#122).
-        if railItem == .notices { return noticePlace.move(by: steps) }
+        if railItem == .inbox, inboxTab == .notices { return noticePlace.move(by: steps) }
         guard let feed = readingFeed else { return false }
         let moved = feed.moveSelection(by: steps)
         // Held down, `j` repeats twenty times a second against a ring that is still at the
@@ -1697,7 +1724,7 @@ public final class AppState {
     /// Back to the top of the feed being read. The screen does the scrolling; what happens
     /// here is that the ring is let go, so the reader is not told they are in two places.
     private func goToTop() -> Bool {
-        if railItem == .notices {
+        if railItem == .inbox, inboxTab == .notices {
             noticePlace.goToTop()
             return true
         }
@@ -1726,7 +1753,8 @@ public final class AppState {
         case .settings: rotate(&settingsTab, by: steps)
         // Neither has tabs to rotate through: one list each, and `Tab` is handed back to the
         // focus system rather than kept for nothing.
-        case .kept, .notices, .talks: false
+        case .inbox: rotate(&inboxTab, by: steps)
+        case .kept: false
         }
     }
 

@@ -12,32 +12,19 @@ import FediqoCore
 /// Drawn as a list of people and a line, not as rows. A row is built to answer what a post says,
 /// who wrote it, and what can be done to it; here the answer to *who* is several people, and
 /// what a reader came for is *what was said last*.
-struct TalksScreen: View {
+struct TalksList: View {
     @Environment(AppState.self) private var app
     @Environment(\.colorScheme) private var colorScheme
 
     private var model: TalksModel { app.talks }
 
     var body: some View {
-        VStack(spacing: 0) {
-            PageHeader(titleKey: RailItem.talks.titleKey,
-                       subtitle: t("talks.subtitle"),
-                       loading: model.loading) {
-                EmptyView()
-            } controls: {
-                IconButton(symbol: "arrow.clockwise", labelKey: "timeline.refresh") {
-                    Task { await model.read() }
-                }
-            }
-            Hairline()
-            body(for: model.talks)
-        }
-        .background(Palette.surface(colorScheme))
         // Keyed on the accounts, not on the page appearing. Who is signed in arrives over the
-        // keychain after the shell is drawn, so a page that asked once on appear would ask
-        // before there was anybody to ask as — and would then be right about nothing until the
-        // app was next launched.
-        .task(id: app.yourAccounts) { await model.readIfNeeded() }
+        // keychain after the shell is drawn, so a tab that asked once on appear would ask before
+        // there was anybody to ask as — and would then be right about nothing until the app was
+        // next launched.
+        body(for: model.talks)
+            .task(id: app.yourAccounts) { await model.readIfNeeded() }
     }
 
     @ViewBuilder
