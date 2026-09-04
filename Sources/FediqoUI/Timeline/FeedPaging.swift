@@ -211,6 +211,17 @@ final class FeedPaging {
         }
     }
 
+    /// Draws again from what the store holds now, without asking anybody anything (#117).
+    ///
+    /// For the one thing that changes a timeline without a server saying so: leaving a server
+    /// stops the store vouching for what it gave, and what is on the screen has to stop showing
+    /// it. An empty answer is shown as an empty answer — a reader who left their only server has
+    /// an empty timeline, and drawing the old one would be the screen disagreeing with the store.
+    func reread() async {
+        guard let held = try? await loader.stored(posts.timeline.query) else { return }
+        posts.showing(held)
+    }
+
     /// Asks a server again about the stretch the reader is already holding of it (#92).
     ///
     /// The other half of `catchUp` and the half `min_id` is for. This one has been read before,
