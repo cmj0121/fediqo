@@ -507,6 +507,24 @@ struct FixtureSource: SourceClient {
     /// What the fixture's person asked you to read first (#112). Their oldest post, which is
     /// what a pinned post usually is — and what makes the band worth having: dropped into a
     /// newest-first list it would be at the bottom where nobody scrolls.
+    /// Two posts the fixture's reader has written and not sent, so the band can be
+    /// photographed — one with something attached, one without (#110).
+    func scheduled(as account: ActingAccount) async throws -> [ScheduledPost] {
+        let now = Date()
+        return [
+            ScheduledPost(id: "1", host: account.host,
+                          text: "The reading room piece, once the photographs are in.",
+                          when: now.addingTimeInterval(3 * 60 * 60),
+                          audience: .everyone, attachments: 2),
+            ScheduledPost(id: "2", host: account.host,
+                          text: "A note to whoever is still awake.",
+                          when: now.addingTimeInterval(26 * 60 * 60),
+                          audience: .followers),
+        ]
+    }
+
+    func cancelScheduled(_ id: String, as account: ActingAccount) async throws {}
+
     func pinned(by id: String, host: String, token: String?) async throws -> [Post] {
         Array(Fixture.timeline(of: host).filter { $0.authorHandle == id }.suffix(1))
     }

@@ -80,6 +80,14 @@ struct AppShell: View {
             // Once, when the shell arrives. See `tidy`: the reader's own policy, applied when
             // they open the app rather than on a clock nobody sees.
             .task { await app.tidy() }
+            // A run told to open the reader's own page does it once the accounts are known.
+            // The same shape every other launch variable has, and the same reason (#30).
+            .task(id: app.yourAccounts) {
+                guard app.launchedOnYourPage, app.person == nil,
+                      let mine = app.yourAccounts.first
+                else { return }
+                app.openYourPage(mine)
+            }
     }
 
     @ViewBuilder

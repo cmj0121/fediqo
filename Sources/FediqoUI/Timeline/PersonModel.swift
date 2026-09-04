@@ -68,6 +68,19 @@ final class PersonModel {
     /// old, and dropped into a newest-first list it would be at the bottom where nobody
     /// scrolls — which is the opposite of what pinning means.
     private(set) var pinned: [Post] = []
+    /// What this account has written and not sent yet (#110).
+    ///
+    /// Only ever the reader's own: there is no reading of somebody else's unsent posts, and the
+    /// question is asked *as* the account rather than about it. Empty for everybody else and for
+    /// a server with no such thing — the page draws the band only where there is something in
+    /// it, so a server that cannot be asked leaves it absent rather than saying nothing is
+    /// waiting.
+    private(set) var scheduled: [ScheduledPost] = []
+    /// Whether this page is about one of the reader's own accounts.
+    ///
+    /// **What it is for is what the page stops offering.** You do not follow yourself, and a
+    /// Follow control on your own page is a control that cannot be pressed.
+    private(set) var isYou = false
     /// What the reader is to them, or `nil` for two different reasons the page must keep apart:
     /// nobody is signed in anywhere, or the acting server has never heard of them. `known` says
     /// which.
@@ -138,6 +151,37 @@ final class PersonModel {
             failure = SourceFailure.of(error)
         }
         await readRelationship()
+        await readWhatIsWaiting()
+    }
+
+    /// Whether this is the reader, and what they have not sent yet (#110).
+    ///
+    /// Asked of the account this page is about — a reader signed in to three servers is three
+    /// people, and each of them has their own unsent posts on their own server.
+    func readWhatIsWaiting() async {
+        guard let account = await acting(), account.host == subject.host,
+              account.authorId == subject.authorId || spelling(account) == subject.handle
+        else {
+            isYou = false
+            scheduled = []
+            return
+        }
+        isYou = true
+        // A server with no scheduled posts and a server that cannot be asked both leave the
+        // band absent. Neither is a fault worth interrupting a page about somebody for.
+        scheduled = (try? await client.scheduled(as: account)) ?? []
+    }
+
+    /// Call one of them off, and take it off the page. The list is the server's answer, so what
+    /// is drawn after this is what the server would say now.
+    func cancel(_ post: ScheduledPost) async {
+        guard let account = await acting() else { return }
+        do {
+            try await client.cancelScheduled(post.id, as: account)
+            scheduled.removeAll { $0.id == post.id }
+        } catch {
+            failure = SourceFailure.of(error)
+        }
     }
 
     /// What the reader is to them, asked of their own server and of nothing else.

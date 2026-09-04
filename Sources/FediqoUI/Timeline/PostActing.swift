@@ -57,6 +57,23 @@ extension AppState {
                              token: token.accessToken)
     }
 
+    /// One named account, as itself (#110).
+    ///
+    /// `publishing()` answers with whichever account the reader chose to write from, which is
+    /// the right answer for a draft and the wrong one for a page about *this* account: a reader
+    /// signed in to three servers is three people, and each of them has their own page and their
+    /// own unsent posts.
+    func acting(as handle: String) async -> ActingAccount? {
+        guard let signIn, let tokens,
+              let endpoint = signIn.accounts.first(where: { $0.value.handle == handle })?.key,
+              let account = signIn.accounts[endpoint],
+              let server = servers.first(where: { $0.endpoint == endpoint }),
+              let token = await tokens.tokens(for: [server])[endpoint]
+        else { return nil }
+        return ActingAccount(host: server.host, authorId: account.authorId,
+                             token: token.accessToken)
+    }
+
     /// Asks the server the reader would post to how long a post may be there.
     ///
     /// Asked when the composer opens rather than kept, because it is that server's rule and it

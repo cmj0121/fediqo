@@ -29,6 +29,7 @@ struct RailView: View {
 
             Hairline().padding(.bottom, Space.snug)
 
+            yourPageButton(expanded: expanded)
             composeButton(expanded: expanded)
         }
         .padding(.horizontal, Space.step)
@@ -76,6 +77,42 @@ struct RailView: View {
         .help(t(item.titleKey))
         .accessibilityLabel(Text(t(item.titleKey)))
         .frame(maxWidth: .infinity, alignment: expanded ? .leading : .center)
+    }
+
+    /// The way to your own page (#110).
+    ///
+    /// #88 built the page and the only way in was pressing an author on a row — so to see your
+    /// own you had to happen across one of your own posts in a timeline you were reading. A door
+    /// rather than a coincidence.
+    ///
+    /// **One per account, because a reader signed in to three servers is three people.** Each
+    /// has their own page, asked of the server that account is on, and their own unsent posts.
+    /// With one there is nothing to choose and it is a button; with several it is a menu that
+    /// names them, because "your page" would be a question the app answered on their behalf.
+    @ViewBuilder
+    private func yourPageButton(expanded: Bool) -> some View {
+        let accounts = app.yourAccounts
+        if accounts.count == 1, let only = accounts.first {
+            Button { app.openYourPage(only) } label: {
+                rowLabel(symbol: "person.crop.circle", titleKey: "rail.me", expanded: expanded, weight: .regular)
+            }
+            .buttonStyle(.plain)
+            .help(t("rail.me"))
+            .accessibilityLabel(Text(t("rail.me")))
+        } else if accounts.count > 1 {
+            Menu {
+                ForEach(accounts, id: \.self) { handle in
+                    Button(handle) { app.openYourPage(handle) }
+                }
+            } label: {
+                rowLabel(symbol: "person.crop.circle", titleKey: "rail.me", expanded: expanded, weight: .regular)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help(t("rail.me"))
+            .accessibilityLabel(Text(t("rail.me")))
+        }
     }
 
     private func composeButton(expanded: Bool) -> some View {

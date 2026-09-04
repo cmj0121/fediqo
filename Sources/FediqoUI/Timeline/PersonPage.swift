@@ -17,6 +17,9 @@ struct PersonPage: View {
 
     @Environment(AppState.self) private var app
     @Environment(\.colorScheme) private var colorScheme
+    /// The app's language, carried down by `fediqoChrome`. A date formatted without it follows
+    /// the *system's* language, which is not the one the reader chose in this app.
+    @Environment(\.locale) private var locale
 
     /// The picture at the top of a page, which is a portrait rather than a mark beside a line.
     private static let portrait: CGFloat = 72
@@ -32,6 +35,7 @@ struct PersonPage: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: Space.band) {
                         who
+                        whatIsWaiting
                         whatTheyPinned
                         theirPosts
                     }
@@ -206,8 +210,18 @@ struct PersonPage: View {
     /// the authority on it, so it moves at once and goes back if refused; whether somebody has
     /// accepted a follower is that somebody's answer, and drawing "following" on the press would
     /// announce an approval nobody has given.
+    /// What the reader is to them — and nothing at all where they are the reader (#110).
+    ///
+    /// You do not follow yourself, and a Follow control on your own page is a control that
+    /// cannot be pressed. Not disabled: a greyed-out button is a page saying "you could do this,
+    /// but not now", and the truth is that there is nothing here to do.
     @ViewBuilder
     private var relationship: some View {
+        if model.isYou { EmptyView() } else { relationshipToThem }
+    }
+
+    @ViewBuilder
+    private var relationshipToThem: some View {
         VStack(alignment: .leading, spacing: Space.step) {
             // Widest first (S9). Beside the control where the row can hold both, under it where
             // it cannot — and not a handle cut down the middle, which is what a single
@@ -316,6 +330,70 @@ struct PersonPage: View {
                        openTag: { app.openTag($0) })
     }
 
+    // MARK: - what you have not sent yet
+
+    /// The posts this account has written and not sent (#110).
+    ///
+    /// **On this page and nowhere else**, because there is nowhere else they could sit: they are
+    /// yours, nobody else can see them, and the page about you is the one page about the account
+    /// that wrote them.
+    ///
+    /// Not drawn as posts. `/api/v1/scheduled_statuses` answers with what a post *will be* — no
+    /// address, no counts, nobody has replied to it — so a row of the ordinary kind would be
+    /// answering questions that have no answers yet. A short list in the order they go out,
+    /// saying when, and the one thing that can be done to one of them.
+    @ViewBuilder
+    private var whatIsWaiting: some View {
+        if !model.scheduled.isEmpty {
+            VStack(alignment: .leading, spacing: Space.gap) {
+                Label(t("person.scheduled"), systemImage: "clock")
+                    .labelStyle(.titleAndIcon)
+                    .fediqoFont(TypeScale.minor, weight: .medium)
+                    .foregroundStyle(.secondary)
+                ForEach(model.scheduled) { waiting in
+                    unsent(waiting)
+                }
+            }
+        }
+    }
+
+    private func unsent(_ post: ScheduledPost) -> some View {
+        VStack(alignment: .leading, spacing: Space.step) {
+            HStack(spacing: Space.step) {
+                // When, in the reader's own language — the only fact about it that is not what
+                // they typed, and the reason the list is in this order.
+                Text(post.when.formatted(.dateTime.year().month().day().hour().minute()
+                        .locale(locale)))
+                    .fediqoFont(TypeScale.minor, weight: .medium)
+                    .foregroundStyle(.secondary)
+                if post.attachments > 0 {
+                    // The count and not the pictures: nothing here has been fetched, and a
+                    // thumbnail would be a request made for a post that has not happened.
+                    Label("\(post.attachments)", systemImage: "paperclip")
+                        .labelStyle(.titleAndIcon)
+                        .fediqoFont(TypeScale.minor)
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer(minLength: Space.step)
+                Button(t("person.scheduled.cancel")) {
+                    Task { await model.cancel(post) }
+                }
+                .buttonStyle(.plain)
+                .fediqoFont(TypeScale.minor)
+                .foregroundStyle(.orange)
+            }
+            if !post.text.isEmpty {
+                Text(post.text)
+                    .fediqoFont(TypeScale.small)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(Space.pad)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .fediqoCard(radius: Radius.inner, raised: false)
+    }
+
     // MARK: - what they asked you to read first
 
     /// What they pinned, above what they wrote and said to be pinned (#112).
@@ -349,7 +427,10 @@ struct PersonPage: View {
     private var theirPosts: some View {
         if model.posts.isEmpty {
             if !model.loading {
-                Text(t("person.nothing")).fediqoFont(TypeScale.body).foregroundStyle(.secondary)
+                // "Nothing from them here yet" on your own page is the app talking about the
+                // reader in the third person (#110).
+                Text(t(model.isYou ? "person.nothing.you" : "person.nothing"))
+                    .fediqoFont(TypeScale.body).foregroundStyle(.secondary)
             }
         } else {
             LazyVStack(spacing: Space.gap) {

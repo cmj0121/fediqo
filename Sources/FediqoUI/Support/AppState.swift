@@ -121,6 +121,9 @@ struct LaunchOptions {
     /// What this run searches this device for, or nothing. A reading reached by a key and a
     /// field is a reading nothing on a runner can reach (#30).
     var searchingFor: String?
+    /// Whether this run opens the reader's own page. The page has a door now and a runner still
+    /// cannot press it (#30, #110).
+    var openingYourPage: Bool = false
     /// Whose page to open, named the same way, for the same reason: the page about somebody is
     /// reached by pressing a name.
     ///
@@ -187,6 +190,7 @@ struct LaunchOptions {
         options.openingPost = environment["FEDIQO_OPEN"]
         options.editingTimeline = environment["FEDIQO_EDIT"] == "1"
         options.searchingFor = environment["FEDIQO_SEARCH"]
+        options.openingYourPage = environment["FEDIQO_ME"] == "1"
         options.openingPerson = environment["FEDIQO_PERSON"]
         options.openingReply = environment["FEDIQO_REPLY"]
         options.openingPeople = environment["FEDIQO_PEOPLE"].flatMap(People.Kind.init(rawValue:))
@@ -318,6 +322,8 @@ public final class AppState {
     let openingPost: String?
     /// Whether this run opens the timeline builder, for the same reason and read the same way.
     let editingTimeline: Bool
+    /// Whether this run opens the reader's own page, read the same way and for the same reason.
+    let launchedOnYourPage: Bool
     /// Whether this run opens the author of the first post it is given. A screenshot's way in to
     /// a page whose only other way in is a press (#30: nothing on a runner may press anything).
     let openingPerson: String?
@@ -581,6 +587,7 @@ public final class AppState {
         self.shootSize = launch.shootSize
         self.openingPost = launch.openingPost
         self.editingTimeline = launch.editingTimeline
+        self.launchedOnYourPage = launch.openingYourPage
         self.openingPerson = launch.openingPerson
         self.openingReply = launch.openingReply
         self.openingPeople = launch.openingPeople
@@ -976,6 +983,42 @@ public final class AppState {
     /// reader has added, which is what #104 built.
     static func tagTimeline(for tag: String) -> Timeline {
         Timeline(id: "tag:\(tag)", name: "#\(tag)", source: .tag, tags: [tag], template: "tag")
+    }
+
+    /// The reader's own accounts, as `@name@host`, in a settled order so the menu does not
+    /// shuffle between launches (#110).
+    var yourAccounts: [String] {
+        (signIn?.accounts.values.map(\.handle) ?? []).sorted()
+    }
+
+    /// Open the page about one of the reader's own accounts.
+    ///
+    /// Reached from the rail rather than by finding one of your own posts, which was the only
+    /// way in before. The page is the same page every other person gets — what it stops offering
+    /// is a relationship with yourself.
+    func openYourPage(_ handle: String) {
+        let bare = handle.hasPrefix("@") ? String(handle.dropFirst()) : handle
+        guard let host = bare.split(separator: "@").last.map(String.init),
+              let account = signIn?.accounts.values.first(where: { $0.handle == handle }),
+              let client = registry.client(for: .mastodon)
+        else { return }
+        railItem = .timeline
+        let subject = PersonSubject(profile: Profile(id: account.authorId, authorId: account.authorId,
+                                                     name: account.displayName,
+                                                     handle: account.handle,
+                                                     avatarURL: account.avatarURL),
+                                    host: host)
+        guard person?.subject != subject else { return }
+        people = nil
+        // Asked as this account and no other. A reader signed in to three servers is three
+        // people, and the unsent posts on this page are the ones this account has waiting.
+        person = PersonModel(subject: subject, client: client) { [weak self] in
+            await self?.acting(as: handle)
+        } spelling: { [weak self] account in
+            self?.handle(of: account)
+        } changed: { [weak self] in
+            await self?.homeChanged()
+        }
     }
 
     /// Open a timeline of one hashtag, the way pressing a name opens a page about somebody.

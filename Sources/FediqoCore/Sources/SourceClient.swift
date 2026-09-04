@@ -262,6 +262,15 @@ public protocol SourceClient: Sendable {
     func searchTags(matching query: String, limit: Int,
                     as account: ActingAccount) async throws -> [String]
 
+    /// The posts this account has written and not sent yet (#110).
+    ///
+    /// Theirs and nobody else's: there is no reading of somebody else's unsent posts, and the
+    /// account is what the question is asked as rather than about.
+    func scheduled(as account: ActingAccount) async throws -> [ScheduledPost]
+
+    /// Call one of them off. What can be done to a post that has not happened.
+    func cancelScheduled(_ id: String, as account: ActingAccount) async throws
+
     /// What somebody asked you to read first — the posts they pinned (#112).
     ///
     /// A separate ask from what they wrote, and the answer is small: a handful at most, usually
@@ -690,6 +699,17 @@ public extension SourceClient {
     /// which is the right answer here, because a tag nobody has used is still typeable.
     func searchTags(matching query: String, limit: Int,
                     as account: ActingAccount) async throws -> [String] {
+        throw SourceFailure.unsupported(.mastodon)
+    }
+
+    /// Default: this build cannot ask that over this protocol, which is different from an
+    /// account that has scheduled nothing — so it throws and the page leaves the part absent
+    /// rather than saying the reader has nothing waiting (#110).
+    func scheduled(as account: ActingAccount) async throws -> [ScheduledPost] {
+        throw SourceFailure.unsupported(.mastodon)
+    }
+
+    func cancelScheduled(_ id: String, as account: ActingAccount) async throws {
         throw SourceFailure.unsupported(.mastodon)
     }
 
