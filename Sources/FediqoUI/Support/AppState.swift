@@ -149,6 +149,9 @@ struct LaunchOptions {
     /// Which half of the inbox this run opens. A tab reached by a press is a tab nothing on a
     /// runner can reach (#30).
     var inboxTab: InboxTab?
+    /// Which tab of Settings this run opens. A tab reached by a press is one nothing on a
+    /// runner can reach (#30).
+    var settingsTab: SettingsTab?
     /// Whether this run opens the page about the post it opened. Reached by a press, so nothing
     /// on a runner can reach it (#30).
     var openingAbout: Bool = false
@@ -220,6 +223,7 @@ struct LaunchOptions {
         options.searchingFor = environment["FEDIQO_SEARCH"]
         options.openingYourPage = environment["FEDIQO_ME"] == "1"
         options.inboxTab = environment["FEDIQO_INBOX_TAB"].flatMap(InboxTab.init(rawValue:))
+        options.settingsTab = environment["FEDIQO_SETTINGS_TAB"].flatMap(SettingsTab.init(rawValue:))
         options.openingAbout = environment["FEDIQO_ABOUT"] == "1"
         options.openingPerson = environment["FEDIQO_PERSON"]
         options.openingReply = environment["FEDIQO_REPLY"]
@@ -668,6 +672,10 @@ public final class AppState {
         if let tab = launch.inboxTab {
             railItem = .inbox
             inboxTab = tab
+        }
+        if let tab = launch.settingsTab {
+            railItem = .settings
+            settingsTab = tab
         }
         if let words = launch.searchingFor, !words.isEmpty {
             showingSearch = true

@@ -645,6 +645,7 @@ struct FixtureSource: SourceClient {
         Marked()
     }
     func setMute(_ kind: Mute.Kind, _ value: String, as account: ActingAccount, muted: Bool) async throws {}
+
     func report(_ post: Post, id: String, as account: ActingAccount, comment: String) async throws {}
 }
 

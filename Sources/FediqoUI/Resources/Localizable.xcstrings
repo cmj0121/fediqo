@@ -7226,6 +7226,108 @@
           }
         }
       }
+    },
+    "settings.muted": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Muted"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已靜音"
+          }
+        }
+      }
+    },
+    "settings.muted.none": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing is muted."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "沒有靜音任何東西。"
+          }
+        }
+      }
+    },
+    "settings.muted.body": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "What you have hidden, and the way to stop hiding it. A muted author's posts do not appear, so this is the only place the decision can be taken back."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你藏起來的東西，以及不再藏它的方法。被靜音的作者貼文不會出現，所以這裡是唯一能把那個決定收回來的地方。"
+          }
+        }
+      }
+    },
+    "settings.muted.here": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "On this device"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在這台裝置上"
+          }
+        }
+      }
+    },
+    "settings.muted.onServer": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "On %@"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 %@ 上"
+          }
+        }
+      }
+    },
+    "settings.muted.undo": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unmute"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消靜音"
+          }
+        }
+      }
     }
   }
 }

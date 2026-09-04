@@ -48,6 +48,7 @@ struct SettingsView: View {
             section(t("settings.writing")) { writing }
         case .sources:
             section(t("settings.sources")) { sources }
+            section(t("settings.muted")) { muted }
             section(t("settings.privacy")) {
                 Text(t("settings.privacy.body"))
                     .fediqoFont(TypeScale.minor)
@@ -192,6 +193,58 @@ struct SettingsView: View {
             .pickerStyle(.menu)
             .labelsHidden()
             .fixedSize()
+        }
+    }
+
+    /// What the reader has muted, and the way out of it (#114).
+    ///
+    /// **A subscription you cannot see is a subscription you cannot undo**, and this one was
+    /// worse than invisible: a muted author's posts do not appear, so the menu that muted them
+    /// could not be reached again — the reader was shut out of their own decision. Every layer
+    /// beneath took `muted: false` and nothing ever passed it.
+    ///
+    /// Here rather than on a screen of its own, which is what #114 asks of every one of these:
+    /// this is where a reader looks for what they have set.
+    @ViewBuilder
+    private var muted: some View {
+        if app.mutes.isEmpty {
+            Text(t("settings.muted.none"))
+                .fediqoFont(TypeScale.minor)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            Text(t("settings.muted.body"))
+                .fediqoFont(TypeScale.minor)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            ForEach(app.mutes, id: \.self) { mute in
+                HStack(spacing: Space.step) {
+                    Image(systemName: mute.kind == .author ? "person.slash" : "network.slash")
+                        .fediqoSymbol(Glyph.inline)
+                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: Space.hair) {
+                        Text(mute.value)
+                            .fediqoFont(TypeScale.small)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        // **Which of the two is carrying it out**, because this app promises it
+                        // can always say which — and undoing one is not undoing the other.
+                        Text(t(mute.isLocal ? "settings.muted.here"
+                                            : "settings.muted.onServer",
+                               mute.serverURL ?? ""))
+                            .fediqoFont(TypeScale.caption)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: Space.step)
+                    Button(t("settings.muted.undo")) {
+                        Task { await app.unmute(mute) }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .fediqoFont(TypeScale.minor)
+                }
+            }
         }
     }
 

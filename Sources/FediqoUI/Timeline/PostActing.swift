@@ -301,6 +301,46 @@ extension AppState {
         }
     }
 
+    /// Lets a mute go — the way out of the one state this app could enter and not leave (#114).
+    ///
+    /// **A subscription you cannot see is a subscription you cannot undo, and this one was
+    /// worse than invisible.** A muted author's posts do not appear, so the menu that muted
+    /// them could not be reached again: the reader was shut out of their own decision. Nothing
+    /// in this app ever passed `muted: false`, though every layer beneath took it.
+    ///
+    /// A mute this device is carrying out needs no account. One a server is carrying out has to
+    /// be undone by that server, as the account that asked for it — so it is undone where it was
+    /// made, and a reader signed out of that server is told rather than quietly failed.
+    func unmute(_ mute: Mute) async {
+        var account: ActingAccount?
+        if let serverURL = mute.serverURL {
+            account = await acting(onServerAt: serverURL)
+            guard account != nil else {
+                actionFailure = .needsSignIn(serverURL)
+                return
+            }
+        }
+        do {
+            try await postActions.setMute(mute.kind, mute.value, muted: false, as: account)
+            await refreshMutes()
+        } catch {
+            actionFailure = SourceFailure.of(error)
+        }
+    }
+
+    /// The account on one named server, by its endpoint. `acting(on:)` above picks a server from
+    /// a post; this one is told which, because a mute names the server that is carrying it out.
+    func acting(onServerAt serverURL: String) async -> ActingAccount? {
+        guard let signIn, let tokens else { return nil }
+        let endpoint = Server.endpoint(of: URL(string: serverURL) ?? URL(fileURLWithPath: "/"))
+        guard let account = signIn.accounts[endpoint],
+              let server = servers.first(where: { $0.endpoint == endpoint }),
+              let token = await tokens.tokens(for: [server])[endpoint]
+        else { return nil }
+        return ActingAccount(host: server.host, authorId: account.authorId,
+                             token: token.accessToken)
+    }
+
     func refreshMutes() async {
         guard let store else { return }
         mutes = (try? await store.mutes()) ?? []
