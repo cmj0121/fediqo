@@ -39,6 +39,10 @@ struct PersonPage: View {
                 }
                 .background { ScrollDirector(place: model.place, proxy: proxy) }
             }
+            // Their posts are the timeline's rows, so they are arranged the way the timeline
+            // arranges them: measured once for the page, at the width a row here actually has.
+            // `Space.pad` is what the scrolling column is padded by, and it is not a row's (#118).
+            .fediqoMeasuresRows(rowsInsetBy: Space.pad)
         }
         .background(Palette.surface(colorScheme))
         .task { await model.read() }
@@ -116,7 +120,7 @@ struct PersonPage: View {
                 VStack(alignment: .leading, spacing: Space.gap) { portrait; names }
             }
             if !note.isEmpty {
-                EmojiText(note, emojis: model.emojis, size: TypeScale.body)
+                EmojiText(prose: note, emojis: model.emojis, size: TypeScale.body)
                     .fixedSize(horizontal: false, vertical: true)
             }
             counts

@@ -133,6 +133,21 @@ enum Size {
     /// here without dragging the isolation back in.
     static let card: CGFloat = 200
 
+    /// How wide a picture may be drawn where the page is one post rather than one of forty.
+    ///
+    /// `card` is a *share of a row in a list* — the column the timeline reserves so that every
+    /// row's words start and end in the same place. The opened post is neither a share nor a
+    /// list, and drawing the reader's picture at the scanning size on a page whose whole job is
+    /// that one post was the second half of #120.
+    ///
+    /// Twice the column, and **bounded rather than free**, which is the whole of the choice. A
+    /// picture that simply takes the width of a wide window is 900 points across and 600 down,
+    /// and it pushes the buttons and the conversation off the bottom — which is the fault this
+    /// number exists to fix, arriving again in better clothes. At 400 the picture is four times
+    /// the area it was and an 800-point window still holds the post, its bar, and the first
+    /// replies under it.
+    static let openedCard: CGFloat = card * 2
+
     /// The width at which a row has room to put its attachments beside its words. Three
     /// shares: `card` for the deck, `Space.gap` between them, and `words` left over for what
     /// the post says.
@@ -282,6 +297,53 @@ extension EnvironmentValues {
     var fediqoWideRows: Bool {
         get { self[WideRowsKey.self] }
         set { self[WideRowsKey.self] = newValue }
+    }
+}
+
+/// Measure this screen once, and tell every row in it which arrangement to use.
+///
+/// **Here rather than on each screen that draws rows, because there is one question and it has
+/// one answer.** The timeline asked it. A person's page, an opened post and the composer's
+/// quoted parent then drew the same `PostRow` without asking, took the default above, and were
+/// stacked at every width however much room they had — which read as a screen that was never
+/// given the two-column arrangement rather than one that measured and chose it (#118). A screen
+/// that draws rows says this once; a screen that draws none is unaffected.
+///
+/// `rowsInsetBy` is what the screen puts between its own edge and a row, on each side, and it
+/// comes off the width before the comparison — **a row is not as wide as the window it is in.**
+/// The timeline compared the whole window, so in a band a couple of dozen points wide it claimed
+/// two columns for rows that did not have room for them and took the difference out of the words.
+///
+/// The default stays the narrow arrangement, so a screen that forgets is safe rather than broken:
+/// attachments under the words fit anywhere, beside them they may not.
+private struct MeasuresRows: ViewModifier {
+    /// The reader's text size, because the width at which a row can hold two columns depends on
+    /// it: the deck's share of that width is a picture, and the rest of it is words.
+    @Environment(\.fediqoTextScale) private var scale
+    /// The width itself and not the answer worked out from it. The answer moves with the
+    /// reader's text size, so holding the width is what lets the comparison be remade when the
+    /// text size changes and not only when the window does.
+    @State private var width: CGFloat = 0
+    let inset: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            // Measured once and read by every row: a row asking the geometry for itself is the
+            // same question answered once per row on screen with all of them agreeing.
+            .onGeometryChange(for: CGFloat.self) { geometry in
+                geometry.size.width
+            } action: { width in
+                self.width = width
+            }
+            .environment(\.fediqoWideRows, width - inset * 2 >= Size.wideRows(at: scale))
+    }
+}
+
+extension View {
+    /// See `MeasuresRows`. Every screen that draws a `PostRow` either calls this or says in a
+    /// comment why it does not.
+    func fediqoMeasuresRows(rowsInsetBy inset: CGFloat = 0) -> some View {
+        modifier(MeasuresRows(inset: inset))
     }
 }
 
