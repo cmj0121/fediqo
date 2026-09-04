@@ -169,6 +169,12 @@ struct FeedScreen: View {
                          onAsk: { await app.askForNotices() })
                 .fediqoChrome(app)
         }
+        // A run told to open the builder does it once. The same shape every other launch
+        // variable has, and the same reason (#30).
+        .task {
+            guard app.editingTimeline, editing == nil else { return }
+            editing = .new
+        }
         .sheet(item: $editing) { subject in
             TimelineEditor(subject: subject) { editing = nil }
                 .fediqoChrome(app)

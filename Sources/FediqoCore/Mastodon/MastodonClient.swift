@@ -108,6 +108,44 @@ public struct MastodonClient: SourceClient {
                         before: before, after: after, token: token)
     }
 
+    /// The public timeline cut to which writers the reader asked for (#113).
+    ///
+    /// `?local=true` and `?remote=true` are Mastodon's words for the two cuts, and this is the
+    /// only place either is spoken.
+    ///
+    /// **The answer is checked, because the question can be ignored in silence.** Mastodon drops
+    /// a query parameter it does not know rather than refusing the request, and a server too old
+    /// for these — or something else answering at that address — hands back the whole federated
+    /// timeline with a 200. There is no status code to read, so the posts are read instead: a
+    /// page cut to this server's own writers whose posts were not written here was not cut. That
+    /// is `wouldNotCut`, and it is said out loud rather than shown, because a reader looking at
+    /// the federated timeline believing it is the room has been told something false.
+    public func timeline(host rawHost: String, limit: Int, before: Post?, after: Post? = nil,
+                         writers: Writers, token: String?) async throws -> [Post] {
+        guard let cut = writers.mastodonQuery else {
+            return try await timeline(host: rawHost, limit: limit, before: before, after: after,
+                                      token: token)
+        }
+        let host = Server.normalise(rawHost)
+        let posts = try await posts(host: host, path: "/api/v1/timelines/public", limit: limit,
+                                    before: before, after: after, token: token,
+                                    query: [URLQueryItem(name: cut.name, value: cut.value)])
+        guard posts.allSatisfy({ Self.wrote($0, on: host) == (writers == .here) }) else {
+            throw SourceFailure.wouldNotCut(host, writers)
+        }
+        return posts
+    }
+
+    /// Whether this server's own writer wrote that post, by the handle rather than by the
+    /// address the post was fetched from — every post on a page fetched from here carries this
+    /// host as its `sourceURL`, which is what fetching it means and says nothing about who wrote
+    /// it. A handle is `@name@host` where the post travelled and `@name` where it did not.
+    static func wrote(_ post: Post, on host: String) -> Bool {
+        let parts = post.authorHandle.split(separator: "@", omittingEmptySubsequences: true)
+        guard parts.count > 1 else { return true }
+        return Server.normalise(String(parts[1])) == host
+    }
+
     public func home(host: String, limit: Int, before: Post?, after: Post? = nil,
                      token: String) async throws -> [Post] {
         try await posts(host: host, path: "/api/v1/timelines/home", limit: limit,

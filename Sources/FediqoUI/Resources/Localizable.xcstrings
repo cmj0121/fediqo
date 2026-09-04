@@ -5798,6 +5798,125 @@
           }
         }
       }
+    },
+    "error.wouldNotCut": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ answered with its whole public timeline rather than %2$@."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ 回的是它整條公開時間軸，不是%2$@。"
+          }
+        }
+      }
+    },
+    "writers.here": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "only its own writers"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "只有它自己的作者"
+          }
+        }
+      }
+    },
+    "writers.elsewhere": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "everything but its own writers"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "它自己的作者以外的所有人"
+          }
+        }
+      }
+    },
+    "template.local.name": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The room"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這個地方"
+          }
+        }
+      }
+    },
+    "template.local.summary": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only the accounts on each server you added. Who is here, and what this place is like."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "只有你加入的每一台伺服器上的帳號。誰在這裡，這個地方是什麼樣子。"
+          }
+        }
+      }
+    },
+    "template.remote.name": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Everywhere else"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "其他地方"
+          }
+        }
+      }
+    },
+    "template.remote.summary": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Everything your servers see except their own writers. The wider network, without the local conversation on top of it."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你的伺服器看得到的一切，扣掉它們自己的作者。更大的網路，上面沒有壓著本地的對話。"
+          }
+        }
+      }
     }
   }
 }

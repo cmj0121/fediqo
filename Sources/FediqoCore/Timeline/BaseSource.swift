@@ -13,6 +13,48 @@ import Foundation
 /// ordered, and sorting somebody else's ranking by time would throw away the only thing it
 /// was carrying. So the reader has no switch for it and a rule cannot reach it: what decides
 /// is which of these a timeline was built on.
+/// Which writers a public timeline is asked for.
+///
+/// `/api/v1/timelines/public` answers with everything a server sees — its own writers and
+/// everything that reached it from elsewhere. Mastodon lets that be cut two ways, and both are
+/// questions a person actually asks (#113):
+///
+/// - **`here`** is the room itself: who is on this server, what this place is like. It is how
+///   somebody decides whether they want to join, and how somebody who has joined keeps up with
+///   their neighbours.
+/// - **`elsewhere`** is what the wider network is saying without the server's own conversation
+///   on top of it.
+///
+/// **Not a base source.** It does not change where the posts come from, only which of them the
+/// server is asked for — so `feeds` gains no row, `post_origins` still records `public`, and a
+/// post that arrived this way arrived by the public timeline, which is the truth.
+///
+/// Nothing but `public` is asked this. A home timeline is already one account's, a trending list
+/// is the server's own, and a conversation is one post's — none of them has a room to be cut out
+/// of, so the question is not asked and `everyone` is what they carry.
+public enum Writers: String, Sendable, Hashable, CaseIterable, Codable {
+    /// Everything the server sees. What `public` has always meant, and what a timeline written
+    /// down before this existed still means.
+    case everyone
+    /// Only the accounts on this server.
+    case here
+    /// Everything except them.
+    case elsewhere
+
+    /// The query Mastodon knows this by, or nothing where the whole timeline is wanted.
+    ///
+    /// Spoken here rather than in the client for the reason `max_id` is spoken in the client and
+    /// not here: this is the *name of the cut*, which every protocol will need a word for, and
+    /// `local` is Mastodon's word. When a second protocol arrives it says its own.
+    public var mastodonQuery: (name: String, value: String)? {
+        switch self {
+        case .everyone: nil
+        case .here: ("local", "true")
+        case .elsewhere: ("remote", "true")
+        }
+    }
+}
+
 public enum BaseSource: String, Sendable, CaseIterable, Identifiable, Codable {
     /// What the server publishes to anyone — read as whoever is signed in where there is
     /// somebody, which is still the public timeline and never substituted for by anything else.

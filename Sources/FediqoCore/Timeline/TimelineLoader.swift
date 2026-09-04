@@ -861,8 +861,11 @@ public struct TimelineLoader: Sendable {
         let posts: [Post]
         do {
             posts = switch query.source {
+            // The one source with a cut. `everyone` is the whole timeline and goes the way it
+            // always did; the other two ask for it and refuse a server that would not (#113).
             case .public: try await client.timeline(host: server.host, limit: limit,
-                                                    before: before, after: after, token: token)
+                                                    before: before, after: after,
+                                                    writers: query.writers, token: token)
             case .home: try await client.home(host: server.host, limit: limit,
                                               before: before, after: after, token: token ?? "")
             case .trend: try await client.trending(host: server.host, limit: limit, token: token)

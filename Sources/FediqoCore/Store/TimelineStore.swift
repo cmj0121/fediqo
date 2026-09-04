@@ -22,7 +22,7 @@ extension LocalStore {
                     TimelineFilter(kind: kind, value: row["value"], negate: (row["negate"] as Int) == 1))
             }
             return try Row.fetchAll(db, sql: """
-                SELECT id, name, summary, feed, author_id, template, position
+                SELECT id, name, summary, feed, writers, author_id, template, position
                 FROM timelines ORDER BY position, id
                 """).compactMap { row in
                 // A row naming a base source this build does not know is a row from a later
@@ -31,8 +31,13 @@ extension LocalStore {
                 // crime of being newer than the code reading it.
                 guard let source = BaseSource(rawValue: row["feed"]) else { return nil }
                 let id: String = row["id"]
+                // A cut this build does not know is read as the whole timeline rather than
+                // dropping the row: an unknown *source* means a reading this build cannot
+                // perform at all, but an unknown *cut* of the public timeline still has an
+                // honest answer — everything the server sees, which is what `public` means.
+                let writers = Writers(rawValue: row["writers"]) ?? .everyone
                 return Timeline(id: id, name: row["name"], summary: row["summary"],
-                                source: source, account: row["author_id"],
+                                source: source, writers: writers, account: row["author_id"],
                                 template: row["template"], position: row["position"],
                                 filters: rules[id] ?? [])
             }
@@ -47,15 +52,16 @@ extension LocalStore {
         let filters = timeline.filters
         try await write { db in
             try db.execute(sql: """
-                INSERT INTO timelines (id, name, summary, feed, author_id, template, position, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO timelines (id, name, summary, feed, writers, author_id, template, position, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (id) DO UPDATE SET
                     name = excluded.name, summary = excluded.summary, feed = excluded.feed,
+                    writers = excluded.writers,
                     author_id = excluded.author_id, position = excluded.position,
                     updated_at = excluded.created_at
                 """, arguments: [timeline.id, timeline.name, timeline.summary,
-                                 timeline.source.rawValue, timeline.account, timeline.template,
-                                 timeline.position, ms])
+                                 timeline.source.rawValue, timeline.writers.rawValue,
+                                 timeline.account, timeline.template, timeline.position, ms])
             try db.execute(sql: "DELETE FROM timeline_filters WHERE timeline_id = ?", arguments: [timeline.id])
             for filter in filters {
                 try db.execute(sql: """

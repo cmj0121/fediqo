@@ -28,6 +28,14 @@ public enum SourceFailure: Error, Sendable, Equatable, LocalizedError {
     /// came before a post it never had, and asking without the cursor would hand back the
     /// newest page and repeat what has just been read.
     case notItsPost(String)
+    /// The server was asked for one server's own writers, or for everything but them, and
+    /// answered with the whole public timeline anyway (#113).
+    ///
+    /// Mastodon ignores a query it does not know rather than refusing it, so this is caught by
+    /// reading the answer rather than by a status code: a page cut to `here` whose posts were
+    /// not written here was not cut. Said out loud, because the quiet alternative is a reader
+    /// looking at the federated timeline believing it is the room.
+    case wouldNotCut(String, Writers)
     /// The server answered outside 2xx; the body rides along for whoever can read a
     /// reason out of it.
     case http(Int, Data)
@@ -62,7 +70,7 @@ public enum SourceFailure: Error, Sendable, Equatable, LocalizedError {
         switch self {
         case .tokenRejected, .store: true
         case .badHost, .notThatKind, .unsupported, .needsSignIn, .signInFailed, .notItsPost,
-             .http, .transport, .emptyDraft, .tooLong,
+             .http, .transport, .emptyDraft, .tooLong, .wouldNotCut,
              .tooManyPictures, .pictureTooLarge, .pictureNotTaken: false
         }
     }
@@ -78,6 +86,8 @@ public enum SourceFailure: Error, Sendable, Equatable, LocalizedError {
     /// The last resort, for anywhere that is not a screen. Screens localise the case instead.
     public var errorDescription: String? {
         switch self {
+        case .wouldNotCut(let host, let writers):
+            "\(host) answered with its whole public timeline rather than \(writers.rawValue)."
         case .badHost(let host): "\(host) is not a hostname."
         case .notThatKind(let socialProtocol, let host): "\(host) did not answer as a \(socialProtocol.rawValue) server."
         case .unsupported(let socialProtocol): "\(socialProtocol.rawValue) is not spoken yet."
@@ -127,6 +137,16 @@ public protocol SourceClient: Sendable {
     /// from it, and nothing returned to the middle.
     func timeline(host: String, limit: Int, before: Post?, after: Post?,
                   token: String?) async throws -> [Post]
+
+    /// The same, cut to which writers the reader asked for (#113).
+    ///
+    /// Separate from the one above rather than a parameter on it, and that is not tidiness: a
+    /// protocol that cannot cut must be able to *say so* instead of quietly answering the whole
+    /// timeline, and the default below is where it says it. A reader who asked for one server's
+    /// own writers and was handed the federated timeline has been told something false about
+    /// which room they are in.
+    func timeline(host: String, limit: Int, before: Post?, after: Post?,
+                  writers: Writers, token: String?) async throws -> [Post]
 
     /// What the server shows the account signed in to it, paged like `timeline`.
     ///
@@ -276,6 +296,25 @@ public protocol SourceClient: Sendable {
     /// app announcing an approval nobody has given.
     func setFollow(_ following: Bool, with handle: String, as account: ActingAccount) async throws -> Relationship
 }
+
+/// What a client that cannot cut the public timeline does about it.
+public extension SourceClient {
+    /// Refuse, rather than answer the whole thing.
+    ///
+    /// A reader who asked for one server's own writers and was handed the federated timeline
+    /// has been told something false about which room they are in — so the honest answer for a
+    /// protocol with no word for the cut is that it has none (#113). `everyone` is not a cut and
+    /// falls through to the ordinary reading, which is why every client already satisfies this.
+    func timeline(host: String, limit: Int, before: Post?, after: Post?,
+                  writers: Writers, token: String?) async throws -> [Post] {
+        guard writers != .everyone else {
+            return try await timeline(host: host, limit: limit, before: before, after: after,
+                                      token: token)
+        }
+        throw SourceFailure.wouldNotCut(host, writers)
+    }
+}
+
 
 /// What a server says about itself, to somebody who has not joined it. Everything here came
 /// from that server and nowhere else, which is what makes it safe to show before a reader has

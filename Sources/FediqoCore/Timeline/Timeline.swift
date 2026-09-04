@@ -69,6 +69,9 @@ public struct Timeline: Sendable, Hashable, Identifiable, Codable {
     /// two words, and two words are not an explanation.
     public var summary: String
     public var source: BaseSource
+    /// Which writers this is asked for. Only `public` has an answer other than `everyone`;
+    /// see `Writers` (#113).
+    public var writers: Writers
     /// Whose home this is. Nil unless `source` is `.home`.
     public var account: String?
     public var template: String
@@ -76,12 +79,16 @@ public struct Timeline: Sendable, Hashable, Identifiable, Codable {
     public var filters: [TimelineFilter]
 
     public init(id: String = UUID().uuidString, name: String, summary: String = "",
-                source: BaseSource, account: String? = nil, template: String,
-                position: Int = 0, filters: [TimelineFilter] = []) {
+                source: BaseSource, writers: Writers = .everyone, account: String? = nil,
+                template: String, position: Int = 0, filters: [TimelineFilter] = []) {
         self.id = id
         self.name = name
         self.summary = summary
         self.source = source
+        // A cut only the public timeline has. Kept rather than refused, the same way `account`
+        // is dropped for a source with no account: a value that cannot mean anything here is
+        // not a value to carry around waiting to be believed.
+        self.writers = source == .public ? writers : .everyone
         self.account = source.needsAccount ? account : nil
         self.template = template
         self.position = position
@@ -92,18 +99,22 @@ public struct Timeline: Sendable, Hashable, Identifiable, Codable {
     /// two timelines called different things that ask the same question are one page of posts,
     /// and the screens hold their own place in each anyway.
     public var query: TimelineQuery {
-        TimelineQuery(source: source, account: account, filters: filters)
+        TimelineQuery(source: source, writers: writers, account: account, filters: filters)
     }
 }
 
 /// A reading: where the posts come from, and which of them are kept.
 public struct TimelineQuery: Sendable, Hashable {
     public let source: BaseSource
+    /// Which writers the public timeline is asked for. `everyone` everywhere else (#113).
+    public let writers: Writers
     public let account: String?
     public let filters: [TimelineFilter]
 
-    public init(source: BaseSource, account: String? = nil, filters: [TimelineFilter] = []) {
+    public init(source: BaseSource, writers: Writers = .everyone, account: String? = nil,
+                filters: [TimelineFilter] = []) {
         self.source = source
+        self.writers = source == .public ? writers : .everyone
         self.account = account
         self.filters = filters
     }
@@ -183,12 +194,28 @@ public struct TimelineTemplate: Sendable, Hashable, Identifiable {
 
     public let id: String
     public let source: BaseSource
+    /// Which writers the template starts a timeline asking for. Two templates differ by nothing
+    /// else, which is #113's own line: it is the same reading with a parameter, not a third base
+    /// source.
+    public let writers: Writers
     public let parameter: Parameter
+
+    /// `writers` defaults, so that adding the cut did not touch the six templates that have no
+    /// room to cut out of.
+    public init(id: String, source: BaseSource, writers: Writers = .everyone,
+                parameter: Parameter) {
+        self.id = id
+        self.source = source
+        self.writers = source == .public ? writers : .everyone
+        self.parameter = parameter
+    }
 
     public static let all: [TimelineTemplate] = [
         TimelineTemplate(id: "public", source: .public, parameter: .none),
         TimelineTemplate(id: "home", source: .home, parameter: .none),
         TimelineTemplate(id: "trend", source: .trend, parameter: .none),
+        TimelineTemplate(id: "local", source: .public, writers: .here, parameter: .none),
+        TimelineTemplate(id: "remote", source: .public, writers: .elsewhere, parameter: .none),
         TimelineTemplate(id: "tag", source: .public, parameter: .tag),
         TimelineTemplate(id: "author", source: .public, parameter: .author),
         TimelineTemplate(id: "mentions", source: .home, parameter: .mention),
@@ -212,7 +239,7 @@ public struct TimelineTemplate: Sendable, Hashable, Identifiable {
         case .author: filters.append(TimelineFilter(kind: .author, value: value))
         case .mention: filters.append(TimelineFilter(kind: .mention, value: value))
         }
-        return Timeline(name: name, summary: summary, source: source, account: account,
-                        template: id, position: position, filters: filters)
+        return Timeline(name: name, summary: summary, source: source, writers: writers,
+                        account: account, template: id, position: position, filters: filters)
     }
 }

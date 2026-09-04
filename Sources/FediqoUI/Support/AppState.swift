@@ -115,6 +115,9 @@ struct LaunchOptions {
     /// that can only be reached by pressing something cannot be photographed on a runner, where
     /// nothing may press anything (#30).
     var openingPost: String?
+    /// Whether this run opens the timeline builder. The last sheet with no way in but a press,
+    /// and the one #113 added templates to that nobody could photograph (#30).
+    var editingTimeline: Bool = false
     /// Whose page to open, named the same way, for the same reason: the page about somebody is
     /// reached by pressing a name.
     ///
@@ -179,6 +182,7 @@ struct LaunchOptions {
         options.composing = environment["FEDIQO_COMPOSE"] == "1"
         options.showingNotices = environment["FEDIQO_NOTICES"] == "1"
         options.openingPost = environment["FEDIQO_OPEN"]
+        options.editingTimeline = environment["FEDIQO_EDIT"] == "1"
         options.openingPerson = environment["FEDIQO_PERSON"]
         options.openingReply = environment["FEDIQO_REPLY"]
         options.openingPeople = environment["FEDIQO_PEOPLE"].flatMap(People.Kind.init(rawValue:))
@@ -286,6 +290,8 @@ public final class AppState {
     /// A post this run was told to open, by the end of its address, or nothing. Read by
     /// `FeedScreen` once it has posts to look through and then never again.
     let openingPost: String?
+    /// Whether this run opens the timeline builder, for the same reason and read the same way.
+    let editingTimeline: Bool
     /// Whether this run opens the author of the first post it is given. A screenshot's way in to
     /// a page whose only other way in is a press (#30: nothing on a runner may press anything).
     let openingPerson: String?
@@ -548,6 +554,7 @@ public final class AppState {
         self.shootTo = launch.shootTo
         self.shootSize = launch.shootSize
         self.openingPost = launch.openingPost
+        self.editingTimeline = launch.editingTimeline
         self.openingPerson = launch.openingPerson
         self.openingReply = launch.openingReply
         self.openingPeople = launch.openingPeople
