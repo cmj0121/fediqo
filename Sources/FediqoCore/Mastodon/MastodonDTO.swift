@@ -223,6 +223,14 @@ enum MastodonDTO {
         let statuses: [Status]
     }
 
+    /// The same answer, read for its hashtags instead (#108). A separate type rather than one
+    /// with two optional halves, so that asking for statuses and getting none is a fact rather
+    /// than a field somebody forgot to read.
+    struct TagResults: Decodable, Sendable {
+        struct Tag: Decodable, Sendable { let name: String }
+        let hashtags: [Tag]
+    }
+
     struct Context: Decodable, Sendable {
         let ancestors: [Status]
         let descendants: [Status]

@@ -257,6 +257,11 @@ public protocol SourceClient: Sendable {
     func searchPeople(matching query: String, limit: Int,
                       as account: ActingAccount) async throws -> [Profile]
 
+    /// What a part-typed hashtag could be, asked of the server a draft will be posted from
+    /// (#108). A requirement and not only a default, for the reason above it.
+    func searchTags(matching query: String, limit: Int,
+                    as account: ActingAccount) async throws -> [String]
+
     /// The same events as they happen, over one connection held open for as long as the
     /// sequence is iterated.
     ///
@@ -668,6 +673,14 @@ public extension SourceClient {
     /// protocol, and an offer of nobody is what a composer draws when nobody can be asked.
     func searchPeople(matching query: String, limit: Int,
                       as account: ActingAccount) async throws -> [Profile] {
+        throw SourceFailure.unsupported(.mastodon)
+    }
+
+    /// What a part-typed hashtag could be (#108). Default: this build cannot ask that over this
+    /// protocol, and an offer of nothing is what a composer draws when nobody can be asked —
+    /// which is the right answer here, because a tag nobody has used is still typeable.
+    func searchTags(matching query: String, limit: Int,
+                    as account: ActingAccount) async throws -> [String] {
         throw SourceFailure.unsupported(.mastodon)
     }
 

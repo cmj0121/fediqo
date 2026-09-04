@@ -70,8 +70,8 @@ struct ComposerView: View {
         // own: changing the id cancels the wait and the question with it, so a reader typing
         // quickly asks once at the end rather than once per letter — and closing the panel
         // cancels it too.
-        .task(id: typedHandle) {
-            guard let typed = typedHandle else { return app.mentions.clear() }
+        .task(id: typedToken) {
+            guard let typed = MentionQuery.trailing(in: draft) else { return app.mentions.clear() }
             try? await Task.sleep(for: Self.settle)
             guard !Task.isCancelled else { return }
             // Asked of the server this draft will be posted from, and of no other: an account
@@ -89,7 +89,7 @@ struct ComposerView: View {
         // wrote (#98).
         .onChange(of: app.mentions.chosen) { _, taken in
             guard let taken, let query = MentionQuery.trailing(in: draft) else { return }
-            draft = query.accepting(taken.handle, in: draft)
+            draft = query.accepting(taken.written, in: draft)
             app.mentions.chosen = nil
             app.mentions.clear()
         }
@@ -203,17 +203,22 @@ struct ComposerView: View {
     /// on every third letter.
     @ViewBuilder
     private var offered: some View {
-        if !app.mentions.people.isEmpty {
+        if !app.mentions.offers.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
-                ForEach(app.mentions.people, id: \.authorId) { person in
-                    Button { app.mentions.chosen = person } label: {
-                        // Widest first (S9), and the whole row is the arrangement. **The handle
-                        // is what survives**: it is the thing being typed and the thing that
-                        // goes into the post, and a row offering `Ra…` beside `@tove…xample`
-                        // has cut up the only part that had to be readable.
-                        ViewThatFits(in: .horizontal) {
-                            offer(person, naming: true)
-                            offer(person, naming: false)
+                ForEach(app.mentions.offers) { offer in
+                    Button { app.mentions.chosen = offer } label: {
+                        switch offer {
+                        case .person(let person):
+                            // Widest first (S9), and the whole row is the arrangement. **The
+                            // handle is what survives**: it is the thing being typed and the
+                            // thing that goes into the post, and a row offering `Ra…` beside
+                            // `@tove…xample` has cut up the only part that had to be readable.
+                            ViewThatFits(in: .horizontal) {
+                                self.offer(person, naming: true)
+                                self.offer(person, naming: false)
+                            }
+                        case .tag(let name):
+                            tagOffer(name, taken: offer == app.mentions.first)
                         }
                     }
                     .buttonStyle(.plain)
@@ -243,7 +248,34 @@ struct ComposerView: View {
             Spacer(minLength: Space.tight)
             // Which one `Tab` takes, said on the row it would take rather than left for a
             // reader to guess from the order.
-            if person.authorId == app.mentions.first?.authorId {
+            if MentionSuggestions.Offer.person(person) == app.mentions.first {
+                Text(verbatim: "⇥")
+                    .fediqoFont(TypeScale.minor, design: .monospaced)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.vertical, Space.tight)
+        .padding(.horizontal, Space.mid)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+
+    /// One hashtag on offer. No avatar and no second line: a tag is one word, and a row built
+    /// for a person around a word would be mostly empty space saying nothing (#108).
+    private func tagOffer(_ name: String, taken: Bool) -> some View {
+        HStack(spacing: Space.step) {
+            Image(systemName: "number")
+                .fediqoSymbol(Glyph.inline)
+                .foregroundStyle(.secondary)
+                .frame(width: Size.iconColumn)
+            Text(verbatim: "#\(name)")
+                .fediqoFont(TypeScale.small, weight: .medium)
+                .lineLimit(1)
+                .fixedSize()
+            Spacer(minLength: Space.tight)
+            // Which one `Tab` takes, said on the row it would take rather than left for a
+            // reader to guess from the order.
+            if taken {
                 Text(verbatim: "⇥")
                     .fediqoFont(TypeScale.minor, design: .monospaced)
                     .foregroundStyle(.tertiary)
@@ -257,7 +289,12 @@ struct ComposerView: View {
 
     /// What is being typed at the end of the draft, or nothing. Watched rather than computed at
     /// the ask, so the wait below is keyed to the question and not to every keystroke.
-    private var typedHandle: String? { MentionQuery.trailing(in: draft)?.text }
+    ///
+    /// The kind is part of the id: `#swift` and `@swift` are two different questions, and one
+    /// keyed on the letters alone would have shown whoever is called *swift* under a hashtag.
+    private var typedToken: String? {
+        MentionQuery.trailing(in: draft).map { "\($0.kind)\($0.text)" }
+    }
 
     /// How long a reader has to stop typing before anybody is asked.
     ///
