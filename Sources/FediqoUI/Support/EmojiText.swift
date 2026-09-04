@@ -116,7 +116,7 @@ struct EmojiText: View {
     /// which is the one way out of this app and already the reader's browser.
     private static func written(_ words: String) -> Text {
         let runs = TextLinks.runs(in: words)
-        guard runs.contains(where: { if case .link = $0 { true } else { false } }) else {
+        guard runs.contains(where: { if case .text = $0 { false } else { true } }) else {
             return Text(verbatim: words)
         }
         var attributed = AttributedString()
@@ -124,6 +124,14 @@ struct EmojiText: View {
             switch run {
             case .text(let plain):
                 attributed += AttributedString(plain)
+            // A hashtag is pressable and is still a word in a sentence: the accent says it can
+            // be pressed and nothing else changes, so the line is a line rather than a row of
+            // controls. No underline — that is what an address out of this app looks like, and
+            // this one goes nowhere near a browser (#107).
+            case .tag(let label, let name):
+                var piece = AttributedString(label)
+                piece.link = TagLink.url(for: name)
+                attributed += piece
             case .link(let label, let url):
                 var piece = AttributedString(label)
                 piece.link = url

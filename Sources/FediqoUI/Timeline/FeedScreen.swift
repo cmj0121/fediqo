@@ -197,9 +197,17 @@ struct FeedScreen: View {
         // A search is a reading nobody named, so the line under the title is what it is rather
         // than an invitation to describe it — "edit this timeline to say what it is for" is
         // advice about a timeline that cannot be edited and will not be there in a moment.
-        let subtitle = timeline.source == .search
-            ? t("search.subtitle")
-            : (timeline.displaySummary.isEmpty ? t("timeline.noDescription") : timeline.displaySummary)
+        let subtitle: String
+        switch timeline.source {
+        case .search: subtitle = t("search.subtitle")
+        // A timeline the reader pressed into rather than made, so the line says what it is and
+        // how to leave — the tabs above do not hold it, which is what "not one of yours" looks
+        // like here (#107).
+        case .tag where app.viewingTag != nil: subtitle = t("tag.subtitle", timeline.name)
+        default:
+            subtitle = timeline.displaySummary.isEmpty ? t("timeline.noDescription")
+                                                       : timeline.displaySummary
+        }
         return FeedHeader(paging: model.paging,
                    titleKey: app.railItem.titleKey,
                    subtitle: subtitle) {
@@ -223,6 +231,9 @@ struct FeedScreen: View {
             // Outside the block below, because what it searches is this device and not this
             // reading — so it is there on every one of them, and on the search itself, where
             // pressing it again is the way back.
+            if app.viewingTag != nil {
+                IconButton(symbol: "chevron.left", labelKey: "tag.back") { app.closeTag() }
+            }
             IconButton(symbol: "magnifyingglass", labelKey: "timeline.search") {
                 app.showingSearch.toggle()
                 if !app.showingSearch { app.searching = "" }

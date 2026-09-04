@@ -295,6 +295,12 @@ public final class AppState {
     /// one would be this app deciding something the reader did not (#106). Settings is where
     /// the standing answer lives, both ways.
     var hidTheSearchOffer = false
+    /// The hashtag the reader pressed, or nothing (#107).
+    ///
+    /// A reading rather than a screen, and a transient one like the search: pressing a tag opens
+    /// a timeline of it the way pressing a name opens a page about somebody, and neither is a
+    /// thing the reader asked to keep.
+    var viewingTag: String?
 
 
     /// The inbox, and the connections that keep it filled. Nil where there is no store — the
@@ -952,6 +958,9 @@ public final class AppState {
         // id is fixed so that `feed(for:)` keeps one page across every search, and typing new
         // words hands the new question to the page that is already open rather than starting a
         // second one, which is what a reader editing any timeline already gets.
+        // A tag the reader pressed comes first: they asked for it a moment ago, and a search
+        // they left open underneath is still there when they come back out of it.
+        if let viewingTag { return Self.tagTimeline(for: viewingTag) }
         if !searching.isEmpty {
             // What the reader agreed to, asked here rather than down in the core: the layer
             // that knows the answer is the one that builds the question (#106).
@@ -963,6 +972,21 @@ public final class AppState {
 
     /// The reading a search is. Not in `timelines` and never written down: it belongs to this
     /// moment rather than to the row of tabs.
+    /// The reading a pressed hashtag is: a timeline of that one tag, asked of every server the
+    /// reader has added, which is what #104 built.
+    static func tagTimeline(for tag: String) -> Timeline {
+        Timeline(id: "tag:\(tag)", name: "#\(tag)", source: .tag, tags: [tag], template: "tag")
+    }
+
+    /// Open a timeline of one hashtag, the way pressing a name opens a page about somebody.
+    func openTag(_ tag: String) {
+        railItem = .timeline
+        viewingTag = tag
+    }
+
+    /// Back out of it, to whatever the reader was reading before.
+    func closeTag() { viewingTag = nil }
+
     static func searchTimeline(for words: String, asksServers: Bool = false) -> Timeline {
         var made = Timeline(id: "search", name: "", source: .search, words: words,
                             template: "search")
@@ -1678,7 +1702,13 @@ public final class AppState {
         // one asked for two steps and gets to take them back one at a time; the last of them
         // is the one that returns them to the list, which still has its scroll position and
         // its ring.
-        guard !threads.isEmpty else { return false }
+        // Behind the conversation, ahead of nothing: a reader who pressed a tag, then opened a
+        // post from the tag's timeline, takes those two steps back in the order they took them.
+        guard !threads.isEmpty else {
+            guard viewingTag != nil else { return false }
+            closeTag()
+            return true
+        }
         // `_ =` because `removeLast` hands back what it removed, and a closure whose last
         // expression is a value makes `withAnimation` return it — which nobody wants and the
         // compiler is right to mention.

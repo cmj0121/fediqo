@@ -105,6 +105,11 @@ struct PostRow: View {
     /// Declared last on purpose: a call site writes it as a trailing closure, and a parameter
     /// added after it would quietly take the closure instead.
     var open: (() -> Void)?
+    /// What a press on one of the post's tags asks for — a timeline of it (#107).
+    ///
+    /// **Declared after `open` and that is safe**, unlike the two above it: this one takes an
+    /// argument, so a trailing closure written at a call site cannot be mistaken for it.
+    var openTag: ((String) -> Void)?
 
     @Environment(\.openURL) private var openURL
     @Environment(\.fediqoWideRows) private var wide
@@ -224,6 +229,14 @@ struct PostRow: View {
                 }
                 .padding(.top, Space.tight)
             }
+            // The tags, where the whole post is being read rather than scanned (#107).
+            //
+            // **Only here, and that is the point.** In a list they are already in the words,
+            // tinted and pressable, and a row of chips under forty rows would be a row of
+            // controls where a sentence was doing the job. On the opened post there is one post
+            // and room to say what it carries — and a chip is a real button, so this is also
+            // where a tag can be reached with the keyboard rather than only with a pointer.
+            if !condensed, !post.tags.isEmpty { tags }
             if acting { InteractionBar(post: post, open: open) }
             footer
         }
@@ -579,6 +592,29 @@ struct PostRow: View {
             .frame(maxWidth: widest, maxHeight: widest * AttachmentDeck.ratio)
             .aspectRatio(1 / AttachmentDeck.ratio, contentMode: .fit)
             .overlay { GeometryReader { room in card(room.size.width) } }
+    }
+
+    /// What this post is filed under, as the server sent it.
+    ///
+    /// Drawn from `post_tags` rather than from the words, so a tag the author put in the fields
+    /// rather than in the sentence is here too — and a post whose server sent none draws nothing
+    /// at all rather than an empty band.
+    private var tags: some View {
+        FlowRow(spacing: Space.tight, lineSpacing: Space.tight) {
+            ForEach(post.tags, id: \.self) { tag in
+                Button { openTag?(tag) } label: {
+                    Text(verbatim: "#\(tag)")
+                        .fediqoFont(TypeScale.minor)
+                        .foregroundStyle(Palette.accent)
+                        .padding(.horizontal, Space.snug)
+                        .padding(.vertical, Space.tight)
+                        .fediqoCard(radius: Radius.inner, raised: false)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text(t("post.tags") + " #\(tag)"))
+            }
+        }
+        .padding(.top, Space.tight)
     }
 
     /// The foot of the row: what the post was written with.

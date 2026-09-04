@@ -64,6 +64,16 @@ struct AppShell: View {
             // behind it.
             .shortcutsOverlay()
             .onAppear { app.openLink = { openURL($0) } }
+            // A hashtag in somebody's words is spelled as an address, because a pressable run
+            // inside a line of prose is the one thing SwiftUI will put there and still let the
+            // line wrap and be selected. This is where the app takes its own back: `fediqo-tag:`
+            // opens a timeline of that tag and **never reaches a browser**, and every other
+            // address goes out exactly as it did (#107).
+            .environment(\.openURL, OpenURLAction { url in
+                guard let tag = TagLink.tag(in: url) else { return .systemAction }
+                app.openTag(tag)
+                return .handled
+            })
             .shellKeyPresses()
             .shellKeyCommands()
             .task(id: app.refreshKey) { await app.refreshWhileVisible() }
