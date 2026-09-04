@@ -262,6 +262,15 @@ public protocol SourceClient: Sendable {
     func searchTags(matching query: String, limit: Int,
                     as account: ActingAccount) async throws -> [String]
 
+    /// What somebody asked you to read first — the posts they pinned (#112).
+    ///
+    /// A separate ask from what they wrote, and the answer is small: a handful at most, usually
+    /// none. It is the one place on the fediverse where somebody says *start here*.
+    ///
+    /// Not paged. Pinned posts are a set somebody chose, not a stretch of time, and there is no
+    /// second page of them to walk to.
+    func pinned(by id: String, host: String, token: String?) async throws -> [Post]
+
     /// The same events as they happen, over one connection held open for as long as the
     /// sequence is iterated.
     ///
@@ -683,6 +692,11 @@ public extension SourceClient {
                     as account: ActingAccount) async throws -> [String] {
         throw SourceFailure.unsupported(.mastodon)
     }
+
+    /// What somebody pinned (#112). Default: nothing, and that is the same answer a server gives
+    /// for somebody who pinned nothing — which is right here, because a protocol with no pinning
+    /// has no *start here* to miss, and the page draws nothing either way.
+    func pinned(by id: String, host: String, token: String?) async throws -> [Post] { [] }
 
     /// Those events as they happen. Default: a sequence that ends at once saying why, rather
     /// than one that stays open forever handing nothing over — a caller waiting on silence

@@ -504,6 +504,13 @@ struct FixtureSource: SourceClient {
     /// The same list `people(_:of:...)` is built from, matched the way a server matches: on the
     /// handle and on the name, either end. Nothing is fetched, because there is nowhere to fetch
     /// from and because the real one does not fetch either.
+    /// What the fixture's person asked you to read first (#112). Their oldest post, which is
+    /// what a pinned post usually is — and what makes the band worth having: dropped into a
+    /// newest-first list it would be at the bottom where nobody scrolls.
+    func pinned(by id: String, host: String, token: String?) async throws -> [Post] {
+        Array(Fixture.timeline(of: host).filter { $0.authorHandle == id }.suffix(1))
+    }
+
     func searchPeople(matching query: String, limit: Int,
                       as account: ActingAccount) async throws -> [Profile] {
         let wanted = query.lowercased()

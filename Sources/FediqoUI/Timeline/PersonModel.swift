@@ -62,6 +62,12 @@ final class PersonModel {
 
     private(set) var profile: Profile?
     private(set) var posts: [Post] = []
+    /// What they asked you to read first (#112).
+    ///
+    /// Held apart from what they wrote rather than merged into it. A pinned post is often years
+    /// old, and dropped into a newest-first list it would be at the bottom where nobody
+    /// scrolls — which is the opposite of what pinning means.
+    private(set) var pinned: [Post] = []
     /// What the reader is to them, or `nil` for two different reasons the page must keep apart:
     /// nobody is signed in anywhere, or the acting server has never heard of them. `known` says
     /// which.
@@ -121,6 +127,12 @@ final class PersonModel {
             if let profile {
                 posts = try await client.posts(by: profile.id, host: subject.host,
                                                limit: 20, before: nil, token: nil)
+                // A second ask, and its own failure. Most people have pinned nothing, so this
+                // is usually an empty answer — and a server that will not answer it leaves the
+                // band absent rather than taking the page down with it. What they wrote is
+                // still true and still on screen.
+                pinned = (try? await client.pinned(by: profile.id, host: subject.host,
+                                                   token: nil)) ?? []
             }
         } catch {
             failure = SourceFailure.of(error)

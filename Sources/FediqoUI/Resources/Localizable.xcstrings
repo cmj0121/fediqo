@@ -6291,6 +6291,23 @@
           }
         }
       }
+    },
+    "person.pinned": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pinned"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "置頂"
+          }
+        }
+      }
     }
   }
 }
