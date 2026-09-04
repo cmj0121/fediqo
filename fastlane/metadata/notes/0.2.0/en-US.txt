@@ -1,0 +1,11 @@
+Every way there is to read.
+
+0.1.0 asked that you could read a timeline, say something, and answer somebody. This one asks that every way there is to read is the same way — one shape, one set of keys, one place a post is written down, whatever question was asked to get it.
+
+• A timeline made of hashtags, asked for by tag rather than sieved out of one that was asked for something else
+• A tag on a post is something you can press
+• One server's own writers, or everything but them
+• Find what this device already holds, with the network off and without asking anybody
+• Your own page, and the posts you have not sent yet
+
+Nothing is collected. There is no Fediqo server for anything to be collected on.
