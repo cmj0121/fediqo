@@ -39,11 +39,38 @@ struct EmojiText: View {
     /// reading it in `body` rather than from owning it.
     private let cache = EmojiCache.shared
 
-    init(_ text: String, emojis: [CustomEmoji], size: CGFloat = TypeScale.body, weight: Font.Weight = .regular) {
+    /// Whether an address in this line is drawn as a link.
+    ///
+    /// **The two inits below are the whole of it, and the unlabelled one — the one somebody
+    /// writing a new line of this app reaches for — is the one that does not link.** A name is
+    /// not prose: it is a label, and it is written by somebody else. A person may call
+    /// themselves `example.com`, and this view drew that in the accent colour, underlined it,
+    /// and handed a press of it to the reader's browser, in five places (#119). A row inventing
+    /// something about a post is the one thing it must not do, and a control made out of a
+    /// stranger's name is that.
+    private let links: Bool
+
+    /// A name, a handle, or anything else that is a label rather than something somebody wrote.
+    /// Drawn as text, whatever it happens to look like.
+    init(_ text: String, emojis: [CustomEmoji],
+         size: CGFloat = TypeScale.body, weight: Font.Weight = .regular) {
+        self.init(text, emojis: emojis, size: size, weight: weight, links: false)
+    }
+
+    /// Somebody's words — a post, the warning above one, a bio. An address in them is a link,
+    /// which is #44, and it is the author's own address rather than one this app worked out.
+    init(prose text: String, emojis: [CustomEmoji],
+         size: CGFloat = TypeScale.body, weight: Font.Weight = .regular) {
+        self.init(text, emojis: emojis, size: size, weight: weight, links: true)
+    }
+
+    private init(_ text: String, emojis: [CustomEmoji],
+                 size: CGFloat, weight: Font.Weight, links: Bool) {
         self.text = text
         self.emojis = emojis
         self.size = size
         self.weight = weight
+        self.links = links
     }
 
     /// How tall a picture in this line is, and how far below the baseline it starts: the font's
@@ -113,7 +140,7 @@ struct EmojiText: View {
         CustomEmoji.runs(in: text, from: emojis).reduce(Text(verbatim: "")) { line, run in
             switch run {
             case .text(let words):
-                return line + Self.written(words)
+                return line + (links ? Self.written(words) : Text(verbatim: words))
             case .emoji(let emoji):
                 // Until the picture is here the shortcode stands in for it, which is what the
                 // reader would have seen anyway and is never a blank.

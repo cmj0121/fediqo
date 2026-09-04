@@ -363,6 +363,10 @@ struct PostRow: View {
             .accessibilityLabel(Text(post.authorName))
             .accessibilityHint(Text(t("person.title")))
             if verbose {
+                // A handle is a label like the name beside it, and `@a@example.com` is most of
+                // an address by construction — so it is drawn as text and never hunted through.
+                // Safe twice over since #119: a plain `Text`, and `EmojiText`'s plain init would
+                // not link it either if it ever wanted emoji.
                 Text(post.authorHandle).fediqoFont(TypeScale.minor).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: Space.snug)
@@ -460,7 +464,7 @@ struct PostRow: View {
         VStack(alignment: .leading, spacing: Space.snug) {
             if !spoiler.isEmpty { warning }
             if !post.text.isEmpty, !wordsAreCovered {
-                EmojiText(post.text, emojis: post.emojis)
+                EmojiText(prose: post.text, emojis: post.emojis)
                     .textSelection(.enabled)
                     .lineLimit(condensed ? lines : nil)
                     .truncationMode(.tail)
@@ -483,7 +487,7 @@ struct PostRow: View {
             Image(systemName: "exclamationmark.triangle.fill")
                 .fediqoSymbol(Glyph.inline)
                 .foregroundStyle(.orange)
-            EmojiText(spoiler, emojis: post.emojis, size: TypeScale.small, weight: .semibold)
+            EmojiText(prose: spoiler, emojis: post.emojis, size: TypeScale.small, weight: .semibold)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: Space.step)
             toggle

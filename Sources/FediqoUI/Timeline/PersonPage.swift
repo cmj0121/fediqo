@@ -120,7 +120,7 @@ struct PersonPage: View {
                 VStack(alignment: .leading, spacing: Space.gap) { portrait; names }
             }
             if !note.isEmpty {
-                EmojiText(note, emojis: model.emojis, size: TypeScale.body)
+                EmojiText(prose: note, emojis: model.emojis, size: TypeScale.body)
                     .fixedSize(horizontal: false, vertical: true)
             }
             counts
