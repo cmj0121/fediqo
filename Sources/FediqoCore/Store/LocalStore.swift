@@ -249,6 +249,11 @@ public final class LocalStore: Sendable {
             try db.execute(sql: "UPDATE feeds SET created_at = ? WHERE feed = 'tag'",
                            arguments: [milliseconds(Date())])
         }
+        migrator.registerMigration("019") { db in
+            try db.execute(sql: schema(named: "schema-019"))
+            try db.execute(sql: "UPDATE feeds SET created_at = ? WHERE feed = 'search'",
+                           arguments: [milliseconds(Date())])
+        }
         return migrator
     }
 

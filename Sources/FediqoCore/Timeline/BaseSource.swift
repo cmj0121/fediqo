@@ -95,6 +95,22 @@ public enum BaseSource: String, Sendable, CaseIterable, Identifiable, Codable {
     ///
     /// Any base may carry tags; this is the one whose posts are only that.
     case tag
+    /// Posts this device already holds, matched on their words (#105).
+    ///
+    /// **The one reading that asks nobody.** `PostStore.search` has been there since migration
+    /// 010 and nothing opened it, so a reader wanting the post they remember had to scroll for
+    /// it. What it searches is what is already here, which is what makes it instant, private,
+    /// and available with the network off — for the post you remember, the better search.
+    ///
+    /// It is a base and an origin, like `tag`, and for a reason that arrives with #106: a search
+    /// put to a server writes what it answers into the store, and those posts arrived by a
+    /// search. Until then nothing arrives this way and the reading is a question put to the
+    /// store alone.
+    ///
+    /// Read differently from every other base: they ask `post_origins` how a post arrived, and
+    /// this one does not ask at all. A search is about what this device holds, however it came
+    /// to hold it.
+    case search
 
     public var id: String { rawValue }
 

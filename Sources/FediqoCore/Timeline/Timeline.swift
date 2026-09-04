@@ -89,6 +89,8 @@ public struct Timeline: Sendable, Hashable, Identifiable, Codable {
     /// none of them, and a reader is left thinking the tag is quiet. These are a question put to
     /// every server the reader has added.
     public var tags: [String]
+    /// What a search is for. Empty unless `source` is `.search` (#105).
+    public var words: String
     /// Whose home this is. Nil unless `source` is `.home`.
     public var account: String?
     public var template: String
@@ -97,7 +99,7 @@ public struct Timeline: Sendable, Hashable, Identifiable, Codable {
 
     public init(id: String = UUID().uuidString, name: String, summary: String = "",
                 source: BaseSource, writers: Writers = .everyone, tags: [String] = [],
-                account: String? = nil, template: String, position: Int = 0,
+                words: String = "", account: String? = nil, template: String, position: Int = 0,
                 filters: [TimelineFilter] = []) {
         self.id = id
         self.name = name
@@ -113,6 +115,7 @@ public struct Timeline: Sendable, Hashable, Identifiable, Codable {
         self.tags = Post.normalisedTags(tags).reduce(into: []) { kept, tag in
             if !kept.contains(tag) { kept.append(tag) }
         }
+        self.words = source == .search ? words : ""
         self.account = source.needsAccount ? account : nil
         self.template = template
         self.position = position
@@ -123,8 +126,8 @@ public struct Timeline: Sendable, Hashable, Identifiable, Codable {
     /// two timelines called different things that ask the same question are one page of posts,
     /// and the screens hold their own place in each anyway.
     public var query: TimelineQuery {
-        TimelineQuery(source: source, writers: writers, tags: tags, account: account,
-                      filters: filters)
+        TimelineQuery(source: source, writers: writers, tags: tags, words: words,
+                      account: account, filters: filters)
     }
 }
 
@@ -135,14 +138,17 @@ public struct TimelineQuery: Sendable, Hashable {
     public let writers: Writers
     /// The hashtags asked for alongside the base, normalised (#104).
     public let tags: [String]
+    /// What a search is for, where this reading is one (#105).
+    public let words: String
     public let account: String?
     public let filters: [TimelineFilter]
 
     public init(source: BaseSource, writers: Writers = .everyone, tags: [String] = [],
-                account: String? = nil, filters: [TimelineFilter] = []) {
+                words: String = "", account: String? = nil, filters: [TimelineFilter] = []) {
         self.source = source
         self.writers = source == .public ? writers : .everyone
         self.tags = tags
+        self.words = source == .search ? words : ""
         self.account = account
         self.filters = filters
     }
@@ -154,8 +160,10 @@ public struct TimelineQuery: Sendable, Hashable {
     /// A timeline based on `tag` with no tags has nothing here at all, and asks nobody — which
     /// is what #104 means by a base of nothing being empty rather than quietly the public
     /// timeline.
+    /// A search asks nobody, so it has no readings at all — what it is about is what this
+    /// device already holds, and the store is asked directly (#105).
     public var readings: [Reading] {
-        (source == .tag ? [] : [Reading.base(source)]) + tags.map(Reading.tag)
+        (source == .tag || source == .search ? [] : [Reading.base(source)]) + tags.map(Reading.tag)
     }
 
     /// One question this timeline puts to a server.

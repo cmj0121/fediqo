@@ -355,6 +355,14 @@ extension LocalStore {
             }
         }
 
+        // A search is not asked of `post_origins` at all: it is about what this device holds,
+        // however it came to hold it (#105). The words are matched the one way this store
+        // matches words, which is `search` above — so there is one idea of what matching means
+        // rather than two that would drift.
+        if query.source == .search {
+            return try await search(query.words, limit: limit, before: before)
+        }
+
         let page = TimelineOrder.cut(before: before)
         // Which reading carried it. A timeline is a base and the tags beside it (#104), so this
         // is one `EXISTS` per reading joined by `OR` — the same merge the loader does across

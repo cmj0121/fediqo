@@ -30,7 +30,7 @@ extension LocalStore {
                     TimelineFilter(kind: kind, value: row["value"], negate: (row["negate"] as Int) == 1))
             }
             return try Row.fetchAll(db, sql: """
-                SELECT id, name, summary, feed, writers, author_id, template, position
+                SELECT id, name, summary, feed, writers, words, author_id, template, position
                 FROM timelines ORDER BY position, id
                 """).compactMap { row in
                 // A row naming a base source this build does not know is a row from a later
@@ -46,7 +46,7 @@ extension LocalStore {
                 let writers = Writers(rawValue: row["writers"]) ?? .everyone
                 return Timeline(id: id, name: row["name"], summary: row["summary"],
                                 source: source, writers: writers, tags: subscribed[id] ?? [],
-                                account: row["author_id"],
+                                words: row["words"], account: row["author_id"],
                                 template: row["template"], position: row["position"],
                                 filters: rules[id] ?? [])
             }
@@ -61,16 +61,17 @@ extension LocalStore {
         let filters = timeline.filters
         try await write { db in
             try db.execute(sql: """
-                INSERT INTO timelines (id, name, summary, feed, writers, author_id, template, position, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO timelines (id, name, summary, feed, writers, words, author_id, template, position, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (id) DO UPDATE SET
                     name = excluded.name, summary = excluded.summary, feed = excluded.feed,
-                    writers = excluded.writers,
+                    writers = excluded.writers, words = excluded.words,
                     author_id = excluded.author_id, position = excluded.position,
                     updated_at = excluded.created_at
                 """, arguments: [timeline.id, timeline.name, timeline.summary,
                                  timeline.source.rawValue, timeline.writers.rawValue,
-                                 timeline.account, timeline.template, timeline.position, ms])
+                                 timeline.words, timeline.account, timeline.template,
+                                 timeline.position, ms])
             // Rewritten rather than merged, for the reason the rules below are: a tag the
             // reader took off is a tag that has to be gone, and there is no such thing as a
             // half-applied subscription.

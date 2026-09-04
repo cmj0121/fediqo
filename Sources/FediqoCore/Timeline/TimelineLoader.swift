@@ -923,6 +923,11 @@ public struct TimelineLoader: Sendable {
             case .author: []
             // Handled above: a tag is asked for by name, and `reading` is what carries it.
             case .tag: []
+            // Nor is a search fanned out: what it is about is what this device already holds,
+            // and the store is asked directly. It asks nobody, so it has no readings at all and
+            // this line is never reached — until #106, which is a question put to a server and
+            // has a cost this one does not (#105).
+            case .search: []
             }
             }
         } catch {

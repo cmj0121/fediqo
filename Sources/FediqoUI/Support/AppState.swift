@@ -118,6 +118,9 @@ struct LaunchOptions {
     /// Whether this run opens the timeline builder. The last sheet with no way in but a press,
     /// and the one #113 added templates to that nobody could photograph (#30).
     var editingTimeline: Bool = false
+    /// What this run searches this device for, or nothing. A reading reached by a key and a
+    /// field is a reading nothing on a runner can reach (#30).
+    var searchingFor: String?
     /// Whose page to open, named the same way, for the same reason: the page about somebody is
     /// reached by pressing a name.
     ///
@@ -183,6 +186,7 @@ struct LaunchOptions {
         options.showingNotices = environment["FEDIQO_NOTICES"] == "1"
         options.openingPost = environment["FEDIQO_OPEN"]
         options.editingTimeline = environment["FEDIQO_EDIT"] == "1"
+        options.searchingFor = environment["FEDIQO_SEARCH"]
         options.openingPerson = environment["FEDIQO_PERSON"]
         options.openingReply = environment["FEDIQO_REPLY"]
         options.openingPeople = environment["FEDIQO_PEOPLE"].flatMap(People.Kind.init(rawValue:))
@@ -276,6 +280,16 @@ public final class AppState {
     /// from outside the screen that draws them. The drawing stays where it was.
     var addingSource = false
     var showingNotifications: Bool
+    /// What the reader is searching this device for, or empty (#105).
+    ///
+    /// On the app rather than on the screen because two things reach it: the field, and the key
+    /// that opens the field. A `@State` inside `FeedScreen` can be reached by neither the rail
+    /// nor a menu item, which is the same reason `showingNotifications` lives here.
+    var searching = ""
+    /// Whether the field is up. Distinct from having words in it: a reader who opened the field
+    /// and typed nothing is still searching, and the timeline underneath has not gone anywhere.
+    var showingSearch = false
+
 
     /// The inbox, and the connections that keep it filled. Nil where there is no store — the
     /// fixture without one, and any build that has none.
@@ -563,6 +577,12 @@ public final class AppState {
         // The language before the first frame, not after it: a screenshot is taken of what was
         // drawn, and a tree redrawn a moment later is a photograph of the moment before. The
         // text size is set here for the same reason and it is the same kind of fact.
+        // Acted on rather than kept: unlike the pages a run is told to open, a search is
+        // already the whole of what it does, so there is nothing left to read it later.
+        if let words = launch.searchingFor, !words.isEmpty {
+            showingSearch = true
+            searching = words
+        }
         if let language = launch.language { preferences.language = language }
         if let scale = launch.textScale { preferences.textScale = scale }
         L10n.use(preferences.language)
@@ -920,7 +940,20 @@ public final class AppState {
     /// feeds themselves. Kept reads the store, Statistics reads the store and the ledger, and
     /// Settings reads nobody: one screen each, and no feed on any of them.
     var readingTimeline: Timeline? {
-        railItem == .timeline ? (timeline(currentTimeline) ?? timelines.first) : nil
+        guard railItem == .timeline else { return nil }
+        // A search is a reading, so it is a timeline — the same rows, the same ring, the same
+        // keys, the same paging, none of it written again (#105). One that is never saved: the
+        // id is fixed so that `feed(for:)` keeps one page across every search, and typing new
+        // words hands the new question to the page that is already open rather than starting a
+        // second one, which is what a reader editing any timeline already gets.
+        if !searching.isEmpty { return Self.searchTimeline(for: searching) }
+        return timeline(currentTimeline) ?? timelines.first
+    }
+
+    /// The reading a search is. Not in `timelines` and never written down: it belongs to this
+    /// moment rather than to the row of tabs.
+    static func searchTimeline(for words: String) -> Timeline {
+        Timeline(id: "search", name: "", source: .search, words: words, template: "search")
     }
 
     /// The feed being read, ready to be asked something. Every key that moves through a
@@ -1168,6 +1201,13 @@ public final class AppState {
         case .completeMention: return takeTheOfferedHandle()
         case .backToTop: return goToTop()
         case .showShortcuts: setShowingShortcuts(true); return true
+        // Opens the field, and closes it with the words it was holding — pressing it again is
+        // how a reader gets their timeline back without reaching for the pointer (#105).
+        case .searchHere:
+            guard railItem == .timeline else { return false }
+            showingSearch.toggle()
+            if !showingSearch { searching = "" }
+            return true
         }
     }
 
