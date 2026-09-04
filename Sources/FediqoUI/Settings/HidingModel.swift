@@ -12,6 +12,10 @@ import FediqoCore
 final class HidingModel {
     /// What each server answered, keyed by the account it was asked as.
     private(set) var found: [String: [Hiding: [Hidden.Subject]]] = [:]
+    /// The hashtags each server says this account follows (#114).
+    private(set) var tags: [String: [String]] = [:]
+    /// The lists each server says this account has made.
+    private(set) var lists: [String: [ServerList]] = [:]
     private(set) var loading = false
     private(set) var failure: SourceFailure?
     private var hasRead = false
@@ -27,6 +31,8 @@ final class HidingModel {
 
     /// Every account's handle that answered, in a settled order so the lists do not shuffle.
     var hosts: [String] { found.keys.sorted() }
+    /// Every account that answered about something it is subscribed to, in a settled order.
+    var subscribedHosts: [String] { Set(tags.keys).union(lists.keys).sorted() }
 
     func readIfNeeded() async {
         guard !hasRead else { return }
@@ -43,6 +49,8 @@ final class HidingModel {
         guard let client = client() else { return }
 
         var answers: [String: [Hiding: [Hidden.Subject]]] = [:]
+        var subscribedTags: [String: [String]] = [:]
+        var madeLists: [String: [ServerList]] = [:]
         var refused: SourceFailure?
         for account in asking {
             var mine: [Hiding: [Hidden.Subject]] = [:]
@@ -58,9 +66,33 @@ final class HidingModel {
                 }
             }
             if !mine.isEmpty { answers[account.host] = mine }
+
+            // The two subscriptions, asked of the same account in the same round. Each refusing
+            // is its own refusal: a server with no followed tags still has lists worth showing.
+            if let followed = try? await client.followedTags(as: account), !followed.isEmpty {
+                subscribedTags[account.host] = followed
+            }
+            if let made = try? await client.lists(as: account), !made.isEmpty {
+                madeLists[account.host] = made
+            }
         }
         found = answers
+        tags = subscribedTags
+        lists = madeLists
         failure = refused
+    }
+
+    /// Stop following a hashtag, on the server that is following it.
+    func unfollow(_ tag: String, on host: String) async {
+        guard let client = client(),
+              let account = await accounts().first(where: { $0.host == host })
+        else { return }
+        do {
+            try await client.unfollowTag(tag, as: account)
+            await read()
+        } catch {
+            failure = SourceFailure.of(error)
+        }
     }
 
     /// Stop hiding one of them, on the server that is doing it.

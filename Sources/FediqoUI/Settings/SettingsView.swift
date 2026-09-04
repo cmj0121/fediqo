@@ -50,6 +50,7 @@ struct SettingsView: View {
             section(t("settings.sources")) { sources }
             section(t("settings.muted")) { muted }
             section(t("settings.hiding")) { hiding }
+            section(t("settings.subscribed")) { subscribed }
                 // Keyed on the accounts, not on the screen appearing: who is signed in arrives
                 // over the keychain after the shell is drawn, so asking once on appear asks
                 // before there is anybody to ask as (#109 found this the same way).
@@ -198,6 +199,67 @@ struct SettingsView: View {
             .pickerStyle(.menu)
             .labelsHidden()
             .fixedSize()
+        }
+    }
+
+    /// What each of the reader's servers says this account is subscribed to (#114).
+    ///
+    /// **A list made two years ago on a website is a thing only that website knows about**, and
+    /// a hashtag followed and forgotten is a subscription quietly shaping a home timeline. Being
+    /// able to see them is most of being able to decide about them.
+    ///
+    /// A followed hashtag can be let go from here. A list cannot yet be read as a timeline —
+    /// that is #103's `/api/v1/timelines/list/:id` and is not built — so it is shown and not
+    /// offered, which is the honest half.
+    @ViewBuilder
+    private var subscribed: some View {
+        let model = app.hiding
+        if model.subscribedHosts.isEmpty {
+            Text(t("settings.subscribed.none"))
+                .fediqoFont(TypeScale.minor)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            ForEach(model.subscribedHosts, id: \.self) { host in
+                if let tags = model.tags[host], !tags.isEmpty {
+                    Text(t("settings.subscribed.tags", host))
+                        .fediqoFont(TypeScale.caption)
+                        .foregroundStyle(.tertiary)
+                    ForEach(tags, id: \.self) { tag in
+                        HStack(spacing: Space.step) {
+                            Image(systemName: "number")
+                                .fediqoSymbol(Glyph.inline).foregroundStyle(.secondary)
+                            Text(verbatim: "#\(tag)").fediqoFont(TypeScale.small).lineLimit(1)
+                            Spacer(minLength: Space.step)
+                            Button(t("settings.subscribed.unfollow")) {
+                                Task { await app.hiding.unfollow(tag, on: host) }
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .fediqoFont(TypeScale.minor)
+                        }
+                    }
+                }
+                if let lists = model.lists[host], !lists.isEmpty {
+                    Text(t("settings.subscribed.lists", host))
+                        .fediqoFont(TypeScale.caption)
+                        .foregroundStyle(.tertiary)
+                    ForEach(lists) { list in
+                        HStack(spacing: Space.step) {
+                            Image(systemName: "list.bullet")
+                                .fediqoSymbol(Glyph.inline).foregroundStyle(.secondary)
+                            Text(list.title).fediqoFont(TypeScale.small).lineLimit(1)
+                            Spacer(minLength: Space.step)
+                            // Said rather than offered: reading one as a timeline is #103's and
+                            // is not built, and a button that did nothing would be worse than
+                            // no button.
+                            Text(t("settings.subscribed.lists.note"))
+                                .fediqoFont(TypeScale.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+            }
         }
     }
 

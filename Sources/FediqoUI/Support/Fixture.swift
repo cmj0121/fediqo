@@ -663,6 +663,28 @@ struct FixtureSource: SourceClient {
     func stopHiding(_ which: Hiding, _ subject: Hidden.Subject,
                     as account: ActingAccount) async throws {}
 
+    /// Somebody waiting on an answer, and two subscriptions, so the last three of #114 can be
+    /// photographed with something in them.
+    func followRequests(as account: ActingAccount) async throws -> [Profile] {
+        Fixture.timeline(of: account.host).dropFirst(2).prefix(1).map {
+            Profile(id: $0.authorHandle, authorId: $0.authorId, name: $0.authorName,
+                    handle: $0.authorHandle, avatarURL: $0.authorAvatarURL, emojis: $0.emojis)
+        }
+    }
+
+    func answerFollowRequest(_ who: Profile, accept: Bool,
+                             as account: ActingAccount) async throws {}
+
+    func followedTags(as account: ActingAccount) async throws -> [String] {
+        ["libraries", "slowweb"]
+    }
+
+    func unfollowTag(_ tag: String, as account: ActingAccount) async throws {}
+
+    func lists(as account: ActingAccount) async throws -> [ServerList] {
+        [ServerList(id: "1", title: "People who make things", host: account.host)]
+    }
+
     func report(_ post: Post, id: String, as account: ActingAccount, comment: String) async throws {}
 }
 

@@ -64,7 +64,9 @@ enum RailItem: String, CaseIterable, Identifiable, Hashable {
 /// ordered by the conversation — so neither is a tab of the Timeline page, and each says which
 /// it is in the line under the title.
 enum InboxTab: String, CaseIterable, Identifiable, Hashable {
-    case notices, talks
+    /// Three, and the third is the one that is waiting on the reader rather than telling them
+    /// something: somebody has asked to follow you (#114).
+    case notices, talks, requests
 
     var id: String { rawValue }
 }
@@ -352,6 +354,13 @@ public final class AppState {
     /// Who the reader is talking to (#109). Built once and kept, the way the feeds are: the page
     /// is rebuilt on every visit and what it holds should not be re-asked with it.
     /// What each server is hiding for the reader (#114).
+    /// Who has asked to follow the reader and is waiting (#114).
+    @ObservationIgnored lazy var requests = RequestsModel { [weak self] in
+        await self?.everyAccount() ?? []
+    } client: { [weak self] in
+        self?.registry.client(for: .mastodon)
+    }
+
     @ObservationIgnored lazy var hiding = HidingModel { [weak self] in
         await self?.everyAccount() ?? []
     } client: { [weak self] in
@@ -1861,6 +1870,7 @@ public final class AppState {
             switch inboxTab {
             case .notices: Task { await askForNotices() }
             case .talks: Task { await talks.read() }
+            case .requests: Task { await requests.read() }
             }
             return true
         }
