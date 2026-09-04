@@ -32,9 +32,18 @@ struct TimelineEditor: View {
     let subject: Subject
     let done: () -> Void
 
-    /// Wide enough for a rule and its two fields side by side, and no wider: the sheet stands
-    /// over the timeline it edits, and covering the whole of it would hide what is being said.
-    private static let sheetWidth: CGFloat = 380
+    /// Wide enough for a rule read as a sentence and the controls that change it, and no wider:
+    /// the sheet stands over the timeline it edits, and covering the whole of it would hide what
+    /// is being said.
+    ///
+    /// **It grew, and #115 said it would.** A list of rules and a preview do not fit in the 380
+    /// points that held three questions. Whether it should still be a sheet at all is the
+    /// question that comes next, and it is a question to ask of a height that is a fact rather
+    /// than a guess — which it now is.
+    private static let sheetWidth: CGFloat = 460
+    /// How much of the preview is shown. Enough to recognise what the rules are letting through,
+    /// and not so much that the sheet becomes the timeline it is standing over.
+    private static let previewed = 3
 
     @Environment(AppState.self) private var app
     @State private var template = TimelineTemplate.shipped[0]
@@ -46,6 +55,14 @@ struct TimelineEditor: View {
     /// The hashtags this timeline subscribes to — asked for, not sieved (#104). On every
     /// template rather than only the one about a tag: a timeline is a base and the tags beside
     /// it, so a reader's home timeline may carry them too.
+    /// The rules as they stand, which is what the reader is editing (#115).
+    ///
+    /// Held here and written on Save rather than into the timeline as they are typed: a reader
+    /// who changes their mind and presses Cancel has not changed anything.
+    @State private var rules: [TimelineFilter] = []
+    /// What the rules as they stand let through, out of what this device already holds.
+    @State private var preview: [Post] = []
+    @State private var previewCount = 0
     @State private var tags: [String] = []
     /// The one being typed, before it is added. Separate from the list because a half-typed tag
     /// is not a subscription and must not be saved as one.
@@ -125,6 +142,8 @@ struct TimelineEditor: View {
         // The long one. A name is two words and the line under it is what the page shows to
         // say what those two words mean — `PageHeader` has kept the room for it all along.
         field(t("timeline.description"), text: $summary, lines: 3)
+        rulesList
+        previewList
 
         if chosen.source.needsAccount, app.servers.isEmpty {
             Text(t("timeline.needsAccount"))
@@ -132,6 +151,154 @@ struct TimelineEditor: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    /// The rules, as sentences a person would say, each with the two things that can be done
+    /// to it: turned round, or taken off (#115).
+    ///
+    /// **A list and not a field.** The model has carried several rules of five kinds, each
+    /// including or excluding, since it was written — the sheet was the only thing keeping any
+    /// of it from the reader. It wrote exactly one, of whichever kind the template implied, and
+    /// never set `negate` at all, so *this hashtag but not from that server* could not be said.
+    @ViewBuilder
+    private var rulesList: some View {
+        VStack(alignment: .leading, spacing: Space.tight) {
+            HStack {
+                Text(t("timeline.rules")).fediqoFont(TypeScale.minor).foregroundStyle(.secondary)
+                Spacer()
+                Menu {
+                    ForEach(TimelineFilter.Kind.allCases, id: \.self) { kind in
+                        Button(t("timeline.kind.\(kind.rawValue)")) { add(kind) }
+                    }
+                } label: {
+                    Label(t("timeline.rules.add"), systemImage: "plus")
+                        .labelStyle(.titleAndIcon)
+                        .fediqoFont(TypeScale.minor)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+            }
+            if rules.isEmpty {
+                // Removing the last rule leaves a timeline rather than a broken one: no rules
+                // means everything the reading carries, which is what the three shipped ones are.
+                Text(t("timeline.rules.none"))
+                    .fediqoFont(TypeScale.minor)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            ForEach(Array(rules.enumerated()), id: \.offset) { at, rule in
+                ruleRow(at: at, rule: rule)
+            }
+        }
+    }
+
+    private func ruleRow(at index: Int, rule: TimelineFilter) -> some View {
+        HStack(spacing: Space.step) {
+            // Which way round it is, said in words rather than by a checkbox called `negate`.
+            Picker("", selection: Binding(
+                get: { rules[index].negate },
+                set: { rules[index] = TimelineFilter(kind: rule.kind, value: rule.value, negate: $0) }
+            )) {
+                Text(t("timeline.rules.keep")).tag(false)
+                Text(t("timeline.rules.drop")).tag(true)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+
+            if rule.kind == .media {
+                // The whole rule; there is nothing to name. A field here would be a box asking
+                // for something that does not exist.
+                Text(t(rule.sentence.key))
+                    .fediqoFont(TypeScale.minor)
+                    .foregroundStyle(.secondary)
+            } else {
+                TextField(t("timeline.kind.\(rule.kind.rawValue)"), text: Binding(
+                    get: { rules[index].value },
+                    set: { rules[index] = TimelineFilter(kind: rule.kind, value: $0, negate: rule.negate) }
+                ))
+                .textFieldStyle(.plain)
+                .fediqoFont(TypeScale.small)
+                .padding(Space.step)
+                .fediqoCard(radius: Radius.inner, raised: false)
+            }
+
+            Button { rules.remove(at: index) } label: {
+                Image(systemName: "xmark").fediqoSymbol(Glyph.inline)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help(t("timeline.rules.remove"))
+            .accessibilityLabel(Text(t("timeline.rules.remove")))
+        }
+    }
+
+    /// What the rules as they stand let through, out of what this device already holds (#115).
+    ///
+    /// **It asks nobody.** So it costs nobody's server anything, works with the network off, and
+    /// is instant — and it says out loud that it is showing what is already here rather than
+    /// what exists, because anything else would be a promise it cannot keep. It is #105's read
+    /// path, pointed at a timeline that does not exist yet.
+    @ViewBuilder
+    private var previewList: some View {
+        VStack(alignment: .leading, spacing: Space.tight) {
+            Text(t("timeline.preview")).fediqoFont(TypeScale.minor).foregroundStyle(.secondary)
+            if preview.isEmpty {
+                Text(t("timeline.preview.none"))
+                    .fediqoFont(TypeScale.minor)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ForEach(preview.prefix(Self.previewed), id: \.mergeKey) { post in
+                    VStack(alignment: .leading, spacing: Space.tight) {
+                        Text(post.authorHandle)
+                            .fediqoFont(TypeScale.caption)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                        // The post as the reader would see it, shortcodes drawn as the pictures
+                        // they are: a preview written in `:spark:` is not a preview of what the
+                        // timeline will look like.
+                        EmojiText(prose: post.text, emojis: post.emojis, size: TypeScale.minor)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                    .padding(Space.step)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fediqoCard(radius: Radius.inner, raised: false)
+                }
+                Text(t("timeline.preview.note", "\(previewCount)"))
+                    .fediqoFont(TypeScale.caption)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        // Remade whenever the question changes and never oftener: the rules, the tags and the
+        // template are the whole of what the preview is an answer to.
+        .task(id: previewKey) { await lookAtWhatIsHere() }
+    }
+
+    /// What the preview is an answer to, as one value, so a reader typing a hashtag asks the
+    /// store once when they stop rather than once per letter.
+    private var previewKey: String {
+        "\(chosen.id)|\(tags.joined(separator: ","))|" +
+        rules.map { "\($0.kind.rawValue)\($0.negate ? "!" : "")\($0.value)" }.joined(separator: "|")
+    }
+
+    private func lookAtWhatIsHere() async {
+        try? await Task.sleep(for: .milliseconds(250))
+        guard !Task.isCancelled else { return }
+        var made = chosen.timeline(named: "", summary: "", about: about)
+        made.tags = tags
+        made.filters = rules
+        let found = await app.storedUnder(made.query)
+        guard !Task.isCancelled else { return }
+        preview = found
+        previewCount = found.count
+    }
+
+    private func add(_ kind: TimelineFilter.Kind) {
+        rules.append(TimelineFilter(kind: kind, value: "", negate: false))
     }
 
     /// The tags, and a place to add one.
@@ -241,6 +408,7 @@ struct TimelineEditor: View {
         template = editing.template
         about = editing.filters.first?.value ?? ""
         tags = editing.tags
+        rules = editing.filters
         named = true
     }
 
@@ -266,6 +434,11 @@ struct TimelineEditor: View {
             // to subscribe to it, and losing it to an unpressed button is the sheet being right
             // about the mechanism and wrong about the person.
             editing.tags = tags + Post.normalisedTags([typing]).filter { !tags.contains($0) }
+            // Every rule the reader can now see is a rule this sheet is responsible for, so the
+            // whole list is written rather than one kind of it. A rule with nothing named is
+            // dropped: an empty box is a rule somebody started and did not finish, and saving
+            // it would be a timeline that quietly shows nothing.
+            editing.filters = rules.filter { $0.kind == .media || !$0.value.isEmpty }
             app.update(editing)
         } else {
             // A timeline made from a template the reader did not rename follows the language
@@ -276,6 +449,7 @@ struct TimelineEditor: View {
             var made = chosen.timeline(named: own, summary: line,
                                        about: about.trimmingCharacters(in: .whitespaces))
             made.tags = tags + Post.normalisedTags([typing]).filter { !tags.contains($0) }
+            made.filters = rules.filter { $0.kind == .media || !$0.value.isEmpty }
             app.add(made)
         }
         done()

@@ -34,6 +34,19 @@ public struct TimelineFilter: Sendable, Hashable, Codable {
         self.negate = negate
     }
 
+    /// The rule as a sentence somebody would say (#115).
+    ///
+    /// **In the reader's language, so the words themselves are not here.** What is here is the
+    /// key and the value, and the screen puts them together — this layer has no language, which
+    /// is the same reason a template's name is the caller's.
+    ///
+    /// A kind and a value in two boxes is a form. `with #swift` and `not from birch.example` are
+    /// a rule read back the way it was meant, and reading a rule back is most of being able to
+    /// change one.
+    public var sentence: (key: String, value: String) {
+        ("rule.\(kind.rawValue).\(negate ? "without" : "with")", value)
+    }
+
     /// Whether this rule lets `post` through.
     ///
     /// **This is the definition**, and the SQL in `TimelineStore` is the same rule spelled for

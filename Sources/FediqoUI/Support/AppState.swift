@@ -849,6 +849,16 @@ public final class AppState {
         _ = try? await store.rotate(keeping: window)
     }
 
+    /// What this device already holds under a question that may belong to no timeline yet
+    /// (#115).
+    ///
+    /// **It asks nobody.** The loader's `stored` reads the store and stops there, so the
+    /// builder's preview costs nobody's server anything, works with the network off, and is
+    /// instant — and it is the same read `search` is, pointed at a reading that does not exist.
+    func storedUnder(_ query: TimelineQuery) async -> [Post] {
+        (try? await loader().stored(query)) ?? []
+    }
+
     /// A loader to ask about one post's conversation with.
     ///
     /// The feed the reader is on, where there is one — its loader already knows the store and
