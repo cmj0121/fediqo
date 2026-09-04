@@ -247,6 +247,9 @@ check() {
 WIDTHS=(420 440 700 1024)
 SCALES=(small larger)
 
+# Signed in, like the store pictures above. It was not, and the difference was invisible until a
+# screen that only exists behind a sign-in was checked at every width and photographed signed out
+# — a corner nobody had looked at, in eight pictures that said they had looked.
 widths() {
     say "building the Mac app"
     make -C Apps mac >/dev/null
@@ -269,6 +272,7 @@ widths() {
                 name="${screen}-${width}x${scale}.png"
                 say "  $out/$name"
                 wrote="$(env FEDIQO_FIXTURE=1 \
+                             FEDIQO_SIGNED_IN=1 \
                              FEDIQO_ROUTE=shell \
                              FEDIQO_RAIL="$rail" \
                              FEDIQO_LANGUAGE=en \

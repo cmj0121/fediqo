@@ -204,24 +204,20 @@ struct PersonPage: View {
     @ViewBuilder
     private var relationship: some View {
         VStack(alignment: .leading, spacing: Space.step) {
-            HStack(spacing: Space.gap) {
-                Button {
-                    Task { await model.setFollow(!(model.relationship?.isOn ?? false)) }
-                } label: {
-                    Label(t(followLabel), systemImage: followSymbol)
-                        .fediqoFont(TypeScale.body, weight: .medium)
-                        .frame(minWidth: Size.button)
+            // Widest first (S9). Beside the control where the row can hold both, under it where
+            // it cannot — and not a handle cut down the middle, which is what a single
+            // arrangement gave at 420 points: `@ada…r.example` names nobody, and naming which
+            // account this is is the whole of why the line is here.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: Space.gap) {
+                    followControl
+                    actingAs
+                    Spacer(minLength: Space.tight)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(model.relationship?.isOn == true ? Color.secondary : Palette.accent)
-                .disabled(model.following)
-
-                if model.following { ProgressView().controlSize(.small) }
-                if model.relationship?.muting == true { mark("person.muted", "speaker.slash") }
-                // Beside the control and not at the far edge of the row: it is about that
-                // press, and a `Spacer` between them made it read as a second, unrelated fact.
-                actingAs
-                Spacer(minLength: Space.tight)
+                VStack(alignment: .leading, spacing: Space.tight) {
+                    HStack(spacing: Space.gap) { followControl; Spacer(minLength: Space.tight) }
+                    actingAs
+                }
             }
 
             // Two silences that are not the same, and the page says which one it is in. Neither
@@ -233,6 +229,26 @@ struct PersonPage: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+
+    /// The press itself, and what is standing beside it while it is out.
+    private var followControl: some View {
+        HStack(spacing: Space.gap) {
+            Button {
+                Task { await model.setFollow(!(model.relationship?.isOn ?? false)) }
+            } label: {
+                Label(t(followLabel), systemImage: followSymbol)
+                    .fediqoFont(TypeScale.body, weight: .medium)
+                    .frame(minWidth: Size.button)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(model.relationship?.isOn == true ? Color.secondary : Palette.accent)
+            .disabled(model.following)
+
+            if model.following { ProgressView().controlSize(.small) }
+            if model.relationship?.muting == true { mark("person.muted", "speaker.slash") }
+        }
+        .fixedSize()
     }
 
     /// Which account this follow would be, and which account the relationship above is about.
@@ -252,7 +268,9 @@ struct PersonPage: View {
                 .fediqoFont(TypeScale.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-                .truncationMode(.middle)
+                // Whole or on its own line. A handle cut in the middle is a handle that names
+                // nobody, and `ViewThatFits` above is what gives it the other line.
+                .fixedSize()
         }
     }
 
