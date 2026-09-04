@@ -254,7 +254,7 @@ struct CommandTests {
     func pagesRotateForwards() {
         let app = freshApp("pages-forwards")
         app.railItem = .timeline
-        for page in [RailItem.notices, .talks, .kept, .statistics, .settings, .timeline] {
+        for page in [RailItem.inbox, .kept, .statistics, .settings, .timeline] {
             #expect(app.perform(.nextPage))
             #expect(app.railItem == page)
         }
@@ -264,7 +264,7 @@ struct CommandTests {
     func pagesRotateBackwards() {
         let app = freshApp("pages-backwards")
         app.railItem = .timeline
-        for page in [RailItem.settings, .statistics, .kept, .talks, .notices, .timeline] {
+        for page in [RailItem.settings, .statistics, .kept, .inbox, .timeline] {
             #expect(app.perform(.previousPage))
             #expect(app.railItem == page)
         }
