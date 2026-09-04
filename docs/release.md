@@ -213,43 +213,31 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-[`.github/workflows/release.yml`](../.github/workflows/release.yml) fires on `v*`, and every step in it is
-either a `brew install` or `make publish`. Nothing about releasing is written down in that file: what the build
-is called, which certificate signs it, what the store is told and that nothing is submitted for review are all
-decisions the Fastfile makes, and a laptop makes them the same way.
+**A tag is a name, and the release is `make publish` on a laptop.** There was a workflow that fired on `v*`
+and it is gone. Not because it was wrong — every step in it was a `brew install` or `make publish`, and it
+would have made the same build a laptop makes — but because it was never given anything to run with. Its
+secret store was empty from the day it was written to the day it was deleted, so the one time a tag was
+pushed it stopped at `refusing to run` before it had built anything.
 
-A release that failed at the upload is run again from the same tag -- **Actions → Release → Run workflow**, and
-pick the tag in the dropdown. Nobody has to invent a `v0.1.1` because the pipeline could not be asked twice.
+What that leaves is honest rather than lesser. Releasing needs an Apple credential, a signing certificate and
+a person's telephone number; those live on one machine belonging to one person, and putting a copy of them in
+a hosted runner is a second place they can leak from for the convenience of not typing one command.
 
-The runner is handed by its secret store exactly what `.env` hands a laptop:
-
-| secret                          | how it differs from the laptop's                             |
-| ------------------------------- | ------------------------------------------------------------ |
-| `FEDIQO_TEAM_ID`                | the same                                                     |
-| `FEDIQO_BUNDLE_ID`              | the same                                                     |
-| `MATCH_GIT_URL`                 | the HTTPS form -- a runner has no ssh key to clone with      |
-| `FEDIQO_REVIEW_FIRST_NAME`      | the same                                                     |
-| `FEDIQO_REVIEW_LAST_NAME`       | the same                                                     |
-| `FEDIQO_REVIEW_PHONE`           | the same                                                     |
-| `FEDIQO_REVIEW_EMAIL`           | the same                                                     |
-| `MATCH_GIT_BASIC_AUTHORIZATION` | required here, unused on a laptop                            |
-| `MATCH_PASSWORD`                | required here: there is no keychain to have remembered it    |
-| `ASC_KEY_ID`                    | required here -- the Apple ID way needs a person watching    |
-| `ASC_ISSUER_ID`                 | ... its issuer                                               |
-| `ASC_KEY_P8_BASE64`             | ... and the `.p8`, base64, which is why it is not a path     |
-
-`setup_ci` in the publish lane makes the temporary keychain match needs. Off CI it does nothing, which is why
-it can be the same line on both machines.
-
-**The two lists are checked against each other.** `scripts/env.sh` holds the names the release cannot run
-without and `release.yml` holds the secrets that supply them, and they drifted once already — the day the
-review contact was added, `REQUIRED` grew by four and the workflow did not, so a pushed tag would have
-stopped at `refusing to run` minutes into a runner. `scripts/env.sh --covers .github/workflows/release.yml`
-says whether that has happened again, and CI runs it on every push:
+So: tag what was released, and release it here.
 
 ```sh
-scripts/env.sh --covers .github/workflows/release.yml
+git tag -a v0.1.0 -m "..."
+git push origin v0.1.0
+make publish
 ```
+
+The tag says which commit the build came from. It starts nothing.
+
+## What a laptop is handed
+
+`scripts/env.sh` holds the names a release cannot run without and refuses to run without them — before the
+archive rather than minutes into an upload. `.env.example` is the list; `scripts/env.sh --check` says what is
+missing without running anything.
 
 ## Getting a build to a person
 
