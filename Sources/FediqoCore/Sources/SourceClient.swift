@@ -39,6 +39,9 @@ public enum SourceFailure: Error, Sendable, Equatable, LocalizedError {
     /// The server was asked for a hashtag's timeline and has no such thing (#104). Distinct
     /// from a tag nobody has used, which is an empty answer rather than a refusal.
     case noTagTimeline(String)
+    /// The server was asked to search and has no such thing (#106). Distinct from a search that
+    /// matched nothing, which is an empty answer rather than a refusal.
+    case cannotSearch(String)
     /// The server answered outside 2xx; the body rides along for whoever can read a
     /// reason out of it.
     case http(Int, Data)
@@ -73,7 +76,7 @@ public enum SourceFailure: Error, Sendable, Equatable, LocalizedError {
         switch self {
         case .tokenRejected, .store: true
         case .badHost, .notThatKind, .unsupported, .needsSignIn, .signInFailed, .notItsPost,
-             .http, .transport, .emptyDraft, .tooLong, .wouldNotCut, .noTagTimeline,
+             .http, .transport, .emptyDraft, .tooLong, .wouldNotCut, .noTagTimeline, .cannotSearch,
              .tooManyPictures, .pictureTooLarge, .pictureNotTaken: false
         }
     }
@@ -92,6 +95,7 @@ public enum SourceFailure: Error, Sendable, Equatable, LocalizedError {
         case .wouldNotCut(let host, let writers):
             "\(host) answered with its whole public timeline rather than \(writers.rawValue)."
         case .noTagTimeline(let host): "\(host) has no timeline for a hashtag."
+        case .cannotSearch(let host): "\(host) cannot be searched."
         case .badHost(let host): "\(host) is not a hostname."
         case .notThatKind(let socialProtocol, let host): "\(host) did not answer as a \(socialProtocol.rawValue) server."
         case .unsupported(let socialProtocol): "\(socialProtocol.rawValue) is not spoken yet."
@@ -171,6 +175,18 @@ public protocol SourceClient: Sendable {
     /// like `timeline`, by the same cursor and for the same reason.
     func tag(_ tag: String, host: String, limit: Int, before: Post?, after: Post?,
              token: String?) async throws -> [Post]
+
+    /// Posts a server has that match these words — `/api/v2/search?type=statuses` (#106).
+    ///
+    /// **The one read in this app that is a question about the reader.** Every other is a
+    /// question about a timeline; this one sends what somebody typed to whoever runs the server.
+    /// That is not a reason to refuse it, it is a reason it is never sent without being asked
+    /// for — and the asking is the caller's, which is why nothing here checks.
+    ///
+    /// Asked of servers the reader has added and of nowhere else. A search is not a reason to go
+    /// somewhere new.
+    func search(_ words: String, host: String, limit: Int,
+                token: String?) async throws -> [Post]
 
     /// What the server says is trending. A separate thing, asked for separately.
     ///
@@ -337,6 +353,13 @@ public extension SourceClient {
     func tag(_ tag: String, host: String, limit: Int, before: Post?, after: Post?,
              token: String?) async throws -> [Post] {
         throw SourceFailure.noTagTimeline(host)
+    }
+
+    /// A protocol with no search says so rather than answering nothing, for the reason above it:
+    /// empty is what "nobody wrote that" looks like, and the two are different answers.
+    func search(_ words: String, host: String, limit: Int,
+                token: String?) async throws -> [Post] {
+        throw SourceFailure.cannotSearch(host)
     }
 }
 

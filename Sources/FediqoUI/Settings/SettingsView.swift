@@ -53,6 +53,21 @@ struct SettingsView: View {
                     .fediqoFont(TypeScale.minor)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                // Revocable, which is half of what asking means: an answer that cannot be
+                // taken back was not a question (#106).
+                Toggle(isOn: Binding(get: { app.preferences.mayAskServersToSearch },
+                                     set: { app.preferences.mayAskServersToSearch = $0 })) {
+                    VStack(alignment: .leading, spacing: Space.tight) {
+                        Text(t("settings.searchServers"))
+                            .fediqoFont(TypeScale.small)
+                        Text(t("settings.searchServers.body"))
+                            .fediqoFont(TypeScale.minor)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .toggleStyle(.switch)
+                .tint(Palette.accent)
             }
         case .about:
             // The numbers a report needs, and a pointer at `?` — not the map itself.

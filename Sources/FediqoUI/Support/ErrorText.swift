@@ -16,6 +16,7 @@ func message(for failure: SourceFailure) -> String {
     case .badHost(let host): t("error.badHost", host)
     case .notItsPost(let uri): t("error.notItsPost", uri)
     case .noTagTimeline(let host): t("error.noTagTimeline", host)
+    case .cannotSearch(let host): t("error.cannotSearch", host)
     // The cut in the reader's own words, not `here`/`elsewhere` — the case is a name for a
     // question and this is the sentence a person would have asked it in.
     case .wouldNotCut(let host, let writers): t("error.wouldNotCut", host, t("writers.\(writers.rawValue)"))

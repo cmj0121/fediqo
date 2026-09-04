@@ -923,11 +923,12 @@ public struct TimelineLoader: Sendable {
             case .author: []
             // Handled above: a tag is asked for by name, and `reading` is what carries it.
             case .tag: []
-            // Nor is a search fanned out: what it is about is what this device already holds,
-            // and the store is asked directly. It asks nobody, so it has no readings at all and
-            // this line is never reached — until #106, which is a question put to a server and
-            // has a cost this one does not (#105).
-            case .search: []
+            // A search reaches a server only where the reader agreed it may (#106), and the
+            // query is what carries that answer — a reading that is here at all is one they
+            // asked for. What comes back is written down like anything else and read back by
+            // #105 tomorrow: the network writes and the screen reads.
+            case .search: try await client.search(query.words, host: server.host, limit: limit,
+                                                  token: token)
             }
             }
         } catch {

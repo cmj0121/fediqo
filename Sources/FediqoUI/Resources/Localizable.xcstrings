@@ -6138,6 +6138,108 @@
           }
         }
       }
+    },
+    "error.cannotSearch": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ cannot be searched."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 無法被搜尋。"
+          }
+        }
+      }
+    },
+    "search.offer": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Also ask your servers? This would send “%1$@” to %2$@."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "也問你的伺服器嗎？這會把「%1$@」送給 %2$@。"
+          }
+        }
+      }
+    },
+    "search.offer.yes": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ask them"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "去問"
+          }
+        }
+      }
+    },
+    "search.offer.no": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not now"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "現在不要"
+          }
+        }
+      }
+    },
+    "settings.searchServers": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Let searches reach your servers"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "讓搜尋抵達你的伺服器"
+          }
+        }
+      }
+    },
+    "settings.searchServers.body": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Off, a search reads only what this device already holds and asks nobody. On, what you type is also sent to the servers you added — and to nowhere else."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "關閉時，搜尋只讀這台裝置上已經有的東西，不問任何人。開啟時，你打的字也會送給你加入的那些伺服器——而且只有它們。"
+          }
+        }
+      }
     }
   }
 }

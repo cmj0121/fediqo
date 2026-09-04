@@ -165,6 +165,30 @@ public struct MastodonClient: SourceClient {
                                before: before, after: after, token: token)
     }
 
+    /// `GET /api/v2/search?type=statuses` (#106).
+    ///
+    /// **`resolve=false`, always.** Resolving asks the server to go and fetch whatever the words
+    /// look like they name — which turns a search into this app making the reader's server touch
+    /// a third party, and `docs/privacy.md` says that never happens. The reader agreed to their
+    /// own servers seeing what they typed; they did not agree to a stranger's being visited.
+    ///
+    /// The answer is a bag of accounts, hashtags and statuses; only the statuses are read. A
+    /// server too old for v2 answers 404, which is `http(404, _)` and says so.
+    public func search(_ words: String, host rawHost: String, limit: Int,
+                       token: String?) async throws -> [Post] {
+        let trimmed = words.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        let host = Server.normalise(rawHost)
+        let data = try await get(host: host, path: "/api/v2/search",
+                                 query: [URLQueryItem(name: "q", value: trimmed),
+                                         URLQueryItem(name: "type", value: "statuses"),
+                                         URLQueryItem(name: "resolve", value: "false"),
+                                         URLQueryItem(name: "limit", value: String(limit))],
+                                 token: token)
+        return try Self.decoder.decode(MastodonDTO.SearchResults.self, from: data)
+            .statuses.map { $0.asPost(from: host) }
+    }
+
     public func trending(host: String, limit: Int, token: String?) async throws -> [Post] {
         try await posts(host: host, path: "/api/v1/trends/statuses", limit: limit, before: nil, token: token)
     }

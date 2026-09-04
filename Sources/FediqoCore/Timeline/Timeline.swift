@@ -91,6 +91,9 @@ public struct Timeline: Sendable, Hashable, Identifiable, Codable {
     public var tags: [String]
     /// What a search is for. Empty unless `source` is `.search` (#105).
     public var words: String
+    /// Whether this search is also put to the reader's servers. Never written down: it is what
+    /// they have agreed to today, not a property of the reading (#106).
+    public var asksServers: Bool = false
     /// Whose home this is. Nil unless `source` is `.home`.
     public var account: String?
     public var template: String
@@ -115,7 +118,11 @@ public struct Timeline: Sendable, Hashable, Identifiable, Codable {
         self.tags = Post.normalisedTags(tags).reduce(into: []) { kept, tag in
             if !kept.contains(tag) { kept.append(tag) }
         }
-        self.words = source == .search ? words : ""
+        // Trimmed, because the edges of what somebody typed are not part of what they meant —
+        // the store splits on whitespace anyway — and because a search of nothing but spaces is
+        // a search of nothing, which must not become a request (#106).
+        self.words = source == .search
+            ? words.trimmingCharacters(in: .whitespacesAndNewlines) : ""
         self.account = source.needsAccount ? account : nil
         self.template = template
         self.position = position
@@ -127,7 +134,7 @@ public struct Timeline: Sendable, Hashable, Identifiable, Codable {
     /// and the screens hold their own place in each anyway.
     public var query: TimelineQuery {
         TimelineQuery(source: source, writers: writers, tags: tags, words: words,
-                      account: account, filters: filters)
+                      asksServers: asksServers, account: account, filters: filters)
     }
 }
 
@@ -140,15 +147,27 @@ public struct TimelineQuery: Sendable, Hashable {
     public let tags: [String]
     /// What a search is for, where this reading is one (#105).
     public let words: String
+    /// Whether this search is also put to the servers the reader added (#106).
+    ///
+    /// The reader's own answer, carried on the question rather than read from anywhere down
+    /// here: the layer that knows what they agreed to is the one that builds the query, and a
+    /// core that could reach for the answer itself is a core that could forget to.
+    public let asksServers: Bool
     public let account: String?
     public let filters: [TimelineFilter]
 
     public init(source: BaseSource, writers: Writers = .everyone, tags: [String] = [],
-                words: String = "", account: String? = nil, filters: [TimelineFilter] = []) {
+                words: String = "", asksServers: Bool = false, account: String? = nil,
+                filters: [TimelineFilter] = []) {
         self.source = source
         self.writers = source == .public ? writers : .everyone
         self.tags = tags
-        self.words = source == .search ? words : ""
+        // Trimmed, because the edges of what somebody typed are not part of what they meant —
+        // the store splits on whitespace anyway — and because a search of nothing but spaces is
+        // a search of nothing, which must not become a request (#106).
+        self.words = source == .search
+            ? words.trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        self.asksServers = source == .search && !self.words.isEmpty && asksServers
         self.account = account
         self.filters = filters
     }
@@ -160,10 +179,17 @@ public struct TimelineQuery: Sendable, Hashable {
     /// A timeline based on `tag` with no tags has nothing here at all, and asks nobody — which
     /// is what #104 means by a base of nothing being empty rather than quietly the public
     /// timeline.
-    /// A search asks nobody, so it has no readings at all — what it is about is what this
-    /// device already holds, and the store is asked directly (#105).
+    /// A search asks nobody unless the reader said it may (#105, #106). What it is about is what
+    /// this device already holds, and the store is asked directly; agreeing to #106 adds the one
+    /// reading that leaves the device, and what it answers is written down for this to read.
     public var readings: [Reading] {
-        (source == .tag || source == .search ? [] : [Reading.base(source)]) + tags.map(Reading.tag)
+        let base: [Reading]
+        switch source {
+        case .tag: base = []
+        case .search: base = asksServers ? [.base(.search)] : []
+        default: base = [.base(source)]
+        }
+        return base + tags.map(Reading.tag)
     }
 
     /// One question this timeline puts to a server.

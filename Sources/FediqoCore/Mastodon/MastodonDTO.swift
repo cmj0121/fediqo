@@ -215,6 +215,14 @@ enum MastodonDTO {
 
     /// What `/api/v1/statuses/:id/context` answers: the chain above a post and everything
     /// under it, each already in the order that server reads them in.
+    /// What `/api/v2/search` answers with: accounts, statuses and hashtags in one bag (#106).
+    ///
+    /// Only the statuses are read. The other two are answers to questions this app did not ask —
+    /// the accounts are #98's and the hashtags are #108's, and each asks for its own type.
+    struct SearchResults: Decodable, Sendable {
+        let statuses: [Status]
+    }
+
     struct Context: Decodable, Sendable {
         let ancestors: [Status]
         let descendants: [Status]

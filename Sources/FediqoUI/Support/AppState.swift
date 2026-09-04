@@ -289,6 +289,12 @@ public final class AppState {
     /// Whether the field is up. Distinct from having words in it: a reader who opened the field
     /// and typed nothing is still searching, and the timeline underneath has not gone anywhere.
     var showingSearch = false
+    /// Whether the offer to put this search to the reader's servers has been put away for now.
+    ///
+    /// Not an answer and not written down: "not this time" is not "never", and recording it as
+    /// one would be this app deciding something the reader did not (#106). Settings is where
+    /// the standing answer lives, both ways.
+    var hidTheSearchOffer = false
 
 
     /// The inbox, and the connections that keep it filled. Nil where there is no store — the
@@ -946,14 +952,22 @@ public final class AppState {
         // id is fixed so that `feed(for:)` keeps one page across every search, and typing new
         // words hands the new question to the page that is already open rather than starting a
         // second one, which is what a reader editing any timeline already gets.
-        if !searching.isEmpty { return Self.searchTimeline(for: searching) }
+        if !searching.isEmpty {
+            // What the reader agreed to, asked here rather than down in the core: the layer
+            // that knows the answer is the one that builds the question (#106).
+            return Self.searchTimeline(for: searching,
+                                       asksServers: preferences.mayAskServersToSearch)
+        }
         return timeline(currentTimeline) ?? timelines.first
     }
 
     /// The reading a search is. Not in `timelines` and never written down: it belongs to this
     /// moment rather than to the row of tabs.
-    static func searchTimeline(for words: String) -> Timeline {
-        Timeline(id: "search", name: "", source: .search, words: words, template: "search")
+    static func searchTimeline(for words: String, asksServers: Bool = false) -> Timeline {
+        var made = Timeline(id: "search", name: "", source: .search, words: words,
+                            template: "search")
+        made.asksServers = asksServers
+        return made
     }
 
     /// The feed being read, ready to be asked something. Every key that moves through a

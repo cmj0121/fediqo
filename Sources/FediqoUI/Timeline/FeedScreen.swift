@@ -95,6 +95,7 @@ struct FeedScreen: View {
             VStack(spacing: 0) {
                 header
                 if app.showingSearch { searchField }
+                if app.showingSearch, offersToAskServers { searchOffer }
                 Hairline()
                 body(for: model.visible)
             }
@@ -469,6 +470,46 @@ struct FeedScreen: View {
         // a field that made them ask twice.
         .onAppear { searchFocused = true }
         .background(Palette.surface(colorScheme))
+    }
+
+    /// Whether to offer to put this search to the reader's servers.
+    ///
+    /// Only with something to send and somewhere to send it: an offer to search no servers is a
+    /// question with no answer, and one made before a word is typed is a question about nothing.
+    private var offersToAskServers: Bool {
+        !app.preferences.mayAskServersToSearch && !app.hidTheSearchOffer
+            && !app.searching.isEmpty && !app.servers.isEmpty
+    }
+
+    /// The ask, and it says what it sends and to whom (#106).
+    ///
+    /// **Every other read in this app is a question about a timeline; this one is a question
+    /// about the reader.** So the words themselves and the servers that would see them are in
+    /// the sentence, rather than "search remote servers?" — which asks somebody to agree to
+    /// something they would have to go and work out.
+    private var searchOffer: some View {
+        HStack(alignment: .top, spacing: Space.step) {
+            Image(systemName: "questionmark.circle")
+                .fediqoSymbol(Glyph.inline)
+                .foregroundStyle(.secondary)
+            Text(t("search.offer", app.searching,
+                   app.servers.map(\.host).joined(separator: ", ")))
+                .fediqoFont(TypeScale.minor)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: Space.step)
+            Button(t("search.offer.no")) { app.hidTheSearchOffer = true }
+                .buttonStyle(.plain)
+                .fediqoFont(TypeScale.minor)
+            Button(t("search.offer.yes")) {
+                app.preferences.mayAskServersToSearch = true
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Palette.accent)
+            .fediqoFont(TypeScale.minor)
+        }
+        .padding(.horizontal, Space.pad)
+        .padding(.bottom, Space.step)
     }
 
     private var emptyState: some View {
