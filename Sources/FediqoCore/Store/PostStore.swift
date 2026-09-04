@@ -355,17 +355,47 @@ extension LocalStore {
             }
         }
 
-        let page = TimelineOrder.cut(before: before)
-        // Which base source carried it, and — where the timeline names one — whose reading it
-        // was in. A `home` timeline with no account named is every home this device reads.
-        var origin = "AND EXISTS (SELECT 1 FROM post_origins o WHERE o.merge_key = p.merge_key AND o.feed = ?"
-        var originArguments: [any DatabaseValueConvertible] = [query.source.rawValue]
-        if let account = query.account {
-            origin += " AND o.author_id = ?"
-            originArguments.append(account)
+        // A search is not asked of `post_origins` at all: it is about what this device holds,
+        // however it came to hold it (#105). The words are matched the one way this store
+        // matches words, which is `search` above — so there is one idea of what matching means
+        // rather than two that would drift.
+        if query.source == .search {
+            return try await search(query.words, limit: limit, before: before)
         }
-        origin += ")"
-        let originClause = origin
+
+        let page = TimelineOrder.cut(before: before)
+        // Which reading carried it. A timeline is a base and the tags beside it (#104), so this
+        // is one `EXISTS` per reading joined by `OR` — the same merge the loader does across
+        // servers, asked of the store.
+        var reads: [String] = []
+        var originArguments: [any DatabaseValueConvertible] = []
+        if query.source != .tag {
+            // The base, and — where the timeline names one — whose reading it was in. A `home`
+            // timeline with no account named is every home this device reads.
+            var base = "EXISTS (SELECT 1 FROM post_origins o WHERE o.merge_key = p.merge_key AND o.feed = ?"
+            originArguments.append(query.source.rawValue)
+            if let account = query.account {
+                base += " AND o.author_id = ?"
+                originArguments.append(account)
+            }
+            reads.append(base + ")")
+        }
+        // **And which tag, not merely that it was a tag.** `post_origins` records the reading
+        // and not its subject, so `feed = 'tag'` alone is every tag anybody here subscribes to —
+        // two hashtag timelines would show each other's posts. The tag itself is in `post_tags`,
+        // written when the post was stored, so the subject is asked for from there.
+        if !query.tags.isEmpty {
+            let places = Array(repeating: "?", count: query.tags.count).joined(separator: ", ")
+            reads.append("""
+                EXISTS (SELECT 1 FROM post_origins o JOIN post_tags pt ON pt.merge_key = o.merge_key
+                        WHERE o.merge_key = p.merge_key AND o.feed = 'tag' AND pt.tag IN (\(places)))
+                """)
+            originArguments += query.tags.map { $0 as any DatabaseValueConvertible }
+        }
+        // No readings at all is a timeline based on its tags that has none — it asked nobody, so
+        // there is nothing of its own to read back. `0` rather than an empty clause, which would
+        // quietly be every post this device holds (#104).
+        let originClause = reads.isEmpty ? "AND 0" : "AND (" + reads.joined(separator: " OR ") + ")"
 
         var values = (originArguments + ruleArguments).map(\.databaseValue) + page.arguments
         values.append(limit.databaseValue)

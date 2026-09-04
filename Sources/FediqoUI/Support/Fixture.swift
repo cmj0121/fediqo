@@ -504,6 +504,53 @@ struct FixtureSource: SourceClient {
     /// The same list `people(_:of:...)` is built from, matched the way a server matches: on the
     /// handle and on the name, either end. Nothing is fetched, because there is nowhere to fetch
     /// from and because the real one does not fetch either.
+    /// What the fixture's person asked you to read first (#112). Their oldest post, which is
+    /// what a pinned post usually is — and what makes the band worth having: dropped into a
+    /// newest-first list it would be at the bottom where nobody scrolls.
+    /// Two posts the fixture's reader has written and not sent, so the band can be
+    /// photographed — one with something attached, one without (#110).
+    /// Two conversations, so the page can be photographed: one unread with two people in it,
+    /// one read whose last post has gone (#109).
+    func conversations(as account: ActingAccount) async throws -> [Talk] {
+        let recent = Fixture.timeline(of: account.host).first
+        return [
+            Talk(id: "1", host: account.host,
+                 people: Fixture.timeline(of: account.host).prefix(2).map {
+                     Profile(id: $0.authorHandle, authorId: $0.authorId, name: $0.authorName,
+                             handle: $0.authorHandle, avatarURL: $0.authorAvatarURL,
+                             emojis: $0.emojis)
+                 },
+                 last: recent, unread: true),
+            Talk(id: "2", host: account.host,
+                 people: Fixture.timeline(of: account.host).dropFirst(2).prefix(1).map {
+                     Profile(id: $0.authorHandle, authorId: $0.authorId, name: $0.authorName,
+                             handle: $0.authorHandle, avatarURL: $0.authorAvatarURL,
+                             emojis: $0.emojis)
+                 },
+                 last: nil, unread: false),
+        ]
+    }
+
+    func scheduled(as account: ActingAccount) async throws -> [ScheduledPost] {
+        let now = Date()
+        return [
+            ScheduledPost(id: "1", host: account.host,
+                          text: "The reading room piece, once the photographs are in.",
+                          when: now.addingTimeInterval(3 * 60 * 60),
+                          audience: .everyone, attachments: 2),
+            ScheduledPost(id: "2", host: account.host,
+                          text: "A note to whoever is still awake.",
+                          when: now.addingTimeInterval(26 * 60 * 60),
+                          audience: .followers),
+        ]
+    }
+
+    func cancelScheduled(_ id: String, as account: ActingAccount) async throws {}
+
+    func pinned(by id: String, host: String, token: String?) async throws -> [Post] {
+        Array(Fixture.timeline(of: host).filter { $0.authorHandle == id }.suffix(1))
+    }
+
     func searchPeople(matching query: String, limit: Int,
                       as account: ActingAccount) async throws -> [Profile] {
         let wanted = query.lowercased()

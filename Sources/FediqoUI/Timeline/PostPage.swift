@@ -189,7 +189,8 @@ struct PostPage: View {
                 // Clicking one opens nothing — the reader is already looking at the whole of
                 // it — but it does say which post they mean, and the ring has to agree.
                 focus: { app.focus(post) },
-                openAuthor: { app.openPerson(of: post) })
+                openAuthor: { app.openPerson(of: post) },
+                openTag: { app.openTag($0) })
             .id(post.mergeKey)
     }
 

@@ -45,6 +45,6 @@ struct BaseSourceTests {
         // somebody's posts leaves out what they deleted, so the evidence is real — what is not
         // yet established is that it would be read against the right stretch, and being wrong
         // means telling a reader a post is gone when it is not. See `BaseSource.author`.
-        #expect(BaseSource.allCases.filter { !$0.isThreadOfTime } == [.trend, .thread, .notice, .author])
+        #expect(BaseSource.allCases.filter { !$0.isThreadOfTime } == [.trend, .thread, .notice, .author, .tag, .search])
     }
 }

@@ -235,6 +235,25 @@ public final class LocalStore: Sendable {
         migrator.registerMigration("016") { db in
             try db.execute(sql: schema(named: "schema-016"))
         }
+        migrator.registerMigration("017") { db in
+            try db.execute(sql: schema(named: "schema-017"))
+            // One more seeded lookup, stamped the way 004, 005, 009, 012 and 014 stamp theirs:
+            // the file writes the rows, the migration is what knows when they arrived.
+            try db.execute(sql: "UPDATE writers SET created_at = ?",
+                           arguments: [milliseconds(Date())])
+        }
+        migrator.registerMigration("018") { db in
+            try db.execute(sql: schema(named: "schema-018"))
+            // The seeded row stamped the way 014 stamps `author`: the file writes it, the
+            // migration is what knows when it arrived.
+            try db.execute(sql: "UPDATE feeds SET created_at = ? WHERE feed = 'tag'",
+                           arguments: [milliseconds(Date())])
+        }
+        migrator.registerMigration("019") { db in
+            try db.execute(sql: schema(named: "schema-019"))
+            try db.execute(sql: "UPDATE feeds SET created_at = ? WHERE feed = 'search'",
+                           arguments: [milliseconds(Date())])
+        }
         return migrator
     }
 

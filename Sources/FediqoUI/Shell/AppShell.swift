@@ -64,12 +64,30 @@ struct AppShell: View {
             // behind it.
             .shortcutsOverlay()
             .onAppear { app.openLink = { openURL($0) } }
+            // A hashtag in somebody's words is spelled as an address, because a pressable run
+            // inside a line of prose is the one thing SwiftUI will put there and still let the
+            // line wrap and be selected. This is where the app takes its own back: `fediqo-tag:`
+            // opens a timeline of that tag and **never reaches a browser**, and every other
+            // address goes out exactly as it did (#107).
+            .environment(\.openURL, OpenURLAction { url in
+                guard let tag = TagLink.tag(in: url) else { return .systemAction }
+                app.openTag(tag)
+                return .handled
+            })
             .shellKeyPresses()
             .shellKeyCommands()
             .task(id: app.refreshKey) { await app.refreshWhileVisible() }
             // Once, when the shell arrives. See `tidy`: the reader's own policy, applied when
             // they open the app rather than on a clock nobody sees.
             .task { await app.tidy() }
+            // A run told to open the reader's own page does it once the accounts are known.
+            // The same shape every other launch variable has, and the same reason (#30).
+            .task(id: app.yourAccounts) {
+                guard app.launchedOnYourPage, app.person == nil,
+                      let mine = app.yourAccounts.first
+                else { return }
+                app.openYourPage(mine)
+            }
     }
 
     @ViewBuilder
@@ -154,6 +172,7 @@ struct AppShell: View {
         // it would have to be: beside the feeds rather than by dropping this `.id`. The ring
         // lives on the `FeedModel`, and `FeedScreen` scrolls to it once on the way in — so
         // the swap is still clean, and coming back is still a screen built from nothing.
+        case .inbox: InboxScreen()
         case .timeline:
             if let timeline = app.readingTimeline {
                 FeedScreen(timeline: timeline).id(timeline.id)

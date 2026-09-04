@@ -93,7 +93,12 @@ struct TimelineListTests {
         #expect(app.timelines.count == 3)
         #expect(app.currentTimeline == app.timelines.last?.id)
         #expect(app.readingTimeline?.name == "Swift")
-        #expect(app.readingTimeline?.filters == [TimelineFilter(kind: .tag, value: "swift")])
+        // A subscription and not a sieve: this used to be a rule over the public timeline,
+        // which showed the posts carrying the tag that the public timeline happened to hand
+        // over — on a busy server, almost none of them (#104).
+        #expect(app.readingTimeline?.filters == [])
+        #expect(app.readingTimeline?.tags == ["swift"])
+        #expect(app.readingTimeline?.source == .tag)
     }
 
     @Test("A copy is its own timeline, and editing it leaves the one it came from alone")

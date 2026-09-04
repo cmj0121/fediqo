@@ -34,6 +34,19 @@ public struct TimelineFilter: Sendable, Hashable, Codable {
         self.negate = negate
     }
 
+    /// The rule as a sentence somebody would say (#115).
+    ///
+    /// **In the reader's language, so the words themselves are not here.** What is here is the
+    /// key and the value, and the screen puts them together — this layer has no language, which
+    /// is the same reason a template's name is the caller's.
+    ///
+    /// A kind and a value in two boxes is a form. `with #swift` and `not from birch.example` are
+    /// a rule read back the way it was meant, and reading a rule back is most of being able to
+    /// change one.
+    public var sentence: (key: String, value: String) {
+        ("rule.\(kind.rawValue).\(negate ? "without" : "with")", value)
+    }
+
     /// Whether this rule lets `post` through.
     ///
     /// **This is the definition**, and the SQL in `TimelineStore` is the same rule spelled for
@@ -52,12 +65,21 @@ public struct TimelineFilter: Sendable, Hashable, Codable {
     }
 }
 
-/// A timeline the reader made: one base source, any number of rules, a name and the line
-/// under it.
+/// A timeline the reader made: where its posts are asked for, any number of rules, a name and
+/// the line under it.
 ///
-/// One base source and not several. Two would leave the order undecided — order comes from
-/// the source — and "which of my sources is this post here for" is a question a reader would
-/// then have to answer for every post they saw.
+/// **One order, and it is time.** This used to say one base source and not several, and gave the
+/// order as the reason: two sources would leave it undecided, because the order came from the
+/// source. That reason had already stopped being true when it was written — a timeline has always
+/// fanned out across every server the reader added and merged what came back by timestamp, so the
+/// order was never any one source's. What the rule was really protecting is the sentence after
+/// it, and that one still holds: a reader must never have to work out *which of my sources is
+/// this post here for*. They do not have to. `post_origins` records how each post arrived, per
+/// account, and a row says so; the reader is told rather than left to deduce.
+///
+/// So a timeline is a base reading and the tags it subscribes to, merged and sorted by time
+/// (#104). The one source that still hands its own order over is `trend`, and a ranked reading
+/// cannot be merged with anything without one of the two orders being thrown away — so it is not.
 ///
 /// `template` is where it came from and nothing more. A template seeds a timeline when it is
 /// made and has no say in it afterwards, so that shipping a new version of a template cannot
@@ -69,6 +91,22 @@ public struct Timeline: Sendable, Hashable, Identifiable, Codable {
     /// two words, and two words are not an explanation.
     public var summary: String
     public var source: BaseSource
+    /// Which writers this is asked for. Only `public` has an answer other than `everyone`;
+    /// see `Writers` (#113).
+    public var writers: Writers
+    /// The hashtags this timeline subscribes to, kept the one way the store keeps a tag: NFC,
+    /// lowercased, no `#`. So `#Swift`, `#swift` and `＃swift` are one subscription (#104).
+    ///
+    /// **Asked for, not sieved.** A tag rule over the public timeline shows the posts carrying
+    /// that tag *which the public timeline happened to hand over* — on a busy server, almost
+    /// none of them, and a reader is left thinking the tag is quiet. These are a question put to
+    /// every server the reader has added.
+    public var tags: [String]
+    /// What a search is for. Empty unless `source` is `.search` (#105).
+    public var words: String
+    /// Whether this search is also put to the reader's servers. Never written down: it is what
+    /// they have agreed to today, not a property of the reading (#106).
+    public var asksServers: Bool = false
     /// Whose home this is. Nil unless `source` is `.home`.
     public var account: String?
     public var template: String
@@ -76,12 +114,28 @@ public struct Timeline: Sendable, Hashable, Identifiable, Codable {
     public var filters: [TimelineFilter]
 
     public init(id: String = UUID().uuidString, name: String, summary: String = "",
-                source: BaseSource, account: String? = nil, template: String,
-                position: Int = 0, filters: [TimelineFilter] = []) {
+                source: BaseSource, writers: Writers = .everyone, tags: [String] = [],
+                words: String = "", account: String? = nil, template: String, position: Int = 0,
+                filters: [TimelineFilter] = []) {
         self.id = id
         self.name = name
         self.summary = summary
         self.source = source
+        // A cut only the public timeline has. Kept rather than refused, the same way `account`
+        // is dropped for a source with no account: a value that cannot mean anything here is
+        // not a value to carry around waiting to be believed.
+        self.writers = source == .public ? writers : .everyone
+        // Normalised here rather than trusted, and deduplicated: two spellings of one tag are
+        // one subscription, and asking twice would be one server told twice and every post
+        // arriving to be merged with itself.
+        self.tags = Post.normalisedTags(tags).reduce(into: []) { kept, tag in
+            if !kept.contains(tag) { kept.append(tag) }
+        }
+        // Trimmed, because the edges of what somebody typed are not part of what they meant —
+        // the store splits on whitespace anyway — and because a search of nothing but spaces is
+        // a search of nothing, which must not become a request (#106).
+        self.words = source == .search
+            ? words.trimmingCharacters(in: .whitespacesAndNewlines) : ""
         self.account = source.needsAccount ? account : nil
         self.template = template
         self.position = position
@@ -92,20 +146,77 @@ public struct Timeline: Sendable, Hashable, Identifiable, Codable {
     /// two timelines called different things that ask the same question are one page of posts,
     /// and the screens hold their own place in each anyway.
     public var query: TimelineQuery {
-        TimelineQuery(source: source, account: account, filters: filters)
+        TimelineQuery(source: source, writers: writers, tags: tags, words: words,
+                      asksServers: asksServers, account: account, filters: filters)
     }
 }
 
 /// A reading: where the posts come from, and which of them are kept.
 public struct TimelineQuery: Sendable, Hashable {
     public let source: BaseSource
+    /// Which writers the public timeline is asked for. `everyone` everywhere else (#113).
+    public let writers: Writers
+    /// The hashtags asked for alongside the base, normalised (#104).
+    public let tags: [String]
+    /// What a search is for, where this reading is one (#105).
+    public let words: String
+    /// Whether this search is also put to the servers the reader added (#106).
+    ///
+    /// The reader's own answer, carried on the question rather than read from anywhere down
+    /// here: the layer that knows what they agreed to is the one that builds the query, and a
+    /// core that could reach for the answer itself is a core that could forget to.
+    public let asksServers: Bool
     public let account: String?
     public let filters: [TimelineFilter]
 
-    public init(source: BaseSource, account: String? = nil, filters: [TimelineFilter] = []) {
+    public init(source: BaseSource, writers: Writers = .everyone, tags: [String] = [],
+                words: String = "", asksServers: Bool = false, account: String? = nil,
+                filters: [TimelineFilter] = []) {
         self.source = source
+        self.writers = source == .public ? writers : .everyone
+        self.tags = tags
+        // Trimmed, because the edges of what somebody typed are not part of what they meant —
+        // the store splits on whitespace anyway — and because a search of nothing but spaces is
+        // a search of nothing, which must not become a request (#106).
+        self.words = source == .search
+            ? words.trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        self.asksServers = source == .search && !self.words.isEmpty && asksServers
         self.account = account
         self.filters = filters
+    }
+
+    /// Every reading this timeline is made of: the base, unless the base *is* its tags, and then
+    /// one for each tag. What the loader fans out across the servers, and what a post's origin
+    /// is recorded as.
+    ///
+    /// A timeline based on `tag` with no tags has nothing here at all, and asks nobody — which
+    /// is what #104 means by a base of nothing being empty rather than quietly the public
+    /// timeline.
+    /// A search asks nobody unless the reader said it may (#105, #106). What it is about is what
+    /// this device already holds, and the store is asked directly; agreeing to #106 adds the one
+    /// reading that leaves the device, and what it answers is written down for this to read.
+    public var readings: [Reading] {
+        let base: [Reading]
+        switch source {
+        case .tag: base = []
+        case .search: base = asksServers ? [.base(.search)] : []
+        default: base = [.base(source)]
+        }
+        return base + tags.map(Reading.tag)
+    }
+
+    /// One question this timeline puts to a server.
+    public enum Reading: Sendable, Hashable {
+        case base(BaseSource)
+        case tag(String)
+
+        /// How a post that arrived by this reading is written down.
+        public var source: BaseSource {
+            switch self {
+            case .base(let source): source
+            case .tag: .tag
+            }
+        }
     }
 
     /// The whole of the rules, applied to posts that have not been through the store — a page
@@ -183,13 +294,29 @@ public struct TimelineTemplate: Sendable, Hashable, Identifiable {
 
     public let id: String
     public let source: BaseSource
+    /// Which writers the template starts a timeline asking for. Two templates differ by nothing
+    /// else, which is #113's own line: it is the same reading with a parameter, not a third base
+    /// source.
+    public let writers: Writers
     public let parameter: Parameter
+
+    /// `writers` defaults, so that adding the cut did not touch the six templates that have no
+    /// room to cut out of.
+    public init(id: String, source: BaseSource, writers: Writers = .everyone,
+                parameter: Parameter) {
+        self.id = id
+        self.source = source
+        self.writers = source == .public ? writers : .everyone
+        self.parameter = parameter
+    }
 
     public static let all: [TimelineTemplate] = [
         TimelineTemplate(id: "public", source: .public, parameter: .none),
         TimelineTemplate(id: "home", source: .home, parameter: .none),
         TimelineTemplate(id: "trend", source: .trend, parameter: .none),
-        TimelineTemplate(id: "tag", source: .public, parameter: .tag),
+        TimelineTemplate(id: "local", source: .public, writers: .here, parameter: .none),
+        TimelineTemplate(id: "remote", source: .public, writers: .elsewhere, parameter: .none),
+        TimelineTemplate(id: "tag", source: .tag, parameter: .tag),
         TimelineTemplate(id: "author", source: .public, parameter: .author),
         TimelineTemplate(id: "mentions", source: .home, parameter: .mention),
     ]
@@ -206,13 +333,18 @@ public struct TimelineTemplate: Sendable, Hashable, Identifiable {
     public func timeline(named name: String, summary: String = "", about value: String = "",
                          account: String? = nil, position: Int = 0) -> Timeline {
         var filters: [TimelineFilter] = []
+        var tags: [String] = []
         switch parameter {
         case .none: break
-        case .tag: filters.append(TimelineFilter(kind: .tag, value: value))
+        // A subscription and not a sieve (#104). This wrote a rule over the public timeline,
+        // which showed the posts carrying the tag that the public timeline happened to hand
+        // over — on a busy server, almost none of them.
+        case .tag: tags.append(value)
         case .author: filters.append(TimelineFilter(kind: .author, value: value))
         case .mention: filters.append(TimelineFilter(kind: .mention, value: value))
         }
-        return Timeline(name: name, summary: summary, source: source, account: account,
-                        template: id, position: position, filters: filters)
+        return Timeline(name: name, summary: summary, source: source, writers: writers,
+                        tags: tags, account: account, template: id, position: position,
+                        filters: filters)
     }
 }

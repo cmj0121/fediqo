@@ -22,7 +22,16 @@ enum Route: Hashable {
 /// Trending is not here. It was never a category of its own — it is another timeline, so it
 /// is a tab inside the Timeline page rather than a fifth thing in the rail.
 enum RailItem: String, CaseIterable, Identifiable, Hashable {
-    case timeline, kept, statistics, settings
+    /// The inbox is here rather than behind a bell (#122). It is the one reading that arrives
+    /// while nobody is looking, and it was the only one with no page of its own — so the reader
+    /// could not tell it was there without opening something.
+    /// The inbox is one page with two tabs: what reached you, and who you are talking to.
+    ///
+    /// **They are one place because they are one question asked two ways** — *who has been in
+    /// touch* — and two rail entries for it would have a reader checking two lists to find out
+    /// whether anybody had. Neither is a timeline, which is why neither is a tab of the Timeline
+    /// page; both are somebody addressing you, which is why they are tabs of each other.
+    case timeline, inbox, kept, statistics, settings
 
     var id: String { rawValue }
 
@@ -31,6 +40,7 @@ enum RailItem: String, CaseIterable, Identifiable, Hashable {
     var symbolName: String {
         switch self {
         case .timeline: "list.bullet.rectangle"
+        case .inbox: "bell"
         case .kept: "archivebox"
         // The rising line belongs to the Trending tab, and it means "what is happening out
         // there". This page is the other kind of chart: bars of what is already here.
@@ -47,6 +57,18 @@ enum RailItem: String, CaseIterable, Identifiable, Hashable {
 /// other people and how much of it came back. How the numbers are counted is not a third: it
 /// is a note, and a note belongs beside the number it explains rather than on a page of its
 /// own that nobody would go to.
+/// The tabs of the Inbox page.
+///
+/// Two, and they are the two ways somebody reaches you: an event about you, and a conversation
+/// you are in. Neither is a timeline — an inbox is not a stretch of time and a conversation is
+/// ordered by the conversation — so neither is a tab of the Timeline page, and each says which
+/// it is in the line under the title.
+enum InboxTab: String, CaseIterable, Identifiable, Hashable {
+    case notices, talks
+
+    var id: String { rawValue }
+}
+
 enum StatisticsTab: String, CaseIterable, Identifiable, Hashable {
     case storage, network, merges
 
@@ -115,6 +137,18 @@ struct LaunchOptions {
     /// that can only be reached by pressing something cannot be photographed on a runner, where
     /// nothing may press anything (#30).
     var openingPost: String?
+    /// Whether this run opens the timeline builder. The last sheet with no way in but a press,
+    /// and the one #113 added templates to that nobody could photograph (#30).
+    var editingTimeline: Bool = false
+    /// What this run searches this device for, or nothing. A reading reached by a key and a
+    /// field is a reading nothing on a runner can reach (#30).
+    var searchingFor: String?
+    /// Whether this run opens the reader's own page. The page has a door now and a runner still
+    /// cannot press it (#30, #110).
+    var openingYourPage: Bool = false
+    /// Which half of the inbox this run opens. A tab reached by a press is a tab nothing on a
+    /// runner can reach (#30).
+    var inboxTab: InboxTab?
     /// Whose page to open, named the same way, for the same reason: the page about somebody is
     /// reached by pressing a name.
     ///
@@ -179,6 +213,10 @@ struct LaunchOptions {
         options.composing = environment["FEDIQO_COMPOSE"] == "1"
         options.showingNotices = environment["FEDIQO_NOTICES"] == "1"
         options.openingPost = environment["FEDIQO_OPEN"]
+        options.editingTimeline = environment["FEDIQO_EDIT"] == "1"
+        options.searchingFor = environment["FEDIQO_SEARCH"]
+        options.openingYourPage = environment["FEDIQO_ME"] == "1"
+        options.inboxTab = environment["FEDIQO_INBOX_TAB"].flatMap(InboxTab.init(rawValue:))
         options.openingPerson = environment["FEDIQO_PERSON"]
         options.openingReply = environment["FEDIQO_REPLY"]
         options.openingPeople = environment["FEDIQO_PEOPLE"].flatMap(People.Kind.init(rawValue:))
@@ -272,6 +310,56 @@ public final class AppState {
     /// from outside the screen that draws them. The drawing stays where it was.
     var addingSource = false
     var showingNotifications: Bool
+    /// What the reader is searching this device for, or empty (#105).
+    ///
+    /// On the app rather than on the screen because two things reach it: the field, and the key
+    /// that opens the field. A `@State` inside `FeedScreen` can be reached by neither the rail
+    /// nor a menu item, which is the same reason `showingNotifications` lives here.
+    var searching = ""
+    /// Whether the field is up. Distinct from having words in it: a reader who opened the field
+    /// and typed nothing is still searching, and the timeline underneath has not gone anywhere.
+    var showingSearch = false
+    /// Whether the offer to put this search to the reader's servers has been put away for now.
+    ///
+    /// Not an answer and not written down: "not this time" is not "never", and recording it as
+    /// one would be this app deciding something the reader did not (#106). Settings is where
+    /// the standing answer lives, both ways.
+    var hidTheSearchOffer = false
+    /// The hashtag the reader pressed, or nothing (#107).
+    ///
+    /// A reading rather than a screen, and a transient one like the search: pressing a tag opens
+    /// a timeline of it the way pressing a name opens a page about somebody, and neither is a
+    /// thing the reader asked to keep.
+    var viewingTag: String?
+    /// Where the reader is standing in their inbox (#122). On the app for the reason every other
+    /// ring's place is: the keys reach it from outside the screen that draws it.
+    /// How many notices the reader has not looked at, for the rail to say (#122).
+    var unseenNotices: Int { notices?.unseen ?? 0 }
+    /// Which half of the inbox is being read.
+    var inboxTab: InboxTab = .notices
+
+    /// Who the reader is talking to (#109). Built once and kept, the way the feeds are: the page
+    /// is rebuilt on every visit and what it holds should not be re-asked with it.
+    @ObservationIgnored lazy var talks = TalksModel { [weak self] in
+        await self?.everyAccount() ?? []
+    } client: { [weak self] _ in
+        self?.registry.client(for: .mastodon)
+    }
+
+    /// Every account the reader is signed in as, as itself. A conversation belongs to one
+    /// account on one server, so each of them is asked separately (#109).
+    func everyAccount() async -> [ActingAccount] {
+        var found: [ActingAccount] = []
+        for handle in yourAccounts {
+            if let account = await acting(as: handle) { found.append(account) }
+        }
+        return found
+    }
+
+    @ObservationIgnored lazy var noticePlace = NoticePlace(rows: { [weak self] in
+        self?.notices?.notices ?? []
+    })
+
 
     /// The inbox, and the connections that keep it filled. Nil where there is no store — the
     /// fixture without one, and any build that has none.
@@ -286,6 +374,10 @@ public final class AppState {
     /// A post this run was told to open, by the end of its address, or nothing. Read by
     /// `FeedScreen` once it has posts to look through and then never again.
     let openingPost: String?
+    /// Whether this run opens the timeline builder, for the same reason and read the same way.
+    let editingTimeline: Bool
+    /// Whether this run opens the reader's own page, read the same way and for the same reason.
+    let launchedOnYourPage: Bool
     /// Whether this run opens the author of the first post it is given. A screenshot's way in to
     /// a page whose only other way in is a press (#30: nothing on a runner may press anything).
     let openingPerson: String?
@@ -548,6 +640,8 @@ public final class AppState {
         self.shootTo = launch.shootTo
         self.shootSize = launch.shootSize
         self.openingPost = launch.openingPost
+        self.editingTimeline = launch.editingTimeline
+        self.launchedOnYourPage = launch.openingYourPage
         self.openingPerson = launch.openingPerson
         self.openingReply = launch.openingReply
         self.openingPeople = launch.openingPeople
@@ -556,6 +650,19 @@ public final class AppState {
         // The language before the first frame, not after it: a screenshot is taken of what was
         // drawn, and a tree redrawn a moment later is a photograph of the moment before. The
         // text size is set here for the same reason and it is the same kind of fact.
+        // Acted on rather than kept: unlike the pages a run is told to open, a search is
+        // already the whole of what it does, so there is nothing left to read it later.
+        // The inbox is a page now, so a run told to open it lands on the page rather than
+        // putting a sheet over the timeline (#122, #30).
+        if launch.showingNotices { railItem = .inbox }
+        if let tab = launch.inboxTab {
+            railItem = .inbox
+            inboxTab = tab
+        }
+        if let words = launch.searchingFor, !words.isEmpty {
+            showingSearch = true
+            searching = words
+        }
         if let language = launch.language { preferences.language = language }
         if let scale = launch.textScale { preferences.textScale = scale }
         L10n.use(preferences.language)
@@ -769,6 +876,16 @@ public final class AppState {
         _ = try? await store.rotate(keeping: window)
     }
 
+    /// What this device already holds under a question that may belong to no timeline yet
+    /// (#115).
+    ///
+    /// **It asks nobody.** The loader's `stored` reads the store and stops there, so the
+    /// builder's preview costs nobody's server anything, works with the network off, and is
+    /// instant — and it is the same read `search` is, pointed at a reading that does not exist.
+    func storedUnder(_ query: TimelineQuery) async -> [Post] {
+        (try? await loader().stored(query)) ?? []
+    }
+
     /// A loader to ask about one post's conversation with.
     ///
     /// The feed the reader is on, where there is one — its loader already knows the store and
@@ -913,7 +1030,82 @@ public final class AppState {
     /// feeds themselves. Kept reads the store, Statistics reads the store and the ledger, and
     /// Settings reads nobody: one screen each, and no feed on any of them.
     var readingTimeline: Timeline? {
-        railItem == .timeline ? (timeline(currentTimeline) ?? timelines.first) : nil
+        guard railItem == .timeline else { return nil }
+        // A search is a reading, so it is a timeline — the same rows, the same ring, the same
+        // keys, the same paging, none of it written again (#105). One that is never saved: the
+        // id is fixed so that `feed(for:)` keeps one page across every search, and typing new
+        // words hands the new question to the page that is already open rather than starting a
+        // second one, which is what a reader editing any timeline already gets.
+        // A tag the reader pressed comes first: they asked for it a moment ago, and a search
+        // they left open underneath is still there when they come back out of it.
+        if let viewingTag { return Self.tagTimeline(for: viewingTag) }
+        if !searching.isEmpty {
+            // What the reader agreed to, asked here rather than down in the core: the layer
+            // that knows the answer is the one that builds the question (#106).
+            return Self.searchTimeline(for: searching,
+                                       asksServers: preferences.mayAskServersToSearch)
+        }
+        return timeline(currentTimeline) ?? timelines.first
+    }
+
+    /// The reading a search is. Not in `timelines` and never written down: it belongs to this
+    /// moment rather than to the row of tabs.
+    /// The reading a pressed hashtag is: a timeline of that one tag, asked of every server the
+    /// reader has added, which is what #104 built.
+    static func tagTimeline(for tag: String) -> Timeline {
+        Timeline(id: "tag:\(tag)", name: "#\(tag)", source: .tag, tags: [tag], template: "tag")
+    }
+
+    /// The reader's own accounts, as `@name@host`, in a settled order so the menu does not
+    /// shuffle between launches (#110).
+    var yourAccounts: [String] {
+        (signIn?.accounts.values.map(\.handle) ?? []).sorted()
+    }
+
+    /// Open the page about one of the reader's own accounts.
+    ///
+    /// Reached from the rail rather than by finding one of your own posts, which was the only
+    /// way in before. The page is the same page every other person gets — what it stops offering
+    /// is a relationship with yourself.
+    func openYourPage(_ handle: String) {
+        let bare = handle.hasPrefix("@") ? String(handle.dropFirst()) : handle
+        guard let host = bare.split(separator: "@").last.map(String.init),
+              let account = signIn?.accounts.values.first(where: { $0.handle == handle }),
+              let client = registry.client(for: .mastodon)
+        else { return }
+        railItem = .timeline
+        let subject = PersonSubject(profile: Profile(id: account.authorId, authorId: account.authorId,
+                                                     name: account.displayName,
+                                                     handle: account.handle,
+                                                     avatarURL: account.avatarURL),
+                                    host: host)
+        guard person?.subject != subject else { return }
+        people = nil
+        // Asked as this account and no other. A reader signed in to three servers is three
+        // people, and the unsent posts on this page are the ones this account has waiting.
+        person = PersonModel(subject: subject, client: client) { [weak self] in
+            await self?.acting(as: handle)
+        } spelling: { [weak self] account in
+            self?.handle(of: account)
+        } changed: { [weak self] in
+            await self?.homeChanged()
+        }
+    }
+
+    /// Open a timeline of one hashtag, the way pressing a name opens a page about somebody.
+    func openTag(_ tag: String) {
+        railItem = .timeline
+        viewingTag = tag
+    }
+
+    /// Back out of it, to whatever the reader was reading before.
+    func closeTag() { viewingTag = nil }
+
+    static func searchTimeline(for words: String, asksServers: Bool = false) -> Timeline {
+        var made = Timeline(id: "search", name: "", source: .search, words: words,
+                            template: "search")
+        made.asksServers = asksServers
+        return made
     }
 
     /// The feed being read, ready to be asked something. Every key that moves through a
@@ -1161,6 +1353,13 @@ public final class AppState {
         case .completeMention: return takeTheOfferedHandle()
         case .backToTop: return goToTop()
         case .showShortcuts: setShowingShortcuts(true); return true
+        // Opens the field, and closes it with the words it was holding — pressing it again is
+        // how a reader gets their timeline back without reaching for the pointer (#105).
+        case .searchHere:
+            guard railItem == .timeline else { return false }
+            showingSearch.toggle()
+            if !showingSearch { searching = "" }
+            return true
         }
     }
 
@@ -1181,6 +1380,9 @@ public final class AppState {
         // belong to what is in front of the reader. Moving the ring in the list behind it
         // would be moving something they cannot see (#94).
         if let person { return person.place.moveSelection(by: steps) }
+        // The inbox is a page of its own now, and the ring in it names a notice rather than a
+        // post — a notice can be somebody following you, with no post at all (#122).
+        if railItem == .inbox, inboxTab == .notices { return noticePlace.move(by: steps) }
         guard let feed = readingFeed else { return false }
         let moved = feed.moveSelection(by: steps)
         // Held down, `j` repeats twenty times a second against a ring that is still at the
@@ -1522,6 +1724,10 @@ public final class AppState {
     /// Back to the top of the feed being read. The screen does the scrolling; what happens
     /// here is that the ring is let go, so the reader is not told they are in two places.
     private func goToTop() -> Bool {
+        if railItem == .inbox, inboxTab == .notices {
+            noticePlace.goToTop()
+            return true
+        }
         guard let feed = readingFeed else { return false }
         feed.goToTop()
         return true
@@ -1545,6 +1751,9 @@ public final class AppState {
         case .timeline: rotateTimeline(by: steps)
         case .statistics: rotate(&statisticsTab, by: steps)
         case .settings: rotate(&settingsTab, by: steps)
+        // Neither has tabs to rotate through: one list each, and `Tab` is handed back to the
+        // focus system rather than kept for nothing.
+        case .inbox: rotate(&inboxTab, by: steps)
         case .kept: false
         }
     }
@@ -1617,7 +1826,13 @@ public final class AppState {
         // one asked for two steps and gets to take them back one at a time; the last of them
         // is the one that returns them to the list, which still has its scroll position and
         // its ring.
-        guard !threads.isEmpty else { return false }
+        // Behind the conversation, ahead of nothing: a reader who pressed a tag, then opened a
+        // post from the tag's timeline, takes those two steps back in the order they took them.
+        guard !threads.isEmpty else {
+            guard viewingTag != nil else { return false }
+            closeTag()
+            return true
+        }
         // `_ =` because `removeLast` hands back what it removed, and a closure whose last
         // expression is a value makes `withAnimation` return it — which nobody wants and the
         // compiler is right to mention.

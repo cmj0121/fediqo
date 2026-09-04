@@ -28,6 +28,20 @@ public enum SourceFailure: Error, Sendable, Equatable, LocalizedError {
     /// came before a post it never had, and asking without the cursor would hand back the
     /// newest page and repeat what has just been read.
     case notItsPost(String)
+    /// The server was asked for one server's own writers, or for everything but them, and
+    /// answered with the whole public timeline anyway (#113).
+    ///
+    /// Mastodon ignores a query it does not know rather than refusing it, so this is caught by
+    /// reading the answer rather than by a status code: a page cut to `here` whose posts were
+    /// not written here was not cut. Said out loud, because the quiet alternative is a reader
+    /// looking at the federated timeline believing it is the room.
+    case wouldNotCut(String, Writers)
+    /// The server was asked for a hashtag's timeline and has no such thing (#104). Distinct
+    /// from a tag nobody has used, which is an empty answer rather than a refusal.
+    case noTagTimeline(String)
+    /// The server was asked to search and has no such thing (#106). Distinct from a search that
+    /// matched nothing, which is an empty answer rather than a refusal.
+    case cannotSearch(String)
     /// The server answered outside 2xx; the body rides along for whoever can read a
     /// reason out of it.
     case http(Int, Data)
@@ -62,7 +76,7 @@ public enum SourceFailure: Error, Sendable, Equatable, LocalizedError {
         switch self {
         case .tokenRejected, .store: true
         case .badHost, .notThatKind, .unsupported, .needsSignIn, .signInFailed, .notItsPost,
-             .http, .transport, .emptyDraft, .tooLong,
+             .http, .transport, .emptyDraft, .tooLong, .wouldNotCut, .noTagTimeline, .cannotSearch,
              .tooManyPictures, .pictureTooLarge, .pictureNotTaken: false
         }
     }
@@ -78,6 +92,10 @@ public enum SourceFailure: Error, Sendable, Equatable, LocalizedError {
     /// The last resort, for anywhere that is not a screen. Screens localise the case instead.
     public var errorDescription: String? {
         switch self {
+        case .wouldNotCut(let host, let writers):
+            "\(host) answered with its whole public timeline rather than \(writers.rawValue)."
+        case .noTagTimeline(let host): "\(host) has no timeline for a hashtag."
+        case .cannotSearch(let host): "\(host) cannot be searched."
         case .badHost(let host): "\(host) is not a hostname."
         case .notThatKind(let socialProtocol, let host): "\(host) did not answer as a \(socialProtocol.rawValue) server."
         case .unsupported(let socialProtocol): "\(socialProtocol.rawValue) is not spoken yet."
@@ -128,6 +146,16 @@ public protocol SourceClient: Sendable {
     func timeline(host: String, limit: Int, before: Post?, after: Post?,
                   token: String?) async throws -> [Post]
 
+    /// The same, cut to which writers the reader asked for (#113).
+    ///
+    /// Separate from the one above rather than a parameter on it, and that is not tidiness: a
+    /// protocol that cannot cut must be able to *say so* instead of quietly answering the whole
+    /// timeline, and the default below is where it says it. A reader who asked for one server's
+    /// own writers and was handed the federated timeline has been told something false about
+    /// which room they are in.
+    func timeline(host: String, limit: Int, before: Post?, after: Post?,
+                  writers: Writers, token: String?) async throws -> [Post]
+
     /// What the server shows the account signed in to it, paged like `timeline`.
     ///
     /// `token` is not optional, and that is the difference between this and the two beside
@@ -136,6 +164,29 @@ public protocol SourceClient: Sendable {
     /// instead — the same rule #4 set for a server that publishes no public timeline.
     func home(host: String, limit: Int, before: Post?, after: Post?,
               token: String) async throws -> [Post]
+
+    /// Posts carrying a hashtag, asked for by it (#104).
+    ///
+    /// **Asked for, not sieved.** A tag rule over the public timeline shows the posts carrying
+    /// that tag which the public timeline happened to hand over — on a busy server, almost none
+    /// of them, and a reader is left thinking the tag is quiet.
+    ///
+    /// The tag arrives normalised the way the store keeps one: NFC, lowercased, no `#`. Paged
+    /// like `timeline`, by the same cursor and for the same reason.
+    func tag(_ tag: String, host: String, limit: Int, before: Post?, after: Post?,
+             token: String?) async throws -> [Post]
+
+    /// Posts a server has that match these words — `/api/v2/search?type=statuses` (#106).
+    ///
+    /// **The one read in this app that is a question about the reader.** Every other is a
+    /// question about a timeline; this one sends what somebody typed to whoever runs the server.
+    /// That is not a reason to refuse it, it is a reason it is never sent without being asked
+    /// for — and the asking is the caller's, which is why nothing here checks.
+    ///
+    /// Asked of servers the reader has added and of nowhere else. A search is not a reason to go
+    /// somewhere new.
+    func search(_ words: String, host: String, limit: Int,
+                token: String?) async throws -> [Post]
 
     /// What the server says is trending. A separate thing, asked for separately.
     ///
@@ -205,6 +256,36 @@ public protocol SourceClient: Sendable {
     /// be walked straight past.
     func searchPeople(matching query: String, limit: Int,
                       as account: ActingAccount) async throws -> [Profile]
+
+    /// What a part-typed hashtag could be, asked of the server a draft will be posted from
+    /// (#108). A requirement and not only a default, for the reason above it.
+    func searchTags(matching query: String, limit: Int,
+                    as account: ActingAccount) async throws -> [String]
+
+    /// The conversations this account is in (#109).
+    ///
+    /// Theirs and nobody else's, and not fanned out: a conversation belongs to one account on
+    /// one server, and two servers' conversations are two conversations even where the same
+    /// people are in both.
+    func conversations(as account: ActingAccount) async throws -> [Talk]
+
+    /// The posts this account has written and not sent yet (#110).
+    ///
+    /// Theirs and nobody else's: there is no reading of somebody else's unsent posts, and the
+    /// account is what the question is asked as rather than about.
+    func scheduled(as account: ActingAccount) async throws -> [ScheduledPost]
+
+    /// Call one of them off. What can be done to a post that has not happened.
+    func cancelScheduled(_ id: String, as account: ActingAccount) async throws
+
+    /// What somebody asked you to read first — the posts they pinned (#112).
+    ///
+    /// A separate ask from what they wrote, and the answer is small: a handful at most, usually
+    /// none. It is the one place on the fediverse where somebody says *start here*.
+    ///
+    /// Not paged. Pinned posts are a set somebody chose, not a stretch of time, and there is no
+    /// second page of them to walk to.
+    func pinned(by id: String, host: String, token: String?) async throws -> [Post]
 
     /// The same events as they happen, over one connection held open for as long as the
     /// sequence is iterated.
@@ -276,6 +357,42 @@ public protocol SourceClient: Sendable {
     /// app announcing an approval nobody has given.
     func setFollow(_ following: Bool, with handle: String, as account: ActingAccount) async throws -> Relationship
 }
+
+/// What a client that cannot cut the public timeline does about it.
+public extension SourceClient {
+    /// Refuse, rather than answer the whole thing.
+    ///
+    /// A reader who asked for one server's own writers and was handed the federated timeline
+    /// has been told something false about which room they are in — so the honest answer for a
+    /// protocol with no word for the cut is that it has none (#113). `everyone` is not a cut and
+    /// falls through to the ordinary reading, which is why every client already satisfies this.
+    func timeline(host: String, limit: Int, before: Post?, after: Post?,
+                  writers: Writers, token: String?) async throws -> [Post] {
+        guard writers != .everyone else {
+            return try await timeline(host: host, limit: limit, before: before, after: after,
+                                      token: token)
+        }
+        throw SourceFailure.wouldNotCut(host, writers)
+    }
+
+    /// A protocol with no hashtag timeline says so rather than answering nothing.
+    ///
+    /// Empty would be indistinguishable from a tag nobody has used, and the two are different
+    /// answers a reader is shown different things for — the same reason a server that publishes
+    /// no public timeline is never quietly handed something else (#4).
+    func tag(_ tag: String, host: String, limit: Int, before: Post?, after: Post?,
+             token: String?) async throws -> [Post] {
+        throw SourceFailure.noTagTimeline(host)
+    }
+
+    /// A protocol with no search says so rather than answering nothing, for the reason above it:
+    /// empty is what "nobody wrote that" looks like, and the two are different answers.
+    func search(_ words: String, host: String, limit: Int,
+                token: String?) async throws -> [Post] {
+        throw SourceFailure.cannotSearch(host)
+    }
+}
+
 
 /// What a server says about itself, to somebody who has not joined it. Everything here came
 /// from that server and nowhere else, which is what makes it safe to show before a reader has
@@ -583,6 +700,35 @@ public extension SourceClient {
                       as account: ActingAccount) async throws -> [Profile] {
         throw SourceFailure.unsupported(.mastodon)
     }
+
+    /// What a part-typed hashtag could be (#108). Default: this build cannot ask that over this
+    /// protocol, and an offer of nothing is what a composer draws when nobody can be asked —
+    /// which is the right answer here, because a tag nobody has used is still typeable.
+    func searchTags(matching query: String, limit: Int,
+                    as account: ActingAccount) async throws -> [String] {
+        throw SourceFailure.unsupported(.mastodon)
+    }
+
+    /// Default: a protocol with no private conversations has none to list, and an empty answer
+    /// is the true one rather than a refusal — unlike the unsent posts below, where nobody
+    /// having looked and nothing being queued are different facts a reader is shown differently.
+    func conversations(as account: ActingAccount) async throws -> [Talk] { [] }
+
+    /// Default: this build cannot ask that over this protocol, which is different from an
+    /// account that has scheduled nothing — so it throws and the page leaves the part absent
+    /// rather than saying the reader has nothing waiting (#110).
+    func scheduled(as account: ActingAccount) async throws -> [ScheduledPost] {
+        throw SourceFailure.unsupported(.mastodon)
+    }
+
+    func cancelScheduled(_ id: String, as account: ActingAccount) async throws {
+        throw SourceFailure.unsupported(.mastodon)
+    }
+
+    /// What somebody pinned (#112). Default: nothing, and that is the same answer a server gives
+    /// for somebody who pinned nothing — which is right here, because a protocol with no pinning
+    /// has no *start here* to miss, and the page draws nothing either way.
+    func pinned(by id: String, host: String, token: String?) async throws -> [Post] { [] }
 
     /// Those events as they happen. Default: a sequence that ends at once saying why, rather
     /// than one that stays open forever handing nothing over — a caller waiting on silence

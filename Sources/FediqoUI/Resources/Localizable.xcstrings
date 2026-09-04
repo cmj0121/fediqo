@@ -5798,6 +5798,1213 @@
           }
         }
       }
+    },
+    "error.wouldNotCut": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ answered with its whole public timeline rather than %2$@."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ 回的是它整條公開時間軸，不是%2$@。"
+          }
+        }
+      }
+    },
+    "writers.here": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "only its own writers"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "只有它自己的作者"
+          }
+        }
+      }
+    },
+    "writers.elsewhere": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "everything but its own writers"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "它自己的作者以外的所有人"
+          }
+        }
+      }
+    },
+    "template.local.name": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The room"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這個地方"
+          }
+        }
+      }
+    },
+    "template.local.summary": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only the accounts on each server you added. Who is here, and what this place is like."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "只有你加入的每一台伺服器上的帳號。誰在這裡，這個地方是什麼樣子。"
+          }
+        }
+      }
+    },
+    "template.remote.name": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Everywhere else"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "其他地方"
+          }
+        }
+      }
+    },
+    "template.remote.summary": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Everything your servers see except their own writers. The wider network, without the local conversation on top of it."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你的伺服器看得到的一切，扣掉它們自己的作者。更大的網路，上面沒有壓著本地的對話。"
+          }
+        }
+      }
+    },
+    "error.noTagTimeline": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ has no timeline for a hashtag."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 沒有 hashtag 的時間軸。"
+          }
+        }
+      }
+    },
+    "timeline.tags": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hashtags"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hashtag"
+          }
+        }
+      }
+    },
+    "timeline.tags.hint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add a hashtag"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "加一個 hashtag"
+          }
+        }
+      }
+    },
+    "timeline.tags.add": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "加入"
+          }
+        }
+      }
+    },
+    "timeline.tags.remove": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove #%@"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移除 #%@"
+          }
+        }
+      }
+    },
+    "timeline.search": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search what is here"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "搜尋這裡有的東西"
+          }
+        }
+      }
+    },
+    "search.hint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search what this device holds"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "搜尋這台裝置上有的東西"
+          }
+        }
+      }
+    },
+    "search.clear": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clear"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "清除"
+          }
+        }
+      }
+    },
+    "search.waiting": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Type to search what this device already holds. Nothing is asked of any server."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打字就會搜尋這台裝置上已經有的東西。不會問任何伺服器。"
+          }
+        }
+      }
+    },
+    "search.nothing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing here matches, which is about what this device holds rather than about what exists."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這裡沒有東西符合。這是在說這台裝置上有什麼，不是在說世界上有什麼。"
+          }
+        }
+      }
+    },
+    "search.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "搜尋"
+          }
+        }
+      }
+    },
+    "shortcut.search": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search what this device holds"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "搜尋這台裝置上有的東西"
+          }
+        }
+      }
+    },
+    "search.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "What this device already holds, newest first. Nothing is asked of any server."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這台裝置上已經有的東西，最新的在前面。不會問任何伺服器。"
+          }
+        }
+      }
+    },
+    "error.cannotSearch": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ cannot be searched."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 無法被搜尋。"
+          }
+        }
+      }
+    },
+    "search.offer": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Also ask your servers? This would send “%1$@” to %2$@."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "也問你的伺服器嗎？這會把「%1$@」送給 %2$@。"
+          }
+        }
+      }
+    },
+    "search.offer.yes": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ask them"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "去問"
+          }
+        }
+      }
+    },
+    "search.offer.no": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not now"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "現在不要"
+          }
+        }
+      }
+    },
+    "settings.searchServers": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Let searches reach your servers"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "讓搜尋抵達你的伺服器"
+          }
+        }
+      }
+    },
+    "settings.searchServers.body": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Off, a search reads only what this device already holds and asks nobody. On, what you type is also sent to the servers you added — and to nowhere else."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "關閉時，搜尋只讀這台裝置上已經有的東西，不問任何人。開啟時，你打的字也會送給你加入的那些伺服器——而且只有它們。"
+          }
+        }
+      }
+    },
+    "tag.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Posts carrying %@, asked of every server you added."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "帶有 %@ 的貼文，向你加入的每一台伺服器問過。"
+          }
+        }
+      }
+    },
+    "tag.back": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Back"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "返回"
+          }
+        }
+      }
+    },
+    "post.tags": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tags"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "標籤"
+          }
+        }
+      }
+    },
+    "person.pinned": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pinned"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "置頂"
+          }
+        }
+      }
+    },
+    "person.scheduled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not sent yet"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "還沒送出"
+          }
+        }
+      }
+    },
+    "person.scheduled.cancel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消"
+          }
+        }
+      }
+    },
+    "rail.me": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your page"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你的頁面"
+          }
+        }
+      }
+    },
+    "person.nothing.you": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing of yours here yet."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這裡還沒有你的東西。"
+          }
+        }
+      }
+    },
+    "rail.notices": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inbox"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "收件匣"
+          }
+        }
+      }
+    },
+    "notices.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "What reached you, newest first. Read as each account, on its own server."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "抵達你這裡的東西，最新的在前面。以各個帳號的身分、在各自的伺服器上讀。"
+          }
+        }
+      }
+    },
+    "notices.unseen": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ not looked at yet"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 則還沒看過"
+          }
+        }
+      }
+    },
+    "rail.talks": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conversations"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "對話"
+          }
+        }
+      }
+    },
+    "talks.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Who you are talking to, and what was last said. The order is the conversation's, not time's."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你正在跟誰說話，以及最後說了什麼。順序是對話的，不是時間的。"
+          }
+        }
+      }
+    },
+    "talks.empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nobody is talking to you privately just now."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "目前沒有人在私下跟你說話。"
+          }
+        }
+      }
+    },
+    "talks.refused": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No server would answer about conversations."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "沒有伺服器願意回答關於對話的事。"
+          }
+        }
+      }
+    },
+    "talks.unread": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not read"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未讀"
+          }
+        }
+      }
+    },
+    "talks.nothingSaid": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The last post here is gone."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這裡最後那則貼文已經不在了。"
+          }
+        }
+      }
+    },
+    "talks.justYou": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only you"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "只有你"
+          }
+        }
+      }
+    },
+    "rule.tag.with": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "carrying %@"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "帶有 %@"
+          }
+        }
+      }
+    },
+    "rule.tag.without": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "not carrying %@"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "沒有帶 %@"
+          }
+        }
+      }
+    },
+    "rule.author.with": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "written by %@"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 寫的"
+          }
+        }
+      }
+    },
+    "rule.author.without": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "not written by %@"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不是 %@ 寫的"
+          }
+        }
+      }
+    },
+    "rule.mention.with": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "naming %@"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "有提到 %@"
+          }
+        }
+      }
+    },
+    "rule.mention.without": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "not naming %@"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "沒有提到 %@"
+          }
+        }
+      }
+    },
+    "rule.server.with": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "from %@"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "來自 %@"
+          }
+        }
+      }
+    },
+    "rule.server.without": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "not from %@"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不是來自 %@"
+          }
+        }
+      }
+    },
+    "rule.media.with": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "with something attached"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "有附加東西"
+          }
+        }
+      }
+    },
+    "rule.media.without": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "with nothing attached"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "沒有附加東西"
+          }
+        }
+      }
+    },
+    "timeline.rules": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rules"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "規則"
+          }
+        }
+      }
+    },
+    "timeline.rules.add": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add a rule"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "加一條規則"
+          }
+        }
+      }
+    },
+    "timeline.rules.none": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No rules. Everything this reading carries is shown."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "沒有規則。這個讀法帶來的東西全部都會顯示。"
+          }
+        }
+      }
+    },
+    "timeline.rules.remove": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove this rule"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移除這條規則"
+          }
+        }
+      }
+    },
+    "timeline.rules.keep": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保留"
+          }
+        }
+      }
+    },
+    "timeline.rules.drop": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Leave out"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "排除"
+          }
+        }
+      }
+    },
+    "timeline.kind.tag": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hashtag"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hashtag"
+          }
+        }
+      }
+    },
+    "timeline.kind.author": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Author"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "作者"
+          }
+        }
+      }
+    },
+    "timeline.kind.mention": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Names"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "提到的人"
+          }
+        }
+      }
+    },
+    "timeline.kind.server": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Server"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "伺服器"
+          }
+        }
+      }
+    },
+    "timeline.kind.media": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Attachments"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "附件"
+          }
+        }
+      }
+    },
+    "timeline.preview": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "What is already here"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這裡已經有的"
+          }
+        }
+      }
+    },
+    "timeline.preview.note": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ of what this device already holds. Nothing is asked of any server."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這台裝置上已經有的東西裡的 %@ 則。不會問任何伺服器。"
+          }
+        }
+      }
+    },
+    "timeline.preview.none": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing this device holds passes these rules yet."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這台裝置上的東西，目前沒有一則通過這些規則。"
+          }
+        }
+      }
+    },
+    "rail.inbox": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inbox"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "收件匣"
+          }
+        }
+      }
+    },
+    "tab.notices": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reached you"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "抵達你這裡"
+          }
+        }
+      }
+    },
+    "tab.talks": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conversations"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "對話"
+          }
+        }
+      }
     }
   }
 }

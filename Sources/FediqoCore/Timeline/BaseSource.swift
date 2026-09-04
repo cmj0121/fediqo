@@ -13,6 +13,48 @@ import Foundation
 /// ordered, and sorting somebody else's ranking by time would throw away the only thing it
 /// was carrying. So the reader has no switch for it and a rule cannot reach it: what decides
 /// is which of these a timeline was built on.
+/// Which writers a public timeline is asked for.
+///
+/// `/api/v1/timelines/public` answers with everything a server sees — its own writers and
+/// everything that reached it from elsewhere. Mastodon lets that be cut two ways, and both are
+/// questions a person actually asks (#113):
+///
+/// - **`here`** is the room itself: who is on this server, what this place is like. It is how
+///   somebody decides whether they want to join, and how somebody who has joined keeps up with
+///   their neighbours.
+/// - **`elsewhere`** is what the wider network is saying without the server's own conversation
+///   on top of it.
+///
+/// **Not a base source.** It does not change where the posts come from, only which of them the
+/// server is asked for — so `feeds` gains no row, `post_origins` still records `public`, and a
+/// post that arrived this way arrived by the public timeline, which is the truth.
+///
+/// Nothing but `public` is asked this. A home timeline is already one account's, a trending list
+/// is the server's own, and a conversation is one post's — none of them has a room to be cut out
+/// of, so the question is not asked and `everyone` is what they carry.
+public enum Writers: String, Sendable, Hashable, CaseIterable, Codable {
+    /// Everything the server sees. What `public` has always meant, and what a timeline written
+    /// down before this existed still means.
+    case everyone
+    /// Only the accounts on this server.
+    case here
+    /// Everything except them.
+    case elsewhere
+
+    /// The query Mastodon knows this by, or nothing where the whole timeline is wanted.
+    ///
+    /// Spoken here rather than in the client for the reason `max_id` is spoken in the client and
+    /// not here: this is the *name of the cut*, which every protocol will need a word for, and
+    /// `local` is Mastodon's word. When a second protocol arrives it says its own.
+    public var mastodonQuery: (name: String, value: String)? {
+        switch self {
+        case .everyone: nil
+        case .here: ("local", "true")
+        case .elsewhere: ("remote", "true")
+        }
+    }
+}
+
 public enum BaseSource: String, Sendable, CaseIterable, Identifiable, Codable {
     /// What the server publishes to anyone — read as whoever is signed in where there is
     /// somebody, which is still the public timeline and never substituted for by anything else.
@@ -41,6 +83,34 @@ public enum BaseSource: String, Sendable, CaseIterable, Identifiable, Codable {
     /// and gives rules to — and this is not that promise being kept. It is the narrower thing
     /// a page about somebody needs: an origin for the posts on it.
     case author
+    /// Posts asked for by a hashtag — `/api/v1/timelines/tag/:tag`, of every server the reader
+    /// has added (#104).
+    ///
+    /// **A reading and a base at once, which the five above are not.** As an origin it is how a
+    /// post arrived, the way `thread` and `author` are. As a base it is a timeline that reads
+    /// *nothing but its own tags* — which is #104's "a base of nothing", spelled as the thing it
+    /// actually reads rather than as an absence. A timeline based here with no tags asks nobody
+    /// and is empty, which is the honest answer and not the public timeline quietly put in its
+    /// place.
+    ///
+    /// Any base may carry tags; this is the one whose posts are only that.
+    case tag
+    /// Posts this device already holds, matched on their words (#105).
+    ///
+    /// **The one reading that asks nobody.** `PostStore.search` has been there since migration
+    /// 010 and nothing opened it, so a reader wanting the post they remember had to scroll for
+    /// it. What it searches is what is already here, which is what makes it instant, private,
+    /// and available with the network off — for the post you remember, the better search.
+    ///
+    /// It is a base and an origin, like `tag`, and for a reason that arrives with #106: a search
+    /// put to a server writes what it answers into the store, and those posts arrived by a
+    /// search. Until then nothing arrives this way and the reading is a question put to the
+    /// store alone.
+    ///
+    /// Read differently from every other base: they ask `post_origins` how a post arrived, and
+    /// this one does not ask at all. A search is about what this device holds, however it came
+    /// to hold it.
+    case search
 
     public var id: String { rawValue }
 

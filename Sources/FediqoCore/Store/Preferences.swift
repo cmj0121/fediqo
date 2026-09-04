@@ -158,6 +158,19 @@ public final class Preferences {
     /// the request that would make it work is the request that tells somebody what is being
     /// read, and this app does not send that one without being asked to.
     public var mayFetchToAct: Bool { didSet { defaults.set(mayFetchToAct, forKey: Keys.mayFetchToAct) } }
+    /// Whether the reader has agreed that a search may be put to their own servers as well as
+    /// to this device. Off until they say otherwise, and revocable (#106).
+    ///
+    /// **Every other read in this app is a question about a timeline; this one is a question
+    /// about the reader.** What is sent is what they typed, and who learns it is whoever runs
+    /// the servers they added. That is not a reason to refuse it — it is a reason to ask first,
+    /// which is the same rule `mayFetchToAct` is kept by.
+    ///
+    /// Refused, searching still works: `search` reads what this device already holds and asks
+    /// nobody, which is #105 and is the whole of the reading without this.
+    public var mayAskServersToSearch: Bool {
+        didSet { defaults.set(mayAskServersToSearch, forKey: Keys.mayAskServersToSearch) }
+    }
 
     /// When this device last managed to ask a server what had happened — whether or not
     /// anything had.
@@ -187,6 +200,7 @@ public final class Preferences {
         static let clearedSeededWording = "fediqo.clearedSeededWording"
         static let actingServer = "fediqo.actingServer"
         static let mayFetchToAct = "fediqo.mayFetchToAct"
+        static let mayAskServersToSearch = "fediqo.mayAskServersToSearch"
         static let lastHeard = "fediqo.lastHeard"
         static let carryMentions = "fediqo.carryMentions"
 
@@ -195,7 +209,8 @@ public final class Preferences {
         /// that quietly survives a reset.
         static let all = [theme, textScale, language, railExpanded, showBoosts, showMediaOnly,
                           showSensitive, refreshInterval, keepFor, offeredHomeTimeline, clearedSeededWording,
-                          actingServer, mayFetchToAct, lastHeard, carryMentions]
+                          actingServer, mayFetchToAct, mayAskServersToSearch, lastHeard,
+                          carryMentions]
     }
 
     /// Every preference back to the value a first launch would have given it, and the stored
@@ -218,6 +233,7 @@ public final class Preferences {
         clearedSeededWording = fresh.clearedSeededWording
         actingServer = fresh.actingServer
         mayFetchToAct = fresh.mayFetchToAct
+        mayAskServersToSearch = fresh.mayAskServersToSearch
         lastHeard = fresh.lastHeard
         carryMentions = fresh.carryMentions
     }
@@ -236,6 +252,8 @@ public final class Preferences {
         // Off until asked. The request this permits is the one that tells somebody what is
         // being read, so it is not a default anybody arrives at by not looking.
         mayFetchToAct = defaults.object(forKey: Keys.mayFetchToAct) as? Bool ?? false
+        // Off until asked. The default is the one that sends nothing.
+        mayAskServersToSearch = defaults.object(forKey: Keys.mayAskServersToSearch) as? Bool ?? false
         lastHeard = defaults.object(forKey: Keys.lastHeard) as? Date
         // The one mention a reply cannot be without, and the one nobody is surprised by.
         carryMentions = defaults.string(forKey: Keys.carryMentions)

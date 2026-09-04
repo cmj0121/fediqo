@@ -18,6 +18,9 @@ struct FeedScreen: View {
     /// button to do it in one move only exists while that is true — an arrow pointing at
     /// where you already are is a button that does nothing.
     @State private var scrolledAway = false
+    /// Whether the search field has the keyboard. Held here because the field is put up from
+    /// outside this screen and a field somebody asked for should not need a second click.
+    @FocusState private var searchFocused: Bool
     @State private var editing: TimelineEditor.Subject?
     /// Whether the list of what the rules kept off this page is up.
     @State private var showingHidden = false
@@ -91,6 +94,8 @@ struct FeedScreen: View {
         return ScrollViewReader { proxy in
             VStack(spacing: 0) {
                 header
+                if app.showingSearch { searchField }
+                if app.showingSearch, offersToAskServers { searchOffer }
                 Hairline()
                 body(for: model.visible)
             }
@@ -164,10 +169,11 @@ struct FeedScreen: View {
             ServerPickerView(socialProtocol: .mastodon) { app.addingSource = false }
                 .fediqoChrome(app)
         }
-        .sheet(isPresented: $app.showingNotifications) {
-            NoticesSheet(model: app.notices, onClose: { app.showingNotifications = false },
-                         onAsk: { await app.askForNotices() })
-                .fediqoChrome(app)
+        // A run told to open the builder does it once. The same shape every other launch
+        // variable has, and the same reason (#30).
+        .task {
+            guard app.editingTimeline, editing == nil else { return }
+            editing = .new
         }
         .sheet(item: $editing) { subject in
             TimelineEditor(subject: subject) { editing = nil }
@@ -183,10 +189,23 @@ struct FeedScreen: View {
         // The reader's own sentence, and the template's where they have not written one. A
         // page with tabs always has this line — two words of name are not an explanation —
         // and a timeline made in a hurry should not leave it blank.
-        FeedHeader(paging: model.paging,
+        // A search is a reading nobody named, so the line under the title is what it is rather
+        // than an invitation to describe it — "edit this timeline to say what it is for" is
+        // advice about a timeline that cannot be edited and will not be there in a moment.
+        let subtitle: String
+        switch timeline.source {
+        case .search: subtitle = t("search.subtitle")
+        // A timeline the reader pressed into rather than made, so the line says what it is and
+        // how to leave — the tabs above do not hold it, which is what "not one of yours" looks
+        // like here (#107).
+        case .tag where app.viewingTag != nil: subtitle = t("tag.subtitle", timeline.name)
+        default:
+            subtitle = timeline.displaySummary.isEmpty ? t("timeline.noDescription")
+                                                       : timeline.displaySummary
+        }
+        return FeedHeader(paging: model.paging,
                    titleKey: app.railItem.titleKey,
-                   subtitle: timeline.displaySummary.isEmpty ? t("timeline.noDescription")
-                                                             : timeline.displaySummary) {
+                   subtitle: subtitle) {
             TimelineChips(editing: $editing)
         } controls: {
             controls
@@ -203,6 +222,16 @@ struct FeedScreen: View {
             if scrolledAway {
                 IconButton(symbol: "arrow.up", labelKey: "timeline.top") { app.perform(.backToTop) }
                     .transition(.opacity)
+            }
+            // Outside the block below, because what it searches is this device and not this
+            // reading — so it is there on every one of them, and on the search itself, where
+            // pressing it again is the way back.
+            if app.viewingTag != nil {
+                IconButton(symbol: "chevron.left", labelKey: "tag.back") { app.closeTag() }
+            }
+            IconButton(symbol: "magnifyingglass", labelKey: "timeline.search") {
+                app.showingSearch.toggle()
+                if !app.showingSearch { app.searching = "" }
             }
             if showsTimelineControls {
                 IconButton(symbol: "bell", labelKey: "timeline.notifications") { app.showingNotifications = true }
@@ -420,6 +449,75 @@ struct FeedScreen: View {
 
     /// Not `@ViewBuilder`: it works out two facts first and then returns one view, and a
     /// builder turned off by the `return` that follows it is a warning rather than a shape.
+    /// What this device holds, matched on its words.
+    ///
+    /// **It asks nobody**, which is what makes it instant, private, and there with the network
+    /// off. For the post you remember reading, that is not a lesser search: it is the better one
+    /// (#105).
+    private var searchField: some View {
+        HStack(spacing: Space.step) {
+            Image(systemName: "magnifyingglass")
+                .fediqoSymbol(Glyph.inline)
+                .foregroundStyle(.secondary)
+            TextField(t("search.hint"), text: Binding(get: { app.searching },
+                                                      set: { app.searching = $0 }))
+                .textFieldStyle(.plain)
+                .fediqoFont(TypeScale.small)
+                .focused($searchFocused)
+            if !app.searching.isEmpty {
+                IconButton(symbol: "xmark.circle.fill", labelKey: "search.clear") {
+                    app.searching = ""
+                }
+            }
+        }
+        .padding(.horizontal, Space.pad)
+        .padding(.vertical, Space.step)
+        // Focused when it appears, because a field a reader has to click after asking for it is
+        // a field that made them ask twice.
+        .onAppear { searchFocused = true }
+        .background(Palette.surface(colorScheme))
+    }
+
+    /// Whether to offer to put this search to the reader's servers.
+    ///
+    /// Only with something to send and somewhere to send it: an offer to search no servers is a
+    /// question with no answer, and one made before a word is typed is a question about nothing.
+    private var offersToAskServers: Bool {
+        !app.preferences.mayAskServersToSearch && !app.hidTheSearchOffer
+            && !app.searching.isEmpty && !app.servers.isEmpty
+    }
+
+    /// The ask, and it says what it sends and to whom (#106).
+    ///
+    /// **Every other read in this app is a question about a timeline; this one is a question
+    /// about the reader.** So the words themselves and the servers that would see them are in
+    /// the sentence, rather than "search remote servers?" — which asks somebody to agree to
+    /// something they would have to go and work out.
+    private var searchOffer: some View {
+        HStack(alignment: .top, spacing: Space.step) {
+            Image(systemName: "questionmark.circle")
+                .fediqoSymbol(Glyph.inline)
+                .foregroundStyle(.secondary)
+            Text(t("search.offer", app.searching,
+                   app.servers.map(\.host).joined(separator: ", ")))
+                .fediqoFont(TypeScale.minor)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: Space.step)
+            Button(t("search.offer.no")) { app.hidTheSearchOffer = true }
+                .buttonStyle(.plain)
+                .fediqoFont(TypeScale.minor)
+            Button(t("search.offer.yes")) {
+                app.preferences.mayAskServersToSearch = true
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Palette.accent)
+            .fediqoFont(TypeScale.minor)
+        }
+        .padding(.horizontal, Space.pad)
+        .padding(.bottom, Space.step)
+    }
+
     private var emptyState: some View {
         let hiddenByRules = !model.result.posts.isEmpty
         // A home timeline on a device nobody is signed in on is not an empty timeline: there
@@ -431,14 +529,19 @@ struct FeedScreen: View {
                 ProgressView()
                 Text(t("timeline.loading")).fediqoFont(TypeScale.small).foregroundStyle(.secondary)
             } else {
-                Image(systemName: needsAccount ? "person.crop.circle.badge.questionmark" : "tray")
+                Image(systemName: timeline.source == .search ? "magnifyingglass"
+                        : needsAccount ? "person.crop.circle.badge.questionmark" : "tray")
                     .fediqoSymbol(Glyph.big, weight: .light).foregroundStyle(.tertiary)
-                Text(t(needsAccount ? "timeline.empty.needsAccount"
-                                    : hiddenByRules ? "timeline.empty.filtered" : "timeline.empty"))
+                // A search that found nothing says what it was looking through. "No posts"
+                // would read as "this does not exist", and what it means is "not here yet".
+                Text(timeline.source == .search
+                     ? t(app.searching.isEmpty ? "search.waiting" : "search.nothing")
+                     : t(needsAccount ? "timeline.empty.needsAccount"
+                                      : hiddenByRules ? "timeline.empty.filtered" : "timeline.empty"))
                     .fediqoFont(TypeScale.small)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                if showsTimelineControls {
+                if showsTimelineControls, timeline.source != .search {
                     Button(t("timeline.addSource")) { app.addingSource = true }
                         .buttonStyle(.borderedProminent)
                         .tint(Palette.accent)
@@ -608,7 +711,9 @@ struct ScrollDirector: View {
 /// read here rather than in `FeedScreen.body`, so the spinner beside the title coming and going
 /// redraws the heading and not the list under it. The tabs and the controls are handed in
 /// already built, so they are not rebuilt for it either.
-private struct FeedHeader<Tabs: View, Controls: View>: View {
+/// Internal rather than private since #122: the inbox is a page now, and a page's header is
+/// one thing rather than one per page.
+struct FeedHeader<Tabs: View, Controls: View>: View {
     let paging: FeedPaging
     let titleKey: String
     let subtitle: String

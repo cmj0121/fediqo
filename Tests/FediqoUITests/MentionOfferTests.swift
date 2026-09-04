@@ -8,6 +8,11 @@ import FediqoCore
 @Suite("Offering who a handle could be")
 @MainActor
 struct MentionOfferTests {
+    /// The token a reader is part-way through typing, as the finder hands it over.
+    private func handleQuery(_ text: String) -> MentionQuery {
+        MentionQuery.trailing(in: "@" + text)!
+    }
+
     private let host = "one.example"
 
     private func profile(_ who: String) -> Profile {
@@ -30,10 +35,10 @@ struct MentionOfferTests {
     func whatIsOfferedIsDrawn() async {
         let offering = model([profile("tove"), profile("tom")])
 
-        await offering.look(for: "to", as: account())
+        await offering.look(for: handleQuery("to"), as: account())
 
-        #expect(offering.people.map(\.handle) == ["@tove@one.example", "@tom@one.example"])
-        #expect(offering.first?.handle == "@tove@one.example")
+        #expect(offering.offers.map(\.written) == ["@tove@one.example", "@tom@one.example"])
+        #expect(offering.first?.written == "@tove@one.example")
     }
 
     /// Nobody signed in on the server this draft would go to is nobody to ask. A composer that
@@ -42,9 +47,9 @@ struct MentionOfferTests {
     func nobodyToAskAs() async {
         let offering = model([profile("tove")])
 
-        await offering.look(for: "to", as: nil)
+        await offering.look(for: handleQuery("to"), as: nil)
 
-        #expect(offering.people.isEmpty)
+        #expect(offering.offers.isEmpty)
     }
 
     /// A convenience while somebody is typing is not a thing to interrupt a draft over. The
@@ -53,9 +58,9 @@ struct MentionOfferTests {
     func arefusalIsQuiet() async {
         let offering = model([], refusing: true)
 
-        await offering.look(for: "to", as: account())
+        await offering.look(for: handleQuery("to"), as: account())
 
-        #expect(offering.people.isEmpty)
+        #expect(offering.offers.isEmpty)
     }
 
     /// An answer to a question the reader has moved on from is not an answer to draw. Without
@@ -64,10 +69,10 @@ struct MentionOfferTests {
     func alateAnswerIsDropped() async {
         let offering = model([profile("tove")])
 
-        await offering.look(for: "to", as: account())
+        await offering.look(for: handleQuery("to"), as: account())
         offering.clear()
 
-        #expect(offering.people.isEmpty)
+        #expect(offering.offers.isEmpty)
     }
 
     // MARK: - taking one
@@ -86,11 +91,11 @@ struct MentionOfferTests {
                                                                      profile("tom")]))
         #expect(!app.isOfferingHandle)
 
-        await app.mentions.look(for: "to", as: account())
+        await app.mentions.look(for: handleQuery("to"), as: account())
 
         #expect(app.isOfferingHandle)
         #expect(app.perform(.completeMention))
-        #expect(app.mentions.chosen?.handle == "@tove@one.example")
+        #expect(app.mentions.chosen?.written == "@tove@one.example")
     }
 
     /// With nothing on offer, `Tab` in a draft is the nothing it always was — it is not handed

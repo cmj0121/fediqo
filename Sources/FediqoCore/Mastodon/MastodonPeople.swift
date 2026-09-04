@@ -55,6 +55,21 @@ extension MastodonClient {
                         query: [URLQueryItem(name: "exclude_replies", value: "true")])
     }
 
+    /// What somebody asked you to read first — `?pinned=true` (#112).
+    ///
+    /// A separate ask, because it is a separate answer: `exclude_replies` and a cursor mean
+    /// nothing here. Mastodon ignores paging on this endpoint, so none is sent — a pinned set is
+    /// somebody's choice rather than a stretch of time, and there is no page before it.
+    ///
+    /// Asked of the server the page is asked of and no other. Which posts somebody pinned is a
+    /// thing their own server knows; another server's copy of them is whatever it happened to
+    /// see.
+    public func pinned(by id: String, host rawHost: String, token: String?) async throws -> [Post] {
+        try await posts(host: Server.normalise(rawHost), path: "/api/v1/accounts/\(id)/statuses",
+                        limit: 20, before: nil, token: token,
+                        query: [URLQueryItem(name: "pinned", value: "true")])
+    }
+
     /// Who somebody follows, or who follows them, as one server holds it (#90).
     ///
     /// **A hidden list and an empty one come back the same**, and that is the endpoint's doing:
@@ -196,5 +211,29 @@ extension MastodonClient {
                                  token: account.token)
         return try Self.decoder.decode([MastodonDTO.Account].self, from: data)
             .map { $0.asProfile(on: account.host) }
+    }
+
+    /// What a part-typed hashtag could be — `/api/v2/search?type=hashtags` (#108).
+    ///
+    /// The same rules the handles above are asked by, for the same reasons. **`resolve=false`**:
+    /// resolving would have the reader's server go and fetch whatever the letters look like they
+    /// name, which is a third party told what somebody is part-way through typing. The reader's
+    /// own server and no other, because a tag is offered so it can go into a post that server
+    /// will send.
+    ///
+    /// The names come back without the `#`, which is how the store keeps them and how a timeline
+    /// of one is asked for.
+    public func searchTags(matching query: String, limit: Int,
+                           as account: ActingAccount) async throws -> [String] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        let data = try await get(host: account.host, path: "/api/v2/search",
+                                 query: [URLQueryItem(name: "q", value: trimmed),
+                                         URLQueryItem(name: "type", value: "hashtags"),
+                                         URLQueryItem(name: "limit", value: String(limit)),
+                                         URLQueryItem(name: "resolve", value: "false")],
+                                 token: account.token)
+        return try Self.decoder.decode(MastodonDTO.TagResults.self, from: data)
+            .hashtags.compactMap { Post.normalisedTags([$0.name]).first }
     }
 }

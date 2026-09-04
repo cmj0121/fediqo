@@ -4,6 +4,11 @@ import SwiftUI
 /// has no initialiser: the decision of what a key means is the part worth testing, so it is
 /// the part kept away from the event type.
 enum KeyCommand: Hashable, CaseIterable {
+    /// Search what this device already holds (#105).
+    ///
+    /// `/`, which is what it is in every reader a person already uses. It asks nobody, so it is
+    /// the one reading a key can open with the network off.
+    case searchHere
     case refreshNow
     case cycleRefreshInterval
     case compose
@@ -117,12 +122,18 @@ enum KeyCommand: Hashable, CaseIterable {
         if shift {
             switch character {
             case "r", "R": return .cycleRefreshInterval
-            case "/", "?": return .showShortcuts
+            // Shifted, both spellings are the question mark: `?` *is* shift-slash, and which
+            // of the two arrives depends on the keyboard layer. Unshifted, `/` is its own key
+            // and means search — see below.
+            case "?", "/": return .showShortcuts
             default: return nil
             }
         }
 
         switch character {
+        // `?` is help and `/` is search, which is what the two are in every reader a person
+        // already uses. A plain slash meant nothing until there was something to search (#105).
+        case "/": return .searchHere
         case "r": return .refreshNow
         case "R": return .cycleRefreshInterval
         case "c": return .compose
@@ -299,6 +310,7 @@ extension KeyCommand {
         Shortcut(group: .doing, keys: ["r"], name: "readAgain", commands: [.refreshNow]),
         Shortcut(group: .doing, keys: ["R"], name: "interval", commands: [.cycleRefreshInterval]),
         Shortcut(group: .doing, keys: ["c"], name: "compose", commands: [.compose]),
+        Shortcut(group: .doing, keys: ["/"], name: "search", commands: [.searchHere]),
         Shortcut(group: .doing, keys: ["Tab"], name: "complete", commands: [.completeMention]),
         Shortcut(group: .doing, keys: ["Return", "Space"], name: "expand", commands: [.expandPost]),
         Shortcut(group: .doing, keys: ["o"], name: "browser", commands: [.openInBrowser]),
