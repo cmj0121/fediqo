@@ -24,8 +24,11 @@ struct NoticePlaceTests {
     /// ring names the pair too.
     private func key(_ id: String) -> String { "https://inbox.example#\(id)" }
 
+    /// The ring names a row rather than an event since #124, so the list it walks is the
+    /// grouped one — which for these, each about a different post, is one row each.
     private func place(_ notices: [Notice]) -> NoticePlace {
-        NoticePlace(rows: { notices })
+        let rows = Notice.grouped(notices)
+        return NoticePlace(rows: { rows })
     }
 
     /// A follow has no post, and it is still a row the ring must be able to stand on.
@@ -79,18 +82,18 @@ struct NoticePlaceTests {
     /// a ring pointing at nothing must say nothing rather than the wrong thing.
     @Test("A notice that has gone is not what the ring is on")
     func agoneNotice() {
-        var list = [notice("1"), notice("2")]
+        var list = Notice.grouped([notice("1"), notice("2")])
         let standing = NoticePlace(rows: { list })
         standing.select(list[1])
         #expect(standing.selected?.id == key("2"))
-        list = [notice("1")]
+        list = Notice.grouped([notice("1")])
         #expect(standing.selected == nil)
     }
 
     @Test("The top is the first, and says it was asked for")
     func theTop() {
         let standing = place([notice("1"), notice("2")])
-        standing.select(notice("2"))
+        standing.select(NoticeGroup([notice("2")]))
         let before = standing.topRequests
         standing.goToTop()
         #expect(standing.selection == key("1"))

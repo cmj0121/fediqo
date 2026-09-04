@@ -44,9 +44,9 @@ struct NoticeScreenTests {
     @Test("Lateness is shown when it means something and not before")
     func latenessHasAThreshold() {
         #expect(NoticeRow.worthSaying == 60)
-        #expect(NoticeRow.spelled(120).contains("2"))
+        #expect(NoticeRow.spelled(120, in: Locale(identifier: "en_US")).contains("2"))
         // Past an hour, minutes are a number a reader has to do arithmetic on.
-        #expect(NoticeRow.spelled(2 * 3600).contains("2"))
+        #expect(NoticeRow.spelled(2 * 3600, in: Locale(identifier: "en_US")).contains("2"))
     }
 
     /// The screen has to say why a notice can be late, in both languages, or #9's third line
