@@ -14,7 +14,7 @@ struct PageTabsTests {
     /// timeline, and it is a tab inside the Timeline page.
     @Test("The rail is the main categories, and Trending is not one of them")
     func rail() {
-        #expect(RailItem.allCases == [.timeline, .notices, .kept, .statistics, .settings])
+        #expect(RailItem.allCases == [.timeline, .notices, .talks, .kept, .statistics, .settings])
     }
 
     @Test("The feed being read is the visible tab of the visible page")
