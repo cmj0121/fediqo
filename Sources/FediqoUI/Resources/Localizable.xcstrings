@@ -6376,6 +6376,57 @@
           }
         }
       }
+    },
+    "rail.notices": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inbox"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "收件匣"
+          }
+        }
+      }
+    },
+    "notices.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "What reached you, newest first. Read as each account, on its own server."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "抵達你這裡的東西，最新的在前面。以各個帳號的身分、在各自的伺服器上讀。"
+          }
+        }
+      }
+    },
+    "notices.unseen": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ not looked at yet"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 則還沒看過"
+          }
+        }
+      }
     }
   }
 }

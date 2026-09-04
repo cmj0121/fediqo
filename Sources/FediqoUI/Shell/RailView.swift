@@ -23,6 +23,22 @@ struct RailView: View {
 
             ForEach(RailItem.allCases) { item in
                 button(item, expanded: expanded)
+                    // The one page whose contents change with nobody watching, so the one that
+                    // can say so from here. A number and not a dot: "some" is a nudge and the
+                    // count is a fact, and a reader who can see it is eleven has been told
+                    // enough to decide whether to go (#122).
+                    .overlay(alignment: .topTrailing) {
+                        if item == .notices, app.unseenNotices > 0 {
+                            Text(app.unseenNotices > 99 ? "99+" : "\(app.unseenNotices)")
+                                .fediqoFont(TypeScale.caption, weight: .semibold)
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, Space.tight)
+                                .padding(.vertical, 1)
+                                .background(Capsule().fill(Palette.accent))
+                                .accessibilityLabel(Text(t("notices.unseen",
+                                                           "\(app.unseenNotices)")))
+                        }
+                    }
             }
 
             Spacer(minLength: Space.step)

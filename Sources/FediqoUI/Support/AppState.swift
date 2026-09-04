@@ -22,7 +22,10 @@ enum Route: Hashable {
 /// Trending is not here. It was never a category of its own — it is another timeline, so it
 /// is a tab inside the Timeline page rather than a fifth thing in the rail.
 enum RailItem: String, CaseIterable, Identifiable, Hashable {
-    case timeline, kept, statistics, settings
+    /// The inbox is here rather than behind a bell (#122). It is the one reading that arrives
+    /// while nobody is looking, and it was the only one with no page of its own — so the reader
+    /// could not tell it was there without opening something.
+    case timeline, notices, kept, statistics, settings
 
     var id: String { rawValue }
 
@@ -31,6 +34,7 @@ enum RailItem: String, CaseIterable, Identifiable, Hashable {
     var symbolName: String {
         switch self {
         case .timeline: "list.bullet.rectangle"
+        case .notices: "bell"
         case .kept: "archivebox"
         // The rising line belongs to the Trending tab, and it means "what is happening out
         // there". This page is the other kind of chart: bars of what is already here.
@@ -305,6 +309,14 @@ public final class AppState {
     /// a timeline of it the way pressing a name opens a page about somebody, and neither is a
     /// thing the reader asked to keep.
     var viewingTag: String?
+    /// Where the reader is standing in their inbox (#122). On the app for the reason every other
+    /// ring's place is: the keys reach it from outside the screen that draws it.
+    /// How many notices the reader has not looked at, for the rail to say (#122).
+    var unseenNotices: Int { notices?.unseen ?? 0 }
+
+    @ObservationIgnored lazy var noticePlace = NoticePlace(rows: { [weak self] in
+        self?.notices?.notices ?? []
+    })
 
 
     /// The inbox, and the connections that keep it filled. Nil where there is no store — the
@@ -598,6 +610,9 @@ public final class AppState {
         // text size is set here for the same reason and it is the same kind of fact.
         // Acted on rather than kept: unlike the pages a run is told to open, a search is
         // already the whole of what it does, so there is nothing left to read it later.
+        // The inbox is a page now, so a run told to open it lands on the page rather than
+        // putting a sheet over the timeline (#122, #30).
+        if launch.showingNotices { railItem = .notices }
         if let words = launch.searchingFor, !words.isEmpty {
             showingSearch = true
             searching = words
@@ -1309,6 +1324,9 @@ public final class AppState {
         // belong to what is in front of the reader. Moving the ring in the list behind it
         // would be moving something they cannot see (#94).
         if let person { return person.place.moveSelection(by: steps) }
+        // The inbox is a page of its own now, and the ring in it names a notice rather than a
+        // post — a notice can be somebody following you, with no post at all (#122).
+        if railItem == .notices { return noticePlace.move(by: steps) }
         guard let feed = readingFeed else { return false }
         let moved = feed.moveSelection(by: steps)
         // Held down, `j` repeats twenty times a second against a ring that is still at the
@@ -1650,6 +1668,10 @@ public final class AppState {
     /// Back to the top of the feed being read. The screen does the scrolling; what happens
     /// here is that the ring is let go, so the reader is not told they are in two places.
     private func goToTop() -> Bool {
+        if railItem == .notices {
+            noticePlace.goToTop()
+            return true
+        }
         guard let feed = readingFeed else { return false }
         feed.goToTop()
         return true
@@ -1673,7 +1695,9 @@ public final class AppState {
         case .timeline: rotateTimeline(by: steps)
         case .statistics: rotate(&statisticsTab, by: steps)
         case .settings: rotate(&settingsTab, by: steps)
-        case .kept: false
+        // Neither has tabs to rotate through: one list each, and `Tab` is handed back to the
+        // focus system rather than kept for nothing.
+        case .kept, .notices: false
         }
     }
 

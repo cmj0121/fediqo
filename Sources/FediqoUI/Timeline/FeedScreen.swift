@@ -169,11 +169,6 @@ struct FeedScreen: View {
             ServerPickerView(socialProtocol: .mastodon) { app.addingSource = false }
                 .fediqoChrome(app)
         }
-        .sheet(isPresented: $app.showingNotifications) {
-            NoticesSheet(model: app.notices, onClose: { app.showingNotifications = false },
-                         onAsk: { await app.askForNotices() })
-                .fediqoChrome(app)
-        }
         // A run told to open the builder does it once. The same shape every other launch
         // variable has, and the same reason (#30).
         .task {
@@ -716,7 +711,9 @@ struct ScrollDirector: View {
 /// read here rather than in `FeedScreen.body`, so the spinner beside the title coming and going
 /// redraws the heading and not the list under it. The tabs and the controls are handed in
 /// already built, so they are not rebuilt for it either.
-private struct FeedHeader<Tabs: View, Controls: View>: View {
+/// Internal rather than private since #122: the inbox is a page now, and a page's header is
+/// one thing rather than one per page.
+struct FeedHeader<Tabs: View, Controls: View>: View {
     let paging: FeedPaging
     let titleKey: String
     let subtitle: String
