@@ -90,9 +90,12 @@ struct ShortcutKeyTests {
         #expect(KeyCommand.from("/", modifiers: [.shift], typing: false) == .showShortcuts)
     }
 
-    @Test("A slash on its own is not an ask for anything")
-    func plainSlashIsNotOurs() {
-        #expect(KeyCommand.from("/", modifiers: [], typing: false) == nil)
+    /// Shifted it is the question mark and asks for the list; on its own it is its own key and
+    /// searches. It meant nothing at all until there was something to search (#105).
+    @Test("A slash on its own searches, and shifted it still asks for the list")
+    func plainSlashSearches() {
+        #expect(KeyCommand.from("/", modifiers: [], typing: false) == .searchHere)
+        #expect(KeyCommand.from("/", modifiers: [.shift], typing: false) == .showShortcuts)
     }
 
     @Test("While text is being typed, ? is a character the draft is owed",
