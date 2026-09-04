@@ -981,6 +981,30 @@ public final class AppState {
         serverStore.remove(server)
         servers = serverStore.servers
         if servers.isEmpty { route = .protocolPicker }
+        // And it takes its posts with it (#117). Leaving used to stop asking a server and leave
+        // everything it had already given in the middle of what the reader was looking at, until
+        // something happened to replace the list.
+        //
+        // Nothing is asked of the server being left — this is the store forgetting that it
+        // vouched for anything, and what that leaves is decided by the rows rather than here: a
+        // post nothing else handed over goes, a post two servers carried stays with one fewer
+        // source.
+        Task { await letGo(of: server) }
+    }
+
+    /// Stops claiming the posts a server gave, and redraws whatever is on the screen from what is
+    /// left — without a reload, which is the point.
+    private func letGo(of server: Server) async {
+        guard let store else { return }
+        do {
+            try await store.left(server)
+        } catch {
+            LocalStore.log.error("leaving \(server.host, privacy: .public): \(String(describing: error), privacy: .public)")
+            return
+        }
+        // Every feed built so far and not only the one in front: a reader who steps to another
+        // tab should not find the server they just left still in it.
+        for feed in feeds.values { await feed.reread() }
     }
 
     func forgetAllServers() {

@@ -174,6 +174,28 @@ extension LocalStore {
         }
     }
 
+    /// The reader has left a server, so it stops being one of the places a post came from (#117).
+    ///
+    /// **The origins go and the posts stay.** A timeline asks for posts that some `post_origins`
+    /// row vouches for, so a post nothing else handed over leaves every reading at once, and one
+    /// two servers carried stays with one fewer source — `sources` is read back off these rows,
+    /// so it shrinks by itself. Nothing here decides which of those two a post is; the rows do.
+    ///
+    /// What the store keeps afterwards is retention's answer and not this act's. A reader who
+    /// leaves a server and rejoins it has not lost what they read, and a reader who never rejoins
+    /// has posts that age out under the policy they can see and change (#7).
+    ///
+    /// Says how many arrivals it stopped claiming, which is a fact worth a line in a log rather
+    /// than a number anybody acts on.
+    @discardableResult
+    public func left(_ server: Server, now: Date = Date()) async throws -> Int {
+        try await write { db in
+            try db.execute(sql: "DELETE FROM post_origins WHERE source_url = ?",
+                           arguments: [Self.serverRow(server).url])
+            return db.changesCount
+        }
+    }
+
     /// The one DELETE the store performs: marked rows older than `olderThan` go, and
     /// `post_tags` / `server_trends` / `posts_fts` go with them. `tag_buckets` keeps its count.
     @discardableResult
