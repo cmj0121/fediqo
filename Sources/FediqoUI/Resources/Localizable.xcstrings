@@ -7022,6 +7022,40 @@
           }
         }
       }
+    },
+    "post.reload": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "What it says now"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "它現在說什麼"
+          }
+        }
+      }
+    },
+    "post.gone": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This post has gone"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這則貼文已經不在了"
+          }
+        }
+      }
     }
   }
 }

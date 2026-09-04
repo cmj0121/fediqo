@@ -13,6 +13,16 @@ public struct Conversation: Sendable, Hashable {
     /// Everything below it, oldest first, which is the order a conversation is read in.
     public let descendants: [Post]
 
+    /// The same conversation with its own post replaced by a newer reading of it (#125).
+    ///
+    /// The post and not the chain: `merged(with:)` is what brings the chain up to date, and this
+    /// is for the one post the page is about, whose counts and words were asked for separately
+    /// because `context` does not carry them.
+    public func replacing(_ fresh: Post) -> Conversation {
+        guard fresh.mergeKey == post.mergeKey else { return self }
+        return Conversation(ancestors: ancestors, post: fresh, descendants: descendants)
+    }
+
     public init(ancestors: [Post] = [], post: Post, descendants: [Post] = []) {
         self.ancestors = ancestors
         self.post = post

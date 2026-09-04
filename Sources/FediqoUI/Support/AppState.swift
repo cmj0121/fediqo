@@ -1809,6 +1809,22 @@ public final class AppState {
     /// whatever it did last time — that is what `.manual` means, and it is the default.
     /// A page with no feed has nothing to read again.
     private func refreshNow() -> Bool {
+        // Whatever is in front of the reader. An opened post is what they are looking at, so
+        // `r` there asks what *it* says now — the post and every reply in its conversation —
+        // rather than refreshing a list behind it they cannot see (#125).
+        if let thread {
+            Task { await thread.reload() }
+            return true
+        }
+        // The inbox is a page now, and its own control is the one to press. `r` on it asks the
+        // same thing that button does.
+        if railItem == .inbox {
+            switch inboxTab {
+            case .notices: Task { await askForNotices() }
+            case .talks: Task { await talks.read() }
+            }
+            return true
+        }
         guard let feed = readingFeed else { return false }
         Task { await feed.load(servers: servers) }
         return true

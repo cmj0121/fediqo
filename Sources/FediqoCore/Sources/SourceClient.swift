@@ -714,6 +714,13 @@ public extension SourceClient {
     /// having looked and nothing being queued are different facts a reader is shown differently.
     func conversations(as account: ActingAccount) async throws -> [Talk] { [] }
 
+    /// Default: a protocol that cannot be asked about one post says so rather than handing back
+    /// the post it was given, which would look exactly like a server saying nothing had changed
+    /// (#125).
+    func status(of post: Post, host: String, token: String?) async throws -> Post {
+        throw SourceFailure.unsupported(post.socialProtocol)
+    }
+
     /// Default: this build cannot ask that over this protocol, which is different from an
     /// account that has scheduled nothing — so it throws and the page leaves the part absent
     /// rather than saying the reader has nothing waiting (#110).
