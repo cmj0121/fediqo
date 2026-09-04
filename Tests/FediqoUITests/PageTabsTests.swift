@@ -7,9 +7,14 @@ import Testing
 @Suite("Pages, and the tabs inside them")
 @MainActor
 struct PageTabsTests {
-    @Test("The rail is the four main categories, and Trending is not one of them")
+    /// **The inbox is one of them since #122.** It was a sheet put up from a bell in the
+    /// timeline's own header — so the one reading that arrives while nobody is looking was the
+    /// only one with no page of its own, and it stopped existing when the reader left the
+    /// Timeline page. Trending is still not here: it was never a category, it is another
+    /// timeline, and it is a tab inside the Timeline page.
+    @Test("The rail is the main categories, and Trending is not one of them")
     func rail() {
-        #expect(RailItem.allCases == [.timeline, .kept, .statistics, .settings])
+        #expect(RailItem.allCases == [.timeline, .notices, .kept, .statistics, .settings])
     }
 
     @Test("The feed being read is the visible tab of the visible page")

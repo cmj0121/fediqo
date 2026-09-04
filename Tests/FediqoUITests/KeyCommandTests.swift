@@ -247,11 +247,14 @@ struct CommandTests {
                                 typing: false) == .expandPost)
     }
 
-    @Test("⌃Tab goes round the four pages and comes back to where it started")
+    /// Every page in the rail, in the order the rail draws them — the inbox joined them when it
+    /// stopped being a sheet (#122), and the list here is `RailItem.allCases` said out loud so
+    /// that a page added without a way to reach it by keyboard fails here.
+    @Test("⌃Tab goes round every page and comes back to where it started")
     func pagesRotateForwards() {
         let app = freshApp("pages-forwards")
         app.railItem = .timeline
-        for page in [RailItem.kept, .statistics, .settings, .timeline] {
+        for page in [RailItem.notices, .kept, .statistics, .settings, .timeline] {
             #expect(app.perform(.nextPage))
             #expect(app.railItem == page)
         }
@@ -261,7 +264,7 @@ struct CommandTests {
     func pagesRotateBackwards() {
         let app = freshApp("pages-backwards")
         app.railItem = .timeline
-        for page in [RailItem.settings, .statistics, .kept, .timeline] {
+        for page in [RailItem.settings, .statistics, .kept, .notices, .timeline] {
             #expect(app.perform(.previousPage))
             #expect(app.railItem == page)
         }
