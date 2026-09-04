@@ -67,6 +67,12 @@ final class PersonModel {
     /// which.
     private(set) var relationship: Relationship?
     private(set) var known = false
+    /// Which account the relationship above is about, and which one a press here would be — as
+    /// `@name@host`, or nothing where nobody is signed in anywhere (#88).
+    ///
+    /// Read at the same moment the relationship is, and of the same account, so the two cannot
+    /// come to disagree about whose answer is on the screen.
+    private(set) var actingHandle: String?
 
     private(set) var loading = false
     /// A press that is still out. The control says so and goes on saying what it currently is —
@@ -83,6 +89,9 @@ final class PersonModel {
 
     private let client: any SourceClient
     private let acting: () async -> ActingAccount?
+    /// How that account is spelled to a reader. Handed in for the reason `acting` is: whose
+    /// accounts these are belongs to the app, and a page about somebody knows only this person.
+    private let spelling: (ActingAccount) -> String?
     /// Told when a follow has landed, so that home stops being answered by what it said before
     /// there was anybody to read. Nothing on an unfollow that failed and nothing on a read.
     private let changed: () async -> Void
@@ -90,10 +99,12 @@ final class PersonModel {
 
     init(subject: PersonSubject, client: any SourceClient,
          acting: @escaping () async -> ActingAccount?,
+         spelling: @escaping (ActingAccount) -> String? = { _ in nil },
          changed: @escaping () async -> Void = {}) {
         self.subject = subject
         self.client = client
         self.acting = acting
+        self.spelling = spelling
         self.changed = changed
     }
 
@@ -125,8 +136,10 @@ final class PersonModel {
         guard let account = await acting() else {
             known = false
             relationship = nil
+            actingHandle = nil
             return
         }
+        actingHandle = spelling(account)
         do {
             relationship = try await client.relationship(with: subject.handle, as: account)
             known = relationship != nil

@@ -218,6 +218,10 @@ struct PersonPage: View {
 
                 if model.following { ProgressView().controlSize(.small) }
                 if model.relationship?.muting == true { mark("person.muted", "speaker.slash") }
+                // Beside the control and not at the far edge of the row: it is about that
+                // press, and a `Spacer` between them made it read as a second, unrelated fact.
+                actingAs
+                Spacer(minLength: Space.tight)
             }
 
             // Two silences that are not the same, and the page says which one it is in. Neither
@@ -228,6 +232,27 @@ struct PersonPage: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+
+    /// Which account this follow would be, and which account the relationship above is about.
+    ///
+    /// **One fact and not two.** Whether the reader follows somebody is a fact on one server, so
+    /// a page that says "Following" without saying whose following it is has answered a question
+    /// nobody asked — and with more than one account signed in, pressing here makes one of them
+    /// follow somebody the reader may not have meant. The composer says it for a reply (#87) and
+    /// this says it for a follow, from the same door both acts use.
+    ///
+    /// Nothing where nobody is signed in: the sentence under the control already says so, and
+    /// two ways of saying it is one too many.
+    @ViewBuilder
+    private var actingAs: some View {
+        if let handle = model.actingHandle {
+            Text(t("person.as", handle))
+                .fediqoFont(TypeScale.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
         }
     }
 

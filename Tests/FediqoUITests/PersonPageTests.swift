@@ -23,6 +23,8 @@ struct PersonPageTests {
         PersonModel(subject: PersonSubject(post: post()), client: client) {
             signedIn ? ActingAccount(host: "birch.example",
                                      authorId: "https://birch.example/@me", token: "t") : nil
+        } spelling: { _ in
+            "@me@birch.example"
         } changed: {
             changed?.bump()
         }
@@ -132,6 +134,49 @@ struct PersonPageTests {
         #expect(page.place.selectedPost?.text == "a")
         // And the list behind it did not move under them.
         #expect(app.feed(for: .publicFixture).place.selection == behind)
+    }
+
+
+    // MARK: - whose following it is (#88)
+
+    /// **Whether the reader follows somebody is a fact on one server**, so a page saying
+    /// "Following" without saying whose following it is has answered a question nobody asked —
+    /// and with more than one account, pressing there makes one of them follow somebody the
+    /// reader may not have meant.
+    @Test("The page says which account the relationship is about")
+    func itSaysWhoseFollowingItIs() async {
+        let page = model(PersonDouble(relationship: Relationship(following: true)))
+        #expect(page.actingHandle == nil)
+
+        await page.readRelationship()
+
+        #expect(page.actingHandle == "@me@birch.example")
+    }
+
+    /// Signed in nowhere, there is nobody to name — and the sentence under the control already
+    /// says so, which is one way of saying it rather than two.
+    @Test("Signed in nowhere, it names nobody")
+    func signedInNowhereNamesNobody() async {
+        let page = model(PersonDouble(), signedIn: false)
+
+        await page.readRelationship()
+
+        #expect(page.actingHandle == nil)
+        #expect(page.relationship == nil)
+    }
+
+    /// Read at the same moment the relationship is, and of the same account, so the two cannot
+    /// come to disagree about whose answer is on the screen.
+    @Test("It is the account the relationship was asked of")
+    func itIsTheSameAccount() async {
+        let page = model(PersonDouble(refusing: true))
+
+        await page.readRelationship()
+
+        // The ask failed, so there is no relationship — and the account it was asked of is still
+        // the account a press would be, which is what the line is about.
+        #expect(page.relationship == nil)
+        #expect(page.actingHandle == "@me@birch.example")
     }
 
     /// The row already knows a name and a picture, so the page opens drawn rather than empty and
