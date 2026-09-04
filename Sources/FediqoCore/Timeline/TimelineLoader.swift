@@ -831,8 +831,8 @@ public struct TimelineLoader: Sendable {
     private func attempt(_ client: any SourceClient, _ server: Server, query: TimelineQuery,
                          token: String?, as reader: String?, before: Post?,
                          after: Post? = nil) async -> Answer {
-        let signedIn = await read(client, server, query: query, token: token, as: reader,
-                                  before: before, after: after)
+        let signedIn = await readAll(client, server, query: query, token: token, as: reader,
+                                     before: before, after: after)
         // A token the server turned down is the account's problem, not the server's, so the
         // same read goes out once more as a stranger and the column shows whatever anyone
         // would see. What is reported stays `.tokenRejected`, so the screen marks the account
@@ -842,8 +842,8 @@ public struct TimelineLoader: Sendable {
         // A source with an owner has nowhere to fall back to: read as nobody it is not this
         // timeline at all. So the refusal stands, and it stands as the account's problem.
         guard !query.source.needsAccount else { return signedIn }
-        let anonymous = await read(client, server, query: query, token: nil, as: nil,
-                                   before: before, after: after)
+        let anonymous = await readAll(client, server, query: query, token: nil, as: nil,
+                                      before: before, after: after)
         // A retry that read fine but would not store replaces `.tokenRejected` with `.store`,
         // and the account goes unmarked this round. That is the trade taken knowingly: one
         // host can only carry one reason, and the store failing is the newer news. It heals
@@ -853,14 +853,51 @@ public struct TimelineLoader: Sendable {
         return (anonymous.posts, signedIn.failure)
     }
 
+    /// Every reading this timeline is made of, put to one server (#104).
+    ///
+    /// A timeline is a base and the tags it subscribes to, so one server may be asked more than
+    /// once — and the answers are one answer here, because that is what the caller above is
+    /// counting: one server, one failure, one entry in the backoff. Order is not decided here at
+    /// all; everything merges by timestamp the way posts from different servers always have.
+    ///
+    /// **The first failure, and the rest still asked.** A tag that a server has no timeline for
+    /// must not take the base reading down with it — a reader whose home timeline arrived and
+    /// whose one hashtag did not has more of their page than nothing, and the failure still
+    /// says what did not come.
+    ///
+    /// Every reading takes the same cursor. It is a post of this server's, and on Mastodon its
+    /// id orders that server's timelines alike, so each reading walks back from the same place —
+    /// a sparser one simply reaches further back for its page, which is what it should do.
+    private func readAll(_ client: any SourceClient, _ server: Server, query: TimelineQuery,
+                         token: String?, as reader: String?, before: Post?,
+                         after: Post? = nil) async -> Answer {
+        var posts: [Post] = []
+        var failure: SourceFailure?
+        for reading in query.readings {
+            let answer = await read(client, server, reading: reading, query: query, token: token,
+                                    as: reader, before: before, after: after)
+            posts += answer.posts
+            // A token turned down is the one failure the caller acts on, so it wins whatever
+            // else went wrong: it is what sends the whole read out again as a stranger.
+            if case .tokenRejected? = answer.failure { return (posts, answer.failure) }
+            failure = failure ?? answer.failure
+        }
+        return (posts, failure)
+    }
+
     /// One request to one server as `token`'s owner, and what it handed over kept. `before` is
     /// that server's own cursor; a trending list has none and is never given one.
-    private func read(_ client: any SourceClient, _ server: Server, query: TimelineQuery,
+    private func read(_ client: any SourceClient, _ server: Server, reading: TimelineQuery.Reading,
+                      query: TimelineQuery,
                       token: String?, as reader: String?, before: Post?,
                       after: Post? = nil) async -> Answer {
         let posts: [Post]
         do {
-            posts = switch query.source {
+            if case .tag(let tag) = reading {
+                posts = try await client.tag(tag, host: server.host, limit: limit,
+                                             before: before, after: after, token: token)
+            } else {
+            posts = switch reading.source {
             // The one source with a cut. `everyone` is the whole timeline and goes the way it
             // always did; the other two ask for it and refuse a server that would not (#113).
             case .public: try await client.timeline(host: server.host, limit: limit,
@@ -884,6 +921,9 @@ public struct TimelineLoader: Sendable {
             // would be six servers told who is being looked at. #88's own path is that one; no
             // template offers this source either, so this line is never reached.
             case .author: []
+            // Handled above: a tag is asked for by name, and `reading` is what carries it.
+            case .tag: []
+            }
             }
         } catch {
             return ([], SourceFailure.of(error))
@@ -893,8 +933,8 @@ public struct TimelineLoader: Sendable {
             // kept with the source it came through written beside it — that pairing is what
             // lets a timeline be a question asked of one copy of each post rather than a copy
             // of its own.
-            try await store?.save(posts, from: server, into: query.source, as: reader)
-            if query.source.ranked { try await store?.recordTrending(posts, from: server) }
+            try await store?.save(posts, from: server, into: reading.source, as: reader)
+            if reading.source.ranked { try await store?.recordTrending(posts, from: server) }
         } catch {
             // What SQLite said, in full, is for the log; the screen gets the message.
             LocalStore.log.error("save failed for \(server.host, privacy: .public): \(String(describing: error), privacy: .public)")

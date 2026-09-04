@@ -242,6 +242,13 @@ public final class LocalStore: Sendable {
             try db.execute(sql: "UPDATE writers SET created_at = ?",
                            arguments: [milliseconds(Date())])
         }
+        migrator.registerMigration("018") { db in
+            try db.execute(sql: schema(named: "schema-018"))
+            // The seeded row stamped the way 014 stamps `author`: the file writes it, the
+            // migration is what knows when it arrived.
+            try db.execute(sql: "UPDATE feeds SET created_at = ? WHERE feed = 'tag'",
+                           arguments: [milliseconds(Date())])
+        }
         return migrator
     }
 

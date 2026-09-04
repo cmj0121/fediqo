@@ -36,6 +36,9 @@ public enum SourceFailure: Error, Sendable, Equatable, LocalizedError {
     /// not written here was not cut. Said out loud, because the quiet alternative is a reader
     /// looking at the federated timeline believing it is the room.
     case wouldNotCut(String, Writers)
+    /// The server was asked for a hashtag's timeline and has no such thing (#104). Distinct
+    /// from a tag nobody has used, which is an empty answer rather than a refusal.
+    case noTagTimeline(String)
     /// The server answered outside 2xx; the body rides along for whoever can read a
     /// reason out of it.
     case http(Int, Data)
@@ -70,7 +73,7 @@ public enum SourceFailure: Error, Sendable, Equatable, LocalizedError {
         switch self {
         case .tokenRejected, .store: true
         case .badHost, .notThatKind, .unsupported, .needsSignIn, .signInFailed, .notItsPost,
-             .http, .transport, .emptyDraft, .tooLong, .wouldNotCut,
+             .http, .transport, .emptyDraft, .tooLong, .wouldNotCut, .noTagTimeline,
              .tooManyPictures, .pictureTooLarge, .pictureNotTaken: false
         }
     }
@@ -88,6 +91,7 @@ public enum SourceFailure: Error, Sendable, Equatable, LocalizedError {
         switch self {
         case .wouldNotCut(let host, let writers):
             "\(host) answered with its whole public timeline rather than \(writers.rawValue)."
+        case .noTagTimeline(let host): "\(host) has no timeline for a hashtag."
         case .badHost(let host): "\(host) is not a hostname."
         case .notThatKind(let socialProtocol, let host): "\(host) did not answer as a \(socialProtocol.rawValue) server."
         case .unsupported(let socialProtocol): "\(socialProtocol.rawValue) is not spoken yet."
@@ -156,6 +160,17 @@ public protocol SourceClient: Sendable {
     /// instead — the same rule #4 set for a server that publishes no public timeline.
     func home(host: String, limit: Int, before: Post?, after: Post?,
               token: String) async throws -> [Post]
+
+    /// Posts carrying a hashtag, asked for by it (#104).
+    ///
+    /// **Asked for, not sieved.** A tag rule over the public timeline shows the posts carrying
+    /// that tag which the public timeline happened to hand over — on a busy server, almost none
+    /// of them, and a reader is left thinking the tag is quiet.
+    ///
+    /// The tag arrives normalised the way the store keeps one: NFC, lowercased, no `#`. Paged
+    /// like `timeline`, by the same cursor and for the same reason.
+    func tag(_ tag: String, host: String, limit: Int, before: Post?, after: Post?,
+             token: String?) async throws -> [Post]
 
     /// What the server says is trending. A separate thing, asked for separately.
     ///
@@ -312,6 +327,16 @@ public extension SourceClient {
                                       token: token)
         }
         throw SourceFailure.wouldNotCut(host, writers)
+    }
+
+    /// A protocol with no hashtag timeline says so rather than answering nothing.
+    ///
+    /// Empty would be indistinguishable from a tag nobody has used, and the two are different
+    /// answers a reader is shown different things for — the same reason a server that publishes
+    /// no public timeline is never quietly handed something else (#4).
+    func tag(_ tag: String, host: String, limit: Int, before: Post?, after: Post?,
+             token: String?) async throws -> [Post] {
+        throw SourceFailure.noTagTimeline(host)
     }
 }
 

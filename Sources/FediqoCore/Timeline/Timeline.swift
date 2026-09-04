@@ -52,12 +52,21 @@ public struct TimelineFilter: Sendable, Hashable, Codable {
     }
 }
 
-/// A timeline the reader made: one base source, any number of rules, a name and the line
-/// under it.
+/// A timeline the reader made: where its posts are asked for, any number of rules, a name and
+/// the line under it.
 ///
-/// One base source and not several. Two would leave the order undecided — order comes from
-/// the source — and "which of my sources is this post here for" is a question a reader would
-/// then have to answer for every post they saw.
+/// **One order, and it is time.** This used to say one base source and not several, and gave the
+/// order as the reason: two sources would leave it undecided, because the order came from the
+/// source. That reason had already stopped being true when it was written — a timeline has always
+/// fanned out across every server the reader added and merged what came back by timestamp, so the
+/// order was never any one source's. What the rule was really protecting is the sentence after
+/// it, and that one still holds: a reader must never have to work out *which of my sources is
+/// this post here for*. They do not have to. `post_origins` records how each post arrived, per
+/// account, and a row says so; the reader is told rather than left to deduce.
+///
+/// So a timeline is a base reading and the tags it subscribes to, merged and sorted by time
+/// (#104). The one source that still hands its own order over is `trend`, and a ranked reading
+/// cannot be merged with anything without one of the two orders being thrown away — so it is not.
 ///
 /// `template` is where it came from and nothing more. A template seeds a timeline when it is
 /// made and has no say in it afterwards, so that shipping a new version of a template cannot
@@ -72,6 +81,14 @@ public struct Timeline: Sendable, Hashable, Identifiable, Codable {
     /// Which writers this is asked for. Only `public` has an answer other than `everyone`;
     /// see `Writers` (#113).
     public var writers: Writers
+    /// The hashtags this timeline subscribes to, kept the one way the store keeps a tag: NFC,
+    /// lowercased, no `#`. So `#Swift`, `#swift` and `＃swift` are one subscription (#104).
+    ///
+    /// **Asked for, not sieved.** A tag rule over the public timeline shows the posts carrying
+    /// that tag *which the public timeline happened to hand over* — on a busy server, almost
+    /// none of them, and a reader is left thinking the tag is quiet. These are a question put to
+    /// every server the reader has added.
+    public var tags: [String]
     /// Whose home this is. Nil unless `source` is `.home`.
     public var account: String?
     public var template: String
@@ -79,8 +96,9 @@ public struct Timeline: Sendable, Hashable, Identifiable, Codable {
     public var filters: [TimelineFilter]
 
     public init(id: String = UUID().uuidString, name: String, summary: String = "",
-                source: BaseSource, writers: Writers = .everyone, account: String? = nil,
-                template: String, position: Int = 0, filters: [TimelineFilter] = []) {
+                source: BaseSource, writers: Writers = .everyone, tags: [String] = [],
+                account: String? = nil, template: String, position: Int = 0,
+                filters: [TimelineFilter] = []) {
         self.id = id
         self.name = name
         self.summary = summary
@@ -89,6 +107,12 @@ public struct Timeline: Sendable, Hashable, Identifiable, Codable {
         // is dropped for a source with no account: a value that cannot mean anything here is
         // not a value to carry around waiting to be believed.
         self.writers = source == .public ? writers : .everyone
+        // Normalised here rather than trusted, and deduplicated: two spellings of one tag are
+        // one subscription, and asking twice would be one server told twice and every post
+        // arriving to be merged with itself.
+        self.tags = Post.normalisedTags(tags).reduce(into: []) { kept, tag in
+            if !kept.contains(tag) { kept.append(tag) }
+        }
         self.account = source.needsAccount ? account : nil
         self.template = template
         self.position = position
@@ -99,7 +123,8 @@ public struct Timeline: Sendable, Hashable, Identifiable, Codable {
     /// two timelines called different things that ask the same question are one page of posts,
     /// and the screens hold their own place in each anyway.
     public var query: TimelineQuery {
-        TimelineQuery(source: source, writers: writers, account: account, filters: filters)
+        TimelineQuery(source: source, writers: writers, tags: tags, account: account,
+                      filters: filters)
     }
 }
 
@@ -108,15 +133,43 @@ public struct TimelineQuery: Sendable, Hashable {
     public let source: BaseSource
     /// Which writers the public timeline is asked for. `everyone` everywhere else (#113).
     public let writers: Writers
+    /// The hashtags asked for alongside the base, normalised (#104).
+    public let tags: [String]
     public let account: String?
     public let filters: [TimelineFilter]
 
-    public init(source: BaseSource, writers: Writers = .everyone, account: String? = nil,
-                filters: [TimelineFilter] = []) {
+    public init(source: BaseSource, writers: Writers = .everyone, tags: [String] = [],
+                account: String? = nil, filters: [TimelineFilter] = []) {
         self.source = source
         self.writers = source == .public ? writers : .everyone
+        self.tags = tags
         self.account = account
         self.filters = filters
+    }
+
+    /// Every reading this timeline is made of: the base, unless the base *is* its tags, and then
+    /// one for each tag. What the loader fans out across the servers, and what a post's origin
+    /// is recorded as.
+    ///
+    /// A timeline based on `tag` with no tags has nothing here at all, and asks nobody — which
+    /// is what #104 means by a base of nothing being empty rather than quietly the public
+    /// timeline.
+    public var readings: [Reading] {
+        (source == .tag ? [] : [Reading.base(source)]) + tags.map(Reading.tag)
+    }
+
+    /// One question this timeline puts to a server.
+    public enum Reading: Sendable, Hashable {
+        case base(BaseSource)
+        case tag(String)
+
+        /// How a post that arrived by this reading is written down.
+        public var source: BaseSource {
+            switch self {
+            case .base(let source): source
+            case .tag: .tag
+            }
+        }
     }
 
     /// The whole of the rules, applied to posts that have not been through the store — a page
@@ -216,7 +269,7 @@ public struct TimelineTemplate: Sendable, Hashable, Identifiable {
         TimelineTemplate(id: "trend", source: .trend, parameter: .none),
         TimelineTemplate(id: "local", source: .public, writers: .here, parameter: .none),
         TimelineTemplate(id: "remote", source: .public, writers: .elsewhere, parameter: .none),
-        TimelineTemplate(id: "tag", source: .public, parameter: .tag),
+        TimelineTemplate(id: "tag", source: .tag, parameter: .tag),
         TimelineTemplate(id: "author", source: .public, parameter: .author),
         TimelineTemplate(id: "mentions", source: .home, parameter: .mention),
     ]
@@ -233,13 +286,18 @@ public struct TimelineTemplate: Sendable, Hashable, Identifiable {
     public func timeline(named name: String, summary: String = "", about value: String = "",
                          account: String? = nil, position: Int = 0) -> Timeline {
         var filters: [TimelineFilter] = []
+        var tags: [String] = []
         switch parameter {
         case .none: break
-        case .tag: filters.append(TimelineFilter(kind: .tag, value: value))
+        // A subscription and not a sieve (#104). This wrote a rule over the public timeline,
+        // which showed the posts carrying the tag that the public timeline happened to hand
+        // over — on a busy server, almost none of them.
+        case .tag: tags.append(value)
         case .author: filters.append(TimelineFilter(kind: .author, value: value))
         case .mention: filters.append(TimelineFilter(kind: .mention, value: value))
         }
         return Timeline(name: name, summary: summary, source: source, writers: writers,
-                        account: account, template: id, position: position, filters: filters)
+                        tags: tags, account: account, template: id, position: position,
+                        filters: filters)
     }
 }

@@ -14,6 +14,14 @@ extension LocalStore {
     /// join would hand back a row per rule to be folded again on this side.
     public func timelines() async throws -> [Timeline] {
         try await read { db in
+            // The tags each timeline subscribes to, in the order they were added — a third
+            // statement for the reason there are two: a timeline with no tags is the common
+            // one, and a join would hand back a row per tag to be folded again on this side.
+            let subscribed = try Row.fetchAll(db, sql: """
+                SELECT timeline_id, tag FROM timeline_tags ORDER BY rowid
+                """).reduce(into: [String: [String]]()) { tags, row in
+                tags[row["timeline_id"], default: []].append(row["tag"])
+            }
             let rules = try Row.fetchAll(db, sql: """
                 SELECT timeline_id, kind, value, negate FROM timeline_filters ORDER BY rowid
                 """).reduce(into: [String: [TimelineFilter]]()) { filters, row in
@@ -37,7 +45,8 @@ extension LocalStore {
                 // honest answer — everything the server sees, which is what `public` means.
                 let writers = Writers(rawValue: row["writers"]) ?? .everyone
                 return Timeline(id: id, name: row["name"], summary: row["summary"],
-                                source: source, writers: writers, account: row["author_id"],
+                                source: source, writers: writers, tags: subscribed[id] ?? [],
+                                account: row["author_id"],
                                 template: row["template"], position: row["position"],
                                 filters: rules[id] ?? [])
             }
@@ -62,6 +71,14 @@ extension LocalStore {
                 """, arguments: [timeline.id, timeline.name, timeline.summary,
                                  timeline.source.rawValue, timeline.writers.rawValue,
                                  timeline.account, timeline.template, timeline.position, ms])
+            // Rewritten rather than merged, for the reason the rules below are: a tag the
+            // reader took off is a tag that has to be gone, and there is no such thing as a
+            // half-applied subscription.
+            try db.execute(sql: "DELETE FROM timeline_tags WHERE timeline_id = ?", arguments: [timeline.id])
+            for tag in timeline.tags {
+                try db.execute(sql: "INSERT INTO timeline_tags (timeline_id, tag) VALUES (?, ?)",
+                               arguments: [timeline.id, tag])
+            }
             try db.execute(sql: "DELETE FROM timeline_filters WHERE timeline_id = ?", arguments: [timeline.id])
             for filter in filters {
                 try db.execute(sql: """

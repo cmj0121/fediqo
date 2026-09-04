@@ -43,6 +43,13 @@ struct TimelineEditor: View {
     /// What a template that is about something in particular is about: a hashtag, an author,
     /// an account being named. Empty for the three that are about everything.
     @State private var about = ""
+    /// The hashtags this timeline subscribes to — asked for, not sieved (#104). On every
+    /// template rather than only the one about a tag: a timeline is a base and the tags beside
+    /// it, so a reader's home timeline may carry them too.
+    @State private var tags: [String] = []
+    /// The one being typed, before it is added. Separate from the list because a half-typed tag
+    /// is not a subscription and must not be saved as one.
+    @State private var typing = ""
     /// Whether the reader has typed a name of their own. Until they do, the name and the line
     /// under it follow the template they are picking — which is what makes choosing a template
     /// feel like choosing a timeline rather than filling in a form.
@@ -109,9 +116,10 @@ struct TimelineEditor: View {
         // What the timeline is about, whether it is being made or changed. A hashtag timeline
         // whose hashtag could be set once and never corrected would be a timeline the reader
         // has to delete and make again over a typo.
-        if chosen.parameter != .none {
+        if chosen.parameter != .none, chosen.parameter != .tag {
             field(t("template.\(chosen.id).prompt"), text: $about, lines: 1)
         }
+        hashtags
         field(t("timeline.name"), text: $name, lines: 1)
             .onChange(of: name) { _, _ in named = true }
         // The long one. A name is two words and the line under it is what the page shows to
@@ -124,6 +132,68 @@ struct TimelineEditor: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    /// The tags, and a place to add one.
+    ///
+    /// A list rather than a field, because a subscription is a thing you add to and take from —
+    /// a hashtag timeline whose one tag could be set and never corrected was a timeline the
+    /// reader had to delete and make again over a typo, and one that could only ever hold a
+    /// single tag was most of what #104 is about missing.
+    private var hashtags: some View {
+        VStack(alignment: .leading, spacing: Space.tight) {
+            Text(t("timeline.tags")).fediqoFont(TypeScale.minor).foregroundStyle(.secondary)
+            if !tags.isEmpty {
+                FlowRow(spacing: Space.tight, lineSpacing: Space.tight) {
+                    ForEach(tags, id: \.self) { tag in
+                        Button { remove(tag) } label: {
+                            HStack(spacing: Space.tight) {
+                                Text(verbatim: "#\(tag)").fediqoFont(TypeScale.minor)
+                                Image(systemName: "xmark").fediqoSymbol(Glyph.inline)
+                            }
+                            .padding(.horizontal, Space.snug)
+                            .padding(.vertical, Space.tight)
+                            .fediqoCard(radius: Radius.inner, raised: false)
+                        }
+                        .buttonStyle(.plain)
+                        // What pressing it does, said in words: the shape is a tag and the
+                        // cross is small, and neither says "remove" to somebody not looking.
+                        .help(t("timeline.tags.remove", tag))
+                        .accessibilityLabel(Text(t("timeline.tags.remove", tag)))
+                    }
+                }
+            }
+            HStack(spacing: Space.step) {
+                TextField(t("timeline.tags.hint"), text: $typing)
+                    .textFieldStyle(.plain)
+                    .fediqoFont(TypeScale.small)
+                    .padding(Space.step)
+                    .fediqoCard(radius: Radius.inner, raised: false)
+                    // Return adds it, because that is what Return does to a field you are
+                    // typing a list into. The button is the same thing for a pointer.
+                    .onSubmit(add)
+                Button(t("timeline.tags.add"), action: add)
+                    .buttonStyle(.plain)
+                    .fediqoFont(TypeScale.small)
+                    .disabled(Post.normalisedTags([typing]).isEmpty)
+            }
+        }
+    }
+
+    /// What was typed, kept the one way the store keeps a tag — so `#Swift`, `swift` and
+    /// `＃swift` are one subscription however it was typed, and adding one already there does
+    /// nothing rather than asking the same server twice.
+    private func add() {
+        guard let tag = Post.normalisedTags([typing]).first, !tags.contains(tag) else {
+            typing = ""
+            return
+        }
+        tags.append(tag)
+        typing = ""
+    }
+
+    private func remove(_ tag: String) {
+        tags.removeAll { $0 == tag }
     }
 
     private func field(_ label: String, text: Binding<String>, lines: Int) -> some View {
@@ -170,6 +240,7 @@ struct TimelineEditor: View {
         summary = editing.displaySummary
         template = editing.template
         about = editing.filters.first?.value ?? ""
+        tags = editing.tags
         named = true
     }
 
@@ -185,12 +256,16 @@ struct TimelineEditor: View {
             // The rule the template is about, rewritten from what they typed. Every other rule
             // the timeline carries is left where it is: this sheet is about what it is called
             // and what it is about, and a rule it never showed is not its to remove.
-            if chosen.parameter != .none {
+            if chosen.parameter != .none, chosen.parameter != .tag {
                 let kind = Self.kind(of: chosen.parameter)
                 editing.filters = editing.filters.filter { $0.kind != kind }
                 let typed = about.trimmingCharacters(in: .whitespaces)
                 if !typed.isEmpty { editing.filters.insert(TimelineFilter(kind: kind, value: typed), at: 0) }
             }
+            // Including one still in the field. A reader who typed a tag and pressed Save meant
+            // to subscribe to it, and losing it to an unpressed button is the sheet being right
+            // about the mechanism and wrong about the person.
+            editing.tags = tags + Post.normalisedTags([typing]).filter { !tags.contains($0) }
             app.update(editing)
         } else {
             // A timeline made from a template the reader did not rename follows the language
@@ -198,8 +273,10 @@ struct TimelineEditor: View {
             // from the same template should behave the same.
             let own = Timeline.isTemplateWording(trimmed, "name", of: chosen.id) ? "" : trimmed
             let line = Timeline.isTemplateWording(summary, "summary", of: chosen.id) ? "" : summary
-            app.add(chosen.timeline(named: own, summary: line,
-                                    about: about.trimmingCharacters(in: .whitespaces)))
+            var made = chosen.timeline(named: own, summary: line,
+                                       about: about.trimmingCharacters(in: .whitespaces))
+            made.tags = tags + Post.normalisedTags([typing]).filter { !tags.contains($0) }
+            app.add(made)
         }
         done()
     }

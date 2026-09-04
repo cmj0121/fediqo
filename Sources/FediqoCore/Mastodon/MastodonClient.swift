@@ -152,6 +152,19 @@ public struct MastodonClient: SourceClient {
                         before: before, after: after, token: token)
     }
 
+    /// `GET /api/v1/timelines/tag/:tag` — the question #104 says was never asked.
+    ///
+    /// The tag is path-escaped rather than trusted: it arrives normalised, but a normalised tag
+    /// is still somebody else's text and a `/` in it would be a different endpoint entirely.
+    public func tag(_ tag: String, host: String, limit: Int, before: Post?, after: Post? = nil,
+                    token: String?) async throws -> [Post] {
+        guard let escaped = tag.addingPercentEncoding(withAllowedCharacters: .alphanumerics),
+              !escaped.isEmpty
+        else { return [] }
+        return try await posts(host: host, path: "/api/v1/timelines/tag/\(escaped)", limit: limit,
+                               before: before, after: after, token: token)
+    }
+
     public func trending(host: String, limit: Int, token: String?) async throws -> [Post] {
         try await posts(host: host, path: "/api/v1/trends/statuses", limit: limit, before: nil, token: token)
     }

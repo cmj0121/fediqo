@@ -83,6 +83,18 @@ public enum BaseSource: String, Sendable, CaseIterable, Identifiable, Codable {
     /// and gives rules to — and this is not that promise being kept. It is the narrower thing
     /// a page about somebody needs: an origin for the posts on it.
     case author
+    /// Posts asked for by a hashtag — `/api/v1/timelines/tag/:tag`, of every server the reader
+    /// has added (#104).
+    ///
+    /// **A reading and a base at once, which the five above are not.** As an origin it is how a
+    /// post arrived, the way `thread` and `author` are. As a base it is a timeline that reads
+    /// *nothing but its own tags* — which is #104's "a base of nothing", spelled as the thing it
+    /// actually reads rather than as an absence. A timeline based here with no tags asks nobody
+    /// and is empty, which is the honest answer and not the public timeline quietly put in its
+    /// place.
+    ///
+    /// Any base may carry tags; this is the one whose posts are only that.
+    case tag
 
     public var id: String { rawValue }
 

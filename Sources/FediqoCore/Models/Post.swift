@@ -169,11 +169,19 @@ public struct Post: Sendable, Hashable, Identifiable {
     /// A tag matches case-insensitively, so it is kept in one form: NFC, lowercased,
     /// without the `#`. `#Swift` and `swift` are one tag, and the first spelling keeps
     /// its place in line.
-    static func normalisedTags(_ raw: [String]) -> [String] {
+    ///
+    /// Public since #104: the builder normalises what a reader types with the same call the
+    /// store keeps tags with, rather than a second idea of what a tag is that would drift.
+    public static func normalisedTags(_ raw: [String]) -> [String] {
         var seen: Set<String> = []
         return raw.compactMap { tag in
             var name = tag.precomposedStringWithCanonicalMapping.lowercased()
-            if name.hasPrefix("#") { name.removeFirst() }
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            // Both hashes. `＃` is U+FF03, and it is what a Japanese or Chinese keyboard types
+            // without being switched out of the input mode the rest of the sentence is in — so
+            // `＃swift` is the ordinary spelling for a great many readers rather than a corner
+            // case, and it was being kept as a tag with a hash in its name that matched nothing.
+            if let first = name.first, first == "#" || first == "＃" { name.removeFirst() }
             guard !name.isEmpty, seen.insert(name).inserted else { return nil }
             return name
         }
