@@ -165,6 +165,16 @@ struct PostPage: View {
         .task(id: post.mergeKey) { await app.thread?.read() }
     }
 
+    /// A run told to open the page about this post does it once it has one. The same shape
+    /// every other launch variable has, and the same reason (#30).
+    private var openingAbout: some View {
+        Color.clear.frame(width: 0, height: 0)
+            .task {
+                guard app.launchedOnAbout, app.about == nil else { return }
+                app.openAbout(model?.conversation.post ?? post)
+            }
+    }
+
     private var header: some View {
         HStack(spacing: Space.mid) {
             Button(action: done) {
@@ -197,10 +207,15 @@ struct PostPage: View {
             IconButton(symbol: "arrow.clockwise", labelKey: "post.reload") {
                 Task { await model?.reload() }
             }
+            // The numbers on the row below are numbers; this is where they have names (#126).
+            IconButton(symbol: "info.circle", labelKey: "post.aboutIt") {
+                app.openAbout(model?.conversation.post ?? post)
+            }
         }
         .padding(.horizontal, Space.pad)
         .padding(.vertical, Space.mid)
         .background(PageHeaderBackground())
+        .background { openingAbout }
     }
 
     /// The chain above, the post, and everything under it. The post itself is drawn as the

@@ -110,6 +110,29 @@ public enum People: Sendable, Hashable {
         public var path: String { rawValue }
     }
 
+    /// The two lists a *post* has, as against the two a person has (#126).
+    ///
+    /// Separate from `Kind` above and not a case of it, because the subject is different: those
+    /// are asked about somebody, these are asked about something they wrote. Sharing one enum
+    /// would mean every caller carrying a subject that might be either.
+    public enum AboutAPost: String, Sendable, Hashable, CaseIterable, Identifiable {
+        /// Who favourited it.
+        case favourited
+        /// Who boosted it.
+        case boosted
+
+        public var id: String { rawValue }
+
+        /// What Mastodon calls it in an address. Said here so that a screen naming the list and
+        /// the request asking for it cannot come to disagree.
+        public var path: String {
+            switch self {
+            case .favourited: "favourited_by"
+            case .boosted: "reblogged_by"
+            }
+        }
+    }
+
     /// Why a list is empty, which is not a thing a list can say about itself.
     ///
     /// Somebody who has asked their server not to publish their network is answered with an empty

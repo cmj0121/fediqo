@@ -484,6 +484,30 @@ public struct TimelineLoader: Sendable {
         }
     }
 
+    /// Who favourited or boosted a post, asked of the server whose word on it is final (#126).
+    ///
+    /// Nothing is written down. These are people rather than posts, and a list of who did
+    /// something is a question about this moment — the store keeps what a reader reads, not who
+    /// was standing near it.
+    public func people(_ which: People.AboutAPost, of post: Post,
+                       limit: Int = 80) async -> (people: [Profile], host: String,
+                                                  asked: Bool, failure: SourceFailure?) {
+        // **`asked` and not an empty list.** Nobody having been asked and a server handing over
+        // nobody are different facts, and a page that could not tell them apart said *the server
+        // chose not to publish this* about a post nothing had been asked about.
+        guard let authority = await authorityHost(of: post),
+              let client = registry.client(for: post.socialProtocol)
+        else { return ([], "", false, nil) }
+        let server = Server(host: authority, socialProtocol: post.socialProtocol, title: authority)
+        let token = await tokensByEndpoint(for: [server])[server.endpoint]
+        do {
+            return (try await client.people(which, of: post, host: authority,
+                                            limit: limit, token: token), authority, true, nil)
+        } catch {
+            return ([], authority, true, SourceFailure.of(error))
+        }
+    }
+
     /// The host whose word on this post is final: the store's `authority_url` where it has one,
     /// and the server that handed the post over where it does not — which is a preview, a test,
     /// or a protocol that names no authority at all.

@@ -237,6 +237,13 @@ private struct PagesOverThePage: ViewModifier {
                         .transition(.opacity)
                 }
             }
+            // What a post can tell you about itself, over the post it is about (#126).
+            .overlay {
+                if let about = app.about {
+                    PostAboutPage(model: about) { app.closeAbout() }
+                        .transition(.opacity)
+                }
+            }
     }
 }
 

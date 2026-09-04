@@ -721,6 +721,12 @@ public extension SourceClient {
         throw SourceFailure.unsupported(post.socialProtocol)
     }
 
+    /// Default: a protocol that keeps no such list has none to hand over, and empty is the true
+    /// answer — which the page tells apart from *hidden* the way #90's lists already do, by the
+    /// count on the post disagreeing with it (#126).
+    func people(_ which: People.AboutAPost, of post: Post, host: String,
+                limit: Int, token: String?) async throws -> [Profile] { [] }
+
     /// Default: this build cannot ask that over this protocol, which is different from an
     /// account that has scheduled nothing — so it throws and the page leaves the part absent
     /// rather than saying the reader has nothing waiting (#110).

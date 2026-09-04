@@ -509,6 +509,17 @@ struct FixtureSource: SourceClient {
     /// newest-first list it would be at the bottom where nobody scrolls.
     /// Two posts the fixture's reader has written and not sent, so the band can be
     /// photographed — one with something attached, one without (#110).
+    /// Who favourited or boosted a post, so the page about it can be photographed with people
+    /// on it (#126). Two for one list and one for the other, so the tabs differ.
+    func people(_ which: People.AboutAPost, of post: Post, host: String,
+                limit: Int, token: String?) async throws -> [Profile] {
+        let everybody = Fixture.timeline(of: host).map {
+            Profile(id: $0.authorHandle, authorId: $0.authorId, name: $0.authorName,
+                    handle: $0.authorHandle, avatarURL: $0.authorAvatarURL, emojis: $0.emojis)
+        }
+        return Array(which == .favourited ? everybody.prefix(3) : everybody.prefix(1))
+    }
+
     /// What reached the fixture's reader, so the inbox can be photographed with something in it
     /// — including **three favourites on one post**, which is the case #124 is about: without it
     /// the grouped row is a thing no screenshot has ever shown.

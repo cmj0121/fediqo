@@ -149,6 +149,9 @@ struct LaunchOptions {
     /// Which half of the inbox this run opens. A tab reached by a press is a tab nothing on a
     /// runner can reach (#30).
     var inboxTab: InboxTab?
+    /// Whether this run opens the page about the post it opened. Reached by a press, so nothing
+    /// on a runner can reach it (#30).
+    var openingAbout: Bool = false
     /// Whose page to open, named the same way, for the same reason: the page about somebody is
     /// reached by pressing a name.
     ///
@@ -217,6 +220,7 @@ struct LaunchOptions {
         options.searchingFor = environment["FEDIQO_SEARCH"]
         options.openingYourPage = environment["FEDIQO_ME"] == "1"
         options.inboxTab = environment["FEDIQO_INBOX_TAB"].flatMap(InboxTab.init(rawValue:))
+        options.openingAbout = environment["FEDIQO_ABOUT"] == "1"
         options.openingPerson = environment["FEDIQO_PERSON"]
         options.openingReply = environment["FEDIQO_REPLY"]
         options.openingPeople = environment["FEDIQO_PEOPLE"].flatMap(People.Kind.init(rawValue:))
@@ -331,6 +335,9 @@ public final class AppState {
     /// a timeline of it the way pressing a name opens a page about somebody, and neither is a
     /// thing the reader asked to keep.
     var viewingTag: String?
+    /// The page about one post — when it was written, and who did what to it (#126). Over the
+    /// opened post, because that is where it was asked for and what it is about.
+    var about: PostAboutModel?
     /// Where the reader is standing in their inbox (#122). On the app for the reason every other
     /// ring's place is: the keys reach it from outside the screen that draws it.
     /// How many notices the reader has not looked at, for the rail to say (#122).
@@ -378,6 +385,8 @@ public final class AppState {
     let editingTimeline: Bool
     /// Whether this run opens the reader's own page, read the same way and for the same reason.
     let launchedOnYourPage: Bool
+    /// Whether this run opens the page about a post, read the same way and for the same reason.
+    let launchedOnAbout: Bool
     /// Whether this run opens the author of the first post it is given. A screenshot's way in to
     /// a page whose only other way in is a press (#30: nothing on a runner may press anything).
     let openingPerson: String?
@@ -642,6 +651,7 @@ public final class AppState {
         self.openingPost = launch.openingPost
         self.editingTimeline = launch.editingTimeline
         self.launchedOnYourPage = launch.openingYourPage
+        self.launchedOnAbout = launch.openingAbout
         self.openingPerson = launch.openingPerson
         self.openingReply = launch.openingReply
         self.openingPeople = launch.openingPeople
@@ -1491,6 +1501,14 @@ public final class AppState {
         }
     }
 
+    /// Opens the page about a post: when exactly, and who favourited or boosted it (#126).
+    func openAbout(_ post: Post) {
+        guard about?.post.mergeKey != post.mergeKey else { return }
+        about = PostAboutModel(post: post, loader: loader())
+    }
+
+    func closeAbout() { about = nil }
+
     /// Opens somebody named by a notice rather than by a post (#123).
     ///
     /// A notice about somebody following you has no post to open, and their page is the whole of
@@ -1623,6 +1641,12 @@ public final class AppState {
     /// before, doing the same thing to the same deck.
     private func openTheMedia() -> Bool {
         if viewing != nil { return closeTheMedia() }
+        // In front of the opened post, because it is drawn over it and is what the reader is
+        // looking at (#126).
+        if about != nil {
+            closeAbout()
+            return true
+        }
         guard let post = postUnderTheRing, !post.attachments.isEmpty else { return false }
         show(post.attachments, at: 0, covered: post.sensitive == true)
         return true
