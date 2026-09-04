@@ -1,0 +1,6 @@
+The lists you are already in, and a conversation that reads like the timeline.
+
+• A post in a conversation is laid out the way the timeline lays out the same post: the picture beside the words wherever there is room for it
+• The people you follow, the people who follow you, and the hashtags you subscribed to — as lists you can see and undo
+
+Nothing is collected. There is no Fediqo server for anything to be collected on.
