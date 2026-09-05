@@ -270,7 +270,10 @@ enum Fixture {
             spoiler: spoiler,
             audience: audience,
             counts: counts,
-            application: Application(name: "Fediqo"),
+            // With a website, because the half of #102 that is worth looking at is the half
+            // that only exists where the server sent one — and no picture had ever shown it.
+            application: Application(name: "Fediqo",
+                                     website: URL(string: "https://fediqo.example/about")),
             webURL: URL(string: "https://\(host)/@\(handle)/\(uri)"),
             inReplyToURI: inReplyToURI,
             tags: tags,

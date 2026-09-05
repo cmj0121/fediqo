@@ -640,10 +640,25 @@ struct PostRow: View {
                 Spacer(minLength: 0)
                 Text(t("post.writtenWith")).fediqoFont(TypeScale.micro).foregroundStyle(.tertiary)
                 if let website = application.website {
+                    // **Underlined and not tinted** (#102). It has always opened; what it never
+                    // did was look as though it would — drawn in the same tertiary grey as the
+                    // words beside it, it was a link nobody could see was one. The accent would
+                    // say it louder than the rest of the footer, and this line is still the
+                    // least of what a row says: it is about neither the person, nor the words,
+                    // nor what can be done.
                     Link(application.name, destination: website)
                         .fediqoFont(TypeScale.micro)
                         .foregroundStyle(.tertiary)
+                        .underline()
+                        // Where it goes, before it is pressed. The name of a client is not the
+                        // name of a host, and a reader is owed the second before they leave.
+                        .help(website.host() ?? website.absoluteString)
+                        .accessibilityLabel(Text(t("post.writtenWith.opens", application.name,
+                                                   website.host() ?? website.absoluteString)))
                 } else {
+                    // A name with no site stays what it is: this app does not go looking for a
+                    // client's website and does not guess one from a name, because a link
+                    // nobody sent is a link this app invented (S5).
                     Text(application.name).fediqoFont(TypeScale.micro).foregroundStyle(.tertiary)
                 }
             }

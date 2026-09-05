@@ -7651,6 +7651,23 @@
           }
         }
       }
+    },
+    "post.writtenWith.opens": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Written with %1$@ — opens %2$@"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用 %1$@ 寫的——會開啟 %2$@"
+          }
+        }
+      }
     }
   }
 }
