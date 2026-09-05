@@ -345,14 +345,31 @@ struct PostRow: View {
     /// They go together because they went together before, when a size class dropped both at
     /// once on a phone. Which of the two should go first is a question nobody has asked, and
     /// this is not the change that answers it.
+    /// Three arrangements, widest first, and the third is the one #127 added.
+    ///
+    /// **A hostname with its middle removed names nothing.** `ced…ample` is not a shortened
+    /// host — it is a host with the part you would recognise taken out, which is the one form of
+    /// it that cannot be matched, looked up, or typed. It was drawn that way at 440 points and
+    /// the largest text, on a real phone, at the size this app ships at.
+    ///
+    /// #88 met this on the person page's own header and answered it: the narrow arrangement
+    /// **drops the line** rather than cutting it, because half a caveat is worse than none. This
+    /// is the same answer one level down. Where the band cannot hold the server's name whole, it
+    /// does not hold it at all — and the room goes to the name of whoever wrote the post, which
+    /// is what a reader is looking for first and the thing that has nothing to fall back on.
+    ///
+    /// Nothing is lost to a reader who cannot see the band at all: the accessibility label
+    /// still names every server outright in every arrangement, because a width is a reason to
+    /// draw less and not a reason to say less.
     private var metadata: some View {
         ViewThatFits(in: .horizontal) {
-            metadataBand(verbose: true)
-            metadataBand(verbose: false)
+            metadataBand(verbose: true, naming: true)
+            metadataBand(verbose: false, naming: true)
+            metadataBand(verbose: false, naming: false)
         }
     }
 
-    private func metadataBand(verbose: Bool) -> some View {
+    private func metadataBand(verbose: Bool, naming: Bool) -> some View {
         HStack(spacing: Space.step) {
             // The picture and the name are one press and not two: they are the same fact, and
             // splitting them would leave a reader guessing which half is the door. It takes the
@@ -387,7 +404,7 @@ struct PostRow: View {
                 Text(post.authorHandle).fediqoFont(TypeScale.minor).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: Space.snug)
-            sources(verbose: verbose)
+            sources(verbose: verbose, naming: naming)
             // When it was written never gives any of it up: a time squeezed to an ellipsis is
             // a row that has stopped saying when it happened. What it costs to keep is the
             // band's answer, though, and not one number — this comment said "four characters"
@@ -679,7 +696,7 @@ struct PostRow: View {
     /// `verbose` is the band's answer rather than this view's own: the word before the pill
     /// and the author's handle are given up together, by whichever arrangement of the band
     /// fitted the room it was given.
-    private func sources(verbose: Bool) -> some View {
+    private func sources(verbose: Bool, naming: Bool) -> some View {
         HStack(spacing: Space.snug) {
             // The word is worth a column on a screen that has one to spare, and is the first
             // thing to go where there is not, because a pill saying `birch.example` says it
@@ -687,15 +704,26 @@ struct PostRow: View {
             if verbose {
                 Text(t("timeline.via")).fediqoFont(TypeScale.caption).foregroundStyle(.tertiary)
             }
-            if let first = shownSources.first {
+            // **Whole or not at all** (#127). The middle is where a host is recognised from,
+            // so cutting it out leaves a word that is not a hostname and not anything else. The
+            // narrowest band asks for this without a name and gets a row that says who wrote
+            // the post instead — which is the trade #127 names and the one #88 already made.
+            // **A width is a reason to draw less, not a reason to say less.** Where the band
+            // has no room to name the server, the label that names every one of them outright
+            // still has to be somewhere — otherwise the narrowest arrangement drops it for a
+            // reader using a screen reader too, and they had no width problem to begin with.
+            if !naming { Color.clear.frame(width: 0, height: 0) }
+            if naming, let first = shownSources.first {
                 Text(first)
                     .fediqoFont(TypeScale.caption)
                     .lineLimit(1)
-                    // Middle, not tail: what a reader recognises about a server is at both
-                    // ends, and `birch.exa…` names one no better than `b…` does.
-                    .truncationMode(.middle)
+                    // Tail rather than middle, and it should never be reached: a band that
+                    // cannot hold this whole is a band that draws the arrangement below.
+                    .fixedSize()
                     .fediqoPill()
             }
+            // The count survives where the name does not: *and one more server* is true at
+            // every width, and it is the vocabulary this row already had for saying less.
             if shownSources.count > 1 { carriedByTheRest }
         }
         // The same priority as the name beside it, which in an `HStack` means the name is
