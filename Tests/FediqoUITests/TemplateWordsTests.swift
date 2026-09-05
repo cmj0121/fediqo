@@ -40,6 +40,12 @@ struct TemplateWordsTests {
     /// less, and the app ships in two.
     private static let languages: Set<String> = ["en", "zh-TW"]
 
+    /// Whether a key is in the catalogue in both languages. Shared, because a second suite
+    /// wanting the same answer should not grow a second reader of the same file.
+    static func written(_ key: String) -> Bool {
+        catalogue[key] == languages
+    }
+
     private func written(_ key: String, _ comment: Comment) {
         let languages = Self.catalogue[key]
         #expect(languages != nil, comment)
