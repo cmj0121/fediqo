@@ -1,6 +1,11 @@
 The lists you are already in, and a conversation that reads like the timeline.
 
 • A post in a conversation is laid out the way the timeline lays out the same post: the picture beside the words wherever there is room for it
-• The people you follow, the people who follow you, and the hashtags you subscribed to — as lists you can see and undo
+• What you muted can be un-muted. It could not be, and a muted author's posts do not appear — so the menu that muted them could not be reached again
+• What your servers are hiding for you: the people you muted, the people you blocked, the servers you blocked. Each of them can be stopped from where it is listed
+• Who has asked to follow you and is waiting, with an answer either way. A locked account could not answer anybody
+• The hashtags you follow and the lists you have made, as things you can see
+• A post's own page and the button that re-reads it now work at all. They were reaching a default instead of your server, quietly, and answering nothing
+• On a narrow phone a server is named whole or not named. `ced…ample` is not a shortened hostname
 
 Nothing is collected. There is no Fediqo server for anything to be collected on.
