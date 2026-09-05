@@ -7634,6 +7634,23 @@
           }
         }
       }
+    },
+    "shortcut.about": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "What this post can tell you about itself"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這則貼文能說出關於自己的什麼"
+          }
+        }
+      }
     }
   }
 }

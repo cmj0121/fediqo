@@ -1389,6 +1389,16 @@ public final class AppState {
         case .showShortcuts: setShowingShortcuts(true); return true
         // Opens the field, and closes it with the words it was holding — pressing it again is
         // how a reader gets their timeline back without reaching for the pointer (#105).
+        // What the post in front of the reader can tell them about itself. Pressed again it
+        // closes, so the key is the whole of the way in and out.
+        case .aboutPost:
+            if about != nil {
+                closeAbout()
+                return true
+            }
+            guard let post = thread?.conversation.post ?? expanded else { return false }
+            openAbout(post)
+            return true
         case .searchHere:
             guard railItem == .timeline else { return false }
             showingSearch.toggle()
@@ -1820,13 +1830,20 @@ public final class AppState {
     /// the one in front of the reader.
     @discardableResult
     func rotateTab(by steps: Int) -> Bool {
-        switch railItem {
+        // The page in front of the reader owns `Tab`, the way the page behind it does when
+        // nothing is over it: rotating a rail page's tabs under an open one would be moving
+        // something they cannot see (#126).
+        if let about {
+            about.tab = rotated(People.AboutAPost.allCases, from: about.tab, by: steps) ?? about.tab
+            return true
+        }
+        return switch railItem {
         case .timeline: rotateTimeline(by: steps)
         case .statistics: rotate(&statisticsTab, by: steps)
         case .settings: rotate(&settingsTab, by: steps)
-        // Neither has tabs to rotate through: one list each, and `Tab` is handed back to the
-        // focus system rather than kept for nothing.
         case .inbox: rotate(&inboxTab, by: steps)
+        // Nothing to rotate through: one list, and `Tab` is handed back to the focus system
+        // rather than kept for nothing.
         case .kept: false
         }
     }

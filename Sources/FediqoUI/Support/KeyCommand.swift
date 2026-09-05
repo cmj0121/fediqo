@@ -4,6 +4,13 @@ import SwiftUI
 /// has no initialiser: the decision of what a key means is the part worth testing, so it is
 /// the part kept away from the event type.
 enum KeyCommand: Hashable, CaseIterable {
+    /// What a post can tell you about itself: exactly when, and who favourited or boosted it.
+    ///
+    /// `i`, and pressed again it closes. The page was reachable only by pressing an icon — the
+    /// same gap #96 named when it gave the author's page a key: *a reader working from the
+    /// keyboard had to reach for the pointer to do the one thing this app is otherwise built to
+    /// do without one.*
+    case aboutPost
     /// Search what this device already holds (#105).
     ///
     /// `/`, which is what it is in every reader a person already uses. It asks nobody, so it is
@@ -134,6 +141,7 @@ enum KeyCommand: Hashable, CaseIterable {
         // `?` is help and `/` is search, which is what the two are in every reader a person
         // already uses. A plain slash meant nothing until there was something to search (#105).
         case "/": return .searchHere
+        case "i": return .aboutPost
         case "r": return .refreshNow
         case "R": return .cycleRefreshInterval
         case "c": return .compose
@@ -213,7 +221,7 @@ enum KeyCommand: Hashable, CaseIterable {
     /// ones a text field, a menu or the focus system owns — out of our handler entirely.
     static let listened: Set<KeyEquivalent> = [
         .tab, .escape, .return, .upArrow, .downArrow, .space,
-        "r", "R", "c", "j", "k", "g", "m", "o", "p", "s", "v", "f", "?", "/",
+        "r", "R", "c", "i", "j", "k", "g", "m", "o", "p", "s", "v", "f", "?", "/",
         "l", "b", "d", "a", "u",
     ]
 
@@ -311,6 +319,7 @@ extension KeyCommand {
         Shortcut(group: .doing, keys: ["R"], name: "interval", commands: [.cycleRefreshInterval]),
         Shortcut(group: .doing, keys: ["c"], name: "compose", commands: [.compose]),
         Shortcut(group: .doing, keys: ["/"], name: "search", commands: [.searchHere]),
+        Shortcut(group: .doing, keys: ["i"], name: "about", commands: [.aboutPost]),
         Shortcut(group: .doing, keys: ["Tab"], name: "complete", commands: [.completeMention]),
         Shortcut(group: .doing, keys: ["Return", "Space"], name: "expand", commands: [.expandPost]),
         Shortcut(group: .doing, keys: ["o"], name: "browser", commands: [.openInBrowser]),
