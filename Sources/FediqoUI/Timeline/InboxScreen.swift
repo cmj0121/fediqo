@@ -32,6 +32,7 @@ struct InboxScreen: View {
             switch app.inboxTab {
             case .notices: NoticesList()
             case .talks: TalksList()
+            case .requests: RequestsList()
             }
         }
         .background(Palette.surface(colorScheme))
@@ -43,6 +44,7 @@ struct InboxScreen: View {
         switch app.inboxTab {
         case .notices: app.notices?.asking ?? false
         case .talks: app.talks.loading
+        case .requests: app.requests.loading
         }
     }
 
@@ -54,6 +56,7 @@ struct InboxScreen: View {
             switch app.inboxTab {
             case .notices: Task { await app.askForNotices() }
             case .talks: Task { await app.talks.read() }
+            case .requests: Task { await app.requests.read() }
             }
         }
     }

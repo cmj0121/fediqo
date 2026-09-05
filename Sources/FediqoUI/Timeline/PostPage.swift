@@ -160,6 +160,11 @@ struct PostPage: View {
                 guard let key else { return }
                 withAnimation(Motion.appearing) { rows.scrollTo(key, anchor: .center) }
             }
+            // Measured for the widest column on the page, which is the opened post's, and with
+            // the deepest indent taken off — the reply furthest in has the least room and is the
+            // one that has to fit (#121).
+            .fediqoMeasuresRows(rowsInsetBy: Space.gap + Self.deepestIndent / 2,
+                                card: Size.openedCard)
         }
         .background(Palette.surface(colorScheme))
         .task(id: post.mergeKey) { await app.thread?.read() }
@@ -225,17 +230,23 @@ struct PostPage: View {
     /// pressed `Return` on a post should find the same thing here — and clicking one opens
     /// nothing, because they are already looking at the whole of it.
     ///
-    /// **This page does not measure, and that is the answer rather than the oversight #118 found
-    /// elsewhere.** Two columns is an arrangement for a scannable list: the words are clamped to
-    /// a few lines, so a 200-point card beside them is the taller of two comparable things. Here
-    /// nothing is clamped — `condensed` is false, because a reader who opened a post came to read
-    /// all of it — and a reply sits further in for every generation above it. Beside a column of
-    /// words that may run for a screen, and inside an indent, the same card is a stamp in the
-    /// corner of a page. Under the words the picture keeps its own scale and the page keeps its
-    /// shape, which is the lesser wrong of the two.
+    /// **This page measures like the timeline, and reserves a wider column than it (#121).**
     ///
-    /// It is not the right one, and #120 is what is left: stacked, the card is still the width of
-    /// the column the timeline reserves for it, which is a share of a row this page is not.
+    /// It did not measure at all, and the comment here argued for that: nothing is clamped
+    /// — `condensed` is false, because a reader who opened a post came to read all of it — and
+    /// beside a column of words that may run for a screen, a 200-point card is a stamp in the
+    /// corner of a page. That argument was made from the code and never checked against somebody
+    /// reading a conversation, and what they see is one post drawn one way in the timeline and
+    /// another way a keypress later.
+    ///
+    /// So the picture goes beside the words, and it keeps the size #120 gave it: the column here
+    /// is `Size.openedCard`, not the share of a row that a list reserves. The page is measured
+    /// for that wider column, and **every row on it takes the same answer** — a two-column reply
+    /// above a stacked one would be two arrangements down one list, which is what S6 will not
+    /// have.
+    ///
+    /// The indent comes off the width before the comparison, because the deepest reply is the
+    /// one with least room and it is the one that has to fit.
     private func row(_ post: Post, selected: Bool, answering: Answering = .nothing) -> some View {
         PostRow(post: post, selected: selected,
                 turns: selected ? app.mediaTurns : 0,
@@ -274,6 +285,10 @@ struct PostPage: View {
     /// twenty deep would otherwise walk off the right-hand edge, and a row squeezed to nothing
     /// says less about the shape than a row that has stopped moving does.
     private static let deepest = 4
+
+    /// How far in the deepest reply sits. Taken off the page's width before the arrangement is
+    /// decided, because that reply is the one with the least room for two columns.
+    static var deepestIndent: CGFloat { CGFloat(deepest) * Space.withinGroup }
 
     private func indent(_ depth: Int) -> CGFloat {
         CGFloat(min(depth, Self.deepest)) * Space.withinGroup

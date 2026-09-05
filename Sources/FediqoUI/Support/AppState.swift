@@ -64,7 +64,9 @@ enum RailItem: String, CaseIterable, Identifiable, Hashable {
 /// ordered by the conversation — so neither is a tab of the Timeline page, and each says which
 /// it is in the line under the title.
 enum InboxTab: String, CaseIterable, Identifiable, Hashable {
-    case notices, talks
+    /// Three, and the third is the one that is waiting on the reader rather than telling them
+    /// something: somebody has asked to follow you (#114).
+    case notices, talks, requests
 
     var id: String { rawValue }
 }
@@ -149,6 +151,9 @@ struct LaunchOptions {
     /// Which half of the inbox this run opens. A tab reached by a press is a tab nothing on a
     /// runner can reach (#30).
     var inboxTab: InboxTab?
+    /// Which tab of Settings this run opens. A tab reached by a press is one nothing on a
+    /// runner can reach (#30).
+    var settingsTab: SettingsTab?
     /// Whether this run opens the page about the post it opened. Reached by a press, so nothing
     /// on a runner can reach it (#30).
     var openingAbout: Bool = false
@@ -220,6 +225,7 @@ struct LaunchOptions {
         options.searchingFor = environment["FEDIQO_SEARCH"]
         options.openingYourPage = environment["FEDIQO_ME"] == "1"
         options.inboxTab = environment["FEDIQO_INBOX_TAB"].flatMap(InboxTab.init(rawValue:))
+        options.settingsTab = environment["FEDIQO_SETTINGS_TAB"].flatMap(SettingsTab.init(rawValue:))
         options.openingAbout = environment["FEDIQO_ABOUT"] == "1"
         options.openingPerson = environment["FEDIQO_PERSON"]
         options.openingReply = environment["FEDIQO_REPLY"]
@@ -347,6 +353,20 @@ public final class AppState {
 
     /// Who the reader is talking to (#109). Built once and kept, the way the feeds are: the page
     /// is rebuilt on every visit and what it holds should not be re-asked with it.
+    /// What each server is hiding for the reader (#114).
+    /// Who has asked to follow the reader and is waiting (#114).
+    @ObservationIgnored lazy var requests = RequestsModel { [weak self] in
+        await self?.everyAccount() ?? []
+    } client: { [weak self] in
+        self?.registry.client(for: .mastodon)
+    }
+
+    @ObservationIgnored lazy var hiding = HidingModel { [weak self] in
+        await self?.everyAccount() ?? []
+    } client: { [weak self] in
+        self?.registry.client(for: .mastodon)
+    }
+
     @ObservationIgnored lazy var talks = TalksModel { [weak self] in
         await self?.everyAccount() ?? []
     } client: { [weak self] _ in
@@ -668,6 +688,10 @@ public final class AppState {
         if let tab = launch.inboxTab {
             railItem = .inbox
             inboxTab = tab
+        }
+        if let tab = launch.settingsTab {
+            railItem = .settings
+            settingsTab = tab
         }
         if let words = launch.searchingFor, !words.isEmpty {
             showingSearch = true
@@ -1365,6 +1389,16 @@ public final class AppState {
         case .showShortcuts: setShowingShortcuts(true); return true
         // Opens the field, and closes it with the words it was holding — pressing it again is
         // how a reader gets their timeline back without reaching for the pointer (#105).
+        // What the post in front of the reader can tell them about itself. Pressed again it
+        // closes, so the key is the whole of the way in and out.
+        case .aboutPost:
+            if about != nil {
+                closeAbout()
+                return true
+            }
+            guard let post = thread?.conversation.post ?? expanded else { return false }
+            openAbout(post)
+            return true
         case .searchHere:
             guard railItem == .timeline else { return false }
             showingSearch.toggle()
@@ -1796,13 +1830,20 @@ public final class AppState {
     /// the one in front of the reader.
     @discardableResult
     func rotateTab(by steps: Int) -> Bool {
-        switch railItem {
+        // The page in front of the reader owns `Tab`, the way the page behind it does when
+        // nothing is over it: rotating a rail page's tabs under an open one would be moving
+        // something they cannot see (#126).
+        if let about {
+            about.tab = rotated(People.AboutAPost.allCases, from: about.tab, by: steps) ?? about.tab
+            return true
+        }
+        return switch railItem {
         case .timeline: rotateTimeline(by: steps)
         case .statistics: rotate(&statisticsTab, by: steps)
         case .settings: rotate(&settingsTab, by: steps)
-        // Neither has tabs to rotate through: one list each, and `Tab` is handed back to the
-        // focus system rather than kept for nothing.
         case .inbox: rotate(&inboxTab, by: steps)
+        // Nothing to rotate through: one list, and `Tab` is handed back to the focus system
+        // rather than kept for nothing.
         case .kept: false
         }
     }
@@ -1846,6 +1887,7 @@ public final class AppState {
             switch inboxTab {
             case .notices: Task { await askForNotices() }
             case .talks: Task { await talks.read() }
+            case .requests: Task { await requests.read() }
             }
             return true
         }

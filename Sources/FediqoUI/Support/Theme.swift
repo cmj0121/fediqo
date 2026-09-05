@@ -140,13 +140,22 @@ enum Size {
     /// list, and drawing the reader's picture at the scanning size on a page whose whole job is
     /// that one post was the second half of #120.
     ///
-    /// Twice the column, and **bounded rather than free**, which is the whole of the choice. A
-    /// picture that simply takes the width of a wide window is 900 points across and 600 down,
-    /// and it pushes the buttons and the conversation off the bottom — which is the fault this
-    /// number exists to fix, arriving again in better clothes. At 400 the picture is four times
-    /// the area it was and an 800-point window still holds the post, its bar, and the first
-    /// replies under it.
-    static let openedCard: CGFloat = card * 2
+    /// **Bounded rather than free**, which is the first half of the choice. A picture that
+    /// simply takes the width of a wide window is 900 points across and 600 down, and it pushes
+    /// the buttons and the conversation off the bottom — the fault this number exists to fix,
+    /// arriving again in better clothes.
+    ///
+    /// **And half again rather than twice, which is the second half and was decided by
+    /// arithmetic.** #121 puts this picture beside the words rather than under them, and a
+    /// column costs the page its own width: at twice the column, a conversation needed 969
+    /// points at the text size this app ships at, a 1024-point window has 886, and so the
+    /// timeline drew two columns where the conversation drew one — one post laid out two ways, a
+    /// keypress apart, which is the thing #121 exists to stop.
+    ///
+    /// At half again it needs 869 and fits, so the two agree at the width people actually use.
+    /// The picture is still two and a quarter times the area a list reserves, which is what
+    /// "the reader opened this one" is worth.
+    static let openedCard: CGFloat = card * 1.5
 
     /// The width at which a row has room to put its attachments beside its words. Three
     /// shares: `card` for the deck, `Space.gap` between them, and `words` left over for what
@@ -170,7 +179,15 @@ enum Size {
     ///
     /// Out here rather than on the screen that measures it, because the closure that asks the
     /// geometry is `Sendable` and a `View`'s own static is isolated to the main actor.
-    static func wideRows(at scale: Double) -> CGFloat {
+    /// `card` is which column is being measured for. The timeline reserves `Size.card`; the
+    /// post a conversation is about reserves `openedCard`, because #120 gave it a bigger
+    /// picture and #121 asks for that picture to be beside the words rather than under them.
+    ///
+    /// **The page measures for the widest column on it, and every row on it takes the same
+    /// answer.** Two thresholds on one screen would be two arrangements down one list, which is
+    /// what S6 will not have: a reader would meet a two-column reply and then a stacked one and
+    /// have to work out why.
+    static func wideRows(at scale: Double, card: CGFloat = Size.card) -> CGFloat {
         card + Space.gap + words * scale
     }
 
@@ -325,6 +342,9 @@ private struct MeasuresRows: ViewModifier {
     /// text size changes and not only when the window does.
     @State private var width: CGFloat = 0
     let inset: CGFloat
+    /// The widest column any row on this page reserves. The page is measured for that one, so
+    /// every row on it gets the same arrangement (#121).
+    let card: CGFloat
 
     func body(content: Content) -> some View {
         content
@@ -335,15 +355,17 @@ private struct MeasuresRows: ViewModifier {
             } action: { width in
                 self.width = width
             }
-            .environment(\.fediqoWideRows, width - inset * 2 >= Size.wideRows(at: scale))
+            .environment(\.fediqoWideRows,
+                         width - inset * 2 >= Size.wideRows(at: scale, card: card))
     }
 }
 
 extension View {
     /// See `MeasuresRows`. Every screen that draws a `PostRow` either calls this or says in a
     /// comment why it does not.
-    func fediqoMeasuresRows(rowsInsetBy inset: CGFloat = 0) -> some View {
-        modifier(MeasuresRows(inset: inset))
+    func fediqoMeasuresRows(rowsInsetBy inset: CGFloat = 0,
+                            card: CGFloat = Size.card) -> some View {
+        modifier(MeasuresRows(inset: inset, card: card))
     }
 }
 

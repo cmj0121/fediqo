@@ -550,15 +550,18 @@ struct PostRow: View {
     @ViewBuilder
     private var attachmentColumn: some View {
         if !post.attachments.isEmpty {
-            deck()
+            deck(widest: widest)
         } else if let card = post.card {
             // The link's own picture goes where the post's would have, because there is no
             // post's — a card and an attachment never both claim this column. The author's
             // media comes first where there is any: it is theirs, and the card is somebody
             // else's page.
-            LinkCard(card: card, covered: mediaIsCovered)
+            LinkCard(card: card, covered: mediaIsCovered, widest: widest)
         } else {
-            Color.clear.frame(width: AttachmentDeck.side, height: 0)
+            // As wide as this row's column, not as wide as a list's: the empty column is what
+            // keeps the words the same width down the page, and on the opened post the column
+            // is the bigger one (#121).
+            Color.clear.frame(width: widest, height: 0)
         }
     }
 

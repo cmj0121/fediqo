@@ -7226,6 +7226,431 @@
           }
         }
       }
+    },
+    "settings.muted": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Muted"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已靜音"
+          }
+        }
+      }
+    },
+    "settings.muted.none": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing is muted."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "沒有靜音任何東西。"
+          }
+        }
+      }
+    },
+    "settings.muted.body": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "What you have hidden, and the way to stop hiding it. A muted author's posts do not appear, so this is the only place the decision can be taken back."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你藏起來的東西，以及不再藏它的方法。被靜音的作者貼文不會出現，所以這裡是唯一能把那個決定收回來的地方。"
+          }
+        }
+      }
+    },
+    "settings.muted.here": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "On this device"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在這台裝置上"
+          }
+        }
+      }
+    },
+    "settings.muted.onServer": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "On %@"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 %@ 上"
+          }
+        }
+      }
+    },
+    "settings.muted.undo": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unmute"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消靜音"
+          }
+        }
+      }
+    },
+    "settings.hiding": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "What your servers are hiding"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你的伺服器正在藏什麼"
+          }
+        }
+      }
+    },
+    "settings.hiding.none": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your servers are hiding nothing for you."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你的伺服器沒有替你藏任何東西。"
+          }
+        }
+      }
+    },
+    "settings.hiding.asking": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Asking each of your servers…"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在問你的每一台伺服器⋯⋯"
+          }
+        }
+      }
+    },
+    "settings.hiding.muted": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Muted on %@"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 %@ 上被靜音"
+          }
+        }
+      }
+    },
+    "settings.hiding.blocked": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Blocked on %@"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 %@ 上被封鎖"
+          }
+        }
+      }
+    },
+    "settings.hiding.blockedServers": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Servers blocked on %@"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 %@ 上被封鎖的伺服器"
+          }
+        }
+      }
+    },
+    "settings.hiding.stop": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stop"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "停止"
+          }
+        }
+      }
+    },
+    "settings.subscribed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "What you subscribed to"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你訂閱了什麼"
+          }
+        }
+      }
+    },
+    "settings.subscribed.none": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your servers say you have subscribed to nothing."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你的伺服器說你沒有訂閱任何東西。"
+          }
+        }
+      }
+    },
+    "settings.subscribed.tags": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hashtags followed on %@"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 %@ 上追蹤的 hashtag"
+          }
+        }
+      }
+    },
+    "settings.subscribed.lists": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lists made on %@"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 %@ 上做的清單"
+          }
+        }
+      }
+    },
+    "settings.subscribed.lists.note": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "not readable here yet"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這裡還讀不了"
+          }
+        }
+      }
+    },
+    "settings.subscribed.unfollow": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unfollow"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消追蹤"
+          }
+        }
+      }
+    },
+    "tab.requests": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "等著的"
+          }
+        }
+      }
+    },
+    "requests.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Who has asked to follow you and is waiting on an answer. There is no third answer and no taking it back."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "誰要求追蹤你、正在等一個答案。沒有第三種答案，也收不回來。"
+          }
+        }
+      }
+    },
+    "requests.none": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nobody is waiting."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "沒有人在等。"
+          }
+        }
+      }
+    },
+    "requests.accept": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Let them"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "讓他追"
+          }
+        }
+      }
+    },
+    "requests.reject": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不要"
+          }
+        }
+      }
+    },
+    "shortcut.about": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "What this post can tell you about itself"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這則貼文能說出關於自己的什麼"
+          }
+        }
+      }
     }
   }
 }

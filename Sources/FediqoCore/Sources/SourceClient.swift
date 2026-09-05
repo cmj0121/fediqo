@@ -323,6 +323,61 @@ public protocol SourceClient: Sendable {
     /// nowhere is not a report.
     func report(_ post: Post, id: String, as account: ActingAccount, comment: String) async throws
 
+    /// What the server says about one post now (#125).
+    ///
+    /// **A requirement and not only a default**, which is the rule `searchPeople` below already
+    /// states and which these four had to learn the hard way: a default in an extension is
+    /// dispatched where it is written rather than where it is called, so a client's own answer
+    /// is walked straight past. Every one of them was silently doing nothing — a re-read that
+    /// always said "unsupported", and lists that were always empty.
+    func status(of post: Post, host: String, token: String?) async throws -> Post
+
+    /// Who favourited or boosted one post (#126). Asked of the server whose word on the post is
+    /// final, and only when a reader asks: the numbers on a row are free, and the names behind
+    /// them are a request.
+    func people(_ which: People.AboutAPost, of post: Post, host: String,
+                limit: Int, token: String?) async throws -> [Profile]
+
+    /// What this account's server says it is hiding for them (#114).
+    ///
+    /// The server's own answer, not this device's record of what it asked for: a mute made on a
+    /// phone is a mute this app has never heard of, and a list showing only what this device did
+    /// would leave the reader unable to undo most of what is standing.
+    func hidden(_ which: Hiding, as account: ActingAccount) async throws -> [Hidden.Subject]
+
+    /// Stop hiding one of them, on the server that is doing it.
+    func stopHiding(_ which: Hiding, _ subject: Hidden.Subject,
+                    as account: ActingAccount) async throws
+
+    /// Who has asked to follow this account and is waiting — `/api/v1/follow_requests` (#114).
+    ///
+    /// **A locked account could not answer anybody.** This is the one list here whose rows are
+    /// not a state the reader is in but a question somebody else is waiting on, and the only
+    /// thing in this app that changes another person's situation.
+    func followRequests(as account: ActingAccount) async throws -> [Profile]
+
+    /// Say yes or no to one of them. **There is no third answer and no taking it back**: the
+    /// person is told either way by what happens next, which is why this is asked out loud
+    /// rather than done on a swipe.
+    func answerFollowRequest(_ who: Profile, accept: Bool,
+                             as account: ActingAccount) async throws
+
+    /// The hashtags this account follows on its own server — `/api/v1/followed_tags` (#114).
+    ///
+    /// Not the same thing as a timeline made of tags (#104): that is this device's reading, and
+    /// this is a subscription the server is keeping. A reader can have either, both, or one
+    /// they have forgotten about — which is the whole reason to be able to see this.
+    func followedTags(as account: ActingAccount) async throws -> [String]
+
+    func unfollowTag(_ tag: String, as account: ActingAccount) async throws
+
+    /// The lists this account has made on its server — `/api/v1/lists` (#114).
+    ///
+    /// Reading one as a timeline is #103's, and is not built. This is the half #114 asks for:
+    /// a subscription you can see, so that a list made two years ago on a website is not a thing
+    /// only that website knows about.
+    func lists(as account: ActingAccount) async throws -> [ServerList]
+
     /// Somebody as one server holds them, or nothing where it has never heard of them.
     ///
     /// Asked of a server that already handed one of their posts over, never of their own: that
@@ -726,6 +781,33 @@ public extension SourceClient {
     /// count on the post disagreeing with it (#126).
     func people(_ which: People.AboutAPost, of post: Post, host: String,
                 limit: Int, token: String?) async throws -> [Profile] { [] }
+
+    /// Default: a protocol that hides nothing on the reader's behalf has nothing to list, and
+    /// nothing to stop doing (#114).
+    func hidden(_ which: Hiding, as account: ActingAccount) async throws -> [Hidden.Subject] { [] }
+
+    func stopHiding(_ which: Hiding, _ subject: Hidden.Subject,
+                    as account: ActingAccount) async throws {
+        throw SourceFailure.unsupported(.mastodon)
+    }
+
+    /// Defaults: a protocol with no such thing has none to list. Answering one it does not have
+    /// is refused rather than quietly doing nothing, because *nothing happened* and *it worked*
+    /// must not look the same to somebody waiting on the other end of it.
+    func followRequests(as account: ActingAccount) async throws -> [Profile] { [] }
+
+    func answerFollowRequest(_ who: Profile, accept: Bool,
+                             as account: ActingAccount) async throws {
+        throw SourceFailure.unsupported(.mastodon)
+    }
+
+    func followedTags(as account: ActingAccount) async throws -> [String] { [] }
+
+    func unfollowTag(_ tag: String, as account: ActingAccount) async throws {
+        throw SourceFailure.unsupported(.mastodon)
+    }
+
+    func lists(as account: ActingAccount) async throws -> [ServerList] { [] }
 
     /// Default: this build cannot ask that over this protocol, which is different from an
     /// account that has scheduled nothing — so it throws and the page leaves the part absent

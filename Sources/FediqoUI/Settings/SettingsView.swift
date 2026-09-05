@@ -48,6 +48,13 @@ struct SettingsView: View {
             section(t("settings.writing")) { writing }
         case .sources:
             section(t("settings.sources")) { sources }
+            section(t("settings.muted")) { muted }
+            section(t("settings.hiding")) { hiding }
+            section(t("settings.subscribed")) { subscribed }
+                // Keyed on the accounts, not on the screen appearing: who is signed in arrives
+                // over the keychain after the shell is drawn, so asking once on appear asks
+                // before there is anybody to ask as (#109 found this the same way).
+                .task(id: app.yourAccounts) { await app.hiding.readIfNeeded() }
             section(t("settings.privacy")) {
                 Text(t("settings.privacy.body"))
                     .fediqoFont(TypeScale.minor)
@@ -192,6 +199,180 @@ struct SettingsView: View {
             .pickerStyle(.menu)
             .labelsHidden()
             .fixedSize()
+        }
+    }
+
+    /// What each of the reader's servers says this account is subscribed to (#114).
+    ///
+    /// **A list made two years ago on a website is a thing only that website knows about**, and
+    /// a hashtag followed and forgotten is a subscription quietly shaping a home timeline. Being
+    /// able to see them is most of being able to decide about them.
+    ///
+    /// A followed hashtag can be let go from here. A list cannot yet be read as a timeline —
+    /// that is #103's `/api/v1/timelines/list/:id` and is not built — so it is shown and not
+    /// offered, which is the honest half.
+    @ViewBuilder
+    private var subscribed: some View {
+        let model = app.hiding
+        if model.subscribedHosts.isEmpty {
+            Text(t("settings.subscribed.none"))
+                .fediqoFont(TypeScale.minor)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            ForEach(model.subscribedHosts, id: \.self) { host in
+                if let tags = model.tags[host], !tags.isEmpty {
+                    Text(t("settings.subscribed.tags", host))
+                        .fediqoFont(TypeScale.caption)
+                        .foregroundStyle(.tertiary)
+                    ForEach(tags, id: \.self) { tag in
+                        HStack(spacing: Space.step) {
+                            Image(systemName: "number")
+                                .fediqoSymbol(Glyph.inline).foregroundStyle(.secondary)
+                            Text(verbatim: "#\(tag)").fediqoFont(TypeScale.small).lineLimit(1)
+                            Spacer(minLength: Space.step)
+                            Button(t("settings.subscribed.unfollow")) {
+                                Task { await app.hiding.unfollow(tag, on: host) }
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .fediqoFont(TypeScale.minor)
+                        }
+                    }
+                }
+                if let lists = model.lists[host], !lists.isEmpty {
+                    Text(t("settings.subscribed.lists", host))
+                        .fediqoFont(TypeScale.caption)
+                        .foregroundStyle(.tertiary)
+                    ForEach(lists) { list in
+                        HStack(spacing: Space.step) {
+                            Image(systemName: "list.bullet")
+                                .fediqoSymbol(Glyph.inline).foregroundStyle(.secondary)
+                            Text(list.title).fediqoFont(TypeScale.small).lineLimit(1)
+                            Spacer(minLength: Space.step)
+                            // Said rather than offered: reading one as a timeline is #103's and
+                            // is not built, and a button that did nothing would be worse than
+                            // no button.
+                            Text(t("settings.subscribed.lists.note"))
+                                .fediqoFont(TypeScale.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// What each of the reader's servers says it is hiding for them, and the way to stop (#114).
+    ///
+    /// **The server's answer, not this device's record.** The section above is what this device
+    /// asked for; this one is what is actually standing — a mute made on a phone is a mute this
+    /// app has never heard of, and a reader could not undo what it could not see.
+    ///
+    /// One list per account, because a reader signed in to three servers has three: muting
+    /// somebody on one does not mute them on another, and a merged list would offer to undo
+    /// something on a server that was never doing it.
+    @ViewBuilder
+    private var hiding: some View {
+        let model = app.hiding
+        if model.hosts.isEmpty {
+            Text(t(model.loading ? "settings.hiding.asking" : "settings.hiding.none"))
+                .fediqoFont(TypeScale.minor)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            ForEach(model.hosts, id: \.self) { host in
+                ForEach(Hiding.allCases) { which in
+                    if let list = model.found[host]?[which], !list.isEmpty {
+                        Text(t("settings.hiding.\(which.rawValue)", host))
+                            .fediqoFont(TypeScale.caption)
+                            .foregroundStyle(.tertiary)
+                        ForEach(list) { subject in
+                            hidden(subject, which: which, on: host)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func hidden(_ subject: Hidden.Subject, which: Hiding, on host: String) -> some View {
+        HStack(spacing: Space.step) {
+            Image(systemName: which.isAboutPeople ? "person.slash" : "network.slash")
+                .fediqoSymbol(Glyph.inline)
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: Space.hair) {
+                // A name can be written partly in pictures, and `:spark:` is what the server
+                // sends. The plain init, because a name is not prose (#119).
+                EmojiText(subject.name, emojis: subject.emojis, size: TypeScale.small)
+                    .lineLimit(1)
+                if let detail = subject.detail {
+                    Text(detail)
+                        .fediqoFont(TypeScale.caption)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            Spacer(minLength: Space.step)
+            Button(t("settings.hiding.stop")) {
+                Task { await app.hiding.stop(which, subject, on: host) }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .fediqoFont(TypeScale.minor)
+        }
+    }
+
+    /// What the reader has muted, and the way out of it (#114).
+    ///
+    /// **A subscription you cannot see is a subscription you cannot undo**, and this one was
+    /// worse than invisible: a muted author's posts do not appear, so the menu that muted them
+    /// could not be reached again — the reader was shut out of their own decision. Every layer
+    /// beneath took `muted: false` and nothing ever passed it.
+    ///
+    /// Here rather than on a screen of its own, which is what #114 asks of every one of these:
+    /// this is where a reader looks for what they have set.
+    @ViewBuilder
+    private var muted: some View {
+        if app.mutes.isEmpty {
+            Text(t("settings.muted.none"))
+                .fediqoFont(TypeScale.minor)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            Text(t("settings.muted.body"))
+                .fediqoFont(TypeScale.minor)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            ForEach(app.mutes, id: \.self) { mute in
+                HStack(spacing: Space.step) {
+                    Image(systemName: mute.kind == .author ? "person.slash" : "network.slash")
+                        .fediqoSymbol(Glyph.inline)
+                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: Space.hair) {
+                        Text(mute.value)
+                            .fediqoFont(TypeScale.small)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        // **Which of the two is carrying it out**, because this app promises it
+                        // can always say which — and undoing one is not undoing the other.
+                        Text(t(mute.isLocal ? "settings.muted.here"
+                                            : "settings.muted.onServer",
+                               mute.serverURL ?? ""))
+                            .fediqoFont(TypeScale.caption)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: Space.step)
+                    Button(t("settings.muted.undo")) {
+                        Task { await app.unmute(mute) }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .fediqoFont(TypeScale.minor)
+                }
+            }
         }
     }
 
