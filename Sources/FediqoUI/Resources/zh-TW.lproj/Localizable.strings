@@ -4,6 +4,8 @@
 "shell.notices.summary" = "誰來找你";
 "shell.account.title" = "帳號";
 "shell.account.summary" = "這條時間軸的來源";
+"shell.usage.title" = "用量";
+"shell.usage.summary" = "這台機器上留了什麼";
 "shell.preferences.title" = "偏好";
 "shell.preferences.summary" = "來源與外觀";
 "source.signedIn" = "已登入";
@@ -28,6 +30,9 @@
 
 "notices.empty.title" = "通知";
 "notices.empty.detail" = "誰來找你會出現在這裡。";
+
+"usage.empty.title" = "用量";
+"usage.empty.detail" = "這台機器上留了什麼會出現在這裡。";
 
 "preferences.empty.title" = "偏好";
 "preferences.empty.detail" = "來源與外觀會放在這裡。";

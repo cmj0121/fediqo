@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The dummy shell: three places on the left, the current page on the right, compose over it.
+/// The dummy shell: places on the left, the current page on the right, compose over it.
 public struct FediqoRootView: View {
     @State private var place: ShellPlace = .timeline
     @State private var timelineID = DummyTimeline.shipped[0].id
@@ -87,6 +87,7 @@ public struct FediqoRootView: View {
         case .timeline: TimelinePane(timelineID: $timelineID)
         case .notices: NoticesPane()
         case .account: AccountPane(source: .signedIn)
+        case .usage: UsagePane()
         case .preferences: PreferencesPane()
         }
     }

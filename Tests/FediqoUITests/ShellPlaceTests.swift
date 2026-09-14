@@ -5,7 +5,9 @@ import Testing
 struct ShellPlaceTests {
     @Test("Compose is not a place")
     func composeIsNotAPlace() {
-        #expect(ShellPlace.allCases.map(\.rawValue) == ["timeline", "notices", "account", "preferences"])
+        #expect(ShellPlace.allCases.map(\.rawValue) == [
+            "timeline", "notices", "account", "usage", "preferences",
+        ])
     }
 
     @Test("Dummy tabs are named queries")
@@ -34,7 +36,14 @@ struct ShellPlaceTests {
     @Test("Shell copy comes from the module, not the key")
     func shellCopyIsTranslated() {
         #expect(ShellPlace.timeline.title != "shell.timeline.title")
+        #expect(ShellPlace.usage.title != "shell.usage.title")
         #expect(L10n.t("rail.collapse.title") != "rail.collapse.title")
+    }
+
+    @Test("Usage is a place, with the statistic bar")
+    func usageIsAPlace() {
+        #expect(ShellPlace.usage.symbolName == "chart.bar.xaxis")
+        #expect(!ShellPlace.usage.summary.isEmpty)
     }
 
     @Test("A source without an account is unsigned")

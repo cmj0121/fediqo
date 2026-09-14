@@ -4,6 +4,8 @@
 "shell.notices.summary" = "Who has been in touch";
 "shell.account.title" = "Account";
 "shell.account.summary" = "This timeline's source";
+"shell.usage.title" = "Usage";
+"shell.usage.summary" = "What this device is keeping";
 "shell.preferences.title" = "Preferences";
 "shell.preferences.summary" = "Sources and appearance";
 "source.signedIn" = "Signed in";
@@ -28,6 +30,9 @@
 
 "notices.empty.title" = "Notices";
 "notices.empty.detail" = "Who has been in touch will land here.";
+
+"usage.empty.title" = "Usage";
+"usage.empty.detail" = "What this device is keeping will land here.";
 
 "preferences.empty.title" = "Preferences";
 "preferences.empty.detail" = "Sources and appearance will live here.";
