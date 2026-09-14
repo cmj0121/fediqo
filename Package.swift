@@ -27,5 +27,10 @@ let package = Package(
             dependencies: ["FediqoCore"],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
+        .testTarget(
+            name: "FediqoUITests",
+            dependencies: ["FediqoUI"],
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
     ]
 )
