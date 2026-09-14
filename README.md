@@ -55,7 +55,13 @@ arrived and what you see is a rule you wrote.
 checkout does not already carry. [`docs/release.md`](docs/release.md) covers the one command
 that does need more — the one that signs both apps and sends them to TestFlight.
 
-This checkout has no release tag yet: the mascot, and a build that ships. The timeline is not written yet.
+An empty launch opens Account. Add an unsigned Mastodon host from the catalog or by
+typing its hostname. It names the protocol; only Mastodon joins this session.
+Public and trending notes land in an in-memory store. All and Trends are queries of
+that store. Timeline, notices and compose stay off until they have something.
+The data is gone on relaunch. There is no OAuth.
+
+This checkout has no release tag yet: the mascot, and a session-only Mastodon source, in memory.
 
 ## The mark
 
