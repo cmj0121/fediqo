@@ -1,24 +1,22 @@
 import SwiftUI
 
-/// Who you are on a source. Unsigned: the host. Signed in: avatar and account meta.
+/// Empty invitation to add a source. The catalog and hostname field come later.
 struct AccountPane: View {
-    let source: DummySource
+    private enum Metrics {
+        static let pad: CGFloat = 16
+        static let stack: CGFloat = 16
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            SourceMark(source: source)
-            if source.isSignedIn {
-                Text(L10n.t("source.signedIn"))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            } else {
-                Text(L10n.t("source.unsigned"))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
+        VStack(alignment: .leading, spacing: Metrics.stack) {
+            Text(L10n.t("account.add.title"))
+                .font(.headline)
+            Text(L10n.t("account.add.detail"))
+                .font(.body)
+                .foregroundStyle(.secondary)
             Spacer()
         }
-        .padding(16)
+        .padding(Metrics.pad)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }

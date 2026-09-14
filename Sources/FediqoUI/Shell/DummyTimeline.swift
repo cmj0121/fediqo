@@ -1,34 +1,21 @@
-/// A named query the dummy shell can tab between. Not a network's home page.
+/// A named query the shell can tab between. All and Trends are created on join.
 public struct DummyTimeline: Identifiable, Hashable, Sendable {
     public let id: String
 
     public var name: String { L10n.t("timeline.tab.\(id)") }
 
-    public static let shipped: [DummyTimeline] = [
-        DummyTimeline(id: "all"),
-        DummyTimeline(id: "work"),
-    ]
+    /// Empty until a source is joined. The dummy stream is not the live set.
+    public static let shipped: [DummyTimeline] = []
 
-    /// Sources this query reads. All is the mix; Work is a configured subset.
-    public var sources: [DummySource] {
-        switch id {
-        case "work": [.signedIn, .forum]
-        default: [.unsignedPublic, .signedIn, .forum, .board]
-        }
-    }
+    public var sources: [DummySource] { [] }
 
     public var rule: String {
         switch id {
-        case "work": L10n.t("timeline.rule.work")
+        case "trends": L10n.t("timeline.rule.trends")
         default: L10n.t("timeline.rule.all")
         }
     }
 
-    /// This query's items, newest first. Source set, then the rule.
-    public var items: [DummyItem] {
-        DummyItem.stored
-            .filter { sources.contains($0.source) }
-            .filter { id != "work" || $0.workRelated }
-            .sorted { $0.postedAt > $1.postedAt }
-    }
+    /// Newest first. Empty until the store is wired; dummy stored items do not feed this.
+    public var items: [DummyItem] { [] }
 }

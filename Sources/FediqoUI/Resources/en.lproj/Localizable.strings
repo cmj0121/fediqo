@@ -8,7 +8,12 @@
 "shell.usage.summary" = "What this device is keeping";
 "shell.preferences.title" = "Preferences";
 "shell.preferences.summary" = "Language, theme and type";
+"shell.timeline.disabled" = "Add a source on Account first";
+"shell.notices.disabled" = "Notices need a signed-in source";
 "source.signedIn" = "Signed in";
+"account.rail.empty" = "Add a source";
+"account.add.title" = "Add a source";
+"account.add.detail" = "Pick a Mastodon host from the list, or type its hostname. This session only.";
 
 "rail.open.title" = "Open";
 "rail.open.summary" = "Show names and descriptions";
@@ -17,6 +22,7 @@
 
 "compose.title" = "New post";
 "compose.summary" = "Write without leaving this page";
+"compose.disabled.summary" = "Compose needs a signed-in source";
 "compose.cancel" = "Cancel";
 "compose.post" = "Post";
 
@@ -50,9 +56,11 @@
 "timeline.add.toast" = "A new named query stays dummy.";
 "timeline.tab.all" = "All";
 "timeline.tab.work" = "Work";
+"timeline.tab.trends" = "Trends";
 "timeline.rule.all" = "In time order, nothing filtered.";
 "timeline.rule.work" = "These sources, only work-related items.";
-"timeline.empty" = "The timeline is not written yet.";
+"timeline.rule.trends" = "Trending notes, in time order.";
+"timeline.empty" = "No items yet. Public notes from these sources will land here.";
 "timeline.sources" = "Sources";
 "source.unsigned" = "Not signed in";
 
@@ -91,7 +99,7 @@
 "item.thread.board.weekend.body" = "They asked why the slots are square.";
 
 "notices.empty.title" = "Notices";
-"notices.empty.detail" = "Who has been in touch will land here.";
+"notices.empty.detail" = "Notices need a signed-in source. This session has none.";
 
 "usage.empty.title" = "Usage";
 "usage.empty.detail" = "What this device is keeping will land here.";

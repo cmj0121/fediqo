@@ -8,7 +8,12 @@
 "shell.usage.summary" = "這台機器上留了什麼";
 "shell.preferences.title" = "偏好";
 "shell.preferences.summary" = "語言、主題與字級";
+"shell.timeline.disabled" = "先到帳號頁新增來源";
+"shell.notices.disabled" = "通知需要已登入的來源";
 "source.signedIn" = "已登入";
+"account.rail.empty" = "新增來源";
+"account.add.title" = "新增來源";
+"account.add.detail" = "從清單挑選 Mastodon 主機，或自行輸入主機名稱。只留在這次工作階段。";
 
 "rail.open.title" = "打開";
 "rail.open.summary" = "顯示名稱與說明";
@@ -17,6 +22,7 @@
 
 "compose.title" = "新貼文";
 "compose.summary" = "寫，但不離開這一頁";
+"compose.disabled.summary" = "發文需要已登入的來源";
 "compose.cancel" = "取消";
 "compose.post" = "發佈";
 
@@ -50,9 +56,11 @@
 "timeline.add.toast" = "新的 named query 仍是 dummy。";
 "timeline.tab.all" = "全部";
 "timeline.tab.work" = "工作";
+"timeline.tab.trends" = "趨勢";
 "timeline.rule.all" = "時間序，不過濾。";
 "timeline.rule.work" = "這些來源，只留和工作有關的。";
-"timeline.empty" = "時間軸還沒寫。";
+"timeline.rule.trends" = "趨勢貼文，時間序。";
+"timeline.empty" = "還沒有項目。這些來源的公開貼文會出現在這裡。";
 "timeline.sources" = "來源";
 "source.unsigned" = "尚未登入";
 
@@ -91,7 +99,7 @@
 "item.thread.board.weekend.body" = "他們問為什麼槽是方的。";
 
 "notices.empty.title" = "通知";
-"notices.empty.detail" = "誰來找你會出現在這裡。";
+"notices.empty.detail" = "通知需要已登入的來源。這次工作階段沒有。";
 
 "usage.empty.title" = "用量";
 "usage.empty.detail" = "這台機器上留了什麼會出現在這裡。";

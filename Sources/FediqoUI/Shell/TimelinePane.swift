@@ -2,7 +2,8 @@ import SwiftUI
 
 /// The timeline place: named queries, a brief rule, then the stream or a thread.
 struct TimelinePane: View {
-    @Binding var timelineID: String
+    @Binding var timelineID: String?
+    var queries: [DummyTimeline]
     @Binding var selectedID: String?
     @Binding var openedID: String?
     var jumpToTop: Int
@@ -12,7 +13,7 @@ struct TimelinePane: View {
     @State private var toastTick = 0
     @Environment(\.colorScheme) private var colorScheme
 
-    private var timeline: DummyTimeline { DummyTimeline(id: timelineID) }
+    private var timeline: DummyTimeline { DummyTimeline(id: timelineID ?? "") }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -136,16 +137,17 @@ struct TimelinePane: View {
                 .font(.headline)
                 .fixedSize()
             HStack(spacing: 6) {
-                ForEach(DummyTimeline.shipped) { query in
+                ForEach(queries) { query in
                     queryPill(query)
                 }
-                addQuery
             }
-            Text(timeline.rule)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if timelineID != nil {
+                Text(timeline.rule)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .accessibilityElement(children: .contain)
     }
@@ -169,34 +171,10 @@ struct TimelinePane: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
-    private var addQuery: some View {
-        Button {
-            showToast(L10n.t("timeline.add.toast"))
-        } label: {
-            Image(systemName: "plus")
-                .font(.subheadline.weight(.semibold))
-                .frame(width: 28, height: 24)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(ShellChrome.well(colorScheme))
-                )
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(L10n.t("timeline.add"))
-        .help(L10n.t("timeline.add"))
-    }
-
     private var empty: some View {
-        VStack(spacing: 12) {
-            Image("Mascot", bundle: .module)
-                .resizable()
-                .scaledToFit()
-                .frame(maxWidth: 200)
-            Text(L10n.t("timeline.empty"))
-                .font(.body)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(32)
+        ContentUnavailableView(
+            L10n.t("timeline.empty"),
+            systemImage: "list.bullet.rectangle"
+        )
     }
 }
