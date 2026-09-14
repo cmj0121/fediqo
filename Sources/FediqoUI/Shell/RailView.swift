@@ -10,17 +10,22 @@ struct RailView: View {
     var currentSource: DummySource
     var onCompose: () -> Void
 
-    /// 1rem = 16pt.
-    static let rem: CGFloat = 16
-    static let pad: CGFloat = rem * 0.3
-    static let side: CGFloat = rem * 0.5
-    /// The square plate the glyph sits on. Row height equals this, so open/collapse does not jump.
-    static let well: CGFloat = 32
-    static let iconSize: CGFloat = 20
-    static let wellRadius: CGFloat = 3
-    static let rowInnerHeight: CGFloat = well
-    static let collapsedWidth: CGFloat = side + well + side
-    static let expandedWidth: CGFloat = side + well + pad + 148 + side
+    /// Layout numbers. Here rather than as statics on the View: a View's static is
+    /// main-actor isolated on the runner's Swift, and the tests that hold these
+    /// numbers are not.
+    enum Metrics {
+        /// 1rem = 16pt.
+        static let rem: CGFloat = 16
+        static let pad: CGFloat = rem * 0.3
+        static let side: CGFloat = rem * 0.5
+        /// The square plate the glyph sits on. Row height equals this, so open/collapse does not jump.
+        static let well: CGFloat = 32
+        static let iconSize: CGFloat = 20
+        static let wellRadius: CGFloat = 3
+        static let rowInnerHeight: CGFloat = well
+        static let collapsedWidth: CGFloat = side + well + side
+        static let expandedWidth: CGFloat = side + well + pad + 148 + side
+    }
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -36,7 +41,7 @@ struct RailView: View {
                     withAnimation(.easeInOut(duration: 0.18)) { expanded.toggle() }
                 }
             )
-            .padding(.bottom, Self.side)
+            .padding(.bottom, Metrics.side)
 
             ForEach(ShellPlace.allCases) { item in
                 RailButton(
@@ -49,13 +54,13 @@ struct RailView: View {
                 )
             }
 
-            Spacer(minLength: Self.pad)
+            Spacer(minLength: Metrics.pad)
 
             Rectangle()
                 .fill(ShellChrome.hairline(colorScheme))
                 .frame(height: 1)
-                .padding(.vertical, Self.pad)
-                .padding(.horizontal, Self.well / 4)
+                .padding(.vertical, Metrics.pad)
+                .padding(.horizontal, Metrics.well / 4)
 
             RailButton(
                 symbol: "square.and.pencil",
@@ -66,9 +71,9 @@ struct RailView: View {
                 action: onCompose
             )
         }
-        .padding(.vertical, Self.pad)
-        .padding(.horizontal, Self.side)
-        .frame(width: expanded ? Self.expandedWidth : Self.collapsedWidth, alignment: .topLeading)
+        .padding(.vertical, Metrics.pad)
+        .padding(.horizontal, Metrics.side)
+        .frame(width: expanded ? Metrics.expandedWidth : Metrics.collapsedWidth, alignment: .topLeading)
         .clipped()
         .background(ShellChrome.rail(colorScheme))
         .overlay(alignment: .trailing) {
@@ -100,16 +105,16 @@ private struct RailButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(alignment: .center, spacing: RailView.pad) {
+            HStack(alignment: .center, spacing: RailView.Metrics.pad) {
                 glyphView
-                    .frame(width: RailView.well, height: RailView.well)
+                    .frame(width: RailView.Metrics.well, height: RailView.Metrics.well)
                 labels
                     .opacity(expanded ? 1 : 0)
             }
-            .frame(height: RailView.well, alignment: .leading)
-            .frame(maxWidth: expanded ? .infinity : RailView.well, alignment: .leading)
+            .frame(height: RailView.Metrics.well, alignment: .leading)
+            .frame(maxWidth: expanded ? .infinity : RailView.Metrics.well, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: RailView.wellRadius, style: .continuous)
+                RoundedRectangle(cornerRadius: RailView.Metrics.wellRadius, style: .continuous)
                     .fill(rowFill)
             )
             .foregroundStyle(selected ? ShellChrome.selectInk(colorScheme) : Color.primary.opacity(0.84))
@@ -138,7 +143,7 @@ private struct RailButton: View {
 
     private var glyphView: some View {
         Image(systemName: symbol)
-            .font(.system(size: RailView.iconSize, weight: selected ? .semibold : .regular))
+            .font(.system(size: RailView.Metrics.iconSize, weight: selected ? .semibold : .regular))
             .symbolVariant(selected ? .fill : .none)
             .symbolRenderingMode(.hierarchical)
     }

@@ -24,13 +24,13 @@ struct ShellPlaceTests {
 
     @Test("The rail has two widths")
     func railWidths() {
-        #expect(RailView.collapsedWidth < RailView.expandedWidth)
+        #expect(RailView.Metrics.collapsedWidth < RailView.Metrics.expandedWidth)
     }
 
     @Test("A rail row is the same height open or collapsed")
     func railRowHeightIsStable() {
-        #expect(RailView.rowInnerHeight == RailView.well)
-        #expect(RailView.iconSize < RailView.well)
+        #expect(RailView.Metrics.rowInnerHeight == RailView.Metrics.well)
+        #expect(RailView.Metrics.iconSize < RailView.Metrics.well)
     }
 
     @Test("Shell copy comes from the module, not the key")
