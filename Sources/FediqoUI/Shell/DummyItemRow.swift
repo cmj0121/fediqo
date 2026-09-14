@@ -8,12 +8,12 @@ struct DummyItemRow: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private enum Box {
-        static let avatar: CGFloat = 36
+        static let avatar: CGFloat = 40
         static let thumb: CGFloat = 96
         static let vis: CGFloat = 16
         static let source: CGFloat = 108
         static let time: CGFloat = 88
-        static let glyph: CGFloat = 20
+        static let glyph: CGFloat = 22
         static let count: CGFloat = 22
     }
 

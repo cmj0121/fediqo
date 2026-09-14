@@ -7,7 +7,7 @@
 "shell.usage.title" = "用量";
 "shell.usage.summary" = "這台機器上留了什麼";
 "shell.preferences.title" = "偏好";
-"shell.preferences.summary" = "來源與外觀";
+"shell.preferences.summary" = "語言、主題與字級";
 "source.signedIn" = "已登入";
 
 "rail.open.title" = "打開";
@@ -82,3 +82,18 @@
 
 "preferences.empty.title" = "偏好";
 "preferences.empty.detail" = "來源與外觀會放在這裡。";
+
+"prefs.language" = "語言";
+"prefs.language.system" = "系統";
+"prefs.language.english" = "English";
+"prefs.language.taiwanese" = "繁體中文";
+"prefs.theme" = "主題";
+"prefs.theme.system" = "系統";
+"prefs.theme.light" = "淺色";
+"prefs.theme.dark" = "深色";
+"prefs.fontSize" = "字級";
+"prefs.fontSize.smallest" = "最小";
+"prefs.fontSize.smaller" = "較小";
+"prefs.fontSize.default" = "預設";
+"prefs.fontSize.larger" = "較大";
+"prefs.fontSize.largest" = "最大";

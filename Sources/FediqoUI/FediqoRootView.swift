@@ -7,6 +7,7 @@ public struct FediqoRootView: View {
     @State private var composing = false
     @State private var showingShortcuts = false
     @State private var railExpanded = false
+    @State private var prefs = DummyPrefs()
     @Environment(\.colorScheme) private var colorScheme
 
     #if os(iOS)
@@ -32,6 +33,11 @@ public struct FediqoRootView: View {
             .dummyShellKeys { character, shift, control in
                 performDummyKey(character, shift: shift, control: control)
             }
+            .environment(prefs)
+            .environment(\.locale, prefs.language.locale)
+            .preferredColorScheme(prefs.theme.colorScheme)
+            .dynamicTypeSize(prefs.fontSize.dynamicType)
+            .id(prefs.language)
     }
 
     private func performDummyKey(_ character: Character, shift: Bool, control: Bool) -> Bool {

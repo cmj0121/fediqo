@@ -91,9 +91,9 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         }
     }
 
-    public var title: String? { titleKey.map(L10n.t) }
+    public var title: String? { titleKey.map { L10n.t($0) } }
     public var body: String { L10n.t(bodyKey) }
-    public var board: String? { boardKey.map(L10n.t) }
+    public var board: String? { boardKey.map { L10n.t($0) } }
 
     /// The dummy store. Named queries select from this; they do not fetch.
     public static let stored: [DummyItem] = [

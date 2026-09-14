@@ -16,7 +16,7 @@ struct RailView: View {
     static let side: CGFloat = rem * 0.5
     /// The square plate the glyph sits on. Row height equals this, so open/collapse does not jump.
     static let well: CGFloat = 32
-    static let iconSize: CGFloat = 18
+    static let iconSize: CGFloat = 20
     static let wellRadius: CGFloat = 3
     static let rowInnerHeight: CGFloat = well
     static let collapsedWidth: CGFloat = side + well + side

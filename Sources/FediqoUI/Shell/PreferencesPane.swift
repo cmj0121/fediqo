@@ -1,11 +1,29 @@
 import SwiftUI
 
+/// Language, theme, and type. Defaults follow the device, except type which starts a step up.
 struct PreferencesPane: View {
+    @Environment(DummyPrefs.self) private var prefs
+
     var body: some View {
-        ContentUnavailableView(
-            L10n.t("preferences.empty.title"),
-            systemImage: "gearshape",
-            description: Text(L10n.t("preferences.empty.detail"))
-        )
+        @Bindable var prefs = prefs
+        Form {
+            Picker(L10n.t("prefs.language"), selection: $prefs.language) {
+                ForEach(DummyLanguage.allCases) { language in
+                    Text(L10n.t("prefs.language.\(language.labelKey)")).tag(language)
+                }
+            }
+            Picker(L10n.t("prefs.theme"), selection: $prefs.theme) {
+                ForEach(DummyTheme.allCases) { theme in
+                    Text(L10n.t("prefs.theme.\(theme.rawValue)")).tag(theme)
+                }
+            }
+            Picker(L10n.t("prefs.fontSize"), selection: $prefs.fontSize) {
+                ForEach(DummyFontSize.allCases) { size in
+                    Text(L10n.t("prefs.fontSize.\(size.rawValue)")).tag(size)
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .padding(8)
     }
 }

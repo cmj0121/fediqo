@@ -7,7 +7,7 @@
 "shell.usage.title" = "Usage";
 "shell.usage.summary" = "What this device is keeping";
 "shell.preferences.title" = "Preferences";
-"shell.preferences.summary" = "Sources and appearance";
+"shell.preferences.summary" = "Language, theme and type";
 "source.signedIn" = "Signed in";
 
 "rail.open.title" = "Open";
@@ -82,3 +82,18 @@
 
 "preferences.empty.title" = "Preferences";
 "preferences.empty.detail" = "Sources and appearance will live here.";
+
+"prefs.language" = "Language";
+"prefs.language.system" = "System";
+"prefs.language.english" = "English";
+"prefs.language.taiwanese" = "繁體中文";
+"prefs.theme" = "Theme";
+"prefs.theme.system" = "System";
+"prefs.theme.light" = "Light";
+"prefs.theme.dark" = "Dark";
+"prefs.fontSize" = "Font size";
+"prefs.fontSize.smallest" = "Smallest";
+"prefs.fontSize.smaller" = "Smaller";
+"prefs.fontSize.default" = "Default";
+"prefs.fontSize.larger" = "Larger";
+"prefs.fontSize.largest" = "Largest";

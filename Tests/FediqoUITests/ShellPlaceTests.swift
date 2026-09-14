@@ -170,3 +170,28 @@ struct DummyCommandTests {
         )
     }
 }
+
+@Suite("Dummy preferences")
+struct DummyPrefsTests {
+    @Test("Language and theme default to the system")
+    func languageAndThemeFollowTheSystem() {
+        #expect(DummyLanguage.system.lprojName == nil)
+        #expect(DummyTheme.system.colorScheme == nil)
+        #expect(DummyTheme.light.colorScheme == .light)
+        #expect(DummyTheme.dark.colorScheme == .dark)
+    }
+
+    @Test("Default type is a step above system large")
+    func defaultTypeIsLarger() {
+        #expect(DummyFontSize.standard.dynamicType == .xLarge)
+        #expect(DummyFontSize.smallest.dynamicType < DummyFontSize.standard.dynamicType)
+        #expect(DummyFontSize.standard.dynamicType < DummyFontSize.largest.dynamicType)
+    }
+
+    @Test("A chosen language loads that lproj")
+    func chosenLanguageLoadsThatCatalog() {
+        #expect(L10n.t("shell.timeline.title", language: .english) == "Timeline")
+        #expect(L10n.t("shell.timeline.title", language: .taiwanese) == "時間軸")
+        #expect(L10n.t("prefs.fontSize.default", language: .english) == "Default")
+    }
+}
