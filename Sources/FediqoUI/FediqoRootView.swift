@@ -7,6 +7,7 @@ public struct FediqoRootView: View {
     @State private var composing = false
     @State private var showingShortcuts = false
     @State private var railExpanded = false
+    @Environment(\.colorScheme) private var colorScheme
 
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -96,11 +97,15 @@ public struct FediqoRootView: View {
                 currentSource: .signedIn,
                 onCompose: { composing = true }
             )
-            Divider()
+            Rectangle()
+                .fill(ShellChrome.hairline(colorScheme))
+                .frame(width: 1)
             page
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(ShellChrome.page(colorScheme))
         }
         .frame(minWidth: 520, minHeight: 360)
+        .background(ShellChrome.page(colorScheme))
     }
 
     #if os(iOS)
@@ -117,8 +122,8 @@ public struct FediqoRootView: View {
                 Image(systemName: "square.and.pencil")
                     .font(.title3.weight(.semibold))
                     .frame(width: 56, height: 56)
-                    .background(Circle().fill(Color.accentColor))
-                    .foregroundStyle(.white)
+                    .background(Circle().fill(ShellChrome.phosphor(colorScheme)))
+                    .foregroundStyle(ShellChrome.page(colorScheme))
             }
             .buttonStyle(.plain)
             .padding(.trailing, 20)

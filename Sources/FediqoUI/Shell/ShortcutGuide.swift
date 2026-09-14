@@ -3,10 +3,11 @@ import SwiftUI
 /// The dummy keys, written down over the page.
 struct ShortcutGuide: View {
     var onClose: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.35)
+            ShellChrome.dim(colorScheme)
                 .ignoresSafeArea()
                 .contentShape(Rectangle())
                 .onTapGesture(perform: onClose)
@@ -47,12 +48,12 @@ struct ShortcutGuide: View {
         .frame(maxWidth: 420, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(nsOrWindowBackground)
+                .fill(ShellChrome.page(colorScheme))
                 .shadow(color: .black.opacity(0.22), radius: 18, y: 8)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                .strokeBorder(ShellChrome.hairline(colorScheme), lineWidth: 1)
         )
         .padding(24)
         .transition(.scale(scale: 0.96).combined(with: .opacity))
@@ -67,18 +68,10 @@ struct ShortcutGuide: View {
                     .padding(.vertical, 3)
                     .background(
                         Capsule(style: .continuous)
-                            .fill(Color.primary.opacity(0.08))
+                            .fill(ShellChrome.well(colorScheme))
                     )
             }
         }
         .fixedSize()
-    }
-
-    private var nsOrWindowBackground: Color {
-        #if os(macOS)
-        Color(nsColor: .windowBackgroundColor)
-        #else
-        Color(uiColor: .systemBackground)
-        #endif
     }
 }

@@ -22,27 +22,7 @@ struct RailView: View {
     static let collapsedWidth: CGFloat = side + well + side
     static let expandedWidth: CGFloat = side + well + pad + 148 + side
 
-    /// Selection is sky, not navy.
-    static func selectFill(for scheme: ColorScheme) -> Color {
-        switch scheme {
-        case .dark: Color(red: 0.32, green: 0.50, blue: 0.64)
-        default: Color(red: 0.82, green: 0.92, blue: 1.00)
-        }
-    }
-
-    static func selectInk(for scheme: ColorScheme) -> Color {
-        switch scheme {
-        case .dark: Color(red: 0.72, green: 0.88, blue: 1.00)
-        default: Color(red: 0.32, green: 0.62, blue: 0.86)
-        }
-    }
-
-    static func hoverFill(for scheme: ColorScheme) -> Color {
-        switch scheme {
-        case .dark: Color(red: 0.28, green: 0.40, blue: 0.50).opacity(0.55)
-        default: Color(red: 0.90, green: 0.96, blue: 1.00)
-        }
-    }
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -72,7 +52,7 @@ struct RailView: View {
             Spacer(minLength: Self.pad)
 
             Rectangle()
-                .fill(Color.primary.opacity(0.12))
+                .fill(ShellChrome.hairline(colorScheme))
                 .frame(height: 1)
                 .padding(.vertical, Self.pad)
                 .padding(.horizontal, Self.well / 4)
@@ -90,10 +70,10 @@ struct RailView: View {
         .padding(.horizontal, Self.side)
         .frame(width: expanded ? Self.expandedWidth : Self.collapsedWidth, alignment: .topLeading)
         .clipped()
-        .background(Color.primary.opacity(0.03))
+        .background(ShellChrome.rail(colorScheme))
         .overlay(alignment: .trailing) {
             Rectangle()
-                .fill(Color.primary.opacity(0.10))
+                .fill(ShellChrome.hairline(colorScheme))
                 .frame(width: 1)
         }
     }
@@ -132,7 +112,7 @@ private struct RailButton: View {
                 RoundedRectangle(cornerRadius: RailView.wellRadius, style: .continuous)
                     .fill(rowFill)
             )
-            .foregroundStyle(selected ? RailView.selectInk(for: colorScheme) : Color.primary.opacity(0.84))
+            .foregroundStyle(selected ? ShellChrome.selectInk(colorScheme) : Color.primary.opacity(0.84))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -164,8 +144,8 @@ private struct RailButton: View {
     }
 
     private var rowFill: Color {
-        if selected { RailView.selectFill(for: colorScheme) }
-        else if hovering { RailView.hoverFill(for: colorScheme) }
+        if selected { ShellChrome.selectFill(colorScheme) }
+        else if hovering { ShellChrome.hoverFill(colorScheme) }
         else { .clear }
     }
 }

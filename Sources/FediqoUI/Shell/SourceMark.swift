@@ -3,6 +3,7 @@ import SwiftUI
 /// The account icon for a timeline source. Unsigned: the host. Signed in: avatar and account meta.
 struct SourceMark: View {
     let source: DummySource
+    @Environment(\.colorScheme) private var colorScheme
 
     private let avatarSize: CGFloat = 28
 
@@ -23,7 +24,7 @@ struct SourceMark: View {
         .padding(.horizontal, 8)
         .background(
             Capsule(style: .continuous)
-                .fill(Color.primary.opacity(0.06))
+                .fill(ShellChrome.well(colorScheme))
         )
         .accessibilityElement(children: .combine)
         .accessibilityLabel(label)

@@ -6,6 +6,7 @@ struct TimelinePane: View {
     @State private var marks: [String: DummyMarks] = [:]
     @State private var toast: String?
     @State private var toastTick = 0
+    @Environment(\.colorScheme) private var colorScheme
 
     private var timeline: DummyTimeline { DummyTimeline(id: timelineID) }
 
@@ -16,7 +17,9 @@ struct TimelinePane: View {
                 .padding(.top, 12)
                 .padding(.bottom, 8)
 
-            Divider()
+            Rectangle()
+                .fill(ShellChrome.hairline(colorScheme))
+                .frame(height: 1)
 
             if timeline.items.isEmpty {
                 empty
@@ -29,7 +32,9 @@ struct TimelinePane: View {
                                 marks: markBinding(item),
                                 onToast: showToast
                             )
-                            Divider()
+                            Rectangle()
+                                .fill(ShellChrome.hairline(colorScheme))
+                                .frame(height: 1)
                         }
                     }
                 }
@@ -41,7 +46,8 @@ struct TimelinePane: View {
                     .font(.subheadline)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
-                    .background(.ultraThinMaterial, in: Capsule())
+                    .background(ShellChrome.selectFill(colorScheme), in: Capsule())
+                    .foregroundStyle(ShellChrome.selectInk(colorScheme))
                     .padding(.bottom, 16)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
@@ -93,11 +99,12 @@ struct TimelinePane: View {
         } label: {
             Text(query.name)
                 .font(.subheadline.weight(selected ? .semibold : .regular))
+                .foregroundStyle(selected ? ShellChrome.selectInk(colorScheme) : Color.primary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)
                 .background(
                     Capsule(style: .continuous)
-                        .fill(Color.primary.opacity(selected ? 0.14 : 0.06))
+                        .fill(selected ? ShellChrome.selectFill(colorScheme) : ShellChrome.well(colorScheme))
                 )
         }
         .buttonStyle(.plain)
@@ -113,7 +120,7 @@ struct TimelinePane: View {
                 .frame(width: 28, height: 24)
                 .background(
                     Capsule(style: .continuous)
-                        .fill(Color.primary.opacity(0.06))
+                        .fill(ShellChrome.well(colorScheme))
                 )
         }
         .buttonStyle(.plain)

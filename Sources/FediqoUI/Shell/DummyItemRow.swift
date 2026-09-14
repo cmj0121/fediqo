@@ -5,6 +5,7 @@ struct DummyItemRow: View {
     let item: DummyItem
     @Binding var marks: DummyMarks
     var onToast: (String) -> Void
+    @Environment(\.colorScheme) private var colorScheme
 
     private enum Box {
         static let avatar: CGFloat = 36
@@ -83,7 +84,7 @@ struct DummyItemRow: View {
     private var avatar: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Color.primary.opacity(0.06))
+                .fill(ShellChrome.well(colorScheme))
             if item.hasAvatar {
                 Image(systemName: "person.fill")
                     .font(.subheadline)
@@ -123,7 +124,7 @@ struct DummyItemRow: View {
             if let audience = item.audience {
                 Image(systemName: audience.symbolName)
                     .font(.subheadline.weight(.medium))
-                    .foregroundStyle(tint(for: audience))
+                    .foregroundStyle(ShellChrome.vis(audience, colorScheme))
                     .help(L10n.t("item.visibility.\(audience.rawValue)"))
                     .accessibilityLabel(L10n.t("item.visibility.\(audience.rawValue)"))
             }
@@ -154,17 +155,8 @@ struct DummyItemRow: View {
             .padding(.vertical, 2)
             .background(
                 Capsule(style: .continuous)
-                    .fill(Color.primary.opacity(0.06))
+                    .fill(ShellChrome.well(colorScheme))
             )
-    }
-
-    private func tint(for audience: DummyAudience) -> Color {
-        switch audience {
-        case .everyone: .secondary
-        case .unlisted: .teal
-        case .followers: .orange
-        case .mentioned: .pink
-        }
     }
 
     private var mainBox: some View {
@@ -203,7 +195,7 @@ struct DummyItemRow: View {
     private var thumb: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Color.primary.opacity(0.06))
+                .fill(ShellChrome.well(colorScheme))
             if item.hasThumb {
                 Image(systemName: "photo")
                     .foregroundStyle(.tertiary)
@@ -220,24 +212,26 @@ struct DummyItemRow: View {
                     onToast(L10n.t("item.toast.reply"))
                 }
                 counted("arrow.2.squarepath", count: item.counts.reblogs,
-                        label: "item.act.reblog", on: false, tint: .green) {
+                        label: "item.act.reblog", on: false, tint: ShellChrome.reblog(colorScheme)) {
                     onToast(L10n.t("item.toast.reblog"))
                 }
                 counted(marks.favourited ? "star.fill" : "star",
                         count: item.counts.favourites,
-                        label: "item.act.favourite", on: marks.favourited, tint: .yellow) {
+                        label: "item.act.favourite", on: marks.favourited,
+                        tint: ShellChrome.favourite(colorScheme)) {
                     marks.favourited.toggle()
                     onToast(L10n.t(marks.favourited ? "item.toast.favourite.on" : "item.toast.favourite.off"))
                 }
             }
             HStack(spacing: 4) {
                 mark(marks.bookmarked ? "bookmark.fill" : "bookmark",
-                     label: "item.act.bookmark", on: marks.bookmarked, tint: .blue) {
+                     label: "item.act.bookmark", on: marks.bookmarked,
+                     tint: ShellChrome.bookmark(colorScheme)) {
                     marks.bookmarked.toggle()
                     onToast(L10n.t(marks.bookmarked ? "item.toast.bookmark.on" : "item.toast.bookmark.off"))
                 }
                 mark(marks.kept ? "archivebox.fill" : "archivebox",
-                     label: "item.act.kept", on: marks.kept, tint: Color(red: 0.45, green: 0.72, blue: 0.92)) {
+                     label: "item.act.kept", on: marks.kept, tint: ShellChrome.phosphor(colorScheme)) {
                     marks.kept.toggle()
                     onToast(L10n.t(marks.kept ? "item.toast.kept.on" : "item.toast.kept.off"))
                 }
