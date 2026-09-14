@@ -47,11 +47,12 @@ public enum Host {
         return host
     }
 
-    static func httpsURL(host: String, path: String) -> URL? {
+    static func httpsURL(host: String, path: String, query: [URLQueryItem] = []) -> URL? {
         var components = URLComponents()
         components.scheme = "https"
         components.host = host
         components.path = path
+        if !query.isEmpty { components.queryItems = query }
         return components.url
     }
 }
