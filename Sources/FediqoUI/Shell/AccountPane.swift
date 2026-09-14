@@ -161,6 +161,6 @@ struct AccountPane: View {
     }
 
     private static func mark(_ source: Source) -> DummySource {
-        DummySource(id: source.host, host: source.host, kind: .microblog, account: nil)
+        .unsigned(source.host)
     }
 }

@@ -139,13 +139,18 @@ struct EmptySessionTests {
 
     @Test("Dummy stored items are not what All would show")
     func allIsEmptyWithoutJoin() {
-        #expect(DummyTimeline(id: "all").items.isEmpty)
         #expect(DummyItem.stored.isEmpty)
-        #expect(DummyTimeline(id: "all").sources.isEmpty)
+        #expect(DummyTimeline(id: "all").emptyKey == "timeline.empty")
+        #expect(DummyTimeline(id: "trends").emptyKey == "timeline.empty.trends")
         #expect(
             L10n.t("timeline.empty", language: .english)
                 == "No items yet. Public notes from these sources will land here."
         )
+        #expect(
+            L10n.t("timeline.empty.trends", language: .english)
+                == "No trending notes yet. Notes that arrived as trending will land here."
+        )
+        #expect(L10n.t("timeline.empty") != L10n.t("timeline.empty.trends"))
         #expect(L10n.t("timeline.tab.trends", language: .english) == "Trends")
     }
 }
@@ -233,5 +238,6 @@ struct DummyPrefsTests {
         #expect(L10n.t("prefs.fontSize.default", language: .english) == "Default")
         #expect(L10n.t("account.rail.empty", language: .taiwanese) == "新增來源")
         #expect(L10n.t("timeline.empty", language: .taiwanese) == "還沒有項目。這些來源的公開貼文會出現在這裡。")
+        #expect(L10n.t("timeline.empty.trends", language: .taiwanese) == "還沒有趨勢項目。以趨勢進來的貼文會出現在這裡。")
     }
 }

@@ -72,6 +72,7 @@
 "timeline.rule.work" = "這些來源，只留和工作有關的。";
 "timeline.rule.trends" = "趨勢貼文，時間序。";
 "timeline.empty" = "還沒有項目。這些來源的公開貼文會出現在這裡。";
+"timeline.empty.trends" = "還沒有趨勢項目。以趨勢進來的貼文會出現在這裡。";
 "timeline.sources" = "來源";
 "source.unsigned" = "尚未登入";
 

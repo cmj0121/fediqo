@@ -115,25 +115,24 @@ public struct FediqoRootView: View {
         return true
     }
 
+    private var streamItems: [DummyItem] {
+        DummyTimeline(id: session.timelineID ?? "").items(from: session.notes)
+    }
+
     private var currentListIDs: [String]? {
-        if let opened = threadStack.last, let item = DummyItem.named(opened) {
+        if let opened = threadStack.last, let item = streamItems.first(where: { $0.id == opened }) {
             return item.dummyConversation().inOrder.map(\.id)
         }
-        guard let timelineID = session.timelineID else { return nil }
-        let ids = DummyTimeline(id: timelineID).items.map(\.id)
+        let ids = streamItems.map(\.id)
         return ids.isEmpty ? nil : ids
     }
 
     private func jumpListOrThreadToTop() -> Bool {
         guard place == .timeline else { return false }
-        if let opened = threadStack.last, let item = DummyItem.named(opened) {
+        if let opened = threadStack.last, let item = streamItems.first(where: { $0.id == opened }) {
             selectedItemID = item.id
         } else {
-            guard let timelineID = session.timelineID,
-                  let first = DummyTimeline(id: timelineID).items.first
-            else {
-                return false
-            }
+            guard let first = streamItems.first else { return false }
             selectedItemID = first.id
         }
         jumpToTop += 1
@@ -246,13 +245,6 @@ public struct FediqoRootView: View {
     }
     #endif
 
-    private var timelineIDBinding: Binding<String?> {
-        Binding(
-            get: { session.timelineID },
-            set: { session.timelineID = $0 }
-        )
-    }
-
     @ViewBuilder
     private var page: some View {
         pageFor(place)
@@ -263,8 +255,7 @@ public struct FediqoRootView: View {
         switch item {
         case .timeline:
             TimelinePane(
-                timelineID: timelineIDBinding,
-                queries: session.queries,
+                session: session,
                 selectedID: $selectedItemID,
                 openedID: openedThread,
                 jumpToTop: jumpToTop,

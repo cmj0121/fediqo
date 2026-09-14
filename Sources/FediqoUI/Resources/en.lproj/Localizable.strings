@@ -72,6 +72,7 @@
 "timeline.rule.work" = "These sources, only work-related items.";
 "timeline.rule.trends" = "Trending notes, in time order.";
 "timeline.empty" = "No items yet. Public notes from these sources will land here.";
+"timeline.empty.trends" = "No trending notes yet. Notes that arrived as trending will land here.";
 "timeline.sources" = "Sources";
 "source.unsigned" = "Not signed in";
 

@@ -1,0 +1,188 @@
+import Foundation
+import FediqoCore
+import Testing
+@testable import FediqoUI
+
+@Suite("Live stream")
+@MainActor
+struct TimelineStreamTests {
+    init() {
+        L10n.language = .english
+    }
+
+    @Test("All IDs match the store; Trends is origin; overlapping uri is one All row and a trend")
+    func allAndTrendsFromStore() async {
+        let session = ShellSession(http: Self.joinHTTP())
+        session.hostname = "first.example"
+        await session.add()
+        #expect(session.timelineID == "all")
+
+        let stored = await session.store.all()
+        let all = DummyTimeline(id: "all").items(from: session.notes)
+        let trends = DummyTimeline(id: "trends").items(from: session.notes)
+        #expect(all.map(\.id) == stored.map(\.id))
+        #expect(trends.map(\.id) == stored.filter { $0.origins.contains(.trending) }.map(\.id))
+        #expect(trends.map(\.id) == [
+            "https://first.example/users/ada/statuses/trend-only",
+            "https://first.example/users/ada/statuses/shared",
+        ])
+
+        let shared = "https://first.example/users/ada/statuses/shared"
+        #expect(all.filter { $0.id == shared }.count == 1)
+        #expect(trends.contains { $0.id == shared })
+        #expect(Set(all.map(\.id)).count == all.count)
+
+        let publicOrder = [
+            "https://first.example/users/ada/statuses/old",
+            "https://first.example/users/ada/statuses/shared",
+            "https://first.example/users/bob/statuses/new",
+        ]
+        #expect(all.map(\.id) != publicOrder)
+        #expect(all.map(\.postedAt) == all.map(\.postedAt).sorted(by: >))
+        #expect(trends.map(\.postedAt) == trends.map(\.postedAt).sorted(by: >))
+        #expect(all.map(\.id).first == "https://first.example/users/bob/statuses/new")
+        #expect(all.contains { $0.body == "Newest public" })
+        #expect(all.contains { $0.body == "Shared with trends" })
+    }
+
+    @Test("Source marks are unsigned hosts from the session")
+    func sourceMarksAreUnsignedHosts() async {
+        let session = ShellSession(http: Self.joinHTTP())
+        session.hostname = "first.example"
+        await session.add()
+        let marks = session.sources.map { DummySource.unsigned($0.host) }
+        #expect(marks.map(\.host) == ["first.example"])
+        #expect(marks.allSatisfy { $0.account == nil && $0.kind == .microblog && !$0.isSignedIn })
+    }
+
+    @Test("Empty Trends is a different key than empty All")
+    func emptyTrendsCopy() async {
+        let session = ShellSession(http: Self.joinHTTP(trending: .fail))
+        session.hostname = "first.example"
+        await session.add()
+        #expect(!DummyTimeline(id: "all").items(from: session.notes).isEmpty)
+        #expect(DummyTimeline(id: "trends").items(from: session.notes).isEmpty)
+        #expect(DummyTimeline(id: "all").emptyKey == "timeline.empty")
+        #expect(DummyTimeline(id: "trends").emptyKey == "timeline.empty.trends")
+        #expect(
+            L10n.t("timeline.empty.trends", language: .english)
+                != L10n.t("timeline.empty", language: .english)
+        )
+        #expect(L10n.t("timeline.empty.trends", language: .english) != "timeline.empty.trends")
+        #expect(L10n.t("timeline.empty.trends", language: .taiwanese) != "timeline.empty.trends")
+    }
+
+    @Test("j/k walks live list IDs, not DummyItem.stored")
+    func liveIDsNotStored() async {
+        let session = ShellSession(http: Self.joinHTTP())
+        session.hostname = "first.example"
+        await session.add()
+        let ids = DummyTimeline(id: session.timelineID ?? "all").items(from: session.notes).map(\.id)
+        #expect(!ids.isEmpty)
+        #expect(DummyItem.stored.isEmpty)
+        #expect(ids != DummyItem.stored.map(\.id))
+        #expect(DummyCommand.stepped(ids, from: nil, by: 1) == ids.first)
+        #expect(DummyCommand.stepped(ids, from: ids.first, by: 1) == ids.dropFirst().first)
+        #expect(DummyCommand.stepped(ids, from: ids.last, by: 1) == ids.last)
+    }
+
+    @Test("A Note maps to a DummyItem with a literal body and 1:1 audience")
+    func noteMapsToDummyItem() {
+        let source = Source(host: "first.example", kind: .mastodon)
+        let posted = Date(timeIntervalSince1970: 1_700_000_000)
+        let somebody = Note(
+            id: "https://first.example/users/ada/statuses/1",
+            source: source,
+            author: "Ada",
+            handle: "@ada@first.example",
+            body: "item.note.public.body",
+            postedAt: posted,
+            origins: [.publicTimeline],
+            reply: Reply(handle: nil),
+            boostedBy: "Bob",
+            audience: .followers,
+            avatarURL: URL(string: "https://first.example/a.png"),
+            previewURL: nil,
+            counts: Counts(replies: 4, reblogs: 5, favourites: 6)
+        )
+        let item = DummyItem(somebody)
+        #expect(item.body == "item.note.public.body")
+        #expect(item.body != L10n.t("item.note.public.body", language: .english))
+        #expect(item.answering == .somebody)
+        #expect(item.boostedBy == "Bob")
+        #expect(item.audience == .followers)
+        #expect(item.hasAvatar)
+        #expect(!item.hasThumb)
+        #expect(item.kind == .note)
+        #expect(item.source == DummySource.unsigned("first.example"))
+        #expect(item.counts.replies == 4)
+        #expect(item.counts.reblogs == 5)
+        #expect(item.counts.favourites == 6)
+        #expect(item.handle == "@ada@first.example")
+        #expect(item.dummyConversation().inOrder.map(\.id) == [item.id])
+        #expect(item.dummyConversation().descendants.isEmpty)
+
+        let named = DummyItem(
+            Note(
+                id: "n2",
+                source: source,
+                author: "Ada",
+                handle: "@ada@first.example",
+                body: "hi",
+                postedAt: posted,
+                origins: [.trending],
+                reply: Reply(handle: "@bob@second.example"),
+                audience: .everyone,
+                avatarURL: nil,
+                previewURL: URL(string: "https://first.example/p.jpg")
+            )
+        )
+        #expect(named.answering == .handle("@bob@second.example"))
+        #expect(named.audience == .everyone)
+        #expect(!named.hasAvatar)
+        #expect(named.hasThumb)
+
+        let root = DummyItem(
+            Note(
+                id: "n3",
+                source: source,
+                author: "Ada",
+                handle: "@ada@first.example",
+                body: "root",
+                postedAt: posted,
+                origins: [.publicTimeline],
+                audience: .unlisted
+            )
+        )
+        #expect(root.answering == .nothing)
+        #expect(root.audience == .unlisted)
+        #expect(!root.hasAvatar)
+        #expect(!root.hasThumb)
+
+        let mentioned = DummyItem(
+            Note(
+                id: "n4",
+                source: source,
+                author: "Ada",
+                handle: "@ada@first.example",
+                body: "d",
+                postedAt: posted,
+                origins: [.publicTimeline],
+                audience: .mentioned
+            )
+        )
+        #expect(mentioned.audience == .mentioned)
+    }
+
+    private static func joinHTTP(
+        trending: FixtureHTTP.Outcome = .body(Fixtures.json("trending-statuses"))
+    ) -> FixtureHTTP {
+        FixtureHTTP([
+            "/": .body(Fixtures.html("mastodon")),
+            "/api/v2/instance": .body(Fixtures.json("instance-v2")),
+            "/api/v1/timelines/public": .body(Fixtures.json("public-timeline")),
+            "/api/v1/trends/statuses": trending,
+            "/servers": .body(Fixtures.json("servers")),
+        ])
+    }
+}
