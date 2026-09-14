@@ -5,6 +5,7 @@ public struct FediqoRootView: View {
     @State private var place: ShellPlace = .timeline
     @State private var timelineID = DummyTimeline.shipped[0].id
     @State private var composing = false
+    @State private var showingShortcuts = false
     @State private var railExpanded = false
 
     #if os(iOS)
@@ -21,6 +22,36 @@ public struct FediqoRootView: View {
                     .presentationDetents([.medium, .large])
                     #endif
             }
+            .overlay {
+                if showingShortcuts {
+                    ShortcutGuide { showingShortcuts = false }
+                }
+            }
+            .animation(.easeInOut(duration: 0.18), value: showingShortcuts)
+            .dummyShellKeys { character, shift in
+                performDummyKey(character, shift: shift)
+            }
+    }
+
+    private func performDummyKey(_ character: Character, shift: Bool) -> Bool {
+        guard let command = DummyCommand.from(character, shift: shift, typing: composing) else {
+            return false
+        }
+        switch command {
+        case .showShortcuts:
+            showingShortcuts.toggle()
+            return true
+        case .compose:
+            showingShortcuts = false
+            composing = true
+            return true
+        case .dismiss:
+            if showingShortcuts {
+                showingShortcuts = false
+                return true
+            }
+            return false
+        }
     }
 
     @ViewBuilder

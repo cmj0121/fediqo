@@ -129,3 +129,29 @@ struct DummyStreamTests {
         #expect(DummyItem.stored.contains { $0.shownHosts.count == 1 })
     }
 }
+
+@Suite("The dummy keys")
+struct DummyCommandTests {
+    @Test("Question mark opens the guide")
+    func questionMarkShowsTheGuide() {
+        #expect(DummyCommand.from("?", shift: true) == .showShortcuts)
+        #expect(DummyCommand.from("/") == nil)
+        #expect(DummyCommand.from("?", typing: true) == nil)
+    }
+
+    @Test("The guide names every dummy command")
+    func guideNamesEveryCommand() {
+        let named = Set(DummyShortcut.all.map(\.command))
+        #expect(named == Set(DummyCommand.allCases))
+        #expect(DummyShortcut.all.contains { $0.keys.contains("?") })
+        #expect(L10n.t("shortcut.title") != "shortcut.title")
+        #expect(L10n.t("shortcut.list") != "shortcut.list")
+    }
+
+    @Test("Letters belong to the draft while composing")
+    func lettersYieldWhileTyping() {
+        #expect(DummyCommand.from("c") == .compose)
+        #expect(DummyCommand.from("c", typing: true) == nil)
+        #expect(DummyCommand.from("\u{1B}", typing: true) == .dismiss)
+    }
+}

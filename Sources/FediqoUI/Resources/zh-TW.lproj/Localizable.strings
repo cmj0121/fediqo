@@ -20,6 +20,13 @@
 "compose.cancel" = "取消";
 "compose.post" = "發佈";
 
+"shortcut.title" = "快捷鍵";
+"shortcut.note" = "沒有在寫的時候，這些鍵會動。";
+"shortcut.close" = "關閉";
+"shortcut.compose" = "新貼文";
+"shortcut.list" = "這份清單";
+"shortcut.dismiss" = "關掉眼前的東西";
+
 "timeline.picker" = "時間軸";
 "timeline.add" = "新增";
 "timeline.add.toast" = "新的 named query 仍是 dummy。";

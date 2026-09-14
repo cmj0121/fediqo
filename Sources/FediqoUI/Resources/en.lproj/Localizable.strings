@@ -20,6 +20,13 @@
 "compose.cancel" = "Cancel";
 "compose.post" = "Post";
 
+"shortcut.title" = "Keys";
+"shortcut.note" = "These work while you are not writing.";
+"shortcut.close" = "Close";
+"shortcut.compose" = "New post";
+"shortcut.list" = "This list";
+"shortcut.dismiss" = "Close what is in front";
+
 "timeline.picker" = "Timeline";
 "timeline.add" = "Add";
 "timeline.add.toast" = "A new named query stays dummy.";
