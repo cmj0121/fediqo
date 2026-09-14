@@ -42,6 +42,8 @@
 "thread.leaveHint" = "Esc or q";
 "item.reply.one.body" = "Same machine. Keep it here.";
 "item.reply.two.body" = "Then the list stays one stream.";
+"item.reply.up.body" = "Before this: the question that started it.";
+"item.reply.nested.body" = "And this answers that, not the post.";
 
 "timeline.picker" = "Timeline";
 "timeline.add" = "Add";

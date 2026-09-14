@@ -6,6 +6,7 @@ struct TimelinePane: View {
     @Binding var selectedID: String?
     @Binding var openedID: String?
     var jumpToTop: Int
+    var onPopThread: () -> Void
     @State private var marks: [String: DummyMarks] = [:]
     @State private var toast: String?
     @State private var toastTick = 0
@@ -27,10 +28,11 @@ struct TimelinePane: View {
             if let opened = openedItem {
                 DummyThreadPane(
                     root: opened,
+                    selectedID: $selectedID,
                     marks: markBinding,
                     jumpToTop: jumpToTop,
                     onToast: showToast,
-                    onBack: { openedID = nil }
+                    onBack: onPopThread
                 )
             } else if timeline.items.isEmpty {
                 empty
@@ -61,7 +63,7 @@ struct TimelinePane: View {
 
     private var openedItem: DummyItem? {
         guard let openedID else { return nil }
-        return DummyItem.stored.first { $0.id == openedID }
+        return DummyItem.named(openedID)
     }
 
     private var list: some View {

@@ -5,7 +5,7 @@ public struct FediqoRootView: View {
     @State private var place: ShellPlace = .timeline
     @State private var timelineID = DummyTimeline.shipped[0].id
     @State private var selectedItemID: String?
-    @State private var openedItemID: String?
+    @State private var threadStack: [String] = []
     @State private var jumpToTop = 0
     @State private var composing = false
     @State private var showingShortcuts = false
@@ -74,9 +74,7 @@ public struct FediqoRootView: View {
         case .expandPost:
             return openThread()
         case .back:
-            guard openedItemID != nil else { return false }
-            openedItemID = nil
-            return true
+            return popThread()
         case .showShortcuts:
             showingShortcuts.toggle()
             return true
@@ -89,10 +87,7 @@ public struct FediqoRootView: View {
                 showingShortcuts = false
                 return true
             }
-            if openedItemID != nil {
-                openedItemID = nil
-                return true
-            }
+            if popThread() { return true }
             if selectedItemID != nil {
                 selectedItemID = nil
                 return true
@@ -101,18 +96,28 @@ public struct FediqoRootView: View {
         }
     }
 
+    /// j/k and the arrows walk whichever list is in front: the stream, or the open conversation.
     private func moveInList(by step: Int) -> Bool {
-        guard place == .timeline, openedItemID == nil else { return false }
-        let ids = DummyTimeline(id: timelineID).items.map(\.id)
+        guard place == .timeline, let ids = currentListIDs else { return false }
         let next = DummyCommand.stepped(ids, from: selectedItemID, by: step)
         guard let next else { return false }
         selectedItemID = next
         return true
     }
 
+    private var currentListIDs: [String]? {
+        if let opened = threadStack.last, let item = DummyItem.named(opened) {
+            return item.dummyConversation().inOrder.map(\.id)
+        }
+        let ids = DummyTimeline(id: timelineID).items.map(\.id)
+        return ids.isEmpty ? nil : ids
+    }
+
     private func jumpListOrThreadToTop() -> Bool {
         guard place == .timeline else { return false }
-        if openedItemID == nil {
+        if let opened = threadStack.last, let item = DummyItem.named(opened) {
+            selectedItemID = item.id
+        } else {
             guard let first = DummyTimeline(id: timelineID).items.first else { return false }
             selectedItemID = first.id
         }
@@ -121,9 +126,25 @@ public struct FediqoRootView: View {
     }
 
     private func openThread() -> Bool {
-        guard place == .timeline, openedItemID == nil, let selectedItemID else { return false }
-        openedItemID = selectedItemID
+        guard place == .timeline, let selectedItemID else { return false }
+        if threadStack.last == selectedItemID { return false }
+        threadStack.append(selectedItemID)
         return true
+    }
+
+    private func popThread() -> Bool {
+        guard !threadStack.isEmpty else { return false }
+        threadStack.removeLast()
+        return true
+    }
+
+    private var openedThread: Binding<String?> {
+        Binding(
+            get: { threadStack.last },
+            set: { newValue in
+                if newValue == nil { threadStack = [] }
+            }
+        )
     }
 
     /// Tab only rotates named queries on the timeline. Elsewhere it is the platform's.
@@ -204,8 +225,9 @@ public struct FediqoRootView: View {
             TimelinePane(
                 timelineID: $timelineID,
                 selectedID: $selectedItemID,
-                openedID: $openedItemID,
-                jumpToTop: jumpToTop
+                openedID: openedThread,
+                jumpToTop: jumpToTop,
+                onPopThread: { _ = threadStack.popLast() }
             )
         case .notices: NoticesPane()
         case .account: AccountPane(source: .signedIn)

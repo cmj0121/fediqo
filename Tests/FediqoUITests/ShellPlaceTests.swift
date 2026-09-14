@@ -185,6 +185,11 @@ struct DummyCommandTests {
         #expect(DummyCommand.stepped(["a", "b", "c"], from: "a", by: 1) == "b")
         #expect(DummyCommand.stepped(["a", "b", "c"], from: "c", by: 1) == "c")
         #expect(DummyItem.stored[0].dummyReplies().count == 2)
+        let conversation = DummyItem.stored[0].dummyConversation()
+        #expect(conversation.inOrder.contains { $0.id == DummyItem.stored[0].id })
+        #expect(conversation.descendants.contains { $0.depth == 2 })
+        #expect(DummyItem.named(conversation.descendants[0].item.id) != nil)
+        #expect(conversation.depth(of: DummyItem.stored[0].id) == conversation.ancestors.count)
         #expect(DummyCommand.consumes("j", did: false))
         #expect(!DummyCommand.consumes(" ", did: false))
     }

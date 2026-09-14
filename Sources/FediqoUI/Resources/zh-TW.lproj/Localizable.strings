@@ -42,6 +42,8 @@
 "thread.leaveHint" = "Esc 或 q";
 "item.reply.one.body" = "同一台機器。留在這裡。";
 "item.reply.two.body" = "這樣清單還是一條流。";
+"item.reply.up.body" = "在這之前：引起這則的問題。";
+"item.reply.nested.body" = "這則是在回那則，不是在回主文。";
 
 "timeline.picker" = "時間軸";
 "timeline.add" = "新增";

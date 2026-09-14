@@ -220,6 +220,21 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         origin.addingTimeInterval((offset - 8) * 3600)
     }
 
+    /// One dummy conversation: the way up, this post, then answers indented under it.
+    public func dummyConversation() -> DummyConversation {
+        DummyConversation(ancestors: dummyAncestor.map { [$0] } ?? [], post: self, descendants: dummyLaidOut())
+    }
+
+    public static func named(_ id: String) -> DummyItem? {
+        if let hit = stored.first(where: { $0.id == id }) { return hit }
+        for item in stored {
+            if let hit = item.dummyConversation().inOrder.first(where: { $0.id == id }) {
+                return hit
+            }
+        }
+        return nil
+    }
+
     /// Dummy replies under this item. Same shape, later in time.
     public func dummyReplies() -> [DummyItem] {
         [
@@ -270,4 +285,72 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
             alsoFrom: []
         )
     }
+
+    private var dummyAncestor: DummyItem? {
+        guard answering != .nothing else { return nil }
+        return DummyItem(
+            id: "\(id)-up",
+            source: source,
+            author: "Ada",
+            handle: "@ada@first.example",
+            titleKey: nil,
+            bodyKey: "item.reply.up.body",
+            boardKey: nil,
+            postedAt: postedAt.addingTimeInterval(-3600),
+            workRelated: workRelated,
+            answering: .nothing,
+            boostedBy: nil,
+            audience: audience,
+            hasAvatar: true,
+            hasThumb: false,
+            counts: DummyCounts(replies: 3),
+            marks: DummyMarks(),
+            alsoFrom: []
+        )
+    }
+
+    private func dummyLaidOut() -> [DummyThreadEntry] {
+        let replies = dummyReplies()
+        guard let first = replies.first, let second = replies.dropFirst().first else {
+            return replies.map { DummyThreadEntry(item: $0, depth: 1) }
+        }
+        let nested = first.reply(
+            suffix: "n",
+            author: "Rin",
+            handle: nil,
+            bodyKey: "item.reply.nested.body",
+            later: 500,
+            hasAvatar: false
+        )
+        return [
+            DummyThreadEntry(item: first, depth: 1),
+            DummyThreadEntry(item: nested, depth: 2),
+            DummyThreadEntry(item: second, depth: 1),
+        ]
+    }
+}
+
+/// Ancestors, the post, then answers. Depth is generations below the post.
+public struct DummyConversation: Hashable, Sendable {
+    public let ancestors: [DummyItem]
+    public let post: DummyItem
+    public let descendants: [DummyThreadEntry]
+
+    public var inOrder: [DummyItem] {
+        ancestors + [post] + descendants.map(\.item)
+    }
+
+    public func depth(of id: String) -> Int {
+        if let index = ancestors.firstIndex(where: { $0.id == id }) { return index }
+        if post.id == id { return ancestors.count }
+        if let entry = descendants.first(where: { $0.item.id == id }) {
+            return ancestors.count + entry.depth
+        }
+        return 0
+    }
+}
+
+public struct DummyThreadEntry: Hashable, Sendable {
+    public let item: DummyItem
+    public let depth: Int
 }

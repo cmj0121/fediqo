@@ -1,13 +1,19 @@
 import SwiftUI
 
-/// The dummy conversation under one item. Esc or q returns to the list.
+/// The conversation around one item: the way up, the post, then answers related-on.
 struct DummyThreadPane: View {
     let root: DummyItem
+    @Binding var selectedID: String?
     var marks: (DummyItem) -> Binding<DummyMarks>
     var jumpToTop: Int
     var onToast: (String) -> Void
     var onBack: () -> Void
     @Environment(\.colorScheme) private var colorScheme
+
+    private let step: CGFloat = 16
+    private let deepest = 4
+
+    private var conversation: DummyConversation { root.dummyConversation() }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -34,33 +40,61 @@ struct DummyThreadPane: View {
 
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        DummyItemRow(item: root, marks: marks(root), onToast: onToast)
-                            .id("thread-root")
-                        Rectangle()
-                            .fill(ShellChrome.hairline(colorScheme))
-                            .frame(height: 1)
-                        Text(L10n.t("thread.replies"))
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                        ForEach(root.dummyReplies()) { reply in
-                            DummyItemRow(item: reply, marks: marks(reply), onToast: onToast)
-                                .padding(.leading, 24)
-                            Rectangle()
-                                .fill(ShellChrome.hairline(colorScheme))
-                                .frame(height: 1)
+                    LazyVStack(alignment: .leading, spacing: 6) {
+                        ForEach(conversation.ancestors) { above in
+                            threaded(above, dimmed: true)
+                        }
+                        threaded(conversation.post, dimmed: false)
+                        ForEach(conversation.descendants, id: \.item.id) { entry in
+                            threaded(entry.item, dimmed: false)
                         }
                     }
+                    .padding(.vertical, 8)
+                    .padding(.trailing, 8)
                 }
                 .scrollIndicators(.hidden)
+                .onChange(of: selectedID) { _, id in
+                    guard let id else { return }
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        proxy.scrollTo(id, anchor: .center)
+                    }
+                }
                 .onChange(of: jumpToTop) { _, _ in
                     withAnimation(.easeInOut(duration: 0.18)) {
-                        proxy.scrollTo("thread-root", anchor: .top)
+                        proxy.scrollTo(conversation.post.id, anchor: .top)
                     }
                 }
             }
+        }
+    }
+
+    private func threaded(_ item: DummyItem, dimmed: Bool) -> some View {
+        let depth = conversation.depth(of: item.id)
+        return DummyItemRow(
+            item: item,
+            marks: marks(item),
+            selected: item.id == selectedID,
+            onSelect: { selectedID = item.id },
+            onToast: onToast
+        )
+        .opacity(dimmed ? 0.85 : 1)
+        .padding(.leading, indent(depth))
+        .overlay(alignment: .leading) { rail(depth) }
+        .id(item.id)
+    }
+
+    private func indent(_ depth: Int) -> CGFloat {
+        CGFloat(min(depth, deepest)) * step
+    }
+
+    @ViewBuilder
+    private func rail(_ depth: Int) -> some View {
+        if depth > 0 {
+            Rectangle()
+                .fill(ShellChrome.hairline(colorScheme))
+                .frame(width: 1)
+                .padding(.leading, indent(depth) - 8)
+                .padding(.vertical, 6)
         }
     }
 }
