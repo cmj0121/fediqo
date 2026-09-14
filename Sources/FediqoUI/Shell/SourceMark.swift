@@ -3,6 +3,7 @@ import SwiftUI
 /// The account icon for a timeline source. Unsigned: the host. Signed in: avatar and account meta.
 struct SourceMark: View {
     let source: DummySource
+    @Environment(\.colorScheme) private var colorScheme
 
     private let avatarSize: CGFloat = 28
 
@@ -23,7 +24,7 @@ struct SourceMark: View {
         .padding(.horizontal, 8)
         .background(
             Capsule(style: .continuous)
-                .fill(Color.primary.opacity(0.06))
+                .fill(ShellChrome.well(colorScheme))
         )
         .accessibilityElement(children: .combine)
         .accessibilityLabel(label)
@@ -31,11 +32,19 @@ struct SourceMark: View {
 
     @ViewBuilder
     private var avatar: some View {
-        Image(systemName: source.isSignedIn ? "person.crop.circle" : "globe")
+        Image(systemName: markSymbol)
             .font(.body)
             .symbolVariant(source.isSignedIn ? .fill : .none)
             .symbolRenderingMode(.hierarchical)
             .frame(width: avatarSize, height: avatarSize)
+    }
+
+    private var markSymbol: String {
+        switch source.kind {
+        case .microblog: source.isSignedIn ? "person.crop.circle" : "globe"
+        case .forum: "text.bubble"
+        case .board: "list.bullet"
+        }
     }
 
     private var primary: String {

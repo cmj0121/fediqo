@@ -7,7 +7,7 @@
 "shell.usage.title" = "用量";
 "shell.usage.summary" = "這台機器上留了什麼";
 "shell.preferences.title" = "偏好";
-"shell.preferences.summary" = "來源與外觀";
+"shell.preferences.summary" = "語言、主題與字級";
 "source.signedIn" = "已登入";
 
 "rail.open.title" = "打開";
@@ -20,13 +20,75 @@
 "compose.cancel" = "取消";
 "compose.post" = "發佈";
 
+"shortcut.title" = "快捷鍵";
+"shortcut.note" = "沒有在寫的時候，這些鍵會動。";
+"shortcut.close" = "關閉";
+"shortcut.group.moving" = "移動";
+"shortcut.group.doing" = "做";
+"shortcut.group.leaving" = "離開";
+"shortcut.tabs" = "輪換這一頁的分頁";
+"shortcut.pages" = "輪換左側的地方";
+"shortcut.posts" = "在這份清單裡移動";
+"shortcut.top" = "到這串的頂端";
+"shortcut.expand" = "打開討論串";
+"shortcut.compose" = "新貼文";
+"shortcut.list" = "這份清單";
+"shortcut.back" = "回到清單";
+"shortcut.dismiss" = "關掉眼前的東西，或取消選取";
+
+"thread.title" = "討論串";
+"thread.replies" = "回覆";
+"thread.back" = "返回";
+"thread.leaveHint" = "Esc 或 q";
+"item.reply.one.body" = "同一台機器。留在這裡。";
+"item.reply.two.body" = "這樣清單還是一條流。";
+"item.reply.up.body" = "在這之前：引起這則的問題。";
+"item.reply.nested.body" = "這則是在回那則，不是在回主文。";
+
 "timeline.picker" = "時間軸";
+"timeline.add" = "新增";
+"timeline.add.toast" = "新的 named query 仍是 dummy。";
 "timeline.tab.all" = "全部";
 "timeline.tab.work" = "工作";
-"timeline.noRules" = "還沒有規則。";
+"timeline.rule.all" = "時間序，不過濾。";
+"timeline.rule.work" = "這些來源，只留和工作有關的。";
 "timeline.empty" = "時間軸還沒寫。";
 "timeline.sources" = "來源";
 "source.unsigned" = "尚未登入";
+
+"item.replies" = "則回覆";
+"item.board.dev" = "dev";
+"item.isReply" = "一則回覆";
+"item.replyingTo" = "回覆 %@";
+"item.boostedBy" = "由 %@ 轉發";
+"item.visibility.everyone" = "公開";
+"item.visibility.unlisted" = "不公開列出";
+"item.visibility.followers" = "追隨者";
+"item.visibility.mentioned" = "被提到的人";
+"item.act.reply" = "回覆";
+"item.act.reblog" = "轉發";
+"item.act.favourite" = "收藏";
+"item.act.bookmark" = "書籤";
+"item.act.kept" = "留下";
+"item.act.more" = "更多";
+"item.toast.reply" = "回覆只在這台機器上。";
+"item.toast.reblog" = "轉發只在這台機器上。";
+"item.toast.favourite.on" = "已收藏，在這台機器上。";
+"item.toast.favourite.off" = "已取消收藏。";
+"item.toast.bookmark.on" = "已加書籤，dummy。";
+"item.toast.bookmark.off" = "已取消書籤。";
+"item.toast.kept.on" = "已留在這台機器上。";
+"item.toast.kept.off" = "不再留下。";
+"item.toast.more" = "更多仍是 dummy。";
+"item.note.public.body" = "市場是一條走廊。走過去就好。";
+"item.note.you.work.body" = "十分鐘後 standup。規則還是：一條流。";
+"item.note.you.weekend.body" = "章魚第二稿。";
+"item.thread.forum.work.title" = "編譯該放哪？";
+"item.thread.forum.work.body" = "app 或 library。反正都是這台機器。";
+"item.thread.forum.chat.title" = "工作室附近喝咖啡";
+"item.thread.forum.chat.body" = "六點後有人去嗎？";
+"item.thread.board.weekend.title" = "把機箱拿給朋友看";
+"item.thread.board.weekend.body" = "他們問為什麼槽是方的。";
 
 "notices.empty.title" = "通知";
 "notices.empty.detail" = "誰來找你會出現在這裡。";
@@ -36,3 +98,18 @@
 
 "preferences.empty.title" = "偏好";
 "preferences.empty.detail" = "來源與外觀會放在這裡。";
+
+"prefs.language" = "語言";
+"prefs.language.system" = "系統";
+"prefs.language.english" = "English";
+"prefs.language.taiwanese" = "繁體中文";
+"prefs.theme" = "主題";
+"prefs.theme.system" = "系統";
+"prefs.theme.light" = "淺色";
+"prefs.theme.dark" = "深色";
+"prefs.fontSize" = "字級";
+"prefs.fontSize.smallest" = "最小";
+"prefs.fontSize.smaller" = "較小";
+"prefs.fontSize.default" = "預設";
+"prefs.fontSize.larger" = "較大";
+"prefs.fontSize.largest" = "最大";
