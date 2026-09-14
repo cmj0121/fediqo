@@ -23,6 +23,8 @@
 "shortcut.title" = "快捷鍵";
 "shortcut.note" = "沒有在寫的時候，這些鍵會動。";
 "shortcut.close" = "關閉";
+"shortcut.tabs" = "輪換這一頁的分頁";
+"shortcut.pages" = "輪換左側的地方";
 "shortcut.compose" = "新貼文";
 "shortcut.list" = "這份清單";
 "shortcut.dismiss" = "關掉眼前的東西";

@@ -141,11 +141,12 @@ struct DummyCommandTests {
 
     @Test("The guide names every dummy command")
     func guideNamesEveryCommand() {
-        let named = Set(DummyShortcut.all.map(\.command))
+        let named = Set(DummyShortcut.all.flatMap(\.commands))
         #expect(named == Set(DummyCommand.allCases))
         #expect(DummyShortcut.all.contains { $0.keys.contains("?") })
         #expect(L10n.t("shortcut.title") != "shortcut.title")
-        #expect(L10n.t("shortcut.list") != "shortcut.list")
+        #expect(L10n.t("shortcut.tabs") != "shortcut.tabs")
+        #expect(L10n.t("shortcut.pages") != "shortcut.pages")
     }
 
     @Test("Letters belong to the draft while composing")
@@ -153,5 +154,19 @@ struct DummyCommandTests {
         #expect(DummyCommand.from("c") == .compose)
         #expect(DummyCommand.from("c", typing: true) == nil)
         #expect(DummyCommand.from("\u{1B}", typing: true) == .dismiss)
+        #expect(DummyCommand.from("\t", typing: true) == nil)
+    }
+
+    @Test("Tab rotates this page's tabs; control-tab rotates places")
+    func tabRotatesTabsAndControlTabRotatesPlaces() {
+        #expect(DummyCommand.from("\t") == .nextTab)
+        #expect(DummyCommand.from("\t", shift: true) == .previousTab)
+        #expect(DummyCommand.from("\t", control: true) == .nextPage)
+        #expect(DummyCommand.from("\t", shift: true, control: true) == .previousPage)
+        #expect(DummyCommand.advanced(["all", "work"], from: "all", by: 1) == "work")
+        #expect(DummyCommand.advanced(["all", "work"], from: "work", by: 1) == "all")
+        #expect(
+            DummyCommand.advanced(ShellPlace.allCases, from: .timeline, by: -1) == .preferences
+        )
     }
 }

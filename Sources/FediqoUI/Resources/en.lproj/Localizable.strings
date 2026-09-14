@@ -23,6 +23,8 @@
 "shortcut.title" = "Keys";
 "shortcut.note" = "These work while you are not writing.";
 "shortcut.close" = "Close";
+"shortcut.tabs" = "Rotate this page's tabs";
+"shortcut.pages" = "Rotate the places";
 "shortcut.compose" = "New post";
 "shortcut.list" = "This list";
 "shortcut.dismiss" = "Close what is in front";

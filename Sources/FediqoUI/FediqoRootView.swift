@@ -28,16 +28,28 @@ public struct FediqoRootView: View {
                 }
             }
             .animation(.easeInOut(duration: 0.18), value: showingShortcuts)
-            .dummyShellKeys { character, shift in
-                performDummyKey(character, shift: shift)
+            .dummyShellKeys { character, shift, control in
+                performDummyKey(character, shift: shift, control: control)
             }
     }
 
-    private func performDummyKey(_ character: Character, shift: Bool) -> Bool {
-        guard let command = DummyCommand.from(character, shift: shift, typing: composing) else {
+    private func performDummyKey(_ character: Character, shift: Bool, control: Bool) -> Bool {
+        guard let command = DummyCommand.from(
+            character, shift: shift, control: control, typing: composing
+        ) else {
             return false
         }
         switch command {
+        case .nextTab:
+            return rotateTimelineTab(by: 1)
+        case .previousTab:
+            return rotateTimelineTab(by: -1)
+        case .nextPage:
+            place = DummyCommand.advanced(ShellPlace.allCases, from: place, by: 1)
+            return true
+        case .previousPage:
+            place = DummyCommand.advanced(ShellPlace.allCases, from: place, by: -1)
+            return true
         case .showShortcuts:
             showingShortcuts.toggle()
             return true
@@ -52,6 +64,15 @@ public struct FediqoRootView: View {
             }
             return false
         }
+    }
+
+    /// Tab only rotates named queries on the timeline. Elsewhere it is the platform's.
+    private func rotateTimelineTab(by step: Int) -> Bool {
+        guard place == .timeline else { return false }
+        timelineID = DummyCommand.advanced(
+            DummyTimeline.shipped.map(\.id), from: timelineID, by: step
+        )
+        return true
     }
 
     @ViewBuilder
