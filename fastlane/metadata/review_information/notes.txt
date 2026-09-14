@@ -1,0 +1,5 @@
+Fediqo is a native client for the open social web. This build is a dummy: launch it
+and the mascot is the screen. There is no Fediqo account and nothing to sign up for.
+
+Nothing is collected. The privacy answer is Data Not Collected. The source is public:
+https://github.com/cmj0121/fediqo

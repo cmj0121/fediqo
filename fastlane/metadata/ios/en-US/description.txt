@@ -1,0 +1,15 @@
+Your timeline. Your rules.
+
+Fediqo is your timeline. You add sources, write rules, and read one stream in time order.
+There is no Fediqo server.
+
+This build shows the mascot. The timeline is not written yet.
+
+THERE IS NO FEDIQO SERVER
+
+Your iPhone talks to the servers you choose and to nobody else. There is no account with us,
+no analytics, no crash reporting and no third-party SDK.
+
+OPEN SOURCE
+
+AGPL-3.0. Build it from the source it is written about, and check every claim on this page.

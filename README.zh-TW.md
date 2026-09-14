@@ -5,56 +5,42 @@
 
 [English](README.md) | [繁體中文](README.zh-TW.md)
 
-> 一條時間軸，所有網路。
+> 你的時間軸，你寫的規則。
 
-Fediqo 是開放社群網路的統一客戶端，把散在各處的社群網路收在同一個地方。
-在一個原生的介面裡追蹤多條時間軸、處理對話，並且跨平台發文。
+Fediqo 是你的時間軸。你加入來源，寫下規則，讀一條依時間排的流。
+沒有 Fediqo 伺服器。
 
 ## 概念
 
-| 原則         | 意思                                                           |
-| ------------ | -------------------------------------------------------------- |
-| 只有客戶端   | 沒有我們的伺服器----你的裝置直接連你的網路，不經過別人         |
-| 開放協定     | 任何人都能實作、都能自架的協定----終究全部都要支援             |
-| 合併，不重複 | 同一則貼文來自多個地方，仍然只佔一列                           |
-| 時間軸優先   | 一條流、一個順序----依 hashtag、作者，或你不必加入的伺服器     |
-| 只發一次     | 一個編輯器、多個網路，自己的時間軸只出現一則                   |
-| 管理屬於你的 | 你的貼文，以及伺服器允許時，你的伺服器                         |
-| 留在這裡     | 你留下的、以及你寫的，都留在這裡----不告訴伺服器，也不會輪替掉 |
-| 在這裡算出來 | 趨勢與摘要來自你留下的東西，在你的裝置上算出來                 |
+| 名詞 | 是什麼 | 不是什麼 |
+| --- | --- | --- |
+| source | 你在讀的伺服器或帳號——協定在它後面 | 不是協定頁 |
+| rule | 這條 timeline 讓什麼進來；藏的能指名 | 不是靜音清單 |
+| timeline | 對這台裝置上 store 的一條 query | 不是某個網路的首頁 |
+| item | 一則 `note` 或一則 `thread` | 不是單一協定的一列 |
 
 ## 怎麼運作
 
 ```text
-     servers you read                                servers you post to
-   several, any protocol,                            the ones you chose,
-   some you never joined                           each told exactly once
-             |                                                ^
-             v                                                |
-  +----------+------------------------------------------------+-----+
-  |  your device, and nothing else                            |     |
-  |         |                                                 |     |
-  |         v                                                 |     |
-  |  one shape --> merge --> your rules --> one timeline      |     |
-  |                  ^                                        |     |
-  |                  |  the same post from two servers is     |     |
-  |                  |  one row; nothing is ranked, only      |     |
-  |                  |  ordered, and only by rules you wrote  |     |
-  |                                                           |     |
-  |  what you keep --> stays here, unrotated --> trends       |     |
-  |                      and digests, worked out here         |     |
-  |                                                           |     |
-  |  what you write --> Composer --> once per server ---------+     |
-  |                                                                 |
-  +-----------------------------------------------------------------+
+  sources (any open protocol)
+           │
+           ▼
+     your device, and nothing else
+           │
+           ▼
+  one shape → merge → your rules → one timeline
 ```
 
-框裡的每一件事都發生在你的裝置上。沒有一個 Fediqo 伺服器讓它們經過，這就是隱私宣稱的全部——不多，也不少。
+這條路上的每一件事都發生在你的裝置上。沒有一個 Fediqo 伺服器讓它們經過，這就是隱私宣稱的全部——不多，也不少。
 
-進去的是好幾台伺服器，出來的是一條時間軸，所以從兩台讀到的同一則貼文只佔一列，不是兩列。
+進去的是好幾個來源，出來的是一條時間軸，所以從兩處讀到的同一則只佔一列，不是兩列。
 路上不會有人替它評分或重排：抵達的東西和你看到的東西之間，只有你自己寫的規則。
-你留下的不再被輪替掉，趨勢與摘要就從它算出來，在它本來就待著的地方算。
-你寫的東西從同一道門出去——你選的每個網路各一次，而且時間軸會這樣說，不會假裝那只是一則。
+
+## 它不是什麼
+
+- 不是把每個網路都接上的競賽
+- 不是 RSS、YouTube 與部落格的閱讀器
+- 不是 X、Instagram 或 Facebook 的客戶端——只接任何人都能實作、都能自架的協定
 
 ## 怎麼做出來的
 
@@ -62,6 +48,11 @@ Fediqo 是開放社群網路的統一客戶端，把散在各處的社群網路�
 | ---------- | --------------------------------------------------------- |
 | 原生       | Apple 平台上的 Swift----沒有 web view，沒有跨平台 runtime |
 | 開放原始碼 | AGPL-3.0，可以從這份 checkout 自己建置，宣稱因此可查證    |
+
+`make test` 跑測試。`make -C Apps run` 打開 macOS app。兩者都不需要這份 checkout 以外的東西。
+[`docs/release.md`](docs/release.md) 寫的是那一個需要更多的指令——幫兩個 app 簽名並送到 TestFlight 的那一個。
+
+這份 checkout 還沒有 release tag：mascot，以及一個建得起來的 build。時間軸還沒寫。
 
 ## 標誌
 

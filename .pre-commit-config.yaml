@@ -5,7 +5,26 @@ repos:
       - id: check-yaml
       - id: end-of-file-fixer
       - id: trailing-whitespace
+  # A release needs a signing key, an App Store Connect key and a passphrase, and .gitignore
+  # is the only thing standing between them and a public repository. A file it has not been
+  # told about is a file it will not stop. This will.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.0
+    hooks:
+      - id: gitleaks
   - repo: https://github.com/igorshubovych/markdownlint-cli
     rev: v0.45.0
     hooks:
       - id: markdownlint-fix
+  # What the store is told, checked where checking is free. deliver skips a language folder
+  # it does not recognise without a word, so `zh-TW` -- which is the code every document in
+  # this repository uses and not the one App Store Connect uses -- is a release that went out
+  # in one language while somebody was sure it went out in two. Found here instead.
+  - repo: local
+    hooks:
+      - id: store-text
+        name: store text
+        entry: scripts/metadata.py
+        language: system
+        files: ^fastlane/metadata/
+        pass_filenames: false

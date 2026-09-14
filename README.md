@@ -5,58 +5,44 @@
 
 [English](README.md) | [繁體中文](README.zh-TW.md)
 
-> One timeline. Every network.
+> Your timeline. Your rules.
 
-Fediqo is a unified social client for the open social web, bringing social networks together in one place.
-Follow multiple timelines, manage conversations, and publish content across platforms from a single, native experience.
+Fediqo is your timeline. You add sources, write rules, and read one stream in time order.
+There is no Fediqo server.
 
 ## The concept
 
-| Principle            | What it means                                                                 |
-| -------------------- | ----------------------------------------------------------------------------- |
-| client-only          | no server of ours -- your device talks to your networks, nobody else          |
-| open protocols       | any protocol anyone can implement and host -- all of them, in time            |
-| merged, not repeated | one post from several places is one row, not several                          |
-| timeline first       | one stream in one order -- by hashtag, by author, by servers you needn't join |
-| post once            | one composer, several networks, one entry in your own timeline                |
-| manage what is yours | your posts, and your server where it lets you                                 |
-| keep it here         | what you keep, and what you wrote, stays here -- untold, unrotated            |
-| work it out here     | trends and summaries from what you kept, computed on your device              |
+| Noun     | What it is                                             | What it is not        |
+| -------- | ------------------------------------------------------ | --------------------- |
+| source   | a server or account you read; protocol stays behind    | a protocol page       |
+| rule     | what this timeline lets through; a hide names its rule | a mute list           |
+| timeline | one query of this device's store, in time order        | a network's home page |
+| item     | a `note` or a `thread`                                 | a row of one protocol |
 
 ## How it works
 
 ```text
-     servers you read                                servers you post to
-   several, any protocol,                            the ones you chose,
-   some you never joined                           each told exactly once
-             |                                                ^
-             v                                                |
-  +----------+------------------------------------------------+-----+
-  |  your device, and nothing else                            |     |
-  |         |                                                 |     |
-  |         v                                                 |     |
-  |  one shape --> merge --> your rules --> one timeline      |     |
-  |                  ^                                        |     |
-  |                  |  the same post from two servers is     |     |
-  |                  |  one row; nothing is ranked, only      |     |
-  |                  |  ordered, and only by rules you wrote  |     |
-  |                                                           |     |
-  |  what you keep --> stays here, unrotated --> trends       |     |
-  |                      and digests, worked out here         |     |
-  |                                                           |     |
-  |  what you write --> Composer --> once per server ---------+     |
-  |                                                                 |
-  +-----------------------------------------------------------------+
+  sources (any open protocol)
+           │
+           ▼
+     your device, and nothing else
+           │
+           ▼
+  one shape → merge → your rules → one timeline
 ```
 
-Everything inside the box happens on your device. There is no Fediqo server for any of it to pass through,
-which is the whole of the privacy claim — no more, and no less.
+Everything in that path happens on your device. There is no Fediqo server for any of it to
+pass through, which is the whole of the privacy claim — no more, and no less.
 
-Several servers go in and one timeline comes out, so a post read from two of them is one row rather than two.
-Nothing is scored or re-ordered on the way: the only thing between what arrived and what you see is a rule you
-wrote. What you keep stops rotating out, and the trends and digests are computed from it here, where it already
-is. What you write goes back out through the same door — once to each network you chose, and the timeline says
-so rather than pretending it was one post.
+Several sources go in and one timeline comes out, so the same post from two of them is one
+row rather than two. Nothing is scored or re-ordered on the way: the only thing between what
+arrived and what you see is a rule you wrote.
+
+## What it is not
+
+- not a race to speak every network
+- not a reader of RSS, YouTube and blogs
+- not a client for X, Instagram or Facebook — only protocols anyone can implement and host
 
 ## How it is built
 
@@ -64,6 +50,12 @@ so rather than pretending it was one post.
 | ----------- | ------------------------------------------------------------------- |
 | native      | Swift on Apple platforms -- no web view, no cross-platform runtime  |
 | open source | AGPL-3.0, buildable from this checkout, so the claim can be checked |
+
+`make test` tests it. `make -C Apps run` opens the macOS app. Neither needs anything this
+checkout does not already carry. [`docs/release.md`](docs/release.md) covers the one command
+that does need more — the one that signs both apps and sends them to TestFlight.
+
+This checkout has no release tag yet: the mascot, and a build that ships. The timeline is not written yet.
 
 ## The mark
 
