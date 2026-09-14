@@ -1,0 +1,69 @@
+name: Bug
+description: Specified behaviour is not what happens — a dummy still drawn, a missing row, or a silent wrong item.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A **bug** is a mismatch with the README or a closed issue, measured on the running
+        app or its tests.
+
+        Write **what is specified** and **what happens instead**. Do not write the fix — no
+        files, no types, no "route this through X". That belongs in the pull request.
+
+        A purpose an issue still marks as later work is not a bug. File a task against that
+        issue instead.
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      options:
+        - dummy still drawn — a live path still shows the mock
+        - specified missing — the README or an issue says it, the app does not
+        - silent wrong item — an item is the wrong shape, host, or order
+        - other (say what in the body)
+    validations:
+      required: true
+
+  - type: textarea
+    id: specified
+    attributes:
+      label: Specified
+      description: The README row or the issue, and the behaviour it requires.
+      placeholder: "README — a timeline is one query of this device's store, in time order. #12 — All mixes notes and threads."
+    validations:
+      required: true
+
+  - type: textarea
+    id: instead
+    attributes:
+      label: What happens instead
+      description: Measured on this tree, not remembered. Quote the row, the header, or the test.
+      placeholder: "All lists only the dummy notes. The header still names first.example."
+    validations:
+      required: true
+
+  - type: textarea
+    id: see
+    attributes:
+      label: How to see it
+      description: A place and an action, or a test name. Not a walk through the code.
+      placeholder: "Open Timeline → All. Or `swift test --filter allIsMixedAndTimed`."
+    validations:
+      required: true
+
+  - type: input
+    id: parent
+    attributes:
+      label: Parent
+      description: Story or milestone this belongs to, if any. Example — #12
+      placeholder: "#12"
+
+  - type: checkboxes
+    id: purpose-only
+    attributes:
+      label: Purpose only
+      options:
+        - label: This issue states the mismatch, not how to fix it.
+          required: true

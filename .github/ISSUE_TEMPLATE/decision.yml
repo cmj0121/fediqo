@@ -1,0 +1,53 @@
+name: Decision
+description: A sentence about what Fediqo is. A child of #1. The fork lives in the comments.
+labels: ["decision"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A **decision** is one sentence about the product. It is a child of #1.
+
+        The body is the sentence, and how you would know it is kept. The fork, the options,
+        and why belong in the comments — not here. A later reader should be able to close
+        this without reconstructing the argument.
+
+        Title: a lowercase sentence of what becomes true. Not a verb phrase, not a protocol
+        name as a page.
+
+        After opening: start the body with `Part of #1` and attach this as a sub-issue of #1.
+
+  - type: input
+    id: parent
+    attributes:
+      label: Concept
+      description: Always #1.
+      placeholder: "#1"
+      value: "#1"
+    validations:
+      required: true
+
+  - type: textarea
+    id: wanted
+    attributes:
+      label: Wanted
+      description: The sentence. Use the nouns from #1 — source, rule, timeline, item.
+      placeholder: "A public timeline is readable before signing in to anything."
+    validations:
+      required: true
+
+  - type: textarea
+    id: accepted
+    attributes:
+      label: Accepted when
+      description: Observables a reader or a test can hold. Not files, not types, not endpoints.
+      placeholder: "An unsigned Mastodon host still contributes notes to All. Home is not asked without an account."
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: purpose-only
+    attributes:
+      label: Purpose only
+      options:
+        - label: This issue states the sentence, not the fork that produced it.
+          required: true

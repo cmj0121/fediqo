@@ -1,0 +1,73 @@
+name: Milestone
+description: Root issue for a version — the sentence that release is judged by. Stories hang off this, not off #1.
+title: "0.X.0: "
+labels: ["milestone"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is the **root** of a GitHub milestone. Its children are **stories**, not tasks
+        and not decisions.
+
+        Write the **purpose of the version**. Do not write how it is built — no files, no
+        endpoints, no store schema. That belongs in the pull request.
+
+        Title: `0.X.0:` then a lowercase sentence of what this version lets a person do.
+
+        After opening: set the GitHub **Milestone**, and attach each story as a sub-issue.
+        When #1 exists, attach this as a sub-issue of #1.
+
+  - type: textarea
+    id: sentence
+    attributes:
+      label: Sentence
+      description: The one line this version is judged by. Contrast it with the version before.
+      placeholder: "The dummy mixed stream is readable. This version lets a Mastodon host be a source of notes."
+    validations:
+      required: true
+
+  - type: textarea
+    id: in
+    attributes:
+      label: In
+      description: What a person can do when this version ships that they could not do before. Source, item, timeline — not internals.
+      placeholder: "An unsigned Mastodon host contributes notes to All. The header names that host as a source of this query."
+    validations:
+      required: true
+
+  - type: textarea
+    id: out
+    attributes:
+      label: Out
+      description: What this version deliberately does not do, and which later issue or version owns it.
+      placeholder: "Signing in, home, writes, a store, a source editor, and any other protocol."
+    validations:
+      required: true
+
+  - type: textarea
+    id: stories
+    attributes:
+      label: Stories
+      description: Child stories of this root. One purpose each. Fill numbers after those issues exist.
+      value: |
+        - [ ] #
+        - [ ] #
+    validations:
+      required: true
+
+  - type: textarea
+    id: accepted
+    attributes:
+      label: Accepted when
+      description: How the version closes. Every listed story is closed, or deferred with a sentence saying so.
+      placeholder: "Every story above is closed or deferred with a sentence. The In line is true on the running app."
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: purpose-only
+    attributes:
+      label: Purpose only
+      options:
+        - label: This issue states what the version is for, not how to implement it.
+          required: true

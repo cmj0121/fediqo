@@ -1,0 +1,59 @@
+name: Task
+description: One purpose. A single observable change.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A **task** is one purpose that can close on its own. If it has children, it is a
+        story.
+
+        Write **what must be true**. Do not write how — no files to edit, no endpoints, no
+        "add a type then map it". That belongs in the pull request.
+
+        Title: a lowercase sentence of what becomes true.
+
+        After opening: start the body with `Part of #<story>` so the parent can link it.
+
+  - type: input
+    id: parent
+    attributes:
+      label: Story
+      description: The story this task is part of. Example — #12
+      placeholder: "#12"
+    validations:
+      required: true
+
+  - type: textarea
+    id: purpose
+    attributes:
+      label: Purpose
+      description: The single thing that becomes true. Name the source, the item, the timeline — not the patch.
+      placeholder: "The public timeline of first.example arrives as notes in All."
+    validations:
+      required: true
+
+  - type: textarea
+    id: accepted
+    attributes:
+      label: Accepted when
+      description: Observables a test or the running app can hold. A row, a host in the header, a fixture that needs no network.
+      placeholder: "All mixes those notes with the dummy forum and board threads, in time order. A fixture status maps to a note without a network. Work is unchanged."
+    validations:
+      required: true
+
+  - type: textarea
+    id: out
+    attributes:
+      label: Not this task
+      description: What a reader might bundle in and must not.
+      placeholder: "Home, OAuth, paging as evidence, a persistent store, and replacing the dummy signed-in source."
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: purpose-only
+    attributes:
+      label: Purpose only
+      options:
+        - label: This issue states the purpose, not how to implement it.
+          required: true

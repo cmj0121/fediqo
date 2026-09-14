@@ -1,0 +1,72 @@
+name: Story
+description: One purpose a person can do, split into tasks.
+labels: ["story"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A **story** is one purpose large enough to split. Its children are **tasks**.
+
+        Write **what a person can do** when the story closes. The protocol stays behind the
+        source: name the source, the item, the timeline — not the API, not the file. How it
+        is built belongs in the pull request.
+
+        Title: a lowercase sentence of what becomes true.
+
+        After opening: write `Part of #<milestone-issue>`, and attach each task as a
+        sub-issue.
+
+  - type: input
+    id: parent
+    attributes:
+      label: Milestone root
+      description: The milestone issue this story is part of. Example — #4
+      placeholder: "#4"
+    validations:
+      required: true
+
+  - type: textarea
+    id: purpose
+    attributes:
+      label: Purpose
+      description: One purpose. What a person can do, in the nouns from #1.
+      placeholder: "A Mastodon host you have added is a source. Its public timeline arrives as notes in the mixed stream."
+    validations:
+      required: true
+
+  - type: textarea
+    id: out
+    attributes:
+      label: Not this story
+      description: Neighbours, later work, and what would make this story a filing cabinet.
+      placeholder: "Signing in, home, writes, a store, a source editor, and any other protocol."
+    validations:
+      required: true
+
+  - type: textarea
+    id: tasks
+    attributes:
+      label: Tasks
+      description: Child tasks. One observable purpose each. Fill numbers after those issues exist.
+      value: |
+        - [ ] #
+        - [ ] #
+    validations:
+      required: true
+
+  - type: textarea
+    id: accepted
+    attributes:
+      label: Accepted when
+      description: What a person can see, or a test can hold. Not "the client implements X".
+      placeholder: "All shows notes from that host, mixed with other sources, in time order. The header names the host as a source of this query."
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: purpose-only
+    attributes:
+      label: Purpose only
+      options:
+        - label: This issue states the purpose, not how to implement it.
+          required: true

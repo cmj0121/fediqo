@@ -1,0 +1,66 @@
+name: Concept
+description: The constitution — what Fediqo is. Used once, as #1. Children are decisions and milestones.
+title: "What Fediqo is"
+labels: ["concept"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The **concept** is the constitution. There is one: this issue, as #1.
+
+        Write the nouns a later issue is judged by. Do not write how the app is built — no
+        files, no protocols as pages, no store schema. A decision or a milestone cites this;
+        a story cites its milestone. This issue does not repeat them.
+
+        After opening: attach each decision and each milestone as a sub-issue. Stories hang
+        off a milestone, not off this.
+
+  - type: textarea
+    id: sentence
+    attributes:
+      label: Sentence
+      description: The one line the product is judged by.
+      placeholder: "Your timeline. Your rules. There is no Fediqo server."
+    validations:
+      required: true
+
+  - type: textarea
+    id: nouns
+    attributes:
+      label: Nouns
+      description: The words every later issue must use. Name, what it is, what it is not.
+      value: |
+        | Noun     | What it is                                          | What it is not        |
+        | -------- | --------------------------------------------------- | --------------------- |
+        | source   | a server or account you read; protocol stays behind | a protocol page       |
+        | rule     | what this timeline lets through; a hide names its rule | a mute list        |
+        | timeline | one query of this device's store, in time order     | a network's home page |
+        | item     | a `note` or a `thread`                              | a row of one protocol |
+    validations:
+      required: true
+
+  - type: textarea
+    id: out
+    attributes:
+      label: Not Fediqo
+      description: What this product refuses, so a later issue cannot quietly become it.
+      placeholder: "Not a client for a closed network. Not a reader of RSS. Not a Fediqo server."
+    validations:
+      required: true
+
+  - type: textarea
+    id: accepted
+    attributes:
+      label: Accepted when
+      description: How a reader knows the constitution still holds. Observables, not internals.
+      placeholder: "The README still says these nouns. A new issue that names a protocol as a page is refused."
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: purpose-only
+    attributes:
+      label: Purpose only
+      options:
+        - label: This issue states what Fediqo is, not how to implement it.
+          required: true
