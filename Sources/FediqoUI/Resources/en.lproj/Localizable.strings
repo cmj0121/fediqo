@@ -1,0 +1,33 @@
+"shell.timeline.title" = "Timeline";
+"shell.timeline.summary" = "One stream, in time order";
+"shell.notices.title" = "Notices";
+"shell.notices.summary" = "Who has been in touch";
+"shell.account.title" = "Account";
+"shell.account.summary" = "This timeline's source";
+"shell.preferences.title" = "Preferences";
+"shell.preferences.summary" = "Sources and appearance";
+"source.signedIn" = "Signed in";
+
+"rail.open.title" = "Open";
+"rail.open.summary" = "Show names and descriptions";
+"rail.collapse.title" = "Collapse";
+"rail.collapse.summary" = "Icons only";
+
+"compose.title" = "New post";
+"compose.summary" = "Write without leaving this page";
+"compose.cancel" = "Cancel";
+"compose.post" = "Post";
+
+"timeline.picker" = "Timeline";
+"timeline.tab.all" = "All";
+"timeline.tab.work" = "Work";
+"timeline.noRules" = "No rules yet.";
+"timeline.empty" = "The timeline is not written yet.";
+"timeline.sources" = "Sources";
+"source.unsigned" = "Not signed in";
+
+"notices.empty.title" = "Notices";
+"notices.empty.detail" = "Who has been in touch will land here.";
+
+"preferences.empty.title" = "Preferences";
+"preferences.empty.detail" = "Sources and appearance will live here.";

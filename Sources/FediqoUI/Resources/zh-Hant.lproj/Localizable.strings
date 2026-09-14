@@ -1,0 +1,33 @@
+"shell.timeline.title" = "時間軸";
+"shell.timeline.summary" = "一條流，時間序";
+"shell.notices.title" = "通知";
+"shell.notices.summary" = "誰來找你";
+"shell.account.title" = "帳號";
+"shell.account.summary" = "這條時間軸的來源";
+"shell.preferences.title" = "偏好";
+"shell.preferences.summary" = "來源與外觀";
+"source.signedIn" = "已登入";
+
+"rail.open.title" = "打開";
+"rail.open.summary" = "顯示名稱與說明";
+"rail.collapse.title" = "收合";
+"rail.collapse.summary" = "只顯示圖示";
+
+"compose.title" = "新貼文";
+"compose.summary" = "寫，但不離開這一頁";
+"compose.cancel" = "取消";
+"compose.post" = "發佈";
+
+"timeline.picker" = "時間軸";
+"timeline.tab.all" = "全部";
+"timeline.tab.work" = "工作";
+"timeline.noRules" = "還沒有規則。";
+"timeline.empty" = "時間軸還沒寫。";
+"timeline.sources" = "來源";
+"source.unsigned" = "尚未登入";
+
+"notices.empty.title" = "通知";
+"notices.empty.detail" = "誰來找你會出現在這裡。";
+
+"preferences.empty.title" = "偏好";
+"preferences.empty.detail" = "來源與外觀會放在這裡。";
