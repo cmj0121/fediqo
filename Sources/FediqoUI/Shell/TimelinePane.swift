@@ -38,6 +38,7 @@ struct TimelinePane: View {
                         }
                     }
                 }
+                .scrollIndicators(.hidden)
             }
         }
         .overlay(alignment: .bottom) {
