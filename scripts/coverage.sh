@@ -33,6 +33,10 @@ PROFILE="$BIN_PATH/codecov/default.profdata"
 
 SUMMARY="$(mktemp -t fediqo-coverage)"
 trap 'rm -f "$SUMMARY"' EXIT
-xcrun llvm-cov export -summary-only -instr-profile "$PROFILE" "$BINARY" "$MEASURED" > "$SUMMARY"
+# View bodies and the test runner are in the same binary. They are not
+# what this gate is for: ignore them, and count only Core.
+xcrun llvm-cov export -summary-only \
+    -ignore-filename-regex='Sources/FediqoUI/|Tests/|\.build/' \
+    -instr-profile "$PROFILE" "$BINARY" "$MEASURED" > "$SUMMARY"
 
 python3 scripts/coverage_gate.py "$SUMMARY" "$THRESHOLD" "$MEASURED"

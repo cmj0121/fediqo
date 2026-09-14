@@ -1,0 +1,73 @@
+import SwiftUI
+
+/// The account icon for a timeline source. Unsigned: the host. Signed in: avatar and account meta.
+struct SourceMark: View {
+    let source: DummySource
+
+    private let avatarSize: CGFloat = 28
+
+    var body: some View {
+        HStack(spacing: 8) {
+            avatar
+            VStack(alignment: .leading, spacing: 1) {
+                Text(primary)
+                    .font(.caption.weight(.medium))
+                    .lineLimit(1)
+                Text(secondary)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 8)
+        .background(
+            Capsule(style: .continuous)
+                .fill(Color.primary.opacity(0.06))
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(label)
+    }
+
+    @ViewBuilder
+    private var avatar: some View {
+        Image(systemName: source.isSignedIn ? "person.crop.circle" : "globe")
+            .font(.body)
+            .symbolVariant(source.isSignedIn ? .fill : .none)
+            .symbolRenderingMode(.hierarchical)
+            .frame(width: avatarSize, height: avatarSize)
+    }
+
+    private var primary: String {
+        source.account?.displayName ?? source.host
+    }
+
+    private var secondary: String {
+        if let account = source.account { account.handle }
+        else { L10n.t("source.unsigned") }
+    }
+
+    private var label: String {
+        if let account = source.account {
+            "\(account.displayName), \(account.handle), \(source.host)"
+        } else {
+            "\(source.host), \(L10n.t("source.unsigned"))"
+        }
+    }
+}
+
+/// The sources this timeline reads, as a row of account icons.
+struct SourceMarkRow: View {
+    let sources: [DummySource]
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(sources) { source in
+                    SourceMark(source: source)
+                }
+            }
+        }
+        .accessibilityLabel(L10n.t("timeline.sources"))
+    }
+}
