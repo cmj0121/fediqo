@@ -41,6 +41,40 @@ final class ShellSession {
         return sources.contains { $0.host == host }
     }
 
+    var query: String {
+        hostname.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Catalog rows matching the field, live. Domain and description, case-insensitive.
+    var visibleServers: [CatalogServer] {
+        guard case .ready(let servers) = catalog else { return [] }
+        let needle = query
+        guard !needle.isEmpty else { return servers }
+        return servers.filter { Self.matches($0, query: needle) }
+    }
+
+    /// A typed host that is not in the visible catalog. Join is still a tap.
+    var extraJoinHost: String? {
+        guard let host = try? Host.parse(hostname) else { return nil }
+        let isAddress = host.contains(".") || host.contains(":")
+        guard isAddress else { return nil }
+        if visibleServers.contains(where: { $0.domain.compare(host, options: .caseInsensitive) == .orderedSame }) {
+            return nil
+        }
+        return host
+    }
+
+    static func matches(_ server: CatalogServer, query: String) -> Bool {
+        server.domain.localizedCaseInsensitiveContains(query)
+            || server.summary.localizedCaseInsensitiveContains(query)
+    }
+
+    /// Enter and the search icon. The list already filters as the field changes.
+    func search() {
+        refuse = nil
+        hostname = query
+    }
+
     func loadCatalog() async {
         if case .ready = catalog { return }
         if case .empty = catalog { return }

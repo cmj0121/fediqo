@@ -7,7 +7,10 @@ public struct CatalogServer: Hashable, Sendable, Identifiable {
     public let language: String
     public let region: String
     public let category: String
+    /// Registered accounts. Not activity.
     public let users: Int
+    /// Weekly active users from the directory (`last_week_users`).
+    public let weekUsers: Int
     public let approvalRequired: Bool
     public let thumbnail: URL?
 
@@ -18,6 +21,7 @@ public struct CatalogServer: Hashable, Sendable, Identifiable {
         region: String,
         category: String,
         users: Int,
+        weekUsers: Int,
         approvalRequired: Bool,
         thumbnail: URL?
     ) {
@@ -27,6 +31,7 @@ public struct CatalogServer: Hashable, Sendable, Identifiable {
         self.region = region
         self.category = category
         self.users = users
+        self.weekUsers = weekUsers
         self.approvalRequired = approvalRequired
         self.thumbnail = thumbnail
     }
@@ -58,6 +63,7 @@ public struct ServerDirectory: Sendable {
         let region: String?
         let category: String?
         let totalUsers: Int?
+        let lastWeekUsers: Int?
         let approvalRequired: Bool?
         let proxiedThumbnail: String?
 
@@ -69,6 +75,7 @@ public struct ServerDirectory: Sendable {
                 region: region ?? "",
                 category: category ?? "",
                 users: totalUsers ?? 0,
+                weekUsers: lastWeekUsers ?? 0,
                 approvalRequired: approvalRequired ?? false,
                 thumbnail: proxiedThumbnail.flatMap(URL.init(string:))
             )

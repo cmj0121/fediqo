@@ -102,10 +102,62 @@ struct AccountAddTests {
         #expect(!session.availability.timelineEnabled)
     }
 
+    @Test("Keyword filters domain and description live, without joining")
+    func keywordFiltersCatalog() async {
+        let session = ShellSession(http: Self.joinHTTP())
+        await session.loadCatalog()
+        session.hostname = "hachy"
+        #expect(session.visibleServers.map(\.domain) == ["second.example"])
+        #expect(session.extraJoinHost == nil)
+        session.hostname = "flagship"
+        #expect(session.visibleServers.map(\.domain) == ["first.example"])
+        session.search()
+        #expect(session.sources.isEmpty)
+        #expect(!session.availability.timelineEnabled)
+        session.hostname = ""
+        #expect(session.visibleServers.map(\.domain) == ["first.example", "second.example"])
+    }
+
+    @Test("A typed host not in the catalog is an extra row; search does not join")
+    func extraJoinHostDoesNotJoin() async {
+        let session = ShellSession(http: Self.joinHTTP())
+        await session.loadCatalog()
+        session.hostname = "my.example"
+        session.search()
+        #expect(session.extraJoinHost == "my.example")
+        #expect(session.visibleServers.isEmpty)
+        #expect(session.sources.isEmpty)
+        #expect(!session.availability.timelineEnabled)
+    }
+
+    @Test("A keyword without a dot is not an Add-host row")
+    func keywordIsNotAHost() async {
+        let session = ShellSession(http: Self.joinHTTP())
+        await session.loadCatalog()
+        session.hostname = "social"
+        #expect(session.extraJoinHost == nil)
+        #expect(session.visibleServers.map(\.domain) == ["first.example"])
+    }
+
+    @Test("A catalog host in the field is not an extra row")
+    func catalogHostIsNotExtra() async {
+        let session = ShellSession(http: Self.joinHTTP())
+        await session.loadCatalog()
+        session.hostname = "first.example"
+        session.search()
+        #expect(session.extraJoinHost == nil)
+        #expect(session.visibleServers.map(\.domain) == ["first.example"])
+        #expect(session.sources.isEmpty)
+    }
+
     @Test("Account copy is translated and unknown never says is unknown")
     func accountCopy() {
         #expect(L10n.t("account.add", language: .english) == "Add")
         #expect(L10n.t("account.add.host", language: .english) == "Hostname")
+        #expect(L10n.t("account.search", language: .english) == "Search")
+        #expect(L10n.t("account.search.placeholder", language: .english) == "Host or keyword")
+        #expect(L10n.t("account.catalog.addHost", language: .english) == "Add %@")
+        #expect(L10n.t("account.catalog.meta", language: .english) == "%@ · WAU %@ · %@")
         #expect(
             L10n.t("account.detect.progress", language: .english) == "Checking %@…"
         )

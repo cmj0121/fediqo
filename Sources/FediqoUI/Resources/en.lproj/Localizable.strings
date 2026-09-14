@@ -16,6 +16,8 @@
 "account.add.detail" = "Pick a Mastodon host from the list, or type its hostname. This session only.";
 "account.add" = "Add";
 "account.add.host" = "Hostname";
+"account.search" = "Search";
+"account.search.placeholder" = "Host or keyword";
 "account.detect.progress" = "Checking %@…";
 "account.refuse.kind" = "%@ is %@. Only Mastodon can be added this session.";
 "account.refuse.unknown" = "Fediqo could not tell what %@ speaks. Only Mastodon can be added this session.";
@@ -25,6 +27,10 @@
 "account.catalog.failed" = "The directory could not be reached. Type a hostname.";
 "account.catalog.empty" = "The directory listed none. Type a hostname.";
 "account.catalog.added" = "Added";
+"account.catalog.addHost" = "Add %@";
+"account.catalog.addHost.detail" = "Not in the directory. Detect and add it this session.";
+"account.catalog.meta" = "%@ · WAU %@ · %@";
+"account.catalog.langUnknown" = "Language unknown";
 
 "rail.open.title" = "Open";
 "rail.open.summary" = "Show names and descriptions";

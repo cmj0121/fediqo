@@ -16,6 +16,8 @@
 "account.add.detail" = "從清單挑選 Mastodon 主機，或自行輸入主機名稱。只留在這次工作階段。";
 "account.add" = "新增";
 "account.add.host" = "主機名稱";
+"account.search" = "搜尋";
+"account.search.placeholder" = "主機或關鍵字";
 "account.detect.progress" = "正在檢查 %@…";
 "account.refuse.kind" = "%@ 是 %@。這個工作階段只能新增 Mastodon。";
 "account.refuse.unknown" = "看不出 %@ 在說哪種協定。這個工作階段只能新增 Mastodon。";
@@ -25,6 +27,10 @@
 "account.catalog.failed" = "連不上目錄。請改輸入主機名稱。";
 "account.catalog.empty" = "目錄沒有列出任何主機。請改輸入主機名稱。";
 "account.catalog.added" = "已新增";
+"account.catalog.addHost" = "新增 %@";
+"account.catalog.addHost.detail" = "不在目錄裡。偵測並在這個工作階段加入。";
+"account.catalog.meta" = "%@ · WAU %@ · %@";
+"account.catalog.langUnknown" = "語言不明";
 
 "rail.open.title" = "打開";
 "rail.open.summary" = "顯示名稱與說明";
