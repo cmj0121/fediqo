@@ -26,7 +26,7 @@ private struct DummyKeyPresses: ViewModifier {
             .focused($focused)
             .onAppear { focused = true }
             .onKeyPress(
-                keys: ["?", "/", "c", "j", "k", "q", " ", .escape, .tab, .return, .upArrow, .downArrow],
+                keys: ["?", "/", "c", "j", "k", "g", "q", " ", .escape, .tab, .return, .upArrow, .downArrow],
                 phases: .down
             ) { press in
                 let shift = press.modifiers.contains(.shift)

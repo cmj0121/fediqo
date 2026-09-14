@@ -5,6 +5,7 @@ struct TimelinePane: View {
     @Binding var timelineID: String
     @Binding var selectedID: String?
     @Binding var openedID: String?
+    var jumpToTop: Int
     @State private var marks: [String: DummyMarks] = [:]
     @State private var toast: String?
     @State private var toastTick = 0
@@ -27,6 +28,7 @@ struct TimelinePane: View {
                 DummyThreadPane(
                     root: opened,
                     marks: markBinding,
+                    jumpToTop: jumpToTop,
                     onToast: showToast,
                     onBack: { openedID = nil }
                 )
@@ -88,6 +90,12 @@ struct TimelinePane: View {
                 guard let id else { return }
                 withAnimation(.easeInOut(duration: 0.18)) {
                     proxy.scrollTo(id, anchor: .center)
+                }
+            }
+            .onChange(of: jumpToTop) { _, _ in
+                guard let first = timeline.items.first else { return }
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    proxy.scrollTo(first.id, anchor: .top)
                 }
             }
         }

@@ -29,6 +29,7 @@
 "shortcut.tabs" = "Rotate this page's tabs";
 "shortcut.pages" = "Rotate the places";
 "shortcut.posts" = "Move in this list";
+"shortcut.top" = "Top of this thread";
 "shortcut.expand" = "Open the thread";
 "shortcut.compose" = "New post";
 "shortcut.list" = "This list";

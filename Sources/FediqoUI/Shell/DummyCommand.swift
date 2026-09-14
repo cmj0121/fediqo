@@ -8,6 +8,7 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     case previousPage
     case nextPost
     case previousPost
+    case goTop
     case expandPost
     case back
     case compose
@@ -36,6 +37,7 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         case "c": return .compose
         case "j", KeyEquivalent.downArrow.character: return .nextPost
         case "k", KeyEquivalent.upArrow.character: return .previousPost
+        case "g": return .goTop
         case KeyEquivalent.return.character, " ": return .expandPost
         case "q": return .back
         default: return nil
@@ -103,6 +105,7 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
                       commands: [.nextPage, .previousPage]),
         DummyShortcut(group: .moving, keys: ["j", "k", "↓", "↑"], name: "posts",
                       commands: [.nextPost, .previousPost]),
+        DummyShortcut(group: .moving, keys: ["g"], name: "top", commands: [.goTop]),
         DummyShortcut(group: .doing, keys: ["Return", "Space"], name: "expand",
                       commands: [.expandPost]),
         DummyShortcut(group: .doing, keys: ["c"], name: "compose", commands: [.compose]),

@@ -6,6 +6,7 @@ public struct FediqoRootView: View {
     @State private var timelineID = DummyTimeline.shipped[0].id
     @State private var selectedItemID: String?
     @State private var openedItemID: String?
+    @State private var jumpToTop = 0
     @State private var composing = false
     @State private var showingShortcuts = false
     @State private var railExpanded = false
@@ -68,6 +69,8 @@ public struct FediqoRootView: View {
             return moveInList(by: 1)
         case .previousPost:
             return moveInList(by: -1)
+        case .goTop:
+            return jumpListOrThreadToTop()
         case .expandPost:
             return openThread()
         case .back:
@@ -104,6 +107,16 @@ public struct FediqoRootView: View {
         let next = DummyCommand.stepped(ids, from: selectedItemID, by: step)
         guard let next else { return false }
         selectedItemID = next
+        return true
+    }
+
+    private func jumpListOrThreadToTop() -> Bool {
+        guard place == .timeline else { return false }
+        if openedItemID == nil {
+            guard let first = DummyTimeline(id: timelineID).items.first else { return false }
+            selectedItemID = first.id
+        }
+        jumpToTop += 1
         return true
     }
 
@@ -191,7 +204,8 @@ public struct FediqoRootView: View {
             TimelinePane(
                 timelineID: $timelineID,
                 selectedID: $selectedItemID,
-                openedID: $openedItemID
+                openedID: $openedItemID,
+                jumpToTop: jumpToTop
             )
         case .notices: NoticesPane()
         case .account: AccountPane(source: .signedIn)

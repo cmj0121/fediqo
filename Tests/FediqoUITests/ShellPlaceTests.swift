@@ -178,6 +178,8 @@ struct DummyCommandTests {
         #expect(DummyCommand.from("k") == .previousPost)
         #expect(DummyCommand.from(" ") == .expandPost)
         #expect(DummyCommand.from("q") == .back)
+        #expect(DummyCommand.from("g") == .goTop)
+        #expect(DummyCommand.from("g", typing: true) == nil)
         #expect(DummyCommand.stepped(["a", "b", "c"], from: nil, by: 1) == "a")
         #expect(DummyCommand.stepped(["a", "b", "c"], from: nil, by: -1) == "c")
         #expect(DummyCommand.stepped(["a", "b", "c"], from: "a", by: 1) == "b")

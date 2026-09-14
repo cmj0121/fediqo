@@ -4,6 +4,7 @@ import SwiftUI
 struct DummyThreadPane: View {
     let root: DummyItem
     var marks: (DummyItem) -> Binding<DummyMarks>
+    var jumpToTop: Int
     var onToast: (String) -> Void
     var onBack: () -> Void
     @Environment(\.colorScheme) private var colorScheme
@@ -31,27 +32,35 @@ struct DummyThreadPane: View {
                 .fill(ShellChrome.hairline(colorScheme))
                 .frame(height: 1)
 
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    DummyItemRow(item: root, marks: marks(root), onToast: onToast)
-                    Rectangle()
-                        .fill(ShellChrome.hairline(colorScheme))
-                        .frame(height: 1)
-                    Text(L10n.t("thread.replies"))
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                    ForEach(root.dummyReplies()) { reply in
-                        DummyItemRow(item: reply, marks: marks(reply), onToast: onToast)
-                            .padding(.leading, 24)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        DummyItemRow(item: root, marks: marks(root), onToast: onToast)
+                            .id("thread-root")
                         Rectangle()
                             .fill(ShellChrome.hairline(colorScheme))
                             .frame(height: 1)
+                        Text(L10n.t("thread.replies"))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                        ForEach(root.dummyReplies()) { reply in
+                            DummyItemRow(item: reply, marks: marks(reply), onToast: onToast)
+                                .padding(.leading, 24)
+                            Rectangle()
+                                .fill(ShellChrome.hairline(colorScheme))
+                                .frame(height: 1)
+                        }
+                    }
+                }
+                .scrollIndicators(.hidden)
+                .onChange(of: jumpToTop) { _, _ in
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        proxy.scrollTo("thread-root", anchor: .top)
                     }
                 }
             }
-            .scrollIndicators(.hidden)
         }
     }
 }
