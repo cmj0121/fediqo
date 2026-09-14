@@ -3,10 +3,8 @@ import SwiftUI
 
 /// Places on the left, the current page on the right, compose over it.
 public struct FediqoRootView: View {
-    @State private var store = ItemStore()
+    @State private var session: ShellSession
     @State private var place: ShellPlace = .launch
-    @State private var queries: [DummyTimeline] = DummyTimeline.shipped
-    @State private var timelineID: String?
     @State private var selectedItemID: String?
     @State private var threadStack: [String] = []
     @State private var jumpToTop = 0
@@ -20,11 +18,11 @@ public struct FediqoRootView: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
 
-    public init() {}
-
-    private var availability: ShellAvailability {
-        ShellAvailability(queryIDs: Set(queries.map(\.id)), signedIn: false)
+    public init(http: any HTTPClient = URLSessionClient()) {
+        _session = State(initialValue: ShellSession(http: http))
     }
+
+    private var availability: ShellAvailability { session.availability }
 
     public var body: some View {
         layout
@@ -121,7 +119,7 @@ public struct FediqoRootView: View {
         if let opened = threadStack.last, let item = DummyItem.named(opened) {
             return item.dummyConversation().inOrder.map(\.id)
         }
-        guard let timelineID else { return nil }
+        guard let timelineID = session.timelineID else { return nil }
         let ids = DummyTimeline(id: timelineID).items.map(\.id)
         return ids.isEmpty ? nil : ids
     }
@@ -131,7 +129,9 @@ public struct FediqoRootView: View {
         if let opened = threadStack.last, let item = DummyItem.named(opened) {
             selectedItemID = item.id
         } else {
-            guard let timelineID, let first = DummyTimeline(id: timelineID).items.first else {
+            guard let timelineID = session.timelineID,
+                  let first = DummyTimeline(id: timelineID).items.first
+            else {
                 return false
             }
             selectedItemID = first.id
@@ -165,10 +165,10 @@ public struct FediqoRootView: View {
     /// Tab only rotates named queries on the timeline. Elsewhere it is the platform's.
     private func rotateTimelineTab(by step: Int) -> Bool {
         guard place == .timeline else { return false }
-        let ids = queries.map(\.id)
+        let ids = session.queries.map(\.id)
         guard !ids.isEmpty else { return false }
-        let current = timelineID ?? ids[0]
-        timelineID = DummyCommand.advanced(ids, from: current, by: step)
+        let current = session.timelineID ?? ids[0]
+        session.timelineID = DummyCommand.advanced(ids, from: current, by: step)
         return true
     }
 
@@ -246,6 +246,13 @@ public struct FediqoRootView: View {
     }
     #endif
 
+    private var timelineIDBinding: Binding<String?> {
+        Binding(
+            get: { session.timelineID },
+            set: { session.timelineID = $0 }
+        )
+    }
+
     @ViewBuilder
     private var page: some View {
         pageFor(place)
@@ -256,15 +263,15 @@ public struct FediqoRootView: View {
         switch item {
         case .timeline:
             TimelinePane(
-                timelineID: $timelineID,
-                queries: queries,
+                timelineID: timelineIDBinding,
+                queries: session.queries,
                 selectedID: $selectedItemID,
                 openedID: openedThread,
                 jumpToTop: jumpToTop,
                 onPopThread: { _ = threadStack.popLast() }
             )
         case .notices: NoticesPane()
-        case .account: AccountPane()
+        case .account: AccountPane(session: session)
         case .usage: UsagePane()
         case .preferences: PreferencesPane()
         }

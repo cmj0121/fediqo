@@ -14,6 +14,17 @@
 "account.rail.empty" = "Add a source";
 "account.add.title" = "Add a source";
 "account.add.detail" = "Pick a Mastodon host from the list, or type its hostname. This session only.";
+"account.add" = "Add";
+"account.add.host" = "Hostname";
+"account.detect.progress" = "Checking %@…";
+"account.refuse.kind" = "%@ is %@. Only Mastodon can be added this session.";
+"account.refuse.unknown" = "Fediqo could not tell what %@ speaks. Only Mastodon can be added this session.";
+"account.refuse.network" = "That host could not be reached.";
+"account.refuse.duplicate" = "That host is already a source this session.";
+"account.catalog.loading" = "Loading the directory…";
+"account.catalog.failed" = "The directory could not be reached. Type a hostname.";
+"account.catalog.empty" = "The directory listed none. Type a hostname.";
+"account.catalog.added" = "Added";
 
 "rail.open.title" = "Open";
 "rail.open.summary" = "Show names and descriptions";
