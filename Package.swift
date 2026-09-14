@@ -19,6 +19,7 @@ let package = Package(
         ),
         .target(
             name: "FediqoUI",
+            dependencies: ["FediqoCore"],
             resources: [.process("Resources")],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
