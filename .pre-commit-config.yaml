@@ -16,6 +16,13 @@ repos:
     rev: v0.45.0
     hooks:
       - id: markdownlint-fix
+  - repo: https://github.com/rbubley/mirrors-prettier
+    rev: v3.9.6
+    hooks:
+      - id: prettier
+        # Markdown stays with markdownlint: prettier wraps tables past MD013
+        # and restyles emphasis, then the two hooks fight on every commit.
+        types_or: [yaml, json]
   # What the store is told, checked where checking is free. deliver skips a language folder
   # it does not recognise without a word, so `zh-TW` -- which is the code every document in
   # this repository uses and not the one App Store Connect uses -- is a release that went out
