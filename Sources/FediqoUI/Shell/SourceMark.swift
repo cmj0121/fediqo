@@ -31,11 +31,19 @@ struct SourceMark: View {
 
     @ViewBuilder
     private var avatar: some View {
-        Image(systemName: source.isSignedIn ? "person.crop.circle" : "globe")
+        Image(systemName: markSymbol)
             .font(.body)
             .symbolVariant(source.isSignedIn ? .fill : .none)
             .symbolRenderingMode(.hierarchical)
             .frame(width: avatarSize, height: avatarSize)
+    }
+
+    private var markSymbol: String {
+        switch source.kind {
+        case .microblog: source.isSignedIn ? "person.crop.circle" : "globe"
+        case .forum: "text.bubble"
+        case .board: "list.bullet"
+        }
     }
 
     private var primary: String {
