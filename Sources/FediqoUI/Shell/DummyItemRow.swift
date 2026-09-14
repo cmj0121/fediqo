@@ -29,10 +29,27 @@ struct DummyItemRow: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(selected ? ShellChrome.selectFill(colorScheme) : Color.clear)
+        .background { floatPlate }
+        .padding(.horizontal, selected ? 10 : 0)
+        .padding(.vertical, selected ? 6 : 0)
+        .zIndex(selected ? 1 : 0)
+        .animation(.easeInOut(duration: 0.18), value: selected)
         .contentShape(Rectangle())
         .onTapGesture { onSelect?() }
         .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    @ViewBuilder
+    private var floatPlate: some View {
+        if selected {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(ShellChrome.floatFill(colorScheme))
+                .shadow(color: ShellChrome.floatShadow(colorScheme), radius: 14, y: 6)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(ShellChrome.phosphor(colorScheme).opacity(0.32), lineWidth: 1)
+                )
+        }
     }
 
     @ViewBuilder

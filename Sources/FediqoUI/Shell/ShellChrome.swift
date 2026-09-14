@@ -53,6 +53,15 @@ enum ShellChrome {
         rgb(0.08, 0.12, 0.14).opacity(scheme == .dark ? 0.55 : 0.42)
     }
 
+    /// The lifted plate a focused row sits on.
+    static func floatFill(_ scheme: ColorScheme) -> Color {
+        scheme == .dark ? rgb(0.11, 0.16, 0.19) : rgb(0.988, 0.992, 0.995)
+    }
+
+    static func floatShadow(_ scheme: ColorScheme) -> Color {
+        rgb(0.06, 0.10, 0.12).opacity(scheme == .dark ? 0.65 : 0.20)
+    }
+
     static func vis(_ audience: DummyAudience, _ scheme: ColorScheme) -> Color {
         switch audience {
         case .everyone: phosphor(scheme).opacity(0.85)

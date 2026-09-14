@@ -66,7 +66,7 @@ struct TimelinePane: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(timeline.items) { item in
+                    ForEach(Array(timeline.items.enumerated()), id: \.element.id) { index, item in
                         DummyItemRow(
                             item: item,
                             marks: markBinding(item),
@@ -75,9 +75,11 @@ struct TimelinePane: View {
                             onToast: showToast
                         )
                         .id(item.id)
-                        Rectangle()
-                            .fill(ShellChrome.hairline(colorScheme))
-                            .frame(height: 1)
+                        if showsHairline(after: index) {
+                            Rectangle()
+                                .fill(ShellChrome.hairline(colorScheme))
+                                .frame(height: 1)
+                        }
                     }
                 }
             }
@@ -89,6 +91,16 @@ struct TimelinePane: View {
                 }
             }
         }
+    }
+
+    /// Hide the rule against a floating row so the plate is not cut by a hairline.
+    private func showsHairline(after index: Int) -> Bool {
+        let items = timeline.items
+        guard items.indices.contains(index) else { return false }
+        if items[index].id == selectedID { return false }
+        let next = items.index(after: index)
+        if items.indices.contains(next), items[next].id == selectedID { return false }
+        return true
     }
 
     private func markBinding(_ item: DummyItem) -> Binding<DummyMarks> {
