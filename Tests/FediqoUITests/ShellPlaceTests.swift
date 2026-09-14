@@ -147,6 +147,8 @@ struct DummyCommandTests {
         #expect(L10n.t("shortcut.title") != "shortcut.title")
         #expect(L10n.t("shortcut.tabs") != "shortcut.tabs")
         #expect(L10n.t("shortcut.pages") != "shortcut.pages")
+        #expect(Set(DummyShortcut.all.map(\.group)) == Set(DummyShortcutGroup.allCases))
+        #expect(L10n.t("shortcut.group.moving") != "shortcut.group.moving")
     }
 
     @Test("Letters belong to the draft while composing")
@@ -168,6 +170,21 @@ struct DummyCommandTests {
         #expect(
             DummyCommand.advanced(ShellPlace.allCases, from: .timeline, by: -1) == .preferences
         )
+    }
+
+    @Test("j and k step this list without wrapping")
+    func listKeysStepWithoutWrapping() {
+        #expect(DummyCommand.from("j") == .nextPost)
+        #expect(DummyCommand.from("k") == .previousPost)
+        #expect(DummyCommand.from(" ") == .expandPost)
+        #expect(DummyCommand.from("q") == .back)
+        #expect(DummyCommand.stepped(["a", "b", "c"], from: nil, by: 1) == "a")
+        #expect(DummyCommand.stepped(["a", "b", "c"], from: nil, by: -1) == "c")
+        #expect(DummyCommand.stepped(["a", "b", "c"], from: "a", by: 1) == "b")
+        #expect(DummyCommand.stepped(["a", "b", "c"], from: "c", by: 1) == "c")
+        #expect(DummyItem.stored[0].dummyReplies().count == 2)
+        #expect(DummyCommand.consumes("j", did: false))
+        #expect(!DummyCommand.consumes(" ", did: false))
     }
 }
 

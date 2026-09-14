@@ -4,6 +4,8 @@ import SwiftUI
 public struct FediqoRootView: View {
     @State private var place: ShellPlace = .timeline
     @State private var timelineID = DummyTimeline.shipped[0].id
+    @State private var selectedItemID: String?
+    @State private var openedItemID: String?
     @State private var composing = false
     @State private var showingShortcuts = false
     @State private var railExpanded = false
@@ -46,6 +48,11 @@ public struct FediqoRootView: View {
         ) else {
             return false
         }
+        let did = apply(command)
+        return DummyCommand.consumes(character, did: did)
+    }
+
+    private func apply(_ command: DummyCommand) -> Bool {
         switch command {
         case .nextTab:
             return rotateTimelineTab(by: 1)
@@ -56,6 +63,16 @@ public struct FediqoRootView: View {
             return true
         case .previousPage:
             place = DummyCommand.advanced(ShellPlace.allCases, from: place, by: -1)
+            return true
+        case .nextPost:
+            return moveInList(by: 1)
+        case .previousPost:
+            return moveInList(by: -1)
+        case .expandPost:
+            return openThread()
+        case .back:
+            guard openedItemID != nil else { return false }
+            openedItemID = nil
             return true
         case .showShortcuts:
             showingShortcuts.toggle()
@@ -69,8 +86,31 @@ public struct FediqoRootView: View {
                 showingShortcuts = false
                 return true
             }
+            if openedItemID != nil {
+                openedItemID = nil
+                return true
+            }
+            if selectedItemID != nil {
+                selectedItemID = nil
+                return true
+            }
             return false
         }
+    }
+
+    private func moveInList(by step: Int) -> Bool {
+        guard place == .timeline, openedItemID == nil else { return false }
+        let ids = DummyTimeline(id: timelineID).items.map(\.id)
+        let next = DummyCommand.stepped(ids, from: selectedItemID, by: step)
+        guard let next else { return false }
+        selectedItemID = next
+        return true
+    }
+
+    private func openThread() -> Bool {
+        guard place == .timeline, openedItemID == nil, let selectedItemID else { return false }
+        openedItemID = selectedItemID
+        return true
     }
 
     /// Tab only rotates named queries on the timeline. Elsewhere it is the platform's.
@@ -147,7 +187,12 @@ public struct FediqoRootView: View {
     @ViewBuilder
     private func pageFor(_ item: ShellPlace) -> some View {
         switch item {
-        case .timeline: TimelinePane(timelineID: $timelineID)
+        case .timeline:
+            TimelinePane(
+                timelineID: $timelineID,
+                selectedID: $selectedItemID,
+                openedID: $openedItemID
+            )
         case .notices: NoticesPane()
         case .account: AccountPane(source: .signedIn)
         case .usage: UsagePane()

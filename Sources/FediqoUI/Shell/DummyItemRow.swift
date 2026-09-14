@@ -4,6 +4,8 @@ import SwiftUI
 struct DummyItemRow: View {
     let item: DummyItem
     @Binding var marks: DummyMarks
+    var selected: Bool = false
+    var onSelect: (() -> Void)?
     var onToast: (String) -> Void
     @Environment(\.colorScheme) private var colorScheme
 
@@ -27,6 +29,10 @@ struct DummyItemRow: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(selected ? ShellChrome.selectFill(colorScheme) : Color.clear)
+        .contentShape(Rectangle())
+        .onTapGesture { onSelect?() }
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     @ViewBuilder

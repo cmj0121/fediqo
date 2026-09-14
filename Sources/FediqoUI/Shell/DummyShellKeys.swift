@@ -25,7 +25,10 @@ private struct DummyKeyPresses: ViewModifier {
             .focusEffectDisabled()
             .focused($focused)
             .onAppear { focused = true }
-            .onKeyPress(keys: ["?", "/", "c", .escape, .tab], phases: .down) { press in
+            .onKeyPress(
+                keys: ["?", "/", "c", "j", "k", "q", " ", .escape, .tab, .return, .upArrow, .downArrow],
+                phases: .down
+            ) { press in
                 let shift = press.modifiers.contains(.shift)
                 let control = press.modifiers.contains(.control)
                 return handle(press.key.character, shift, control) ? .handled : .ignored
@@ -38,6 +41,10 @@ private struct DummyKeyPresses: ViewModifier {
 private enum DummyKeyCode {
     static let tab: UInt16 = 48
     static let escape: UInt16 = 53
+    static let returnKey: UInt16 = 36
+    static let keypadEnter: UInt16 = 76
+    static let downArrow: UInt16 = 125
+    static let upArrow: UInt16 = 126
 }
 
 private struct DummyKeyMonitor: ViewModifier {
@@ -74,6 +81,9 @@ private func dummyCharacter(of event: NSEvent) -> Character? {
     switch event.keyCode {
     case DummyKeyCode.tab: KeyEquivalent.tab.character
     case DummyKeyCode.escape: KeyEquivalent.escape.character
+    case DummyKeyCode.returnKey, DummyKeyCode.keypadEnter: KeyEquivalent.return.character
+    case DummyKeyCode.upArrow: KeyEquivalent.upArrow.character
+    case DummyKeyCode.downArrow: KeyEquivalent.downArrow.character
     default: event.charactersIgnoringModifiers?.first
     }
 }

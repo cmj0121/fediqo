@@ -23,11 +23,24 @@
 "shortcut.title" = "Keys";
 "shortcut.note" = "These work while you are not writing.";
 "shortcut.close" = "Close";
+"shortcut.group.moving" = "Moving";
+"shortcut.group.doing" = "Doing";
+"shortcut.group.leaving" = "Leaving";
 "shortcut.tabs" = "Rotate this page's tabs";
 "shortcut.pages" = "Rotate the places";
+"shortcut.posts" = "Move in this list";
+"shortcut.expand" = "Open the thread";
 "shortcut.compose" = "New post";
 "shortcut.list" = "This list";
-"shortcut.dismiss" = "Close what is in front";
+"shortcut.back" = "Back to the list";
+"shortcut.dismiss" = "Close what is in front, or unfocus";
+
+"thread.title" = "Thread";
+"thread.replies" = "Replies";
+"thread.back" = "Back";
+"thread.leaveHint" = "Esc or q";
+"item.reply.one.body" = "Same machine. Keep it here.";
+"item.reply.two.body" = "Then the list stays one stream.";
 
 "timeline.picker" = "Timeline";
 "timeline.add" = "Add";

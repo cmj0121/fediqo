@@ -1,8 +1,10 @@
 import SwiftUI
 
-/// The timeline place: named queries, a brief rule, then the stream.
+/// The timeline place: named queries, a brief rule, then the stream or a thread.
 struct TimelinePane: View {
     @Binding var timelineID: String
+    @Binding var selectedID: String?
+    @Binding var openedID: String?
     @State private var marks: [String: DummyMarks] = [:]
     @State private var toast: String?
     @State private var toastTick = 0
@@ -21,24 +23,17 @@ struct TimelinePane: View {
                 .fill(ShellChrome.hairline(colorScheme))
                 .frame(height: 1)
 
-            if timeline.items.isEmpty {
+            if let opened = openedItem {
+                DummyThreadPane(
+                    root: opened,
+                    marks: markBinding,
+                    onToast: showToast,
+                    onBack: { openedID = nil }
+                )
+            } else if timeline.items.isEmpty {
                 empty
             } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(timeline.items) { item in
-                            DummyItemRow(
-                                item: item,
-                                marks: markBinding(item),
-                                onToast: showToast
-                            )
-                            Rectangle()
-                                .fill(ShellChrome.hairline(colorScheme))
-                                .frame(height: 1)
-                        }
-                    }
-                }
-                .scrollIndicators(.hidden)
+                list
             }
         }
         .overlay(alignment: .bottom) {
@@ -54,6 +49,46 @@ struct TimelinePane: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: toast)
+        .onChange(of: timelineID) { _, _ in
+            if let selectedID, !timeline.items.contains(where: { $0.id == selectedID }) {
+                self.selectedID = nil
+            }
+            openedID = nil
+        }
+    }
+
+    private var openedItem: DummyItem? {
+        guard let openedID else { return nil }
+        return DummyItem.stored.first { $0.id == openedID }
+    }
+
+    private var list: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(timeline.items) { item in
+                        DummyItemRow(
+                            item: item,
+                            marks: markBinding(item),
+                            selected: item.id == selectedID,
+                            onSelect: { selectedID = item.id },
+                            onToast: showToast
+                        )
+                        .id(item.id)
+                        Rectangle()
+                            .fill(ShellChrome.hairline(colorScheme))
+                            .frame(height: 1)
+                    }
+                }
+            }
+            .scrollIndicators(.hidden)
+            .onChange(of: selectedID) { _, id in
+                guard let id else { return }
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    proxy.scrollTo(id, anchor: .center)
+                }
+            }
+        }
     }
 
     private func markBinding(_ item: DummyItem) -> Binding<DummyMarks> {

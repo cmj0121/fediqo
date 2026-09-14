@@ -219,4 +219,55 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     private static func at(_ offset: TimeInterval) -> Date {
         origin.addingTimeInterval((offset - 8) * 3600)
     }
+
+    /// Dummy replies under this item. Same shape, later in time.
+    public func dummyReplies() -> [DummyItem] {
+        [
+            reply(
+                suffix: "r1",
+                author: "Ada",
+                handle: "@ada@first.example",
+                bodyKey: "item.reply.one.body",
+                later: 900,
+                hasAvatar: true
+            ),
+            reply(
+                suffix: "r2",
+                author: "Sam",
+                handle: nil,
+                bodyKey: "item.reply.two.body",
+                later: 2400,
+                hasAvatar: false
+            ),
+        ]
+    }
+
+    private func reply(
+        suffix: String,
+        author: String,
+        handle: String?,
+        bodyKey: String,
+        later: TimeInterval,
+        hasAvatar: Bool
+    ) -> DummyItem {
+        DummyItem(
+            id: "\(id)-\(suffix)",
+            source: source,
+            author: author,
+            handle: handle,
+            titleKey: nil,
+            bodyKey: bodyKey,
+            boardKey: nil,
+            postedAt: postedAt.addingTimeInterval(later),
+            workRelated: workRelated,
+            answering: handle.map { .handle($0) } ?? .somebody,
+            boostedBy: nil,
+            audience: audience,
+            hasAvatar: hasAvatar,
+            hasThumb: false,
+            counts: DummyCounts(),
+            marks: DummyMarks(),
+            alsoFrom: []
+        )
+    }
 }
