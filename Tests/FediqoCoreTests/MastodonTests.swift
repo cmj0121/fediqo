@@ -21,7 +21,10 @@ struct MastodonTests {
         #expect(notes.allSatisfy { $0.origins == [.publicTimeline] })
         #expect(notes[0].handle == "@ada@first.example")
         #expect(notes[2].handle == "@bob@second.example")
-        #expect(notes[1].previewURL == URL(string: "https://first.example/preview.jpg"))
+        #expect(notes[0].attachments.isEmpty)
+        #expect(notes[1].attachments.map(\.displayURL) == [URL(string: "https://first.example/preview.jpg")])
+        #expect(notes[1].attachments.map(\.url) == [URL(string: "https://first.example/full.jpg")])
+        #expect(notes[1].attachments.allSatisfy { $0.kind == .unknown })
         let requested = await http.requested
         #expect(requested.first?.path == "/api/v1/timelines/public")
         #expect(requested.first?.query == "limit=40")
@@ -129,6 +132,54 @@ struct MastodonTests {
             try await MastodonClient(http: http, host: "first.example")
                 .publicTimeline(source: source)
         }
+    }
+
+    @Test("An attachment with no address at all is not one this device carries")
+    func addresslessAttachmentIsDropped() throws {
+        let note = try Self.note("""
+        {
+          "id": "4",
+          "uri": "https://first.example/users/ada/statuses/4",
+          "created_at": "2024-01-01T00:00:00.000Z",
+          "content": "<p>hi</p>",
+          "account": { "username": "ada", "acct": "ada", "display_name": "Ada" },
+          "media_attachments": [
+            { "url": null, "preview_url": null },
+            { "url": "https://first.example/full.jpg", "preview_url": null }
+          ]
+        }
+        """)
+        #expect(note.attachments.map(\.displayURL) == [URL(string: "https://first.example/full.jpg")])
+    }
+
+    @Test("An address this device will not fetch is no address")
+    func onlyHTTPSSurvivesTheWire() throws {
+        let note = try Self.note("""
+        {
+          "id": "5",
+          "uri": "https://first.example/users/ada/statuses/5",
+          "created_at": "2024-01-01T00:00:00.000Z",
+          "content": "<p>hi</p>",
+          "account": {
+            "username": "ada", "acct": "ada", "display_name": "Ada",
+            "avatar": "javascript:alert(1)"
+          },
+          "media_attachments": [
+            { "url": "file:///etc/passwd", "preview_url": "data:image/png;base64,AAAA" },
+            { "url": "http://first.example/plain.jpg", "preview_url": null },
+            { "url": null, "preview_url": "https://" },
+            { "url": "file:///etc/passwd", "preview_url": "https://first.example/ok.jpg" }
+          ]
+        }
+        """)
+        #expect(note.avatarURL == nil)
+        // The first three carried nothing this device can fetch and are gone — `https://` among
+        // them, which parses but names no host, and which kept would fill a slot for a fetch
+        // that can never finish. The fourth keeps the still it was allowed and loses the file
+        // it was not.
+        #expect(note.attachments.count == 1)
+        #expect(note.attachments[0].url == nil)
+        #expect(note.attachments[0].previewURL == URL(string: "https://first.example/ok.jpg"))
     }
 
     private static func note(_ json: String) throws -> Note {
