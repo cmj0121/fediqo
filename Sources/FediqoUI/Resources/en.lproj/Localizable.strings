@@ -166,7 +166,7 @@
 "prefs.fontSize.largest" = "Largest";
 
 "prefs.cache" = "Held for this run";
-"prefs.cache.footer" = "None of this is written to disk. Every server is read again from scratch the next time Fediqo opens, and a server's emoji names are read again by themselves after a day.";
+"prefs.cache.footer" = "None of this is written to disk, with one exception. Every server is read again from scratch the next time Fediqo opens, and a server's emoji names are read again by themselves after a day. The exception is a password you asked Fediqo to save: that is kept in this device's Keychain, and Clear deletes it along with everything else.";
 "prefs.cache.empty" = "Add a source on Account. What each one sends is held here until you close Fediqo.";
 "prefs.cache.catalogue" = "%d emoji names, read";
 "prefs.cache.catalogue.none" = "No emoji names held";
@@ -174,3 +174,24 @@
 "prefs.cache.pictures.none" = "No pictures held";
 "prefs.cache.clear" = "Clear";
 "prefs.cache.clear.label" = "Clear what this device holds from %@";
+
+/* Unit F2 — the signed-in transport. */
+"account.refuse.signin" = "Sign in to %@ yourself";
+"account.refuse.signin.label" = "Open %@'s own sign-in page";
+"forum.signin.title" = "Sign in to %@";
+"forum.signin.web.label" = "%@'s own page";
+"forum.signin.save" = "Save my username and password on this device";
+"forum.signin.save.off" = "This app never sees your password. You are typing into this forum's own page, and nothing here reads what you type.";
+"forum.signin.save.on" = "This app will see your password, because signing you in by itself means holding it. It goes into this device's Keychain, is sent to nowhere but this forum, and is never copied to iCloud. Clearing this server, or forgetting it on Preferences, deletes it.";
+"forum.signin.cancel" = "Cancel";
+"forum.signin.done" = "Done";
+"forum.stop.first" = "The first sign-in is yours. Type into this forum's own page below.";
+"forum.stop.wall" = "Something in front of this forum wants to check the browser. It usually passes by itself; if it asks you something, answer it below.";
+"forum.stop.captcha" = "This forum is asking for a verification code, which a saved password cannot answer. Finish signing in below.";
+"forum.stop.question" = "This account has a security question, which a saved password cannot answer. Finish signing in below.";
+"forum.stop.refused" = "This forum did not accept the saved username and password.";
+"forum.stop.unreadable" = "This forum's answer could not be read. Sign in below and see what it says.";
+"forum.stop.unreachable" = "This forum did not answer. Try below.";
+"prefs.password.held" = "Password held on this device";
+"prefs.password.forget" = "Forget it";
+"prefs.password.forget.label" = "Forget the password held for %@";

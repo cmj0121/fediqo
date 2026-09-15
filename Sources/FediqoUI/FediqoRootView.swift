@@ -71,6 +71,16 @@ public struct FediqoRootView: View {
                     .presentationDetents([.medium, .large])
                     #endif
             }
+            // **On the root, beside the composer's, and not on a pane.** A sign-in is asked for
+            // from Account, where a refusal is reported, and it will be asked for from a timeline
+            // the day a forum's session lapses mid-scroll — so a sheet attached to either pane
+            // would be a sheet that does not open from the other. One presenter, driven by one
+            // piece of session state, is the shape that survives both call sites.
+            .sheet(item: $session.signingIn) { request in
+                ForumSignInSheet(request: request, sessions: session.forums) { reached in
+                    session.signInFinished(reached: reached)
+                }
+            }
             .overlay {
                 if showingShortcuts {
                     ShortcutGuide { showingShortcuts = false }

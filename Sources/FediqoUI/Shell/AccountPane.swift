@@ -138,9 +138,30 @@ struct AccountPane: View {
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
             }
         } else if let refuse = session.refuse {
-            Text(refuse)
-                .font(ShellType.meta)
-                .foregroundStyle(ShellChrome.alarm(colorScheme))
+            VStack(alignment: .leading, spacing: ShellSpace.snug) {
+                Text(refuse)
+                    .font(ShellType.meta)
+                    .foregroundStyle(ShellChrome.alarm(colorScheme))
+                offer
+            }
+        }
+    }
+
+    /// The one thing a reader can do about a server that turned this app away.
+    ///
+    /// This branch recorded the hole and left it open — the refusal message "tells the reader
+    /// what happened and offers them nothing to do about it". A reader with an account on that
+    /// forum *is* somebody it can be opened for, and the honest route is the one the forum's
+    /// owner controls: their own sign-in page, in a real browser engine, with them typing into
+    /// it. Offered only after a refusal, never beside a typo.
+    @ViewBuilder
+    private var offer: some View {
+        if let host = session.offerSignIn {
+            Button(String(format: L10n.t("account.refuse.signin"), host)) {
+                Task { await session.signIn(host: host) }
+            }
+            .font(ShellType.meta)
+            .accessibilityLabel(Text(String(format: L10n.t("account.refuse.signin.label"), host)))
         }
     }
 

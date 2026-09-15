@@ -30,6 +30,22 @@ final class ShellSession {
     let pictures: ShellPictures
     let emojis: EmojiCache
 
+    /// Every forum this run signs in to, one browser each — unit F2's transport.
+    ///
+    /// On the session for the same reason the two picture caches are: **what Clear presses and
+    /// what Preferences draws have to be the same object**, and a second one reached for as
+    /// `.shared` at a call site is an agreement that a test or a preview breaks in silence.
+    let forums: ForumSessions
+
+    /// The sheet the reader is being shown the forum's own page in, or nothing.
+    var signingIn: ForumSignInRequest?
+
+    /// A host that turned this app away and that a sign-in might open — set only where the
+    /// server answered with a refusal of its own, which is the one failure that is never the
+    /// reader's spelling. It closes a hole this branch recorded and left open: the refusal
+    /// message "tells the reader what happened and offers them nothing to do about it".
+    var offerSignIn: String?
+
     var queries: [DummyTimeline] = DummyTimeline.shipped
     var timelineID: String?
     var sources: [Source] = []
@@ -62,12 +78,14 @@ final class ShellSession {
         http: any HTTPClient,
         store: ItemStore = ItemStore(),
         pictures: ShellPictures = .shared,
-        emojis: EmojiCache = .shared
+        emojis: EmojiCache = .shared,
+        forums: ForumSessions = ForumSessions()
     ) {
         self.http = http
         self.store = store
         self.pictures = pictures
         self.emojis = emojis
+        self.forums = forums
     }
 
     var availability: ShellAvailability {
@@ -137,6 +155,7 @@ final class ShellSession {
         let raw = hostname.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else { return }
         refuse = nil
+        offerSignIn = nil
         let parsed: String
         do {
             parsed = try Host.parse(raw)
@@ -163,6 +182,11 @@ final class ShellSession {
             return
         } catch let error as JoinError {
             refuse = Self.refuseMessage(error, raw: raw, host: parsed)
+            // A refusal is the one failure where the host is fine, the spelling is fine, and
+            // this app was turned away on purpose — which is exactly the case a reader with an
+            // account can do something about. Offered only for that one, so that a typo or a
+            // dead server never invites somebody to go and sign in to nothing.
+            if case .refused = error { offerSignIn = parsed }
         } catch {
             refuse = L10n.t("account.refuse.network")
         }
@@ -183,12 +207,44 @@ final class ShellSession {
     ///
     /// Presses this session's own caches — the ones `PreferencesPane` reads its figures off — so
     /// that what the button empties and what the screen reports cannot come apart.
+    ///
+    /// Four kinds became six. Cookies and a saved password are things a signed-in forum left
+    /// here too, and D25 says a Clear that does not reach them leaves the two worst ones behind:
+    /// a session somebody can still read the forum with, and a password for a server the reader
+    /// has stopped looking at. See `ForumSessions.forget(host:)` for why the password goes even
+    /// though decision 14 is otherwise "empties, does not remove", and what the screen says about
+    /// it before the button is pressed.
     func clear(host: String) async {
         let host = host.lowercased()
         await emoji.forget(host: host)
         emojis.forget(host: host)
         pictures.forget(host: host)
+        await forums.forget(host: host)
         cleared += 1
+    }
+
+    /// Shows the reader the forum's own page, after asking the saved credential first.
+    ///
+    /// **Automatic is the default path and never the only one** — D24. The saved password is
+    /// tried, and every way that can stop short of a confirmed sign-in ends here, with the page
+    /// in front of the reader and a sentence saying which way it stopped. None of them is
+    /// reported as a failure, because none of them is one.
+    func signIn(host raw: String) async {
+        guard let host = try? Host.parse(raw) else { return }
+        switch await forums.signIn(host: host) {
+        case .signedIn:
+            signingIn = nil
+            offerSignIn = nil
+        case .handOver(let stop):
+            signingIn = ForumSignInRequest(host: host, stop: stop)
+        }
+    }
+
+    /// The sheet closed. A sign-in that was reached clears the offer; one that was not leaves it
+    /// where it is, so the reader can try again without retyping the host.
+    func signInFinished(reached: Bool) {
+        signingIn = nil
+        if reached { offerSignIn = nil }
     }
 
     private static func refuseMessage(_ error: JoinError, raw: String, host: String) -> String {
