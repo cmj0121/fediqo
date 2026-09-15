@@ -1,9 +1,10 @@
+import FediqoCore
 import SwiftUI
 
-/// The dummy shell: places on the left, the current page on the right, compose over it.
+/// Places on the left, the current page on the right, compose over it.
 public struct FediqoRootView: View {
-    @State private var place: ShellPlace = .timeline
-    @State private var timelineID = DummyTimeline.shipped[0].id
+    @State private var session: ShellSession
+    @State private var place: ShellPlace = .launch
     @State private var selectedItemID: String?
     @State private var threadStack: [String] = []
     @State private var jumpToTop = 0
@@ -17,10 +18,18 @@ public struct FediqoRootView: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
 
-    public init() {}
+    public init(http: any HTTPClient = URLSessionClient()) {
+        _session = State(initialValue: ShellSession(http: http))
+    }
+
+    private var availability: ShellAvailability { session.availability }
 
     public var body: some View {
         layout
+            .onChange(of: place) { old, new in
+                let accepted = availability.placing(old, as: new)
+                if accepted != new { place = accepted }
+            }
             .sheet(isPresented: $composing) {
                 ComposerSheet()
                     #if os(iOS)
@@ -45,7 +54,11 @@ public struct FediqoRootView: View {
 
     private func performDummyKey(_ character: Character, shift: Bool, control: Bool) -> Bool {
         guard let command = DummyCommand.from(
-            character, shift: shift, control: control, typing: composing
+            character,
+            shift: shift,
+            control: control,
+            typing: composing,
+            fieldFocused: session.searchFocused
         ) else {
             return false
         }
@@ -60,10 +73,10 @@ public struct FediqoRootView: View {
         case .previousTab:
             return rotateTimelineTab(by: -1)
         case .nextPage:
-            place = DummyCommand.advanced(ShellPlace.allCases, from: place, by: 1)
+            place = availability.rotate(from: place, by: 1)
             return true
         case .previousPage:
-            place = DummyCommand.advanced(ShellPlace.allCases, from: place, by: -1)
+            place = availability.rotate(from: place, by: -1)
             return true
         case .nextPost:
             return moveInList(by: 1)
@@ -79,6 +92,7 @@ public struct FediqoRootView: View {
             showingShortcuts.toggle()
             return true
         case .compose:
+            guard availability.canCompose else { return false }
             showingShortcuts = false
             composing = true
             return true
@@ -105,20 +119,24 @@ public struct FediqoRootView: View {
         return true
     }
 
+    private var streamItems: [DummyItem] {
+        DummyTimeline(id: session.timelineID ?? "").items(from: session.notes)
+    }
+
     private var currentListIDs: [String]? {
-        if let opened = threadStack.last, let item = DummyItem.named(opened) {
+        if let opened = threadStack.last, let item = streamItems.first(where: { $0.id == opened }) {
             return item.dummyConversation().inOrder.map(\.id)
         }
-        let ids = DummyTimeline(id: timelineID).items.map(\.id)
+        let ids = streamItems.map(\.id)
         return ids.isEmpty ? nil : ids
     }
 
     private func jumpListOrThreadToTop() -> Bool {
         guard place == .timeline else { return false }
-        if let opened = threadStack.last, let item = DummyItem.named(opened) {
+        if let opened = threadStack.last, let item = streamItems.first(where: { $0.id == opened }) {
             selectedItemID = item.id
         } else {
-            guard let first = DummyTimeline(id: timelineID).items.first else { return false }
+            guard let first = streamItems.first else { return false }
             selectedItemID = first.id
         }
         jumpToTop += 1
@@ -150,9 +168,10 @@ public struct FediqoRootView: View {
     /// Tab only rotates named queries on the timeline. Elsewhere it is the platform's.
     private func rotateTimelineTab(by step: Int) -> Bool {
         guard place == .timeline else { return false }
-        timelineID = DummyCommand.advanced(
-            DummyTimeline.shipped.map(\.id), from: timelineID, by: step
-        )
+        let ids = session.queries.map(\.id)
+        guard !ids.isEmpty else { return false }
+        let current = session.timelineID ?? ids[0]
+        session.timelineID = DummyCommand.advanced(ids, from: current, by: step)
         return true
     }
 
@@ -172,10 +191,13 @@ public struct FediqoRootView: View {
     private var columns: some View {
         HStack(spacing: 0) {
             RailView(
-                place: $place,
+                place: placeBinding,
                 expanded: $railExpanded,
-                currentSource: .signedIn,
-                onCompose: { composing = true }
+                availability: availability,
+                onCompose: {
+                    guard availability.canCompose else { return }
+                    composing = true
+                }
             )
             Rectangle()
                 .fill(ShellChrome.hairline(colorScheme))
@@ -188,6 +210,14 @@ public struct FediqoRootView: View {
         .background(ShellChrome.page(colorScheme))
     }
 
+    /// Rejects a disabled destination so compact TabView snaps back.
+    private var placeBinding: Binding<ShellPlace> {
+        Binding(
+            get: { place },
+            set: { place = availability.placing(place, as: $0) }
+        )
+    }
+
     #if os(iOS)
     private var tabbed: some View {
         TabView(selection: $place) {
@@ -198,7 +228,10 @@ public struct FediqoRootView: View {
             }
         }
         .overlay(alignment: .bottomTrailing) {
-            Button { composing = true } label: {
+            Button {
+                guard availability.canCompose else { return }
+                composing = true
+            } label: {
                 Image(systemName: "square.and.pencil")
                     .font(.title3.weight(.semibold))
                     .frame(width: 56, height: 56)
@@ -206,9 +239,12 @@ public struct FediqoRootView: View {
                     .foregroundStyle(ShellChrome.page(colorScheme))
             }
             .buttonStyle(.plain)
+            .disabled(!availability.canCompose)
+            .help(L10n.t(availability.composeHintKey))
+            .accessibilityLabel(L10n.t("compose.title"))
+            .accessibilityHint(L10n.t(availability.composeHintKey))
             .padding(.trailing, 20)
             .padding(.bottom, 72)
-            .accessibilityLabel(L10n.t("compose.title"))
         }
     }
     #endif
@@ -223,14 +259,14 @@ public struct FediqoRootView: View {
         switch item {
         case .timeline:
             TimelinePane(
-                timelineID: $timelineID,
+                session: session,
                 selectedID: $selectedItemID,
                 openedID: openedThread,
                 jumpToTop: jumpToTop,
                 onPopThread: { _ = threadStack.popLast() }
             )
         case .notices: NoticesPane()
-        case .account: AccountPane(source: .signedIn)
+        case .account: AccountPane(session: session)
         case .usage: UsagePane()
         case .preferences: PreferencesPane()
         }

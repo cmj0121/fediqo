@@ -16,12 +16,15 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     case dismiss
 
     /// What a press means. Letters are the draft's while composing, except Escape.
+    /// A focused text field owns every key, including Escape.
     public static func from(
         _ character: Character,
         shift: Bool = false,
         control: Bool = false,
-        typing: Bool = false
+        typing: Bool = false,
+        fieldFocused: Bool = false
     ) -> DummyCommand? {
+        if fieldFocused { return nil }
         if character == KeyEquivalent.escape.character {
             return .dismiss
         }

@@ -1,34 +1,34 @@
-/// A named query the dummy shell can tab between. Not a network's home page.
+import FediqoCore
+
+/// A named query the shell can tab between. All and Trends are created on join.
 public struct DummyTimeline: Identifiable, Hashable, Sendable {
     public let id: String
 
     public var name: String { L10n.t("timeline.tab.\(id)") }
 
-    public static let shipped: [DummyTimeline] = [
-        DummyTimeline(id: "all"),
-        DummyTimeline(id: "work"),
-    ]
-
-    /// Sources this query reads. All is the mix; Work is a configured subset.
-    public var sources: [DummySource] {
-        switch id {
-        case "work": [.signedIn, .forum]
-        default: [.unsignedPublic, .signedIn, .forum, .board]
-        }
-    }
+    /// Empty until a source is joined. The dummy stream is not the live set.
+    public static let shipped: [DummyTimeline] = []
 
     public var rule: String {
         switch id {
-        case "work": L10n.t("timeline.rule.work")
+        case "trends": L10n.t("timeline.rule.trends")
         default: L10n.t("timeline.rule.all")
         }
     }
 
-    /// This query's items, newest first. Source set, then the rule.
-    public var items: [DummyItem] {
-        DummyItem.stored
-            .filter { sources.contains($0.source) }
-            .filter { id != "work" || $0.workRelated }
-            .sorted { $0.postedAt > $1.postedAt }
+    public var emptyKey: String {
+        id == "trends" ? "timeline.empty.trends" : "timeline.empty"
+    }
+
+    /// Newest first. `notes` is already store order; Trends is origin, not rank.
+    public func items(from notes: [Note]) -> [DummyItem] {
+        switch id {
+        case "trends":
+            notes.filter { $0.origins.contains(.trending) }.map(DummyItem.init)
+        case "all":
+            notes.map(DummyItem.init)
+        default:
+            []
+        }
     }
 }

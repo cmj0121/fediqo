@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The timeline place: named queries, a brief rule, then the stream or a thread.
 struct TimelinePane: View {
-    @Binding var timelineID: String
+    @Bindable var session: ShellSession
     @Binding var selectedID: String?
     @Binding var openedID: String?
     var jumpToTop: Int
@@ -12,7 +12,9 @@ struct TimelinePane: View {
     @State private var toastTick = 0
     @Environment(\.colorScheme) private var colorScheme
 
-    private var timeline: DummyTimeline { DummyTimeline(id: timelineID) }
+    private var timeline: DummyTimeline { DummyTimeline(id: session.timelineID ?? "") }
+
+    private var items: [DummyItem] { timeline.items(from: session.notes) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -34,7 +36,7 @@ struct TimelinePane: View {
                     onToast: showToast,
                     onBack: onPopThread
                 )
-            } else if timeline.items.isEmpty {
+            } else if items.isEmpty {
                 empty
             } else {
                 list
@@ -53,8 +55,8 @@ struct TimelinePane: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: toast)
-        .onChange(of: timelineID) { _, _ in
-            if let selectedID, !timeline.items.contains(where: { $0.id == selectedID }) {
+        .onChange(of: session.timelineID) { _, _ in
+            if let selectedID, !items.contains(where: { $0.id == selectedID }) {
                 self.selectedID = nil
             }
             openedID = nil
@@ -63,14 +65,14 @@ struct TimelinePane: View {
 
     private var openedItem: DummyItem? {
         guard let openedID else { return nil }
-        return DummyItem.named(openedID)
+        return items.first { $0.id == openedID }
     }
 
     private var list: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(timeline.items.enumerated()), id: \.element.id) { index, item in
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                         DummyItemRow(
                             item: item,
                             marks: markBinding(item),
@@ -95,7 +97,7 @@ struct TimelinePane: View {
                 }
             }
             .onChange(of: jumpToTop) { _, _ in
-                guard let first = timeline.items.first else { return }
+                guard let first = items.first else { return }
                 withAnimation(.easeInOut(duration: 0.18)) {
                     proxy.scrollTo(first.id, anchor: .top)
                 }
@@ -105,7 +107,6 @@ struct TimelinePane: View {
 
     /// Hide the rule against a floating row so the plate is not cut by a hairline.
     private func showsHairline(after index: Int) -> Bool {
-        let items = timeline.items
         guard items.indices.contains(index) else { return false }
         if items[index].id == selectedID { return false }
         let next = items.index(after: index)
@@ -131,29 +132,35 @@ struct TimelinePane: View {
     }
 
     private var header: some View {
-        HStack(alignment: .center, spacing: 8) {
-            Text(L10n.t("shell.timeline.title"))
-                .font(.headline)
-                .fixedSize()
-            HStack(spacing: 6) {
-                ForEach(DummyTimeline.shipped) { query in
-                    queryPill(query)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 8) {
+                Text(L10n.t("shell.timeline.title"))
+                    .font(.headline)
+                    .fixedSize()
+                HStack(spacing: 6) {
+                    ForEach(session.queries) { query in
+                        queryPill(query)
+                    }
                 }
-                addQuery
+                if session.timelineID != nil {
+                    Text(timeline.rule)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
-            Text(timeline.rule)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if !session.sources.isEmpty {
+                SourceMarkRow(sources: session.sources.map { .unsigned($0.host) })
+            }
         }
         .accessibilityElement(children: .contain)
     }
 
     private func queryPill(_ query: DummyTimeline) -> some View {
-        let selected = query.id == timelineID
+        let selected = query.id == session.timelineID
         return Button {
-            timelineID = query.id
+            session.timelineID = query.id
         } label: {
             Text(query.name)
                 .font(.subheadline.weight(selected ? .semibold : .regular))
@@ -169,34 +176,10 @@ struct TimelinePane: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
-    private var addQuery: some View {
-        Button {
-            showToast(L10n.t("timeline.add.toast"))
-        } label: {
-            Image(systemName: "plus")
-                .font(.subheadline.weight(.semibold))
-                .frame(width: 28, height: 24)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(ShellChrome.well(colorScheme))
-                )
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(L10n.t("timeline.add"))
-        .help(L10n.t("timeline.add"))
-    }
-
     private var empty: some View {
-        VStack(spacing: 12) {
-            Image("Mascot", bundle: .module)
-                .resizable()
-                .scaledToFit()
-                .frame(maxWidth: 200)
-            Text(L10n.t("timeline.empty"))
-                .font(.body)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(32)
+        ContentUnavailableView(
+            L10n.t(timeline.emptyKey),
+            systemImage: "list.bullet.rectangle"
+        )
     }
 }

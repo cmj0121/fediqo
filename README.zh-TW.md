@@ -52,7 +52,12 @@ Fediqo 是你的時間軸。你加入來源，寫下規則，讀一條依時間�
 `make test` 跑測試。`make -C Apps run` 打開 macOS app。兩者都不需要這份 checkout 以外的東西。
 [`docs/release.md`](docs/release.md) 寫的是那一個需要更多的指令——幫兩個 app 簽名並送到 TestFlight 的那一個。
 
-這份 checkout 還沒有 release tag：mascot，以及一個建得起來的 build。時間軸還沒寫。
+空的啟動會打開帳號頁。加入一個尚未登入的 Mastodon 主機當來源——從目錄挑，或自己輸入主機名稱。
+它會說出協定的名字；這個工作階段只有 Mastodon 能加入。公開與趨勢貼文進到記憶體裡的 store。
+「全部」與「趨勢」是對那個 store 的 query。時間軸、通知與發文在還沒有東西可做之前會停用。
+重新啟動，資料就沒了。沒有 OAuth。
+
+這份 checkout 還沒有 release tag：mascot，以及一個只留在這次工作階段、存在記憶體裡的 Mastodon 來源。
 
 ## 標誌
 

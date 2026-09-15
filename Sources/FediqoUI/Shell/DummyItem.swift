@@ -1,3 +1,4 @@
+import FediqoCore
 import Foundation
 
 /// An item in the dummy store. A `note` or a `thread`, never a protocol row.
@@ -19,6 +20,15 @@ public enum DummyAudience: String, Sendable, Hashable {
         case .unlisted: "moon"
         case .followers: "lock"
         case .mentioned: "at"
+        }
+    }
+
+    init(_ audience: Audience) {
+        switch audience {
+        case .everyone: self = .everyone
+        case .unlisted: self = .unlisted
+        case .followers: self = .followers
+        case .mentioned: self = .mentioned
         }
     }
 }
@@ -61,7 +71,7 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     public let author: String
     public let handle: String?
     public let titleKey: String?
-    public let bodyKey: String
+    public let body: String
     public let boardKey: String?
     public let postedAt: Date
     public let workRelated: Bool
@@ -92,241 +102,44 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     }
 
     public var title: String? { titleKey.map { L10n.t($0) } }
-    public var body: String { L10n.t(bodyKey) }
     public var board: String? { boardKey.map { L10n.t($0) } }
 
-    /// The dummy store. Named queries select from this; they do not fetch.
-    public static let stored: [DummyItem] = [
-        DummyItem(
-            id: "note-public",
-            source: .unsignedPublic,
-            author: "Ada",
-            handle: "@ada@first.example",
-            titleKey: nil,
-            bodyKey: "item.note.public.body",
-            boardKey: nil,
-            postedAt: at(4),
-            workRelated: false,
-            answering: .handle("@you@second.example"),
-            boostedBy: nil,
-            audience: .everyone,
-            hasAvatar: true,
-            hasThumb: false,
-            counts: DummyCounts(replies: 2, reblogs: 1, favourites: 4),
-            marks: DummyMarks(),
-            alsoFrom: []
-        ),
-        DummyItem(
-            id: "note-you-work",
-            source: .signedIn,
-            author: "You",
-            handle: "@you@second.example",
-            titleKey: nil,
-            bodyKey: "item.note.you.work.body",
-            boardKey: nil,
-            postedAt: at(6),
-            workRelated: true,
-            answering: .nothing,
-            boostedBy: nil,
-            audience: .followers,
-            hasAvatar: true,
-            hasThumb: false,
-            counts: DummyCounts(replies: 1, favourites: 2),
-            marks: DummyMarks(kept: true),
-            alsoFrom: [.unsignedPublic]
-        ),
-        DummyItem(
-            id: "note-you-weekend",
-            source: .signedIn,
-            author: "You",
-            handle: "@you@second.example",
-            titleKey: nil,
-            bodyKey: "item.note.you.weekend.body",
-            boardKey: nil,
-            postedAt: at(2),
-            workRelated: false,
-            answering: .nothing,
-            boostedBy: "Ada",
-            audience: .everyone,
-            hasAvatar: true,
-            hasThumb: true,
-            counts: DummyCounts(reblogs: 3, favourites: 9),
-            marks: DummyMarks(favourited: true),
-            alsoFrom: []
-        ),
-        DummyItem(
-            id: "thread-forum-work",
-            source: .forum,
-            author: "Sam",
-            handle: nil,
-            titleKey: "item.thread.forum.work.title",
-            bodyKey: "item.thread.forum.work.body",
-            boardKey: nil,
-            postedAt: at(5),
-            workRelated: true,
-            answering: .somebody,
-            boostedBy: nil,
-            audience: .unlisted,
-            hasAvatar: false,
-            hasThumb: false,
-            counts: DummyCounts(replies: 12, reblogs: 2, favourites: 7),
-            marks: DummyMarks(),
-            alsoFrom: []
-        ),
-        DummyItem(
-            id: "thread-forum-chat",
-            source: .forum,
-            author: "Sam",
-            handle: nil,
-            titleKey: "item.thread.forum.chat.title",
-            bodyKey: "item.thread.forum.chat.body",
-            boardKey: nil,
-            postedAt: at(3),
-            workRelated: false,
-            answering: .nothing,
-            boostedBy: nil,
-            audience: .everyone,
-            hasAvatar: false,
-            hasThumb: true,
-            counts: DummyCounts(replies: 4),
-            marks: DummyMarks(bookmarked: true),
-            alsoFrom: []
-        ),
-        DummyItem(
-            id: "thread-board-weekend",
-            source: .board,
-            author: "Rin",
-            handle: nil,
-            titleKey: "item.thread.board.weekend.title",
-            bodyKey: "item.thread.board.weekend.body",
-            boardKey: "item.board.dev",
-            postedAt: at(7),
-            workRelated: false,
-            answering: .nothing,
-            boostedBy: nil,
-            audience: nil,
-            hasAvatar: false,
-            hasThumb: false,
-            counts: DummyCounts(replies: 8, favourites: 1),
-            marks: DummyMarks(),
-            alsoFrom: []
-        ),
-    ]
+    /// Not the live stream. Named queries do not read this.
+    public static let stored: [DummyItem] = []
 
-    /// Dummy clock relative to first load, so the row can say "xx ago".
-    private static let origin = Date()
-
-    private static func at(_ offset: TimeInterval) -> Date {
-        origin.addingTimeInterval((offset - 8) * 3600)
-    }
-
-    /// One dummy conversation: the way up, this post, then answers indented under it.
+    /// One note as root; conversation fetch is out of this branch.
     public func dummyConversation() -> DummyConversation {
-        DummyConversation(ancestors: dummyAncestor.map { [$0] } ?? [], post: self, descendants: dummyLaidOut())
+        DummyConversation(ancestors: [], post: self, descendants: [])
     }
 
-    public static func named(_ id: String) -> DummyItem? {
-        if let hit = stored.first(where: { $0.id == id }) { return hit }
-        for item in stored {
-            if let hit = item.dummyConversation().inOrder.first(where: { $0.id == id }) {
-                return hit
-            }
-        }
-        return nil
-    }
-
-    /// Dummy replies under this item. Same shape, later in time.
-    public func dummyReplies() -> [DummyItem] {
-        [
-            reply(
-                suffix: "r1",
-                author: "Ada",
-                handle: "@ada@first.example",
-                bodyKey: "item.reply.one.body",
-                later: 900,
-                hasAvatar: true
-            ),
-            reply(
-                suffix: "r2",
-                author: "Sam",
-                handle: nil,
-                bodyKey: "item.reply.two.body",
-                later: 2400,
-                hasAvatar: false
-            ),
-        ]
-    }
-
-    private func reply(
-        suffix: String,
-        author: String,
-        handle: String?,
-        bodyKey: String,
-        later: TimeInterval,
-        hasAvatar: Bool
-    ) -> DummyItem {
-        DummyItem(
-            id: "\(id)-\(suffix)",
-            source: source,
-            author: author,
-            handle: handle,
-            titleKey: nil,
-            bodyKey: bodyKey,
-            boardKey: nil,
-            postedAt: postedAt.addingTimeInterval(later),
-            workRelated: workRelated,
-            answering: handle.map { .handle($0) } ?? .somebody,
-            boostedBy: nil,
-            audience: audience,
-            hasAvatar: hasAvatar,
-            hasThumb: false,
-            counts: DummyCounts(),
-            marks: DummyMarks(),
-            alsoFrom: []
+    public init(_ note: Note) {
+        id = note.id
+        source = DummySource.unsigned(note.source.host)
+        author = note.author
+        handle = note.handle
+        titleKey = nil
+        body = note.body
+        boardKey = nil
+        postedAt = note.postedAt
+        workRelated = false
+        answering = Self.answering(note.reply)
+        boostedBy = note.boostedBy
+        audience = note.audience.map(DummyAudience.init)
+        hasAvatar = note.avatarURL != nil
+        hasThumb = note.previewURL != nil
+        counts = DummyCounts(
+            replies: note.counts.replies,
+            reblogs: note.counts.reblogs,
+            favourites: note.counts.favourites
         )
+        marks = DummyMarks()
+        alsoFrom = []
     }
 
-    private var dummyAncestor: DummyItem? {
-        guard answering != .nothing else { return nil }
-        return DummyItem(
-            id: "\(id)-up",
-            source: source,
-            author: "Ada",
-            handle: "@ada@first.example",
-            titleKey: nil,
-            bodyKey: "item.reply.up.body",
-            boardKey: nil,
-            postedAt: postedAt.addingTimeInterval(-3600),
-            workRelated: workRelated,
-            answering: .nothing,
-            boostedBy: nil,
-            audience: audience,
-            hasAvatar: true,
-            hasThumb: false,
-            counts: DummyCounts(replies: 3),
-            marks: DummyMarks(),
-            alsoFrom: []
-        )
-    }
-
-    private func dummyLaidOut() -> [DummyThreadEntry] {
-        let replies = dummyReplies()
-        guard let first = replies.first, let second = replies.dropFirst().first else {
-            return replies.map { DummyThreadEntry(item: $0, depth: 1) }
-        }
-        let nested = first.reply(
-            suffix: "n",
-            author: "Rin",
-            handle: nil,
-            bodyKey: "item.reply.nested.body",
-            later: 500,
-            hasAvatar: false
-        )
-        return [
-            DummyThreadEntry(item: first, depth: 1),
-            DummyThreadEntry(item: nested, depth: 2),
-            DummyThreadEntry(item: second, depth: 1),
-        ]
+    private static func answering(_ reply: Reply?) -> DummyAnswering {
+        guard let reply else { return .nothing }
+        if let handle = reply.handle { return .handle(handle) }
+        return .somebody
     }
 }
 

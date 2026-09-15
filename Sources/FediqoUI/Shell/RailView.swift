@@ -1,13 +1,13 @@
 import SwiftUI
 
-/// The left bar: places, the account that is this timeline's source, and compose.
+/// The left bar: places, the account (empty until a source is joined), and compose.
 ///
 /// Visual: a milled chassis. Each action is a square well — the slots in the mark —
 /// not a stretched pill. Opening the bar only reveals labels to the right of the well.
 struct RailView: View {
     @Binding var place: ShellPlace
     @Binding var expanded: Bool
-    var currentSource: DummySource
+    var availability: ShellAvailability
     var onCompose: () -> Void
 
     /// Layout numbers. Here rather than as statics on the View: a View's static is
@@ -44,13 +44,17 @@ struct RailView: View {
             .padding(.bottom, Metrics.side)
 
             ForEach(ShellPlace.allCases) { item in
+                let summary = item == .account ? accountSummary : item.summary
+                let hint = availability.reasonKey(for: item).map { L10n.t($0) } ?? summary
                 RailButton(
                     symbol: item.symbolName,
-                    title: item == .account ? accountTitle : item.title,
-                    summary: item == .account ? accountSummary : item.summary,
+                    title: item.title,
+                    summary: summary,
+                    hint: hint,
                     selected: place == item,
                     expanded: expanded,
-                    action: { place = item }
+                    enabled: availability.allows(item),
+                    action: { place = availability.placing(place, as: item) }
                 )
             }
 
@@ -66,8 +70,10 @@ struct RailView: View {
                 symbol: "square.and.pencil",
                 title: L10n.t("compose.title"),
                 summary: L10n.t("compose.summary"),
+                hint: L10n.t(availability.composeHintKey),
                 selected: false,
                 expanded: expanded,
+                enabled: availability.canCompose,
                 action: onCompose
             )
         }
@@ -83,12 +89,8 @@ struct RailView: View {
         }
     }
 
-    private var accountTitle: String {
-        currentSource.account?.displayName ?? currentSource.host
-    }
-
     private var accountSummary: String {
-        currentSource.account?.handle ?? L10n.t("source.unsigned")
+        L10n.t("account.rail.empty")
     }
 }
 
@@ -96,8 +98,10 @@ private struct RailButton: View {
     let symbol: String
     let title: String
     let summary: String
+    var hint: String? = nil
     let selected: Bool
     let expanded: Bool
+    var enabled: Bool = true
     let action: () -> Void
 
     @State private var hovering = false
@@ -121,12 +125,15 @@ private struct RailButton: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(expanded ? summary : "\(title). \(summary)")
+        .disabled(!enabled)
+        .help(expanded ? helpText : "\(title). \(helpText)")
         .accessibilityLabel(title)
-        .accessibilityHint(summary)
+        .accessibilityHint(helpText)
         .accessibilityAddTraits(selected ? .isSelected : [])
         .onHover { hovering = $0 }
     }
+
+    private var helpText: String { hint ?? summary }
 
     private var labels: some View {
         VStack(alignment: .leading, spacing: 1) {

@@ -10,9 +10,15 @@ struct ShellPlaceTests {
         ])
     }
 
-    @Test("Dummy tabs are named queries")
-    func dummyTabs() {
-        #expect(DummyTimeline.shipped.map(\.id) == ["all", "work"])
+    @Test("Empty launch lands on Account")
+    func launchPlaceIsAccount() {
+        #expect(ShellPlace.launch == .account)
+    }
+
+    @Test("Named queries start empty; Work is not shipped")
+    func shippedQueriesAreEmpty() {
+        #expect(DummyTimeline.shipped.isEmpty)
+        #expect(!DummyTimeline.shipped.map(\.id).contains("work"))
     }
 
     @Test("Every place can say what the action is for")
@@ -38,6 +44,10 @@ struct ShellPlaceTests {
         #expect(ShellPlace.timeline.title != "shell.timeline.title")
         #expect(ShellPlace.usage.title != "shell.usage.title")
         #expect(L10n.t("rail.collapse.title") != "rail.collapse.title")
+        #expect(L10n.t("account.rail.empty") != "account.rail.empty")
+        #expect(L10n.t("account.add.title") != "account.add.title")
+        #expect(L10n.t("shell.timeline.disabled") != "shell.timeline.disabled")
+        #expect(L10n.t("compose.disabled.summary") != "compose.disabled.summary")
     }
 
     @Test("Usage is a place, with the statistic bar")
@@ -56,77 +66,92 @@ struct ShellPlaceTests {
     func signedInSource() {
         #expect(DummySource.signedIn.isSignedIn)
         #expect(DummySource.signedIn.account?.handle == "@you@second.example")
-        #expect(DummyTimeline(id: "all").sources.contains { $0.isSignedIn })
-        #expect(DummyTimeline(id: "all").sources.contains { !$0.isSignedIn })
     }
 }
 
-@Suite("The dummy stream")
-struct DummyStreamTests {
-    @Test("All mixes three source shapes")
-    func allMixesShapes() {
-        let kinds = Set(DummyTimeline(id: "all").sources.map(\.kind))
-        #expect(kinds == [.microblog, .forum, .board])
+@Suite("The empty session")
+struct EmptySessionTests {
+    @Test("Timeline and notices rails are not selectable")
+    func timelineAndNoticesAreOff() {
+        let empty = ShellAvailability.empty
+        #expect(!empty.allows(.timeline))
+        #expect(!empty.allows(.notices))
+        #expect(empty.allows(.account))
+        #expect(empty.allows(.usage))
+        #expect(empty.allows(.preferences))
+        #expect(empty.enabledPlaces == [.account, .usage, .preferences])
     }
 
-    @Test("All is notes and threads in time order")
-    func allIsMixedAndTimed() {
-        let items = DummyTimeline(id: "all").items
-        #expect(items.contains { $0.kind == .note })
-        #expect(items.contains { $0.source.kind == .forum })
-        #expect(items.contains { $0.source.kind == .board })
-        #expect(items.map(\.postedAt) == items.map(\.postedAt).sorted(by: >))
-        #expect(items.count == DummyItem.stored.count)
+    @Test("Compose command no-ops without a signed-in source")
+    func composeNoOpsWhenUnsigned() {
+        #expect(DummyCommand.from("c") == .compose)
+        #expect(!ShellAvailability.empty.canCompose)
+        #expect(ShellAvailability.empty.composeHintKey == "compose.disabled.summary")
     }
 
-    @Test("Work is a source subset and a rule")
-    func workFiltersBySourceAndRule() {
-        let work = DummyTimeline(id: "work")
-        #expect(work.sources.map(\.id) == ["second.example", "forum.example"])
-        #expect(work.items.allSatisfy { $0.workRelated })
-        #expect(work.items.allSatisfy { work.sources.contains($0.source) })
-        #expect(work.items.contains { $0.kind == .note })
-        #expect(work.items.contains { $0.kind == .thread })
-        #expect(work.items.count < DummyTimeline(id: "all").items.count)
+    @Test("Place rotate skips disabled")
+    func placeRotateSkipsDisabled() {
+        let empty = ShellAvailability.empty
+        #expect(empty.rotate(from: .account, by: 1) == .usage)
+        #expect(empty.rotate(from: .usage, by: 1) == .preferences)
+        #expect(empty.rotate(from: .preferences, by: 1) == .account)
+        #expect(empty.rotate(from: .account, by: -1) == .preferences)
+        #expect(empty.rotate(from: .timeline, by: 1) == .account)
+        #expect(empty.placing(.account, as: .timeline) == .account)
+        #expect(empty.placing(.account, as: .notices) == .account)
+        #expect(empty.placing(.account, as: .usage) == .usage)
     }
 
-    @Test("A named query can say its rule")
-    func namedQueryHasARule() {
-        #expect(DummyTimeline(id: "all").rule != "timeline.rule.all")
-        #expect(DummyTimeline(id: "work").rule != "timeline.rule.work")
-        #expect(DummyTimeline(id: "all").rule != DummyTimeline(id: "work").rule)
+    @Test("Disabled rail copy is the reason, not a fake host")
+    func disabledReasonsAndEmptyAccount() {
+        let empty = ShellAvailability.empty
+        #expect(empty.reasonKey(for: .timeline) == "shell.timeline.disabled")
+        #expect(empty.reasonKey(for: .notices) == "shell.notices.disabled")
+        #expect(empty.reasonKey(for: .account) == nil)
+        #expect(L10n.t("account.rail.empty", language: .english) == "Add a source")
+        #expect(L10n.t("account.add.title", language: .english) == "Add a source")
+        #expect(
+            L10n.t("account.add.detail", language: .english)
+                == "Pick a Mastodon host from the list, or type its hostname. This session only."
+        )
+        #expect(L10n.t("shell.timeline.disabled", language: .english) == "Add a source on Account first")
+        #expect(L10n.t("shell.notices.disabled", language: .english) == "Notices need a signed-in source")
+        #expect(L10n.t("compose.disabled.summary", language: .english) == "Compose needs a signed-in source")
+        #expect(
+            L10n.t("notices.empty.detail", language: .english)
+                == "Notices need a signed-in source. This session has none."
+        )
     }
 
-    @Test("A thread has an optional title; a note does not")
-    func titleIsOptionalOnTheSameForm() {
-        #expect(DummyItem.stored.filter { $0.kind == .note }.allSatisfy { $0.titleKey == nil })
-        #expect(DummyItem.stored.filter { $0.kind == .thread }.allSatisfy { $0.titleKey != nil })
+    @Test("Timeline enables when All and Trends exist")
+    func timelineEnablesWhenAllAndTrendsExist() {
+        #expect(!ShellAvailability(queryIDs: ["all"]).allows(.timeline))
+        #expect(!ShellAvailability(queryIDs: ["trends"]).allows(.timeline))
+        let ready = ShellAvailability(queryIDs: ["all", "trends"])
+        #expect(ready.allows(.timeline))
+        #expect(!ready.allows(.notices))
+        #expect(!ready.canCompose)
+        let signed = ShellAvailability(queryIDs: ["all", "trends"], signedIn: true)
+        #expect(signed.allows(.notices))
+        #expect(signed.canCompose)
+        #expect(signed.rotate(from: .timeline, by: 1) == .notices)
     }
 
-    @Test("Decorator, visibility and thumb are optional")
-    func rowFactsAreOptional() {
-        #expect(DummyItem.stored.contains { $0.answering != .nothing })
-        #expect(DummyItem.stored.contains { $0.answering == .nothing })
-        #expect(DummyItem.stored.contains { $0.boostedBy != nil })
-        #expect(DummyItem.stored.contains { $0.audience == nil })
-        #expect(DummyItem.stored.contains { $0.hasThumb })
-        #expect(DummyItem.stored.contains { !$0.hasThumb })
-        #expect(DummyItem.stored.contains { !$0.hasAvatar })
-    }
-
-    @Test("Action copy comes from the module")
-    func actionCopyIsTranslated() {
-        #expect(L10n.t("item.act.kept") != "item.act.kept")
-        #expect(L10n.t("item.toast.kept.on") != "item.toast.kept.on")
-        #expect(L10n.t("timeline.add") != "timeline.add")
-    }
-
-    @Test("A merged item names extra hosts as plus-n")
-    func mergedItemHasExtraHosts() {
-        let merged = DummyItem.stored.first { $0.shownHosts.count > 1 }
-        #expect(merged != nil)
-        #expect(merged?.shownHosts == merged?.shownHosts.sorted())
-        #expect(DummyItem.stored.contains { $0.shownHosts.count == 1 })
+    @Test("Dummy stored items are not what All would show")
+    func allIsEmptyWithoutJoin() {
+        #expect(DummyItem.stored.isEmpty)
+        #expect(DummyTimeline(id: "all").emptyKey == "timeline.empty")
+        #expect(DummyTimeline(id: "trends").emptyKey == "timeline.empty.trends")
+        #expect(
+            L10n.t("timeline.empty", language: .english)
+                == "No items yet. Public notes from these sources will land here."
+        )
+        #expect(
+            L10n.t("timeline.empty.trends", language: .english)
+                == "No trending notes yet. Notes that arrived as trending will land here."
+        )
+        #expect(L10n.t("timeline.empty") != L10n.t("timeline.empty.trends"))
+        #expect(L10n.t("timeline.tab.trends", language: .english) == "Trends")
     }
 }
 
@@ -165,8 +190,8 @@ struct DummyCommandTests {
         #expect(DummyCommand.from("\t", shift: true) == .previousTab)
         #expect(DummyCommand.from("\t", control: true) == .nextPage)
         #expect(DummyCommand.from("\t", shift: true, control: true) == .previousPage)
-        #expect(DummyCommand.advanced(["all", "work"], from: "all", by: 1) == "work")
-        #expect(DummyCommand.advanced(["all", "work"], from: "work", by: 1) == "all")
+        #expect(DummyCommand.advanced(["all", "trends"], from: "all", by: 1) == "trends")
+        #expect(DummyCommand.advanced(["all", "trends"], from: "trends", by: 1) == "all")
         #expect(
             DummyCommand.advanced(ShellPlace.allCases, from: .timeline, by: -1) == .preferences
         )
@@ -180,16 +205,16 @@ struct DummyCommandTests {
         #expect(DummyCommand.from("q") == .back)
         #expect(DummyCommand.from("g") == .goTop)
         #expect(DummyCommand.from("g", typing: true) == nil)
+        #expect(DummyCommand.from("j", fieldFocused: true) == nil)
+        #expect(DummyCommand.from("c", fieldFocused: true) == nil)
+        #expect(DummyCommand.from("?", fieldFocused: true) == nil)
+        #expect(DummyCommand.from("\t", fieldFocused: true) == nil)
+        #expect(DummyCommand.from("\u{1B}", fieldFocused: true) == nil)
+        #expect(DummyCommand.from("\r", fieldFocused: true) == nil)
         #expect(DummyCommand.stepped(["a", "b", "c"], from: nil, by: 1) == "a")
         #expect(DummyCommand.stepped(["a", "b", "c"], from: nil, by: -1) == "c")
         #expect(DummyCommand.stepped(["a", "b", "c"], from: "a", by: 1) == "b")
         #expect(DummyCommand.stepped(["a", "b", "c"], from: "c", by: 1) == "c")
-        #expect(DummyItem.stored[0].dummyReplies().count == 2)
-        let conversation = DummyItem.stored[0].dummyConversation()
-        #expect(conversation.inOrder.contains { $0.id == DummyItem.stored[0].id })
-        #expect(conversation.descendants.contains { $0.depth == 2 })
-        #expect(DummyItem.named(conversation.descendants[0].item.id) != nil)
-        #expect(conversation.depth(of: DummyItem.stored[0].id) == conversation.ancestors.count)
         #expect(DummyCommand.consumes("j", did: false))
         #expect(!DummyCommand.consumes(" ", did: false))
     }
@@ -217,5 +242,8 @@ struct DummyPrefsTests {
         #expect(L10n.t("shell.timeline.title", language: .english) == "Timeline")
         #expect(L10n.t("shell.timeline.title", language: .taiwanese) == "時間軸")
         #expect(L10n.t("prefs.fontSize.default", language: .english) == "Default")
+        #expect(L10n.t("account.rail.empty", language: .taiwanese) == "新增來源")
+        #expect(L10n.t("timeline.empty", language: .taiwanese) == "還沒有項目。這些來源的公開貼文會出現在這裡。")
+        #expect(L10n.t("timeline.empty.trends", language: .taiwanese) == "還沒有趨勢項目。以趨勢進來的貼文會出現在這裡。")
     }
 }

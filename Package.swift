@@ -19,6 +19,7 @@ let package = Package(
         ),
         .target(
             name: "FediqoUI",
+            dependencies: ["FediqoCore"],
             resources: [.process("Resources")],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
@@ -29,7 +30,7 @@ let package = Package(
         ),
         .testTarget(
             name: "FediqoUITests",
-            dependencies: ["FediqoUI"],
+            dependencies: ["FediqoUI", "FediqoCore"],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
     ]
