@@ -86,6 +86,119 @@ struct ForumJoinTests {
         }
     }
 
+    // MARK: - The other forum
+
+    private static func discuzHTTP(
+        page: FixtureHTTP.Outcome = .body(Fixtures.html("discuz-x34-guide"))
+    ) -> FixtureHTTP {
+        FixtureHTTP([
+            "/": .body(Fixtures.html("discuz")),
+            "/forum.php": page,
+        ])
+    }
+
+    @Test("A Discuz! forum is detected, read, and added with its threads in the store")
+    func aDiscuzForumJoins() async throws {
+        let store = ItemStore()
+        let http = Self.discuzHTTP()
+        try await SourceJoin(http: http, store: store, catalogues: EmojiCatalogueStore())
+            .join(host: "install-a.example")
+
+        let sources = await store.sources()
+        #expect(sources.map(\.host) == ["install-a.example"])
+        // The source carries what the host actually speaks. A Discuz! and a Discourse are both
+        // forums and are not the same program; the row is drawn from the kind.
+        #expect(sources.first?.kind == .discuz)
+
+        let notes = await store.all()
+        #expect(notes.count == 5)
+        #expect(notes.allSatisfy { $0.title?.isEmpty == false })
+        #expect(notes.contains { $0.board == "缘聚茶楼" })
+
+        // The front page is read once for the detector, and the guide page once for the threads.
+        #expect(await Set(http.paths) == ["/", "/forum.php"])
+        #expect(await http.paths.filter { $0 == "/" }.count == 1)
+    }
+
+    @Test("A challenge page is a refusal, and leaves no source behind that draws nothing")
+    func aChallengedForumIsNotAdded() async throws {
+        // The whole reason the page is read *before* the source is added. A forum that detects
+        // perfectly and then hands back a filter's challenge would otherwise sit in the reader's
+        // list forever, permanently blank, with nothing anywhere saying why.
+        for status in [200, 403] {
+            let store = ItemStore()
+            let http = Self.discuzHTTP(page: .body(Fixtures.html("challenge"), status: status))
+
+            // 403 whatever status it arrived with: a challenge dressed as a 200 reported as a
+            // 200 would tell the reader that it worked.
+            await #expect(throws: JoinError.refused(403)) {
+                try await SourceJoin(http: http, store: store, catalogues: EmojiCatalogueStore())
+                    .join(host: "closed.example")
+            }
+            #expect(await store.sources().isEmpty)
+            #expect(await store.all().isEmpty)
+        }
+    }
+
+    @Test("The forum's own notice page is a refusal too, and is not a spelling mistake")
+    func aRestrictedForumIsNotAdded() async throws {
+        // `install-e.example` answers a signed-out reader with one of these on every board. The
+        // host is fine and so is the address; an account is what would change the answer, which
+        // is exactly what `refused` means and `publicTimelineFailed` does not.
+        let store = ItemStore()
+        let http = Self.discuzHTTP(page: .body(Fixtures.html("discuz-restricted")))
+        await #expect(throws: JoinError.refused(403)) {
+            try await SourceJoin(http: http, store: store, catalogues: EmojiCatalogueStore())
+                .join(host: "install-e.example")
+        }
+        #expect(await store.sources().isEmpty)
+    }
+
+    @Test("A forum that shows this reader no threads is a failed join, not an empty one")
+    func anEmptyForumIsNotAdded() async throws {
+        // Captured from `install-e.example`: a real guide page with an empty table, because a
+        // signed-out reader may read no board there at all.
+        let store = ItemStore()
+        let http = Self.discuzHTTP(page: .body(Fixtures.html("discuz-empty-guide")))
+        await #expect(throws: JoinError.publicTimelineFailed) {
+            try await SourceJoin(http: http, store: store, catalogues: EmojiCatalogueStore())
+                .join(host: "install-e.example")
+        }
+        #expect(await store.sources().isEmpty)
+        #expect(await store.all().isEmpty)
+    }
+
+    @Test("A Discuz! refusal keeps its own number, and a 404 stays a 404")
+    func aDiscuzRefusalIsToldApart() async throws {
+        for status in [401, 403, 429, 503] {
+            let store = ItemStore()
+            let http = Self.discuzHTTP(page: .text("<html>no</html>", status: status))
+            await #expect(throws: JoinError.refused(status)) {
+                try await SourceJoin(http: http, store: store, catalogues: EmojiCatalogueStore())
+                    .join(host: "install-a.example")
+            }
+            #expect(await store.sources().isEmpty)
+        }
+
+        let store = ItemStore()
+        let http = Self.discuzHTTP(page: .text("", status: 404))
+        await #expect(throws: JoinError.publicTimelineFailed) {
+            try await SourceJoin(http: http, store: store, catalogues: EmojiCatalogueStore())
+                .join(host: "install-a.example")
+        }
+    }
+
+    @Test("A forum that cannot be reached at all is not reported as a refusal")
+    func anUnreachableDiscuzIsUnreachable() async throws {
+        let store = ItemStore()
+        let http = Self.discuzHTTP(page: .fail)
+        await #expect(throws: JoinError.unreachable) {
+            try await SourceJoin(http: http, store: store, catalogues: EmojiCatalogueStore())
+                .join(host: "install-a.example")
+        }
+        #expect(await store.sources().isEmpty)
+    }
+
     @Test("A microblog still joins through the same door, and still gets its catalogue")
     func aMicroblogStillJoins() async throws {
         let store = ItemStore()

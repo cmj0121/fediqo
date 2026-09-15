@@ -108,6 +108,17 @@ public enum HTMLKind: Equatable, Sendable {
         // is in the HTML rather than built by script, so it survives a reader with no JavaScript
         // and a fetch that never runs any.
         if matches(labeled, "discourse") { return .named(.discourse) }
+        // Discuz! names itself the same way — `<meta name="generator" content="Discuz! X3.4" />`,
+        // confirmed live on four installs across X3.4, X3.5 and X5.0 — and the tag is in the
+        // markup rather than written by script, so it survives a fetch that runs none.
+        //
+        // **Beside `discourse` rather than anywhere in particular, and that is checked.** The two
+        // names share four letters and neither contains the other, so no ordering between them can
+        // go wrong; the same is true of every other name in this list. `DetectTests` asserts that
+        // for the whole list rather than for this pair, because the hazard is the name added
+        // *next* — the list is only safe while it stays mutually exclusive, and a comment saying
+        // so is not a check.
+        if matches(labeled, "discuz") { return .named(.discuz) }
         if matches(labeled, "mastodon") { return .named(.mastodon) }
         if hasID(html, "mastodon") { return .named(.mastodon) }
         if html.range(of: "joinmastodon.org", options: .caseInsensitive) != nil {
@@ -170,9 +181,27 @@ public struct Detector: Sendable {
         do {
             let (data, _) = try await http.data(from: root)
             htmlTalked = true
-            if let html = String(data: data, encoding: .utf8),
-               case .named(let kind) = HTMLKind.classify(html)
-            {
+            // **Decoded lossily, and that is the correct decode for this one job.** The strict
+            // `String(data:encoding:.utf8)` that stood here returns `nil` for the *entire* page
+            // if a single byte in it is not UTF-8 — not a mangled string somebody might notice,
+            // but nothing at all, after which detection falls through to the probe and reports a
+            // running forum as an unknown protocol.
+            //
+            // That is not a hypothetical. `install-a.example` is a live Discuz! X3.4 whose front
+            // page declares UTF-8 and is UTF-8, apart from a handful of leftover GBK bytes in one
+            // JavaScript comment — and it detected as `.unknown` until this line changed. A
+            // wholly GBK install, which a great many Discuz! still are, fails the same way for a
+            // better reason.
+            //
+            // Lossy is *sufficient* here rather than merely better, and the reason is worth
+            // stating because it is what makes this safe for every protocol and not just the
+            // new one: **every marker `HTMLKind.classify` looks for is ASCII** — the software
+            // names, `joinmastodon.org`, `__misskey_boot__`, the `meta` and `id` patterns — and
+            // UTF-8 decoding never substitutes a replacement character for a byte below 0x80. So
+            // the bytes that matter arrive unchanged, and only the parts nobody reads are
+            // damaged. Guessing an encoding would be the wrong tool: a guess can be wrong, and
+            // this cannot.
+            if case .named(let kind) = HTMLKind.classify(String(decoding: data, as: UTF8.self)) {
                 return kind
             }
         } catch {

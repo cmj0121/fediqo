@@ -15,6 +15,9 @@ public enum ProtocolKind: String, Sendable, Hashable, CaseIterable {
     /// host is "what do you speak", and a forum is an answer to that question — the shape of
     /// what comes back differs, not the question.
     case discourse
+    /// The other forum, and a different program with a different answer to "how do I read you":
+    /// Discourse publishes JSON, Discuz! publishes a page. Same question, same list.
+    case discuz
     case unknown
 
     public var displayName: String {
@@ -29,6 +32,9 @@ public enum ProtocolKind: String, Sendable, Hashable, CaseIterable {
         case .friendica: "Friendica"
         case .gotosocial: "GoToSocial"
         case .discourse: "Discourse"
+        // With the exclamation mark. It is part of the product's name rather than punctuation
+        // this app added, and it is how the software writes itself in its own generator tag.
+        case .discuz: "Discuz!"
         case .unknown: "unknown protocol"
         }
     }

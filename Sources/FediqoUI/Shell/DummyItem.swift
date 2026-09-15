@@ -199,9 +199,17 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// common is that a post is somebody's words. A forum is the other shape: a named discussion
     /// with a section and a count of answers, which the row already knows how to draw as a
     /// thread.
+    ///
+    /// **Both forums, and they are listed rather than defaulted.** Discourse and Discuz! are
+    /// different programs — one publishes JSON and one publishes a page — and the difference is
+    /// entirely behind this line: by here they are both a title, a board and an answer count,
+    /// which is the whole of what `.forum` means. Adding a forum to `ProtocolKind` and not to
+    /// this switch is a silent failure rather than a build error, because the `default` catches
+    /// it: the source joins, the threads arrive, and every one of them is drawn as somebody's
+    /// words with its title nowhere. `DummyItemTests` pins both.
     private static func shape(of kind: ProtocolKind) -> DummySourceKind {
         switch kind {
-        case .discourse: .forum
+        case .discourse, .discuz: .forum
         default: .microblog
         }
     }

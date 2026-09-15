@@ -150,6 +150,69 @@ public struct DiscourseJoin: Sendable {
     }
 }
 
+/// A Discuz! forum joined, and its front page read.
+///
+/// `DiscourseJoin`'s shape exactly, and for the same reason rather than out of symmetry: the host
+/// is asked for the page the reader actually wants **before** the source is added, so a server
+/// that answers the detector and then hands back a challenge, a notice page or markup nobody can
+/// read does not leave a source behind that draws nothing forever.
+///
+/// That reason is stronger here than it was there. Discourse's front page is a documented public
+/// read and five forums in six answer it; Discuz!'s is a page, and `install-e.example` — an
+/// install that detects perfectly — shows a signed-out reader **no threads at all**, on every
+/// board and on the guide page alike. Joining it on the strength of the detection would be
+/// exactly the empty source this ordering exists to prevent.
+///
+/// No catalogue is fetched, for the reason `DiscourseJoin` gives: a forum's emoji are not a
+/// per-server dictionary a client can read, so there is nothing to hold and nothing to clear.
+public struct DiscuzJoin: Sendable {
+    private let http: any HTTPClient
+    private let store: ItemStore
+
+    public init(http: any HTTPClient, store: ItemStore) {
+        self.http = http
+        self.store = store
+    }
+
+    func ingest(host: String) async throws {
+        let source = Source(host: host, kind: .discuz)
+        let client = DiscuzClient(http: http, host: host)
+
+        let threads: [Note]
+        do {
+            threads = try await client.latest(source: source)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as DiscuzRequestError {
+            switch error {
+            // The server answered, and the answer was no. Its own number, kept.
+            case .refused(let status):
+                throw JoinError.refused(status)
+            // **Also a refusal, and it gets 403 whatever status it arrived with.** A challenge
+            // page is a filter turning this app away and is routinely dressed as a 200; the
+            // forum's own notice page is the forum turning this reader away and is *always* a
+            // 200. Reporting either as its literal status would tell the reader "that worked",
+            // and `JoinError.refused` is the one case that says the host is fine, the spelling is
+            // fine, and somebody said no on purpose — which is true of both. 403 is the number
+            // that refusal means, and it is what the reader's message is written from.
+            case .challenged, .restricted:
+                throw JoinError.refused(403)
+            // It answered, and there was no forum front page in it: a 404, bytes in no encoding
+            // this device knows, or a page whose thread table nobody could find. A reader sent to
+            // check their spelling by one of these is being sent to look for a fault that might
+            // well be theirs — which is the distinction `refused` above is protecting.
+            case .noThreads, .http, .invalidURL, .undecodable:
+                throw JoinError.publicTimelineFailed
+            }
+        } catch {
+            throw JoinError.unreachable
+        }
+
+        await store.add(source)
+        await store.ingest(threads)
+    }
+}
+
 /// What a reader's "add a source" actually calls. Asks the host what it speaks, once, and hands
 /// it to whoever reads that.
 ///
@@ -195,6 +258,8 @@ public struct SourceJoin: Sendable {
                 .ingest(host: host)
         case .discourse:
             try await DiscourseJoin(http: http, store: store).ingest(host: host)
+        case .discuz:
+            try await DiscuzJoin(http: http, store: store).ingest(host: host)
         default:
             throw JoinError.unsupportedKind(kind)
         }
