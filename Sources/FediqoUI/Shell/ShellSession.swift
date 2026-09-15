@@ -26,6 +26,8 @@ final class ShellSession {
     var checking = false
     var progressHost = ""
     var refuse: String?
+    /// The Account search field is first responder; dummy keys must not steal its typing.
+    var searchFocused = false
 
     init(http: any HTTPClient, store: ItemStore = ItemStore()) {
         self.http = http

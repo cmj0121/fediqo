@@ -4,6 +4,7 @@ import SwiftUI
 /// Catalog plus a search field. Join is tapping a row; the field only filters.
 struct AccountPane: View {
     @Bindable var session: ShellSession
+    @FocusState private var searchFocused: Bool
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.locale) private var locale
 
@@ -32,6 +33,10 @@ struct AccountPane: View {
         }
         .padding(Metrics.pad)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .onChange(of: searchFocused) { _, on in
+            session.searchFocused = on
+        }
+        .onDisappear { session.searchFocused = false }
         .task { await session.loadCatalog() }
     }
 
@@ -63,6 +68,7 @@ struct AccountPane: View {
             TextField(L10n.t("account.search.placeholder"), text: $session.hostname)
                 .font(.body)
                 .textFieldStyle(.plain)
+                .focused($searchFocused)
                 .disabled(session.checking)
                 .onSubmit { session.search() }
                 #if os(iOS)

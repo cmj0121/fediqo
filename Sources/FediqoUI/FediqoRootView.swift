@@ -54,7 +54,11 @@ public struct FediqoRootView: View {
 
     private func performDummyKey(_ character: Character, shift: Bool, control: Bool) -> Bool {
         guard let command = DummyCommand.from(
-            character, shift: shift, control: control, typing: composing
+            character,
+            shift: shift,
+            control: control,
+            typing: composing,
+            fieldFocused: session.searchFocused
         ) else {
             return false
         }
