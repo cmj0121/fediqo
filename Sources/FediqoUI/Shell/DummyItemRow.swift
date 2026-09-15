@@ -12,15 +12,22 @@ struct DummyItemRow: View {
     @State private var hovering = false
     @Environment(\.colorScheme) private var colorScheme
 
+    /// The row's fittings, in points at the standard type size and scaled from there.
+    /// They used to be fixed: the words grew with the reader's preference and the
+    /// avatar, the thumbnail and every mark stayed exactly where they were, so at the
+    /// largest size a row was big text wrapped around small furniture.
+    ///
+    /// The spine is the same width on every row, so the column beside it never moves.
+    @ScaledMetric(relativeTo: .body) private var gutter: CGFloat = 36
+    @ScaledMetric(relativeTo: .body) private var thumbSide: CGFloat = 96
+    @ScaledMetric(relativeTo: .caption) private var vis: CGFloat = 16
+    @ScaledMetric(relativeTo: .caption) private var glyph: CGFloat = 17
+    @ScaledMetric(relativeTo: .caption) private var countBox: CGFloat = 20
+    /// What a finger gets, whatever the glyph drawn inside it measures.
+    @ScaledMetric(relativeTo: .caption) private var touch: CGFloat = 32
+
     private enum Box {
-        /// The spine. The same width on every row, so the column beside it never moves.
-        static let gutter: CGFloat = 36
-        static let thumb: CGFloat = 96
-        static let vis: CGFloat = 16
-        static let glyph: CGFloat = 17
-        static let count: CGFloat = 20
-        /// What a finger gets, whatever the glyph drawn inside it measures.
-        static let touch: CGFloat = 32
+        /// The lamp is a lamp at every type size, and a corner is a corner.
         static let lamp: CGFloat = 2
         static let plate: CGFloat = 6
     }
@@ -149,7 +156,7 @@ struct DummyItemRow: View {
                     .foregroundStyle(ShellChrome.inkFaint(colorScheme))
             }
         }
-        .frame(width: Box.gutter, height: Box.gutter)
+        .frame(width: gutter, height: gutter)
     }
 
     private var postedAgo: some View {
@@ -175,7 +182,7 @@ struct DummyItemRow: View {
                     .accessibilityLabel(L10n.t("item.visibility.\(audience.rawValue)"))
             }
         }
-        .frame(width: Box.vis, height: Box.vis)
+        .frame(width: vis, height: vis)
     }
 
     private var sourcePills: some View {
@@ -243,7 +250,7 @@ struct DummyItemRow: View {
         if item.hasThumb {
             RoundedRectangle(cornerRadius: Box.plate, style: .continuous)
                 .fill(ShellChrome.well(colorScheme))
-                .frame(width: Box.thumb, height: Box.thumb)
+                .frame(width: thumbSide, height: thumbSide)
                 .overlay {
                     Image(systemName: "photo")
                         .foregroundStyle(ShellChrome.inkFaint(colorScheme))
@@ -297,15 +304,15 @@ struct DummyItemRow: View {
                          action: @escaping () -> Void) -> some View {
         let shown = (count ?? 0) > 0 ? count : nil
         return DummyMarkButton(symbol: symbol, count: shown, labelKey: label,
-                               on: on, quiet: !reading, glyph: Box.glyph,
-                               countWidth: Box.count, touch: Box.touch, action: action)
+                               on: on, quiet: !reading, glyph: glyph,
+                               countWidth: countBox, touch: touch, action: action)
     }
 
     private func mark(_ symbol: String, label: String, on: Bool,
                       action: @escaping () -> Void) -> some View {
         DummyMarkButton(symbol: symbol, count: nil, labelKey: label,
-                        on: on, quiet: !reading, glyph: Box.glyph,
-                        countWidth: Box.count, touch: Box.touch, action: action)
+                        on: on, quiet: !reading, glyph: glyph,
+                        countWidth: countBox, touch: touch, action: action)
     }
 }
 

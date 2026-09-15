@@ -240,7 +240,11 @@ struct DummyPrefsTests {
 
     @Test("Default type is a step above system large")
     func defaultTypeIsLarger() {
-        #expect(DummyFontSize.standard.dynamicType == .xLarge)
+        #expect(DummyFontSize.standard.dynamicType == .xxLarge)
+        // Five steps, and no two of them the same size.
+        #expect(Set(DummyFontSize.allCases.map(\.dynamicType)).count == DummyFontSize.allCases.count)
+        #expect(DummyFontSize.smallest.dynamicType < DummyFontSize.standard.dynamicType)
+        #expect(DummyFontSize.standard.dynamicType < DummyFontSize.largest.dynamicType)
         #expect(DummyFontSize.smallest.dynamicType < DummyFontSize.standard.dynamicType)
         #expect(DummyFontSize.standard.dynamicType < DummyFontSize.largest.dynamicType)
     }

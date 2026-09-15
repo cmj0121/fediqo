@@ -9,8 +9,9 @@ struct ShellNotice: View {
 
     @Environment(\.colorScheme) private var colorScheme
 
+    @ScaledMetric(relativeTo: .title3) private var glyph: CGFloat = 28
+
     private enum Metrics {
-        static let glyph: CGFloat = 28
         /// An empty page is prose. It wraps where a sentence should.
         static let saying: CGFloat = 560
     }
@@ -18,7 +19,7 @@ struct ShellNotice: View {
     var body: some View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
             Image(systemName: symbol)
-                .font(.system(size: Metrics.glyph, weight: .regular))
+                .font(.system(size: glyph, weight: .regular))
                 .foregroundStyle(ShellChrome.inkFaint(colorScheme))
                 .accessibilityHidden(true)
             Text(title)
