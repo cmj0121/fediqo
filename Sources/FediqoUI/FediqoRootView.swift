@@ -18,6 +18,14 @@ public struct FediqoRootView: View {
     @State private var prefs = DummyPrefs()
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
+    /// The same scale every `RemoteImage` on this screen reads, so a wake asks for the keys the
+    /// screen actually holds rather than for a second decode of each of them.
+    @Environment(\.displayScale) private var displayScale
+
+    /// Where the next wake starts scanning. Counts up and is taken modulo what is eligible, so
+    /// the handful a wake asks for is a different handful each time — see
+    /// `stranded(among:scale:from:)` for what goes wrong when it is not.
+    @State private var wakeCursor = 0
 
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -140,7 +148,7 @@ public struct FediqoRootView: View {
         }
     }
 
-    /// Asks again for the pictures that were written off while the network was down.
+    /// Asks again for the pictures on this screen that were written off while the network was down.
     ///
     /// **The cache cannot start this by itself, and that is deliberate.** Every stranded row
     /// re-asks correctly the moment *any* fetch gets through — the arrival clears the whole
@@ -150,9 +158,19 @@ public struct FediqoRootView: View {
     /// glyphs until they scroll. Coming back to the front is an event the stranded cohort cannot
     /// cause itself, which is exactly what the cache's rule about relief asks for.
     ///
-    /// Started together, never awaited one after another: a call site that asks and satisfies in
-    /// the same pass makes each newcomer the most recently wanted thing in the cache and defeats
-    /// admission.
+    /// **Driven from here rather than from inside the cache**, for two reasons that are in
+    /// `stranded(among:scale:)` in full: a `Key` carries no host and a fetch needs one, and a
+    /// wake that reached keys nobody is drawing could mark them `.crowded`, which is terminal.
+    /// This view is the one place that holds both an address and the server it arrived through.
+    ///
+    /// Every address a row can draw is offered, not only the card currently on top of a deck:
+    /// the filter is `.unreachable`, and only an address that was actually fetched and failed
+    /// carries that mark, so what is offered but never drawn cannot be woken.
+    ///
+    /// **Started together, never awaited one after another.** That is not house style, it is the
+    /// two-phase precondition admission rests on: a call site that asks and satisfies in the same
+    /// pass makes each newcomer the most recently wanted thing in the cache, which defeats
+    /// admission entirely. See `ShellPictures`, I5.
     ///
     /// **These are not speculative fetches and may evict.** A stranded key whose row is still on
     /// screen has been re-stamped by `picture(…)` on every body pass since, so it arrives with a
@@ -163,9 +181,22 @@ public struct FediqoRootView: View {
     /// When the emoji catalogue's pictures land they have the same problem and belong on this
     /// line, beside this one.
     private func wakeTheCaches() {
-        for key in ShellPictures.shared.stranded {
+        let cache = ShellPictures.shared
+        let drawn = currentListItems.flatMap { item in
+            ((item.avatarURL.map { [$0] } ?? []) + item.attachments.compactMap(\.displayURL))
+                // The source the post arrived through, which is the only kind of server a Clear
+                // button can ever name. Not the author's home instance — see the avatar in
+                // `DummyItemRow`.
+                .map { DrawnPicture(url: $0, host: item.source.host) }
+        }
+        let woken = cache.stranded(among: drawn, scale: displayScale, from: wakeCursor)
+        // Moved on by what was actually asked for, so the next activation starts where this one
+        // stopped and a handful that keeps failing cannot be the whole of every activation. See
+        // `stranded(among:scale:from:)`.
+        wakeCursor += woken.count
+        for picture in woken {
             Task { @MainActor in
-                await ShellPictures.shared.fetch(key.url, scale: key.scale, tier: key.tier)
+                await cache.fetch(picture.url, scale: displayScale, tier: .deck, host: picture.host)
             }
         }
     }
