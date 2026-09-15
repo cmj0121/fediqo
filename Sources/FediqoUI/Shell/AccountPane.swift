@@ -17,22 +17,22 @@ struct AccountPane: View {
         static let fieldRadius: CGFloat = 6
         static let fieldPad: CGFloat = 10
         static let icon: CGFloat = 18
+        static let float: CGFloat = 0.8
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Metrics.stack) {
+        ZStack {
             if !session.sources.isEmpty {
                 SourceMarkRow(sources: session.sources.map(Self.mark))
+                    .padding(Metrics.pad)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-            Text(L10n.t("account.add.title"))
-                .font(.headline)
-            Text(L10n.t("account.add.detail"))
-                .font(.body)
-                .foregroundStyle(.secondary)
             widget
+                .containerRelativeFrame([.horizontal, .vertical]) { length, _ in
+                    length * Metrics.float
+                }
         }
-        .padding(Metrics.pad)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onChange(of: searchFocused) { _, on in
             session.searchFocused = on
         }
@@ -42,8 +42,15 @@ struct AccountPane: View {
 
     private var widget: some View {
         VStack(alignment: .leading, spacing: 0) {
-            searchField
-                .padding(Metrics.fieldPad)
+            VStack(alignment: .leading, spacing: Metrics.stack) {
+                Text(L10n.t("account.add.title"))
+                    .font(.headline)
+                Text(L10n.t("account.add.detail"))
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                searchField
+            }
+            .padding(Metrics.fieldPad)
             if statusVisible {
                 status
                     .padding(.horizontal, Metrics.fieldPad)
@@ -160,7 +167,7 @@ struct AccountPane: View {
                 }
                 .padding(.horizontal, Metrics.fieldPad)
             }
-            .scrollIndicators(.hidden)
+            .scrollIndicators(.never)
         }
     }
 
