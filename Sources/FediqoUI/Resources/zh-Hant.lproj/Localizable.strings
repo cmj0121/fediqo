@@ -106,6 +106,7 @@
 "item.deck.video" = "一段影片";
 "item.deck.audio" = "一段聲音";
 "item.deck.unknown" = "一個附件";
+"item.deck.play" = "播放";
 "item.covered.title" = "作者把這篇蓋起來了";
 "item.covered.show" = "掀開";
 "item.covered.label" = "按 s 掀開";

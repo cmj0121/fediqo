@@ -188,6 +188,82 @@ struct ShellPicturesTests {
         #expect(cache.picture(url, scale: 2, tier: .deck, host: alpha) == nil)
     }
 
+    // MARK: Letting go of what the viewer was holding
+
+    /// The unit 7 contract counts **held** viewer-tier addresses, and nothing here has a notion
+    /// of a live one. So the viewer has to give its entry back when it stops drawing it, and this
+    /// is what makes the contract true by construction rather than by everybody remembering it.
+    @Test("Closing the viewer lets go of the viewer tier, and only of that")
+    func releaseDropsTheViewerTier() {
+        let cache = ShellPictures()
+        cache.keep(plate, cost: mb, for: key(1, tier: .deck), startedAt: 0, hosts: [alpha])
+        cache.keep(plate, cost: 4 * mb, for: key(1, tier: .viewer), startedAt: 0, hosts: [alpha])
+        cache.keep(plate, cost: 4 * mb, for: key(2, tier: .viewer), startedAt: 0, hosts: [beta])
+        let before = cache.heldBytes
+
+        cache.releaseViewerTier()
+
+        #expect(cache.picture(address(1), scale: 2, tier: .viewer, host: alpha) == nil)
+        #expect(cache.picture(address(2), scale: 2, tier: .viewer, host: beta) == nil)
+        // The deck's thumbnails are what the rows behind the viewer are drawing. They stay.
+        #expect(cache.picture(address(1), scale: 2, tier: .deck, host: alpha) != nil)
+        #expect(cache.heldBytes == before - 8 * mb)
+    }
+
+    /// Every path that admits a picture writes the source set beside it, and every path that
+    /// drops one has to clear it — I10's key sets are the same set or the bound is gone.
+    @Test("Releasing takes the source tags with it")
+    func releaseClearsTheSources() {
+        let cache = ShellPictures()
+        cache.keep(plate, cost: mb, for: key(1, tier: .viewer), startedAt: 0, hosts: [alpha])
+        cache.releaseViewerTier()
+        #expect(cache.sources[key(1, tier: .viewer)] == nil)
+        #expect(cache.sources.isEmpty)
+    }
+
+    /// The third case in the generation rule: a single deliberate drop whose only observer is
+    /// going away. Not the cohort clause — nobody is owed a fresh ask — and not the eviction
+    /// clause either, because it is deliberate. Bumping would tell every visible body to re-ask
+    /// for the benefit of a view that is closing.
+    @Test("Releasing the viewer tier tells nobody")
+    func releaseDoesNotBumpTheGeneration() {
+        let cache = ShellPictures()
+        cache.keep(plate, cost: mb, for: key(1, tier: .viewer), startedAt: 0, hosts: [alpha])
+        let before = cache.generation
+        cache.releaseViewerTier()
+        #expect(cache.generation == before)
+    }
+
+    /// Releasing nothing is not a special case and must stay silent too — the viewer closing
+    /// before its picture ever arrived is the ordinary way out of a slow fetch.
+    @Test("Releasing an empty viewer tier changes nothing")
+    func releaseOfNothing() {
+        let cache = ShellPictures()
+        cache.keep(plate, cost: mb, for: key(1, tier: .deck), startedAt: 0, hosts: [alpha])
+        let bytes = cache.heldBytes
+        let generation = cache.generation
+        cache.releaseViewerTier()
+        #expect(cache.heldBytes == bytes)
+        #expect(cache.generation == generation)
+        #expect(cache.picture(address(1), scale: 2, tier: .deck, host: alpha) != nil)
+    }
+
+    /// The case the tripwire was tripping on: `v`, then `m` three times on a post carrying four
+    /// pictures. Each turn releases, so what is held is what the viewer is drawing, and the
+    /// contract holds however long the reader turns for.
+    @Test("Turning the deck inside the viewer never holds more than the contract allows")
+    func turningInsideTheViewerStaysInsideTheContract() {
+        let cache = ShellPictures()
+        for n in 1...8 {
+            // What `m` does with the viewer open: let go, then draw the next one.
+            cache.releaseViewerTier()
+            cache.keep(plate, cost: 4 * mb, for: key(n, tier: .viewer), startedAt: 0, hosts: [alpha])
+            let held = Set(cache.order.filter { $0.tier == .viewer }.map(\.url))
+            #expect(held.count <= ShellPictures.viewerAddresses)
+            #expect(held.count == 1)
+        }
+    }
+
     // MARK: The key and the tiers
 
     @Test("The same address on two screens is two pictures")
@@ -547,12 +623,19 @@ struct ShellPicturesTests {
     /// drag while unit 7 sat exactly inside its stated budget — three addresses becoming six keys
     /// spends the whole of the slack.
     ///
-    /// Uses the shared cache deliberately: the tripwire is scoped to it, so nothing else can
-    /// reach the branch under test. Reaching the end of this test at all is the assertion — a key
-    /// count traps on the fourth `keep` rather than failing an expectation.
+    /// Reaching the end of this test at all is the assertion — a key count traps on the fourth
+    /// `keep` rather than failing an expectation.
+    ///
+    /// **A cache of its own, and enforcing.** The tripwire is scoped on *intent* — the init
+    /// parameter — rather than on being the shared instance, so a fresh enforcing cache runs
+    /// exactly the same check and leaves nothing behind. This used to take `ShellPictures.shared`
+    /// and park three viewer-tier addresses in it for the rest of the process, which left the
+    /// whole suite one address under a hard trap: global state, zero slack, parallel runner. The
+    /// next test anywhere to add a fourth killed the process — and a trap gives no `✘` and no
+    /// test name, so what it produced was an unattributable red run.
     @Test("Two screens' worth of three addresses does not trip the contract tripwire")
     func tripwireCountsAddressesNotKeys() {
-        let cache = ShellPictures.shared
+        let cache = ShellPictures()
         let cost = ShellPictures.Tier.viewer.ceiling
 
         for n in 0 ..< 3 {

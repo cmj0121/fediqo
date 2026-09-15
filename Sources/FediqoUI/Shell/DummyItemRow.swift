@@ -1,3 +1,4 @@
+import AVKit
 import FediqoCore
 import SwiftUI
 
@@ -20,8 +21,16 @@ struct DummyItemRow: View {
     var top: Int = 0
     /// Whether the reader has taken the author's cover off this row, for this run.
     var lifted: Bool = false
+    /// The app's one player, handed to this row only while this row's card is the thing that is
+    /// playing. Nothing otherwise — including while the viewer is playing the same file over the
+    /// top of it. See `ShellPlayback`.
+    var player: AVPlayer?
     var onSelect: (() -> Void)?
     var onToggleCover: () -> Void = {}
+    /// Starts or stops what is on top of the deck — the mark on the card's own way to the key `a`.
+    var onPlay: () -> Void = {}
+    /// That the playing rectangle has left the screen, which the owner answers by stopping.
+    var onEnded: () -> Void = {}
     var onToast: (String) -> Void
 
     @State private var hovering = false
@@ -552,6 +561,11 @@ struct DummyItemRow: View {
                 // behind the cover, it is the cover lifted for exactly the reader who cannot
                 // lift it back. The notice names what is under there without describing it.
                 .accessibilityHidden(true)
+                // And unpressable. The play mark on the card is a real button, and behind a blur
+                // it would start a film the reader has not agreed to see — the same fault as
+                // reading the alt text out from behind the cover, arriving through the pointer
+                // instead of through the screen reader.
+                .allowsHitTesting(false)
         } else {
             thumb
         }
@@ -702,7 +716,10 @@ struct DummyItemRow: View {
                 top: top,
                 side: thumbSide,
                 host: item.source.host,
-                radius: Box.plate
+                radius: Box.plate,
+                player: player,
+                onPlay: onPlay,
+                onEnded: onEnded
             )
             .frame(width: thumbSide, height: thumbSide)
         } else {

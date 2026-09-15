@@ -107,6 +107,15 @@ enum ShellChrome {
 
     static let scrim = Color.black.opacity(0.55)
 
+    /// The ground a picture is opened on, when `v` gives it the whole app.
+    ///
+    /// Scheme-independent for the reason the pair above is, and then darker than either: what
+    /// sits on it is a photograph, and the one thing a ground behind a photograph must not do is
+    /// look like part of it. Nearly opaque rather than a wash — `ShellChrome.dim` is right behind
+    /// a panel the reader reads *and* keeps the page legible around it, which is exactly what is
+    /// not wanted here.
+    static let behindPicture = Color.black.opacity(0.92)
+
     /// Audience is carried by the glyph. Colour only says how far the post travels:
     /// what anyone can read recedes, what was narrowed to somebody stays legible.
     static func vis(_ audience: DummyAudience, _ scheme: ColorScheme) -> Color {

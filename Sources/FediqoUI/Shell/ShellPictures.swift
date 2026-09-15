@@ -282,6 +282,12 @@ final class ShellPictures {
     /// the view that lost its picture already sees `have` go true→false through `pictures`, which
     /// is observed. Telling every other view as well is what turns one eviction into a storm, and
     /// the storm into a refetch loop.
+    ///
+    /// **And a third case, which is neither**: a single deliberate drop whose only observer is
+    /// going away — `releaseViewerTier()`. It is deliberate, so the eviction clause does not
+    /// cover it; it is one key and nobody is owed a fresh ask, so the cohort clause does not
+    /// either. The test is not "was this deliberate" but "is there a row still on screen that
+    /// needs telling". Written down here rather than left to be guessed at the next call site.
     private(set) var generation = 0
 
     /// A fetch on the wire, and which sources are still waiting on it.
@@ -626,6 +632,41 @@ final class ShellPictures {
             sources.removeValue(forKey: key)
         }
         generation += 1
+    }
+
+    /// Lets go of everything held at viewer tier, when the viewer stops drawing it.
+    ///
+    /// **This is what makes the unit 7 contract hold by construction rather than by discipline.**
+    /// The contract counts *held* viewer-tier addresses, not live ones, and it has to: I2 funds
+    /// what the cache holds, and the declining branch is reachable only when the viewer tier is
+    /// full, which is a fact about held entries. Nothing here has a notion of "live" and acquiring
+    /// one cheaply is the `interest` problem again.
+    ///
+    /// Without this, four addresses arrive at viewer tier from perfectly ordinary use — `v` on
+    /// four posts in turn, or `v` and then three presses of `m` on a post carrying four pictures —
+    /// and the tripwire is right to trip. With it, what is held is what the one open viewer is
+    /// drawing, which is one. The assert stops being the thing standing between unit 7 and
+    /// permanently stranded rows and becomes what an assert should be: a regression tripwire.
+    ///
+    /// **No generation bump**, and the rule on `generation` now names this case. The viewer is
+    /// closing or turning; the deck behind it draws a different key at a different tier. Telling
+    /// every visible body to re-ask would be the storm, for nobody's benefit.
+    ///
+    /// **It cannot livelock.** It frees bytes rather than asking for them, which is the helping
+    /// direction, and it is driven by a reader's own action from outside this cache's loop. It is
+    /// also, precisely, the "deliberate external event the crowded cohort cannot itself cause"
+    /// that `Absence.crowded` names as the one legitimate relief signal. **It does not build that
+    /// relief** — nothing here clears a `.crowded` mark — but this is where it would go.
+    ///
+    /// The `interest` stamps stay, for the reason `forget(host:)` leaves them: I7 forbids a held
+    /// key without a stamp and says nothing about a stamp without a picture, which is the
+    /// ordinary state of every address a row has ever read.
+    func releaseViewerTier() {
+        // Over a copy of the keys, because the body writes back into the map it is walking.
+        for key in Array(pictures.keys) where key.tier == .viewer {
+            if let gone = pictures.removeValue(forKey: key) { heldBytes -= gone.cost }
+            sources.removeValue(forKey: key)
+        }
     }
 
     /// `Source` lowercases the host it holds, and so does this. A picture filed under the

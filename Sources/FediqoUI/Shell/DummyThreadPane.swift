@@ -1,3 +1,4 @@
+import AVKit
 import FediqoCore
 import SwiftUI
 
@@ -13,6 +14,10 @@ struct DummyThreadPane: View {
     @Binding var selectedID: String?
     var marks: (DummyItem) -> Binding<DummyMarks>
     @Binding var decks: ShellDecks
+    /// What is playing, and the one player in the app. See `ShellPlayback`.
+    let playback: ShellPlayback
+    /// A press on a card's own play mark, which the root answers under the same rule as `a`.
+    var onPlayRow: (DummyItem) -> Void
     var jumpToTop: Int
     var onToast: (String) -> Void
     var onBack: () -> Void
@@ -87,14 +92,26 @@ struct DummyThreadPane: View {
             selected: item.id == selectedID,
             top: decks.top(of: item.id, of: item.attachments.count),
             lifted: decks.isLifted(item.id),
+            player: player(of: item),
             onSelect: { selectedID = item.id },
             onToggleCover: { _ = decks.toggleCover(item.id) },
+            onPlay: { onPlayRow(item) },
+            onEnded: { playback.stop() },
             onToast: onToast
         )
         .opacity(dimmed ? 0.85 : 1)
         .padding(.leading, indent(depth))
         .overlay(alignment: .leading) { rail(depth) }
         .id(item.id)
+    }
+
+    /// The player for this row's slot, where this row's card is the thing that is playing.
+    private func player(of item: DummyItem) -> AVPlayer? {
+        playback.player(
+            for: ShellPlaying.playable(decks.showing(item.attachments, of: item.id)),
+            of: item.id,
+            on: .row
+        )
     }
 
     private func indent(_ depth: Int) -> CGFloat {

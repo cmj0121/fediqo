@@ -15,6 +15,15 @@ public struct FediqoRootView: View {
     /// here rather than in the list, because a list is replaced by every refresh and `m` and `s`
     /// are read here.
     @State private var decks = ShellDecks()
+    /// Which post the reader has opened over the app, where there is one.
+    ///
+    /// **The post, not the picture.** Which card is on top lives in `decks`, so a viewer holding
+    /// the post reads the same answer the row does and `m` turns both at once. A viewer holding
+    /// its own index would be a second copy of the deck's position, drifting from the row behind
+    /// it from the first press of `m`.
+    @State private var viewing: String?
+    /// What is playing, and the one `AVPlayer` in the app. See `ShellPlayback`.
+    @State private var playback = ShellPlayback()
     @State private var prefs = DummyPrefs()
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
@@ -42,6 +51,12 @@ public struct FediqoRootView: View {
             .onChange(of: place) { old, new in
                 let accepted = availability.placing(old, as: new)
                 if accepted != new { place = accepted }
+                guard accepted != old else { return }
+                // A picture opened over the timeline is not opened over the account page.
+                _ = closeViewer()
+                // And the film stops — **including one playing in a row**, which is the half
+                // `closeViewer` cannot do, because with a row playing the viewer was never open.
+                playback.stop()
             }
             // The rail and the tab bar both draw only the places that can be entered.
             // If that set ever narrows under the reader — a sign-out, a source
@@ -61,7 +76,24 @@ public struct FediqoRootView: View {
                     ShortcutGuide { showingShortcuts = false }
                 }
             }
+            // Outside the guide's overlay and after it, which is what puts it on top of
+            // everything this view draws. The order of the two `if`s here and the order of
+            // `DummyLayer`'s cases say the same thing, and they have to: one is what a reader
+            // sees in front, the other is what a press to leave takes away.
+            //
+            // **Everything under the viewer leaves the accessibility tree while it is open.**
+            // A plain `.overlay` draws on top and removes nothing, so without this a reader using
+            // VoiceOver, or a focus traversal, could still reach a row's play mark and start a
+            // film behind a ground they can neither see through nor stop — the exact fault
+            // `openViewer` stops playback to avoid, arriving by another route. Applied here so it
+            // covers the guide as well, which the viewer is also allowed to open over.
+            .accessibilityHidden(viewedItem != nil)
+            .overlay { viewer }
             .animation(.easeInOut(duration: 0.18), value: showingShortcuts)
+            .animation(.easeInOut(duration: 0.18), value: viewing)
+            // A viewer whose post the last refresh took away is not a layer any more, and the id
+            // that named it must not survive to spring it open again when the post comes back.
+            .onChange(of: currentListIDs) { _, _ in forgetAVanishedViewer() }
             // On a Mac this is not only a return from the background: `scenePhase` goes
             // `.inactive` whenever the window stops being the key one, so this fires on every
             // regain of focus. That is more often than the outage needs and still far less often
@@ -74,6 +106,15 @@ public struct FediqoRootView: View {
                 performDummyKey(character, shift: shift, control: control)
             }
             .environment(prefs)
+            // **The session, for the panes that are handed no binding.** `PreferencesPane` reads
+            // it out of the environment, and without this it is nil on every real launch — so the
+            // pane draws its empty state and tells a reader who has already joined a server to go
+            // and add one. A pane whose whole purpose is not to say a false thing, saying one.
+            //
+            // A hand-off rather than a local need: this view is the only place that holds the
+            // session, so it is the only place that can put it there. See `PLAN.md`, Cross-worktree
+            // hand-offs.
+            .environment(session)
             .environment(\.locale, prefs.language.locale)
             .preferredColorScheme(prefs.theme.colorScheme)
             .dynamicTypeSize(prefs.fontSize.dynamicType)
@@ -95,6 +136,8 @@ public struct FediqoRootView: View {
     }
 
     private func apply(_ command: DummyCommand) -> Bool {
+        // Before any rule reads `openLayers`, so no press can act on a viewer that is not there.
+        forgetAVanishedViewer()
         switch command {
         case .nextTab:
             return rotateTimelineTab(by: 1)
@@ -115,19 +158,51 @@ public struct FediqoRootView: View {
         case .expandPost:
             return openThread()
         case .nextAttachment:
-            return onFocusedItem { decks.turn($0.id, of: $0.attachments.count) }
+            let inViewer = viewedItem != nil
+            return onActedItem { item in
+                let turned = decks.turn(item.id, of: item.attachments.count)
+                guard turned else { return false }
+                // Sound out of a card the reader has just turned away from is a fault, and so is
+                // a thumbnail still moving after it has stopped being the thumbnail. Only where
+                // something actually turned: a deck of one leaves nothing behind to stop.
+                playback.stop()
+                // And the viewer stops holding the card it has turned away from. Without this,
+                // `v` and three presses of `m` on a post carrying four pictures hold four
+                // addresses at viewer tier, which is the contract broken by ordinary use.
+                if inViewer { ShellPictures.shared.releaseViewerTier() }
+                return true
+            }
         case .liftCover:
-            return onFocusedItem { item in
+            // **Blurs in place and never navigates.** Not "toggle, and also close the viewer if
+            // that leaves nothing to show" — a conditional rule inside the layer order is the
+            // named risk, and the blur at size is what confirms the press took. Two intents, two
+            // keys: `Escape` is still how a reader leaves.
+            return onActedItem { item in
                 guard item.covered else { return false }
                 return decks.toggleCover(item.id)
             }
-        // Named so the guide and the key list are honest; unit 7 gives them something to do.
-        case .viewAttachment, .playAttachment:
-            return false
+        case .viewAttachment:
+            return openViewer()
+        case .playAttachment:
+            return playFocused()
         case .back:
-            return popThread()
+            // `q` leaves what is in front of it and reaches past nothing — the same one
+            // expression of the order `Escape` reads. It used to intersect a local subset of the
+            // layers, which was the order written down a second time.
+            switch DummyCommand.outermost(of: openLayers) {
+            case .viewer: return closeViewer()
+            case .thread: return popThread()
+            default: return false
+            }
         case .showShortcuts:
-            showingShortcuts.toggle()
+            // Closing is always allowed; opening obeys the entry rule, so `?` under an open
+            // viewer does nothing and yields rather than closing the viewer to make room.
+            if showingShortcuts {
+                showingShortcuts = false
+                return true
+            }
+            guard DummyCommand.canOpen(.shortcuts, whenOpen: openLayers) else { return false }
+            showingShortcuts = true
             return true
         case .compose:
             guard availability.canCompose else { return false }
@@ -135,17 +210,172 @@ public struct FediqoRootView: View {
             composing = true
             return true
         case .dismiss:
-            if showingShortcuts {
+            switch DummyCommand.outermost(of: openLayers) {
+            case .viewer: return closeViewer()
+            case .shortcuts:
                 showingShortcuts = false
                 return true
-            }
-            if popThread() { return true }
-            if selectedItemID != nil {
+            case .thread: return popThread()
+            case .selection:
                 selectedItemID = nil
                 return true
+            case nil: return false
             }
-            return false
         }
+    }
+
+    /// What is open, in the order a press to leave takes it away. See `DummyLayer`.
+    private var openLayers: Set<DummyLayer> {
+        Set(DummyLayer.allCases.filter(isOpen))
+    }
+
+    /// Whether one layer is open, answered case by case.
+    ///
+    /// **An exhaustive `switch` over `DummyLayer` rather than a run of `if`s**, and deliberately
+    /// the same shape the suite's harness uses. A run of `if`s lets the product describe a
+    /// smaller world than the test — a layer added later would be silently absent from every set
+    /// this builds, so `outermost` would put the new layer nowhere and `canOpen` would wave it
+    /// through. Written this way, a fifth case stops the app and its harness compiling together
+    /// until both answer it.
+    ///
+    /// The order is still nowhere near here. This says what is open; `DummyLayer.allCases` says
+    /// what is in front of what, and it says it once.
+    private func isOpen(_ layer: DummyLayer) -> Bool {
+        switch layer {
+        case .viewer: viewedItem != nil
+        case .shortcuts: showingShortcuts
+        case .thread: !threadStack.isEmpty
+        case .selection: selectedItemID != nil
+        }
+    }
+
+    /// Opens what is on top of the focused row's deck, over the whole app.
+    ///
+    /// A second `v` while it is open does nothing. `Escape` and `q` are how this is left, and one
+    /// key that both opens and closes a layer is the conditional rule the order above is kept
+    /// free of. The letter is still ours either way — see `DummyCommand.consumes`.
+    private func openViewer() -> Bool {
+        guard viewedItem == nil,
+              DummyCommand.canOpen(.viewer, whenOpen: openLayers) else { return false }
+        return onFocusedItem { item in
+            guard decks.showing(item.attachments, of: item.id) != nil else { return false }
+            // Whatever the row was playing stops. It would go on playing behind an opaque ground
+            // where nobody can see it or stop it, which is the "sound from a row that has scrolled
+            // off" fault arriving by another route.
+            playback.stop()
+            viewing = item.id
+            return true
+        }
+    }
+
+    /// Says whether a viewer a reader could see was closed — and tidies up either way.
+    ///
+    /// The tidying runs on a stale id too, which is what keeps an id left pointing at a post the
+    /// last refresh took away from springing the viewer open again when that post comes back.
+    private func closeViewer() -> Bool {
+        guard viewing != nil else { return false }
+        let wasOpen = viewedItem != nil
+        viewing = nil
+        playback.stop()
+        // The viewer stops drawing, so the cache stops holding what it was drawing. See
+        // `ShellPictures.releaseViewerTier()`: this is what keeps the unit 7 contract true by
+        // construction rather than by everybody remembering it.
+        ShellPictures.shared.releaseViewerTier()
+        return wasOpen
+    }
+
+    /// Drops a viewer whose post the list no longer has.
+    ///
+    /// The drawing half was already safe — `viewedItem` looks up rather than trusts — but the id
+    /// itself has to go too, and `Escape` will not do it: with the post gone the viewer is not a
+    /// layer, so the dismiss resolves to something underneath and never reaches `closeViewer`.
+    private func forgetAVanishedViewer() {
+        if viewing != nil, viewedItem == nil { _ = closeViewer() }
+    }
+
+    /// A press on a card's own play mark, which is the pointer's way to `a`.
+    ///
+    /// **The rule lives here and not in the pane**, so that a mark and the key cannot come to mean
+    /// two different things. On the row that was pressed rather than on the focused one — a
+    /// pointer says which row it means.
+    private func playRow(_ item: DummyItem) {
+        guard viewedItem == nil, !isCovered(item) else { return }
+        let file = ShellPlaying.playable(decks.showing(item.attachments, of: item.id))
+        playback.toggle(file, of: item.id, on: .row)
+    }
+
+    /// The post the viewer is showing, where there is one to show.
+    ///
+    /// **Looked up rather than trusted.** A refresh can take the post away under an open viewer,
+    /// and an id that names nothing would otherwise be a layer that is counted as open, closed by
+    /// `Escape`, and drawn by nobody.
+    private var viewedItem: DummyItem? {
+        guard let viewing else { return nil }
+        return currentListItems.first { $0.id == viewing }
+    }
+
+    /// Starts what is on top, or stops it if it is what is already playing.
+    ///
+    /// The stage is decided here and nowhere else: with the viewer open `a` means the viewer's
+    /// full player, and otherwise the slot's silent one.
+    ///
+    /// **Nothing plays under a cover.** The row is blurred and the viewer draws its notice over
+    /// the picture, so a film started there is one the reader has not agreed to see, playing where
+    /// they cannot see it. `s` first, then `a`.
+    private func playFocused() -> Bool {
+        let stage: ShellPlaying.Stage = viewedItem == nil ? .row : .viewer
+        return onActedItem { item in
+            guard !isCovered(item) else { return false }
+            let file = ShellPlaying.playable(decks.showing(item.attachments, of: item.id))
+            return playback.toggle(file, of: item.id, on: stage)
+        }
+    }
+
+    private func isCovered(_ item: DummyItem) -> Bool {
+        item.covered && !decks.isLifted(item.id)
+    }
+
+    /// The post a press acts on: what the viewer is showing where it is open, and the focused row
+    /// otherwise.
+    ///
+    /// This is the whole of what makes `m`, `a` and `s` mean the same thing with the viewer open.
+    /// The same three keys, on the same post, against the same `decks` — not three keys that have
+    /// learned a second meaning, which is what a viewer with state of its own would have needed.
+    private func onActedItem(_ act: (DummyItem) -> Bool) -> Bool {
+        guard let item = viewedItem else { return onFocusedItem(act) }
+        return act(item)
+    }
+
+    /// What `v` opened, drawn over everything else this view draws.
+    @ViewBuilder
+    private var viewer: some View {
+        if let item = viewedItem {
+            AttachmentViewer(
+                attachments: item.attachments,
+                top: decks.top(of: item.id, of: item.attachments.count),
+                covered: isCovered(item),
+                hasCover: item.covered,
+                coverLine: coverLine(of: item),
+                emojis: item.emojis,
+                host: item.source.host,
+                player: playback.player(
+                    for: ShellPlaying.playable(decks.showing(item.attachments, of: item.id)),
+                    of: item.id,
+                    on: .viewer
+                ),
+                onToggleCover: { _ = apply(.liftCover) },
+                onPlay: { _ = apply(.playAttachment) },
+                onGone: { playback.stop() },
+                onClose: { _ = closeViewer() }
+            )
+        }
+    }
+
+    /// What the author wrote on the cover, or what to say where they flagged it and wrote nothing.
+    /// The same two cases the row draws, because it is the same line.
+    private func coverLine(of item: DummyItem) -> String {
+        let spoiler = item.spoiler ?? ""
+        return spoiler.isEmpty ? L10n.t("item.covered.title") : spoiler
     }
 
     /// Asks again for the pictures on this screen that were written off while the network was down.
@@ -212,6 +442,7 @@ public struct FediqoRootView: View {
         case .nothing:
             return false
         case .first(let id):
+            guard DummyCommand.canOpen(.selection, whenOpen: openLayers) else { return false }
             selectedItemID = id
             return true
         case .post(let item):
@@ -222,6 +453,12 @@ public struct FediqoRootView: View {
     /// j/k and the arrows walk whichever list is in front: the stream, or the open conversation.
     private func moveInList(by step: Int) -> Bool {
         guard place == .timeline, let ids = currentListIDs else { return false }
+        // Entering the selection obeys the entry rule the same as any other layer. Moving an
+        // existing one does not — the lamp is already on, and `j` means move rather than enter.
+        // With a thread or the viewer open the selection is always already on, so in practice
+        // this only ever refuses a first press under the guide.
+        if selectedItemID == nil,
+           !DummyCommand.canOpen(.selection, whenOpen: openLayers) { return false }
         let next = DummyCommand.stepped(ids, from: selectedItemID, by: step)
         guard let next else { return false }
         selectedItemID = next
@@ -258,7 +495,8 @@ public struct FediqoRootView: View {
     }
 
     private func openThread() -> Bool {
-        guard place == .timeline, let selectedItemID else { return false }
+        guard place == .timeline, let selectedItemID,
+              DummyCommand.canOpen(.thread, whenOpen: openLayers) else { return false }
         if threadStack.last == selectedItemID { return false }
         threadStack.append(selectedItemID)
         return true
@@ -346,7 +584,7 @@ public struct FediqoRootView: View {
     private var tabbed: some View {
         TabView(selection: $place) {
             ForEach(availability.enabledPlaces) { item in
-                pageFor(item)
+                placedPage(item)
                     .tabItem { Label(item.title, systemImage: item.symbolName) }
                     .tag(item)
             }
@@ -376,7 +614,7 @@ public struct FediqoRootView: View {
 
     @ViewBuilder
     private var page: some View {
-        pageFor(place)
+        placedPage(place)
     }
 
     @ViewBuilder
@@ -388,6 +626,8 @@ public struct FediqoRootView: View {
                 selectedID: $selectedItemID,
                 openedID: openedThread,
                 decks: $decks,
+                playback: playback,
+                onPlayRow: playRow,
                 jumpToTop: jumpToTop,
                 onPopThread: { _ = threadStack.popLast() }
             )
@@ -396,5 +636,16 @@ public struct FediqoRootView: View {
         case .usage: UsagePane()
         case .preferences: PreferencesPane()
         }
+    }
+
+    /// One page, told whether it is the one the reader is looking at.
+    ///
+    /// **Per page rather than once at the root**, because on a compact `TabView` every tab stays
+    /// alive and a value set above them all would be true in the tab nobody can see. See
+    /// `EnvironmentValues.shellPlaceIsActive`.
+    @ViewBuilder
+    private func placedPage(_ item: ShellPlace) -> some View {
+        pageFor(item)
+            .environment(\.shellPlaceIsActive, item == place)
     }
 }

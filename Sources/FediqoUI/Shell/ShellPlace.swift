@@ -1,3 +1,5 @@
+import SwiftUI
+
 /// A destination in the shell. Compose is not one: it is an action over the current page.
 public enum ShellPlace: String, CaseIterable, Identifiable, Hashable, Sendable {
     case timeline
@@ -96,4 +98,27 @@ struct ShellAvailability: Hashable, Sendable {
     var composeHintKey: String {
         canCompose ? "compose.summary" : "compose.disabled.summary"
     }
+}
+
+/// Whether the subtree being drawn is the place the reader is actually in.
+///
+/// **Decision 20: a picture is fetched only for the place the reader is in.** The bug is larger
+/// than the button that exposed it — on a compact `TabView` every tab stays alive, so a bulk cache
+/// invalidation makes an *invisible* timeline refetch its whole working set: on the order of
+/// fifteen to twenty-five deck-tier pictures, measured at 23 files and 7.6 MB for one server. A
+/// reader sitting in Preferences pays that with no button pressed and nothing on screen.
+///
+/// **A flag and not a `ShellPlace`, and that is the load-bearing detail.** A `RemoteImage` does
+/// not know which pane it is drawn in, so a value naming the active place gives it nothing to
+/// compare against; what a picture needs to know is whether *its own* subtree is the one on
+/// screen. `FediqoRootView` sets it per page, so it is true in exactly one subtree and changes on
+/// every navigation — on the rail and on the tab bar alike, which is what lets a returning tab
+/// re-fire its task.
+///
+/// **The default is `true`, deliberately.** Until the value is provided — in a preview, in a test,
+/// in any host that does not set it — a picture fetches exactly as it does today. A hand-off
+/// degrades to today's behaviour and never to a quietly disabled feature, which is the lesson of
+/// a missing `.environment` turning a pane into a screen that told the reader a false sentence.
+extension EnvironmentValues {
+    @Entry var shellPlaceIsActive: Bool = true
 }

@@ -233,4 +233,30 @@ struct DeckTests {
             #expect(!position.contains("%"))
         }
     }
+
+    // The sheets behind the top card draw the pictures the reader has not turned to yet, so the
+    // one thing that can go wrong silently is the `+ 1`: without it, sheet zero is the card's own
+    // photograph drawn behind itself, which on a deck of two reads as a stack of one picture and
+    // is invisible to anything that only checks a count.
+    @Test("What is under the top card is the next one, never the one already on top")
+    func theSheetsAreTheOnesNotYetTurnedTo() {
+        // Three attachments, nothing turned: the top is 0, so the sheets are 1 then 2 then round.
+        #expect(AttachmentDeck.beneath(0, depth: 0, of: 3) == 1)
+        #expect(AttachmentDeck.beneath(0, depth: 1, of: 3) == 2)
+        #expect(AttachmentDeck.beneath(0, depth: 2, of: 3) == 0)
+
+        // Turned twice, so the top is 2 and the stack wraps rather than walking off the end.
+        #expect(AttachmentDeck.beneath(2, depth: 0, of: 3) == 0)
+        #expect(AttachmentDeck.beneath(2, depth: 1, of: 3) == 1)
+
+        // Turned backwards past zero. `top` is the row's own running count and nothing clamps it,
+        // so a negative one has to fold rather than trap on a subscript.
+        #expect(AttachmentDeck.beneath(-1, depth: 0, of: 3) == 0)
+        #expect(AttachmentDeck.beneath(-4, depth: 0, of: 3) == 0)
+
+        // No sheet is drawn for a deck of one, and none at all for an empty one — the second is
+        // the case that would otherwise index an empty array.
+        #expect(AttachmentDeck.beneath(0, depth: 0, of: 1) == 0)
+        #expect(AttachmentDeck.beneath(0, depth: 0, of: 0) == nil)
+    }
 }

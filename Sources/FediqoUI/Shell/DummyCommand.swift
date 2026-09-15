@@ -94,6 +94,31 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         return .post(item)
     }
 
+    /// Which of what is open a dismissing press closes: the outermost, and only that one.
+    ///
+    /// The order is `DummyLayer.allCases` and nothing else, which is the point of this existing
+    /// at all — the alternative is a run of `if`s in a view, where the order is whatever somebody
+    /// last wrote and cannot be asserted from anywhere.
+    public static func outermost(of open: Set<DummyLayer>) -> DummyLayer? {
+        DummyLayer.allCases.first(where: open.contains)
+    }
+
+    /// Whether a layer may be entered now.
+    ///
+    /// The dual of `outermost`, and deliberately the **same function** rather than a second list:
+    /// a layer may open only if it would then be the outermost one.
+    ///
+    /// A key that would open something underneath what the reader is already looking at is not
+    /// handled and yields. **It does not close the layer above to make room for itself** — that
+    /// is the compound behaviour ruled out for `s` inside the viewer, ruled out here for the same
+    /// reason. Keys do not navigate implicitly.
+    ///
+    /// There is exactly one expression of the layer order in this codebase, and both directions
+    /// read it. A second expression is a bug that has not happened yet.
+    public static func canOpen(_ layer: DummyLayer, whenOpen open: Set<DummyLayer>) -> Bool {
+        outermost(of: open.union([layer])) == layer
+    }
+
     /// Step through a list without wrapping. Nil current picks the first (down) or last (up).
     public static func stepped<T: Equatable>(_ items: [T], from current: T?, by step: Int) -> T? {
         guard !items.isEmpty else { return nil }
@@ -104,6 +129,27 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         guard items.indices.contains(next) else { return current }
         return items[next]
     }
+}
+
+/// What a dismissing press can close, outermost first.
+///
+/// **The order of the cases is the layer order**, which is why they are `CaseIterable` and why
+/// `DummyCommand.outermost` is the only reader of that order. A viewer left open under a popped
+/// thread is the failure this is arranged to make unreachable: the viewer is drawn over the whole
+/// app, so it is what a press to leave has to leave.
+///
+/// The selection is a layer in this sense too. It is not something drawn over anything, but it is
+/// the last thing `Escape` has to give back, and leaving it out of the list would put the rule in
+/// two places again.
+public enum DummyLayer: Hashable, Sendable, CaseIterable {
+    /// What `v` opened, over the whole app.
+    case viewer
+    /// The written-down keys.
+    case shortcuts
+    /// The conversation opened over the stream.
+    case thread
+    /// The lamp on a row.
+    case selection
 }
 
 /// What a press on the focused post has to work with. See `DummyCommand.focused(in:selected:)`.

@@ -1,3 +1,5 @@
+import FediqoCore
+
 /// Which card each row's deck is turned to, and which rows the reader has uncovered.
 ///
 /// **It belongs to the app rather than to the row.** A row is rebuilt every time the list is,
@@ -29,6 +31,16 @@ struct ShellDecks: Equatable, Sendable {
     /// position remembered from the longer version would point past the end of the shorter one.
     func top(of id: String, of count: Int) -> Int {
         AttachmentDeck.folded(turned[id] ?? 0, of: count)
+    }
+
+    /// Which attachment this row's deck is turned to, where it brought any.
+    ///
+    /// **One place decides.** The row draws it, the viewer opens it, and `a` plays it; three
+    /// answers to the same question, and any two of them disagreeing is a reader playing one
+    /// thing and watching another.
+    func showing(_ attachments: [Attachment], of id: String) -> Attachment? {
+        guard !attachments.isEmpty else { return nil }
+        return attachments[top(of: id, of: attachments.count)]
     }
 
     /// Turns one row's deck, and says whether there was anything to turn.

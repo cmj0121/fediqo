@@ -1,3 +1,4 @@
+import AVKit
 import FediqoCore
 import SwiftUI
 
@@ -9,6 +10,11 @@ struct TimelinePane: View {
     /// Where every deck in this pane is turned to, and which rows the reader uncovered. Held by
     /// the app rather than here, because `m` and `s` are pressed where the keys are read.
     @Binding var decks: ShellDecks
+    /// What is playing, and the one player in the app. Read here and written nowhere: the rule
+    /// about what a press means lives beside the key that means it. See `ShellPlayback`.
+    let playback: ShellPlayback
+    /// A press on a card's own play mark, which the root answers under the same rule as `a`.
+    var onPlayRow: (DummyItem) -> Void
     var jumpToTop: Int
     var onPopThread: () -> Void
     @State private var marks: [String: DummyMarks] = [:]
@@ -42,6 +48,8 @@ struct TimelinePane: View {
                     selectedID: $selectedID,
                     marks: markBinding,
                     decks: $decks,
+                    playback: playback,
+                    onPlayRow: onPlayRow,
                     jumpToTop: jumpToTop,
                     onToast: showToast,
                     onBack: onPopThread
@@ -162,8 +170,11 @@ struct TimelinePane: View {
                             selected: item.id == selectedID,
                             top: decks.top(of: item.id, of: item.attachments.count),
                             lifted: decks.isLifted(item.id),
+                            player: player(of: item),
                             onSelect: { selectedID = item.id },
                             onToggleCover: { _ = decks.toggleCover(item.id) },
+                            onPlay: { onPlayRow(item) },
+                            onEnded: { playback.stop() },
                             onToast: showToast
                         )
                         .id(item.id)
@@ -189,6 +200,16 @@ struct TimelinePane: View {
                 }
             }
         }
+    }
+
+    /// The player for this row's slot, where this row's card is the thing that is playing. There
+    /// is at most one in the app, so at most one row ever gets it back.
+    private func player(of item: DummyItem) -> AVPlayer? {
+        playback.player(
+            for: ShellPlaying.playable(decks.showing(item.attachments, of: item.id)),
+            of: item.id,
+            on: .row
+        )
     }
 
     private func markBinding(_ item: DummyItem) -> Binding<DummyMarks> {

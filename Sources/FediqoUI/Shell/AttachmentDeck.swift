@@ -1,3 +1,4 @@
+import AVKit
 import FediqoCore
 import SwiftUI
 
@@ -17,11 +18,18 @@ import SwiftUI
 /// step out of the photograph instead: the card is `side - overhang` and the stack as a whole is
 /// `side`.
 ///
-/// **The picture is scaled to fit and never cut.** The slot is one shape and a photograph is
-/// another, so what is left over is the well colour — `RemoteImage` draws it behind every picture
-/// for exactly this. Cutting it to the square instead would show the middle of somebody's
-/// photograph and call it the photograph; at 96pt that is most of the picture gone. `v` is what
-/// seeing it properly is for.
+/// **The picture fills the slot and is cut to it.** It was fitted at first, on the grounds that
+/// cutting shows the middle of somebody's photograph and calls it the photograph; the reader
+/// overruled that, and the reason is the column rather than the picture — a fitted photograph
+/// leaves the well colour on two sides, and a screenful of rows each with a different band of
+/// empty colour reads as broken rather than as careful. Filling means the **short** edge decides
+/// the scale and the long one is truncated: a tall picture keeps its full width and loses its top
+/// and bottom. What that costs is real — at 96pt most of a tall photograph is off the card — and
+/// `v` is what seeing it properly is for.
+///
+/// **No edge is drawn round any of it.** The hairline that used to separate card from sheet and
+/// sheet from row went with the fitting: it was chrome standing in for a picture, and now there
+/// is a picture in every one of those rectangles to do the separating itself.
 struct AttachmentDeck: View {
     let attachments: [Attachment]
     /// Which one is on top, as the row remembers it. Folded by the count here as well, because
@@ -38,6 +46,18 @@ struct AttachmentDeck: View {
     /// `ShellPictures`, I10.
     let host: String
     var radius: CGFloat = ShellSpace.tight
+
+    /// The app's one player, handed to this slot only while this slot's card is the thing that is
+    /// playing. Nothing covers "nothing is playing", "another row is playing it" and "the viewer
+    /// is playing it over this row" alike, which to a slot are one answer: draw the still.
+    var player: AVPlayer?
+
+    /// Starts or stops the card on top. The slot's own way to the key `a`, for the reader who is
+    /// not holding one.
+    var onPlay: () -> Void = {}
+
+    /// That the playing rectangle has left the screen.
+    var onEnded: () -> Void = {}
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -57,10 +77,10 @@ struct AttachmentDeck: View {
         /// that reads as an edge rather than as a rendering artefact.
         static let leafShare: CGFloat = 0.032
 
-        /// How much fainter each sheet is than the one above it. The sheets are the same colour
-        /// as the card behind them — that is what makes them read as paper rather than as objects
-        /// of their own — so this and the hairline are the whole of what separates one from the
-        /// next.
+        /// How much fainter each sheet is than the one above it. With the hairline gone and a
+        /// real picture in every sheet, this is the whole of what says which one is further down:
+        /// the edge of a photograph at three quarters strength reads as under the one above it
+        /// rather than beside it.
         static let fade: Double = 0.25
     }
 
@@ -111,42 +131,130 @@ struct AttachmentDeck: View {
 
     /// The ones underneath, stepping down and to the right so the stack has a thickness.
     ///
-    /// Drawn as plain cards rather than as their own pictures. What is under the top one is a few
-    /// points of edge that nobody can see anyway, and fetching three more photographs from a
-    /// stranger's server to draw them would be three requests the reader did not ask for.
+    /// **They draw their own pictures.** They were plain cards at first, on the grounds that a
+    /// few points of edge is not worth another request to a stranger's server. The reader
+    /// overruled it, and they were right: a fan of blank cards behind a photograph reads as
+    /// chrome, where what the fan is there to say is that there are more *photographs*.
+    ///
+    /// The cost is bounded and mostly already spent. At most three more deck-tier entries per
+    /// row, and they are the same addresses `m` is about to ask for anyway — so turning the deck
+    /// now draws something the cache is already holding instead of starting a fetch and showing
+    /// a bare plate while it lands.
+    ///
+    /// No alt text, deliberately: these are edges of pictures the reader has not turned to yet,
+    /// and `RemoteImage` keeps an unlabelled picture out of the accessibility tree. What is
+    /// spoken is the card on top and the counter that says how many there are.
     private var sheets: some View {
         ForEach(0..<sheetCount, id: \.self) { depth in
-            RoundedRectangle(cornerRadius: radius, style: .continuous)
-                .fill(ShellChrome.well(colorScheme))
-                .overlay(
-                    RoundedRectangle(cornerRadius: radius, style: .continuous)
-                        .strokeBorder(ShellChrome.hairline(colorScheme))
-                )
-                .opacity(1 - Double(depth) * Card.fade)
-                .frame(width: face, height: face)
-                .offset(x: CGFloat(depth + 1) * leaf, y: CGFloat(depth + 1) * leaf)
+            Group {
+                if let next = beneath(depth) {
+                    RemoteImage(url: next.displayURL, tier: .deck, host: host, radius: radius)
+                } else {
+                    ShellChrome.well(colorScheme)
+                        .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+                }
+            }
+            .frame(width: face, height: face)
+            .opacity(1 - Double(depth) * Card.fade)
+            .offset(x: CGFloat(depth + 1) * leaf, y: CGFloat(depth + 1) * leaf)
         }
+    }
+
+    /// The attachment one step further down the stack than `depth` — what the sheet at that depth
+    /// is an edge of, and what `m` will put on top next.
+    ///
+    /// Folded like everything else that indexes this list, because `top` is the row's own count of
+    /// how many times it has been turned and adding to it walks straight off the end.
+    private func beneath(_ depth: Int) -> Attachment? {
+        guard let at = Self.beneath(top, depth: depth, of: attachments.count) else { return nil }
+        return attachments[at]
+    }
+
+    /// The index `beneath(_:)` reads, as a number, so the off-by-one can be pinned without a view.
+    ///
+    /// The `+ 1` is the whole of it: sheet zero is the *next* one and never the one already on
+    /// top. Getting it wrong draws the card's own picture behind itself, which on a deck of two
+    /// looks like a stack of the same photograph and on a deck of one looks like nothing at all.
+    nonisolated static func beneath(_ top: Int, depth: Int, of count: Int) -> Int? {
+        guard count > 0 else { return nil }
+        return folded(top + depth + 1, of: count)
     }
 
     /// The one on top: the picture, its edge, and which one of how many it is.
     private func card(_ attachment: Attachment) -> some View {
-        RemoteImage(
-            url: attachment.displayURL,
-            // Said, not defaulted. The slot wants a thumbnail; the viewer's tier is unit 7's and
-            // has a contract of at most three addresses at once that a row in a list would break
-            // on its first screen.
-            tier: .deck,
-            host: host,
-            contentMode: .fit,
-            alt: spoken,
-            radius: radius
-        )
+        Group {
+            if let player {
+                // In the rectangle the still was in, so starting and stopping moves nothing else
+                // on the screen — and with no controls, because AVKit's are larger than this
+                // square. What plays here is a moving thumbnail, not a player.
+                AttachmentPlayer(player: player, controls: false, onGone: onEnded)
+                    .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+            } else {
+                RemoteImage(
+                    url: attachment.displayURL,
+                    // Said, not defaulted. The slot wants a thumbnail; the viewer's tier is unit
+                    // 7's and has a contract of at most three addresses at once that a row in a
+                    // list would break on its first screen.
+                    tier: .deck,
+                    host: host,
+                    alt: spoken,
+                    radius: radius
+                )
+            }
+        }
         .frame(width: face, height: face)
-        .overlay(
-            RoundedRectangle(cornerRadius: radius, style: .continuous)
-                .strokeBorder(ShellChrome.hairline(colorScheme))
-        )
         .overlay(alignment: .topTrailing) { counter }
+        .overlay(alignment: .bottomLeading) { playMark(attachment) }
+    }
+
+    /// The mark that says this one plays, and plays it.
+    ///
+    /// **Unit 6 left this out on purpose and the reason has now gone.** A play mark over a still
+    /// that nothing would play is a control that lies, so until `a` did something there was
+    /// nothing honest to draw. What it cost in the meantime was that a video in the slot was
+    /// pixel-identical to a photograph, and only a reader using a screen reader was told which.
+    ///
+    /// A button and not only a mark, for the reason the cover control is one: a control that can
+    /// only be reached from the keyboard is no control at all on a phone, and unit 6 has just
+    /// been fixed for exactly that.
+    ///
+    /// Gone while it plays. What is in the rectangle is moving, which is the whole of what the
+    /// mark was there to promise, and `a` is still how it stops.
+    @ViewBuilder
+    private func playMark(_ attachment: Attachment) -> some View {
+        if player == nil, let symbol = Self.playSymbol(of: attachment) {
+            Button(action: onPlay) {
+                Image(systemName: symbol)
+                    .font(ShellType.mark.weight(.semibold))
+                    .foregroundStyle(ShellChrome.overPicture)
+                    .padding(ShellSpace.tight)
+                    .background(Circle().fill(ShellChrome.scrim))
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .padding(ShellSpace.tight)
+            .help(L10n.t("item.deck.play"))
+            .accessibilityLabel(L10n.t("item.deck.play"))
+        }
+    }
+
+    /// Which mark a kind of attachment gets, and which gets none.
+    ///
+    /// A video and an audio clip get one. **An image gets none** — it is a picture and it looks
+    /// like one, and a label saying so is a label about nothing. **`unknown` gets none either**:
+    /// a question mark over somebody's photograph claims to know something about it that nobody
+    /// told us, and what the server actually said is that it did not say.
+    ///
+    /// And nothing at all where there is no file behind the still, which is `isPlayable`'s second
+    /// half. A mark offering to play something this app cannot play is the lie again, arriving
+    /// from the other side.
+    nonisolated static func playSymbol(of attachment: Attachment) -> String? {
+        guard attachment.isPlayable else { return nil }
+        switch attachment.kind {
+        case .video: return "play.fill"
+        case .audio: return "waveform"
+        case .image, .unknown: return nil
+        }
     }
 
     /// Which one of how many, on the card rather than under it. The slot is exactly the card and
