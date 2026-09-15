@@ -93,12 +93,14 @@
 "item.visibility.mentioned" = "Mentioned";
 "item.act.reply" = "Reply";
 "item.act.reblog" = "Reblog";
+"item.act.quote" = "Quote";
 "item.act.favourite" = "Favourite";
 "item.act.bookmark" = "Bookmark";
 "item.act.kept" = "Kept";
 "item.act.more" = "More";
 "item.toast.reply" = "Reply stays on this device.";
 "item.toast.reblog" = "Reblog stays on this device.";
+"item.toast.quote" = "A quote opens the composer. Not this session.";
 "item.toast.favourite.on" = "Favourited, on this device.";
 "item.toast.favourite.off" = "Favourite cleared.";
 "item.toast.bookmark.on" = "Bookmarked, dummy.";

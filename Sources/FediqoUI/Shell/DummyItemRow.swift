@@ -262,6 +262,9 @@ struct DummyItemRow: View {
                         label: "item.act.reblog", on: false) {
                     onToast(L10n.t("item.toast.reblog"))
                 }
+                mark("quote.bubble", label: "item.act.quote", on: false) {
+                    onToast(L10n.t("item.toast.quote"))
+                }
                 counted(marks.favourited ? "star.fill" : "star",
                         count: item.counts.favourites,
                         label: "item.act.favourite", on: marks.favourited) {

@@ -93,12 +93,14 @@
 "item.visibility.mentioned" = "被提到的人";
 "item.act.reply" = "回覆";
 "item.act.reblog" = "轉發";
+"item.act.quote" = "引用";
 "item.act.favourite" = "收藏";
 "item.act.bookmark" = "書籤";
 "item.act.kept" = "留下";
 "item.act.more" = "更多";
 "item.toast.reply" = "回覆只在這台機器上。";
 "item.toast.reblog" = "轉發只在這台機器上。";
+"item.toast.quote" = "引用會開啟編輯器。這次工作階段還不行。";
 "item.toast.favourite.on" = "已收藏，在這台機器上。";
 "item.toast.favourite.off" = "已取消收藏。";
 "item.toast.bookmark.on" = "已加書籤，dummy。";
