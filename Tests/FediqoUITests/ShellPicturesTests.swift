@@ -82,36 +82,57 @@ struct ShellPicturesTests {
         }
     }
 
-    /// Answers slowly enough that more requests arrive than the gate will pass, so the queued
-    /// path is the one under test.
-    private actor Slow: HTTPClient {
-        private var current = 0
-        private(set) var peak = 0
-        private let png: Data
+    /// A barrier a test opens by hand. `opened` is checked **before** waiting, so a caller that
+    /// arrives after the gate is open does not park on a continuation nobody will resume.
+    private actor Gate {
+        private var waiting: [CheckedContinuation<Void, Never>] = []
+        private var opened = false
 
-        init(png: Data) { self.png = png }
+        func wait() async {
+            guard !opened else { return }
+            await withCheckedContinuation { waiting.append($0) }
+        }
 
-        func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
-            current += 1
-            peak = max(peak, current)
-            try? await Task.sleep(nanoseconds: 3_000_000)
-            current -= 1
-            return (png, Flaky.ok(url))
+        func open() {
+            opened = true
+            for continuation in waiting { continuation.resume() }
+            waiting = []
         }
     }
 
-    /// Records how many requests were in the air at once.
-    private actor Gauge: HTTPClient {
+    /// Holds every request open until the gate is opened, so "these fetches were all still in the
+    /// air" is a fact the test arranges rather than a race it hopes to win.
+    private actor Holding: HTTPClient {
         private var current = 0
         private(set) var peak = 0
         private let png: Data
+        private let gate: Gate
 
-        init(png: Data) { self.png = png }
+        private var awaited: Int?
+        private var arrival: CheckedContinuation<Void, Never>?
+
+        init(png: Data, gate: Gate) {
+            self.png = png
+            self.gate = gate
+        }
+
+        /// Returns once `n` requests are simultaneously parked at the gate. A barrier rather than
+        /// a sleep: on a starved machine this takes longer and still means the same thing.
+        func whenHolding(_ n: Int) async {
+            guard current < n else { return }
+            awaited = n
+            await withCheckedContinuation { arrival = $0 }
+        }
 
         func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
             current += 1
             peak = max(peak, current)
-            try? await Task.sleep(nanoseconds: 2_000_000)
+            if let target = awaited, current >= target, let waiter = arrival {
+                awaited = nil
+                arrival = nil
+                waiter.resume()
+            }
+            await gate.wait()
             current -= 1
             return (png, Flaky.ok(url))
         }
@@ -394,20 +415,50 @@ struct ShellPicturesTests {
         let rows = 8
         let passes = 8
 
-        // Every request sleeps, so with `maxInFlight` at four most of them wait and arrivals
-        // land well after the pass that commissioned them.
-        let slow = Slow(png: png)
-        let queued = ShellPictures(http: slow, enforcingViewerContract: false)
-        await drive(queued, rows: rows, passes: passes)
+        // Every request is held open until this test opens the gate, so "the passes overlapped"
+        // is arranged rather than hoped for. It used to be a 3ms sleep, which is a bet that the
+        // machine will schedule this test often enough — and under CPU starvation that bet loses:
+        // the sleeps stop holding anything, every fetch lands inside the pass that commissioned
+        // it, the cache never overflows, and nothing is declined. Measured 4 red in 14 runs under
+        // a 12-way load. A timing stand-in for a barrier is the same defect as a bounded spin.
+        let gate = Gate()
+        let holding = Holding(png: png, gate: gate)
+        let queued = ShellPictures(http: holding, enforcingViewerContract: false)
 
-        // **Pin the premise, not only the conclusion.** Without this, raising `maxInFlight` or
-        // trimming the sleep leaves a green test that runs the direct path twice and compares it
-        // to itself.
-        #expect(await slow.peak == ShellPictures.maxInFlight)
+        // Nothing can land while this runs, so every pass is commissioned against a cache that
+        // is still empty.
+        let outstanding = await commission(queued, rows: rows, passes: passes)
 
-        // The same screen with nothing to wait for.
+        // **Pin the premise the conclusion rests on, in a form that fails when it is false.**
+        // The old pin — `peak == maxInFlight` — passed in every one of the red runs: the gate
+        // had genuinely queued, the passes simply had not overlapped. Those are different facts
+        // and only this one is what the test is about.
+        #expect(
+            queued.order.isEmpty,
+            "a fetch landed while passes were still being commissioned; they did not overlap"
+        )
+        #expect(await holding.peak == ShellPictures.maxInFlight)
+
+        // A watchdog, not a timeout: twenty seconds because it only has to beat the job limit,
+        // and a quick one buys nothing while costing false failures on a loaded machine — at
+        // five seconds the equivalent guard elsewhere opened before a starved body reached the
+        // line it was gating.
+        let rescued = Signal()
+        let watchdog = Task {
+            try? await Task.sleep(for: .seconds(20))
+            guard !Task.isCancelled else { return }
+            rescued.fired = true
+            await gate.open()
+        }
+
+        await gate.open()
+        for task in outstanding { await task.value }
+        watchdog.cancel()
+        #expect(!rescued.fired, "the watchdog opened the gate; the test never got there itself")
+
+        // The same screen with nothing to wait for, each pass drained before the next.
         let direct = ShellPictures(http: Counting(png: png), enforcingViewerContract: false)
-        await drive(direct, rows: rows, passes: passes)
+        await drivePromptly(direct, rows: rows, passes: passes)
 
         let crowdedWhenQueued = queued.missing.values.filter { $0 == .crowded }.count
         let crowdedWhenDirect = direct.missing.values.filter { $0 == .crowded }.count
@@ -425,9 +476,15 @@ struct ShellPicturesTests {
         #expect(direct.heldBytes <= ShellPictures.budget)
     }
 
-    /// Passes overlap: a pass starts without waiting for the previous one's fetches, which is
-    /// what lets an arrival land several passes after it was commissioned.
-    private func drive(_ cache: ShellPictures, rows: Int, passes: Int) async {
+    /// Commissions every pass without letting any of them be satisfied, and hands back the work
+    /// for the caller to drain once it has opened the gate. Splitting commissioning from draining
+    /// is what makes the overlap structural: with the client held shut, no arrival can race the
+    /// loop no matter how little CPU this test is given.
+    private func commission(
+        _ cache: ShellPictures,
+        rows: Int,
+        passes: Int
+    ) async -> [Task<Void, Never>] {
         var outstanding: [Task<Void, Never>] = []
         for _ in 0 ..< passes {
             var absent: [URL] = []
@@ -441,7 +498,31 @@ struct ShellPicturesTests {
             }
             await Task.yield()
         }
-        for task in outstanding { await task.value }
+        return outstanding
+    }
+
+    /// The other half of the comparison: every pass commissioned and then **fully drained**
+    /// before the next begins, so a fetch always lands in the pass that asked for it.
+    ///
+    /// Drained rather than yielded to. The version this replaces relied on `Task.yield()` to let
+    /// passes overlap, which is the same timing bet as the sleep it sat beside — under load the
+    /// fetches completed inline, the run degenerated into the interleaved shape I5b documents,
+    /// and it declined nothing. That produced the mirror image of the failure this test is named
+    /// for: `crowdedWhenDirect → 0`, measured, in the same stress runs.
+    private func drivePromptly(_ cache: ShellPictures, rows: Int, passes: Int) async {
+        for _ in 0 ..< passes {
+            var absent: [URL] = []
+            for n in 0 ..< rows where cache.picture(address(n), scale: 2, tier: .viewer) == nil {
+                absent.append(address(n))
+            }
+            var running: [Task<Void, Never>] = []
+            for url in absent {
+                running.append(Task { @MainActor in
+                    await cache.fetch(url, scale: 2, tier: .viewer)
+                })
+            }
+            for task in running { await task.value }
+        }
     }
 
     /// The tripwire counts **addresses**, which is what unit 7's contract limits, not keys.
@@ -746,9 +827,17 @@ struct ShellPicturesTests {
 
     // MARK: I6 — how much can be in the air at once
 
+    /// Both halves structurally rather than by timing. `whenHolding` returns only once the gate
+    /// has admitted everything it will ever admit at once, so the lower bound is a fact this test
+    /// waits for; the upper bound is then whatever the counter reached across the whole run.
+    ///
+    /// It used to assert `peak > 1` after letting every request sleep for 2ms, which is the same
+    /// "usually enough" promise as the sleep that made the queued test flaky — it survived a
+    /// 12-way load here, but only because the margin happened to be wide.
     @Test("No more than a handful of bodies are ever resident at once")
     func boundedInFlight() async throws {
-        let http = Gauge(png: try picture(width: 32, height: 32, bits: 8))
+        let gate = Gate()
+        let http = Holding(png: try picture(width: 32, height: 32, bits: 8), gate: gate)
         let cache = ShellPictures(http: http)
 
         // Started together rather than one after another, so the gate has something to hold back.
@@ -759,10 +848,25 @@ struct ShellPicturesTests {
                 await cache.fetch(url, scale: 2, tier: .deck)
             })
         }
-        for task in started { await task.value }
 
-        #expect(await http.peak <= ShellPictures.maxInFlight)
-        #expect(await http.peak > 1)
+        let rescued = Signal()
+        let watchdog = Task {
+            try? await Task.sleep(for: .seconds(20))
+            guard !Task.isCancelled else { return }
+            rescued.fired = true
+            await gate.open()
+        }
+
+        // Twenty-four asked for at once, and exactly `maxInFlight` are ever held at once.
+        await http.whenHolding(ShellPictures.maxInFlight)
+        #expect(await http.peak == ShellPictures.maxInFlight)
+
+        await gate.open()
+        for task in started { await task.value }
+        watchdog.cancel()
+
+        #expect(!rescued.fired, "the watchdog opened the gate; the test never got there itself")
+        #expect(await http.peak == ShellPictures.maxInFlight)
         #expect(cache.inFlight.isEmpty)
     }
 
