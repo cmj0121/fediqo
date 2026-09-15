@@ -12,6 +12,11 @@ import UniformTypeIdentifiers
 /// it will decode, what it throws away, what it declines outright, and which kinds of nothing it
 /// remembers. Every fetch goes through an injected `HTTPClient`, so nothing here reaches the
 /// network.
+///
+/// The tests that build a cache with `enforcingViewerContract: false` hold more viewer-tier
+/// addresses than unit 7 is allowed to, on purpose: six keys is where admission can first decline
+/// anything, so exceeding the contract is the only way to reach the branch under test. Saying so
+/// at the call site is the point — an exemption that has to be typed is one a reviewer can see.
 @MainActor
 @Suite("Pictures")
 struct ShellPicturesTests {
@@ -80,12 +85,17 @@ struct ShellPicturesTests {
     /// Answers slowly enough that more requests arrive than the gate will pass, so the queued
     /// path is the one under test.
     private actor Slow: HTTPClient {
+        private var current = 0
+        private(set) var peak = 0
         private let png: Data
 
         init(png: Data) { self.png = png }
 
         func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
+            current += 1
+            peak = max(peak, current)
             try? await Task.sleep(nanoseconds: 3_000_000)
+            current -= 1
             return (png, Flaky.ok(url))
         }
     }
@@ -163,11 +173,28 @@ struct ShellPicturesTests {
         #expect(cache.order.count == 2)
     }
 
-    /// I2 — the budget has to hold the whole of what a screen can legitimately want, or the
-    /// declining branch starts firing during ordinary use.
-    @Test("The budget holds at least six of the largest thing that can be decoded")
-    func budgetClearsSixViewers() {
-        #expect(ShellPictures.budget >= 6 * ShellPictures.Tier.viewer.ceiling)
+    /// I2 — the budget must fund every **key** the contract's **addresses** can produce, and the
+    /// factor between them is display scale: dragging a window between a 2× and a 1× display
+    /// holds both decodes of every address until the stale-scale keys are evicted.
+    ///
+    /// Written as a derivation rather than a constant. The old form asserted `budget >= 6 ×
+    /// ceiling` and justified the six as headroom over the three the app shows; it was
+    /// accidentally right, because six *is* three addresses at two scales and there was no
+    /// headroom in it at all. Raising `viewerAddresses` without raising the budget now fails
+    /// here rather than stranding rows in the app.
+    @Test("The budget funds every key the contract's addresses can produce")
+    func budgetFundsTheContract() {
+        let scales = 2
+        #expect(
+            ShellPictures.budget
+                >= scales * ShellPictures.viewerAddresses * ShellPictures.Tier.viewer.ceiling
+        )
+        // At the contract limit the margin is exactly zero, not two-fold: a scale change fills
+        // the viewer tier completely. Safe, because full is not declining — but nothing spare.
+        #expect(
+            ShellPictures.budget / ShellPictures.Tier.viewer.ceiling
+                == scales * ShellPictures.viewerAddresses
+        )
     }
 
     @Test("A tier is a decode budget, and there are only two of them")
@@ -264,7 +291,7 @@ struct ShellPicturesTests {
         arguments: [7, 8, 9, 12]
     )
     func crowdedScreenSettles(rows: Int) {
-        let cache = ShellPictures()
+        let cache = ShellPictures(enforcingViewerContract: false)
         let cost = ShellPictures.Tier.viewer.ceiling
         var asked = 0
         var seen: [Int] = []
@@ -310,7 +337,7 @@ struct ShellPicturesTests {
         arguments: [7, 8, 9, 12]
     )
     func interleavedIsNotGuaranteed(rows: Int) {
-        let cache = ShellPictures()
+        let cache = ShellPictures(enforcingViewerContract: false)
         let cost = ShellPictures.Tier.viewer.ceiling
         var asked = 0
 
@@ -335,7 +362,7 @@ struct ShellPicturesTests {
     func crowdedScreenSettlesThroughFetches() async throws {
         let wide = ShellPictures.Tier.viewer.maxPixels
         let http = Counting(png: try picture(width: wide, height: wide, bits: 8))
-        let cache = ShellPictures(http: http)
+        let cache = ShellPictures(http: http, enforcingViewerContract: false)
         let rows = 8
 
         for _ in 0 ..< 4 {
@@ -369,11 +396,17 @@ struct ShellPicturesTests {
 
         // Every request sleeps, so with `maxInFlight` at four most of them wait and arrivals
         // land well after the pass that commissioned them.
-        let queued = ShellPictures(http: Slow(png: png))
+        let slow = Slow(png: png)
+        let queued = ShellPictures(http: slow, enforcingViewerContract: false)
         await drive(queued, rows: rows, passes: passes)
 
+        // **Pin the premise, not only the conclusion.** Without this, raising `maxInFlight` or
+        // trimming the sleep leaves a green test that runs the direct path twice and compares it
+        // to itself.
+        #expect(await slow.peak == ShellPictures.maxInFlight)
+
         // The same screen with nothing to wait for.
-        let direct = ShellPictures(http: Counting(png: png))
+        let direct = ShellPictures(http: Counting(png: png), enforcingViewerContract: false)
         await drive(direct, rows: rows, passes: passes)
 
         let crowdedWhenQueued = queued.missing.values.filter { $0 == .crowded }.count
@@ -411,9 +444,40 @@ struct ShellPicturesTests {
         for task in outstanding { await task.value }
     }
 
+    /// The tripwire counts **addresses**, which is what unit 7's contract limits, not keys.
+    ///
+    /// A key carries the screen's scale, so dragging a window from a 2× display to a 1× one gives
+    /// every address a second key at the same tier. Counting keys would trap on that ordinary
+    /// drag while unit 7 sat exactly inside its stated budget — three addresses becoming six keys
+    /// spends the whole of the slack.
+    ///
+    /// Uses the shared cache deliberately: the tripwire is scoped to it, so nothing else can
+    /// reach the branch under test. Reaching the end of this test at all is the assertion — a key
+    /// count traps on the fourth `keep` rather than failing an expectation.
+    @Test("Two screens' worth of three addresses does not trip the contract tripwire")
+    func tripwireCountsAddressesNotKeys() {
+        let cache = ShellPictures.shared
+        let cost = ShellPictures.Tier.viewer.ceiling
+
+        for n in 0 ..< 3 {
+            for scale in [CGFloat(2), CGFloat(1)] {
+                cache.keep(
+                    plate,
+                    cost: cost,
+                    for: ShellPictures.Key(url: address(900 + n), scale: scale, tier: .viewer),
+                    startedAt: cache.clock + 1
+                )
+            }
+        }
+
+        let addresses = Set(cache.order.filter { $0.tier == .viewer }.map(\.url))
+        #expect(addresses.count == 3)
+        #expect(cache.order.count(where: { $0.tier == .viewer }) == 6)
+    }
+
     @Test("Scrolling still evicts rather than declining")
     func scrollingEvicts() {
-        let cache = ShellPictures()
+        let cache = ShellPictures(enforcingViewerContract: false)
         let cost = ShellPictures.Tier.viewer.ceiling
         var asked = 0
 
@@ -454,7 +518,7 @@ struct ShellPicturesTests {
         arguments: [7, 8]
     )
     func narrowObservationIsNotGuaranteed(rows: Int) {
-        let cache = ShellPictures()
+        let cache = ShellPictures(enforcingViewerContract: false)
         let cost = ShellPictures.Tier.viewer.ceiling
         let fits = ShellPictures.budget / cost
 
@@ -506,7 +570,7 @@ struct ShellPicturesTests {
         let cost = ShellPictures.Tier.viewer.ceiling
         let newcomer = key(99, tier: .viewer)
 
-        let asked = ShellPictures()
+        let asked = ShellPictures(enforcingViewerContract: false)
         for n in 0 ..< 6 {
             asked.keep(plate, cost: cost, for: key(n, tier: .viewer), startedAt: 0)
         }
@@ -516,7 +580,7 @@ struct ShellPicturesTests {
         #expect(asked.picture(address(99), scale: 2, tier: .viewer) != nil)
         #expect(asked.order.count == 6)
 
-        let speculative = ShellPictures()
+        let speculative = ShellPictures(enforcingViewerContract: false)
         for n in 0 ..< 6 {
             speculative.keep(plate, cost: cost, for: key(n, tier: .viewer), startedAt: 0)
         }
@@ -531,7 +595,7 @@ struct ShellPicturesTests {
     /// Declining frees nothing and signals nothing: there is no relief path left to reach.
     @Test("Declining is silent")
     func decliningIsSilent() {
-        let cache = ShellPictures()
+        let cache = ShellPictures(enforcingViewerContract: false)
         let cost = ShellPictures.Tier.viewer.ceiling
         for n in 0 ..< 6 {
             cache.keep(plate, cost: cost, for: key(n, tier: .viewer), startedAt: 0)
@@ -598,7 +662,7 @@ struct ShellPicturesTests {
 
     @Test("Ordinary eviction leaves the generation alone")
     func evictionIsSilent() {
-        let cache = ShellPictures()
+        let cache = ShellPictures(enforcingViewerContract: false)
         let cost = ShellPictures.Tier.viewer.ceiling
         for n in 0 ..< 6 {
             cache.keep(plate, cost: cost, for: key(n, tier: .viewer), startedAt: cache.clock)
