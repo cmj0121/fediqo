@@ -44,10 +44,9 @@ struct DummyItemRow: View {
         if selected {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(ShellChrome.floatFill(colorScheme))
-                .shadow(color: ShellChrome.floatShadow(colorScheme), radius: 14, y: 6)
                 .overlay(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .strokeBorder(ShellChrome.phosphor(colorScheme).opacity(0.32), lineWidth: 1)
+                        .strokeBorder(ShellChrome.phosphor(colorScheme).opacity(0.32), lineWidth: ShellSpace.hair)
                 )
         }
     }
@@ -62,8 +61,8 @@ struct DummyItemRow: View {
                 }
                 if let who = item.boostedBy { boosted(by: who) }
             }
-            .font(.caption2)
-            .foregroundStyle(.tertiary)
+            .font(ShellType.mark)
+            .foregroundStyle(ShellChrome.inkFaint(colorScheme))
             .lineLimit(1)
         }
     }
@@ -91,12 +90,13 @@ struct DummyItemRow: View {
         HStack(alignment: .center, spacing: 8) {
             avatar
             Text(item.author)
-                .font(.body.weight(.semibold))
+                .font(ShellType.name)
+                .foregroundStyle(ShellChrome.ink(colorScheme))
                 .lineLimit(1)
             if let handle = item.handle {
                 Text(handle)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .font(ShellType.meta)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .lineLimit(1)
             }
             Spacer(minLength: 8)
@@ -110,8 +110,8 @@ struct DummyItemRow: View {
                 .fill(ShellChrome.well(colorScheme))
             if item.hasAvatar {
                 Image(systemName: "person.fill")
-                    .font(.subheadline)
-                    .foregroundStyle(.tertiary)
+                    .font(ShellType.meta)
+                    .foregroundStyle(ShellChrome.inkFaint(colorScheme))
             }
         }
         .frame(width: Box.avatar, height: Box.avatar)
@@ -129,9 +129,8 @@ struct DummyItemRow: View {
 
     private var postedAgo: some View {
         Text(item.postedAt, format: .relative(presentation: .numeric, unitsStyle: .abbreviated))
-            .font(.caption)
-            .foregroundStyle(.tertiary)
-            .monospacedDigit()
+            .font(ShellType.reading)
+            .foregroundStyle(ShellChrome.inkFaint(colorScheme))
             .fixedSize(horizontal: true, vertical: false)
             .frame(minWidth: Box.time, alignment: .trailing)
             .help(exactPostedAt)
@@ -146,7 +145,7 @@ struct DummyItemRow: View {
         Group {
             if let audience = item.audience {
                 Image(systemName: audience.symbolName)
-                    .font(.subheadline.weight(.medium))
+                    .font(ShellType.meta.weight(.medium))
                     .foregroundStyle(ShellChrome.vis(audience, colorScheme))
                     .help(L10n.t("item.visibility.\(audience.rawValue)"))
                     .accessibilityLabel(L10n.t("item.visibility.\(audience.rawValue)"))
@@ -172,7 +171,8 @@ struct DummyItemRow: View {
 
     private func pill(_ text: String) -> some View {
         Text(text)
-            .font(.caption2)
+            .font(ShellType.mark)
+            .foregroundStyle(ShellChrome.inkDim(colorScheme))
             .lineLimit(1)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
@@ -199,17 +199,20 @@ struct DummyItemRow: View {
         VStack(alignment: .leading, spacing: 4) {
             if item.source.kind == .board, let board = item.board {
                 Text(board)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(ShellType.meta)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
             }
             if let title = item.title {
                 Text(title)
-                    .font(.body.weight(.semibold))
+                    .font(ShellType.name)
+                    .foregroundStyle(ShellChrome.ink(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
             }
             Text(item.body)
-                .font(.body)
-                .foregroundStyle(item.title == nil ? Color.primary : Color.secondary)
+                .font(ShellType.body)
+                .foregroundStyle(
+                    item.title == nil ? ShellChrome.ink(colorScheme) : ShellChrome.inkDim(colorScheme)
+                )
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -221,7 +224,7 @@ struct DummyItemRow: View {
                 .fill(ShellChrome.well(colorScheme))
             if item.hasThumb {
                 Image(systemName: "photo")
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(ShellChrome.inkFaint(colorScheme))
             }
         }
         .frame(width: Box.thumb, height: Box.thumb)
@@ -231,41 +234,44 @@ struct DummyItemRow: View {
         HStack(spacing: 12) {
             HStack(spacing: 4) {
                 counted("arrowshape.turn.up.left", count: item.counts.replies,
-                        label: "item.act.reply", on: false, tint: .secondary) {
+                        label: "item.act.reply", on: false, tint: lit) {
                     onToast(L10n.t("item.toast.reply"))
                 }
                 counted("arrow.2.squarepath", count: item.counts.reblogs,
-                        label: "item.act.reblog", on: false, tint: ShellChrome.reblog(colorScheme)) {
+                        label: "item.act.reblog", on: false, tint: lit) {
                     onToast(L10n.t("item.toast.reblog"))
                 }
                 counted(marks.favourited ? "star.fill" : "star",
                         count: item.counts.favourites,
                         label: "item.act.favourite", on: marks.favourited,
-                        tint: ShellChrome.favourite(colorScheme)) {
+                        tint: lit) {
                     marks.favourited.toggle()
                     onToast(L10n.t(marks.favourited ? "item.toast.favourite.on" : "item.toast.favourite.off"))
                 }
             }
             HStack(spacing: 4) {
                 mark(marks.bookmarked ? "bookmark.fill" : "bookmark",
-                     label: "item.act.bookmark", on: marks.bookmarked,
-                     tint: ShellChrome.bookmark(colorScheme)) {
+                     label: "item.act.bookmark", on: marks.bookmarked, tint: lit) {
                     marks.bookmarked.toggle()
                     onToast(L10n.t(marks.bookmarked ? "item.toast.bookmark.on" : "item.toast.bookmark.off"))
                 }
                 mark(marks.kept ? "archivebox.fill" : "archivebox",
-                     label: "item.act.kept", on: marks.kept, tint: ShellChrome.phosphor(colorScheme)) {
+                     label: "item.act.kept", on: marks.kept, tint: lit) {
                     marks.kept.toggle()
                     onToast(L10n.t(marks.kept ? "item.toast.kept.on" : "item.toast.kept.off"))
                 }
             }
-            mark("ellipsis", label: "item.act.more", on: false, tint: .secondary) {
+            mark("ellipsis", label: "item.act.more", on: false, tint: lit) {
                 onToast(L10n.t("item.toast.more"))
             }
             Spacer(minLength: 0)
         }
         .padding(.top, 2)
     }
+
+    /// What a mark turns once it is on. One hue for all of them — a favourite and a
+    /// bookmark are told apart by their glyph, which is what the glyph is for.
+    private var lit: Color { ShellChrome.filament(colorScheme) }
 
     private func counted(_ symbol: String, count: Int?, label: String, on: Bool, tint: Color,
                          action: @escaping () -> Void) -> some View {
@@ -291,6 +297,8 @@ private struct DummyMarkButton: View {
     let countWidth: CGFloat
     let action: () -> Void
 
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         Button(action: action) {
             HStack(spacing: 2) {
@@ -299,15 +307,14 @@ private struct DummyMarkButton: View {
                     .frame(width: glyph, height: glyph)
                 if counting {
                     Text(count.map(String.init) ?? "")
-                        .font(.caption2)
-                        .monospacedDigit()
+                        .font(ShellType.reading)
                         .frame(minWidth: countWidth, alignment: .leading)
                 }
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(on ? tint : Color.secondary)
+        .foregroundStyle(on ? tint : ShellChrome.inkFaint(colorScheme))
         .help(L10n.t(labelKey))
         .accessibilityLabel(L10n.t(labelKey))
         .accessibilityAddTraits(on ? .isSelected : [])

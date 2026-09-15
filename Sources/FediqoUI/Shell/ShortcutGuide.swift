@@ -20,17 +20,18 @@ struct ShortcutGuide: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text(L10n.t("shortcut.title"))
-                    .font(.headline)
+                    .font(ShellType.pane)
+                    .foregroundStyle(ShellChrome.ink(colorScheme))
                 Spacer()
                 Button(L10n.t("shortcut.close"), action: onClose)
                     .buttonStyle(.plain)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .font(ShellType.meta)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
             }
 
             Text(L10n.t("shortcut.note"))
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .font(ShellType.meta)
+                .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
 
             ViewThatFits(in: .vertical) {
@@ -61,8 +62,8 @@ struct ShortcutGuide: View {
             ForEach(DummyShortcutGroup.allCases) { group in
                 GridRow {
                     Text(L10n.t(group.titleKey))
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .font(ShellType.meta.weight(.semibold))
+                        .foregroundStyle(ShellChrome.inkFaint(colorScheme))
                         .padding(.top, group == DummyShortcutGroup.allCases.first ? 0 : 8)
                         .gridCellColumns(2)
                 }
@@ -70,7 +71,8 @@ struct ShortcutGuide: View {
                     GridRow {
                         keys(of: line)
                         Text(line.detail)
-                            .font(.body)
+                            .font(ShellType.body)
+                            .foregroundStyle(ShellChrome.ink(colorScheme))
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -82,9 +84,10 @@ struct ShortcutGuide: View {
         HStack(spacing: 4) {
             ForEach(line.keys, id: \.self) { cap in
                 Text(cap)
-                    .font(.body.monospaced())
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
+                    .font(ShellType.keycap)
+                    .foregroundStyle(ShellChrome.ink(colorScheme))
+                    .padding(.horizontal, ShellSpace.snug)
+                    .padding(.vertical, ShellSpace.tight)
                     .background(
                         Capsule(style: .continuous)
                             .fill(ShellChrome.well(colorScheme))

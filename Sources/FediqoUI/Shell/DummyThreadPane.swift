@@ -17,26 +17,27 @@ struct DummyThreadPane: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
+            HStack(spacing: ShellSpace.snug) {
                 Button(action: onBack) {
                     Label(L10n.t("thread.back"), systemImage: "chevron.left")
-                        .font(.subheadline.weight(.medium))
+                        .font(ShellType.meta.weight(.medium))
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(ShellChrome.selectInk(colorScheme))
                 Text(L10n.t("thread.title"))
-                    .font(.headline)
+                    .font(ShellType.pane)
+                    .foregroundStyle(ShellChrome.ink(colorScheme))
                 Spacer()
                 Text(L10n.t("thread.leaveHint"))
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    .font(ShellType.meta)
+                    .foregroundStyle(ShellChrome.inkFaint(colorScheme))
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
+            .padding(.horizontal, ShellSpace.pad)
+            .padding(.vertical, ShellSpace.snug)
 
             Rectangle()
                 .fill(ShellChrome.hairline(colorScheme))
-                .frame(height: 1)
+                .frame(height: ShellSpace.hair)
 
             ScrollViewReader { proxy in
                 ScrollView {
@@ -92,8 +93,8 @@ struct DummyThreadPane: View {
         if depth > 0 {
             Rectangle()
                 .fill(ShellChrome.hairline(colorScheme))
-                .frame(width: 1)
-                .padding(.leading, indent(depth) - 8)
+                .frame(width: ShellSpace.hair)
+                .padding(.leading, indent(depth) - ShellSpace.snug)
                 .padding(.vertical, 6)
         }
     }

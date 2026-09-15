@@ -45,12 +45,12 @@ struct TimelinePane: View {
         .overlay(alignment: .bottom) {
             if let toast {
                 Text(toast)
-                    .font(.subheadline)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(ShellChrome.selectFill(colorScheme), in: Capsule())
-                    .foregroundStyle(ShellChrome.selectInk(colorScheme))
-                    .padding(.bottom, 16)
+                    .font(ShellType.meta)
+                    .padding(.horizontal, ShellSpace.step)
+                    .padding(.vertical, ShellSpace.snug)
+                    .background(ShellChrome.well(colorScheme), in: Capsule())
+                    .foregroundStyle(ShellChrome.ink(colorScheme))
+                    .padding(.bottom, ShellSpace.pad)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
@@ -135,7 +135,8 @@ struct TimelinePane: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center, spacing: 8) {
                 Text(L10n.t("shell.timeline.title"))
-                    .font(.headline)
+                    .font(ShellType.pane)
+                    .foregroundStyle(ShellChrome.ink(colorScheme))
                     .fixedSize()
                 HStack(spacing: 6) {
                     ForEach(session.queries) { query in
@@ -144,8 +145,8 @@ struct TimelinePane: View {
                 }
                 if session.timelineID != nil {
                     Text(timeline.rule)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .font(ShellType.meta)
+                        .foregroundStyle(ShellChrome.inkDim(colorScheme))
                         .lineLimit(1)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -163,10 +164,10 @@ struct TimelinePane: View {
             session.timelineID = query.id
         } label: {
             Text(query.name)
-                .font(.subheadline.weight(selected ? .semibold : .regular))
-                .foregroundStyle(selected ? ShellChrome.selectInk(colorScheme) : Color.primary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
+                .font(ShellType.meta.weight(selected ? .semibold : .regular))
+                .foregroundStyle(selected ? ShellChrome.selectInk(colorScheme) : ShellChrome.inkDim(colorScheme))
+                .padding(.horizontal, ShellSpace.snug)
+                .padding(.vertical, ShellSpace.tight)
                 .background(
                     Capsule(style: .continuous)
                         .fill(selected ? ShellChrome.selectFill(colorScheme) : ShellChrome.well(colorScheme))

@@ -201,7 +201,7 @@ public struct FediqoRootView: View {
             )
             Rectangle()
                 .fill(ShellChrome.hairline(colorScheme))
-                .frame(width: 1)
+                .frame(width: ShellSpace.hair)
             page
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(ShellChrome.page(colorScheme))
@@ -235,8 +235,9 @@ public struct FediqoRootView: View {
                 Image(systemName: "square.and.pencil")
                     .font(.title3.weight(.semibold))
                     .frame(width: 56, height: 56)
-                    .background(Circle().fill(ShellChrome.phosphor(colorScheme)))
-                    .foregroundStyle(ShellChrome.page(colorScheme))
+                    .background(Circle().fill(ShellChrome.well(colorScheme)))
+                    .overlay(Circle().strokeBorder(ShellChrome.hairline(colorScheme), lineWidth: ShellSpace.hair))
+                    .foregroundStyle(ShellChrome.ink(colorScheme))
             }
             .buttonStyle(.plain)
             .disabled(!availability.canCompose)

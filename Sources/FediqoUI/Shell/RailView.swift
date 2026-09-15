@@ -121,7 +121,8 @@ private struct RailButton: View {
                 RoundedRectangle(cornerRadius: RailView.Metrics.wellRadius, style: .continuous)
                     .fill(rowFill)
             )
-            .foregroundStyle(selected ? ShellChrome.selectInk(colorScheme) : Color.primary.opacity(0.84))
+            .overlay(alignment: .leading) { lamp }
+            .foregroundStyle(selected ? ShellChrome.selectInk(colorScheme) : ShellChrome.ink(colorScheme))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -135,14 +136,26 @@ private struct RailButton: View {
 
     private var helpText: String { hint ?? summary }
 
+    /// Where the reader is, drawn in the rail's own margin so that selecting a row
+    /// moves nothing. The lamp is the only phosphor on the bar.
+    @ViewBuilder
+    private var lamp: some View {
+        if selected {
+            Rectangle()
+                .fill(ShellChrome.phosphor(colorScheme))
+                .frame(width: ShellSpace.hair * 2)
+                .offset(x: -RailView.Metrics.side)
+        }
+    }
+
     private var labels: some View {
-        VStack(alignment: .leading, spacing: 1) {
+        VStack(alignment: .leading, spacing: ShellSpace.hair) {
             Text(title)
-                .font(.callout.weight(selected ? .semibold : .regular))
+                .font(selected ? ShellType.name : .callout)
                 .lineLimit(1)
             Text(summary)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(ShellType.meta)
+                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
                 .lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -156,8 +169,6 @@ private struct RailButton: View {
     }
 
     private var rowFill: Color {
-        if selected { ShellChrome.selectFill(colorScheme) }
-        else if hovering { ShellChrome.hoverFill(colorScheme) }
-        else { .clear }
+        hovering ? ShellChrome.hoverFill(colorScheme) : .clear
     }
 }

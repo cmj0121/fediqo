@@ -8,20 +8,21 @@ struct SourceMark: View {
     private let avatarSize: CGFloat = 28
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: ShellSpace.snug) {
             avatar
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: ShellSpace.hair) {
                 Text(primary)
-                    .font(.caption.weight(.medium))
+                    .font(ShellType.meta.weight(.medium))
+                    .foregroundStyle(ShellChrome.ink(colorScheme))
                     .lineLimit(1)
                 Text(secondary)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .font(ShellType.mark)
+                    .foregroundStyle(ShellChrome.inkFaint(colorScheme))
                     .lineLimit(1)
             }
         }
-        .padding(.vertical, 4)
-        .padding(.horizontal, 8)
+        .padding(.vertical, ShellSpace.tight)
+        .padding(.horizontal, ShellSpace.snug)
         .background(
             Capsule(style: .continuous)
                 .fill(ShellChrome.well(colorScheme))
@@ -33,7 +34,7 @@ struct SourceMark: View {
     @ViewBuilder
     private var avatar: some View {
         Image(systemName: markSymbol)
-            .font(.body)
+            .font(ShellType.body)
             .symbolVariant(source.isSignedIn ? .fill : .none)
             .symbolRenderingMode(.hierarchical)
             .frame(width: avatarSize, height: avatarSize)
@@ -71,7 +72,7 @@ struct SourceMarkRow: View {
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
+            HStack(spacing: ShellSpace.snug) {
                 ForEach(sources) { source in
                     SourceMark(source: source)
                 }

@@ -1,7 +1,13 @@
 import SwiftUI
 
 /// Cool chassis chrome. One phosphor, no candy sky, no system navy.
+///
+/// Two hues and no more. `phosphor` says where the reader is and says nothing else;
+/// `filament` is the warm counter-hue a mark takes once it is on. Everything between
+/// them is the ink ramp and the machined greys — engraved, never printed.
 enum ShellChrome {
+    // MARK: The chassis
+
     static func page(_ scheme: ColorScheme) -> Color {
         scheme == .dark ? rgb(0.063, 0.086, 0.102) : rgb(0.949, 0.961, 0.969)
     }
@@ -15,16 +21,10 @@ enum ShellChrome {
             .opacity(scheme == .dark ? 0.28 : 0.22)
     }
 
+    /// A milled recess: pills, keycaps, the plate a glyph sits in. Neutral on purpose —
+    /// a container that borrows the lamp's hue makes every container look selected.
     static func well(_ scheme: ColorScheme) -> Color {
-        phosphor(scheme).opacity(scheme == .dark ? 0.16 : 0.10)
-    }
-
-    static func selectFill(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? rgb(0.090, 0.188, 0.220) : rgb(0.831, 0.894, 0.910)
-    }
-
-    static func selectInk(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? rgb(0.561, 0.804, 0.831) : rgb(0.141, 0.345, 0.384)
+        scheme == .dark ? rgb(0.133, 0.161, 0.180) : rgb(0.886, 0.906, 0.918)
     }
 
     static func hoverFill(_ scheme: ColorScheme) -> Color {
@@ -33,41 +33,65 @@ enum ShellChrome {
             : rgb(0.918, 0.949, 0.957)
     }
 
-    static func phosphor(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? rgb(0.494, 0.784, 0.816) : rgb(0.184, 0.427, 0.471)
-    }
-
-    static func reblog(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? rgb(0.478, 0.659, 0.627) : rgb(0.239, 0.435, 0.416)
-    }
-
-    static func favourite(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? rgb(0.769, 0.647, 0.416) : rgb(0.541, 0.439, 0.251)
-    }
-
-    static func bookmark(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? rgb(0.478, 0.608, 0.690) : rgb(0.239, 0.353, 0.451)
+    /// The lifted plate a focused row sits on.
+    static func floatFill(_ scheme: ColorScheme) -> Color {
+        scheme == .dark ? rgb(0.11, 0.16, 0.19) : rgb(0.988, 0.992, 0.995)
     }
 
     static func dim(_ scheme: ColorScheme) -> Color {
         rgb(0.08, 0.12, 0.14).opacity(scheme == .dark ? 0.55 : 0.42)
     }
 
-    /// The lifted plate a focused row sits on.
-    static func floatFill(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? rgb(0.11, 0.16, 0.19) : rgb(0.988, 0.992, 0.995)
+    // MARK: The ink
+
+    static func ink(_ scheme: ColorScheme) -> Color {
+        scheme == .dark ? rgb(0.890, 0.918, 0.925) : rgb(0.098, 0.129, 0.145)
     }
 
-    static func floatShadow(_ scheme: ColorScheme) -> Color {
-        rgb(0.06, 0.10, 0.12).opacity(scheme == .dark ? 0.65 : 0.20)
+    /// Present, read second: handles, hosts, a server's own summary.
+    static func inkDim(_ scheme: ColorScheme) -> Color {
+        ink(scheme).opacity(0.68)
     }
 
+    /// Engraved rather than written: decorators, counts nobody is looking for.
+    static func inkFaint(_ scheme: ColorScheme) -> Color {
+        ink(scheme).opacity(0.45)
+    }
+
+    // MARK: The two hues
+
+    /// The lamp. Where the reader is, and nothing else.
+    static func phosphor(_ scheme: ColorScheme) -> Color {
+        scheme == .dark ? rgb(0.494, 0.784, 0.816) : rgb(0.184, 0.427, 0.471)
+    }
+
+    static func selectFill(_ scheme: ColorScheme) -> Color {
+        phosphor(scheme).opacity(scheme == .dark ? 0.22 : 0.14)
+    }
+
+    static func selectInk(_ scheme: ColorScheme) -> Color {
+        phosphor(scheme)
+    }
+
+    /// What a mark turns when the reader has switched it on. One warm hue for all of
+    /// them: a favourite, a bookmark and a kept item differ by glyph, not by colour.
+    static func filament(_ scheme: ColorScheme) -> Color {
+        scheme == .dark ? rgb(0.855, 0.694, 0.404) : rgb(0.541, 0.404, 0.176)
+    }
+
+    /// The warning lamp. A refusal has to read as a refusal, and no amount of ink
+    /// weight does that on its own. One place only: the line that says a host was
+    /// not added and why.
+    static func alarm(_ scheme: ColorScheme) -> Color {
+        scheme == .dark ? rgb(0.898, 0.478, 0.443) : rgb(0.643, 0.212, 0.180)
+    }
+
+    /// Audience is carried by the glyph. Colour only says how far the post travels:
+    /// what anyone can read recedes, what was narrowed to somebody stays legible.
     static func vis(_ audience: DummyAudience, _ scheme: ColorScheme) -> Color {
         switch audience {
-        case .everyone: phosphor(scheme).opacity(0.85)
-        case .unlisted: scheme == .dark ? rgb(0.45, 0.72, 0.68) : rgb(0.23, 0.48, 0.45)
-        case .followers: scheme == .dark ? rgb(0.78, 0.62, 0.42) : rgb(0.54, 0.42, 0.28)
-        case .mentioned: scheme == .dark ? rgb(0.62, 0.64, 0.78) : rgb(0.35, 0.37, 0.47)
+        case .everyone, .unlisted: inkFaint(scheme)
+        case .followers, .mentioned: inkDim(scheme)
         }
     }
 

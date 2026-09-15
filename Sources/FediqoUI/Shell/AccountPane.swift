@@ -9,13 +9,13 @@ struct AccountPane: View {
     @Environment(\.locale) private var locale
 
     private enum Metrics {
-        static let pad: CGFloat = 16
-        static let stack: CGFloat = 16
-        static let gap: CGFloat = 8
-        static let row: CGFloat = 10
+        static let pad = ShellSpace.pad
+        static let stack = ShellSpace.pad
+        static let gap = ShellSpace.snug
+        static let row = ShellSpace.step
         static let widgetRadius: CGFloat = 8
         static let fieldRadius: CGFloat = 6
-        static let fieldPad: CGFloat = 10
+        static let fieldPad = ShellSpace.step
         static let icon: CGFloat = 18
         static let float: CGFloat = 0.8
     }
@@ -44,10 +44,11 @@ struct AccountPane: View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: Metrics.stack) {
                 Text(L10n.t("account.add.title"))
-                    .font(.headline)
+                    .font(ShellType.pane)
+                    .foregroundStyle(ShellChrome.ink(colorScheme))
                 Text(L10n.t("account.add.detail"))
-                    .font(.body)
-                    .foregroundStyle(.secondary)
+                    .font(ShellType.body)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 searchField
             }
             .padding(Metrics.fieldPad)
@@ -73,7 +74,7 @@ struct AccountPane: View {
     private var searchField: some View {
         HStack(alignment: .center, spacing: Metrics.gap) {
             TextField(L10n.t("account.search.placeholder"), text: $session.hostname)
-                .font(.body)
+                .font(ShellType.body)
                 .textFieldStyle(.plain)
                 .focused($searchFocused)
                 .disabled(session.checking)
@@ -88,9 +89,9 @@ struct AccountPane: View {
                 session.search()
             } label: {
                 Image(systemName: "magnifyingglass")
-                    .font(.body.weight(.semibold))
+                    .font(ShellType.body.weight(.semibold))
                     .frame(width: Metrics.icon, height: Metrics.icon)
-                    .foregroundStyle(ShellChrome.phosphor(colorScheme))
+                    .foregroundStyle(ShellChrome.ink(colorScheme))
             }
             .buttonStyle(.plain)
             .disabled(session.checking)
@@ -98,7 +99,7 @@ struct AccountPane: View {
             .help(L10n.t("account.search"))
         }
         .padding(.horizontal, Metrics.fieldPad)
-        .padding(.vertical, 8)
+        .padding(.vertical, ShellSpace.snug)
         .overlay {
             RoundedRectangle(cornerRadius: Metrics.fieldRadius, style: .continuous)
                 .strokeBorder(ShellChrome.hairline(colorScheme), lineWidth: 1)
@@ -115,13 +116,13 @@ struct AccountPane: View {
             HStack(spacing: Metrics.gap) {
                 ProgressView()
                 Text(String(format: L10n.t("account.detect.progress"), session.progressHost))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .font(ShellType.meta)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
             }
         } else if let refuse = session.refuse {
             Text(refuse)
-                .font(.callout)
-                .foregroundStyle(.red)
+                .font(ShellType.meta)
+                .foregroundStyle(ShellChrome.alarm(colorScheme))
         }
     }
 
@@ -132,21 +133,21 @@ struct AccountPane: View {
             HStack(spacing: Metrics.gap) {
                 ProgressView()
                 Text(L10n.t("account.catalog.loading"))
-                    .font(.body)
-                    .foregroundStyle(.secondary)
+                    .font(ShellType.body)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
             }
             .padding(Metrics.fieldPad)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         case .failed:
             Text(L10n.t("account.catalog.failed"))
-                .font(.body)
-                .foregroundStyle(.secondary)
+                .font(ShellType.body)
+                .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .padding(Metrics.fieldPad)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         case .empty:
             Text(L10n.t("account.catalog.empty"))
-                .font(.body)
-                .foregroundStyle(.secondary)
+                .font(ShellType.body)
+                .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .padding(Metrics.fieldPad)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         case .ready:
@@ -179,11 +180,11 @@ struct AccountPane: View {
         } label: {
             VStack(alignment: .leading, spacing: 2) {
                 Text(String(format: L10n.t("account.catalog.addHost"), host))
-                    .font(.body)
-                    .foregroundStyle(.primary)
+                    .font(ShellType.name)
+                    .foregroundStyle(ShellChrome.ink(colorScheme))
                 Text(added ? L10n.t("account.catalog.added") : L10n.t("account.catalog.addHost.detail"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(ShellType.meta)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .lineLimit(2)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -203,16 +204,16 @@ struct AccountPane: View {
         } label: {
             VStack(alignment: .leading, spacing: 2) {
                 Text(server.domain)
-                    .font(.body)
-                    .foregroundStyle(.primary)
+                    .font(ShellType.name)
+                    .foregroundStyle(ShellChrome.ink(colorScheme))
                 Text(added ? L10n.t("account.catalog.added") : server.summary)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(ShellType.meta)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .lineLimit(2)
                 if !added {
                     Text(metaLine(server))
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                        .font(ShellType.mark)
+                        .foregroundStyle(ShellChrome.inkFaint(colorScheme))
                         .lineLimit(1)
                 }
             }

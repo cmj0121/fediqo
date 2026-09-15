@@ -8,8 +8,8 @@ struct ComposerSheet: View {
     var body: some View {
         NavigationStack {
             TextEditor(text: $draft)
-                .font(.body)
-                .padding(12)
+                .font(ShellType.body)
+                .padding(ShellSpace.step)
                 .navigationTitle(L10n.t("compose.title"))
                 #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
