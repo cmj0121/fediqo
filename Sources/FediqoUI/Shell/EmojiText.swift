@@ -160,7 +160,12 @@ struct EmojiText: View {
 /// Which line of the type scale a piece of somebody's writing is set on.
 ///
 /// Three roles and no more, because there are three places a stranger's words are drawn: a name,
-/// the words themselves, and the quieter line under them — a handle, a spoiler, a summary.
+/// the words themselves, and the quieter line beside them — a handle, a summary.
+///
+/// This list first counted a spoiler among the quiet lines and the call site settled it the other
+/// way: while a row is covered the author's line stands in for the post's words rather than beside
+/// them, so it is drawn as `.body`. A role is what a line *is*, which is a question its call site
+/// answers.
 ///
 /// **One statement, derived three ways.** The style below decides the `Font` the line is drawn
 /// in *and* the platform style its ink is measured from, so the size a picture is decoded at and

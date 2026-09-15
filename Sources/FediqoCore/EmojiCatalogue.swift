@@ -74,9 +74,20 @@ public struct EmojiCatalogue: Sendable {
 /// copied down through a render tree is the *cheap* case, not the expensive one. The real cost
 /// of leaving the conformance off is the other way round: a view storing an `EmojiAlphabet` has
 /// no `==` to call and is treated as always-changed, so its body re-runs on every update of its
-/// parent. It is left off only because nothing consumes one yet. The unit that first stores one
-/// in a view should add it — `host` and `fetchedAt` make an O(1) identity equality for the
-/// catalogue half, and the post's own list is a handful of names.
+/// parent.
+///
+/// **The first consumer arrived and still does not want it.** `DummyItemRow` never stores one: a
+/// view cannot await an actor in `body`, so the row asks in a `.task` — and what it keeps is the
+/// short list of pictures its own lines are written in, not the alphabet that resolved them.
+/// Keeping the alphabet would have meant keeping a big instance's whole catalogue on every row
+/// to answer for a handful of names.
+///
+/// The fast path was measured rather than assumed, and it is real: comparing a 5,000-entry
+/// dictionary with a copy of itself is free, against 333µs for a structurally equal rebuild. So
+/// the O(1) identity on `host` and `fetchedAt` this comment used to recommend is not worth
+/// writing, and is a trap besides — it names only the catalogue half, so two posts read through
+/// one server at one fetch time would compare equal whatever pictures they each brought. A
+/// derived `==` would already be free wherever the conformance would help.
 public struct EmojiAlphabet: Sendable {
     private let own: [String: CustomEmoji]
     private let catalogue: EmojiCatalogue?
@@ -98,6 +109,27 @@ public struct EmojiAlphabet: Sendable {
     public func runs(in text: String) -> [EmojiRun] {
         guard !isEmpty else { return CustomEmoji.plainRuns(text) }
         return CustomEmoji.scan(text, lookup: lookup)
+    }
+
+    /// The pictures one line is actually written in, resolved in this alphabet's order.
+    ///
+    /// **This is how the order reaches a screen.** A screen cannot be handed the alphabet
+    /// itself: a big instance's catalogue is thousands of names and a line is written in a
+    /// handful, so anything downstream that took the whole of it would ask for the whole of it.
+    /// What a line needs is the short list of pictures it actually spells — and narrowing is
+    /// exactly where the two sources have to be asked in order, so the two happen together
+    /// here and the order is applied in one place.
+    ///
+    /// One shortcode appears once however often the line spells it, first resolution winning,
+    /// the way every other folding of a shortcode in this file works.
+    public func emojis(in text: String) -> [CustomEmoji] {
+        var seen: Set<String> = []
+        return runs(in: text).compactMap { run in
+            guard case .emoji(let emoji) = run, seen.insert(emoji.shortcode).inserted else {
+                return nil
+            }
+            return emoji
+        }
     }
 }
 

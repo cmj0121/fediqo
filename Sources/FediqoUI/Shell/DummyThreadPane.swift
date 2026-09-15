@@ -1,8 +1,15 @@
+import FediqoCore
 import SwiftUI
 
 /// The conversation around one item: the way up, the post, then answers related-on.
 struct DummyThreadPane: View {
     let root: DummyItem
+    /// Passed through to every row: a thread draws the same four bands the stream does, and its
+    /// names, words and cover lines are somebody else's writing in exactly the same way.
+    let catalogues: EmojiCatalogueStore
+    /// Passed through with the store: the pane above owns the wait for this source's catalogue.
+    /// A thread is one post's conversation, so every row in it reads through the same server.
+    var catalogueSettled: Bool = false
     @Binding var selectedID: String?
     var marks: (DummyItem) -> Binding<DummyMarks>
     @Binding var decks: ShellDecks
@@ -74,6 +81,8 @@ struct DummyThreadPane: View {
         let depth = conversation.depth(of: item.id)
         return DummyItemRow(
             item: item,
+            catalogues: catalogues,
+            catalogueSettled: catalogueSettled,
             marks: marks(item),
             selected: item.id == selectedID,
             top: decks.top(of: item.id, of: item.attachments.count),

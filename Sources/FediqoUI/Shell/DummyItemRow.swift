@@ -1,9 +1,17 @@
+import FediqoCore
 import SwiftUI
 
 /// One item, in four bands of a fixed shape: what happened to it, who wrote it and
 /// what it arrived with, the words and the attachment, and what can be done to it.
 struct DummyItemRow: View {
     let item: DummyItem
+    /// Where a shortcode this post did not bring a picture for is looked up. The row holds the
+    /// store rather than an alphabet: see `resolve`.
+    let catalogues: EmojiCatalogueStore
+    /// Whether this row's own server has answered about its catalogue yet. Set by the pane, which
+    /// owns the wait; the row cannot do it itself — see `resolve`. Per host rather than a counter
+    /// for the pane, so a slow instance cannot hold up a row reading through a quick one.
+    var catalogueSettled: Bool = false
     @Binding var marks: DummyMarks
     var selected: Bool = false
     /// Which attachment is on top. It belongs to the app rather than to this view, so that a
@@ -17,6 +25,7 @@ struct DummyItemRow: View {
     var onToast: (String) -> Void
 
     @State private var hovering = false
+    @State private var resolved = Written()
     @Environment(\.colorScheme) private var colorScheme
 
     #if os(iOS)
@@ -32,8 +41,8 @@ struct DummyItemRow: View {
     /// They used to be fixed: the words grew with the reader's preference and the
     /// avatar, the thumbnail and every mark stayed exactly where they were, so at the
     /// largest size a row was big text wrapped around small furniture.
-    @ScaledMetric(relativeTo: .body) private var avatarSide: CGFloat = 36
-    @ScaledMetric(relativeTo: .body) private var thumbSide: CGFloat = 96
+    @ScaledMetric(relativeTo: .body) private var avatarSide: CGFloat = Box.avatar
+    @ScaledMetric(relativeTo: .body) private var thumbSide: CGFloat = Box.thumb
     @ScaledMetric(relativeTo: .caption) private var vis: CGFloat = 16
     @ScaledMetric(relativeTo: .caption) private var glyph: CGFloat = 17
     @ScaledMetric(relativeTo: .caption) private var countBox: CGFloat = 20
@@ -44,11 +53,26 @@ struct DummyItemRow: View {
     /// hides the default size leaves the largest size legible, and a cover that can be read
     /// through is not a cover.
     @ScaledMetric(relativeTo: .body) private var smear: CGFloat = 10
+    /// How tall the cover is. **A fixed size, and that is the point of it**: a cover drawn around
+    /// its contents is a cover that tells the reader how much is underneath, and it would be
+    /// server text sizing a band again — the same defect as a row that grows with its post, one
+    /// layer down. Whatever the author wrote and however long the post is, the cover is this.
+    @ScaledMetric(relativeTo: .body) private var coverBox: CGFloat = 44
 
-    private enum Box {
+    enum Box {
         /// The lamp is a lamp at every type size, and a corner is a corner.
         static let lamp: CGFloat = 2
         static let plate: CGFloat = 6
+        /// The two fittings that hold a band open against whatever is drawn inside it, and so
+        /// the two numbers "every row is the same height" actually rests on. Named here rather
+        /// than written into the `@ScaledMetric` defaults above because a test measures a line
+        /// against them: a picture standing in a line makes that line taller than the letters
+        /// do, and what keeps it off the row is that neither band is sized by its text.
+        ///
+        /// True of the wide layout. The narrow one below keeps neither fitting — a phone in
+        /// portrait sizes the words band to the words, as it did before any of this.
+        static let avatar: CGFloat = 36
+        static let thumb: CGFloat = 96
     }
 
     /// Four bands, and every row has all four whether or not it has anything to put
@@ -60,7 +84,11 @@ struct DummyItemRow: View {
     ///     [marks                                                                ]
     ///
     var body: some View {
-        content
+        // Worked out once for the pass and handed down, not read by each band that wants a
+        // piece of it: before the hop below has answered, `written` builds the post's own
+        // alphabet and scans every line, and four readers made that four dictionaries and
+        // sixteen scans where one and four will do.
+        content(written)
             .padding(.horizontal, ShellSpace.pad)
             .padding(.vertical, ShellSpace.step)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -71,6 +99,91 @@ struct DummyItemRow: View {
             .onTapGesture { onSelect?() }
             .onHover { hovering = $0 }
             .accessibilityElement(children: .contain)
+            .task(id: Asked(item: item, settled: catalogueSettled)) { await resolve() }
+    }
+
+    // MARK: - The pictures this post is written in
+
+    /// The pictures each of this row's lines is written in, one short list per line.
+    ///
+    /// Per line rather than one list for the row, because a line's pictures are decoded at that
+    /// line's own ink height: a name and the words are two sizes, and handing both lists to both
+    /// would decode every picture twice for the size it is never drawn at.
+    ///
+    /// **Four lines, and the cover is `item.spoiler` rather than `coverLine`.** Where the author
+    /// wrote no line, `coverLine` is a sentence this app owns and there is nothing in it for an
+    /// alphabet to answer for.
+    struct Written: Equatable {
+        /// Which post this was resolved for. See `written` for why an unstamped answer is not
+        /// good enough.
+        var id: String = ""
+        var name: [CustomEmoji] = []
+        var handle: [CustomEmoji] = []
+        var body: [CustomEmoji] = []
+        var cover: [CustomEmoji] = []
+
+        init() {}
+
+        init(_ alphabet: EmojiAlphabet, of item: DummyItem) {
+            id = item.id
+            name = alphabet.emojis(in: item.author)
+            handle = alphabet.emojis(in: item.handle ?? "")
+            body = alphabet.emojis(in: item.body)
+            cover = alphabet.emojis(in: item.spoiler ?? "")
+        }
+    }
+
+    /// What the row re-asks on: a different post, or this server's catalogue having landed.
+    private struct Asked: Equatable {
+        let item: DummyItem
+        let settled: Bool
+    }
+
+    /// The source this post was read through — never the author's own instance. It is what the
+    /// reader's per-server Clear button reaches these pictures by, and an emoji address usually
+    /// points at a CDN that cannot be read back as a host.
+    private var host: String { item.source.host }
+
+    /// What this row's lines are written in: the catalogue's answer once it has one, and the
+    /// post's own pictures until then.
+    ///
+    /// **The own-only half is derived here, in `body`, and that is deliberate.** It needs no
+    /// actor — `item.emojis` came with the post — so making it wait for a task dispatch would
+    /// draw `:blobcat:` for a frame on every row entry. A `LazyVStack` tears a row down when it
+    /// scrolls away and gives it fresh `@State` on the way back, so "one frame" means every time
+    /// the reader scrolls past, and it would defeat `EmojiText.pictures(for:)`, which unit 5
+    /// built precisely so a line whose pictures are already cached draws them on its first pass.
+    /// An empty list leaves that pre-read nothing to find.
+    ///
+    /// **The own half only.** A shortcode the post brought a picture for is drawn on the first
+    /// pass; one that only the reading server's catalogue can answer for still appears after the
+    /// hop, because nothing in hand can resolve it. That is unavoidable and right — what the fix
+    /// removes is the flash on pictures the post was already carrying.
+    ///
+    /// The stamp is what makes a stale answer harmless: a resolution belongs to the post it was
+    /// made for, so one arriving late for a row that has since been handed a different item is
+    /// ignored rather than drawn over it.
+    var written: Written {
+        resolved.id == item.id ? resolved : Written(EmojiAlphabet(own: item.emojis), of: item)
+    }
+
+    /// Asks the store what this server's catalogue adds to the post's own pictures.
+    ///
+    /// **One actor hop and no waiting.** An earlier version awaited `settle(host:)` here, which
+    /// is a bug this row cannot afford: `settle` awaits a `Task<Void, Never>`, and awaiting one
+    /// of those ignores the *waiting* task's cancellation, so a row that scrolled away stayed
+    /// parked until the server answered — and nothing on this branch sets a request timeout. One
+    /// suspended task per row ever drawn, for the life of the process, on a server that drips.
+    /// The wait belongs to the pane, which lives as long as the place does; `catalogueSettled` is
+    /// how its answer gets back here.
+    ///
+    /// The order — the post's own pictures first, the server's catalogue behind them — is
+    /// `EmojiAlphabet`'s and is not repeated here. This asks; it does not decide.
+    private func resolve() async {
+        let next = Written(await catalogues.alphabet(own: item.emojis, host: host), of: item)
+        // A catalogue that added nothing to this row must not redraw it. A timeline is a hundred
+        // rows and most posts spell no name the reading server had to answer for.
+        if next != resolved { resolved = next }
     }
 
     /// Where the reader is. Two points in the row's own margin, and no geometry of its
@@ -87,16 +200,16 @@ struct DummyItemRow: View {
     /// The row being read. Its marks come up one notch; nothing appears or disappears.
     private var reading: Bool { selected || hovering }
 
-    private var content: some View {
+    private func content(_ written: Written) -> some View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
             decorator
             // The row itself is an accessibility container, and a container is not an
             // element — a trait put on it is announced to nobody. The headline is the
             // row's identity, so it is the element that carries the selection.
-            headline
+            headline(written)
                 .accessibilityElement(children: .combine)
                 .accessibilityAddTraits(selected ? .isSelected : [])
-            mainBox
+            mainBox(written)
             actions
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -141,10 +254,10 @@ struct DummyItemRow: View {
     /// name gives up letters before the line gives up the meta: where a post came from
     /// and when is what a reader scans down the list for, and a name they can only
     /// half read is still a name they recognise.
-    private var headline: some View {
+    private func headline(_ written: Written) -> some View {
         HStack(alignment: .center, spacing: ShellSpace.snug) {
             avatar
-            names
+            names(written)
             Spacer(minLength: ShellSpace.snug)
             meta
         }
@@ -153,16 +266,19 @@ struct DummyItemRow: View {
     /// The name is what the row is; the handle is how to find it again. When there is
     /// not room for both, the handle loses its middle rather than the row losing its
     /// edge — an author clipped by the screen is an author nobody can read at all.
-    private var names: some View {
+    ///
+    /// Both are somebody else's writing and both may be written partly in pictures, so both are
+    /// drawn by `EmojiText`, which sets the role's own font — `.name` and `.meta` are the two
+    /// tokens these lines were already drawn in. Everything else here still comes from outside:
+    /// a colour, a line limit and where the truncation falls are facts about this column.
+    private func names(_ written: Written) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
-            Text(item.author)
-                .font(ShellType.name)
+            EmojiText(item.author, emojis: written.name, host: host, role: .name)
                 .foregroundStyle(ShellChrome.ink(colorScheme))
                 .lineLimit(1)
                 .layoutPriority(1)
             if let handle = item.handle {
-                Text(handle)
-                    .font(ShellType.meta)
+                EmojiText(handle, emojis: written.handle, host: host, role: .meta)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -284,15 +400,15 @@ struct DummyItemRow: View {
     /// A phone has no room for the second column, so it keeps the stack, and an empty
     /// slot there would be most of a screen of nothing.
     @ViewBuilder
-    private var mainBox: some View {
+    private func mainBox(_ written: Written) -> some View {
         if narrow {
             VStack(alignment: .leading, spacing: ShellSpace.snug) {
-                coveredWords
+                coveredWords(written)
                 if item.hasThumb { coveredThumb }
             }
         } else {
             HStack(alignment: .top, spacing: ShellSpace.step) {
-                coveredWords
+                coveredWords(written)
                 coveredThumb
             }
             .frame(height: thumbSide, alignment: .top)
@@ -328,27 +444,95 @@ struct DummyItemRow: View {
     /// today: it is a standing answer, so that enabling selection somewhere above this row cannot
     /// quietly make the covered ones copyable.
     ///
-    /// Clipped because a blur draws outside the box it was given, and what is beside this box is
-    /// the slot and the next post.
+    /// **The wrapper is enough, and that was measured rather than argued.** The words are an
+    /// `EmojiText` now, which names itself — `.accessibilityElement(children: .ignore)` and a
+    /// label of what the author typed — so this modifier is one put *round* a view that asked to
+    /// be an element, which is the shape this branch has twice found to discard something real.
+    /// It was checked against the running app: on one covered row, with no leaf hide compiled in
+    /// at all, the words were absent from the tree while covered and present the moment the row
+    /// was lifted. So `accessibilityHidden` does reach a self-naming leaf, and `coveredThumb`
+    /// below — `RemoteImage` self-names identically — is covered by the same finding rather than
+    /// by luck. **Measured on macOS only**: no iOS test runs on this branch.
+    ///
+    /// The blur itself, and the clipping a blur needs, are `cover`'s below: what this function
+    /// owns is the order of the two bands and which of them is drawn.
     @ViewBuilder
-    private var coveredWords: some View {
+    private func coveredWords(_ written: Written) -> some View {
         if item.covered {
             VStack(alignment: .leading, spacing: ShellSpace.tight) {
-                notice
-                if covered {
-                    words
-                        .blur(radius: smear)
-                        .clipped()
-                        .accessibilityHidden(true)
-                        .textSelection(.disabled)
-                } else {
-                    words
-                }
+                notice(written)
+                if covered { cover(written) } else { words(written) }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } else {
-            words
+            words(written)
         }
+    }
+
+    /// The cover: one rectangle of a fixed size with the words smeared inside it, and nothing
+    /// drawn over them.
+    ///
+    /// **Nothing is printed on the cover, by the reader's own call.** A key cap centred on the
+    /// smear was drawn here first; what it cost was that the one shape whose whole job is to say
+    /// *you are not meant to read this yet* had a control sitting in the middle of it. A cover
+    /// says more with nothing on it.
+    ///
+    /// **The whole rectangle is the way in instead.** Pressing a covered post to uncover it is
+    /// what every other client of this network does, so it is the gesture a reader arrives
+    /// already knowing — and it is not decoration that can be removed later without thought: on a
+    /// phone there is no `s` to fall back on, and the band's accessibility action reaches only a
+    /// reader using assistive technology. Without this, a covered post on a phone could not be
+    /// opened at all.
+    ///
+    /// **Pressed but not spoken.** The band above is already one element carrying the whole of
+    /// `spokenCover` and the action that works it, so announcing this too would offer the same
+    /// cover twice over. The blur keeps `accessibilityHidden` for its own reason — the words
+    /// behind it must not be readable out of a cover the author put there.
+    ///
+    /// Clipped twice over, and both are wanted: the rounded shape is what the eye reads as a
+    /// panel rather than a smudge against the margin, and `clipped` is the standing answer to a
+    /// blur painting outside the box it was given.
+    private func cover(_ written: Written) -> some View {
+        Button(action: onToggleCover) {
+            words(written)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .blur(radius: smear)
+                .accessibilityHidden(true)
+                .textSelection(.disabled)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityHidden(true)
+        .frame(maxWidth: .infinity)
+        .frame(height: coverBox)
+        .background(ShellChrome.well(colorScheme))
+        .clipShape(RoundedRectangle(cornerRadius: Box.plate, style: .continuous))
+        .clipped()
+    }
+
+    /// The key, drawn as the cap it is printed on, and what pressing it does.
+    ///
+    /// Drawn under the author's line once the row is open, and **not while it is covered** — a
+    /// cover carries nothing printed on it, and the way back in is pressing the smear itself.
+    /// So this is the way to put a cover *back*, and it is a button as well as a key: a reader
+    /// who never touches the keyboard would otherwise be told which key works and have no way to
+    /// press it, and on a phone there is no `s` to be told about at all.
+    private var lift: some View {
+        Button(action: onToggleCover) {
+            HStack(spacing: ShellSpace.snug) {
+                Text(verbatim: "s")
+                    .font(ShellType.keycap)
+                    .foregroundStyle(ShellChrome.ink(colorScheme))
+                    .padding(.horizontal, ShellSpace.snug)
+                    .padding(.vertical, ShellSpace.hair * 2)
+                    .background(Capsule(style: .continuous).fill(ShellChrome.well(colorScheme)))
+                Text(L10n.t(covered ? "item.covered.show" : "item.covered.hide"))
+                    .font(ShellType.meta)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     /// The slot, smeared with the same hand as the words. One cover over the row means one
@@ -378,28 +562,18 @@ struct DummyItemRow: View {
     /// One control with two labels. It is a button as well as a key: a reader who never touches
     /// the keyboard would otherwise be told which key works and have no way to press it, and on a
     /// phone there is no `s` to be told about at all.
-    private var notice: some View {
+    private func notice(_ written: Written) -> some View {
         VStack(alignment: .leading, spacing: ShellSpace.tight) {
-            Text(coverLine)
-                .font(ShellType.body)
+            coverTitle(written)
                 .foregroundStyle(ShellChrome.ink(colorScheme))
                 .lineLimit(coverLines)
                 .fixedSize(horizontal: false, vertical: true)
-            Button(action: onToggleCover) {
-                HStack(spacing: ShellSpace.snug) {
-                    Text(verbatim: "s")
-                        .font(ShellType.keycap)
-                        .foregroundStyle(ShellChrome.ink(colorScheme))
-                        .padding(.horizontal, ShellSpace.snug)
-                        .padding(.vertical, ShellSpace.hair * 2)
-                        .background(Capsule(style: .continuous).fill(ShellChrome.well(colorScheme)))
-                    Text(L10n.t(covered ? "item.covered.show" : "item.covered.hide"))
-                        .font(ShellType.meta)
-                        .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+            // Covered, nothing is drawn: the smear below is itself the way in, and printing a
+            // control over the one shape that means "not yet" undoes what the shape says. Lifted,
+            // the way to put the cover back has to be somewhere, and this is the line it belongs
+            // to. It is never conditional on hover or focus — that is a control half the readers
+            // of this row cannot find.
+            if !covered { lift }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         // Ignored rather than combined, and then said properly: combining would read the key cap
@@ -416,9 +590,14 @@ struct DummyItemRow: View {
         .accessibilityAction(.default) { onToggleCover() }
     }
 
-    /// How many lines the author's line may have: one fewer than the words are allowed, because
-    /// the control takes the last one. Derived from the words' own rule rather than chosen, so
-    /// the two cannot drift apart.
+    /// How many lines the author's line may have: two fewer than the words are allowed, because
+    /// the cover below takes a fixed bite of the band. Derived from the words' own rule rather
+    /// than chosen, so the two cannot drift apart — and one line shorter than it was, because the
+    /// cover is now a rectangle of its own rather than whatever space the warning left over.
+    ///
+    /// It was two fewer when the key cap was centred on the cover as well, and it stays two fewer
+    /// now that nothing is printed there: what the bite pays for is the rectangle, not what used
+    /// to be drawn in it, and the four measured heights are all still one number.
     ///
     /// **Server text never changes a row's height. Only a reader's own action does.** A
     /// `spoiler_text` is up to five hundred characters that a hostile instance picks, so any rule
@@ -426,7 +605,7 @@ struct DummyItemRow: View {
     /// which is a stronger reason for the limit than rows looking uniform. What is left over is a
     /// warning long enough that it has stopped being a warning and become the post; a reader who
     /// wants all of it uncovers, and a screen reader is given every character regardless.
-    private var coverLines: Int { max(1, bodyLines - 1) }
+    private var coverLines: Int { max(1, bodyLines - 2) }
 
     /// What the row says out loud: the author's line **in full**, what is under the cover named
     /// but not described, and the way to work the control.
@@ -441,7 +620,7 @@ struct DummyItemRow: View {
     /// there is anything there to uncover. `AttachmentDeck.named` carries the kind and the count
     /// and never the alt text, which is what keeps the cover a cover. Once the row is lifted the
     /// deck speaks for itself and the clause would only say it twice.
-    private var spokenCover: String {
+    var spokenCover: String {
         let attached = covered ? AttachmentDeck.named(item.attachments, top: top) : nil
         let how = L10n.t(covered ? "item.covered.label" : "item.lifted.label")
         return [coverLine, attached, how].compactMap { $0 }.joined(separator: ". ")
@@ -453,7 +632,33 @@ struct DummyItemRow: View {
         return spoiler.isEmpty ? L10n.t("item.covered.title") : spoiler
     }
 
-    private var words: some View {
+    /// The same line, drawn — and the two halves of `coverLine` part company here.
+    ///
+    /// **A shortcode in our own copy would be our own bug, not an author's writing.** The
+    /// author's spoiler is a stranger's text and may be written partly in pictures; the sentence
+    /// we put there when they flagged a post and wrote nothing is a string this app owns, in
+    /// three languages, and drawing a picture out of it would hide a mistake rather than show
+    /// one. So one branch is an `EmojiText` and the other stays a plain `Text`.
+    ///
+    /// `.body` and not `.meta`, though the role's own list of quiet lines names a spoiler: while
+    /// a row is covered this line *is* the post's words — it is what the reader reads to decide —
+    /// and unit 6 drew it at the words' own size for that reason. `EmojiTextRole.body.font` is
+    /// `ShellType.body`, pinned by a test, so the drawing is the one that was already there.
+    @ViewBuilder
+    private func coverTitle(_ written: Written) -> some View {
+        if coverIsTheAuthors {
+            EmojiText(item.spoiler ?? "", emojis: written.cover, host: host)
+        } else {
+            Text(L10n.t("item.covered.title"))
+                .font(ShellType.body)
+        }
+    }
+
+    /// Whether the line on the cover is a stranger's writing or ours. The one question that
+    /// decides which of the two the row draws, named so a test can ask it.
+    var coverIsTheAuthors: Bool { !(item.spoiler ?? "").isEmpty }
+
+    private func words(_ written: Written) -> some View {
         VStack(alignment: .leading, spacing: ShellSpace.tight) {
             if item.source.kind == .board, let board = item.board {
                 Text(board)
@@ -466,8 +671,7 @@ struct DummyItemRow: View {
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                     .lineLimit(1)
             }
-            Text(item.body)
-                .font(ShellType.body)
+            EmojiText(item.body, emojis: written.body, host: host)
                 .foregroundStyle(
                     item.title == nil ? ShellChrome.ink(colorScheme) : ShellChrome.inkDim(colorScheme)
                 )

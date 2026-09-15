@@ -86,6 +86,13 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     public let sensitive: Bool?
     /// The line the author covered it with, where there is one.
     public let spoiler: String?
+    /// The pictures this post is partly written in, as the post itself carried them.
+    ///
+    /// The post's own list and not the reading server's: `:blobcat:` registered on two servers
+    /// is two different pictures, and a row that drew the reader's over the author's would be
+    /// quietly rewriting somebody's post. The reading server's catalogue is the fallback behind
+    /// these, and `EmojiAlphabet` is the only thing that puts the two in that order.
+    public let emojis: [CustomEmoji]
     public let counts: DummyCounts
     public let marks: DummyMarks
     /// Other hosts that also carried this item. Empty for a single source.
@@ -164,6 +171,7 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         attachments = note.attachments
         sensitive = note.sensitive
         spoiler = note.spoiler
+        emojis = note.emojis
         counts = DummyCounts(
             replies: note.counts.replies,
             reblogs: note.counts.reblogs,
