@@ -13,6 +13,8 @@
 "source.signedIn" = "已登入";
 "account.rail.empty" = "新增來源";
 "account.add.title" = "新增來源";
+"account.hero.promise" = "你的時間軸。你的規則。";
+"account.hero.detail" = "加一台 Mastodon 主機來讀。你加的東西、還有它帶回來的東西，都留在這台裝置上。";
 "account.add.detail" = "從清單挑選 Mastodon 主機，或自行輸入主機名稱。只留在這次工作階段。";
 "account.add" = "新增";
 "account.add.host" = "主機名稱";

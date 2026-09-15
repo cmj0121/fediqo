@@ -6,6 +6,9 @@ import SwiftUI
 /// Preferences still moves the whole scale. What is chosen here is which role a line
 /// plays and what weight it carries — not how many points it happens to be.
 enum ShellType {
+    /// The one loud thing on a page that has one. First run only.
+    static let display = Font.title.weight(.semibold)
+
     /// A pane's own title. One per page.
     static let pane = Font.title3.weight(.semibold)
 

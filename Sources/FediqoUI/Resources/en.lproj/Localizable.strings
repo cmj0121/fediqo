@@ -13,6 +13,8 @@
 "source.signedIn" = "Signed in";
 "account.rail.empty" = "Add a source";
 "account.add.title" = "Add a source";
+"account.hero.promise" = "Your timeline. Your rules.";
+"account.hero.detail" = "Add a Mastodon host to read. What you add, and what it brings back, stays on this device.";
 "account.add.detail" = "Pick a Mastodon host from the list, or type its hostname. This session only.";
 "account.add" = "Add";
 "account.add.host" = "Hostname";
