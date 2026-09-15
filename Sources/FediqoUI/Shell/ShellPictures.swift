@@ -77,10 +77,29 @@ import SwiftUI
 /// ## The contract this file is safe under
 ///
 /// **At most three viewer-tier addresses alive at once** — unit 7's limit, and the reason is
-/// consequence rather than headroom. Past seven the cache is full at viewer tier; a full viewer
-/// tier is the only place admission can decline; and a decline is permanent for the life of the
-/// process. Breaking this does not cost memory, it strands rows with a `photo` glyph that
-/// scrolling away and back will not clear. There is a debug tripwire on it in `keep`.
+/// consequence rather than headroom. At six keys the cache is full at viewer tier and the seventh
+/// is the first that can be turned away; a full viewer tier is the only place admission can
+/// decline; and a decline is permanent for the life of the process. Breaking this does not cost
+/// memory, it strands rows with a `photo` glyph that scrolling away and back will not clear.
+/// There is a debug tripwire on it in `keep`, counting addresses rather than keys.
+///
+/// **I2 — `budget ≥ 2 × viewerAddresses × Tier.viewer.ceiling`.** The factor of two is display
+/// scale: a window dragged between a 2× and a 1× display holds both decodes of every address
+/// until the stale-scale keys are evicted. **The contract counts addresses because that is what
+/// the app draws; the budget must fund keys because that is what the cache holds.** Two
+/// quantities, each in its natural unit, linked by scale.
+///
+/// **At the contract limit the margin is exactly zero, not two-fold.** Three addresses during a
+/// scale change fills the viewer tier completely — safe, because full is not declining, but there
+/// is nothing spare. If unit 7 ever raises three to four, the budget goes to 128MB in the same
+/// commit. The old reading of this invariant — "six fit against the three the app shows, so
+/// double the headroom" — was accidentally right: six *is* three addresses at two scales, and
+/// there was never any headroom in it.
+///
+/// What bounds the duplication: a stale-scale key is read by nothing once the window has moved,
+/// so it is immediately evictable and clears on the next admission. The two is a transient peak,
+/// and funding that peak is what the budget is for. A three-display Mac could stage three scales
+/// briefly; the self-clearing is why that is not worth planning for.
 @MainActor
 @Observable
 final class ShellPictures {
@@ -180,6 +199,13 @@ final class ShellPictures {
     /// collection that only grows is the leak this class exists in order not to have.
     nonisolated static let refusals = 512
 
+    /// Unit 7's limit: at most this many viewer-tier **addresses** alive at once.
+    ///
+    /// One number, read by the budget invariant, by the debug tripwire in `keep`, and by the test
+    /// that ties them together — so raising it fails the budget assertion rather than quietly
+    /// stranding rows.
+    nonisolated static let viewerAddresses = 3
+
     /// How many pictures are kept, however small they are.
     ///
     /// The byte budget is the memory bound and it is the important one, but it is not a bound on
@@ -259,8 +285,17 @@ final class ShellPictures {
 
     @ObservationIgnored let http: any HTTPClient
 
-    init(http: any HTTPClient = ShellPictures.live) {
+    /// Whether this cache holds its caller to unit 7's viewer-tier contract in debug builds.
+    ///
+    /// Scoped on intent rather than on being the shared instance. "Nothing else builds one" is
+    /// true today and enforced by nothing, and a convention that cannot be checked is the shape
+    /// of argument this file has already had falsified more than once. Saying `false` here is
+    /// self-documenting and visible in review, which is the whole of what it needs to be.
+    @ObservationIgnored private let enforcingViewerContract: Bool
+
+    init(http: any HTTPClient = ShellPictures.live, enforcingViewerContract: Bool = true) {
         self.http = http
+        self.enforcingViewerContract = enforcingViewerContract
     }
 
     /// The picture, where it is already in hand. Draws on the first pass, which is what removes
@@ -398,17 +433,29 @@ final class ShellPictures {
 
         // Debug-only tripwire on the unit 7 contract. Counting, not inferring.
         //
-        // Scoped to the shared instance, which is the one the app and every preview draw from:
-        // `RemoteImage` reads `.shared` and nothing else. The suite's admission tests build their
-        // own caches and have to hold six or more viewer pictures on purpose — that is the only
-        // way to reach the declining branch — so an unscoped assert would make the mechanism
-        // untestable rather than make the contract enforced.
+        // Counts **addresses**, which is what the contract limits, and not keys. A key carries
+        // the screen's scale, so a window dragged from a 2× display to a 1× one turns three
+        // addresses into six keys while unit 7 sits exactly inside its budget.
+        //
+        // No slack, deliberately. A `+1` sized against key-counting intuition is exactly what
+        // breaks here: four addresses across two scales is eight keys, six fit, and keys seven
+        // and eight decline permanently — while a `<= 4` assert stays silent. At three the worst
+        // case is six keys, which is full, and full cannot decline: the seventh is the first that
+        // can. A fourth address is a contract change rather than a transient, so tripping on it
+        // is correct.
+        //
+        // The price of this is an init parameter on every test that exceeds the contract on
+        // purpose, and it is worth paying for one specific reason rather than a general one:
+        // `.crowded` is terminal with no relief, so this contract is the only thing standing
+        // between unit 7 and permanently stranded rows. **If the latch ever gains relief,
+        // revisit this — the justification goes with it.**
         assert(
-            self !== Self.shared
-                || pictures.keys.filter { $0.tier == .viewer }.count <= 4,
-            "More viewer-tier pictures held than the unit 7 contract allows (3, +1 slack). "
-                + "Past 6 the declining branch becomes reachable and a decline is permanent. "
-                + "See I9."
+            !enforcingViewerContract
+                || Set(pictures.keys.lazy.filter { $0.tier == .viewer }.map(\.url)).count
+                <= Self.viewerAddresses,
+            "More viewer-tier addresses held than the unit 7 contract allows "
+                + "(\(Self.viewerAddresses)). Past 6 keys the declining branch becomes reachable "
+                + "and a decline is permanent. See I9."
         )
     }
 
