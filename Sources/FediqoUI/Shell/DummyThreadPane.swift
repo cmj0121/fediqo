@@ -5,6 +5,7 @@ struct DummyThreadPane: View {
     let root: DummyItem
     @Binding var selectedID: String?
     var marks: (DummyItem) -> Binding<DummyMarks>
+    @Binding var decks: ShellDecks
     var jumpToTop: Int
     var onToast: (String) -> Void
     var onBack: () -> Void
@@ -75,7 +76,10 @@ struct DummyThreadPane: View {
             item: item,
             marks: marks(item),
             selected: item.id == selectedID,
+            top: decks.top(of: item.id, of: item.attachments.count),
+            lifted: decks.isLifted(item.id),
             onSelect: { selectedID = item.id },
+            onToggleCover: { _ = decks.toggleCover(item.id) },
             onToast: onToast
         )
         .opacity(dimmed ? 0.85 : 1)

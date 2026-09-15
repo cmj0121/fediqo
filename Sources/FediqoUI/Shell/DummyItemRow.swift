@@ -6,7 +6,14 @@ struct DummyItemRow: View {
     let item: DummyItem
     @Binding var marks: DummyMarks
     var selected: Bool = false
+    /// Which attachment is on top. It belongs to the app rather than to this view, so that a
+    /// refresh that replaces the list leaves a reader who turned to the third one looking at the
+    /// third one. See `ShellDecks`.
+    var top: Int = 0
+    /// Whether the reader has taken the author's cover off this row, for this run.
+    var lifted: Bool = false
     var onSelect: (() -> Void)?
+    var onToggleCover: () -> Void = {}
     var onToast: (String) -> Void
 
     @State private var hovering = false
@@ -32,6 +39,11 @@ struct DummyItemRow: View {
     @ScaledMetric(relativeTo: .caption) private var countBox: CGFloat = 20
     /// What a finger gets, whatever the glyph drawn inside it measures.
     @ScaledMetric(relativeTo: .caption) private var touch: CGFloat = 32
+    /// How far a covered row is smeared. Scaled with the words for the same reason every other
+    /// fitting here is, and here the reason is not proportion but correctness: a fixed radius that
+    /// hides the default size leaves the largest size legible, and a cover that can be read
+    /// through is not a cover.
+    @ScaledMetric(relativeTo: .body) private var smear: CGFloat = 10
 
     private enum Box {
         /// The lamp is a lamp at every type size, and a corner is a corner.
@@ -174,14 +186,30 @@ struct DummyItemRow: View {
         }
     }
 
+    /// The author's own picture, and the plate where there is none.
+    ///
+    /// Filled rather than fitted: a face in a small square is a face, and the parts of it outside
+    /// the square are the parts nobody looks at. That is the opposite of the slot's rule and for
+    /// the opposite reason — the slot holds a photograph somebody composed, and this holds a head.
+    ///
+    /// **The cover does not reach here.** One cover over the row means the author's words and what
+    /// they attached; who wrote it is not what `sensitive` is a fact about, and a timeline of
+    /// blurred faces would say something about the authors that nobody said.
     private var avatar: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: Box.plate, style: .continuous)
-                .fill(ShellChrome.well(colorScheme))
-            if item.hasAvatar {
-                Image(systemName: "person.fill")
-                    .font(ShellType.meta)
-                    .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+        Group {
+            if let url = item.avatarURL {
+                RemoteImage(
+                    url: url,
+                    tier: .deck,
+                    standing: .avatar,
+                    alt: nil,
+                    radius: Box.plate
+                )
+            } else {
+                // Nothing to draw and nothing on its way: the bare plate, which is what this row
+                // has always drawn for an author who sent no picture.
+                RoundedRectangle(cornerRadius: Box.plate, style: .continuous)
+                    .fill(ShellChrome.well(colorScheme))
             }
         }
         .frame(width: avatarSide, height: avatarSide)
@@ -254,16 +282,170 @@ struct DummyItemRow: View {
     private var mainBox: some View {
         if narrow {
             VStack(alignment: .leading, spacing: ShellSpace.snug) {
-                words
-                if item.hasThumb { thumb }
+                coveredWords
+                if item.hasThumb { coveredThumb }
             }
         } else {
             HStack(alignment: .top, spacing: ShellSpace.step) {
-                words
-                thumb
+                coveredWords
+                coveredThumb
             }
             .frame(height: thumbSide, alignment: .top)
+            // The frame fixes what this band *takes*; this fixes what it can *draw*. A fixed
+            // frame does not stop a child rendering outside it, so the worst case the line limit
+            // still allows — the longest warning an instance may send, with the words under it —
+            // would have drawn over the marks below rather than made the row taller. Both halves
+            // are needed for "server text never changes a row's height" to mean anything.
+            .clipped()
         }
+    }
+
+    /// Whether the blur is on: the author put a cover here and the reader has not taken it off.
+    /// Distinct from `item.covered`, which is whether there is a cover at all — the notice is
+    /// drawn in both states and only this one blurs anything.
+    private var covered: Bool { item.covered && !lifted }
+
+    /// The author's line and the control above, the words below.
+    ///
+    /// **A band, not an overlay, and it does not go away when the row is lifted.** The spoiler
+    /// line is the author's own text and belongs on the post either way; keeping it means the
+    /// control that puts the cover back is the same control in the same place as the one that
+    /// took it off, rather than a second one somewhere else. Not the same *size*: `Show it` and
+    /// `Hide it` happen to match in English and 掀開 and 蓋回去 do not, so what stays put is the
+    /// control and its band, not its width. A control that exists only while the row is covered is
+    /// lift-only for anybody not using the keyboard — which is the fault this row has just been
+    /// fixed for once, and adding a second one deliberately would be the wrong direction.
+    ///
+    /// **Blurred words are still words.** A `Text` behind a blur is in the accessibility tree and
+    /// on the pasteboard, so a cover made of blur alone hides the post from the reader who can see
+    /// it and from nobody else. The blur is what a covered row *looks* like; the two lines under
+    /// it are what it *is*. `textSelection` is set even though nothing here turns selection on
+    /// today: it is a standing answer, so that enabling selection somewhere above this row cannot
+    /// quietly make the covered ones copyable.
+    ///
+    /// Clipped because a blur draws outside the box it was given, and what is beside this box is
+    /// the slot and the next post.
+    @ViewBuilder
+    private var coveredWords: some View {
+        if item.covered {
+            VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                notice
+                if covered {
+                    words
+                        .blur(radius: smear)
+                        .clipped()
+                        .accessibilityHidden(true)
+                        .textSelection(.disabled)
+                } else {
+                    words
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            words
+        }
+    }
+
+    /// The slot, smeared with the same hand as the words. One cover over the row means one
+    /// radius: two blurs of different strengths would read as two covers.
+    ///
+    /// Clipped back to the card's own corner rather than to a rectangle. A blur takes the rounded
+    /// edge with it, and what was left was a hard-cornered smudge against the row's margin — a
+    /// covered picture should still look like the picture it is covering.
+    @ViewBuilder
+    private var coveredThumb: some View {
+        if covered {
+            thumb
+                .blur(radius: smear)
+                .clipShape(RoundedRectangle(cornerRadius: Box.plate, style: .continuous))
+                // And hidden, for the same reason the words are. What the author wrote for
+                // somebody who cannot see the picture describes the picture — read out from
+                // behind the cover, it is the cover lifted for exactly the reader who cannot
+                // lift it back. The notice names what is under there without describing it.
+                .accessibilityHidden(true)
+        } else {
+            thumb
+        }
+    }
+
+    /// The author's own line, and the key that takes the cover off or puts it back.
+    ///
+    /// One control with two labels. It is a button as well as a key: a reader who never touches
+    /// the keyboard would otherwise be told which key works and have no way to press it, and on a
+    /// phone there is no `s` to be told about at all.
+    private var notice: some View {
+        VStack(alignment: .leading, spacing: ShellSpace.tight) {
+            Text(coverLine)
+                .font(ShellType.body)
+                .foregroundStyle(ShellChrome.ink(colorScheme))
+                .lineLimit(coverLines)
+                .fixedSize(horizontal: false, vertical: true)
+            Button(action: onToggleCover) {
+                HStack(spacing: ShellSpace.snug) {
+                    Text(verbatim: "s")
+                        .font(ShellType.keycap)
+                        .foregroundStyle(ShellChrome.ink(colorScheme))
+                        .padding(.horizontal, ShellSpace.snug)
+                        .padding(.vertical, ShellSpace.hair * 2)
+                        .background(Capsule(style: .continuous).fill(ShellChrome.well(colorScheme)))
+                    Text(L10n.t(covered ? "item.covered.show" : "item.covered.hide"))
+                        .font(ShellType.meta)
+                        .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // Ignored rather than combined, and then said properly: combining would read the key cap
+        // out as the letter "s" in the middle of a sentence.
+        //
+        // **Ignoring the children throws the real button's activation away with them**, and a
+        // hand-added `.isButton` trait with nothing behind it is a control that announces itself
+        // and then does nothing when it is pressed. On a phone there is no `s` to fall back on,
+        // so without this action a reader using VoiceOver could not uncover a post at all — the
+        // one reader decision 6 is most for, with no way in.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spokenCover)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction(.default) { onToggleCover() }
+    }
+
+    /// How many lines the author's line may have: one fewer than the words are allowed, because
+    /// the control takes the last one. Derived from the words' own rule rather than chosen, so
+    /// the two cannot drift apart.
+    ///
+    /// **Server text never changes a row's height. Only a reader's own action does.** A
+    /// `spoiler_text` is up to five hundred characters that a hostile instance picks, so any rule
+    /// that lets it size a row is a layout attack that lands on every row of a timeline at once —
+    /// which is a stronger reason for the limit than rows looking uniform. What is left over is a
+    /// warning long enough that it has stopped being a warning and become the post; a reader who
+    /// wants all of it uncovers, and a screen reader is given every character regardless.
+    private var coverLines: Int { max(1, bodyLines - 1) }
+
+    /// What the row says out loud: the author's line **in full**, what is under the cover named
+    /// but not described, and the way to work the control.
+    ///
+    /// **The full `spoiler_text`, never the truncated string.** A visual limit is a fact about
+    /// this column's height and about nothing else; inheriting it here would hide from a screen
+    /// reader exactly the text that exists to let somebody decide.
+    ///
+    /// The middle clause is the one that is easy to leave out. While the row is covered the words
+    /// and the attachment are both out of the accessibility tree, so without it a covered row
+    /// carrying four photographs announces a warning and nothing else, and a reader cannot tell
+    /// there is anything there to uncover. `AttachmentDeck.named` carries the kind and the count
+    /// and never the alt text, which is what keeps the cover a cover. Once the row is lifted the
+    /// deck speaks for itself and the clause would only say it twice.
+    private var spokenCover: String {
+        let attached = covered ? AttachmentDeck.named(item.attachments, top: top) : nil
+        let how = L10n.t(covered ? "item.covered.label" : "item.lifted.label")
+        return [coverLine, attached, how].compactMap { $0 }.joined(separator: ". ")
+    }
+
+    /// What the author wrote on the cover, or what to say where they wrote nothing but flagged it.
+    private var coverLine: String {
+        let spoiler = item.spoiler ?? ""
+        return spoiler.isEmpty ? L10n.t("item.covered.title") : spoiler
     }
 
     private var words: some View {
@@ -306,13 +488,13 @@ struct DummyItemRow: View {
     @ViewBuilder
     private var thumb: some View {
         if item.hasThumb {
-            RoundedRectangle(cornerRadius: Box.plate, style: .continuous)
-                .fill(ShellChrome.well(colorScheme))
-                .overlay {
-                    Image(systemName: "photo")
-                        .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-                }
-                .frame(width: thumbSide, height: thumbSide)
+            AttachmentDeck(
+                attachments: item.attachments,
+                top: top,
+                side: thumbSide,
+                radius: Box.plate
+            )
+            .frame(width: thumbSide, height: thumbSide)
         } else {
             Color.clear
                 .frame(width: thumbSide, height: thumbSide)

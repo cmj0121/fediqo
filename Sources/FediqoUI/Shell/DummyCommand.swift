@@ -77,6 +77,23 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         return items[(index + offset) % count]
     }
 
+    /// Where a press that acts on the focused post lands, when there may not be one.
+    ///
+    /// Pure, and separate from the acting, because the rule is the part with cases in it: an
+    /// empty list, nothing focused yet, a selection left pointing at a post the last refresh took
+    /// away. Inside a view none of those can be asserted; here all of them can.
+    public static func focused(in items: [DummyItem], selected: String?) -> DummyFocus {
+        guard let first = items.first else { return .nothing }
+        guard let selected, let item = items.first(where: { $0.id == selected }) else {
+            // Nothing focused, so the press focuses the first row the way `j` does and stops
+            // there. A key whose first press does nothing and says nothing is a key a reader
+            // concludes is broken; the second press, now that there is a row to press it on,
+            // does the thing.
+            return .first(first.id)
+        }
+        return .post(item)
+    }
+
     /// Step through a list without wrapping. Nil current picks the first (down) or last (up).
     public static func stepped<T: Equatable>(_ items: [T], from current: T?, by step: Int) -> T? {
         guard !items.isEmpty else { return nil }
@@ -87,6 +104,16 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         guard items.indices.contains(next) else { return current }
         return items[next]
     }
+}
+
+/// What a press on the focused post has to work with. See `DummyCommand.focused(in:selected:)`.
+public enum DummyFocus: Equatable, Sendable {
+    /// No list to press on at all.
+    case nothing
+    /// Nobody is on a row yet, so this press only puts them on one.
+    case first(String)
+    /// The post to act on.
+    case post(DummyItem)
 }
 
 /// The three questions the list answers: where am I going, what am I doing, how do I leave.

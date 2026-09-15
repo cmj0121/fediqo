@@ -61,7 +61,7 @@
 "shortcut.view" = "Open what is attached, at the size of the app";
 "shortcut.play" = "Play what is attached, or stop it";
 "shortcut.turn" = "Turn to the next attachment";
-"shortcut.cover" = "Lift the cover the author put over this post";
+"shortcut.cover" = "Lift the cover the author put over this post, or put it back";
 "shortcut.compose" = "New post";
 "shortcut.list" = "This list";
 "shortcut.back" = "Back to the list";
@@ -101,6 +101,17 @@
 "item.visibility.unlisted" = "Unlisted";
 "item.visibility.followers" = "Followers";
 "item.visibility.mentioned" = "Mentioned";
+"item.deck.position" = "%1$d of %2$d";
+"item.deck.image" = "A picture";
+"item.deck.video" = "A video";
+"item.deck.audio" = "An audio clip";
+"item.deck.unknown" = "An attachment";
+"item.covered.title" = "The author covered this post";
+"item.covered.show" = "Show it";
+"item.covered.label" = "Press s to show it";
+"item.covered.hide" = "Hide it";
+"item.lifted.label" = "Press s to cover it again";
+
 "item.act.reply" = "Reply";
 "item.act.reblog" = "Reblog";
 "item.act.quote" = "Quote";

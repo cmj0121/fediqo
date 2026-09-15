@@ -11,8 +11,13 @@ public struct FediqoRootView: View {
     @State private var composing = false
     @State private var showingShortcuts = false
     @State private var railExpanded = false
+    /// Which card each row's deck is turned to, and which rows the reader has uncovered. Held
+    /// here rather than in the list, because a list is replaced by every refresh and `m` and `s`
+    /// are read here.
+    @State private var decks = ShellDecks()
     @State private var prefs = DummyPrefs()
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
 
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -49,6 +54,14 @@ public struct FediqoRootView: View {
                 }
             }
             .animation(.easeInOut(duration: 0.18), value: showingShortcuts)
+            // On a Mac this is not only a return from the background: `scenePhase` goes
+            // `.inactive` whenever the window stops being the key one, so this fires on every
+            // regain of focus. That is more often than the outage needs and still far less often
+            // than anything the stranded cohort could cause itself, which is the rule that
+            // matters — and the cache's own dedup makes a fetch nobody needs free.
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { wakeTheCaches() }
+            }
             .dummyShellKeys { character, shift, control in
                 performDummyKey(character, shift: shift, control: control)
             }
@@ -93,8 +106,15 @@ public struct FediqoRootView: View {
             return jumpListOrThreadToTop()
         case .expandPost:
             return openThread()
-        // Named so the guide and the key list are honest; nothing is drawn for them yet.
-        case .viewAttachment, .playAttachment, .nextAttachment, .liftCover:
+        case .nextAttachment:
+            return onFocusedItem { decks.turn($0.id, of: $0.attachments.count) }
+        case .liftCover:
+            return onFocusedItem { item in
+                guard item.covered else { return false }
+                return decks.toggleCover(item.id)
+            }
+        // Named so the guide and the key list are honest; unit 7 gives them something to do.
+        case .viewAttachment, .playAttachment:
             return false
         case .back:
             return popThread()
@@ -120,6 +140,54 @@ public struct FediqoRootView: View {
         }
     }
 
+    /// Asks again for the pictures that were written off while the network was down.
+    ///
+    /// **The cache cannot start this by itself, and that is deliberate.** Every stranded row
+    /// re-asks correctly the moment *any* fetch gets through — the arrival clears the whole
+    /// outage cohort and bumps the generation, which is what every `RemoteImage` is waiting on.
+    /// But nothing inside the cache can produce that first success, so a reader who opened the
+    /// app with no signal, put it down and came back to a working one sees a screen of `photo`
+    /// glyphs until they scroll. Coming back to the front is an event the stranded cohort cannot
+    /// cause itself, which is exactly what the cache's rule about relief asks for.
+    ///
+    /// Started together, never awaited one after another: a call site that asks and satisfies in
+    /// the same pass makes each newcomer the most recently wanted thing in the cache and defeats
+    /// admission.
+    ///
+    /// **These are not speculative fetches and may evict.** A stranded key whose row is still on
+    /// screen has been re-stamped by `picture(…)` on every body pass since, so it arrives with a
+    /// real `interest` and is admitted on its merits like any other. That is the right answer —
+    /// the row genuinely is wanted — but it is not the "displaces nothing" case, which belongs to
+    /// a key no body has read at all.
+    ///
+    /// When the emoji catalogue's pictures land they have the same problem and belong on this
+    /// line, beside this one.
+    private func wakeTheCaches() {
+        for key in ShellPictures.shared.stranded {
+            Task { @MainActor in
+                await ShellPictures.shared.fetch(key.url, scale: key.scale, tier: key.tier)
+            }
+        }
+    }
+
+    /// Does something to the post the reader is on, and says whether anything happened.
+    ///
+    /// The rule about where a press lands is `DummyCommand.focused(in:selected:)`, which is where
+    /// it can be tested; this is the acting half. On a post with nothing to do — a deck of one,
+    /// a row with no cover — the press moves nothing and says so.
+    private func onFocusedItem(_ act: (DummyItem) -> Bool) -> Bool {
+        guard place == .timeline else { return false }
+        switch DummyCommand.focused(in: currentListItems, selected: selectedItemID) {
+        case .nothing:
+            return false
+        case .first(let id):
+            selectedItemID = id
+            return true
+        case .post(let item):
+            return act(item)
+        }
+    }
+
     /// j/k and the arrows walk whichever list is in front: the stream, or the open conversation.
     private func moveInList(by step: Int) -> Bool {
         guard place == .timeline, let ids = currentListIDs else { return false }
@@ -133,11 +201,16 @@ public struct FediqoRootView: View {
         DummyTimeline(id: session.timelineID ?? "").items(from: session.notes)
     }
 
-    private var currentListIDs: [String]? {
+    /// Whichever list is in front: the open conversation, or the stream under it.
+    private var currentListItems: [DummyItem] {
         if let opened = threadStack.last, let item = streamItems.first(where: { $0.id == opened }) {
-            return item.dummyConversation().inOrder.map(\.id)
+            return item.dummyConversation().inOrder
         }
-        let ids = streamItems.map(\.id)
+        return streamItems
+    }
+
+    private var currentListIDs: [String]? {
+        let ids = currentListItems.map(\.id)
         return ids.isEmpty ? nil : ids
     }
 
@@ -283,6 +356,7 @@ public struct FediqoRootView: View {
                 session: session,
                 selectedID: $selectedItemID,
                 openedID: openedThread,
+                decks: $decks,
                 jumpToTop: jumpToTop,
                 onPopThread: { _ = threadStack.popLast() }
             )
