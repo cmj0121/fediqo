@@ -11,6 +11,10 @@ public enum ProtocolKind: String, Sendable, Hashable, CaseIterable {
     case peertube
     case friendica
     case gotosocial
+    /// A forum rather than a microblog. Kept in the same list because what this app asks a
+    /// host is "what do you speak", and a forum is an answer to that question — the shape of
+    /// what comes back differs, not the question.
+    case discourse
     case unknown
 
     public var displayName: String {
@@ -24,6 +28,7 @@ public enum ProtocolKind: String, Sendable, Hashable, CaseIterable {
         case .peertube: "PeerTube"
         case .friendica: "Friendica"
         case .gotosocial: "GoToSocial"
+        case .discourse: "Discourse"
         case .unknown: "unknown protocol"
         }
     }
@@ -155,6 +160,17 @@ public struct Note: Identifiable, Hashable, Sendable {
     public let author: String
     public let handle: String
     public let body: String
+    /// What the post is called, where the source has such a thing.
+    ///
+    /// **A microblog has none and a forum's is the post.** A Mastodon status is its words; a
+    /// forum topic is a title with a discussion under it, and `/latest.json` often sends no
+    /// excerpt at all — so a row that dropped this would draw a forum as a column of blank
+    /// posts. Optional rather than empty-string, because "this source has no such idea" and
+    /// "the author left it blank" are different facts and only the first is true here.
+    public let title: String?
+    /// The section of the source this was posted in — a forum's category. Nothing where the
+    /// source has no such division, which is every microblog.
+    public let board: String?
     public let postedAt: Date
     public var origins: Set<FetchOrigin>
     public let reply: Reply?
@@ -183,6 +199,8 @@ public struct Note: Identifiable, Hashable, Sendable {
         author: String,
         handle: String,
         body: String,
+        title: String? = nil,
+        board: String? = nil,
         postedAt: Date,
         origins: Set<FetchOrigin>,
         reply: Reply? = nil,
@@ -201,6 +219,8 @@ public struct Note: Identifiable, Hashable, Sendable {
         self.author = author
         self.handle = handle
         self.body = body
+        self.title = title
+        self.board = board
         self.postedAt = postedAt
         self.origins = origins
         self.reply = reply

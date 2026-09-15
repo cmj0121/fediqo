@@ -161,7 +161,9 @@ struct JoinTests {
         }
     }
 
-    private static func joinHTTP(
+    // Shared with `ForumJoinTests`, which needs the same server to prove that the dispatcher did
+    // not break the path that already worked.
+    static func joinHTTP(
         publicTimeline: FixtureHTTP.Outcome = .body(Fixtures.json("public-timeline")),
         trending: FixtureHTTP.Outcome = .body(Fixtures.json("trending-statuses"))
     ) -> FixtureHTTP {

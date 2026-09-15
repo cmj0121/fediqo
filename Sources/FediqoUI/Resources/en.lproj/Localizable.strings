@@ -34,6 +34,7 @@
 "account.catalog.weekly" = "%@ active this week";
 "account.catalog.people" = "%@ people";
 "account.refuse.closed" = "%@ answered, but would not hand over its public timeline.";
+"account.refuse.refused" = "%1$@ turned this app away (HTTP %2$d). Something in front of it is filtering readers it does not recognise.";
 "account.catalog.langUnknown" = "Language unknown";
 
 "rail.open.title" = "Open";

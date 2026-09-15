@@ -152,7 +152,7 @@ final class ShellSession {
         checking = true
         defer { checking = false }
         do {
-            try await MastodonJoin(http: http, store: store, catalogues: emoji).join(host: raw)
+            try await SourceJoin(http: http, store: store, catalogues: emoji).join(host: raw)
             sources = await store.sources()
             notes = await store.all()
             if queries.isEmpty {
@@ -203,6 +203,11 @@ final class ShellSession {
             L10n.t("account.refuse.network")
         case .publicTimelineFailed:
             String(format: L10n.t("account.refuse.closed"), host)
+        // The host is fine and the spelling is fine: something in front of it turned this app
+        // away. Said as its own sentence so the reader does not go looking for a fault of
+        // theirs — see `JoinError.refused`.
+        case .refused(let status):
+            String(format: L10n.t("account.refuse.refused"), host, status)
         }
     }
 }

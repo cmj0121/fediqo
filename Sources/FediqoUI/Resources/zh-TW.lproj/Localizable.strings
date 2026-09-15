@@ -34,6 +34,7 @@
 "account.catalog.weekly" = "本週活躍 %@";
 "account.catalog.people" = "%@ 人";
 "account.refuse.closed" = "%@ 有回應，但不肯交出它的公開時間軸。";
+"account.refuse.refused" = "%1$@ 拒絕了這個 app（HTTP %2$d）。它前面有東西在過濾它不認得的讀取端。";
 "account.catalog.langUnknown" = "語言不明";
 
 "rail.open.title" = "打開";

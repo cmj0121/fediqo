@@ -104,6 +104,10 @@ public enum HTMLKind: Equatable, Sendable {
         if matches(labeled, "peertube") { return .named(.peertube) }
         if matches(labeled, "friendica") { return .named(.friendica) }
         if matches(labeled, "gotosocial") { return .named(.gotosocial) }
+        // Discourse names itself in the generator tag on every server-rendered page, and the tag
+        // is in the HTML rather than built by script, so it survives a reader with no JavaScript
+        // and a fetch that never runs any.
+        if matches(labeled, "discourse") { return .named(.discourse) }
         if matches(labeled, "mastodon") { return .named(.mastodon) }
         if hasID(html, "mastodon") { return .named(.mastodon) }
         if html.range(of: "joinmastodon.org", options: .caseInsensitive) != nil {

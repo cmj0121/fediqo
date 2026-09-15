@@ -19,8 +19,8 @@ public struct DummySource: Identifiable, Hashable, Sendable {
 
     public var isSignedIn: Bool { account != nil }
 
-    public static func unsigned(_ host: String) -> DummySource {
-        DummySource(id: host, host: host, kind: .microblog, account: nil)
+    public static func unsigned(_ host: String, kind: DummySourceKind = .microblog) -> DummySource {
+        DummySource(id: host, host: host, kind: kind, account: nil)
     }
 
     public static let unsignedPublic = DummySource(

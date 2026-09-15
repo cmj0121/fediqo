@@ -71,8 +71,17 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     public let author: String
     public let handle: String?
     public let titleKey: String?
+    /// The same thing a stranger's server actually sent, where one did.
+    ///
+    /// **Two fields for one line, because they are two different things.** `titleKey` names a
+    /// line this app wrote and will translate; this is a line somebody else wrote, in whatever
+    /// language they wrote it, and translating it would be rewriting their post. A fixture sets
+    /// the first, a forum sets the second, and nothing sets both.
+    public var titleText: String?
     public let body: String
     public let boardKey: String?
+    /// The section name a forum sent, as against `boardKey`'s translated one. See `titleText`.
+    public var boardText: String?
     public let postedAt: Date
     public let workRelated: Bool
     public let answering: DummyAnswering
@@ -143,8 +152,8 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         }
     }
 
-    public var title: String? { titleKey.map { L10n.t($0) } }
-    public var board: String? { boardKey.map { L10n.t($0) } }
+    public var title: String? { titleKey.map { L10n.t($0) } ?? titleText }
+    public var board: String? { boardKey.map { L10n.t($0) } ?? boardText }
 
     /// Not the live stream. Named queries do not read this.
     public static let stored: [DummyItem] = []
@@ -156,12 +165,14 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
 
     public init(_ note: Note) {
         id = note.id
-        source = DummySource.unsigned(note.source.host)
+        source = DummySource.unsigned(note.source.host, kind: Self.shape(of: note.source.kind))
         author = note.author
         handle = note.handle
         titleKey = nil
+        titleText = note.title
         body = note.body
         boardKey = nil
+        boardText = note.board
         postedAt = note.postedAt
         workRelated = false
         answering = Self.answering(note.reply)
@@ -179,6 +190,20 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         )
         marks = DummyMarks()
         alsoFrom = []
+    }
+
+    /// Which shape of row a protocol gets. **The protocol stays behind; the timeline sees a
+    /// shape** — that is `DummySourceKind`'s own rule, and this is the one place it is applied.
+    ///
+    /// Everything federated is a microblog whatever its software, because what they have in
+    /// common is that a post is somebody's words. A forum is the other shape: a named discussion
+    /// with a section and a count of answers, which the row already knows how to draw as a
+    /// thread.
+    private static func shape(of kind: ProtocolKind) -> DummySourceKind {
+        switch kind {
+        case .discourse: .forum
+        default: .microblog
+        }
     }
 
     private static func answering(_ reply: Reply?) -> DummyAnswering {

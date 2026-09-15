@@ -90,7 +90,15 @@ struct HostTests {
         #expect(ProtocolKind.peertube.displayName == "PeerTube")
         #expect(ProtocolKind.friendica.displayName == "Friendica")
         #expect(ProtocolKind.gotosocial.displayName == "GoToSocial")
+        #expect(ProtocolKind.discourse.displayName == "Discourse")
         #expect(ProtocolKind.unknown.displayName == "unknown protocol")
-        #expect(ProtocolKind.allCases.count == 10)
+
+        // Over `allCases` rather than against a number. A count is a reminder to come back here,
+        // which is exactly what a new case does not get; this says the property that actually
+        // matters — every kind this app can name has a name, and no two of them share one, so a
+        // case added by copy-and-paste is caught rather than counted.
+        let names = ProtocolKind.allCases.map(\.displayName)
+        #expect(names.allSatisfy { !$0.isEmpty })
+        #expect(Set(names).count == names.count)
     }
 }
