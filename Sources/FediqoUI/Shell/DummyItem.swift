@@ -78,8 +78,21 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     public let answering: DummyAnswering
     public let boostedBy: String?
     public let audience: DummyAudience?
-    public let hasAvatar: Bool
-    public let hasThumb: Bool
+    /// The author's picture, where the source sent an address for one.
+    public let avatarURL: URL?
+    public let attachments: [Attachment]
+    /// Whether the author covered it, or nothing where the source never said. Carried as the
+    /// three answers it has, not folded down to two — see `covered`.
+    public let sensitive: Bool?
+    /// The line the author covered it with, where there is one.
+    public let spoiler: String?
+    /// The pictures this post is partly written in, as the post itself carried them.
+    ///
+    /// The post's own list and not the reading server's: `:blobcat:` registered on two servers
+    /// is two different pictures, and a row that drew the reader's over the author's would be
+    /// quietly rewriting somebody's post. The reading server's catalogue is the fallback behind
+    /// these, and `EmojiAlphabet` is the only thing that puts the two in that order.
+    public let emojis: [CustomEmoji]
     public let counts: DummyCounts
     public let marks: DummyMarks
     /// Other hosts that also carried this item. Empty for a single source.
@@ -92,6 +105,35 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
             .map(\.host)
             .filter { seen.insert($0).inserted }
             .sorted()
+    }
+
+    /// Whether the row fills its slot. One answer for the whole post, because the slot is one
+    /// square however many things came attached.
+    ///
+    /// **This asks a wider question than it used to, on purpose.** It was "the first attachment
+    /// had a `preview_url`"; it is now "the post brought something with an address at all", so
+    /// an audio clip a server sent no cover art for fills the slot instead of leaving it blank.
+    /// A post that brought something should say so whether or not a still came with it.
+    public var hasThumb: Bool { !attachments.isEmpty }
+
+    public var hasAvatar: Bool { avatarURL != nil }
+
+    /// Whether the row arrives covered: the author flagged it, or wrote a line to put in front
+    /// of it. One answer for the whole row, because there is one cover over the whole row.
+    ///
+    /// **`sensitive == true`, never `sensitive ?? false`.** They read the same and mean different
+    /// things: the first asks "did the source say yes", the second turns "the source never said"
+    /// into "the source said no". A `Bool?` already *is* the three-case type — nothing, yes, no —
+    /// so a named enum here would buy a third spelling of the same three cases and one more
+    /// conversion for a wire boundary to get wrong. What was ever dangerous is `??`, and `??` is
+    /// only dangerous at the one place that asks the question. This is that place, and it does
+    /// not use it.
+    ///
+    /// A source that never said has not said the post is safe to look at, so nothing is uncovered
+    /// on its silence — but neither is it covered on it: silence plus no spoiler line is a post
+    /// with nothing to say about itself, and covering every such post would cover the timeline.
+    public var covered: Bool {
+        sensitive == true || !(spoiler ?? "").isEmpty
     }
 
     public var kind: DummyItemKind {
@@ -125,8 +167,11 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         answering = Self.answering(note.reply)
         boostedBy = note.boostedBy
         audience = note.audience.map(DummyAudience.init)
-        hasAvatar = note.avatarURL != nil
-        hasThumb = note.previewURL != nil
+        avatarURL = note.avatarURL
+        attachments = note.attachments
+        sensitive = note.sensitive
+        spoiler = note.spoiler
+        emojis = note.emojis
         counts = DummyCounts(
             replies: note.counts.replies,
             reblogs: note.counts.reblogs,

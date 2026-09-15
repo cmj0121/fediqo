@@ -10,6 +10,10 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     case previousPost
     case goTop
     case expandPost
+    case viewAttachment
+    case playAttachment
+    case nextAttachment
+    case liftCover
     case back
     case compose
     case showShortcuts
@@ -41,6 +45,10 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         case "j", KeyEquivalent.downArrow.character: return .nextPost
         case "k", KeyEquivalent.upArrow.character: return .previousPost
         case "g": return .goTop
+        case "v": return .viewAttachment
+        case "a": return .playAttachment
+        case "m": return .nextAttachment
+        case "s": return .liftCover
         case KeyEquivalent.return.character, " ": return .expandPost
         case "q": return .back
         default: return nil
@@ -69,6 +77,48 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         return items[(index + offset) % count]
     }
 
+    /// Where a press that acts on the focused post lands, when there may not be one.
+    ///
+    /// Pure, and separate from the acting, because the rule is the part with cases in it: an
+    /// empty list, nothing focused yet, a selection left pointing at a post the last refresh took
+    /// away. Inside a view none of those can be asserted; here all of them can.
+    public static func focused(in items: [DummyItem], selected: String?) -> DummyFocus {
+        guard let first = items.first else { return .nothing }
+        guard let selected, let item = items.first(where: { $0.id == selected }) else {
+            // Nothing focused, so the press focuses the first row the way `j` does and stops
+            // there. A key whose first press does nothing and says nothing is a key a reader
+            // concludes is broken; the second press, now that there is a row to press it on,
+            // does the thing.
+            return .first(first.id)
+        }
+        return .post(item)
+    }
+
+    /// Which of what is open a dismissing press closes: the outermost, and only that one.
+    ///
+    /// The order is `DummyLayer.allCases` and nothing else, which is the point of this existing
+    /// at all — the alternative is a run of `if`s in a view, where the order is whatever somebody
+    /// last wrote and cannot be asserted from anywhere.
+    public static func outermost(of open: Set<DummyLayer>) -> DummyLayer? {
+        DummyLayer.allCases.first(where: open.contains)
+    }
+
+    /// Whether a layer may be entered now.
+    ///
+    /// The dual of `outermost`, and deliberately the **same function** rather than a second list:
+    /// a layer may open only if it would then be the outermost one.
+    ///
+    /// A key that would open something underneath what the reader is already looking at is not
+    /// handled and yields. **It does not close the layer above to make room for itself** — that
+    /// is the compound behaviour ruled out for `s` inside the viewer, ruled out here for the same
+    /// reason. Keys do not navigate implicitly.
+    ///
+    /// There is exactly one expression of the layer order in this codebase, and both directions
+    /// read it. A second expression is a bug that has not happened yet.
+    public static func canOpen(_ layer: DummyLayer, whenOpen open: Set<DummyLayer>) -> Bool {
+        outermost(of: open.union([layer])) == layer
+    }
+
     /// Step through a list without wrapping. Nil current picks the first (down) or last (up).
     public static func stepped<T: Equatable>(_ items: [T], from current: T?, by step: Int) -> T? {
         guard !items.isEmpty else { return nil }
@@ -79,6 +129,37 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         guard items.indices.contains(next) else { return current }
         return items[next]
     }
+}
+
+/// What a dismissing press can close, outermost first.
+///
+/// **The order of the cases is the layer order**, which is why they are `CaseIterable` and why
+/// `DummyCommand.outermost` is the only reader of that order. A viewer left open under a popped
+/// thread is the failure this is arranged to make unreachable: the viewer is drawn over the whole
+/// app, so it is what a press to leave has to leave.
+///
+/// The selection is a layer in this sense too. It is not something drawn over anything, but it is
+/// the last thing `Escape` has to give back, and leaving it out of the list would put the rule in
+/// two places again.
+public enum DummyLayer: Hashable, Sendable, CaseIterable {
+    /// What `v` opened, over the whole app.
+    case viewer
+    /// The written-down keys.
+    case shortcuts
+    /// The conversation opened over the stream.
+    case thread
+    /// The lamp on a row.
+    case selection
+}
+
+/// What a press on the focused post has to work with. See `DummyCommand.focused(in:selected:)`.
+public enum DummyFocus: Equatable, Sendable {
+    /// No list to press on at all.
+    case nothing
+    /// Nobody is on a row yet, so this press only puts them on one.
+    case first(String)
+    /// The post to act on.
+    case post(DummyItem)
 }
 
 /// The three questions the list answers: where am I going, what am I doing, how do I leave.
@@ -111,6 +192,10 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
         DummyShortcut(group: .moving, keys: ["g"], name: "top", commands: [.goTop]),
         DummyShortcut(group: .doing, keys: ["Return", "Space"], name: "expand",
                       commands: [.expandPost]),
+        DummyShortcut(group: .doing, keys: ["v"], name: "view", commands: [.viewAttachment]),
+        DummyShortcut(group: .doing, keys: ["a"], name: "play", commands: [.playAttachment]),
+        DummyShortcut(group: .doing, keys: ["m"], name: "turn", commands: [.nextAttachment]),
+        DummyShortcut(group: .doing, keys: ["s"], name: "cover", commands: [.liftCover]),
         DummyShortcut(group: .doing, keys: ["c"], name: "compose", commands: [.compose]),
         DummyShortcut(group: .doing, keys: ["?"], name: "list", commands: [.showShortcuts]),
         DummyShortcut(group: .leaving, keys: ["q"], name: "back", commands: [.back]),

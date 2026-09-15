@@ -1,10 +1,23 @@
+import AVKit
+import FediqoCore
 import SwiftUI
 
 /// The conversation around one item: the way up, the post, then answers related-on.
 struct DummyThreadPane: View {
     let root: DummyItem
+    /// Passed through to every row: a thread draws the same four bands the stream does, and its
+    /// names, words and cover lines are somebody else's writing in exactly the same way.
+    let catalogues: EmojiCatalogueStore
+    /// Passed through with the store: the pane above owns the wait for this source's catalogue.
+    /// A thread is one post's conversation, so every row in it reads through the same server.
+    var catalogueSettled: Bool = false
     @Binding var selectedID: String?
     var marks: (DummyItem) -> Binding<DummyMarks>
+    @Binding var decks: ShellDecks
+    /// What is playing, and the one player in the app. See `ShellPlayback`.
+    let playback: ShellPlayback
+    /// A press on a card's own play mark, which the root answers under the same rule as `a`.
+    var onPlayRow: (DummyItem) -> Void
     var jumpToTop: Int
     var onToast: (String) -> Void
     var onBack: () -> Void
@@ -73,15 +86,32 @@ struct DummyThreadPane: View {
         let depth = conversation.depth(of: item.id)
         return DummyItemRow(
             item: item,
+            catalogues: catalogues,
+            catalogueSettled: catalogueSettled,
             marks: marks(item),
             selected: item.id == selectedID,
+            top: decks.top(of: item.id, of: item.attachments.count),
+            lifted: decks.isLifted(item.id),
+            player: player(of: item),
             onSelect: { selectedID = item.id },
+            onToggleCover: { _ = decks.toggleCover(item.id) },
+            onPlay: { onPlayRow(item) },
+            onEnded: { playback.stop() },
             onToast: onToast
         )
         .opacity(dimmed ? 0.85 : 1)
         .padding(.leading, indent(depth))
         .overlay(alignment: .leading) { rail(depth) }
         .id(item.id)
+    }
+
+    /// The player for this row's slot, where this row's card is the thing that is playing.
+    private func player(of item: DummyItem) -> AVPlayer? {
+        playback.player(
+            for: ShellPlaying.playable(decks.showing(item.attachments, of: item.id)),
+            of: item.id,
+            on: .row
+        )
     }
 
     private func indent(_ depth: Int) -> CGFloat {

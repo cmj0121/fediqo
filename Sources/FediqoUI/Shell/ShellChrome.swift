@@ -94,6 +94,28 @@ enum ShellChrome {
         scheme == .dark ? rgb(0.898, 0.478, 0.443) : rgb(0.643, 0.212, 0.180)
     }
 
+    // MARK: On top of somebody's photograph
+
+    /// The ink of a mark drawn over an attachment, and the shade it sits on.
+    ///
+    /// The only pair here that takes no colour scheme, and the reason is that the scheme does not
+    /// decide the ground. Everywhere else in this file the ink is on the chassis and the two are
+    /// chosen together; over a stranger's photograph the ground is whatever they photographed, so
+    /// the pair has to carry its own contrast and carries the same one in both schemes. A token
+    /// from the ramp would be legible against the page and invisible against a bright sky.
+    static let overPicture = Color.white
+
+    static let scrim = Color.black.opacity(0.55)
+
+    /// The ground a picture is opened on, when `v` gives it the whole app.
+    ///
+    /// Scheme-independent for the reason the pair above is, and then darker than either: what
+    /// sits on it is a photograph, and the one thing a ground behind a photograph must not do is
+    /// look like part of it. Nearly opaque rather than a wash — `ShellChrome.dim` is right behind
+    /// a panel the reader reads *and* keeps the page legible around it, which is exactly what is
+    /// not wanted here.
+    static let behindPicture = Color.black.opacity(0.92)
+
     /// Audience is carried by the glyph. Colour only says how far the post travels:
     /// what anyone can read recedes, what was narrowed to somebody stays legible.
     static func vis(_ audience: DummyAudience, _ scheme: ColorScheme) -> Color {

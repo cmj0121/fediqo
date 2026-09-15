@@ -1,3 +1,4 @@
+import SwiftUI
 import Testing
 @testable import FediqoUI
 
@@ -256,5 +257,13 @@ struct DummyPrefsTests {
         #expect(L10n.t("account.rail.empty", language: .taiwanese) == "新增來源")
         #expect(L10n.t("timeline.empty.title", language: .taiwanese) == "還沒有東西進來")
         #expect(L10n.t("timeline.empty.trends.title", language: .taiwanese) == "目前沒有趨勢")
+    }
+
+    // The load-bearing half of the hand-off, and the one a test can hold: where nothing says
+    // otherwise — a preview, a test, a host that never set it — a picture fetches exactly as it
+    // does today. A hand-off degrades to today's behaviour, never to a quietly disabled feature.
+    @Test("Where nobody says which place is on screen, every place is")
+    func theActivePlaceDefaultsToActive() {
+        #expect(EnvironmentValues().shellPlaceIsActive)
     }
 }

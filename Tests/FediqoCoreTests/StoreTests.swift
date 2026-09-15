@@ -96,7 +96,13 @@ struct StoreTests {
             boostedBy: boostedBy,
             audience: audience,
             avatarURL: URL(string: "https://first.example/avatar.png"),
-            previewURL: URL(string: "https://first.example/preview.jpg"),
+            attachments: [
+                Attachment(
+                    kind: .image,
+                    url: URL(string: "https://first.example/full.jpg"),
+                    previewURL: URL(string: "https://first.example/preview.jpg")
+                ),
+            ],
             url: URL(string: id),
             counts: Counts(replies: 1, reblogs: 2, favourites: 3)
         )

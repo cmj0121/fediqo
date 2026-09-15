@@ -27,6 +27,37 @@ public struct MastodonClient: Sendable {
         )
     }
 
+    /// Every shortcode this server has registered, folded the way a status's own list is.
+    ///
+    /// This is what resolves a shortcode that arrived with no list beside it. A status carries
+    /// its own pictures and costs nothing extra, but a name also turns up where no such list
+    /// came with it, and only the server's own catalogue can answer for those.
+    ///
+    /// Unauthenticated on every Mastodon server, and **optional**: a fork that does not serve it
+    /// answers 404, which is thrown here for the caller to survive. A source with no catalogue
+    /// simply has none.
+    ///
+    /// `visible_in_picker` and `category` are on the wire and are not read. Both exist to
+    /// arrange an emoji picker — which ones to offer, and under which heading — and this app has
+    /// no picker: a reader here never chooses an emoji, only reads one somebody else wrote.
+    /// Keeping them would put two fields in `CustomEmoji` that no screen can draw and every test
+    /// would have to carry. A build that grows a composer with a picker adds them then, against
+    /// a screen that uses them.
+    public func customEmojis() async throws -> [CustomEmoji] {
+        guard let url = Host.httpsURL(host: host, path: "/api/v1/custom_emojis") else {
+            throw MastodonRequestError.invalidURL
+        }
+        let (data, response) = try await http.data(from: url)
+        guard (200..<300).contains(response.statusCode) else {
+            throw MastodonRequestError.http(response.statusCode)
+        }
+        // The same wire object a status carries, with the same rule applied to its addresses:
+        // an emoji this device will not fetch a picture for is a shortcode that can never
+        // resolve, and is dropped rather than indexed.
+        let wire = try MastodonJSON.decoder.decode([StatusDTO.Emoji].self, from: data)
+        return CustomEmoji.folded(wire.compactMap(\.asEmoji))
+    }
+
     private func statuses(
         path: String,
         limit: Int,
@@ -96,25 +127,111 @@ struct StatusDTO: Decodable, Sendable {
     let reblogsCount: Int?
     let favouritesCount: Int?
     let mediaAttachments: [MediaAttachment]?
+    /// Whether the author covered it, and the line they covered it with. Optional because a
+    /// server that did not send them has told us nothing, which is not the same as telling us
+    /// there is nothing: `"spoiler_text": ""` is a server saying there is no line, and absent
+    /// is a server that never had the idea. `Note` keeps the two apart, so neither is folded
+    /// into the other on the way there.
+    let sensitive: Bool?
+    let spoilerText: String?
+    /// The pictures the words are partly written in. Absent on the odd server, which is a post
+    /// written in letters alone rather than a status worth failing.
+    let emojis: [Emoji]?
 
     struct Account: Decodable, Sendable {
         let displayName: String
         let acct: String
         let username: String?
         let avatar: String?
+        /// The pictures the display name is partly written in. A shortcode means one picture
+        /// on one server, so these and the status's own are one alphabet and not two.
+        let emojis: [Emoji]?
+    }
+
+    /// One custom emoji: the name between the colons, and the picture it stands for.
+    ///
+    /// Both addresses go through `Host.fetchableURL`, because an emoji is fetched by exactly
+    /// the same cache that fetches an attachment and so carries exactly the same risk. An
+    /// emoji whose `url` this device will not go to is an emoji with no picture, and is
+    /// dropped: keeping it would put a shortcode in the dictionary that can never resolve,
+    /// which draws a blank where the author wrote a word. A refused `static_url` is only a
+    /// still we have not got, which the animated file already covers.
+    struct Emoji: Decodable, Sendable {
+        let shortcode: String
+        let url: String?
+        let staticUrl: String?
+
+        var asEmoji: CustomEmoji? {
+            guard !shortcode.isEmpty, let address = Host.fetchableURL(url) else { return nil }
+            return CustomEmoji(
+                shortcode: shortcode,
+                url: address,
+                staticURL: Host.fetchableURL(staticUrl)
+            )
+        }
     }
 
     struct Mention: Decodable, Sendable {
         let acct: String
     }
 
+    /// What came attached. `type` is the server's own word for it, kept rather than guessed
+    /// at from the address, which rarely says.
     struct MediaAttachment: Decodable, Sendable {
-        let previewUrl: String?
+        let type: String?
         let url: String?
+        let previewUrl: String?
+        /// What the author wrote for somebody who cannot see it.
+        let description: String?
+        /// What shape the file is. Mastodon nests it, and only `original` is read: `small` is
+        /// the shape of the still, and the slot is drawn from the file's own shape.
+        let meta: Meta?
+
+        struct Meta: Decodable, Sendable {
+            let original: Size?
+
+            struct Size: Decodable, Sendable {
+                let width: Int?
+                let height: Int?
+            }
+        }
+
+        /// Nothing where neither address survived the wire — there is no screen that can draw
+        /// such an attachment and no reader who can open it, whatever else it carried. An alt
+        /// text with no picture under it is words about nothing.
+        var asAttachment: Attachment? {
+            let attachment = Attachment(
+                kind: Self.kind(of: type),
+                url: Host.fetchableURL(url),
+                previewURL: Host.fetchableURL(previewUrl),
+                alt: description ?? "",
+                width: meta?.original?.width,
+                height: meta?.original?.height
+            )
+            return attachment.isEmpty ? nil : attachment
+        }
+
+        /// **A `gifv` is a video.** It is a silent looping MP4 that Mastodon made out of
+        /// somebody's GIF, not a GIF, and it is the commonest moving thing on a timeline —
+        /// filed as anything else it becomes a still that will not play.
+        ///
+        /// A word this build has never heard of is `unknown`, which is a truthful answer and
+        /// not a failure: one strange attachment must never cost the reader the page.
+        private static func kind(of type: String?) -> Attachment.Kind {
+            switch type {
+            case "image": .image
+            case "video", "gifv": .video
+            case "audio": .audio
+            default: .unknown
+            }
+        }
     }
 
     func asNote(source: Source, origin: FetchOrigin) -> Note {
         let subject = reblog?.value ?? self
+        // Named once, so the name the row draws and the pictures that name is written in
+        // cannot come to disagree about whether there is a booster at all.
+        let booster = reblog == nil ? nil : account
         let host = source.host
         return Note(
             id: subject.uri ?? "https://\(host)/statuses/\(subject.id)",
@@ -125,10 +242,13 @@ struct StatusDTO: Decodable, Sendable {
             postedAt: subject.createdAt,
             origins: [origin],
             reply: Self.reply(inReplyToId: subject.inReplyToId, mentions: subject.mentions, host: host),
-            boostedBy: reblog == nil ? nil : account.name,
+            boostedBy: booster?.name,
             audience: Self.audience(subject.visibility),
-            avatarURL: subject.account.avatar.flatMap(URL.init(string:)),
-            previewURL: subject.mediaAttachments?.first?.previewUrl.flatMap(URL.init(string:)),
+            avatarURL: Host.fetchableURL(subject.account.avatar),
+            attachments: subject.mediaAttachments?.compactMap { $0.asAttachment } ?? [],
+            sensitive: subject.sensitive,
+            spoiler: subject.spoilerText,
+            emojis: Self.emojis(of: subject, boostedBy: booster),
             url: subject.url.flatMap(URL.init(string:)),
             counts: Counts(
                 replies: subject.repliesCount,
@@ -136,6 +256,25 @@ struct StatusDTO: Decodable, Sendable {
                 favourites: subject.favouritesCount
             )
         )
+    }
+
+    /// Every alphabet the row can actually need, folded into one list.
+    ///
+    /// **Three accounts are in play on a boost, and the row draws words from all three.**
+    /// `subject.emojis` spell the boosted status's body and its spoiler line;
+    /// `subject.account.emojis` spell the name the row draws as the author; and the booster's
+    /// own `account.emojis` spell the name it draws as `boostedBy`. Leave the third out and a
+    /// booster called `:blobcat:` is drawn as eight letters and two colons on every boost they
+    /// make. On anything else `subject` is `self`, so the third list *is* the second and the
+    /// fold takes the copy back out.
+    ///
+    /// One shortcode can mean one picture on the booster's server and a different one on the
+    /// author's, and a single list per note cannot hold both. The boosted status's own list is
+    /// offered first and first spelling wins, because that status is the post: its body and
+    /// its spoiler line are nearly all the words on the row, and a name is a few.
+    private static func emojis(of subject: StatusDTO, boostedBy booster: Account?) -> [CustomEmoji] {
+        let raw = (subject.emojis ?? []) + (subject.account.emojis ?? []) + (booster?.emojis ?? [])
+        return CustomEmoji.folded(raw.compactMap(\.asEmoji))
     }
 
     static func handle(_ acct: String, host: String) -> String {

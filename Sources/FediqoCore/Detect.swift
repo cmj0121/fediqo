@@ -47,6 +47,33 @@ public enum Host {
         return host
     }
 
+    /// Whether this device will fetch that address at all: `https`, and a host to reach.
+    ///
+    /// **The one definition.** `URLSessionClient` fetches under it and `fetchableURL` admits
+    /// addresses under it, so the rule that decides what may be asked for and the rule that
+    /// decides what may be kept cannot drift apart.
+    ///
+    /// The host clause is not belt and braces. `https:`, `https://`, `https:///p` and
+    /// `https://:8443/p` all parse and all have no host to reach: `URLSession` can only fail
+    /// them, but a kept one is an `Attachment` that is not `isEmpty`, so it fills a slot and
+    /// starts a fetch that can never finish. `Host.parse` has always insisted on a non-empty
+    /// host; this agrees with it.
+    static func isFetchable(_ url: URL) -> Bool {
+        url.scheme?.lowercased() == "https" && url.host()?.isEmpty == false
+    }
+
+    /// An address handed over by a remote instance, or nothing where this device will not go
+    /// there.
+    ///
+    /// A post's pictures belong to whatever host wrote it, and that host's JSON is not ours:
+    /// `file:///`, `data:` and `javascript:` are all things `URL(string:)` will happily build
+    /// out of it, and a picture cache or an `AVPlayer` handed one of those would do as it was
+    /// told. The rule this package fetches under, applied where the data stops being ours.
+    static func fetchableURL(_ raw: String?) -> URL? {
+        guard let raw, let url = URL(string: raw), isFetchable(url) else { return nil }
+        return url
+    }
+
     static func httpsURL(host: String, path: String, query: [URLQueryItem] = []) -> URL? {
         var components = URLComponents()
         components.scheme = "https"

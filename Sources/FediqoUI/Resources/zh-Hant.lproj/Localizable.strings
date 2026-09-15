@@ -7,7 +7,7 @@
 "shell.usage.title" = "用量";
 "shell.usage.summary" = "這台機器上留了什麼";
 "shell.preferences.title" = "偏好";
-"shell.preferences.summary" = "語言、主題與字級";
+"shell.preferences.summary" = "語言、主題、字級與已存內容";
 "shell.timeline.disabled" = "先到帳號頁新增來源";
 "shell.notices.disabled" = "通知需要已登入的來源";
 "source.signedIn" = "已登入";
@@ -58,6 +58,10 @@
 "shortcut.posts" = "在這份清單裡移動";
 "shortcut.top" = "到這串的頂端";
 "shortcut.expand" = "打開討論串";
+"shortcut.view" = "用整個畫面打開附件";
+"shortcut.play" = "播放附件，或讓它停下來";
+"shortcut.turn" = "換到下一個附件";
+"shortcut.cover" = "掀開作者蓋在這篇上的內容，或再蓋回去";
 "shortcut.compose" = "新貼文";
 "shortcut.list" = "這份清單";
 "shortcut.back" = "回到清單";
@@ -97,6 +101,18 @@
 "item.visibility.unlisted" = "不公開列出";
 "item.visibility.followers" = "追隨者";
 "item.visibility.mentioned" = "被提到的人";
+"item.deck.position" = "第 %1$d 個，共 %2$d 個";
+"item.deck.image" = "一張圖片";
+"item.deck.video" = "一段影片";
+"item.deck.audio" = "一段聲音";
+"item.deck.unknown" = "一個附件";
+"item.deck.play" = "播放";
+"item.covered.title" = "作者把這篇蓋起來了";
+"item.covered.show" = "掀開";
+"item.covered.label" = "按 s 掀開";
+"item.covered.hide" = "蓋回去";
+"item.lifted.label" = "按 s 再蓋回去";
+
 "item.act.reply" = "回覆";
 "item.act.reblog" = "轉發";
 "item.act.quote" = "引用";
@@ -147,3 +163,13 @@
 "prefs.fontSize.default" = "預設";
 "prefs.fontSize.larger" = "較大";
 "prefs.fontSize.largest" = "最大";
+
+"prefs.cache" = "這次執行所存";
+"prefs.cache.footer" = "這些都不會寫進磁碟。下次開啟 Fediqo 時，每個伺服器都會重新讀取；伺服器的表情符號名稱則會在一天後自行重新讀取。";
+"prefs.cache.empty" = "先到「帳號」加入來源。各來源送來的內容會留在這裡，直到你關閉 Fediqo。";
+"prefs.cache.catalogue" = "%d 個表情符號名稱 ·";
+"prefs.cache.catalogue.none" = "未存表情符號名稱";
+"prefs.cache.pictures" = "%d 張圖片";
+"prefs.cache.pictures.none" = "未存任何圖片";
+"prefs.cache.clear" = "清除";
+"prefs.cache.clear.label" = "清除這台裝置存的 %@ 內容";

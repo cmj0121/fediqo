@@ -7,7 +7,7 @@
 "shell.usage.title" = "Usage";
 "shell.usage.summary" = "What this device is keeping";
 "shell.preferences.title" = "Preferences";
-"shell.preferences.summary" = "Language, theme and type";
+"shell.preferences.summary" = "Language, theme, type, and what is held";
 "shell.timeline.disabled" = "Add a source on Account first";
 "shell.notices.disabled" = "Notices need a signed-in source";
 "source.signedIn" = "Signed in";
@@ -58,6 +58,10 @@
 "shortcut.posts" = "Move in this list";
 "shortcut.top" = "Top of this thread";
 "shortcut.expand" = "Open the thread";
+"shortcut.view" = "Open what is attached, at the size of the app";
+"shortcut.play" = "Play what is attached, or stop it";
+"shortcut.turn" = "Turn to the next attachment";
+"shortcut.cover" = "Lift the cover the author put over this post, or put it back";
 "shortcut.compose" = "New post";
 "shortcut.list" = "This list";
 "shortcut.back" = "Back to the list";
@@ -97,6 +101,18 @@
 "item.visibility.unlisted" = "Unlisted";
 "item.visibility.followers" = "Followers";
 "item.visibility.mentioned" = "Mentioned";
+"item.deck.position" = "%1$d of %2$d";
+"item.deck.image" = "A picture";
+"item.deck.video" = "A video";
+"item.deck.audio" = "An audio clip";
+"item.deck.unknown" = "An attachment";
+"item.deck.play" = "Play this";
+"item.covered.title" = "The author covered this post";
+"item.covered.show" = "Show it";
+"item.covered.label" = "Press s to show it";
+"item.covered.hide" = "Hide it";
+"item.lifted.label" = "Press s to cover it again";
+
 "item.act.reply" = "Reply";
 "item.act.reblog" = "Reblog";
 "item.act.quote" = "Quote";
@@ -147,3 +163,13 @@
 "prefs.fontSize.default" = "Default";
 "prefs.fontSize.larger" = "Larger";
 "prefs.fontSize.largest" = "Largest";
+
+"prefs.cache" = "Held for this run";
+"prefs.cache.footer" = "None of this is written to disk. Every server is read again from scratch the next time Fediqo opens, and a server's emoji names are read again by themselves after a day.";
+"prefs.cache.empty" = "Add a source on Account. What each one sends is held here until you close Fediqo.";
+"prefs.cache.catalogue" = "%d emoji names, read";
+"prefs.cache.catalogue.none" = "No emoji names held";
+"prefs.cache.pictures" = "%d pictures";
+"prefs.cache.pictures.none" = "No pictures held";
+"prefs.cache.clear" = "Clear";
+"prefs.cache.clear.label" = "Clear what this device holds from %@";
