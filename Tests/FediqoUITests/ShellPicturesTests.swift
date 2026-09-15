@@ -22,6 +22,12 @@ import UniformTypeIdentifiers
 struct ShellPicturesTests {
     private let mb = 1024 * 1024
 
+    /// Two servers the reader added. Every address below is at `example.test`, which is the
+    /// point: an address says nothing about which source it was read through, so the host is
+    /// whatever the call site says it is.
+    private let alpha = "alpha.test"
+    private let beta = "beta.test"
+
     private func address(_ n: Int) -> URL {
         URL(string: "https://example.test/\(n).png")!
     }
@@ -102,16 +108,19 @@ struct ShellPicturesTests {
 
     /// Holds every request open until the gate is opened, so "these fetches were all still in the
     /// air" is a fact the test arranges rather than a race it hopes to win.
+    ///
+    /// `png` of `nil` refuses with a 500 instead of answering, which is what makes the failure
+    /// half of a fetch reachable while the test still controls when it lands.
     private actor Holding: HTTPClient {
         private var current = 0
         private(set) var peak = 0
-        private let png: Data
+        private let png: Data?
         private let gate: Gate
 
         private var awaited: Int?
         private var arrival: CheckedContinuation<Void, Never>?
 
-        init(png: Data, gate: Gate) {
+        init(png: Data?, gate: Gate) {
             self.png = png
             self.gate = gate
         }
@@ -134,6 +143,12 @@ struct ShellPicturesTests {
             }
             await gate.wait()
             current -= 1
+            guard let png else {
+                let refusal = HTTPURLResponse(
+                    url: url, statusCode: 500, httpVersion: "HTTP/1.1", headerFields: nil
+                )!
+                return (Data(), refusal)
+            }
             return (png, Flaky.ok(url))
         }
     }
@@ -168,9 +183,9 @@ struct ShellPicturesTests {
     func refusedSchemeIsPermanent() async throws {
         let cache = ShellPictures(http: URLSessionClient())
         let url = try #require(URL(string: "file:///etc/passwd"))
-        await cache.fetch(url, scale: 2, tier: .deck)
+        await cache.fetch(url, scale: 2, tier: .deck, host: alpha)
         #expect(cache.missing[ShellPictures.Key(url: url, scale: 2, tier: .deck)] == .refused)
-        #expect(cache.picture(url, scale: 2, tier: .deck) == nil)
+        #expect(cache.picture(url, scale: 2, tier: .deck, host: alpha) == nil)
     }
 
     // MARK: The key and the tiers
@@ -187,10 +202,10 @@ struct ShellPicturesTests {
     func keyCarriesTheTier() {
         let cache = ShellPictures()
         #expect(key(1, tier: .deck) != key(1, tier: .viewer))
-        cache.keep(plate, cost: mb, for: key(1, tier: .deck), startedAt: 0)
-        cache.keep(plate, cost: mb, for: key(1, tier: .viewer), startedAt: 0)
-        #expect(cache.picture(address(1), scale: 2, tier: .deck) != nil)
-        #expect(cache.picture(address(1), scale: 2, tier: .viewer) != nil)
+        cache.keep(plate, cost: mb, for: key(1, tier: .deck), startedAt: 0, hosts: [alpha])
+        cache.keep(plate, cost: mb, for: key(1, tier: .viewer), startedAt: 0, hosts: [alpha])
+        #expect(cache.picture(address(1), scale: 2, tier: .deck, host: alpha) != nil)
+        #expect(cache.picture(address(1), scale: 2, tier: .viewer, host: alpha) != nil)
         #expect(cache.order.count == 2)
     }
 
@@ -231,7 +246,7 @@ struct ShellPicturesTests {
     @Test("No address is no picture and no key")
     func noAddress() {
         let cache = ShellPictures()
-        #expect(cache.picture(nil, scale: 2, tier: .deck) == nil)
+        #expect(cache.picture(nil, scale: 2, tier: .deck, host: alpha) == nil)
         #expect(!cache.isMissing(nil, scale: 2, tier: .deck))
     }
 
@@ -319,13 +334,16 @@ struct ShellPicturesTests {
 
         for _ in 0 ..< 20 {
             var absent: [ShellPictures.Key] = []
-            for n in 0 ..< rows where cache.picture(address(n), scale: 2, tier: .viewer) == nil {
+            for n in 0 ..< rows
+            where cache.picture(address(n), scale: 2, tier: .viewer, host: alpha) == nil {
                 absent.append(key(n, tier: .viewer))
             }
             for k in absent {
                 guard cache.missing[k]?.asksAgain ?? true else { continue }
                 asked += 1
-                cache.keep(plate, cost: cost, for: k, startedAt: cache.interest[k] ?? 0)
+                cache.keep(
+                    plate, cost: cost, for: k, startedAt: cache.interest[k] ?? 0, hosts: [alpha]
+                )
             }
             seen.append(asked)
         }
@@ -367,10 +385,13 @@ struct ShellPicturesTests {
         for _ in 0 ..< 10 {
             for n in 0 ..< rows {
                 let k = key(n, tier: .viewer)
-                guard cache.picture(address(n), scale: 2, tier: .viewer) == nil else { continue }
+                guard cache.picture(address(n), scale: 2, tier: .viewer, host: alpha) == nil
+                else { continue }
                 guard cache.missing[k]?.asksAgain ?? true else { continue }
                 asked += 1
-                cache.keep(plate, cost: cost, for: k, startedAt: cache.interest[k] ?? 0)
+                cache.keep(
+                    plate, cost: cost, for: k, startedAt: cache.interest[k] ?? 0, hosts: [alpha]
+                )
             }
         }
 
@@ -388,11 +409,12 @@ struct ShellPicturesTests {
 
         for _ in 0 ..< 4 {
             var absent: [URL] = []
-            for n in 0 ..< rows where cache.picture(address(n), scale: 2, tier: .viewer) == nil {
+            for n in 0 ..< rows
+            where cache.picture(address(n), scale: 2, tier: .viewer, host: alpha) == nil {
                 absent.append(address(n))
             }
             for url in absent {
-                await cache.fetch(url, scale: 2, tier: .viewer)
+                await cache.fetch(url, scale: 2, tier: .viewer, host: alpha)
             }
         }
 
@@ -439,17 +461,8 @@ struct ShellPicturesTests {
         )
         #expect(await holding.peak == ShellPictures.maxInFlight)
 
-        // A watchdog, not a timeout: twenty seconds because it only has to beat the job limit,
-        // and a quick one buys nothing while costing false failures on a loaded machine — at
-        // five seconds the equivalent guard elsewhere opened before a starved body reached the
-        // line it was gating.
         let rescued = Signal()
-        let watchdog = Task {
-            try? await Task.sleep(for: .seconds(20))
-            guard !Task.isCancelled else { return }
-            rescued.fired = true
-            await gate.open()
-        }
+        let watchdog = Task { await Self.watchdog(gate, rescued: rescued) }
 
         await gate.open()
         for task in outstanding { await task.value }
@@ -488,12 +501,13 @@ struct ShellPicturesTests {
         var outstanding: [Task<Void, Never>] = []
         for _ in 0 ..< passes {
             var absent: [URL] = []
-            for n in 0 ..< rows where cache.picture(address(n), scale: 2, tier: .viewer) == nil {
+            for n in 0 ..< rows
+            where cache.picture(address(n), scale: 2, tier: .viewer, host: alpha) == nil {
                 absent.append(address(n))
             }
             for url in absent {
                 outstanding.append(Task { @MainActor in
-                    await cache.fetch(url, scale: 2, tier: .viewer)
+                    await cache.fetch(url, scale: 2, tier: .viewer, host: alpha)
                 })
             }
             await Task.yield()
@@ -512,13 +526,14 @@ struct ShellPicturesTests {
     private func drivePromptly(_ cache: ShellPictures, rows: Int, passes: Int) async {
         for _ in 0 ..< passes {
             var absent: [URL] = []
-            for n in 0 ..< rows where cache.picture(address(n), scale: 2, tier: .viewer) == nil {
+            for n in 0 ..< rows
+            where cache.picture(address(n), scale: 2, tier: .viewer, host: alpha) == nil {
                 absent.append(address(n))
             }
             var running: [Task<Void, Never>] = []
             for url in absent {
                 running.append(Task { @MainActor in
-                    await cache.fetch(url, scale: 2, tier: .viewer)
+                    await cache.fetch(url, scale: 2, tier: .viewer, host: alpha)
                 })
             }
             for task in running { await task.value }
@@ -546,7 +561,8 @@ struct ShellPicturesTests {
                     plate,
                     cost: cost,
                     for: ShellPictures.Key(url: address(900 + n), scale: scale, tier: .viewer),
-                    startedAt: cache.clock + 1
+                    startedAt: cache.clock + 1,
+                    hosts: [alpha]
                 )
             }
         }
@@ -565,13 +581,15 @@ struct ShellPicturesTests {
         for top in 0 ..< 40 {
             var absent: [ShellPictures.Key] = []
             for n in top ..< (top + 4)
-            where cache.picture(address(n), scale: 2, tier: .viewer) == nil {
+            where cache.picture(address(n), scale: 2, tier: .viewer, host: alpha) == nil {
                 absent.append(key(n, tier: .viewer))
             }
             for k in absent {
                 guard cache.missing[k]?.asksAgain ?? true else { continue }
                 asked += 1
-                cache.keep(plate, cost: cost, for: k, startedAt: cache.interest[k] ?? 0)
+                cache.keep(
+                    plate, cost: cost, for: k, startedAt: cache.interest[k] ?? 0, hosts: [alpha]
+                )
             }
         }
 
@@ -611,8 +629,8 @@ struct ShellPicturesTests {
         // once, instead of the steady state it lives in.
         for n in 0 ..< fits {
             let k = key(n, tier: .viewer)
-            _ = cache.picture(k.url, scale: 2, tier: .viewer)
-            cache.keep(plate, cost: cost, for: k, startedAt: cache.interest[k] ?? 0)
+            _ = cache.picture(k.url, scale: 2, tier: .viewer, host: alpha)
+            cache.keep(plate, cost: cost, for: k, startedAt: cache.interest[k] ?? 0, hosts: [alpha])
         }
 
         let passes = 30
@@ -624,13 +642,15 @@ struct ShellPicturesTests {
                 let k = key(n, tier: .viewer)
                 // A body that still has its picture does not re-run, so it does not re-stamp.
                 guard !held.contains(k) else { continue }
-                _ = cache.picture(k.url, scale: 2, tier: .viewer)
+                _ = cache.picture(k.url, scale: 2, tier: .viewer, host: alpha)
                 absent.append(k)
             }
             for k in absent {
                 guard cache.missing[k]?.asksAgain ?? true else { continue }
                 asked += 1
-                cache.keep(plate, cost: cost, for: k, startedAt: cache.interest[k] ?? 0)
+                cache.keep(
+                    plate, cost: cost, for: k, startedAt: cache.interest[k] ?? 0, hosts: [alpha]
+                )
             }
         }
 
@@ -653,21 +673,27 @@ struct ShellPicturesTests {
 
         let asked = ShellPictures(enforcingViewerContract: false)
         for n in 0 ..< 6 {
-            asked.keep(plate, cost: cost, for: key(n, tier: .viewer), startedAt: 0)
+            asked.keep(plate, cost: cost, for: key(n, tier: .viewer), startedAt: 0, hosts: [alpha])
         }
         // A body read is what stamps interest, and interest is what buys room.
-        _ = asked.picture(address(99), scale: 2, tier: .viewer)
-        asked.keep(plate, cost: cost, for: newcomer, startedAt: asked.interest[newcomer] ?? 0)
-        #expect(asked.picture(address(99), scale: 2, tier: .viewer) != nil)
+        _ = asked.picture(address(99), scale: 2, tier: .viewer, host: alpha)
+        asked.keep(
+            plate, cost: cost, for: newcomer,
+            startedAt: asked.interest[newcomer] ?? 0, hosts: [alpha]
+        )
+        #expect(asked.picture(address(99), scale: 2, tier: .viewer, host: alpha) != nil)
         #expect(asked.order.count == 6)
 
         let speculative = ShellPictures(enforcingViewerContract: false)
         for n in 0 ..< 6 {
-            speculative.keep(plate, cost: cost, for: key(n, tier: .viewer), startedAt: 0)
+            speculative.keep(
+                plate, cost: cost, for: key(n, tier: .viewer), startedAt: 0, hosts: [alpha]
+            )
         }
         // No read, so no interest — exactly what `work` computes for a prefetch.
         speculative.keep(
-            plate, cost: cost, for: newcomer, startedAt: speculative.interest[newcomer] ?? 0
+            plate, cost: cost, for: newcomer, startedAt: speculative.interest[newcomer] ?? 0,
+            hosts: [alpha]
         )
         #expect(speculative.missing[newcomer] == .crowded)
         #expect(speculative.order.count == 6)
@@ -679,10 +705,10 @@ struct ShellPicturesTests {
         let cache = ShellPictures(enforcingViewerContract: false)
         let cost = ShellPictures.Tier.viewer.ceiling
         for n in 0 ..< 6 {
-            cache.keep(plate, cost: cost, for: key(n, tier: .viewer), startedAt: 0)
+            cache.keep(plate, cost: cost, for: key(n, tier: .viewer), startedAt: 0, hosts: [alpha])
         }
         let before = cache.generation
-        cache.keep(plate, cost: cost, for: key(99, tier: .viewer), startedAt: 0)
+        cache.keep(plate, cost: cost, for: key(99, tier: .viewer), startedAt: 0, hosts: [alpha])
 
         #expect(cache.missing[key(99, tier: .viewer)] == .crowded)
         #expect(cache.generation == before)
@@ -696,7 +722,7 @@ struct ShellPicturesTests {
         let cache = ShellPictures()
         // Cheap enough that the byte budget never bites — emoji and avatars are this shape.
         for n in 0 ..< (ShellPictures.held + 400) {
-            cache.keep(plate, cost: 1024, for: key(n), startedAt: cache.clock + 1)
+            cache.keep(plate, cost: 1024, for: key(n), startedAt: cache.clock + 1, hosts: [alpha])
         }
         #expect(cache.order.count <= ShellPictures.held)
         #expect(cache.interest.count <= ShellPictures.remembered)
@@ -710,14 +736,14 @@ struct ShellPicturesTests {
     func interestPinsHeldKeys() {
         let cache = ShellPictures()
         for n in 0 ..< 200 {
-            cache.keep(plate, cost: 1024, for: key(n), startedAt: cache.clock + 1)
+            cache.keep(plate, cost: 1024, for: key(n), startedAt: cache.clock + 1, hosts: [alpha])
         }
         let holding = cache.order
         #expect(!holding.isEmpty)
 
         // Push the map far past its bound with keys that have no picture behind them.
         for n in 10_000 ..< (10_000 + ShellPictures.remembered * 3) {
-            _ = cache.picture(address(n), scale: 2, tier: .deck)
+            _ = cache.picture(address(n), scale: 2, tier: .deck, host: alpha)
         }
 
         #expect(cache.interest.count <= ShellPictures.remembered)
@@ -746,11 +772,17 @@ struct ShellPicturesTests {
         let cache = ShellPictures(enforcingViewerContract: false)
         let cost = ShellPictures.Tier.viewer.ceiling
         for n in 0 ..< 6 {
-            cache.keep(plate, cost: cost, for: key(n, tier: .viewer), startedAt: cache.clock)
+            cache.keep(
+                plate, cost: cost, for: key(n, tier: .viewer),
+                startedAt: cache.clock, hosts: [alpha]
+            )
         }
         #expect(cache.generation == 0)
         // The seventh, wanted more recently than any of them, evicts the oldest.
-        cache.keep(plate, cost: cost, for: key(6, tier: .viewer), startedAt: cache.clock + 1)
+        cache.keep(
+            plate, cost: cost, for: key(6, tier: .viewer),
+            startedAt: cache.clock + 1, hosts: [alpha]
+        )
         #expect(cache.order.count == 6)
         #expect(cache.generation == 0)
     }
@@ -763,7 +795,7 @@ struct ShellPicturesTests {
         cache.note(.refused, for: key(3))
         let before = cache.generation
 
-        cache.keep(plate, cost: mb, for: key(4), startedAt: 0)
+        cache.keep(plate, cost: mb, for: key(4), startedAt: 0, hosts: [alpha])
 
         #expect(!cache.isMissing(address(1), scale: 2, tier: .deck))
         #expect(!cache.isMissing(address(2), scale: 2, tier: .deck))
@@ -784,7 +816,7 @@ struct ShellPicturesTests {
         // Plenty of room appears and plenty of other work succeeds; none of it is an event this
         // cohort could not have caused itself, so none of it lifts the mark.
         for n in 2 ..< 40 {
-            cache.keep(plate, cost: 1024, for: key(n), startedAt: cache.clock + 1)
+            cache.keep(plate, cost: 1024, for: key(n), startedAt: cache.clock + 1, hosts: [alpha])
         }
 
         #expect(cache.missing[key(1)] == .crowded)
@@ -807,11 +839,11 @@ struct ShellPicturesTests {
         // `onChange` is a `@Sendable` closure, so the flag it sets cannot be a local `var`.
         let signal = Signal()
         withObservationTracking {
-            _ = cache.picture(address(1), scale: 2, tier: .deck)
+            _ = cache.picture(address(1), scale: 2, tier: .deck, host: alpha)
         } onChange: {
             signal.fired = true
         }
-        cache.keep(plate, cost: 1024, for: key(2), startedAt: 0)
+        cache.keep(plate, cost: 1024, for: key(2), startedAt: 0, hosts: [alpha])
 
         #expect(signal.fired, """
             Admission terminates only because a view reading any picture is invalidated by \
@@ -845,17 +877,12 @@ struct ShellPicturesTests {
         for n in 0 ..< 24 {
             let url = address(n)
             started.append(Task { @MainActor in
-                await cache.fetch(url, scale: 2, tier: .deck)
+                await cache.fetch(url, scale: 2, tier: .deck, host: alpha)
             })
         }
 
         let rescued = Signal()
-        let watchdog = Task {
-            try? await Task.sleep(for: .seconds(20))
-            guard !Task.isCancelled else { return }
-            rescued.fired = true
-            await gate.open()
-        }
+        let watchdog = Task { await Self.watchdog(gate, rescued: rescued) }
 
         // Twenty-four asked for at once, and exactly `maxInFlight` are ever held at once.
         await http.whenHolding(ShellPictures.maxInFlight)
@@ -879,16 +906,16 @@ struct ShellPicturesTests {
         #expect(cache.isMissing(address(1), scale: 2, tier: .deck))
         #expect(!cache.isMissing(address(1), scale: 3, tier: .deck))
         #expect(!cache.isMissing(address(1), scale: 2, tier: .viewer))
-        #expect(cache.picture(address(1), scale: 2, tier: .deck) == nil)
+        #expect(cache.picture(address(1), scale: 2, tier: .deck, host: alpha) == nil)
     }
 
     @Test("A picture that arrives clears the note that it was not there")
     func arrivingClearsMissing() {
         let cache = ShellPictures()
         cache.note(.refused, for: key(1))
-        cache.keep(plate, cost: mb, for: key(1), startedAt: 0)
+        cache.keep(plate, cost: mb, for: key(1), startedAt: 0, hosts: [alpha])
         #expect(!cache.isMissing(address(1), scale: 2, tier: .deck))
-        #expect(cache.picture(address(1), scale: 2, tier: .deck) != nil)
+        #expect(cache.picture(address(1), scale: 2, tier: .deck, host: alpha) != nil)
     }
 
     @Test("Refusals are bounded like everything else here")
@@ -904,9 +931,9 @@ struct ShellPicturesTests {
     @Test("Interest is bounded, and never forgets a picture it is holding")
     func interestIsBounded() {
         let cache = ShellPictures()
-        cache.keep(plate, cost: mb, for: key(0), startedAt: 0)
+        cache.keep(plate, cost: mb, for: key(0), startedAt: 0, hosts: [alpha])
         for n in 1 ..< (ShellPictures.remembered + 50) {
-            _ = cache.picture(address(n), scale: 2, tier: .deck)
+            _ = cache.picture(address(n), scale: 2, tier: .deck, host: alpha)
         }
         #expect(cache.interest.count <= ShellPictures.remembered)
         #expect(cache.interest[key(0)] != nil)
@@ -939,13 +966,13 @@ struct ShellPicturesTests {
         let http = FixtureHTTP(["/1.png": .body(try picture(width: 32, height: 32, bits: 8))])
         let cache = ShellPictures(http: http)
 
-        async let a: Void = cache.fetch(address(1), scale: 2, tier: .deck)
-        async let b: Void = cache.fetch(address(1), scale: 2, tier: .deck)
-        async let c: Void = cache.fetch(address(1), scale: 2, tier: .deck)
+        async let a: Void = cache.fetch(address(1), scale: 2, tier: .deck, host: alpha)
+        async let b: Void = cache.fetch(address(1), scale: 2, tier: .deck, host: alpha)
+        async let c: Void = cache.fetch(address(1), scale: 2, tier: .deck, host: alpha)
         _ = await (a, b, c)
 
         #expect(await http.requested.count == 1)
-        #expect(cache.picture(address(1), scale: 2, tier: .deck) != nil)
+        #expect(cache.picture(address(1), scale: 2, tier: .deck, host: alpha) != nil)
         #expect(cache.inFlight.isEmpty)
         #expect(cache.heldBytes > 0)
     }
@@ -955,10 +982,10 @@ struct ShellPicturesTests {
         let http = FixtureHTTP(["/1.png": .text("gone", status: 404)])
         let cache = ShellPictures(http: http)
 
-        await cache.fetch(address(1), scale: 2, tier: .deck)
+        await cache.fetch(address(1), scale: 2, tier: .deck, host: alpha)
         #expect(cache.missing[key(1)] == .refused)
 
-        await cache.fetch(address(1), scale: 2, tier: .deck)
+        await cache.fetch(address(1), scale: 2, tier: .deck, host: alpha)
         #expect(await http.requested.count == 1)
     }
 
@@ -966,7 +993,7 @@ struct ShellPicturesTests {
     func refusesUndecodableBody() async {
         let http = FixtureHTTP(["/1.png": .text("<html>not a picture</html>")])
         let cache = ShellPictures(http: http)
-        await cache.fetch(address(1), scale: 2, tier: .deck)
+        await cache.fetch(address(1), scale: 2, tier: .deck, host: alpha)
         #expect(cache.missing[key(1)] == .refused)
     }
 
@@ -975,9 +1002,9 @@ struct ShellPicturesTests {
         let huge = Data(count: ShellPictures.maxBytes + 1)
         let http = FixtureHTTP(["/1.png": .body(huge)])
         let cache = ShellPictures(http: http)
-        await cache.fetch(address(1), scale: 2, tier: .deck)
+        await cache.fetch(address(1), scale: 2, tier: .deck, host: alpha)
         #expect(cache.missing[key(1)] == .refused)
-        #expect(cache.picture(address(1), scale: 2, tier: .deck) == nil)
+        #expect(cache.picture(address(1), scale: 2, tier: .deck, host: alpha) == nil)
     }
 
     @Test("A dark network is recorded as an outage and asked for again")
@@ -985,12 +1012,12 @@ struct ShellPicturesTests {
         let http = Flaky(png: try picture(width: 32, height: 32, bits: 8))
         let cache = ShellPictures(http: http)
 
-        await cache.fetch(address(1), scale: 2, tier: .deck)
+        await cache.fetch(address(1), scale: 2, tier: .deck, host: alpha)
         #expect(cache.missing[key(1)] == .unreachable)
-        #expect(cache.picture(address(1), scale: 2, tier: .deck) == nil)
+        #expect(cache.picture(address(1), scale: 2, tier: .deck, host: alpha) == nil)
 
-        await cache.fetch(address(1), scale: 2, tier: .deck)
-        #expect(cache.picture(address(1), scale: 2, tier: .deck) != nil)
+        await cache.fetch(address(1), scale: 2, tier: .deck, host: alpha)
+        #expect(cache.picture(address(1), scale: 2, tier: .deck, host: alpha) != nil)
         #expect(cache.missing.isEmpty)
         #expect(await http.count == 2)
     }
@@ -998,7 +1025,7 @@ struct ShellPicturesTests {
     @Test("An outage is never mistaken for a refusal")
     func outageIsNotRefusal() async {
         let cache = ShellPictures(http: Offline(code: .notConnectedToInternet))
-        await cache.fetch(address(1), scale: 2, tier: .deck)
+        await cache.fetch(address(1), scale: 2, tier: .deck, host: alpha)
         #expect(cache.missing[key(1)] == .unreachable)
         #expect(cache.isMissing(address(1), scale: 2, tier: .deck))
     }
@@ -1007,13 +1034,267 @@ struct ShellPicturesTests {
     func fetchDoesNotRepeatItself() async {
         let cache = ShellPictures()
         cache.note(.refused, for: key(1))
-        cache.keep(plate, cost: mb, for: key(2), startedAt: 0)
+        cache.keep(plate, cost: mb, for: key(2), startedAt: 0, hosts: [alpha])
 
-        await cache.fetch(address(1), scale: 2, tier: .deck)
-        await cache.fetch(address(2), scale: 2, tier: .deck)
-        await cache.fetch(nil, scale: 2, tier: .deck)
+        await cache.fetch(address(1), scale: 2, tier: .deck, host: alpha)
+        await cache.fetch(address(2), scale: 2, tier: .deck, host: alpha)
+        await cache.fetch(nil, scale: 2, tier: .deck, host: alpha)
 
         #expect(cache.inFlight.isEmpty)
+    }
+
+    // MARK: I10 — which server a picture came through
+
+    /// Decision 19, and the half of it that costs something. One picture read through two
+    /// sources is **one** entry, so the first Clear frees nothing — it only strikes a source off.
+    /// That is the price of not holding a photograph twice, and it is why the emoji cache, where
+    /// a duplicate is ten kilobytes, took the other side of the same trade.
+    @Test("A picture two sources read survives the first Clear and goes on the second")
+    func twoSourcesShareOneEntry() {
+        let cache = ShellPictures()
+        cache.keep(plate, cost: mb, for: key(1), startedAt: 0, hosts: [alpha])
+
+        // The second source draws the same address. The read is what tags it — neither source
+        // has to know the other exists.
+        #expect(cache.picture(address(1), scale: 2, tier: .deck, host: beta) != nil)
+        #expect(cache.sources[key(1)] == [alpha, beta])
+
+        cache.forget(host: alpha)
+        #expect(cache.picture(address(1), scale: 2, tier: .deck, host: beta) != nil)
+        #expect(cache.sources[key(1)] == [beta])
+        #expect(cache.heldBytes == mb)
+
+        cache.forget(host: beta)
+        #expect(cache.picture(address(1), scale: 2, tier: .deck, host: beta) == nil)
+        #expect(cache.sources[key(1)] == nil)
+        #expect(cache.order.isEmpty)
+        #expect(cache.heldBytes == 0)
+    }
+
+    @Test("Clearing a server this device holds nothing for takes nothing with it")
+    func forgettingAnUnknownSourceIsHarmless() {
+        let cache = ShellPictures()
+        cache.keep(plate, cost: mb, for: key(1), startedAt: 0, hosts: [alpha])
+        cache.forget(host: beta)
+        #expect(cache.picture(address(1), scale: 2, tier: .deck, host: alpha) != nil)
+        #expect(cache.sources[key(1)] == [alpha])
+    }
+
+    @Test("A source is the same source however it was spelled")
+    func sourceSpellingIsFolded() {
+        let cache = ShellPictures()
+        cache.keep(plate, cost: mb, for: key(1), startedAt: 0, hosts: ["Alpha.Test"])
+        #expect(cache.sources[key(1)] == [alpha])
+        #expect(cache.picture(address(1), scale: 2, tier: .deck, host: "ALPHA.TEST") != nil)
+        #expect(cache.sources[key(1)] == [alpha])
+
+        cache.forget(host: "alpha.TEST")
+        #expect(cache.order.isEmpty)
+    }
+
+    /// The generation split, from both sides in one test. A Clear is a bulk, deliberate
+    /// invalidation of a cohort no single view can observe for itself, so it bumps; dropping one
+    /// key to make room is a fact about that key, which its own view already sees through
+    /// `pictures`, so it does not. Getting these the wrong way round is what turns one eviction
+    /// into a storm.
+    @Test("Clearing a server bumps the generation where evicting a key does not")
+    func forgettingBumpsWhereEvictionDoesNot() {
+        let cache = ShellPictures(enforcingViewerContract: false)
+        let cost = ShellPictures.Tier.viewer.ceiling
+        for n in 0 ..< 6 {
+            cache.keep(
+                plate, cost: cost, for: key(n, tier: .viewer),
+                startedAt: cache.clock, hosts: [alpha]
+            )
+        }
+        #expect(cache.generation == 0)
+
+        cache.keep(
+            plate, cost: cost, for: key(6, tier: .viewer),
+            startedAt: cache.clock + 1, hosts: [alpha]
+        )
+        #expect(cache.order.count == 6)
+        #expect(cache.generation == 0, "an eviction is one key's business")
+
+        cache.forget(host: alpha)
+        #expect(cache.order.isEmpty)
+        #expect(cache.generation == 1)
+
+        // A reader pressing Clear has made a decision, not asked a question: it bumps whether or
+        // not this device happened to be holding anything of theirs, so a row stranded on an
+        // address from some other server still gets its fresh ask.
+        cache.forget(host: beta)
+        #expect(cache.generation == 2)
+    }
+
+    /// I7 from the other end. Per-host eviction takes pictures away, and the eviction predicate
+    /// reads `interest` — so what must survive is not the stamps but the implication: every key
+    /// still holding a picture still has one. A stamp left behind for a key whose picture has
+    /// gone is the ordinary state of every address a row has ever read, and `trimInterest` is
+    /// what clears those.
+    @Test("Clearing a server leaves interest and sources consistent with what is still held")
+    func forgettingKeepsTheMapsConsistent() {
+        let cache = ShellPictures()
+        for n in 0 ..< 100 {
+            cache.keep(
+                plate, cost: 1024, for: key(n), startedAt: cache.clock + 1,
+                hosts: [n.isMultiple(of: 2) ? alpha : beta]
+            )
+        }
+        cache.forget(host: alpha)
+
+        #expect(cache.order.count == 50)
+        #expect(Set(cache.sources.keys) == Set(cache.order))
+        for held in cache.order {
+            #expect(cache.interest[held] != nil, "dropped the interest of a held picture")
+        }
+
+        // Push the trim far past its bound with keys that have no picture behind them, including
+        // the fifty stamps the Clear just orphaned.
+        for n in 10_000 ..< (10_000 + ShellPictures.remembered * 3) {
+            _ = cache.picture(address(n), scale: 2, tier: .deck, host: beta)
+        }
+        #expect(cache.interest.count <= ShellPictures.remembered)
+        #expect(Set(cache.sources.keys) == Set(cache.order))
+        for held in cache.order {
+            #expect(cache.interest[held] != nil, "dropped the interest of a held picture")
+        }
+    }
+
+    /// Prose is not a test. `forget(host:)` frees pictures; it does not lift the marks that say
+    /// why a picture is absent, because `missing` carries no host to clear by. Pinned here
+    /// because 11b trips over it: per-host relief for `.crowded` is not implementable until
+    /// `missing` learns a host, and this is what says so out loud.
+    @Test("Clearing a server leaves the marks saying why a picture is absent alone")
+    func forgettingLeavesMissingAlone() {
+        let cache = ShellPictures()
+        // Kept first: `keep` clears every `.unreachable` on a success, which would take the third
+        // mark with it before the Clear ever ran.
+        cache.keep(plate, cost: mb, for: key(4), startedAt: 0, hosts: [alpha])
+        cache.note(.refused, for: key(1))
+        cache.note(.crowded, for: key(2))
+        cache.note(.unreachable, for: key(3))
+
+        cache.forget(host: alpha)
+
+        #expect(cache.order.isEmpty)
+        #expect(cache.missing[key(1)] == .refused)
+        #expect(cache.missing[key(2)] == .crowded)
+        #expect(cache.missing[key(3)] == .unreachable)
+    }
+
+    /// **The bug that has now been through this branch twice** — `EmojiCatalogueStore` had it and
+    /// the emoji cache had it. A Clear that only drops stored state is undone a moment later by a
+    /// fetch that was already running, which stores its answer back under the very host the
+    /// reader asked to be rid of. Nothing about the cleared state is observable at the moment the
+    /// fetch lands, so only the in-flight record can say the work no longer belongs to anybody.
+    @Test("A Clear during a fetch is not undone when the fetch lands", .timeLimit(.minutes(1)))
+    func forgottenDuringAFetchDoesNotComeBack() async throws {
+        let gate = Gate()
+        let http = Holding(png: try picture(width: 32, height: 32, bits: 8), gate: gate)
+        let cache = ShellPictures(http: http)
+
+        let rescued = Signal()
+        let watchdog = Task { await Self.watchdog(gate, rescued: rescued) }
+
+        let running = Task { @MainActor in
+            await cache.fetch(address(1), scale: 2, tier: .deck, host: alpha)
+        }
+        // Held at the gate, so "the fetch is in the air" is arranged rather than hoped for.
+        await http.whenHolding(1)
+
+        // **Pin the ordering this test is about.** Kept-then-cleared satisfies every expectation
+        // below, so without this the whole test passes vacuously the moment the fetch lands
+        // first — measuring nothing, on exactly the runs where a leaky gate would let it happen.
+        #expect(cache.order.isEmpty, "the fetch landed before the Clear; this measures nothing")
+
+        cache.forget(host: alpha)
+        await gate.open()
+        await running.value
+        watchdog.cancel()
+        #expect(!rescued.fired, "the watchdog opened the gate; the test never got there itself")
+
+        #expect(cache.picture(address(1), scale: 2, tier: .deck, host: alpha) == nil)
+        #expect(cache.order.isEmpty)
+        #expect(cache.sources.isEmpty)
+        #expect(cache.heldBytes == 0)
+        // Dropped, not written off: there is nothing wrong with the address, and a row that draws
+        // it again is owed a fresh ask rather than a permanent mark.
+        #expect(cache.missing.isEmpty)
+        #expect(cache.inFlight.isEmpty)
+    }
+
+    /// The same guard on the other branch, and the half with the longer shadow. `.refused` is
+    /// permanent and `forget(host:)` cannot lift it — `missing` carries no host to clear by — so
+    /// a refusal noted for a fetch the reader disowned blanks that address for the life of the
+    /// process: clear server A, a transient 500 lands, re-add A, and the picture never returns.
+    @Test("A Clear during a fetch that fails writes no permanent mark", .timeLimit(.minutes(1)))
+    func forgottenDuringAFailingFetchIsNotWrittenOff() async throws {
+        let gate = Gate()
+        let http = Holding(png: nil, gate: gate)
+        let cache = ShellPictures(http: http)
+
+        let rescued = Signal()
+        let watchdog = Task { await Self.watchdog(gate, rescued: rescued) }
+
+        let running = Task { @MainActor in
+            await cache.fetch(address(1), scale: 2, tier: .deck, host: alpha)
+        }
+        await http.whenHolding(1)
+        #expect(cache.missing.isEmpty, "the refusal landed before the Clear; this measures nothing")
+
+        cache.forget(host: alpha)
+        await gate.open()
+        await running.value
+        watchdog.cancel()
+        #expect(!rescued.fired, "the watchdog opened the gate; the test never got there itself")
+
+        #expect(cache.missing.isEmpty)
+        #expect(!cache.isMissing(address(1), scale: 2, tier: .deck))
+        #expect(cache.inFlight.isEmpty)
+    }
+
+    /// The other half of the same record: a fetch two sources are waiting on is still the second
+    /// source's fetch after the first one clears, and what lands is tagged for whoever is left.
+    @Test(
+        "A second source joins a fetch in the air and keeps it when the first clears",
+        .timeLimit(.minutes(1))
+    )
+    func joiningSourceKeepsTheFetch() async throws {
+        let gate = Gate()
+        let http = Holding(png: try picture(width: 32, height: 32, bits: 8), gate: gate)
+        let cache = ShellPictures(http: http)
+
+        let rescued = Signal()
+        let watchdog = Task { await Self.watchdog(gate, rescued: rescued) }
+
+        let first = Task { @MainActor in
+            await cache.fetch(address(1), scale: 2, tier: .deck, host: alpha)
+        }
+        await http.whenHolding(1)
+
+        let second = Task { @MainActor in
+            await cache.fetch(address(1), scale: 2, tier: .deck, host: beta)
+        }
+        // **No client-side barrier reaches this one.** Both sources want the same address, so
+        // `work` folds the second into the first and only one request ever reaches the client —
+        // `whenHolding(2)` would wait for a request that is never made. What is being waited for
+        // is a fact about the cache, on the main actor, so it is spun for rather than parked on:
+        // bounded, and the expectation below turns an exhausted spin into a wrong answer rather
+        // than a hang.
+        await spin(until: { cache.inFlight[self.key(1)]?.hosts.count == 2 })
+        #expect(cache.inFlight[key(1)]?.hosts == [alpha, beta], "the second source never joined")
+        #expect(cache.order.isEmpty, "the fetch landed before the Clear; this measures nothing")
+
+        cache.forget(host: alpha)
+        await gate.open()
+        await first.value
+        await second.value
+        watchdog.cancel()
+        #expect(!rescued.fired, "the watchdog opened the gate; the test never got there itself")
+
+        #expect(cache.picture(address(1), scale: 2, tier: .deck, host: beta) != nil)
+        #expect(cache.sources[key(1)] == [beta])
     }
 
     // MARK: Helpers
@@ -1042,5 +1323,41 @@ struct ShellPicturesTests {
         // Checked, because a false here is an empty `Data` and a puzzling nil two tests away.
         #expect(CGImageDestinationFinalize(destination))
         return written as Data
+    }
+
+    /// Opens a gate nobody else will, so that a regression is a failed expectation rather than a
+    /// suite that never finishes and gets re-run instead of investigated. `rescued` is what makes
+    /// that failure loud: a test whose gate was opened by this rather than by its own body has
+    /// measured nothing, and says so.
+    ///
+    /// **Forty-five seconds, not the five `EmojiCatalogueTests` uses, and the difference is
+    /// isolation rather than taste.** That suite is a plain `@Suite` over an `actor`, so its body
+    /// is never queued behind one contended executor; this one is `@MainActor` and shares that
+    /// actor with the rest of the run, so under load the *test body* can be held off for seconds
+    /// while the gate's own actor runs freely. Measured — at five seconds a watchdog fired before
+    /// a starved body reached the line it was gating, and a loaded run of the whole suite has
+    /// taken 23s, the same order as a twenty-second watchdog. The ceiling is the
+    /// `.timeLimit(.minutes(1))` on the tests that carry one, so 45 still leaves fifteen seconds
+    /// spare, and being early buys nothing while costing false failures.
+    private static func watchdog(_ gate: Gate, rescued: Signal) async {
+        try? await Task.sleep(for: .seconds(45))
+        // `try?` swallows the cancellation, so without this a watchdog cancelled on the passing
+        // path would still go on to open the gate.
+        guard !Task.isCancelled else { return }
+        rescued.fired = true
+        await gate.open()
+    }
+
+    /// Waits a bounded number of turns for something another task has to do first.
+    ///
+    /// For conditions no client-side barrier can reach — a fact about the cache rather than about
+    /// the wire. Bounded on purpose: a test that waits forever for a thing that has stopped
+    /// happening hangs with no output, so this gives up and lets the expectation below it fail.
+    private func spin(until ready: () async -> Bool) async {
+        var spins = 0
+        while spins < 10_000, await ready() == false {
+            spins += 1
+            await Task.yield()
+        }
     }
 }

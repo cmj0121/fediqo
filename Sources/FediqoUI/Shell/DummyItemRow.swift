@@ -201,6 +201,11 @@ struct DummyItemRow: View {
                 RemoteImage(
                     url: url,
                     tier: .deck,
+                    // **The source the post arrived through, not the author's own instance.** The
+                    // Clear button can only ever name a server the reader added, and an author's
+                    // home instance generally is not one — filing an avatar under it would make
+                    // exactly the entry no Clear can reach that I10 exists to prevent.
+                    host: item.source.host,
                     standing: .avatar,
                     alt: nil,
                     radius: Box.plate
@@ -492,6 +497,7 @@ struct DummyItemRow: View {
                 attachments: item.attachments,
                 top: top,
                 side: thumbSide,
+                host: item.source.host,
                 radius: Box.plate
             )
             .frame(width: thumbSide, height: thumbSide)

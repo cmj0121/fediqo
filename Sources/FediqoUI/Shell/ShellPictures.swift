@@ -100,6 +100,33 @@ import SwiftUI
 /// so it is immediately evictable and clears on the next admission. The two is a transient peak,
 /// and funding that peak is what the budget is for. A three-display Mac could stage three scales
 /// briefly; the self-clearing is why that is not worth planning for.
+///
+/// ## Which server a picture came through
+///
+/// **I10 — every held picture carries the set of sources it was read through, and nothing here
+/// can work out that set for itself.** An attachment, an emoji or an avatar address usually
+/// points at a CDN — `files.first.example`, an S3 bucket — and not at the instance the reader
+/// added, so the host cannot be read back off the URL. It has to be attached by the call site
+/// that knows it, which is why `host` is required on `picture`, `fetch` and `RemoteImage` for
+/// the same reason `tier` is: a call site that forgets silently makes an entry the reader's
+/// Clear button can never reach.
+///
+/// A **set**, because one address is read through two sources at once. The case that reaches
+/// this today is **one avatar drawn by two rows that arrived through different servers** — the
+/// same author, or the same CDN address, on two of the reader's timelines — and it is the read
+/// in `picture(…)` that tags the second one. So `forget(host:)` strikes that host off each entry
+/// and evicts only where no tagged source is left.
+///
+/// Not, note, a merged row: `RemoteImage.host` is one `String`, so a row folded from two servers
+/// is tagged with the source it is drawn under and no other. If a later unit gives a row more
+/// than one source, tagging it with all of them is a change here, not an emergent property.
+///
+/// **This is deliberately the opposite of `EmojiCatalogueStore`, which puts the host in the
+/// key**, and the inconsistency is the design rather than a bug in one of them. Duplicating a
+/// photograph is expensive, so this cache shares one entry between sources and pays for it with
+/// a Clear that frees nothing until the last source goes. Duplicating an emoji costs about 10KB
+/// against a 24MB budget, so that cache duplicates and buys a Clear that frees on the spot. Two
+/// answers to one reader-facing promise, each right where it is.
 @MainActor
 @Observable
 final class ShellPictures {
@@ -217,9 +244,9 @@ final class ShellPictures {
 
     /// How many keys' worth of interest is remembered.
     ///
-    /// At least twice `held`, and that ratio is load-bearing: `forget` may never drop a key that
-    /// has a picture, so it can only reach its low-water mark out of the keys that do not. With
-    /// half the map guaranteed disposable, trimming always succeeds in one pass.
+    /// At least twice `held`, and that ratio is load-bearing: `trimInterest` may never drop a
+    /// key that has a picture, so it can only reach its low-water mark out of the keys that do
+    /// not. With half the map guaranteed disposable, trimming always succeeds in one pass.
     nonisolated static let remembered = 2 * held
 
     private struct Held {
@@ -229,13 +256,27 @@ final class ShellPictures {
 
     private var pictures: [Key: Held] = [:]
 
+    /// Which sources each held picture was read through — I10.
+    ///
+    /// **Its key set is exactly `pictures`'s**, which is what makes it bounded without a bound of
+    /// its own: it is written only where a picture is admitted and where one is read back, and
+    /// cleared at both of the two places a picture leaves — the eviction loop in `keep` and
+    /// `forget(host:)`.
+    ///
+    /// Beside `pictures` rather than inside `Held` because tagging happens on a **read**, and
+    /// `picture(…)` is called from `RemoteImage.body`. Mutating an observed property there would
+    /// invalidate every visible body on the spot — which is a refetch storm wearing the costume
+    /// of a one-line tidy-up. `interest` sits out here for the same reason.
+    @ObservationIgnored private(set) var sources: [Key: Set<String>] = [:]
+
     /// What has been asked for and answered with nothing, and why. Held so a picture that is not
     /// there is drawn as absent rather than as forever arriving — and so it is asked for once
     /// rather than on every rebuild of every row that shows it.
     private(set) var missing: [Key: Absence] = [:]
 
-    /// Bumped only by a **cohort** changing its mind — today, a network that came back. That is a
-    /// fact about a set of addresses which no single view can observe for itself.
+    /// Bumped only by a **cohort** changing its mind — a network that came back, or a reader
+    /// clearing one server. That is a fact about a set of addresses which no single view can
+    /// observe for itself.
     ///
     /// Ordinary eviction deliberately does **not** bump it. Eviction is a fact about one key, and
     /// the view that lost its picture already sees `have` go true→false through `pictures`, which
@@ -243,9 +284,19 @@ final class ShellPictures {
     /// the storm into a refetch loop.
     private(set) var generation = 0
 
+    /// A fetch on the wire, and which sources are still waiting on it.
+    ///
+    /// The set is what stops `forget(host:)` being undone a moment later by work that was already
+    /// running — see `forget(host:)`. It is also how a second source joining an existing fetch is
+    /// recorded, since the picture that lands is then tagged for both.
+    struct Fetch {
+        var hosts: Set<String>
+        let task: Task<Void, Never>
+    }
+
     /// The task drawing each picture while it is being drawn, so every view wanting the same one
     /// waits on the same work and a view going away does not take that work with it.
-    @ObservationIgnored private(set) var inFlight: [Key: Task<Void, Never>] = [:]
+    @ObservationIgnored private(set) var inFlight: [Key: Fetch] = [:]
 
     /// Held keys, least recently wanted first.
     ///
@@ -257,8 +308,8 @@ final class ShellPictures {
     /// comparator: a `Key` hashes a `URL`, and a comparator does that twice per comparison.
     ///
     /// The `?? 0` is the same belt as the one at the eviction site and is equally unreachable,
-    /// because `forget` never drops a key that has a picture. Removing it is not a tidy-up: a
-    /// held key with no stamp sorts to the front at zero, and the eviction site then reads
+    /// because `trimInterest` never drops a key that has a picture. Removing it is not a
+    /// tidy-up: a held key with no stamp sorts to the front at zero, and the eviction site reads
     /// `0 < startedAt` and drops it immediately. That is the I7 thrash, restored in silence.
     var order: [Key] {
         pictures.keys
@@ -300,11 +351,18 @@ final class ShellPictures {
 
     /// The picture, where it is already in hand. Draws on the first pass, which is what removes
     /// the flash of the waiting shape every time a reader scrolls back to a row.
-    func picture(_ url: URL?, scale: CGFloat, tier: Tier) -> Image? {
+    ///
+    /// `host` is the source this row is being read under, and a hit tags the entry with it — I10.
+    /// Tagging on the read is what lets one picture belong to two sources without either of them
+    /// having to know about the other: whichever source fetched it, every source that draws it
+    /// says so on its own next pass.
+    func picture(_ url: URL?, scale: CGFloat, tier: Tier, host: String) -> Image? {
         guard let url else { return nil }
         let key = Key(url: url, scale: scale, tier: tier)
         wanted(key)
-        return pictures[key]?.picture
+        guard let held = pictures[key] else { return nil }
+        sources[key, default: []].insert(Self.tag(host))
+        return held.picture
     }
 
     /// Whether this one has been asked for and came back with nothing. Every kind of nothing says
@@ -316,15 +374,23 @@ final class ShellPictures {
 
     /// Fetches and decodes it, unless somebody already is, or already has, or already found out
     /// that asking again cannot help.
-    func fetch(_ url: URL?, scale: CGFloat, tier: Tier) async {
+    ///
+    /// `host` is required for the reason `tier` is — see I10.
+    func fetch(_ url: URL?, scale: CGFloat, tier: Tier, host: String) async {
         guard let url else { return }
         let key = Key(url: url, scale: scale, tier: tier)
         guard pictures[key] == nil, missing[key]?.asksAgain ?? true else { return }
-        await work(for: key).value
+        await work(for: key, host: Self.tag(host)).value
     }
 
-    private func work(for key: Key) -> Task<Void, Never> {
-        if let running = inFlight[key] { return running }
+    private func work(for key: Key, host: String) -> Task<Void, Never> {
+        if let running = inFlight[key] {
+            // A second source wanting the same picture joins this fetch rather than starting
+            // another, and is tagged on what lands — two rows from two servers drawing one
+            // address, which is the case I10's set is for. Not a merged row: see the header.
+            inFlight[key]?.hosts.insert(host)
+            return running.task
+        }
         let client = http
         // Unstructured on purpose: the caller is a view's `.task`, and that is cancelled by any
         // rebuild. What it cancels has to be this view's waiting and not the work itself.
@@ -338,6 +404,24 @@ final class ShellPictures {
             )
             self.leave()
             defer { self.inFlight[key] = nil }
+
+            // **The guard that stops a `forget` being undone by work already running.** This
+            // exact bug has been through here twice — `EmojiCatalogueStore` had it and the emoji
+            // cache had it: clearing the stored state alone leaves a fetch in the air which lands
+            // a moment later and files the entry back under the host the reader just cleared. The
+            // mechanism is the catalogue's: the in-flight record carries who the work belongs to,
+            // `forget(host:)` strikes that host off it, and the task re-reads the record **after**
+            // its suspension rather than trusting what it captured before.
+            //
+            // **Above the switch, so it covers the failure too.** An answer nobody is waiting for
+            // any more is dropped whichever kind of answer it is — and a refusal is the worse half
+            // to get wrong: `.refused` is permanent and `forget(host:)` cannot lift it, because
+            // `missing` carries no host to clear by. Noting one for a fetch the reader disowned
+            // would blank that address for the life of the process, surviving even their
+            // re-adding the server.
+            let tagged = self.inFlight[key]?.hosts ?? []
+            guard !tagged.isEmpty else { return }
+
             switch answer {
             case .success(let decoded):
                 self.keep(
@@ -357,13 +441,14 @@ final class ShellPictures {
                     // **Speculative work never displaces work a view has actually asked for** —
                     // with nothing older than it, such a fetch can evict nothing and is
                     // admitted only if it fits outright.
-                    startedAt: self.interest[key] ?? 0
+                    startedAt: self.interest[key] ?? 0,
+                    hosts: tagged
                 )
             case .failure(let absence):
                 self.note(absence, for: key)
             }
         }
-        inFlight[key] = started
+        inFlight[key] = Fetch(hosts: [host], task: started)
         return started
     }
 
@@ -390,7 +475,23 @@ final class ShellPictures {
     /// began. When room cannot be made without dropping a picture that is being drawn right now,
     /// the newcomer is declined instead — that branch is the only thing that ends the loop where
     /// what is dropped is re-asked for and re-asking drops another.
-    func keep(_ picture: Image, cost: Int, for key: Key, startedAt: Int) {
+    ///
+    /// `hosts` is who this picture was read through, and it is unioned rather than replaced: a
+    /// picture re-fetched for one source does not forget the others that were drawing it. Empty
+    /// is not a legal argument — see I10 — which is why there is no default.
+    func keep(_ picture: Image, cost: Int, for key: Key, startedAt: Int, hosts: Set<String>) {
+        // Debug-only tripwire on I10, the same convention as the viewer contract below and for
+        // the same kind of reason. "No default" stops a call site omitting the argument; it does
+        // not stop one passing an empty `Set`, and an entry admitted with no source is one the
+        // reader's Clear button can never reach — which is the whole of what making `host`
+        // required was for. Key-set parity survives it, so no invariant test catches it either.
+        //
+        // It fires *before* `forgottenDuringAFetchDoesNotComeBack` can report, so deleting the
+        // in-flight guard in `work` aborts the suite here rather than failing that test. That is
+        // louder, not quieter — but if you are reading this from a crash log, the guard above the
+        // `switch` in `work` is what you removed.
+        assert(!hosts.isEmpty, "A picture kept under no source is one no Clear can reach. See I10.")
+
         let already = pictures[key]?.cost ?? 0
         var bytes = heldBytes - already + cost
         var count = pictures.count + (already > 0 ? 0 : 1)
@@ -403,7 +504,7 @@ final class ShellPictures {
             // every key after it is too. Both guards stop the walk rather than filtering it.
             for old in order {
                 guard bytes > Self.budget || count > Self.held else { break }
-                // The zero is a belt: `forget` never drops a key that has a picture, so every
+                // The zero is a belt: `trimInterest` never drops a key that has a picture, so every
                 // key in `order` has an interest entry.
                 guard old != key, let held = pictures[old],
                       interest[old] ?? 0 < startedAt else { break }
@@ -419,11 +520,13 @@ final class ShellPictures {
         }
         for old in evictable {
             if let gone = pictures.removeValue(forKey: old) { heldBytes -= gone.cost }
+            sources.removeValue(forKey: old)
         }
 
         heldBytes -= already
         pictures[key] = Held(picture: picture, cost: cost)
         heldBytes += cost
+        sources[key, default: []].formUnion(hosts.lazy.map(Self.tag))
         missing.removeValue(forKey: key)
         wanted(key)
 
@@ -484,8 +587,50 @@ final class ShellPictures {
     private func wanted(_ key: Key) {
         clock += 1
         interest[key] = clock
-        forget()
+        trimInterest()
     }
+
+    /// Drops everything this device holds from one server: the reader pressing Clear on that row.
+    ///
+    /// **A host is struck off each entry, and an entry goes only when no tagged source is left**
+    /// — I10. A picture two sources are both reading is one picture, so clearing the first frees
+    /// nothing; that is the price of not holding it twice, and it is the right price for a
+    /// photograph. The emoji cache, where a duplicate is 10KB, took the other side of the trade.
+    ///
+    /// **Bumps the generation**, unlike ordinary eviction. This is the split the file's header
+    /// states: a bulk, deliberate invalidation is a fact about a cohort no single view can see
+    /// for itself, and what a row still on screen is owed afterwards is a fresh ask. Eviction is
+    /// a fact about one key and stays silent. It bumps whether or not anything was held, because
+    /// a reader who presses Clear has made a decision, not a query.
+    ///
+    /// Work already in flight is struck off too, so the answer cannot land behind the reader and
+    /// file itself back under the host they just cleared. The in-flight entries are **not**
+    /// removed: the task still has to tidy its own record away, and a fetch another source is
+    /// still waiting on is still that source's fetch.
+    func forget(host: String) {
+        let host = Self.tag(host)
+        // Over a copy of the keys, because the body writes back into the map it is walking.
+        for key in Array(inFlight.keys) { inFlight[key]?.hosts.remove(host) }
+        // Likewise over a copy. What is evicted here keeps its `interest` stamp: I7 forbids a
+        // held key without one and says nothing about a stamp without a picture, which is the
+        // ordinary state of every address a row has ever read. `trimInterest` clears those.
+        let tagging = sources
+        for (key, tagged) in tagging where tagged.contains(host) {
+            var rest = tagged
+            rest.remove(host)
+            guard rest.isEmpty else {
+                sources[key] = rest
+                continue
+            }
+            if let gone = pictures.removeValue(forKey: key) { heldBytes -= gone.cost }
+            sources.removeValue(forKey: key)
+        }
+        generation += 1
+    }
+
+    /// `Source` lowercases the host it holds, and so does this. A picture filed under the
+    /// spelling a reader happened to type is one their Clear button would never find.
+    private static func tag(_ host: String) -> String { host.lowercased() }
 
     /// Keeps `interest` bounded, oldest first.
     ///
@@ -496,7 +641,10 @@ final class ShellPictures {
     ///
     /// Trims to three quarters rather than to the bound, so this does its sorting once every few
     /// hundred reads instead of on every read once the map is full.
-    private func forget() {
+    ///
+    /// Named apart from `forget(host:)` on purpose: that one drops pictures a reader asked to be
+    /// rid of, this one only forgets that a key was ever asked about.
+    private func trimInterest() {
         guard interest.count > Self.remembered else { return }
         let target = Self.remembered * 3 / 4
         let spare = interest
@@ -676,6 +824,9 @@ struct RemoteImage: View {
         let tier: ShellPictures.Tier
         let have: Bool
         let generation: Int
+        /// Here so that the same address drawn under a second source commissions a fetch under
+        /// that source, which is what tags the entry for it — I10.
+        let host: String
     }
 
     let url: URL?
@@ -685,6 +836,12 @@ struct RemoteImage: View {
     /// decode at full size, each the first time a call site forgets to say. The compiler asks
     /// instead.
     let tier: ShellPictures.Tier
+
+    /// Which source this picture is being read through. **No default on purpose**, for the same
+    /// reason `tier` has none: the address points at a CDN and cannot be traced back to a server,
+    /// so a call site that forgets to say makes a picture the reader's Clear button can never
+    /// reach. See `ShellPictures`, I10.
+    let host: String
 
     var standing: Standing = .picture
     var contentMode: ContentMode = .fill
@@ -700,7 +857,7 @@ struct RemoteImage: View {
     private var cache: ShellPictures { .shared }
 
     var body: some View {
-        let picture = cache.picture(url, scale: displayScale, tier: tier)
+        let picture = cache.picture(url, scale: displayScale, tier: tier, host: host)
         return Group {
             if let picture {
                 // The well sits behind it rather than only where a picture is absent: fitted
@@ -728,10 +885,11 @@ struct RemoteImage: View {
                 scale: displayScale,
                 tier: tier,
                 have: picture != nil,
-                generation: cache.generation
+                generation: cache.generation,
+                host: host
             )
         ) {
-            await cache.fetch(url, scale: displayScale, tier: tier)
+            await cache.fetch(url, scale: displayScale, tier: tier, host: host)
         }
     }
 

@@ -31,6 +31,12 @@ struct AttachmentDeck: View {
     /// with the reader's type size, and a deck that measured its own room would fan out of a slot
     /// that had already been given a width.
     let side: CGFloat
+
+    /// Which of the reader's servers this post arrived through, for the picture cache to file the
+    /// card under. Passed in because this view holds no item: an attachment address is usually a
+    /// CDN and cannot be traced back to a server, so somebody who knows has to say. See
+    /// `ShellPictures`, I10.
+    let host: String
     var radius: CGFloat = ShellSpace.tight
 
     @Environment(\.colorScheme) private var colorScheme
@@ -130,6 +136,7 @@ struct AttachmentDeck: View {
             // has a contract of at most three addresses at once that a row in a list would break
             // on its first screen.
             tier: .deck,
+            host: host,
             contentMode: .fit,
             alt: spoken,
             radius: radius
@@ -183,19 +190,28 @@ struct AttachmentDeck: View {
     /// that read it out would be the cover lifted for exactly the reader who cannot lift it back
     /// — and a covered row that said nothing about it at all would leave them not knowing there
     /// was anything to uncover. Naming it without describing it is the whole of the difference.
-    static func named(_ attachments: [FediqoCore.Attachment], top: Int) -> String? {
+    ///
+    /// `nonisolated` for the same reason `folded(_:of:)` is: a `View`'s statics are isolated to
+    /// the main actor, and this is asked as a plain question about a list of attachments by
+    /// callers that are not — `DummyItemRow`'s accessibility label and the suite that pins the
+    /// two spellings against each other.
+    nonisolated static func named(_ attachments: [FediqoCore.Attachment], top: Int) -> String? {
         guard !attachments.isEmpty else { return nil }
         let index = folded(top, of: attachments.count)
         return positioned(kind(of: attachments[index]), index: index, of: attachments.count)
     }
 
-    private static func kind(of attachment: FediqoCore.Attachment) -> String {
+    /// `nonisolated` with `named` above it, which is its only reason to be: `L10n` is a plain
+    /// enum and this is a lookup, not a drawing.
+    nonisolated private static func kind(of attachment: FediqoCore.Attachment) -> String {
         L10n.t("item.deck.\(attachment.kind.rawValue)")
     }
 
     /// One place for the counter, so the two spellings cannot drift into two forms of the same
     /// sentence. A deck of one has no position worth saying.
-    private static func positioned(_ described: String, index: Int, of count: Int) -> String {
+    nonisolated private static func positioned(
+        _ described: String, index: Int, of count: Int
+    ) -> String {
         guard count > 1 else { return described }
         let position = String(format: L10n.t("item.deck.position"), index + 1, count)
         return "\(position) — \(described)"
