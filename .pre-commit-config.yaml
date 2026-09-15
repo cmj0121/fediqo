@@ -3,8 +3,17 @@ repos:
     rev: v5.0.0
     hooks:
       - id: check-yaml
+      # A fixture is what a stranger's server actually sent, and tidying it is the one thing
+      # that must never happen to it. `trailing-whitespace` was rewriting captured Discuz!
+      # pages on the way in -- two of the new index captures lost sixteen and thirteen bytes
+      # of real trailing space each -- which is this branch's own recorded lesson happening
+      # again through a different door: **a fixture written out through anything that repairs
+      # it describes a cleaner world than the code meets.** Nothing here is hand-edited and
+      # nothing here is read by a person, so there is nothing for either hook to do but damage.
       - id: end-of-file-fixer
+        exclude: ^Tests/.*/Fixtures/
       - id: trailing-whitespace
+        exclude: ^Tests/.*/Fixtures/
   # A release needs a signing key, an App Store Connect key and a passphrase, and .gitignore
   # is the only thing standing between them and a public repository. A file it has not been
   # told about is a file it will not stop. This will.

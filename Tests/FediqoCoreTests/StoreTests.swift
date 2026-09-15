@@ -19,6 +19,62 @@ struct StoreTests {
         #expect(source.id == source.host)
     }
 
+    @Test("A source carries the boards the reader subscribed to, and every fid only once")
+    func aSourceCarriesItsSubscriptions() {
+        // D26: one source per host with a set of subscribed boards, never one source per board.
+        // The identity is still the host, so nothing keyed by host — the picture cache's tags,
+        // the emoji catalogue, `Clear`, the join list — learns a new kind of key.
+        let forum = Source(
+            host: "install-c.example",
+            kind: .discuz,
+            boards: [BoardSubscription(fid: 33, name: "启动盘工具"), BoardSubscription(fid: 41, name: "Linux系统")]
+        )
+        #expect(forum.id == "install-c.example")
+        #expect(forum.boards.map(\.fid) == [33, 41])
+        #expect(forum.subscribes(to: 41))
+        #expect(!forum.subscribes(to: 42))
+
+        // **At most one entry per fid, guaranteed by the data rather than by a rule each caller
+        // remembers.** A forum that renamed a board between two reads would otherwise hand the
+        // reader two subscriptions to one board, under two names, with no way to tell which.
+        let renamed = Source(
+            host: "install-c.example",
+            kind: .discuz,
+            boards: [
+                BoardSubscription(fid: 33, name: "启动盘工具"),
+                BoardSubscription(fid: 33, name: "what it is called now"),
+            ]
+        )
+        #expect(renamed.boards.map(\.name) == ["启动盘工具"])
+
+        // And every source that has no such idea still has none, with no call site changed.
+        #expect(source.boards.isEmpty)
+        #expect(Source(host: "install-f.example", kind: .discourse).boards.isEmpty)
+    }
+
+    @Test("Picking boards again changes the one source rather than adding another")
+    func subscribingRestatesOneSource() async {
+        let store = ItemStore()
+        let forum = Source(
+            host: "install-c.example", kind: .discuz, boards: [BoardSubscription(fid: 33, name: "a")])
+        await store.add(source)
+        await store.add(forum)
+        await store.subscribe(
+            host: "install-c.example",
+            to: [BoardSubscription(fid: 33, name: "a"), BoardSubscription(fid: 41, name: "b")]
+        )
+
+        #expect(await store.sources().count == 2)
+        // In place: the reader built this list in this order and nothing reorders it.
+        #expect(await store.sources().map(\.id) == ["first.example", "install-c.example"])
+        #expect(await store.sources().last?.boards.map(\.fid) == [33, 41])
+        #expect(await store.sources().last?.kind == .discuz)
+
+        // A host nobody joined does not arrive by this door.
+        await store.subscribe(host: "elsewhere.example", to: [BoardSubscription(fid: 1, name: "c")])
+        #expect(await store.sources().count == 2)
+    }
+
     @Test("all() is postedAt descending, then id, not insert order")
     func allSortsByTimeNotInsert() async {
         let store = ItemStore()

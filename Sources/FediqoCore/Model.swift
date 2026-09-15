@@ -40,15 +40,57 @@ public enum ProtocolKind: String, Sendable, Hashable, CaseIterable {
     }
 }
 
+/// One board of a forum the reader subscribed to.
+///
+/// **The number is the subscription and the name is the label.** A forum renames a board when a
+/// moderator decides to; the `fid` it is served at does not change. Both are kept because a rail
+/// listing `fid 34` is no use to anybody, and only one of them is the identity.
+public struct BoardSubscription: Identifiable, Hashable, Sendable {
+    public var id: Int { fid }
+    public let fid: Int
+    public let name: String
+
+    public init(fid: Int, name: String) {
+        self.fid = fid
+        self.name = name
+    }
+}
+
 /// A server this device reads. Unsigned: the host is the source.
+///
+/// **One source per host, carrying the boards the reader chose — never one source per board**
+/// (D26). Everything per-server in this app is keyed by host: the picture cache's tags, the emoji
+/// catalogue, `Clear`, the join list. A reader subscribing to eight boards would otherwise become
+/// eight servers in every one of them, and pressing Clear on one of the eight would mean
+/// something nobody could predict. A board is a *query within* a source — which is the thing the
+/// rail already draws (D27) — so `id` stays the host and the subscriptions ride along.
+///
+/// **A note's copy of this is a stamp, not a live view.** `Note.source` records which server the
+/// note came from; the subscription list that matters is the one on the source in the store,
+/// which is the only copy anything updates. Reading `boards` off a note would be reading what was
+/// true when the note was parsed.
 public struct Source: Identifiable, Hashable, Sendable {
     public var id: String { host }
     public let host: String
     public let kind: ProtocolKind
+    /// The boards subscribed to, in the order they were picked. Empty for every source that has
+    /// no such idea, which is every microblog and every Discourse.
+    ///
+    /// **At most one entry per `fid`, enforced here.** The guarantee is in the data rather than
+    /// in a convention each caller remembers — this branch's second earned convention — because a
+    /// forum that renamed a board between two reads would otherwise give a reader two
+    /// subscriptions to one board, with two names, and no way to tell which.
+    public let boards: [BoardSubscription]
 
-    public init(host: String, kind: ProtocolKind) {
+    public init(host: String, kind: ProtocolKind, boards: [BoardSubscription] = []) {
         self.host = host.lowercased()
         self.kind = kind
+        var seen: Set<Int> = []
+        self.boards = boards.filter { seen.insert($0.fid).inserted }
+    }
+
+    public func subscribes(to fid: Int) -> Bool {
+        boards.contains { $0.fid == fid }
     }
 }
 
