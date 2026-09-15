@@ -61,7 +61,7 @@
 "shortcut.view" = "用整個畫面打開附件";
 "shortcut.play" = "播放附件，或讓它停下來";
 "shortcut.turn" = "換到下一個附件";
-"shortcut.cover" = "掀開作者蓋住的內容";
+"shortcut.cover" = "掀開作者蓋在這篇上的內容，或再蓋回去";
 "shortcut.compose" = "新貼文";
 "shortcut.list" = "這份清單";
 "shortcut.back" = "回到清單";
@@ -101,6 +101,17 @@
 "item.visibility.unlisted" = "不公開列出";
 "item.visibility.followers" = "追隨者";
 "item.visibility.mentioned" = "被提到的人";
+"item.deck.position" = "第 %1$d 個，共 %2$d 個";
+"item.deck.image" = "一張圖片";
+"item.deck.video" = "一段影片";
+"item.deck.audio" = "一段聲音";
+"item.deck.unknown" = "一個附件";
+"item.covered.title" = "作者把這篇蓋起來了";
+"item.covered.show" = "掀開";
+"item.covered.label" = "按 s 掀開";
+"item.covered.hide" = "蓋回去";
+"item.lifted.label" = "按 s 再蓋回去";
+
 "item.act.reply" = "回覆";
 "item.act.reblog" = "轉發";
 "item.act.quote" = "引用";

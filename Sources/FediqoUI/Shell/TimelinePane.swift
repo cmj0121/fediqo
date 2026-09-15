@@ -5,6 +5,9 @@ struct TimelinePane: View {
     @Bindable var session: ShellSession
     @Binding var selectedID: String?
     @Binding var openedID: String?
+    /// Where every deck in this pane is turned to, and which rows the reader uncovered. Held by
+    /// the app rather than here, because `m` and `s` are pressed where the keys are read.
+    @Binding var decks: ShellDecks
     var jumpToTop: Int
     var onPopThread: () -> Void
     @State private var marks: [String: DummyMarks] = [:]
@@ -32,6 +35,7 @@ struct TimelinePane: View {
                     root: opened,
                     selectedID: $selectedID,
                     marks: markBinding,
+                    decks: $decks,
                     jumpToTop: jumpToTop,
                     onToast: showToast,
                     onBack: onPopThread
@@ -77,7 +81,10 @@ struct TimelinePane: View {
                             item: item,
                             marks: markBinding(item),
                             selected: item.id == selectedID,
+                            top: decks.top(of: item.id, of: item.attachments.count),
+                            lifted: decks.isLifted(item.id),
                             onSelect: { selectedID = item.id },
+                            onToggleCover: { _ = decks.toggleCover(item.id) },
                             onToast: showToast
                         )
                         .id(item.id)
