@@ -64,9 +64,11 @@ import SwiftUI
 /// Two-phase ordering gives the order *within* a pass; I8 keeps it current *across* arrivals, and
 /// I8 is the load-bearing one.
 ///
-/// **I9 — `.crowded` is terminal for the life of the process**, and is the backstop for I5 being
-/// violated. It is **not** a backstop for I8: when I8 is broken the branch that writes it never
-/// runs. Relief must come from an event the crowded cohort cannot itself cause.
+/// **I9 — `.crowded` is terminal until the reader says otherwise**, and is the backstop for I5
+/// being violated. It is **not** a backstop for I8: when I8 is broken the branch that writes it
+/// never runs. Relief must come from an event the crowded cohort cannot itself cause, and there
+/// is exactly one: `forget(host:)`, driven by a press in Preferences. Nothing automatic has ever
+/// passed that test — see `Absence.crowded`.
 ///
 /// The second face of that trade: a row which genuinely **scrolls away while its fetch is in the
 /// air** lands, is correctly declined — nothing wants it any more — and is then terminally
@@ -127,6 +129,42 @@ import SwiftUI
 /// a Clear that frees nothing until the last source goes. Duplicating an emoji costs about 10KB
 /// against a 24MB budget, so that cache duplicates and buys a Clear that frees on the spot. Two
 /// answers to one reader-facing promise, each right where it is.
+///
+/// **Two maps carry sources, and they are bounded differently.** `sources` rides along with
+/// `pictures`: its key set is exactly `pictures`'s, so the byte budget and the count bound that
+/// hold one hold the other, and it is maintained at the two ordered places a picture leaves.
+/// `missingSources` cannot ride along the same way, because `missing` has a bound of its own and
+/// drops an **arbitrary** key to stay under it — `Dictionary.keys` has no order and giving a
+/// negative cache its own LRU would be a second eviction policy for nothing. A parallel map with
+/// no order to follow has to be trimmed in the same loop, at the same key, in the same pass; so
+/// `note` does both, and nothing else may remove from `missing` without removing from it. One
+/// button clears both maps and neither bound is the other's.
+///
+/// ## What Clear means
+///
+/// **Clear drops the cache; it does not forget the server.** The reader is still reading that
+/// server — its row is still in Preferences, its timeline still theirs — so what the button
+/// empties is what this device happens to be holding, and the pictures are read again as they
+/// are wanted. The other reading, where the rows go too, is a much larger action than the word
+/// says and belongs to a Remove button nobody has asked for.
+///
+/// That settles a question this file could not answer while nothing called `forget(host:)`:
+/// **a row still on screen re-tags the host the reader just cleared**, because `picture(…)` puts
+/// `host` back on every body pass and the generation bump guarantees a pass. Under "drop the
+/// cache" that is correct rather than a leak — a source drawing a picture is a source holding
+/// it, and the entry is re-earned by something the reader is looking at. It has one consequence
+/// worth naming: a **shared** entry two sources are both drawing can never be freed by clearing
+/// them one after the other, because the first one's row puts it back before the second press.
+/// Two servers on screen showing one photograph is one photograph, and that is the same trade
+/// the set was chosen for.
+///
+/// **What keeps the button from appearing to do nothing** is navigation rather than anything
+/// here: Preferences is a *place*, so on macOS the timeline is not in the view tree while the
+/// reader is pressing Clear, nothing re-tags, and the readout beside the button falls to zero
+/// where they can see it. On iOS compact the pages are tabs and the timeline's tree is alive
+/// behind, so the same press frees less and the number recovers. **If a later unit makes
+/// Preferences a sheet over the timeline, Clear stops freeing and starts refetching on every
+/// platform** — the behaviour is still correct and the screen stops being able to show it.
 @MainActor
 @Observable
 final class ShellPictures {
@@ -189,6 +227,15 @@ final class ShellPictures {
         /// deliberate, external one: the viewer closing, the place changing, the app returning
         /// from background. It is the same rule as the generation split: bulk, deliberate
         /// invalidations bump; anything the cache can reach on its own does not.
+        ///
+        /// **There is exactly one such relief, and it is the reader's Clear button.** A press in
+        /// Preferences is the permitted class by construction: a crowded cohort cannot reach a
+        /// button, so the signal is outside the loop it ends rather than inside it, which is what
+        /// every rejected automatic relief got wrong. `forget(host:)` lifts this mark for the
+        /// source it was noted under, alongside `.refused` and `.unreachable` and by the same
+        /// rule — a mark shared with a second source survives until that source is cleared too.
+        /// "Permanent for the life of the process" now means "until the reader says otherwise",
+        /// which is the sentence decision 14 was always going to turn it into.
         case crowded
 
         /// Whether asking again could ever change the answer by itself.
@@ -273,6 +320,20 @@ final class ShellPictures {
     /// there is drawn as absent rather than as forever arriving — and so it is asked for once
     /// rather than on every rebuild of every row that shows it.
     private(set) var missing: [Key: Absence] = [:]
+
+    /// Which sources each record of nothing was noted under — I10's other half, and the thing
+    /// that makes a Clear reach a mark rather than only a picture.
+    ///
+    /// Without it, a surviving `.refused` for a cleared server means the device still remembers
+    /// "that server's avatar is not there" and declines to ask again: the reader clears, re-adds,
+    /// and gets a blank row for the rest of the run. `.crowded` is the same shape with a longer
+    /// shadow — see `Absence.crowded`.
+    ///
+    /// **Its key set is exactly `missing`'s, and it is kept so by hand rather than by ordering.**
+    /// See the header: `missing` drops an arbitrary key at its bound, so this is trimmed in the
+    /// same loop in `note`. Every removal from `missing` removes from here too, and
+    /// `theMapsOfNothingAgree` holds the pair.
+    @ObservationIgnored private(set) var missingSources: [Key: Set<String>] = [:]
 
     /// Bumped only by a **cohort** changing its mind — a network that came back, or a reader
     /// clearing one server. That is a fact about a set of addresses which no single view can
@@ -420,11 +481,18 @@ final class ShellPictures {
             // its suspension rather than trusting what it captured before.
             //
             // **Above the switch, so it covers the failure too.** An answer nobody is waiting for
-            // any more is dropped whichever kind of answer it is — and a refusal is the worse half
-            // to get wrong: `.refused` is permanent and `forget(host:)` cannot lift it, because
-            // `missing` carries no host to clear by. Noting one for a fetch the reader disowned
-            // would blank that address for the life of the process, surviving even their
-            // re-adding the server.
+            // any more is dropped whichever kind of answer it is.
+            //
+            // This guard used to be justified by `.refused` being unliftable — `missing` carried
+            // no host to clear by — and **that justification is now false**: `missingSources`
+            // carries it, and `forget(host:)` lifts the mark. The guard stays, on the two reasons
+            // that were always the real ones. A mark noted here would be **filed under the host
+            // the reader just cleared**, which re-files their cleared server into both maps a
+            // moment after they emptied it — the twice-shipped bug above, arriving through the
+            // failure branch instead of the success one. And the work itself is a request to a
+            // stranger's server that nobody is waiting for. Neither is repaired by the mark being
+            // liftable later; the reader would have to press Clear a second time to undo the
+            // first one's own wake.
             let tagged = self.inFlight[key]?.hosts ?? []
             guard !tagged.isEmpty else { return }
 
@@ -451,7 +519,7 @@ final class ShellPictures {
                     hosts: tagged
                 )
             case .failure(let absence):
-                self.note(absence, for: key)
+                self.note(absence, for: key, hosts: tagged)
             }
         }
         inFlight[key] = Fetch(hosts: [host], task: started)
@@ -521,7 +589,7 @@ final class ShellPictures {
         }
 
         guard (bytes <= Self.budget && count <= Self.held) || pictures.isEmpty else {
-            note(.crowded, for: key)
+            note(.crowded, for: key, hosts: hosts)
             return
         }
         for old in evictable {
@@ -534,6 +602,7 @@ final class ShellPictures {
         heldBytes += cost
         sources[key, default: []].formUnion(hosts.lazy.map(Self.tag))
         missing.removeValue(forKey: key)
+        missingSources.removeValue(forKey: key)
         wanted(key)
 
         // Something got through, so the network is back, so everything written off while it was
@@ -555,9 +624,16 @@ final class ShellPictures {
         //
         // The price of this is an init parameter on every test that exceeds the contract on
         // purpose, and it is worth paying for one specific reason rather than a general one:
-        // `.crowded` is terminal with no relief, so this contract is the only thing standing
-        // between unit 7 and permanently stranded rows. **If the latch ever gains relief,
-        // revisit this — the justification goes with it.**
+        // this contract is the only thing standing between unit 7 and stranded rows.
+        //
+        // The latch has since gained exactly one relief — the reader's Clear button, see
+        // `Absence.crowded` — and that is the revisit this comment used to ask for. It does not
+        // retire the tripwire. Relief a **reader** has to find and press is not relief the app
+        // provides: a row stranded by unit 7 drawing more at once than the contract allows is
+        // still stranded for every reader who never opens Preferences, and "press Clear" is not
+        // an answer anybody would arrive at from a `photo` glyph. What the relief changes is the
+        // consequence of being wrong, from permanent to recoverable; what it does not change is
+        // that being wrong is a defect.
         assert(
             !enforcingViewerContract
                 || Set(pictures.keys.lazy.filter { $0.tier == .viewer }.map(\.url)).count
@@ -568,23 +644,44 @@ final class ShellPictures {
         )
     }
 
-    /// Writes down why there is nothing, bounded.
+    /// Writes down why there is nothing, bounded, and under whose sources.
     ///
     /// The entry dropped to stay under the bound is an arbitrary one rather than the oldest:
     /// `Dictionary.keys` has no order and giving this its own ordering would be a second LRU for
     /// a negative cache. Losing the wrong refusal costs one extra request; it cannot loop,
     /// because the entry just written is never the one removed.
-    func note(_ absence: Absence, for key: Key) {
+    ///
+    /// `hosts` is required, and for the same reason it is required on `keep`: a mark filed under
+    /// no source is one the reader's Clear button can never lift, which is exactly the blank row
+    /// this whole map was given sources for. Both production call sites hold the set already —
+    /// the failure branch in `work` holds who is still waiting on the fetch, and the declining
+    /// branch in `keep` holds who the picture was read through — so neither has to invent one.
+    /// It is unioned rather than replaced: two servers drawing one broken address have both been
+    /// told the same thing.
+    func note(_ absence: Absence, for key: Key, hosts: Set<String>) {
+        assert(!hosts.isEmpty, "A mark noted under no source is one no Clear can lift. See I10.")
         missing[key] = absence
+        missingSources[key, default: []].formUnion(hosts.lazy.map(Self.tag))
+        // The parallel map is trimmed here and only here, because this is where the arbitrary
+        // choice of victim is made. See the header on why it has no ordering to inherit.
         while missing.count > Self.refusals,
               let spare = missing.keys.first(where: { $0 != key }) {
             missing.removeValue(forKey: spare)
+            missingSources.removeValue(forKey: spare)
         }
     }
 
     private func forgetUnreachable() {
         guard missing.contains(where: { $0.value == .unreachable }) else { return }
-        missing = missing.filter { $0.value != .unreachable }
+        // Over a copy, because the body writes back into the map it is walking — the same
+        // reason, and the same shape, as the two sweeps in `forget(host:)`. Three loops that do
+        // the same thing should not be written three ways: a reader who finds one of them
+        // different will assume the difference is meant.
+        let noted = missing
+        for (key, absence) in noted where absence == .unreachable {
+            missing.removeValue(forKey: key)
+            missingSources.removeValue(forKey: key)
+        }
         generation += 1
     }
 
@@ -613,6 +710,19 @@ final class ShellPictures {
     /// file itself back under the host they just cleared. The in-flight entries are **not**
     /// removed: the task still has to tidy its own record away, and a fetch another source is
     /// still waiting on is still that source's fetch.
+    ///
+    /// **Two sweeps, because there are two things a Clear has to reach.** The pictures are the
+    /// obvious half; the marks saying why a picture is absent are the half that is reader-visible
+    /// and was missing. A `.refused` surviving for a cleared server means the device still
+    /// remembers "that avatar is not there" and will not ask again, so a reader who clears a
+    /// server and re-adds it gets a blank row for the rest of the run — decision 14's promise not
+    /// kept. A `.crowded` surviving is the same bug with I9's shadow over it, and lifting it here
+    /// is permitted rather than a hole in I9: a crowded cohort cannot press a button, so this
+    /// signal sits outside the loop it ends.
+    ///
+    /// Both sweeps strike the host off and drop only where no source is left, so one rule covers
+    /// both maps: a picture two servers are drawing, and a refusal two servers were both told,
+    /// each survive until the last of them is cleared.
     func forget(host: String) {
         let host = Self.tag(host)
         // Over a copy of the keys, because the body writes back into the map it is walking.
@@ -630,6 +740,17 @@ final class ShellPictures {
             }
             if let gone = pictures.removeValue(forKey: key) { heldBytes -= gone.cost }
             sources.removeValue(forKey: key)
+        }
+        let noted = missingSources
+        for (key, tagged) in noted where tagged.contains(host) {
+            var rest = tagged
+            rest.remove(host)
+            guard rest.isEmpty else {
+                missingSources[key] = rest
+                continue
+            }
+            missing.removeValue(forKey: key)
+            missingSources.removeValue(forKey: key)
         }
         generation += 1
     }
@@ -669,8 +790,53 @@ final class ShellPictures {
         }
     }
 
-    /// `Source` lowercases the host it holds, and so does this. A picture filed under the
-    /// spelling a reader happened to type is one their Clear button would never find.
+    /// What this device is holding that was read through one source: how many pictures, and what
+    /// they cost. The reading beside the reader's Clear button, and the number that has to fall
+    /// where they can see it — a button that appears to do nothing is the failure mode this
+    /// screen is designed against.
+    ///
+    /// **Reads both observed properties this answer depends on, on purpose.** The loop walks
+    /// `pictures` rather than `sources` so that a body calling this registers the observation
+    /// even when nothing is held — a count that stops updating once it reaches zero is a readout
+    /// that lies the moment anything arrives.
+    ///
+    /// But the loop *answers* from `sources`, which is `@ObservationIgnored` by design (see its
+    /// own doc: it is written from `picture(…)` inside a view body, and an observed write there
+    /// is a refetch storm). So there is one way this answer moves with `pictures` untouched:
+    /// **a Clear that strikes a host off a shared entry.** Nothing in the loop would notice, and
+    /// the reading would freeze at the pre-Clear figure — silently, and only for the shared case,
+    /// which is the one hardest to notice by looking.
+    ///
+    /// `generation` closes it, because `forget(host:)` bumps it unconditionally. The read below
+    /// exists for its side effect on observation and not for its value, which is exactly the kind
+    /// of line a later tidy-up deletes; it is written as a discard with this paragraph over it so
+    /// that deleting it has to be a decision.
+    func holding(host: String) -> (count: Int, bytes: Int) {
+        _ = generation
+        let host = Self.tag(host)
+        var count = 0
+        var bytes = 0
+        for (key, held) in pictures where sources[key]?.contains(host) == true {
+            count += 1
+            bytes += held.cost
+        }
+        return (count, bytes)
+    }
+
+    /// **Decision 21 — a host is folded once, where it enters, and every consumer may then
+    /// compare exactly.** A hostname is case-insensitive by DNS, so two spellings of one host is
+    /// an *ingestion* defect and not a comparison one — the same boundary logic as decision 9's
+    /// `https` rule, which is enforced where the address arrives rather than at each socket.
+    ///
+    /// The boundaries are `Host.parse` for what the reader typed and `Source.init` for what came
+    /// off the wire; both fold, and so do `EmojiCatalogue` and `EmojiCatalogueStore.key`. This
+    /// fold and `EmojiCache.Key`'s are belt rather than the statement of the rule.
+    ///
+    /// **Bare `lowercased()`, never `lowercased(with: .current)`.** Unicode default case
+    /// conversion is locale-independent; the Turkish locale maps `I` to `ı`, which for a hostname
+    /// is a real difference rather than a theoretical one — a reader with a Turkish device would
+    /// file `first.example` somewhere nobody else could find it. Every fold in this project is
+    /// the bare form; keep it that way.
     private static func tag(_ host: String) -> String { host.lowercased() }
 
     /// Keeps `interest` bounded, oldest first.
@@ -859,7 +1025,10 @@ struct RemoteImage: View {
     /// observed, that row redraws, `have` goes true→false, and this changes. The generation is
     /// for what no single view can see for itself: a cohort of addresses worth trying again
     /// because the network came back or room did.
-    private struct Wanted: Equatable {
+    ///
+    /// Visible rather than private so that `theGateIsInTheTaskIdentity` can hold the one property
+    /// that is easy to get wrong and impossible to see: `active` must be *in* the identity.
+    struct Wanted: Equatable {
         let url: URL?
         let scale: CGFloat
         let tier: ShellPictures.Tier
@@ -868,6 +1037,13 @@ struct RemoteImage: View {
         /// Here so that the same address drawn under a second source commissions a fetch under
         /// that source, which is what tags the entry for it — I10.
         let host: String
+        /// Decision 20's gate, **in the identity and not only in the guard.** The guard alone
+        /// would stop the fetch and nothing would restart it: a tab that was inactive when the
+        /// task last ran never re-runs it on becoming active, so the reader switches back to a
+        /// page of empty wells that will not fill. Carrying it here means becoming active is a
+        /// change of identity and re-fires. Becoming *inactive* re-fires too and the guard
+        /// returns at once, which costs a task creation and nothing else.
+        let active: Bool
     }
 
     let url: URL?
@@ -894,6 +1070,7 @@ struct RemoteImage: View {
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.displayScale) private var displayScale
+    @Environment(\.shellPlaceIsActive) private var placeIsActive
 
     private var cache: ShellPictures { .shared }
 
@@ -927,9 +1104,20 @@ struct RemoteImage: View {
                 tier: tier,
                 have: picture != nil,
                 generation: cache.generation,
-                host: host
+                host: host,
+                active: placeIsActive
             )
         ) {
+            // Decision 20. **Only the fetch is gated** — `cache.picture(…)` above still runs and
+            // still stamps interest, on every pass, on every page. Gating the read instead would
+            // break I8: admission terminates because every visible key re-stamps between one
+            // arrival and the next, and a row that stops stamping looks infinitely stale and
+            // becomes evictable however recently it was drawn.
+            //
+            // An inactive deck-tier row therefore still competes for admission with active ones,
+            // which is fine and was checked rather than assumed: 96MB holds 245 deck entries, and
+            // the tripwire that matters is viewer-tier.
+            guard placeIsActive else { return }
             await cache.fetch(url, scale: displayScale, tier: tier, host: host)
         }
     }

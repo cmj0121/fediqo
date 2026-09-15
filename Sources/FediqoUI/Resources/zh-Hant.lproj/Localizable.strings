@@ -7,7 +7,7 @@
 "shell.usage.title" = "用量";
 "shell.usage.summary" = "這台機器上留了什麼";
 "shell.preferences.title" = "偏好";
-"shell.preferences.summary" = "語言、主題與字級";
+"shell.preferences.summary" = "語言、主題、字級與已存內容";
 "shell.timeline.disabled" = "先到帳號頁新增來源";
 "shell.notices.disabled" = "通知需要已登入的來源";
 "source.signedIn" = "已登入";
@@ -163,3 +163,13 @@
 "prefs.fontSize.default" = "預設";
 "prefs.fontSize.larger" = "較大";
 "prefs.fontSize.largest" = "最大";
+
+"prefs.cache" = "這次執行所存";
+"prefs.cache.footer" = "這些都不會寫進磁碟。下次開啟 Fediqo 時，每個伺服器都會重新讀取；伺服器的表情符號名稱則會在一天後自行重新讀取。";
+"prefs.cache.empty" = "先到「帳號」加入來源。各來源送來的內容會留在這裡，直到你關閉 Fediqo。";
+"prefs.cache.catalogue" = "%d 個表情符號名稱 ·";
+"prefs.cache.catalogue.none" = "未存表情符號名稱";
+"prefs.cache.pictures" = "%d 張圖片";
+"prefs.cache.pictures.none" = "未存任何圖片";
+"prefs.cache.clear" = "清除";
+"prefs.cache.clear.label" = "清除這台裝置存的 %@ 內容";

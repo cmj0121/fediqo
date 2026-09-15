@@ -269,7 +269,11 @@ enum EmojiTextRole: CaseIterable, Sendable {
 
     #if !os(macOS)
     private static func category(_ size: DynamicTypeSize) -> UIContentSizeCategory {
-        UIContentSizeCategory(size) ?? .large
+        // `UIContentSizeCategory.init(_: DynamicTypeSize)` is non-failable, so the `?? .large`
+        // this used to carry was dead code that warned on every iOS compilation — and warned
+        // only there, which is why it survived a unit, its review and two branch-wide "zero
+        // warnings" claims. It is not reachable from a macOS build at all.
+        UIContentSizeCategory(size)
     }
     #endif
 }

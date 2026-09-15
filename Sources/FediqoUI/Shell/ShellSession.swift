@@ -19,10 +19,36 @@ final class ShellSession {
     /// join, so that a server joined once is a server asked once.
     let emoji = EmojiCatalogueStore()
 
+    /// The two picture caches this session's Clear button empties.
+    ///
+    /// Held here rather than reached for as `.shared` at each call site, so that **the figures
+    /// Preferences draws and the caches its button presses are the same objects by
+    /// construction**. They used to agree by convention — the pane read `.shared` while `clear`
+    /// took parameters — which is an agreement a preview or a test wired to fixture caches
+    /// breaks silently: it would press the fixtures and draw the live figures, and the reading
+    /// would simply not move.
+    let pictures: ShellPictures
+    let emojis: EmojiCache
+
     var queries: [DummyTimeline] = DummyTimeline.shipped
     var timelineID: String?
     var sources: [Source] = []
     var notes: [Note] = []
+
+    /// How many times the reader has cleared a server — decision 14's press, counted.
+    ///
+    /// **A signal, not a statistic.** Three caches hold this device's copy of a server, and only
+    /// one of them announces a Clear to the views drawing from it: `ShellPictures` is
+    /// `@Observable` and bumps its generation, so every `RemoteImage` on screen asks again by
+    /// itself. `EmojiCache` deliberately announces nothing at all — a hundred lines each carrying
+    /// a handful of shortcodes is exactly the audience a cache must not wake — so a line that has
+    /// already resolved its pictures keeps drawing them, and its `.task(id: request)` does not
+    /// re-run, because the request is unchanged. The reader presses Clear and the emoji stay.
+    ///
+    /// This is what a line can key on instead: one counter, on the object that performs the
+    /// Clear, observed by the views that already hold this session. It costs the emoji cache
+    /// nothing, because nothing here is inside it.
+    private(set) var cleared = 0
 
     var hostname = ""
     var catalog: Catalog = .loading
@@ -32,9 +58,16 @@ final class ShellSession {
     /// The Account search field is first responder; dummy keys must not steal its typing.
     var searchFocused = false
 
-    init(http: any HTTPClient, store: ItemStore = ItemStore()) {
+    init(
+        http: any HTTPClient,
+        store: ItemStore = ItemStore(),
+        pictures: ShellPictures = .shared,
+        emojis: EmojiCache = .shared
+    ) {
         self.http = http
         self.store = store
+        self.pictures = pictures
+        self.emojis = emojis
     }
 
     var availability: ShellAvailability {
@@ -133,6 +166,29 @@ final class ShellSession {
         } catch {
             refuse = L10n.t("account.refuse.network")
         }
+    }
+
+    /// Drops everything this device holds from one server — decision 14, in one place.
+    ///
+    /// Four kinds and three caches: the emoji catalogue and any fetch of it still on the wire,
+    /// the emoji pictures, and the attachment previews and avatars, which share one cache because
+    /// they are the same kind of thing arriving through the same door. Each of the three already
+    /// knows how to forget a host safely, including how to stop work in flight from landing
+    /// behind the reader; what was missing was somebody to press all three.
+    ///
+    /// **The server stays added.** Clear empties what is held, it does not undo a join: the
+    /// reader is still reading this server and its timeline is still theirs. That reading is what
+    /// makes it safe for a row still on screen to ask again immediately — see `ShellPictures`,
+    /// "What Clear means".
+    ///
+    /// Presses this session's own caches — the ones `PreferencesPane` reads its figures off — so
+    /// that what the button empties and what the screen reports cannot come apart.
+    func clear(host: String) async {
+        let host = host.lowercased()
+        await emoji.forget(host: host)
+        emojis.forget(host: host)
+        pictures.forget(host: host)
+        cleared += 1
     }
 
     private static func refuseMessage(_ error: JoinError, raw: String, host: String) -> String {

@@ -108,6 +108,15 @@ struct ShellAvailability: Hashable, Sendable {
 /// fifteen to twenty-five deck-tier pictures, measured at 23 files and 7.6 MB for one server. A
 /// reader sitting in Preferences pays that with no button pressed and nothing on screen.
 ///
+/// **Only `fetch` reads it.** `RemoteImage` still reads the cache and still stamps its interest
+/// on every pass, gated or not; gating the read as well would break I8, which is what keeps the
+/// cache's admission control honest. An inactive row competes for admission like any other and
+/// simply stops re-asking for what it cannot see.
+///
+/// This is the wake's own principle from the other side — work in proportion to what the reader
+/// can see — and a refinement of "a source drawing a picture is a source holding it" rather than
+/// a retreat from it: a source that is **not being drawn** simply stops re-asking.
+///
 /// **A flag and not a `ShellPlace`, and that is the load-bearing detail.** A `RemoteImage` does
 /// not know which pane it is drawn in, so a value naming the active place gives it nothing to
 /// compare against; what a picture needs to know is whether *its own* subtree is the one on

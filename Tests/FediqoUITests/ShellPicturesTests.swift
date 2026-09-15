@@ -843,7 +843,7 @@ struct ShellPicturesTests {
     @Test("What was declined reads as absent and is not asked for again")
     func crowdedReadsAsAbsent() {
         let cache = ShellPictures()
-        cache.note(.crowded, for: key(1))
+        cache.note(.crowded, for: key(1), hosts: [alpha])
         #expect(cache.isMissing(address(1), scale: 2, tier: .deck))
         #expect(!ShellPictures.Absence.crowded.asksAgain)
     }
@@ -873,9 +873,9 @@ struct ShellPicturesTests {
     @Test("A network coming back is a cohort, and bumps once")
     func outageRecoveryBumps() {
         let cache = ShellPictures()
-        cache.note(.unreachable, for: key(1))
-        cache.note(.unreachable, for: key(2))
-        cache.note(.refused, for: key(3))
+        cache.note(.unreachable, for: key(1), hosts: [alpha])
+        cache.note(.unreachable, for: key(2), hosts: [alpha])
+        cache.note(.refused, for: key(3), hosts: [alpha])
         let before = cache.generation
 
         cache.keep(plate, cost: mb, for: key(4), startedAt: 0, hosts: [alpha])
@@ -893,7 +893,7 @@ struct ShellPicturesTests {
     @Test("What was declined stays declined, whatever else the cache goes on to do")
     func crowdedIsTerminal() {
         let cache = ShellPictures()
-        cache.note(.crowded, for: key(1))
+        cache.note(.crowded, for: key(1), hosts: [alpha])
         let before = cache.generation
 
         // Plenty of room appears and plenty of other work succeeds; none of it is an event this
@@ -985,7 +985,7 @@ struct ShellPicturesTests {
     @Test("What came back with nothing is absent, not arriving")
     func missingIsRemembered() {
         let cache = ShellPictures()
-        cache.note(.refused, for: key(1))
+        cache.note(.refused, for: key(1), hosts: [alpha])
         #expect(cache.isMissing(address(1), scale: 2, tier: .deck))
         #expect(!cache.isMissing(address(1), scale: 3, tier: .deck))
         #expect(!cache.isMissing(address(1), scale: 2, tier: .viewer))
@@ -995,7 +995,7 @@ struct ShellPicturesTests {
     @Test("A picture that arrives clears the note that it was not there")
     func arrivingClearsMissing() {
         let cache = ShellPictures()
-        cache.note(.refused, for: key(1))
+        cache.note(.refused, for: key(1), hosts: [alpha])
         cache.keep(plate, cost: mb, for: key(1), startedAt: 0, hosts: [alpha])
         #expect(!cache.isMissing(address(1), scale: 2, tier: .deck))
         #expect(cache.picture(address(1), scale: 2, tier: .deck, host: alpha) != nil)
@@ -1005,7 +1005,7 @@ struct ShellPicturesTests {
     func refusalsAreBounded() {
         let cache = ShellPictures()
         for n in 0 ..< (ShellPictures.refusals + 20) {
-            cache.note(.refused, for: key(n))
+            cache.note(.refused, for: key(n), hosts: [alpha])
         }
         #expect(cache.missing.count <= ShellPictures.refusals)
         #expect(cache.missing[key(ShellPictures.refusals + 19)] == .refused)
@@ -1116,7 +1116,7 @@ struct ShellPicturesTests {
     @Test("Nothing is asked for twice: neither what is held nor what was refused")
     func fetchDoesNotRepeatItself() async {
         let cache = ShellPictures()
-        cache.note(.refused, for: key(1))
+        cache.note(.refused, for: key(1), hosts: [alpha])
         cache.keep(plate, cost: mb, for: key(2), startedAt: 0, hosts: [alpha])
 
         await cache.fetch(address(1), scale: 2, tier: .deck, host: alpha)
@@ -1244,26 +1244,98 @@ struct ShellPicturesTests {
         }
     }
 
-    /// Prose is not a test. `forget(host:)` frees pictures; it does not lift the marks that say
-    /// why a picture is absent, because `missing` carries no host to clear by. Pinned here
-    /// because 11b trips over it: per-host relief for `.crowded` is not implementable until
-    /// `missing` learns a host, and this is what says so out loud.
-    @Test("Clearing a server leaves the marks saying why a picture is absent alone")
-    func forgettingLeavesMissingAlone() {
+    /// **This test was the other way round until 11b, and it was changed on purpose.** It used to
+    /// pin that `forget(host:)` left `missing` alone, because `missing` carried no host to clear
+    /// by — and said in its own comment that per-host relief was not implementable until it did.
+    /// It does now, and what was pinned turns out to be decision 14's promise not kept: a
+    /// `.refused` surviving for a cleared server means the device still remembers that that
+    /// server's avatar is not there and declines to ask, so a reader who clears and re-adds gets
+    /// a blank row for the life of the process.
+    ///
+    /// `.crowded` goes with them, which is I9's permitted class rather than a hole in it: a
+    /// crowded cohort cannot press a button, so the signal is outside the loop it ends.
+    @Test("Clearing a server lifts the marks saying why its pictures are absent")
+    func forgettingLiftsTheMarksNotedUnderThatSource() {
         let cache = ShellPictures()
         // Kept first: `keep` clears every `.unreachable` on a success, which would take the third
         // mark with it before the Clear ever ran.
         cache.keep(plate, cost: mb, for: key(4), startedAt: 0, hosts: [alpha])
-        cache.note(.refused, for: key(1))
-        cache.note(.crowded, for: key(2))
-        cache.note(.unreachable, for: key(3))
+        cache.note(.refused, for: key(1), hosts: [alpha])
+        cache.note(.crowded, for: key(2), hosts: [alpha])
+        cache.note(.unreachable, for: key(3), hosts: [alpha])
 
         cache.forget(host: alpha)
 
         #expect(cache.order.isEmpty)
-        #expect(cache.missing[key(1)] == .refused)
-        #expect(cache.missing[key(2)] == .crowded)
-        #expect(cache.missing[key(3)] == .unreachable)
+        #expect(cache.missing.isEmpty, "a mark the Clear could not reach is a row that stays blank")
+        #expect(cache.missingSources.isEmpty)
+        #expect(!cache.isMissing(address(1), scale: 2, tier: .deck))
+        #expect(!cache.isMissing(address(2), scale: 2, tier: .deck))
+    }
+
+    /// The other server's marks are none of this server's business, and a mark **shared** by two
+    /// servers survives until the last of them goes — the same rule the pictures follow, so one
+    /// sentence covers both maps.
+    @Test("A Clear lifts one server's marks and leaves another's, sharing where both were told")
+    func forgettingLeavesAnotherSourcesMarksAlone() {
+        let cache = ShellPictures()
+        cache.note(.refused, for: key(1), hosts: [alpha])
+        cache.note(.refused, for: key(2), hosts: [beta])
+        // One broken address both servers drew, and both were told the same thing about.
+        cache.note(.refused, for: key(3), hosts: [alpha])
+        cache.note(.refused, for: key(3), hosts: [beta])
+
+        cache.forget(host: alpha)
+
+        #expect(cache.missing[key(1)] == nil)
+        #expect(cache.missing[key(2)] == .refused, "cleared the wrong server's mark")
+        #expect(cache.missing[key(3)] == .refused, "beta was never told to forget it")
+        #expect(cache.missingSources[key(3)] == [beta])
+
+        cache.forget(host: beta)
+        #expect(cache.missing.isEmpty)
+        #expect(cache.missingSources.isEmpty)
+    }
+
+    /// The parallel map has no ordering to inherit, so the only thing keeping it bounded is that
+    /// `note` trims it in the same loop, at the same key. Drive the bound hard enough to make the
+    /// arbitrary choice of victim happen hundreds of times and hold the pair after every removal
+    /// site this class has: the bound, an arrival, and a network coming back.
+    @Test("The map of who was told agrees with the map of what they were told")
+    func theMapsOfNothingAgree() {
+        let cache = ShellPictures()
+        for n in 0 ..< (ShellPictures.refusals * 3) {
+            cache.note(n.isMultiple(of: 3) ? .unreachable : .refused, for: key(n), hosts: [alpha])
+        }
+        #expect(cache.missing.count <= ShellPictures.refusals)
+        #expect(Set(cache.missingSources.keys) == Set(cache.missing.keys))
+
+        // An arrival clears one key's mark, and clears every `.unreachable` with it.
+        cache.keep(plate, cost: mb, for: key(1), startedAt: 0, hosts: [alpha])
+        #expect(Set(cache.missingSources.keys) == Set(cache.missing.keys))
+        #expect(!cache.missing.values.contains(.unreachable))
+
+        cache.forget(host: alpha)
+        #expect(cache.missing.isEmpty)
+        #expect(cache.missingSources.isEmpty)
+    }
+
+    /// What Clear is for, end to end and from the reader's side: a server whose avatar was
+    /// written off is asked about again once they have cleared it, where before the Clear it was
+    /// not. Without the second sweep in `forget(host:)` the second fetch never reaches the client.
+    @Test("An address written off for a cleared server is asked for again", .timeLimit(.minutes(1)))
+    func aClearedSourceIsAskedAgain() async throws {
+        let http = Counting(png: try picture(width: 32, height: 32, bits: 8))
+        let cache = ShellPictures(http: http)
+
+        cache.note(.refused, for: key(1), hosts: [alpha])
+        await cache.fetch(address(1), scale: 2, tier: .deck, host: alpha)
+        #expect(await http.requests == 0, "a refusal is remembered, so nothing was asked")
+
+        cache.forget(host: alpha)
+        await cache.fetch(address(1), scale: 2, tier: .deck, host: alpha)
+        #expect(await http.requests == 1, "the mark outlived the Clear; the row stays blank")
+        #expect(cache.picture(address(1), scale: 2, tier: .deck, host: alpha) != nil)
     }
 
     /// **The bug that has now been through this branch twice** — `EmojiCatalogueStore` had it and
@@ -1307,10 +1379,13 @@ struct ShellPicturesTests {
         #expect(cache.inFlight.isEmpty)
     }
 
-    /// The same guard on the other branch, and the half with the longer shadow. `.refused` is
-    /// permanent and `forget(host:)` cannot lift it — `missing` carries no host to clear by — so
-    /// a refusal noted for a fetch the reader disowned blanks that address for the life of the
-    /// process: clear server A, a transient 500 lands, re-add A, and the picture never returns.
+    /// The same guard on the other branch. Its original justification — `.refused` is permanent
+    /// because `missing` carries no host to clear by — **was falsified by 11b**, which gave
+    /// `missing` its hosts and made `forget(host:)` lift the marks. The test stands on what the
+    /// guard was really protecting: a mark noted for a fetch the reader disowned is filed under
+    /// the host they just cleared, so the Clear re-populates `missing` and `missingSources` with
+    /// their own cleared server a moment after they emptied it — and it spends a request on a
+    /// stranger's server that nobody is waiting for. Being liftable later repairs neither.
     @Test("A Clear during a fetch that fails writes no permanent mark", .timeLimit(.minutes(1)))
     func forgottenDuringAFailingFetchIsNotWrittenOff() async throws {
         let gate = Gate()

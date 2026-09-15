@@ -7,7 +7,7 @@
 "shell.usage.title" = "Usage";
 "shell.usage.summary" = "What this device is keeping";
 "shell.preferences.title" = "Preferences";
-"shell.preferences.summary" = "Language, theme and type";
+"shell.preferences.summary" = "Language, theme, type, and what is held";
 "shell.timeline.disabled" = "Add a source on Account first";
 "shell.notices.disabled" = "Notices need a signed-in source";
 "source.signedIn" = "Signed in";
@@ -163,3 +163,13 @@
 "prefs.fontSize.default" = "Default";
 "prefs.fontSize.larger" = "Larger";
 "prefs.fontSize.largest" = "Largest";
+
+"prefs.cache" = "Held for this run";
+"prefs.cache.footer" = "None of this is written to disk. Every server is read again from scratch the next time Fediqo opens, and a server's emoji names are read again by themselves after a day.";
+"prefs.cache.empty" = "Add a source on Account. What each one sends is held here until you close Fediqo.";
+"prefs.cache.catalogue" = "%d emoji names, read";
+"prefs.cache.catalogue.none" = "No emoji names held";
+"prefs.cache.pictures" = "%d pictures";
+"prefs.cache.pictures.none" = "No pictures held";
+"prefs.cache.clear" = "Clear";
+"prefs.cache.clear.label" = "Clear what this device holds from %@";

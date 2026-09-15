@@ -272,6 +272,28 @@ final class EmojiCache {
         /// server offered no still, the still and the moving copy are the same address and
         /// would otherwise share one entry holding whichever was asked for first.
         let still: Bool
+
+        /// Folds the host — **belt, not the statement of the rule.**
+        ///
+        /// Decision 21 puts the rule at the boundary: a host is folded once, where it enters,
+        /// and every consumer may then compare exactly. See `ShellPictures.tag` for where those
+        /// boundaries are and why bare `lowercased()` is the only acceptable form. This key is
+        /// one consumer among several and does not get to redefine the contract; what it buys is
+        /// that the *particular* miss below cannot happen even if a call site is wrong.
+        ///
+        /// That miss is worth naming, because it is why this is cheap enough to keep. Before the
+        /// fold, `forget(host:)` and `holding(host:)` compared the same unfolded way, so **the
+        /// leak and the reading were wrong together**: entries up to the whole 24MB budget could
+        /// sit there for the run while the pane printed "No pictures held" beside them, and
+        /// nothing anywhere would report it. Matching the reading to the sweep — which is what
+        /// the first version of `holding` did — deletes the symptom and keeps the bug.
+        init(url: URL, metrics: Metrics, scale: CGFloat, host: String, still: Bool) {
+            self.url = url
+            self.metrics = metrics
+            self.scale = scale
+            self.host = host.lowercased()
+            self.still = still
+        }
     }
 
     /// What one line wants, and what its `.task(id:)` watches: it asks again when its emoji, its
@@ -603,6 +625,7 @@ final class EmojiCache {
     /// the post was read through, recorded in the key where it was stored, because an emoji
     /// address usually points at a CDN and cannot be traced back to a server.
     func forget(host: String) {
+        let host = host.lowercased()
         epoch &+= 1
         for (key, entry) in entries where key.host == host {
             cost -= entry.cost
@@ -632,6 +655,26 @@ final class EmojiCache {
         cuts.removeAll()
         cutOrder.removeAll()
         cost = 0
+    }
+
+    /// What this device is holding that was read through one source: how many pictures, and what
+    /// they cost. The reading beside the reader's Clear button in Preferences.
+    ///
+    /// Records of nothing are not counted. They cost `entryOverhead` each and they are real
+    /// state a Clear drops, but "3 emoji held" beside a server that drew none of them is a
+    /// reading about the cache's bookkeeping rather than about anything the reader saw.
+    /// Folds the host exactly as `Key` and `forget(host:)` do. The three have to agree: a
+    /// reading that folds where the sweep does not counts pictures the button will not drop, and
+    /// one that does not fold where the sweep does reports zero for pictures that are there.
+    func holding(host: String) -> (count: Int, bytes: Int) {
+        let host = host.lowercased()
+        var count = 0
+        var bytes = 0
+        for (key, entry) in entries where key.host == host && !entry.frames.isAbsent {
+            count += 1
+            bytes += entry.cost
+        }
+        return (count, bytes)
     }
 
     /// What the cache is holding. For a test to read; nothing draws with any of it.

@@ -42,7 +42,7 @@ struct WakeTests {
     /// builds a state the app cannot produce, and the `interest` guard would rightly skip it.
     private func drewAndLost(_ cache: ShellPictures, _ n: Int, _ absence: ShellPictures.Absence) {
         _ = cache.picture(address(n), scale: 2, tier: .deck, host: alpha)
-        cache.note(absence, for: key(n))
+        cache.note(absence, for: key(n), hosts: [alpha])
     }
 
     /// Dark for as long as it is told to be, then answering. The outage and its end, without one.
