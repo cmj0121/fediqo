@@ -142,9 +142,6 @@ struct TimelinePane: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            if !session.sources.isEmpty {
-                SourceMarkRow(sources: session.sources.map { .unsigned($0.host) })
-            }
         }
         .accessibilityElement(children: .contain)
     }

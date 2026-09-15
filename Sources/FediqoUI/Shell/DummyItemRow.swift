@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// One item, on a spine. The gutter carries the avatar and the lamp; everything the
-/// reader actually reads lines up in the column beside it, decorator to marks.
+/// One item, in four bands of a fixed shape: what happened to it, who wrote it and
+/// what it arrived with, the words and the attachment, and what can be done to it.
 struct DummyItemRow: View {
     let item: DummyItem
     @Binding var marks: DummyMarks
@@ -25,9 +25,7 @@ struct DummyItemRow: View {
     /// They used to be fixed: the words grew with the reader's preference and the
     /// avatar, the thumbnail and every mark stayed exactly where they were, so at the
     /// largest size a row was big text wrapped around small furniture.
-    ///
-    /// The spine is the same width on every row, so the column beside it never moves.
-    @ScaledMetric(relativeTo: .body) private var gutter: CGFloat = 36
+    @ScaledMetric(relativeTo: .body) private var avatarSide: CGFloat = 36
     @ScaledMetric(relativeTo: .body) private var thumbSide: CGFloat = 96
     @ScaledMetric(relativeTo: .caption) private var vis: CGFloat = 16
     @ScaledMetric(relativeTo: .caption) private var glyph: CGFloat = 17
@@ -41,21 +39,26 @@ struct DummyItemRow: View {
         static let plate: CGFloat = 6
     }
 
+    /// Four bands, and every row has all four whether or not it has anything to put
+    /// in them:
+    ///
+    ///     [decorator                                                            ]
+    ///     [avatar][name                   ]     [source][visibility][timestamp  ]
+    ///     [words                          ]                        [ attachment ]
+    ///     [marks                                                                ]
+    ///
     var body: some View {
-        HStack(alignment: .top, spacing: ShellSpace.step) {
-            avatar
-            content
-        }
-        .padding(.horizontal, ShellSpace.pad)
-        .padding(.vertical, ShellSpace.step)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(selected ? ShellChrome.floatFill(colorScheme) : .clear)
-        .overlay(alignment: .leading) { lamp }
-        .animation(.easeInOut(duration: 0.18), value: selected)
-        .contentShape(Rectangle())
-        .onTapGesture { onSelect?() }
-        .onHover { hovering = $0 }
-        .accessibilityElement(children: .contain)
+        content
+            .padding(.horizontal, ShellSpace.pad)
+            .padding(.vertical, ShellSpace.step)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(selected ? ShellChrome.floatFill(colorScheme) : .clear)
+            .overlay(alignment: .leading) { lamp }
+            .animation(.easeInOut(duration: 0.18), value: selected)
+            .contentShape(Rectangle())
+            .onTapGesture { onSelect?() }
+            .onHover { hovering = $0 }
+            .accessibilityElement(children: .contain)
     }
 
     /// Where the reader is. Two points in the row's own margin, and no geometry of its
@@ -87,6 +90,9 @@ struct DummyItemRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// What happened to this post before it got here — that it is a reply, that
+    /// somebody passed it on. Drawn only when there is something to say: an empty
+    /// line held open on every row costs the list a line per post to say nothing.
     @ViewBuilder
     private var decorator: some View {
         if item.answering != .nothing || item.boostedBy != nil {
@@ -119,19 +125,16 @@ struct DummyItemRow: View {
         }
     }
 
-    /// Wide, the name and what the post arrived with share a line. Narrow, the meta
-    /// drops below rather than squeezing the name it belongs to into an ellipsis.
+    /// Who wrote it at one end, what it arrived with at the other, on one line. The
+    /// name gives up letters before the line gives up the meta: where a post came from
+    /// and when is what a reader scans down the list for, and a name they can only
+    /// half read is still a name they recognise.
     private var headline: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
-                names
-                Spacer(minLength: ShellSpace.snug)
-                meta
-            }
-            VStack(alignment: .leading, spacing: ShellSpace.tight) {
-                names
-                meta
-            }
+        HStack(alignment: .center, spacing: ShellSpace.snug) {
+            avatar
+            names
+            Spacer(minLength: ShellSpace.snug)
+            meta
         }
     }
 
@@ -181,7 +184,7 @@ struct DummyItemRow: View {
                     .foregroundStyle(ShellChrome.inkFaint(colorScheme))
             }
         }
-        .frame(width: gutter, height: gutter)
+        .frame(width: avatarSide, height: avatarSide)
     }
 
     private var postedAgo: some View {
@@ -240,18 +243,26 @@ struct DummyItemRow: View {
     /// What came attached sits beside the words, never under them, and against the
     /// right edge of the row. A picture below the text pushes the next post off the
     /// screen; out on the edge it is a column you can run your eye down.
+    /// Two columns of a fixed size. The attachment slot is drawn on every row whether
+    /// or not the post brought one, so the words start and stop at the same place all
+    /// the way down the list — a column that moves with the content is a column the
+    /// eye has to find again on every row.
+    ///
+    /// A phone has no room for the second column, so it keeps the stack, and an empty
+    /// slot there would be most of a screen of nothing.
     @ViewBuilder
     private var mainBox: some View {
         if narrow {
             VStack(alignment: .leading, spacing: ShellSpace.snug) {
                 words
-                thumb
+                if item.hasThumb { thumb }
             }
         } else {
             HStack(alignment: .top, spacing: ShellSpace.step) {
                 words
                 thumb
             }
+            .frame(height: thumbSide, alignment: .top)
         }
     }
 
@@ -266,28 +277,46 @@ struct DummyItemRow: View {
                 Text(title)
                     .font(ShellType.name)
                     .foregroundStyle(ShellChrome.ink(colorScheme))
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(1)
             }
             Text(item.body)
                 .font(ShellType.body)
                 .foregroundStyle(
                     item.title == nil ? ShellChrome.ink(colorScheme) : ShellChrome.inkDim(colorScheme)
                 )
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(narrow ? nil : bodyLines)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// What fits in the slot's height beside it. A row that grows to whatever somebody
+    /// wrote makes the list a series of unrelated heights; the rest of the post is a
+    /// press away, which is what the thread is for.
+    private var bodyLines: Int {
+        var lines = 4
+        if item.title != nil { lines -= 1 }
+        if item.source.kind == .board, item.board != nil { lines -= 1 }
+        return max(1, lines)
+    }
+
+    /// The slot every row keeps open. Filled when the post brought something, and
+    /// otherwise nothing at all: what the slot is for is holding the words' column
+    /// still, and a box drawn around a space that is empty on purpose says the
+    /// picture is missing rather than absent.
     @ViewBuilder
     private var thumb: some View {
         if item.hasThumb {
             RoundedRectangle(cornerRadius: Box.plate, style: .continuous)
                 .fill(ShellChrome.well(colorScheme))
-                .frame(width: thumbSide, height: thumbSide)
                 .overlay {
                     Image(systemName: "photo")
                         .foregroundStyle(ShellChrome.inkFaint(colorScheme))
                 }
+                .frame(width: thumbSide, height: thumbSide)
+        } else {
+            Color.clear
+                .frame(width: thumbSide, height: thumbSide)
+                .accessibilityHidden(true)
         }
     }
 

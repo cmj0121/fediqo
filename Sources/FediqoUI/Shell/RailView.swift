@@ -29,6 +29,20 @@ struct RailView: View {
 
     @Environment(\.colorScheme) private var colorScheme
 
+    /// The base numbers above are what the bar measures at the standard type size.
+    /// These are what it measures at the reader's. The bar used to be fixed, which
+    /// was fine while the label was one line of the system's default; a step up the
+    /// type ladder made two lines of it, and two lines do not fit in 32 points — the
+    /// rows overlapped each other rather than the bar getting taller.
+    @ScaledMetric(relativeTo: .callout) private var well: CGFloat = Metrics.well
+    @ScaledMetric(relativeTo: .callout) private var glyph: CGFloat = Metrics.iconSize
+    @ScaledMetric(relativeTo: .callout) private var labelWidth: CGFloat = 148
+
+    private var collapsedWidth: CGFloat { Metrics.side + well + Metrics.side }
+    private var expandedWidth: CGFloat {
+        Metrics.side + well + Metrics.pad + labelWidth + Metrics.side
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             RailButton(
@@ -37,6 +51,8 @@ struct RailView: View {
                 summary: L10n.t(expanded ? "rail.collapse.summary" : "rail.open.summary"),
                 selected: false,
                 expanded: expanded,
+                well: well,
+                glyph: glyph,
                 action: {
                     withAnimation(.easeInOut(duration: 0.18)) { expanded.toggle() }
                 }
@@ -57,6 +73,8 @@ struct RailView: View {
                     summary: summary,
                     selected: place == item,
                     expanded: expanded,
+                    well: well,
+                    glyph: glyph,
                     enabled: availability.allows(item),
                     action: { place = availability.placing(place, as: item) }
                 )
@@ -77,13 +95,15 @@ struct RailView: View {
                 hint: L10n.t(availability.composeHintKey),
                 selected: false,
                 expanded: expanded,
+                well: well,
+                glyph: glyph,
                 enabled: availability.canCompose,
                 action: onCompose
             )
         }
         .padding(.vertical, Metrics.pad)
         .padding(.horizontal, Metrics.side)
-        .frame(width: expanded ? Metrics.expandedWidth : Metrics.collapsedWidth, alignment: .topLeading)
+        .frame(width: expanded ? expandedWidth : collapsedWidth, alignment: .topLeading)
         .clipped()
         .background(ShellChrome.rail(colorScheme))
         .overlay(alignment: .trailing) {
@@ -105,6 +125,8 @@ private struct RailButton: View {
     var hint: String? = nil
     let selected: Bool
     let expanded: Bool
+    let well: CGFloat
+    let glyph: CGFloat
     var enabled: Bool = true
     let action: () -> Void
 
@@ -115,12 +137,13 @@ private struct RailButton: View {
         Button(action: action) {
             HStack(alignment: .center, spacing: RailView.Metrics.pad) {
                 glyphView
-                    .frame(width: RailView.Metrics.well, height: RailView.Metrics.well)
-                labels
-                    .opacity(expanded ? 1 : 0)
+                    .frame(width: well, height: well)
+                // Built only when the bar is open. Drawn at zero opacity it still
+                // takes the room it needs, which is what a collapsed bar has none of.
+                if expanded { labels }
             }
-            .frame(height: RailView.Metrics.well, alignment: .leading)
-            .frame(maxWidth: expanded ? .infinity : RailView.Metrics.well, alignment: .leading)
+            .frame(minHeight: well, alignment: .leading)
+            .frame(maxWidth: expanded ? .infinity : well, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: RailView.Metrics.wellRadius, style: .continuous)
                     .fill(rowFill)
@@ -167,24 +190,34 @@ private struct RailButton: View {
 
     private var glyphView: some View {
         Image(systemName: symbol)
-            .font(.system(size: RailView.Metrics.iconSize, weight: selected ? .semibold : .regular))
+            .font(.system(size: glyph, weight: selected ? .semibold : .regular))
             .symbolVariant(selected ? .fill : .none)
             .symbolRenderingMode(.hierarchical)
-            .overlay(alignment: .bottomTrailing) { closedMark }
+            .overlay { closedMark }
     }
 
-    /// Closed, said in the space a collapsed bar actually has. Without it a place that
-    /// cannot be entered looks exactly like one that simply did not respond to a press.
+    /// Closed, said in the space a collapsed bar actually has.
+    ///
+    /// It is a line struck through the glyph and not a mark in its corner. A small
+    /// filled shape at the bottom-right of a bell is the one thing every reader
+    /// already knows how to read, and what it says is "two of something is waiting" —
+    /// the exact opposite of a place with nothing in it that cannot be opened.
     @ViewBuilder
     private var closedMark: some View {
         if !enabled {
-            Image(systemName: "slash.circle.fill")
-                .font(.system(size: RailView.Metrics.iconSize * 0.55))
-                .symbolRenderingMode(.palette)
-                .foregroundStyle(ShellChrome.rail(colorScheme), ShellChrome.inkDim(colorScheme))
-                .offset(x: RailView.Metrics.iconSize * 0.22, y: RailView.Metrics.iconSize * 0.22)
-                .accessibilityHidden(true)
+            ZStack {
+                strike(ShellChrome.rail(colorScheme), thickness: ShellSpace.tight)
+                strike(ShellChrome.inkDim(colorScheme), thickness: ShellSpace.hair * 1.5)
+            }
+            .rotationEffect(.degrees(-45))
+            .accessibilityHidden(true)
         }
+    }
+
+    private func strike(_ color: Color, thickness: CGFloat) -> some View {
+        Capsule(style: .continuous)
+            .fill(color)
+            .frame(width: glyph * 1.2, height: thickness)
     }
 
     private var rowFill: Color {
