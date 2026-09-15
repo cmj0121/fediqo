@@ -169,9 +169,10 @@ struct TimelinePane: View {
     }
 
     private var empty: some View {
-        ContentUnavailableView(
-            L10n.t(timeline.emptyKey),
-            systemImage: "list.bullet.rectangle"
+        ShellNotice(
+            symbol: "list.bullet.rectangle",
+            title: L10n.t("\(timeline.emptyKey).title"),
+            detail: L10n.t("\(timeline.emptyKey).detail")
         )
     }
 }

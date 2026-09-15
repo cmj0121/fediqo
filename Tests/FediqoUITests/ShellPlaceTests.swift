@@ -119,7 +119,8 @@ struct EmptySessionTests {
         #expect(L10n.t("compose.disabled.summary", language: .english) == "Compose needs a signed-in source")
         #expect(
             L10n.t("notices.empty.detail", language: .english)
-                == "Notices need a signed-in source. This session has none."
+                == "Notices are what an account receives. This session reads public "
+                + "timelines and signs in to nothing, so nothing arrives here."
         )
     }
 
@@ -143,12 +144,19 @@ struct EmptySessionTests {
         #expect(DummyTimeline(id: "all").emptyKey == "timeline.empty")
         #expect(DummyTimeline(id: "trends").emptyKey == "timeline.empty.trends")
         #expect(
-            L10n.t("timeline.empty", language: .english)
-                == "No items yet. Public notes from these sources will land here."
+            L10n.t("timeline.empty.title", language: .english) == "Nothing has arrived"
         )
         #expect(
-            L10n.t("timeline.empty.trends", language: .english)
-                == "No trending notes yet. Notes that arrived as trending will land here."
+            L10n.t("timeline.empty.detail", language: .english)
+                == "Public notes from the sources you added land here, newest first."
+        )
+        #expect(
+            L10n.t("timeline.empty.trends.title", language: .english) == "Nothing is trending"
+        )
+        #expect(
+            L10n.t("timeline.empty.trends.detail", language: .english)
+                == "Notes your sources hand over as trending land here, in the order "
+                + "they were posted."
         )
         #expect(L10n.t("timeline.empty") != L10n.t("timeline.empty.trends"))
         #expect(L10n.t("timeline.tab.trends", language: .english) == "Trends")
@@ -243,7 +251,7 @@ struct DummyPrefsTests {
         #expect(L10n.t("shell.timeline.title", language: .taiwanese) == "時間軸")
         #expect(L10n.t("prefs.fontSize.default", language: .english) == "Default")
         #expect(L10n.t("account.rail.empty", language: .taiwanese) == "新增來源")
-        #expect(L10n.t("timeline.empty", language: .taiwanese) == "還沒有項目。這些來源的公開貼文會出現在這裡。")
-        #expect(L10n.t("timeline.empty.trends", language: .taiwanese) == "還沒有趨勢項目。以趨勢進來的貼文會出現在這裡。")
+        #expect(L10n.t("timeline.empty.title", language: .taiwanese) == "還沒有東西進來")
+        #expect(L10n.t("timeline.empty.trends.title", language: .taiwanese) == "目前沒有趨勢")
     }
 }

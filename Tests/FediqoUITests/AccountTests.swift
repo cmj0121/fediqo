@@ -157,7 +157,12 @@ struct AccountAddTests {
         #expect(L10n.t("account.search", language: .english) == "Search")
         #expect(L10n.t("account.search.placeholder", language: .english) == "Host or keyword")
         #expect(L10n.t("account.catalog.addHost", language: .english) == "Add %@")
-        #expect(L10n.t("account.catalog.meta", language: .english) == "%@ · WAU %@ · %@")
+        #expect(L10n.t("account.catalog.weekly", language: .english) == "%@ active this week")
+        #expect(L10n.t("account.catalog.people", language: .english) == "%@ people")
+        #expect(
+            L10n.t("account.refuse.closed", language: .english)
+                == "%@ answered, but would not hand over its public timeline."
+        )
         #expect(
             L10n.t("account.detect.progress", language: .english) == "Checking %@…"
         )

@@ -31,7 +31,9 @@
 "account.catalog.added" = "已新增";
 "account.catalog.addHost" = "新增 %@";
 "account.catalog.addHost.detail" = "不在目錄裡。偵測並在這個工作階段加入。";
-"account.catalog.meta" = "%@ · WAU %@ · %@";
+"account.catalog.weekly" = "本週活躍 %@";
+"account.catalog.people" = "%@ 人";
+"account.refuse.closed" = "%@ 有回應，但不肯交出它的公開時間軸。";
 "account.catalog.langUnknown" = "語言不明";
 
 "rail.open.title" = "打開";
@@ -79,8 +81,10 @@
 "timeline.rule.all" = "時間序，不過濾。";
 "timeline.rule.work" = "這些來源，只留和工作有關的。";
 "timeline.rule.trends" = "趨勢貼文，時間序。";
-"timeline.empty" = "還沒有項目。這些來源的公開貼文會出現在這裡。";
-"timeline.empty.trends" = "還沒有趨勢項目。以趨勢進來的貼文會出現在這裡。";
+"timeline.empty.title" = "還沒有東西進來";
+"timeline.empty.detail" = "你加的來源的公開貼文會落在這裡，新的在上面。";
+"timeline.empty.trends.title" = "目前沒有趨勢";
+"timeline.empty.trends.detail" = "來源標為趨勢的貼文會落在這裡，依發文時間排列。";
 "timeline.sources" = "來源";
 "source.unsigned" = "尚未登入";
 
@@ -120,11 +124,11 @@
 "item.thread.board.weekend.title" = "把機箱拿給朋友看";
 "item.thread.board.weekend.body" = "他們問為什麼槽是方的。";
 
-"notices.empty.title" = "通知";
-"notices.empty.detail" = "通知需要已登入的來源。這次工作階段沒有。";
+"notices.empty.title" = "沒有通知";
+"notices.empty.detail" = "通知是帳號才收得到的東西。這次工作階段只讀公開時間軸、不登入任何地方，所以這裡不會有東西進來。";
 
-"usage.empty.title" = "用量";
-"usage.empty.detail" = "這台機器上留了什麼會出現在這裡。";
+"usage.empty.title" = "還沒有留下任何東西";
+"usage.empty.detail" = "先到「帳號」加一個來源。它帶回來的東西會算在這裡，而這也是這台裝置留著的全部。";
 
 "preferences.empty.title" = "偏好";
 "preferences.empty.detail" = "來源與外觀會放在這裡。";

@@ -233,10 +233,7 @@ struct AccountPane: View {
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .lineLimit(2)
                 if !added {
-                    Text(metaLine(server))
-                        .font(ShellType.mark)
-                        .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-                        .lineLimit(1)
+                    metaRow(server)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -249,13 +246,30 @@ struct AccountPane: View {
         .accessibilityValue(added ? L10n.t("account.catalog.added") : "\(server.summary), \(metaLine(server))")
     }
 
-    private func metaLine(_ server: CatalogServer) -> String {
-        String(
-            format: L10n.t("account.catalog.meta"),
+    /// Three readings about a server, each one saying what it is. They used to be a
+    /// single string joined with middle dots, where one of the numbers was labelled
+    /// with an initialism and the other was not labelled at all.
+    private func metaRow(_ server: CatalogServer) -> some View {
+        HStack(spacing: ShellSpace.pad) {
+            ForEach(readings(server), id: \.self) { reading in
+                Text(reading)
+            }
+        }
+        .font(ShellType.mark)
+        .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+        .lineLimit(1)
+    }
+
+    private func readings(_ server: CatalogServer) -> [String] {
+        [
             languageName(server.language),
-            Self.compact(server.weekUsers),
-            Self.compact(server.users)
-        )
+            String(format: L10n.t("account.catalog.weekly"), Self.compact(server.weekUsers)),
+            String(format: L10n.t("account.catalog.people"), Self.compact(server.users)),
+        ]
+    }
+
+    private func metaLine(_ server: CatalogServer) -> String {
+        readings(server).joined(separator: ", ")
     }
 
     private func languageName(_ code: String) -> String {

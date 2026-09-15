@@ -64,12 +64,14 @@ struct TimelineStreamTests {
         #expect(DummyTimeline(id: "trends").items(from: session.notes).isEmpty)
         #expect(DummyTimeline(id: "all").emptyKey == "timeline.empty")
         #expect(DummyTimeline(id: "trends").emptyKey == "timeline.empty.trends")
-        #expect(
-            L10n.t("timeline.empty.trends", language: .english)
-                != L10n.t("timeline.empty", language: .english)
-        )
-        #expect(L10n.t("timeline.empty.trends", language: .english) != "timeline.empty.trends")
-        #expect(L10n.t("timeline.empty.trends", language: .taiwanese) != "timeline.empty.trends")
+        // emptyKey is a stem: the pane asks for its .title and its .detail.
+        for part in ["title", "detail"] {
+            let trends = "timeline.empty.trends.\(part)"
+            let all = "timeline.empty.\(part)"
+            #expect(L10n.t(trends, language: .english) != L10n.t(all, language: .english))
+            #expect(L10n.t(trends, language: .english) != trends)
+            #expect(L10n.t(trends, language: .taiwanese) != trends)
+        }
     }
 
     @Test("j/k walks live list IDs, not DummyItem.stored")

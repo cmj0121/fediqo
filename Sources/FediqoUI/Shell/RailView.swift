@@ -44,13 +44,15 @@ struct RailView: View {
             .padding(.bottom, Metrics.side)
 
             ForEach(ShellPlace.allCases) { item in
-                let summary = item == .account ? accountSummary : item.summary
-                let hint = availability.reasonKey(for: item).map { L10n.t($0) } ?? summary
+                // A place that cannot be entered says why on the bar itself. It used to
+                // say it only to a pointer that stopped over it, which on a touch screen
+                // is nobody.
+                let plain = item == .account ? accountSummary : item.summary
+                let summary = availability.reasonKey(for: item).map { L10n.t($0) } ?? plain
                 RailButton(
                     symbol: item.symbolName,
                     title: item.title,
                     summary: summary,
-                    hint: hint,
                     selected: place == item,
                     expanded: expanded,
                     enabled: availability.allows(item),

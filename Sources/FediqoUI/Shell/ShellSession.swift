@@ -140,8 +140,10 @@ final class ShellSession {
             String(format: L10n.t("account.refuse.kind"), host, kind.displayName)
         case .invalidHost:
             String(format: L10n.t("account.refuse.unknown"), raw)
-        case .unreachable, .publicTimelineFailed:
+        case .unreachable:
             L10n.t("account.refuse.network")
+        case .publicTimelineFailed:
+            String(format: L10n.t("account.refuse.closed"), host)
         }
     }
 }
