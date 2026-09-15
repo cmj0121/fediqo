@@ -58,6 +58,10 @@
 "shortcut.posts" = "Move in this list";
 "shortcut.top" = "Top of this thread";
 "shortcut.expand" = "Open the thread";
+"shortcut.view" = "Open what is attached, at the size of the app";
+"shortcut.play" = "Play what is attached, or stop it";
+"shortcut.turn" = "Turn to the next attachment";
+"shortcut.cover" = "Lift the cover the author put over this post";
 "shortcut.compose" = "New post";
 "shortcut.list" = "This list";
 "shortcut.back" = "Back to the list";

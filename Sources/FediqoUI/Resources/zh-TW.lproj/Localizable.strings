@@ -58,6 +58,10 @@
 "shortcut.posts" = "在這份清單裡移動";
 "shortcut.top" = "到這串的頂端";
 "shortcut.expand" = "打開討論串";
+"shortcut.view" = "用整個畫面打開附件";
+"shortcut.play" = "播放附件，或讓它停下來";
+"shortcut.turn" = "換到下一個附件";
+"shortcut.cover" = "掀開作者蓋住的內容";
 "shortcut.compose" = "新貼文";
 "shortcut.list" = "這份清單";
 "shortcut.back" = "回到清單";

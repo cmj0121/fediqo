@@ -10,6 +10,10 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     case previousPost
     case goTop
     case expandPost
+    case viewAttachment
+    case playAttachment
+    case nextAttachment
+    case liftCover
     case back
     case compose
     case showShortcuts
@@ -41,6 +45,10 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         case "j", KeyEquivalent.downArrow.character: return .nextPost
         case "k", KeyEquivalent.upArrow.character: return .previousPost
         case "g": return .goTop
+        case "v": return .viewAttachment
+        case "a": return .playAttachment
+        case "m": return .nextAttachment
+        case "s": return .liftCover
         case KeyEquivalent.return.character, " ": return .expandPost
         case "q": return .back
         default: return nil
@@ -111,6 +119,10 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
         DummyShortcut(group: .moving, keys: ["g"], name: "top", commands: [.goTop]),
         DummyShortcut(group: .doing, keys: ["Return", "Space"], name: "expand",
                       commands: [.expandPost]),
+        DummyShortcut(group: .doing, keys: ["v"], name: "view", commands: [.viewAttachment]),
+        DummyShortcut(group: .doing, keys: ["a"], name: "play", commands: [.playAttachment]),
+        DummyShortcut(group: .doing, keys: ["m"], name: "turn", commands: [.nextAttachment]),
+        DummyShortcut(group: .doing, keys: ["s"], name: "cover", commands: [.liftCover]),
         DummyShortcut(group: .doing, keys: ["c"], name: "compose", commands: [.compose]),
         DummyShortcut(group: .doing, keys: ["?"], name: "list", commands: [.showShortcuts]),
         DummyShortcut(group: .leaving, keys: ["q"], name: "back", commands: [.back]),
