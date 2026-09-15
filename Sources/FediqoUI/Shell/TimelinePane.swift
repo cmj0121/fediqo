@@ -19,13 +19,13 @@ struct TimelinePane: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
+                .padding(.horizontal, ShellSpace.pad)
+                .padding(.top, ShellSpace.step)
+                .padding(.bottom, ShellSpace.snug)
 
             Rectangle()
                 .fill(ShellChrome.hairline(colorScheme))
-                .frame(height: 1)
+                .frame(height: ShellSpace.hair)
 
             if let opened = openedItem {
                 DummyThreadPane(
@@ -45,12 +45,12 @@ struct TimelinePane: View {
         .overlay(alignment: .bottom) {
             if let toast {
                 Text(toast)
-                    .font(.subheadline)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(ShellChrome.selectFill(colorScheme), in: Capsule())
-                    .foregroundStyle(ShellChrome.selectInk(colorScheme))
-                    .padding(.bottom, 16)
+                    .font(ShellType.meta)
+                    .padding(.horizontal, ShellSpace.step)
+                    .padding(.vertical, ShellSpace.snug)
+                    .background(ShellChrome.well(colorScheme), in: Capsule())
+                    .foregroundStyle(ShellChrome.ink(colorScheme))
+                    .padding(.bottom, ShellSpace.pad)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
@@ -81,10 +81,10 @@ struct TimelinePane: View {
                             onToast: showToast
                         )
                         .id(item.id)
-                        if showsHairline(after: index) {
+                        if index < items.count - 1 {
                             Rectangle()
                                 .fill(ShellChrome.hairline(colorScheme))
-                                .frame(height: 1)
+                                .frame(height: ShellSpace.hair)
                         }
                     }
                 }
@@ -105,15 +105,6 @@ struct TimelinePane: View {
         }
     }
 
-    /// Hide the rule against a floating row so the plate is not cut by a hairline.
-    private func showsHairline(after index: Int) -> Bool {
-        guard items.indices.contains(index) else { return false }
-        if items[index].id == selectedID { return false }
-        let next = items.index(after: index)
-        if items.indices.contains(next), items[next].id == selectedID { return false }
-        return true
-    }
-
     private func markBinding(_ item: DummyItem) -> Binding<DummyMarks> {
         Binding(
             get: { marks[item.id] ?? item.marks },
@@ -132,26 +123,24 @@ struct TimelinePane: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .center, spacing: 8) {
+        VStack(alignment: .leading, spacing: ShellSpace.snug) {
+            HStack(alignment: .center, spacing: ShellSpace.step) {
                 Text(L10n.t("shell.timeline.title"))
-                    .font(.headline)
+                    .font(ShellType.pane)
+                    .foregroundStyle(ShellChrome.ink(colorScheme))
                     .fixedSize()
-                HStack(spacing: 6) {
+                HStack(spacing: ShellSpace.tight) {
                     ForEach(session.queries) { query in
                         queryPill(query)
                     }
                 }
                 if session.timelineID != nil {
                     Text(timeline.rule)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .font(ShellType.meta)
+                        .foregroundStyle(ShellChrome.inkDim(colorScheme))
                         .lineLimit(1)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-            }
-            if !session.sources.isEmpty {
-                SourceMarkRow(sources: session.sources.map { .unsigned($0.host) })
             }
         }
         .accessibilityElement(children: .contain)
@@ -163,10 +152,10 @@ struct TimelinePane: View {
             session.timelineID = query.id
         } label: {
             Text(query.name)
-                .font(.subheadline.weight(selected ? .semibold : .regular))
-                .foregroundStyle(selected ? ShellChrome.selectInk(colorScheme) : Color.primary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
+                .font(ShellType.meta.weight(selected ? .semibold : .regular))
+                .foregroundStyle(selected ? ShellChrome.selectInk(colorScheme) : ShellChrome.inkDim(colorScheme))
+                .padding(.horizontal, ShellSpace.snug)
+                .padding(.vertical, ShellSpace.tight)
                 .background(
                     Capsule(style: .continuous)
                         .fill(selected ? ShellChrome.selectFill(colorScheme) : ShellChrome.well(colorScheme))
@@ -177,9 +166,10 @@ struct TimelinePane: View {
     }
 
     private var empty: some View {
-        ContentUnavailableView(
-            L10n.t(timeline.emptyKey),
-            systemImage: "list.bullet.rectangle"
+        ShellNotice(
+            symbol: "list.bullet.rectangle",
+            title: L10n.t("\(timeline.emptyKey).title"),
+            detail: L10n.t("\(timeline.emptyKey).detail")
         )
     }
 }

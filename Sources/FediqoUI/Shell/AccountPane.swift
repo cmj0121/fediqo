@@ -1,7 +1,8 @@
 import FediqoCore
 import SwiftUI
 
-/// Catalog plus a search field. Join is tapping a row; the field only filters.
+/// The sources this device reads. Empty, it is the first thing anyone sees, so it says
+/// what the app is for before it asks for anything. Joined, it gets out of the way.
 struct AccountPane: View {
     @Bindable var session: ShellSession
     @FocusState private var searchFocused: Bool
@@ -9,30 +10,27 @@ struct AccountPane: View {
     @Environment(\.locale) private var locale
 
     private enum Metrics {
-        static let pad: CGFloat = 16
-        static let stack: CGFloat = 16
-        static let gap: CGFloat = 8
-        static let row: CGFloat = 10
-        static let widgetRadius: CGFloat = 8
+        /// The mark, at the size the mark is drawn rather than the size of an icon.
+        static let mark: CGFloat = 72
+        /// A field the width of a hostname. A pane is wider than anything typed into it.
+        static let field: CGFloat = 520
+        /// The promise is a sentence, not a row: it wraps where a sentence should.
+        static let saying: CGFloat = 560
         static let fieldRadius: CGFloat = 6
-        static let fieldPad: CGFloat = 10
         static let icon: CGFloat = 18
-        static let float: CGFloat = 0.8
     }
 
     var body: some View {
-        ZStack {
-            if !session.sources.isEmpty {
-                SourceMarkRow(sources: session.sources.map(Self.mark))
-                    .padding(Metrics.pad)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            }
-            widget
-                .containerRelativeFrame([.horizontal, .vertical]) { length, _ in
-                    length * Metrics.float
-                }
+        VStack(alignment: .leading, spacing: ShellSpace.room) {
+            masthead
+            adding
+            Rectangle()
+                .fill(ShellChrome.hairline(colorScheme))
+                .frame(height: ShellSpace.hair)
+            catalogRegion
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(ShellSpace.pad)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onChange(of: searchFocused) { _, on in
             session.searchFocused = on
         }
@@ -40,40 +38,60 @@ struct AccountPane: View {
         .task { await session.loadCatalog() }
     }
 
-    private var widget: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: Metrics.stack) {
-                Text(L10n.t("account.add.title"))
-                    .font(.headline)
+    @ViewBuilder
+    private var masthead: some View {
+        if session.sources.isEmpty { hero } else { standing }
+    }
+
+    /// Nothing has been joined yet. The octopus, the promise, and what it costs — and
+    /// then the one control that does anything about it.
+    private var hero: some View {
+        HStack(alignment: .top, spacing: ShellSpace.pad) {
+            Image("Mascot", bundle: .module)
+                .resizable()
+                .scaledToFit()
+                .frame(width: Metrics.mark, height: Metrics.mark)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: ShellSpace.snug) {
+                Text(L10n.t("account.hero.promise"))
+                    .font(ShellType.display)
+                    .foregroundStyle(ShellChrome.ink(colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(L10n.t("account.hero.detail"))
+                    .font(ShellType.body)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: Metrics.saying, alignment: .leading)
+        }
+    }
+
+    /// Something is joined. The page says which, and stops selling itself.
+    private var standing: some View {
+        VStack(alignment: .leading, spacing: ShellSpace.snug) {
+            Text(L10n.t("shell.account.title"))
+                .font(ShellType.pane)
+                .foregroundStyle(ShellChrome.ink(colorScheme))
+            SourceMarkRow(sources: session.sources.map(Self.mark))
+        }
+    }
+
+    private var adding: some View {
+        VStack(alignment: .leading, spacing: ShellSpace.snug) {
+            if !session.sources.isEmpty {
                 Text(L10n.t("account.add.detail"))
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-                searchField
+                    .font(ShellType.meta)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
             }
-            .padding(Metrics.fieldPad)
-            if statusVisible {
-                status
-                    .padding(.horizontal, Metrics.fieldPad)
-                    .padding(.bottom, Metrics.gap)
-            }
-            Rectangle()
-                .fill(ShellChrome.hairline(colorScheme))
-                .frame(height: 1)
-            catalogRegion
+            searchField
+            if statusVisible { status }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(ShellChrome.well(colorScheme), in: RoundedRectangle(cornerRadius: Metrics.widgetRadius, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: Metrics.widgetRadius, style: .continuous)
-                .strokeBorder(ShellChrome.hairline(colorScheme), lineWidth: 1)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: Metrics.widgetRadius, style: .continuous))
     }
 
     private var searchField: some View {
-        HStack(alignment: .center, spacing: Metrics.gap) {
+        HStack(alignment: .center, spacing: ShellSpace.snug) {
             TextField(L10n.t("account.search.placeholder"), text: $session.hostname)
-                .font(.body)
+                .font(ShellType.body)
                 .textFieldStyle(.plain)
                 .focused($searchFocused)
                 .disabled(session.checking)
@@ -88,20 +106,21 @@ struct AccountPane: View {
                 session.search()
             } label: {
                 Image(systemName: "magnifyingglass")
-                    .font(.body.weight(.semibold))
+                    .font(ShellType.body.weight(.semibold))
                     .frame(width: Metrics.icon, height: Metrics.icon)
-                    .foregroundStyle(ShellChrome.phosphor(colorScheme))
+                    .foregroundStyle(ShellChrome.ink(colorScheme))
             }
             .buttonStyle(.plain)
             .disabled(session.checking)
             .accessibilityLabel(L10n.t("account.search"))
             .help(L10n.t("account.search"))
         }
-        .padding(.horizontal, Metrics.fieldPad)
-        .padding(.vertical, 8)
+        .padding(.horizontal, ShellSpace.step)
+        .padding(.vertical, ShellSpace.snug)
+        .frame(maxWidth: Metrics.field, alignment: .leading)
         .overlay {
             RoundedRectangle(cornerRadius: Metrics.fieldRadius, style: .continuous)
-                .strokeBorder(ShellChrome.hairline(colorScheme), lineWidth: 1)
+                .strokeBorder(ShellChrome.hairline(colorScheme), lineWidth: ShellSpace.hair)
         }
     }
 
@@ -112,16 +131,16 @@ struct AccountPane: View {
     @ViewBuilder
     private var status: some View {
         if session.checking {
-            HStack(spacing: Metrics.gap) {
+            HStack(spacing: ShellSpace.snug) {
                 ProgressView()
                 Text(String(format: L10n.t("account.detect.progress"), session.progressHost))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .font(ShellType.meta)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
             }
         } else if let refuse = session.refuse {
             Text(refuse)
-                .font(.callout)
-                .foregroundStyle(.red)
+                .font(ShellType.meta)
+                .foregroundStyle(ShellChrome.alarm(colorScheme))
         }
     }
 
@@ -129,26 +148,26 @@ struct AccountPane: View {
     private var catalogRegion: some View {
         switch session.catalog {
         case .loading:
-            HStack(spacing: Metrics.gap) {
-                ProgressView()
-                Text(L10n.t("account.catalog.loading"))
-                    .font(.body)
-                    .foregroundStyle(.secondary)
+            note {
+                HStack(spacing: ShellSpace.snug) {
+                    ProgressView()
+                    Text(L10n.t("account.catalog.loading"))
+                        .font(ShellType.body)
+                        .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                }
             }
-            .padding(Metrics.fieldPad)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         case .failed:
-            Text(L10n.t("account.catalog.failed"))
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .padding(Metrics.fieldPad)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            note {
+                Text(L10n.t("account.catalog.failed"))
+                    .font(ShellType.body)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+            }
         case .empty:
-            Text(L10n.t("account.catalog.empty"))
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .padding(Metrics.fieldPad)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            note {
+                Text(L10n.t("account.catalog.empty"))
+                    .font(ShellType.body)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+            }
         case .ready:
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -156,19 +175,23 @@ struct AccountPane: View {
                         extraJoinRow(host)
                         Rectangle()
                             .fill(ShellChrome.hairline(colorScheme))
-                            .frame(height: 1)
+                            .frame(height: ShellSpace.hair)
                     }
                     ForEach(session.visibleServers) { server in
                         catalogRow(server)
                         Rectangle()
                             .fill(ShellChrome.hairline(colorScheme))
-                            .frame(height: 1)
+                            .frame(height: ShellSpace.hair)
                     }
                 }
-                .padding(.horizontal, Metrics.fieldPad)
             }
             .scrollIndicators(.never)
         }
+    }
+
+    private func note<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content()
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private func extraJoinRow(_ host: String) -> some View {
@@ -177,17 +200,17 @@ struct AccountPane: View {
             session.hostname = host
             Task { await session.add() }
         } label: {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: ShellSpace.tight) {
                 Text(String(format: L10n.t("account.catalog.addHost"), host))
-                    .font(.body)
-                    .foregroundStyle(.primary)
+                    .font(ShellType.name)
+                    .foregroundStyle(ShellChrome.ink(colorScheme))
                 Text(added ? L10n.t("account.catalog.added") : L10n.t("account.catalog.addHost.detail"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(ShellType.meta)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .lineLimit(2)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, Metrics.row)
+            .padding(.vertical, ShellSpace.step)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -201,23 +224,20 @@ struct AccountPane: View {
         return Button {
             Task { await session.pick(server) }
         } label: {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: ShellSpace.tight) {
                 Text(server.domain)
-                    .font(.body)
-                    .foregroundStyle(.primary)
+                    .font(ShellType.name)
+                    .foregroundStyle(ShellChrome.ink(colorScheme))
                 Text(added ? L10n.t("account.catalog.added") : server.summary)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(ShellType.meta)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .lineLimit(2)
                 if !added {
-                    Text(metaLine(server))
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
+                    metaRow(server)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, Metrics.row)
+            .padding(.vertical, ShellSpace.step)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -226,13 +246,30 @@ struct AccountPane: View {
         .accessibilityValue(added ? L10n.t("account.catalog.added") : "\(server.summary), \(metaLine(server))")
     }
 
-    private func metaLine(_ server: CatalogServer) -> String {
-        String(
-            format: L10n.t("account.catalog.meta"),
+    /// Three readings about a server, each one saying what it is. They used to be a
+    /// single string joined with middle dots, where one of the numbers was labelled
+    /// with an initialism and the other was not labelled at all.
+    private func metaRow(_ server: CatalogServer) -> some View {
+        HStack(spacing: ShellSpace.pad) {
+            ForEach(readings(server), id: \.self) { reading in
+                Text(reading)
+            }
+        }
+        .font(ShellType.mark)
+        .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+        .lineLimit(1)
+    }
+
+    private func readings(_ server: CatalogServer) -> [String] {
+        [
             languageName(server.language),
-            Self.compact(server.weekUsers),
-            Self.compact(server.users)
-        )
+            String(format: L10n.t("account.catalog.weekly"), Self.compact(server.weekUsers)),
+            String(format: L10n.t("account.catalog.people"), Self.compact(server.users)),
+        ]
+    }
+
+    private func metaLine(_ server: CatalogServer) -> String {
+        readings(server).joined(separator: ", ")
     }
 
     private func languageName(_ code: String) -> String {

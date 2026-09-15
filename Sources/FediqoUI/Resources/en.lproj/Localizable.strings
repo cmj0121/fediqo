@@ -13,6 +13,8 @@
 "source.signedIn" = "Signed in";
 "account.rail.empty" = "Add a source";
 "account.add.title" = "Add a source";
+"account.hero.promise" = "Your timeline. Your rules.";
+"account.hero.detail" = "Add a Mastodon host to read. What you add, and what it brings back, stays on this device.";
 "account.add.detail" = "Pick a Mastodon host from the list, or type its hostname. This session only.";
 "account.add" = "Add";
 "account.add.host" = "Hostname";
@@ -29,7 +31,9 @@
 "account.catalog.added" = "Added";
 "account.catalog.addHost" = "Add %@";
 "account.catalog.addHost.detail" = "Not in the directory. Detect and add it this session.";
-"account.catalog.meta" = "%@ · WAU %@ · %@";
+"account.catalog.weekly" = "%@ active this week";
+"account.catalog.people" = "%@ people";
+"account.refuse.closed" = "%@ answered, but would not hand over its public timeline.";
 "account.catalog.langUnknown" = "Language unknown";
 
 "rail.open.title" = "Open";
@@ -77,8 +81,10 @@
 "timeline.rule.all" = "In time order, nothing filtered.";
 "timeline.rule.work" = "These sources, only work-related items.";
 "timeline.rule.trends" = "Trending notes, in time order.";
-"timeline.empty" = "No items yet. Public notes from these sources will land here.";
-"timeline.empty.trends" = "No trending notes yet. Notes that arrived as trending will land here.";
+"timeline.empty.title" = "Nothing has arrived";
+"timeline.empty.detail" = "Public notes from the sources you added land here, newest first.";
+"timeline.empty.trends.title" = "Nothing is trending";
+"timeline.empty.trends.detail" = "Notes your sources hand over as trending land here, in the order they were posted.";
 "timeline.sources" = "Sources";
 "source.unsigned" = "Not signed in";
 
@@ -93,12 +99,14 @@
 "item.visibility.mentioned" = "Mentioned";
 "item.act.reply" = "Reply";
 "item.act.reblog" = "Reblog";
+"item.act.quote" = "Quote";
 "item.act.favourite" = "Favourite";
 "item.act.bookmark" = "Bookmark";
 "item.act.kept" = "Kept";
 "item.act.more" = "More";
 "item.toast.reply" = "Reply stays on this device.";
 "item.toast.reblog" = "Reblog stays on this device.";
+"item.toast.quote" = "A quote opens the composer. Not this session.";
 "item.toast.favourite.on" = "Favourited, on this device.";
 "item.toast.favourite.off" = "Favourite cleared.";
 "item.toast.bookmark.on" = "Bookmarked, dummy.";
@@ -116,11 +124,11 @@
 "item.thread.board.weekend.title" = "Showed the chassis to a friend";
 "item.thread.board.weekend.body" = "They asked why the slots are square.";
 
-"notices.empty.title" = "Notices";
-"notices.empty.detail" = "Notices need a signed-in source. This session has none.";
+"notices.empty.title" = "No notices";
+"notices.empty.detail" = "Notices are what an account receives. This session reads public timelines and signs in to nothing, so nothing arrives here.";
 
-"usage.empty.title" = "Usage";
-"usage.empty.detail" = "What this device is keeping will land here.";
+"usage.empty.title" = "Nothing kept yet";
+"usage.empty.detail" = "Add a source on Account. What it brings back is counted here, and it is the whole of what this device is holding.";
 
 "preferences.empty.title" = "Preferences";
 "preferences.empty.detail" = "Sources and appearance will live here.";

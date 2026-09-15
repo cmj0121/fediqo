@@ -29,6 +29,20 @@ struct RailView: View {
 
     @Environment(\.colorScheme) private var colorScheme
 
+    /// The base numbers above are what the bar measures at the standard type size.
+    /// These are what it measures at the reader's. The bar used to be fixed, which
+    /// was fine while the label was one line of the system's default; a step up the
+    /// type ladder made two lines of it, and two lines do not fit in 32 points — the
+    /// rows overlapped each other rather than the bar getting taller.
+    @ScaledMetric(relativeTo: .callout) private var well: CGFloat = Metrics.well
+    @ScaledMetric(relativeTo: .callout) private var glyph: CGFloat = Metrics.iconSize
+    @ScaledMetric(relativeTo: .callout) private var labelWidth: CGFloat = 148
+
+    private var collapsedWidth: CGFloat { Metrics.side + well + Metrics.side }
+    private var expandedWidth: CGFloat {
+        Metrics.side + well + Metrics.pad + labelWidth + Metrics.side
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             RailButton(
@@ -37,6 +51,8 @@ struct RailView: View {
                 summary: L10n.t(expanded ? "rail.collapse.summary" : "rail.open.summary"),
                 selected: false,
                 expanded: expanded,
+                well: well,
+                glyph: glyph,
                 action: {
                     withAnimation(.easeInOut(duration: 0.18)) { expanded.toggle() }
                 }
@@ -44,15 +60,21 @@ struct RailView: View {
             .padding(.bottom, Metrics.side)
 
             ForEach(ShellPlace.allCases) { item in
-                let summary = item == .account ? accountSummary : item.summary
-                let hint = availability.reasonKey(for: item).map { L10n.t($0) } ?? summary
+                // A place that cannot be entered is marked as closed at every width,
+                // and says why wherever there is room for a sentence: the label beside
+                // the glyph when the bar is open, the tooltip and the accessibility
+                // hint when it is not. Collapsed, the bar has room for a mark and for
+                // nothing else — no row shows any text there, closed or open.
+                let plain = item == .account ? accountSummary : item.summary
+                let summary = availability.reasonKey(for: item).map { L10n.t($0) } ?? plain
                 RailButton(
                     symbol: item.symbolName,
                     title: item.title,
                     summary: summary,
-                    hint: hint,
                     selected: place == item,
                     expanded: expanded,
+                    well: well,
+                    glyph: glyph,
                     enabled: availability.allows(item),
                     action: { place = availability.placing(place, as: item) }
                 )
@@ -73,13 +95,15 @@ struct RailView: View {
                 hint: L10n.t(availability.composeHintKey),
                 selected: false,
                 expanded: expanded,
+                well: well,
+                glyph: glyph,
                 enabled: availability.canCompose,
                 action: onCompose
             )
         }
         .padding(.vertical, Metrics.pad)
         .padding(.horizontal, Metrics.side)
-        .frame(width: expanded ? Metrics.expandedWidth : Metrics.collapsedWidth, alignment: .topLeading)
+        .frame(width: expanded ? expandedWidth : collapsedWidth, alignment: .topLeading)
         .clipped()
         .background(ShellChrome.rail(colorScheme))
         .overlay(alignment: .trailing) {
@@ -101,6 +125,8 @@ private struct RailButton: View {
     var hint: String? = nil
     let selected: Bool
     let expanded: Bool
+    let well: CGFloat
+    let glyph: CGFloat
     var enabled: Bool = true
     let action: () -> Void
 
@@ -111,17 +137,19 @@ private struct RailButton: View {
         Button(action: action) {
             HStack(alignment: .center, spacing: RailView.Metrics.pad) {
                 glyphView
-                    .frame(width: RailView.Metrics.well, height: RailView.Metrics.well)
-                labels
-                    .opacity(expanded ? 1 : 0)
+                    .frame(width: well, height: well)
+                // Built only when the bar is open. Drawn at zero opacity it still
+                // takes the room it needs, which is what a collapsed bar has none of.
+                if expanded { labels }
             }
-            .frame(height: RailView.Metrics.well, alignment: .leading)
-            .frame(maxWidth: expanded ? .infinity : RailView.Metrics.well, alignment: .leading)
+            .frame(minHeight: well, alignment: .leading)
+            .frame(maxWidth: expanded ? .infinity : well, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: RailView.Metrics.wellRadius, style: .continuous)
                     .fill(rowFill)
             )
-            .foregroundStyle(selected ? ShellChrome.selectInk(colorScheme) : Color.primary.opacity(0.84))
+            .overlay(alignment: .leading) { lamp }
+            .foregroundStyle(selected ? ShellChrome.selectInk(colorScheme) : ShellChrome.ink(colorScheme))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -135,14 +163,26 @@ private struct RailButton: View {
 
     private var helpText: String { hint ?? summary }
 
+    /// Where the reader is, drawn in the rail's own margin so that selecting a row
+    /// moves nothing. The lamp is the only phosphor on the bar.
+    @ViewBuilder
+    private var lamp: some View {
+        if selected {
+            Rectangle()
+                .fill(ShellChrome.phosphor(colorScheme))
+                .frame(width: ShellSpace.hair * 2)
+                .offset(x: -RailView.Metrics.side)
+        }
+    }
+
     private var labels: some View {
-        VStack(alignment: .leading, spacing: 1) {
+        VStack(alignment: .leading, spacing: ShellSpace.hair) {
             Text(title)
-                .font(.callout.weight(selected ? .semibold : .regular))
+                .font(selected ? ShellType.name : .callout)
                 .lineLimit(1)
             Text(summary)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(ShellType.meta)
+                .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -150,14 +190,37 @@ private struct RailButton: View {
 
     private var glyphView: some View {
         Image(systemName: symbol)
-            .font(.system(size: RailView.Metrics.iconSize, weight: selected ? .semibold : .regular))
+            .font(.system(size: glyph, weight: selected ? .semibold : .regular))
             .symbolVariant(selected ? .fill : .none)
             .symbolRenderingMode(.hierarchical)
+            .overlay { closedMark }
+    }
+
+    /// Closed, said in the space a collapsed bar actually has.
+    ///
+    /// It is a line struck through the glyph and not a mark in its corner. A small
+    /// filled shape at the bottom-right of a bell is the one thing every reader
+    /// already knows how to read, and what it says is "two of something is waiting" —
+    /// the exact opposite of a place with nothing in it that cannot be opened.
+    @ViewBuilder
+    private var closedMark: some View {
+        if !enabled {
+            ZStack {
+                strike(ShellChrome.rail(colorScheme), thickness: ShellSpace.tight)
+                strike(ShellChrome.inkDim(colorScheme), thickness: ShellSpace.hair * 1.5)
+            }
+            .rotationEffect(.degrees(-45))
+            .accessibilityHidden(true)
+        }
+    }
+
+    private func strike(_ color: Color, thickness: CGFloat) -> some View {
+        Capsule(style: .continuous)
+            .fill(color)
+            .frame(width: glyph * 1.2, height: thickness)
     }
 
     private var rowFill: Color {
-        if selected { ShellChrome.selectFill(colorScheme) }
-        else if hovering { ShellChrome.hoverFill(colorScheme) }
-        else { .clear }
+        hovering ? ShellChrome.hoverFill(colorScheme) : .clear
     }
 }

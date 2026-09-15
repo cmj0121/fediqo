@@ -61,13 +61,15 @@ public enum DummyFontSize: String, CaseIterable, Identifiable, Sendable {
 
     public var id: String { rawValue }
 
+    /// The whole ladder sits one rung above the system's, so Default is a step
+    /// larger than a stock app and every other step keeps its distance from it.
     var dynamicType: DynamicTypeSize {
         switch self {
-        case .smallest: .small
-        case .smaller: .medium
-        case .standard: .xLarge
-        case .larger: .xxLarge
-        case .largest: .xxxLarge
+        case .smallest: .medium
+        case .smaller: .large
+        case .standard: .xxLarge
+        case .larger: .xxxLarge
+        case .largest: .accessibility1
         }
     }
 }

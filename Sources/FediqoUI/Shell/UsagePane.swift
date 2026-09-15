@@ -2,10 +2,10 @@ import SwiftUI
 
 struct UsagePane: View {
     var body: some View {
-        ContentUnavailableView(
-            L10n.t("usage.empty.title"),
-            systemImage: "chart.bar.xaxis",
-            description: Text(L10n.t("usage.empty.detail"))
+        ShellNotice(
+            symbol: "chart.bar.xaxis",
+            title: L10n.t("usage.empty.title"),
+            detail: L10n.t("usage.empty.detail")
         )
     }
 }

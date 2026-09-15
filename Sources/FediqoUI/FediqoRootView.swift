@@ -30,6 +30,13 @@ public struct FediqoRootView: View {
                 let accepted = availability.placing(old, as: new)
                 if accepted != new { place = accepted }
             }
+            // The rail and the tab bar both draw only the places that can be entered.
+            // If that set ever narrows under the reader — a sign-out, a source
+            // dropped — the selection would point at a tab that is no longer there.
+            .onChange(of: availability) { _, new in
+                let accepted = new.placing(place, as: place)
+                if accepted != place { place = accepted }
+            }
             .sheet(isPresented: $composing) {
                 ComposerSheet()
                     #if os(iOS)
@@ -201,7 +208,7 @@ public struct FediqoRootView: View {
             )
             Rectangle()
                 .fill(ShellChrome.hairline(colorScheme))
-                .frame(width: 1)
+                .frame(width: ShellSpace.hair)
             page
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(ShellChrome.page(colorScheme))
@@ -219,33 +226,44 @@ public struct FediqoRootView: View {
     }
 
     #if os(iOS)
+    private enum Compact {
+        static let button: CGFloat = 56
+        /// Clear of the tab bar, which the overlay knows nothing about.
+        static let clearance: CGFloat = 72
+    }
+
+    /// A phone gets tabs instead of a rail, and only for the places it can enter.
+    /// A tab bar has no disabled state worth the name: tapping a dead tab selected it,
+    /// the binding put it back, and the reader was told nothing at all. A place that
+    /// is not ready is not a tab yet.
     private var tabbed: some View {
         TabView(selection: $place) {
-            ForEach(ShellPlace.allCases) { item in
+            ForEach(availability.enabledPlaces) { item in
                 pageFor(item)
                     .tabItem { Label(item.title, systemImage: item.symbolName) }
                     .tag(item)
             }
         }
+        .tint(ShellChrome.phosphor(colorScheme))
         .overlay(alignment: .bottomTrailing) {
-            Button {
-                guard availability.canCompose else { return }
-                composing = true
-            } label: {
-                Image(systemName: "square.and.pencil")
-                    .font(.title3.weight(.semibold))
-                    .frame(width: 56, height: 56)
-                    .background(Circle().fill(ShellChrome.phosphor(colorScheme)))
-                    .foregroundStyle(ShellChrome.page(colorScheme))
-            }
-            .buttonStyle(.plain)
-            .disabled(!availability.canCompose)
-            .help(L10n.t(availability.composeHintKey))
-            .accessibilityLabel(L10n.t("compose.title"))
-            .accessibilityHint(L10n.t(availability.composeHintKey))
-            .padding(.trailing, 20)
-            .padding(.bottom, 72)
+            if availability.canCompose { composeButton }
         }
+    }
+
+    /// Solid ink, not phosphor: the lamp says where the reader is, and a button that
+    /// writes a post is not a place. It is here only when it can be pressed.
+    private var composeButton: some View {
+        Button { composing = true } label: {
+            Image(systemName: "square.and.pencil")
+                .font(.title3.weight(.semibold))
+                .frame(width: Compact.button, height: Compact.button)
+                .background(Circle().fill(ShellChrome.ink(colorScheme)))
+                .foregroundStyle(ShellChrome.page(colorScheme))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(L10n.t("compose.title"))
+        .padding(.trailing, ShellSpace.room)
+        .padding(.bottom, Compact.clearance)
     }
     #endif
 

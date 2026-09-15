@@ -24,6 +24,6 @@ struct PreferencesPane: View {
             }
         }
         .formStyle(.grouped)
-        .padding(8)
+        .padding(ShellSpace.snug)
     }
 }

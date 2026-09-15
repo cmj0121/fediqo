@@ -124,6 +124,32 @@ struct JoinTests {
         #expect(await store.sources().isEmpty)
     }
 
+    @Test("A host that answers and refuses is not a host that could not be reached")
+    func refusalIsNotSilence() async {
+        // Detection succeeds either way: the difference is what the public timeline
+        // does afterwards. A status says the host answered; a dead socket does not.
+        await #expect(throws: JoinError.publicTimelineFailed) {
+            try await MastodonJoin(
+                http: Self.joinHTTP(publicTimeline: .text("no", status: 401)),
+                store: ItemStore()
+            ).join(host: "first.example")
+        }
+        await #expect(throws: JoinError.unreachable) {
+            try await MastodonJoin(
+                http: Self.joinHTTP(publicTimeline: .fail),
+                store: ItemStore()
+            ).join(host: "first.example")
+        }
+        // 200, and a body that is not a timeline. The host answered; the reader must
+        // not be sent to look at a network that is working.
+        await #expect(throws: JoinError.publicTimelineFailed) {
+            try await MastodonJoin(
+                http: Self.joinHTTP(publicTimeline: .text("<html>a proxy page</html>")),
+                store: ItemStore()
+            ).join(host: "first.example")
+        }
+    }
+
     private static func joinHTTP(
         publicTimeline: FixtureHTTP.Outcome = .body(Fixtures.json("public-timeline")),
         trending: FixtureHTTP.Outcome = .body(Fixtures.json("trending-statuses"))
