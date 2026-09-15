@@ -79,7 +79,7 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     public let boostedBy: String?
     public let audience: DummyAudience?
     public let hasAvatar: Bool
-    public let hasThumb: Bool
+    public let attachments: [Attachment]
     public let counts: DummyCounts
     public let marks: DummyMarks
     /// Other hosts that also carried this item. Empty for a single source.
@@ -93,6 +93,15 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
             .filter { seen.insert($0).inserted }
             .sorted()
     }
+
+    /// Whether the row fills its slot. One answer for the whole post, because the slot is one
+    /// square however many things came attached.
+    ///
+    /// **This asks a wider question than it used to, on purpose.** It was "the first attachment
+    /// had a `preview_url`"; it is now "the post brought something with an address at all", so
+    /// an audio clip a server sent no cover art for fills the slot instead of leaving it blank.
+    /// A post that brought something should say so whether or not a still came with it.
+    public var hasThumb: Bool { !attachments.isEmpty }
 
     public var kind: DummyItemKind {
         switch source.kind {
@@ -126,7 +135,7 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         boostedBy = note.boostedBy
         audience = note.audience.map(DummyAudience.init)
         hasAvatar = note.avatarURL != nil
-        hasThumb = note.previewURL != nil
+        attachments = note.attachments
         counts = DummyCounts(
             replies: note.counts.replies,
             reblogs: note.counts.reblogs,

@@ -13,7 +13,7 @@ public struct URLSessionClient: HTTPClient, Sendable {
     }
 
     public func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
-        guard url.scheme?.lowercased() == "https" else {
+        guard Host.isFetchable(url) else {
             throw URLError(.unsupportedURL)
         }
         var request = URLRequest(url: url)

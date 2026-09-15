@@ -104,7 +104,6 @@ struct TimelineStreamTests {
             boostedBy: "Bob",
             audience: .followers,
             avatarURL: URL(string: "https://first.example/a.png"),
-            previewURL: nil,
             counts: Counts(replies: 4, reblogs: 5, favourites: 6)
         )
         let item = DummyItem(somebody)
@@ -136,13 +135,35 @@ struct TimelineStreamTests {
                 reply: Reply(handle: "@bob@second.example"),
                 audience: .everyone,
                 avatarURL: nil,
-                previewURL: URL(string: "https://first.example/p.jpg")
+                attachments: [Attachment(kind: .image, previewURL: URL(string: "https://first.example/p.jpg"))]
             )
         )
         #expect(named.answering == .handle("@bob@second.example"))
         #expect(named.audience == .everyone)
         #expect(!named.hasAvatar)
         #expect(named.hasThumb)
+        #expect(named.attachments.map(\.displayURL) == [URL(string: "https://first.example/p.jpg")])
+
+        // `hasThumb` used to mean "the first attachment had a preview_url" and now means "the
+        // post brought something with an address". The widening is deliberate: an audio clip a
+        // server sent no cover art for used to leave the slot empty and now fills it, which is
+        // what the deck wants. Pinned here so the change cannot drift back unnoticed.
+        let unillustrated = DummyItem(
+            Note(
+                id: "n5",
+                source: source,
+                author: "Ada",
+                handle: "@ada@first.example",
+                body: "listen",
+                postedAt: posted,
+                origins: [.publicTimeline],
+                attachments: [
+                    Attachment(kind: .audio, url: URL(string: "https://first.example/clip.mp3")),
+                ]
+            )
+        )
+        #expect(unillustrated.hasThumb)
+        #expect(unillustrated.attachments[0].previewURL == nil)
 
         let root = DummyItem(
             Note(

@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import FediqoCore
 
@@ -47,6 +48,35 @@ struct HostTests {
         #expect(throws: HostError.invalidHost) {
             try Host.parse("ex\u{0001}ample.com")
         }
+    }
+
+    @Test("An address this device will fetch is https with a host to reach")
+    func fetchableNeedsSchemeAndHost() {
+        #expect(Host.fetchableURL("https://first.example/a.jpg")
+            == URL(string: "https://first.example/a.jpg"))
+        #expect(Host.fetchableURL("HTTPS://first.example/a.jpg")
+            == URL(string: "HTTPS://first.example/a.jpg"))
+        #expect(Host.fetchableURL("https://[::1]/a.jpg") == URL(string: "https://[::1]/a.jpg"))
+
+        // Not our scheme.
+        #expect(Host.fetchableURL("http://first.example/a.jpg") == nil)
+        #expect(Host.fetchableURL("file:///etc/passwd") == nil)
+        #expect(Host.fetchableURL("data:image/png;base64,AAAA") == nil)
+        #expect(Host.fetchableURL("javascript:alert(1)") == nil)
+        #expect(Host.fetchableURL("//first.example/a.jpg") == nil)
+
+        // Our scheme, but no host to reach. `URLSession` could only fail these, and a kept one
+        // is an attachment that is not empty: it fills a slot and starts a fetch that can
+        // never finish.
+        #expect(Host.fetchableURL("https:") == nil)
+        #expect(Host.fetchableURL("https://") == nil)
+        #expect(Host.fetchableURL("https:///path") == nil)
+        #expect(Host.fetchableURL("https:/host/x") == nil)
+        #expect(Host.fetchableURL("https://:8443/x") == nil)
+
+        #expect(Host.fetchableURL(nil) == nil)
+        #expect(Host.fetchableURL("") == nil)
+        #expect(Host.fetchableURL("not a url at all") == nil)
     }
 
     @Test("Every kind has a human name; unknown says so")

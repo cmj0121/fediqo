@@ -111,6 +111,20 @@ struct StatusDTO: Decodable, Sendable {
     struct MediaAttachment: Decodable, Sendable {
         let previewUrl: String?
         let url: String?
+
+        /// What this branch can say about it so far: two addresses, and no idea what is behind
+        /// them. `unknown` is the honest answer until the rest of the media is decoded.
+        ///
+        /// Nothing where the server gave neither address — there is no screen that can draw
+        /// such an attachment and no reader who can open it.
+        var asAttachment: Attachment? {
+            let attachment = Attachment(
+                kind: .unknown,
+                url: Host.fetchableURL(url),
+                previewURL: Host.fetchableURL(previewUrl)
+            )
+            return attachment.isEmpty ? nil : attachment
+        }
     }
 
     func asNote(source: Source, origin: FetchOrigin) -> Note {
@@ -127,8 +141,8 @@ struct StatusDTO: Decodable, Sendable {
             reply: Self.reply(inReplyToId: subject.inReplyToId, mentions: subject.mentions, host: host),
             boostedBy: reblog == nil ? nil : account.name,
             audience: Self.audience(subject.visibility),
-            avatarURL: subject.account.avatar.flatMap(URL.init(string:)),
-            previewURL: subject.mediaAttachments?.first?.previewUrl.flatMap(URL.init(string:)),
+            avatarURL: Host.fetchableURL(subject.account.avatar),
+            attachments: subject.mediaAttachments?.compactMap { $0.asAttachment } ?? [],
             url: subject.url.flatMap(URL.init(string:)),
             counts: Counts(
                 replies: subject.repliesCount,
