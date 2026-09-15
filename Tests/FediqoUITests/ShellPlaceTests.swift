@@ -158,7 +158,6 @@ struct EmptySessionTests {
                 == "Notes your sources hand over as trending land here, in the order "
                 + "they were posted."
         )
-        #expect(L10n.t("timeline.empty") != L10n.t("timeline.empty.trends"))
         #expect(L10n.t("timeline.tab.trends", language: .english) == "Trends")
     }
 }

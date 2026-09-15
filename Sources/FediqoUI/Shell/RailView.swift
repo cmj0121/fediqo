@@ -44,9 +44,11 @@ struct RailView: View {
             .padding(.bottom, Metrics.side)
 
             ForEach(ShellPlace.allCases) { item in
-                // A place that cannot be entered says why on the bar itself. It used to
-                // say it only to a pointer that stopped over it, which on a touch screen
-                // is nobody.
+                // A place that cannot be entered is marked as closed at every width,
+                // and says why wherever there is room for a sentence: the label beside
+                // the glyph when the bar is open, the tooltip and the accessibility
+                // hint when it is not. Collapsed, the bar has room for a mark and for
+                // nothing else — no row shows any text there, closed or open.
                 let plain = item == .account ? accountSummary : item.summary
                 let summary = availability.reasonKey(for: item).map { L10n.t($0) } ?? plain
                 RailButton(
@@ -157,7 +159,7 @@ private struct RailButton: View {
                 .lineLimit(1)
             Text(summary)
                 .font(ShellType.meta)
-                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -168,6 +170,21 @@ private struct RailButton: View {
             .font(.system(size: RailView.Metrics.iconSize, weight: selected ? .semibold : .regular))
             .symbolVariant(selected ? .fill : .none)
             .symbolRenderingMode(.hierarchical)
+            .overlay(alignment: .bottomTrailing) { closedMark }
+    }
+
+    /// Closed, said in the space a collapsed bar actually has. Without it a place that
+    /// cannot be entered looks exactly like one that simply did not respond to a press.
+    @ViewBuilder
+    private var closedMark: some View {
+        if !enabled {
+            Image(systemName: "slash.circle.fill")
+                .font(.system(size: RailView.Metrics.iconSize * 0.55))
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(ShellChrome.rail(colorScheme), ShellChrome.inkDim(colorScheme))
+                .offset(x: RailView.Metrics.iconSize * 0.22, y: RailView.Metrics.iconSize * 0.22)
+                .accessibilityHidden(true)
+        }
     }
 
     private var rowFill: Color {

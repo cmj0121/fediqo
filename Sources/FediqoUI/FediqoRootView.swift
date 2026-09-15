@@ -30,6 +30,13 @@ public struct FediqoRootView: View {
                 let accepted = availability.placing(old, as: new)
                 if accepted != new { place = accepted }
             }
+            // The rail and the tab bar both draw only the places that can be entered.
+            // If that set ever narrows under the reader — a sign-out, a source
+            // dropped — the selection would point at a tab that is no longer there.
+            .onChange(of: availability) { _, new in
+                let accepted = new.placing(place, as: place)
+                if accepted != place { place = accepted }
+            }
             .sheet(isPresented: $composing) {
                 ComposerSheet()
                     #if os(iOS)

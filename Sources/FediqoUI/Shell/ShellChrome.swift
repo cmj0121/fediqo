@@ -50,12 +50,17 @@ enum ShellChrome {
 
     /// Present, read second: handles, hosts, a server's own summary.
     static func inkDim(_ scheme: ColorScheme) -> Color {
-        ink(scheme).opacity(0.68)
+        ink(scheme).opacity(0.80)
     }
 
     /// Engraved rather than written: decorators, counts nobody is looking for.
+    ///
+    /// The faintest step is still text, and text has a floor. At 0.45 this sat at
+    /// 2.7:1 on the chassis — under the 4.5:1 that small type needs, and under the
+    /// 3:1 that large type needs, which made the quietest line in the shell one that
+    /// some readers could not read at all. Hierarchy is worth less than legibility.
     static func inkFaint(_ scheme: ColorScheme) -> Color {
-        ink(scheme).opacity(0.45)
+        ink(scheme).opacity(0.64)
     }
 
     // MARK: The two hues
@@ -65,8 +70,11 @@ enum ShellChrome {
         scheme == .dark ? rgb(0.494, 0.784, 0.816) : rgb(0.184, 0.427, 0.471)
     }
 
+    /// The wash a selected pill sits on. Light enough that the phosphor written on
+    /// it still clears 4.5:1 — at 0.14 the pair measured 4.4, which is the floor this
+    /// file sets for the faintest ink and then missed here.
     static func selectFill(_ scheme: ColorScheme) -> Color {
-        phosphor(scheme).opacity(scheme == .dark ? 0.22 : 0.14)
+        phosphor(scheme).opacity(scheme == .dark ? 0.22 : 0.10)
     }
 
     static func selectInk(_ scheme: ColorScheme) -> Color {

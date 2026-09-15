@@ -8,6 +8,12 @@ public enum JoinError: Error, Equatable, Sendable {
 }
 
 public struct MastodonJoin: Sendable {
+    /// The server answered, with a status that says no.
+    private static func isRefusal(_ error: MastodonRequestError) -> Bool {
+        if case .http = error { return true }
+        return false
+    }
+
     private let http: any HTTPClient
     private let store: ItemStore
 
@@ -59,8 +65,17 @@ public struct MastodonJoin: Sendable {
             publicNotes = try await pub
         } catch is CancellationError {
             throw CancellationError()
-        } catch {
+        } catch let error as MastodonRequestError where Self.isRefusal(error) {
             throw JoinError.publicTimelineFailed
+        } catch is DecodingError {
+            // It answered; the answer was not a timeline. A proxy page, a fork with a
+            // schema of its own, a date nobody can parse — the host is reachable and
+            // the reader would waste their time looking at the network.
+            throw JoinError.publicTimelineFailed
+        } catch {
+            // No answer at all: a dropped connection, a TLS failure, a name that does
+            // not resolve. That one is worth checking a network over.
+            throw JoinError.unreachable
         }
         let trendingNotes = try await trend
 

@@ -12,6 +12,15 @@ struct DummyItemRow: View {
     @State private var hovering = false
     @Environment(\.colorScheme) private var colorScheme
 
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    /// A phone held upright, where the picture beside the words leaves the words a
+    /// column four characters wide. Everywhere else the row keeps its full width.
+    private var narrow: Bool { sizeClass == .compact }
+    #else
+    private var narrow: Bool { false }
+    #endif
+
     /// The row's fittings, in points at the standard type size and scaled from there.
     /// They used to be fixed: the words grew with the reader's preference and the
     /// avatar, the thumbnail and every mark stayed exactly where they were, so at the
@@ -47,7 +56,6 @@ struct DummyItemRow: View {
         .onTapGesture { onSelect?() }
         .onHover { hovering = $0 }
         .accessibilityElement(children: .contain)
-        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     /// Where the reader is. Two points in the row's own margin, and no geometry of its
@@ -67,7 +75,12 @@ struct DummyItemRow: View {
     private var content: some View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
             decorator
+            // The row itself is an accessibility container, and a container is not an
+            // element — a trait put on it is announced to nobody. The headline is the
+            // row's identity, so it is the element that carries the selection.
             headline
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(selected ? .isSelected : [])
             mainBox
             actions
         }
@@ -122,28 +135,40 @@ struct DummyItemRow: View {
         }
     }
 
+    /// The name is what the row is; the handle is how to find it again. When there is
+    /// not room for both, the handle loses its middle rather than the row losing its
+    /// edge — an author clipped by the screen is an author nobody can read at all.
     private var names: some View {
         HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
             Text(item.author)
                 .font(ShellType.name)
                 .foregroundStyle(ShellChrome.ink(colorScheme))
                 .lineLimit(1)
+                .layoutPriority(1)
             if let handle = item.handle {
                 Text(handle)
                     .font(ShellType.meta)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .lineLimit(1)
+                    .truncationMode(.middle)
+                    .layoutPriority(0)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// Nothing in here is pinned to a width any more, but nothing may overflow
+    /// either: the host gives way first and truncates, and the age — the one reading
+    /// that is useless half-drawn — keeps its own size and its place at the end.
     private var meta: some View {
         HStack(spacing: ShellSpace.snug) {
             sourcePills
+                .layoutPriority(0)
             visibility
             postedAgo
+                .fixedSize(horizontal: true, vertical: false)
+                .layoutPriority(1)
         }
-        .fixedSize(horizontal: true, vertical: false)
     }
 
     private var avatar: some View {
@@ -215,10 +240,18 @@ struct DummyItemRow: View {
     /// What came attached sits beside the words, never under them, and against the
     /// right edge of the row. A picture below the text pushes the next post off the
     /// screen; out on the edge it is a column you can run your eye down.
+    @ViewBuilder
     private var mainBox: some View {
-        HStack(alignment: .top, spacing: ShellSpace.step) {
-            words
-            thumb
+        if narrow {
+            VStack(alignment: .leading, spacing: ShellSpace.snug) {
+                words
+                thumb
+            }
+        } else {
+            HStack(alignment: .top, spacing: ShellSpace.step) {
+                words
+                thumb
+            }
         }
     }
 
@@ -258,43 +291,53 @@ struct DummyItemRow: View {
         }
     }
 
+    /// Every mark is a press, and a press has a floor it cannot be squeezed below. On
+    /// a narrow row the two groups take a line each rather than the last of them
+    /// sliding off the edge.
     private var actions: some View {
-        HStack(spacing: ShellSpace.room) {
-            HStack(spacing: ShellSpace.snug) {
-                counted("arrowshape.turn.up.left", count: item.counts.replies,
-                        label: "item.act.reply", on: false) {
-                    onToast(L10n.t("item.toast.reply"))
-                }
-                counted("arrow.2.squarepath", count: item.counts.reblogs,
-                        label: "item.act.reblog", on: false) {
-                    onToast(L10n.t("item.toast.reblog"))
-                }
-                mark("quote.bubble", label: "item.act.quote", on: false) {
-                    onToast(L10n.t("item.toast.quote"))
-                }
-                counted(marks.favourited ? "star.fill" : "star",
-                        count: item.counts.favourites,
-                        label: "item.act.favourite", on: marks.favourited) {
-                    marks.favourited.toggle()
-                    onToast(L10n.t(marks.favourited ? "item.toast.favourite.on" : "item.toast.favourite.off"))
-                }
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: ShellSpace.room) { passOn; keep; Spacer(minLength: 0) }
+            VStack(alignment: .leading, spacing: ShellSpace.tight) { passOn; keep }
+        }
+    }
+
+    private var passOn: some View {
+        HStack(spacing: ShellSpace.snug) {
+            counted("arrowshape.turn.up.left", count: item.counts.replies,
+                    label: "item.act.reply", on: false) {
+                onToast(L10n.t("item.toast.reply"))
             }
-            HStack(spacing: ShellSpace.snug) {
-                mark(marks.bookmarked ? "bookmark.fill" : "bookmark",
-                     label: "item.act.bookmark", on: marks.bookmarked) {
-                    marks.bookmarked.toggle()
-                    onToast(L10n.t(marks.bookmarked ? "item.toast.bookmark.on" : "item.toast.bookmark.off"))
-                }
-                mark(marks.kept ? "archivebox.fill" : "archivebox",
-                     label: "item.act.kept", on: marks.kept) {
-                    marks.kept.toggle()
-                    onToast(L10n.t(marks.kept ? "item.toast.kept.on" : "item.toast.kept.off"))
-                }
-                mark("ellipsis", label: "item.act.more", on: false) {
-                    onToast(L10n.t("item.toast.more"))
-                }
+            counted("arrow.2.squarepath", count: item.counts.reblogs,
+                    label: "item.act.reblog", on: false) {
+                onToast(L10n.t("item.toast.reblog"))
             }
-            Spacer(minLength: 0)
+            mark("quote.bubble", label: "item.act.quote", on: false) {
+                onToast(L10n.t("item.toast.quote"))
+            }
+            counted(marks.favourited ? "star.fill" : "star",
+                    count: item.counts.favourites,
+                    label: "item.act.favourite", on: marks.favourited) {
+                marks.favourited.toggle()
+                onToast(L10n.t(marks.favourited ? "item.toast.favourite.on" : "item.toast.favourite.off"))
+            }
+        }
+    }
+
+    private var keep: some View {
+        HStack(spacing: ShellSpace.snug) {
+            mark(marks.bookmarked ? "bookmark.fill" : "bookmark",
+                 label: "item.act.bookmark", on: marks.bookmarked) {
+                marks.bookmarked.toggle()
+                onToast(L10n.t(marks.bookmarked ? "item.toast.bookmark.on" : "item.toast.bookmark.off"))
+            }
+            mark(marks.kept ? "archivebox.fill" : "archivebox",
+                 label: "item.act.kept", on: marks.kept) {
+                marks.kept.toggle()
+                onToast(L10n.t(marks.kept ? "item.toast.kept.on" : "item.toast.kept.off"))
+            }
+            mark("ellipsis", label: "item.act.more", on: false) {
+                onToast(L10n.t("item.toast.more"))
+            }
         }
     }
 
