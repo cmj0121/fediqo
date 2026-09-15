@@ -19,13 +19,13 @@ struct TimelinePane: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
+                .padding(.horizontal, ShellSpace.pad)
+                .padding(.top, ShellSpace.step)
+                .padding(.bottom, ShellSpace.snug)
 
             Rectangle()
                 .fill(ShellChrome.hairline(colorScheme))
-                .frame(height: 1)
+                .frame(height: ShellSpace.hair)
 
             if let opened = openedItem {
                 DummyThreadPane(
@@ -81,10 +81,10 @@ struct TimelinePane: View {
                             onToast: showToast
                         )
                         .id(item.id)
-                        if showsHairline(after: index) {
+                        if index < items.count - 1 {
                             Rectangle()
                                 .fill(ShellChrome.hairline(colorScheme))
-                                .frame(height: 1)
+                                .frame(height: ShellSpace.hair)
                         }
                     }
                 }
@@ -105,15 +105,6 @@ struct TimelinePane: View {
         }
     }
 
-    /// Hide the rule against a floating row so the plate is not cut by a hairline.
-    private func showsHairline(after index: Int) -> Bool {
-        guard items.indices.contains(index) else { return false }
-        if items[index].id == selectedID { return false }
-        let next = items.index(after: index)
-        if items.indices.contains(next), items[next].id == selectedID { return false }
-        return true
-    }
-
     private func markBinding(_ item: DummyItem) -> Binding<DummyMarks> {
         Binding(
             get: { marks[item.id] ?? item.marks },
@@ -132,13 +123,13 @@ struct TimelinePane: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .center, spacing: 8) {
+        VStack(alignment: .leading, spacing: ShellSpace.snug) {
+            HStack(alignment: .center, spacing: ShellSpace.step) {
                 Text(L10n.t("shell.timeline.title"))
                     .font(ShellType.pane)
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                     .fixedSize()
-                HStack(spacing: 6) {
+                HStack(spacing: ShellSpace.tight) {
                     ForEach(session.queries) { query in
                         queryPill(query)
                     }
