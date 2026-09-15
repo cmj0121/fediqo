@@ -62,15 +62,28 @@ public extension CustomEmoji {
     /// every row of every page. A post with no pictures, or words with no colon in them, is one
     /// run and no scan at all — which is the common case.
     static func runs(in text: String, from emojis: [CustomEmoji]) -> [EmojiRun] {
-        // Over the UTF-8 view: `:` is ASCII, so it cannot hide inside a multi-byte scalar, and
-        // a byte scan neither allocates nor assembles the grapheme clusters a Character walk
-        // would. That is what makes this fast path actually free.
-        guard !emojis.isEmpty, text.utf8.contains(UInt8(ascii: ":")) else {
-            return text.isEmpty ? [] : [.text(text)]
-        }
+        guard !emojis.isEmpty else { return plainRuns(text) }
         // Lazily, so the index is built straight from the list rather than from a throwaway
         // array of pairs. First spelling wins here too, for a list nobody folded.
         let byShortcode = Dictionary(emojis.lazy.map { ($0.shortcode, $0) }) { first, _ in first }
+        return scan(text) { byShortcode[$0] }
+    }
+
+    /// A line with no picture in it: one run, or none at all where there are no words.
+    internal static func plainRuns(_ text: String) -> [EmojiRun] {
+        text.isEmpty ? [] : [.text(text)]
+    }
+
+    /// The scan itself, over whatever decides which names are shortcodes.
+    ///
+    /// Separated from the dictionary so that the post's own list and `EmojiAlphabet`'s order —
+    /// the post first, the server's catalogue second — cut a line exactly the same way. The two
+    /// differ in what they will answer to, never in what counts as a name.
+    internal static func scan(_ text: String, lookup: (String) -> CustomEmoji?) -> [EmojiRun] {
+        // Over the UTF-8 view: `:` is ASCII, so it cannot hide inside a multi-byte scalar, and
+        // a byte scan neither allocates nor assembles the grapheme clusters a Character walk
+        // would. That is what makes this fast path actually free.
+        guard text.utf8.contains(UInt8(ascii: ":")) else { return plainRuns(text) }
         var runs: [EmojiRun] = []
         var plain = ""
         var index = text.startIndex
@@ -78,7 +91,7 @@ public extension CustomEmoji {
         while index < text.endIndex {
             guard text[index] == ":",
                   let closing = shortcodeEnd(in: text, openingAt: index),
-                  let emoji = byShortcode[String(text[text.index(after: index)..<closing])]
+                  let emoji = lookup(String(text[text.index(after: index)..<closing]))
             else {
                 // Not a colon, not a shortcode, or not one of ours: this is a character of the
                 // words. The scan carries on from the next one, which may open a real one.

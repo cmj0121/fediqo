@@ -15,6 +15,9 @@ final class ShellSession {
 
     let http: any HTTPClient
     let store: ItemStore
+    /// Each joined server's emoji catalogue, held for this run. On the session and not on the
+    /// join, so that a server joined once is a server asked once.
+    let emoji = EmojiCatalogueStore()
 
     var queries: [DummyTimeline] = DummyTimeline.shipped
     var timelineID: String?
@@ -116,7 +119,7 @@ final class ShellSession {
         checking = true
         defer { checking = false }
         do {
-            try await MastodonJoin(http: http, store: store).join(host: raw)
+            try await MastodonJoin(http: http, store: store, catalogues: emoji).join(host: raw)
             sources = await store.sources()
             notes = await store.all()
             if queries.isEmpty {
