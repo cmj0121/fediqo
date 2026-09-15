@@ -93,6 +93,9 @@ public struct FediqoRootView: View {
             return jumpListOrThreadToTop()
         case .expandPost:
             return openThread()
+        // Named so the guide and the key list are honest; nothing is drawn for them yet.
+        case .viewAttachment, .playAttachment, .nextAttachment, .liftCover:
+            return false
         case .back:
             return popThread()
         case .showShortcuts:

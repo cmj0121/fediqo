@@ -26,9 +26,14 @@ private struct DummyKeyPresses: ViewModifier {
             .focused($focused)
             .onAppear { focused = true }
             .onKeyPress(
-                keys: ["?", "/", "c", "j", "k", "g", "q", " ", .escape, .tab, .return, .upArrow, .downArrow],
+                keys: [
+                    "?", "/", "c", "j", "k", "g", "v", "a", "m", "s", "q", " ",
+                    .escape, .tab, .return, .upArrow, .downArrow,
+                ],
                 phases: .down
             ) { press in
+                // A ⌘ chord is the platform's, the same way the AppKit monitor below lets it past.
+                guard !press.modifiers.contains(.command) else { return .ignored }
                 let shift = press.modifiers.contains(.shift)
                 let control = press.modifiers.contains(.control)
                 return handle(press.key.character, shift, control) ? .handled : .ignored
