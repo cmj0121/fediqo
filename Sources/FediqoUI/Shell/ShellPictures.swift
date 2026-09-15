@@ -1,0 +1,702 @@
+import FediqoCore
+import ImageIO
+import SwiftUI
+
+/// Every picture the shell draws, held somewhere a view cannot lose it.
+///
+/// **The bug this exists for.** `AsyncImage` keeps its result for the lifetime of the view that
+/// asked for it and nowhere else, so a row rebuilt for any reason starts again from nothing.
+/// Whether a reader ever sees a picture then comes down to whether the rebuilding stops before
+/// they look. A taller row means more re-measuring, and the reader's largest text means more
+/// again, so what a reader ends up seeing is decided by how much layout their screen happens to
+/// be doing. A cache that outlives the view is the only thing that makes the answer the same
+/// every time.
+///
+/// Kept by address, by screen, and by tier. **Not** by the size it is drawn at: that is unbounded
+/// — an avatar at 28pt, a slot at 96pt, a viewer at whatever the window is — and would decode one
+/// photograph three times over. A tier is a decode budget with exactly two values chosen by what
+/// the call site is *for* rather than how large it happens to be, so the number of decodes per
+/// address is bounded by construction.
+///
+/// Nothing is fetched directly. Every request goes through an `HTTPClient`, which is what keeps
+/// `file:` and `data:` addresses — and anything else a hostile instance puts in an `avatar`
+/// field — from ever reaching a socket: `URLSessionClient` refuses everything but `https`.
+///
+/// ## What admission rests on
+///
+/// Room is made by recency, and **admission by recency requires that the set of things wanted be
+/// established before any of them is satisfied.** This holds because SwiftUI cannot run a `.task`
+/// during `body` evaluation — the modifier is not attached until `body` returns — so every
+/// visible body reads before any task fires. Reads batch; completions scatter, so a fetch is
+/// judged on the interest its row carries **at the moment it lands**, not the one it carried when
+/// it was commissioned — a row still being drawn has re-stamped every pass since.
+///
+/// There is no safe direction to err in. Declining used to look like the cautious answer; with
+/// `.crowded` terminal it is not, because an over-decline is permanent damage to a row the reader
+/// can see rather than a delay.
+///
+/// **Never `await fetch` sequentially in a loop.** A call site that reads and satisfies in the
+/// same pass defeats admission entirely, because the newcomer is then genuinely the most recently
+/// wanted thing every time.
+///
+/// **I8 — every visible key's `interest` must be re-stamped between one arrival and the next
+/// `startedAt` sample.** This comes from `pictures` being a single coarse-grained `@Observable`
+/// property read inside `RemoteImage.body`, so an eviction re-runs every visible body. Narrowing
+/// that invalidation, or moving the read out of `body`, makes the admission check unreachable and
+/// the refetch chain unbounded — **the latch does not cover this, because the declining branch
+/// that writes `.crowded` is never taken.**
+///
+/// Three changes the design cannot tolerate, two of them otherwise reasonable cleanups:
+///
+/// 1. An `EquatableView`, or any wrapper that lets SwiftUI skip a body when its inputs compare
+///    equal.
+/// 2. Splitting `pictures` into per-key observable storage.
+/// 3. Moving the `cache.picture(…)` read out of `body` into `onAppear` or `task` — the natural
+///    fix for "a view body must not mutate model state", and the one most likely to be proposed.
+///
+/// Each turns this file into one to six real multi-megabyte refetches per pass to a third-party
+/// instance, forever, with nothing in the suite going red. Under narrow observation no other row
+/// has re-run since its last admission, so the newcomer is structurally the newest thing in the
+/// cache every time, there is always exactly one older key to evict, and nothing is ever
+/// declined. It is the same structural failure as sampling the clock at task creation, arriving
+/// from the other side: both make everything permanently evictable.
+///
+/// Two-phase ordering gives the order *within* a pass; I8 keeps it current *across* arrivals, and
+/// I8 is the load-bearing one.
+///
+/// **I9 — `.crowded` is terminal for the life of the process**, and is the backstop for I5 being
+/// violated. It is **not** a backstop for I8: when I8 is broken the branch that writes it never
+/// runs. Relief must come from an event the crowded cohort cannot itself cause.
+///
+/// The second face of that trade: a row which genuinely **scrolls away while its fetch is in the
+/// air** lands, is correctly declined — nothing wants it any more — and is then terminally
+/// marked, so scrolling back to it finds a `photo` glyph that will not clear. Sampling on arrival
+/// does not fix this and nothing here does; it is the latch biting a row that did nothing wrong,
+/// and it is reachable only where declining is reachable at all.
+///
+/// ## The contract this file is safe under
+///
+/// **At most three viewer-tier addresses alive at once** — unit 7's limit, and the reason is
+/// consequence rather than headroom. Past seven the cache is full at viewer tier; a full viewer
+/// tier is the only place admission can decline; and a decline is permanent for the life of the
+/// process. Breaking this does not cost memory, it strands rows with a `photo` glyph that
+/// scrolling away and back will not clear. There is a debug tripwire on it in `keep`.
+@MainActor
+@Observable
+final class ShellPictures {
+    static let shared = ShellPictures()
+
+    /// How much of a picture this call site can afford to hold, which is not the same as how
+    /// large it is drawn. Two values, not a size: the slot and the avatar want a thumbnail, and
+    /// `v` over the whole app wants the photograph. A third tier would be a size in disguise.
+    enum Tier: String, Hashable, Sendable, CaseIterable {
+        /// The 96pt slot, the edges under it, the avatar, an emoji still.
+        case deck
+        /// `v`, over the whole app.
+        case viewer
+
+        var maxPixels: Int {
+            switch self {
+            case .deck: 320
+            case .viewer: 2048
+            }
+        }
+
+        /// The most one decode in this tier can ever cost. Holds only because `normalise`
+        /// guarantees at most four bytes to the pixel.
+        var ceiling: Int { maxPixels * maxPixels * 4 }
+    }
+
+    struct Key: Hashable {
+        let url: URL
+        let scale: CGFloat
+        let tier: Tier
+    }
+
+    /// Why there is no picture — and, more to the point, whether asking again could ever change
+    /// the answer.
+    enum Absence: Error, Sendable {
+        /// Something answered, and the answer was not a picture: a refusal, an address that is
+        /// not fetchable, or bytes that will not decode. Waiting changes none of that.
+        case refused
+        /// Nothing answered. The address may be perfectly good and the network simply dark, so
+        /// this is forgotten the moment anything at all gets through.
+        case unreachable
+        /// The screen is asking for more picture than the cache is allowed to hold, and keeping
+        /// this one would mean dropping one a row is drawing right now. Declined rather than
+        /// admitted, because admitting it starts a refetch that never ends: what is dropped is
+        /// re-asked for, and re-asking drops another.
+        ///
+        /// A floor, not a mechanism. With two decode tiers no layout this app can draw reaches
+        /// it. If a reader ever sees it, a unit has drawn more at once than the contract allows,
+        /// and the visible symptom is the point — a screen of `photo` glyphs gets reported; two
+        /// thousand silent requests to somebody else's server do not.
+        ///
+        /// This mark is **permanent for the life of the process**, and that is not an oversight.
+        /// Every automatic recovery tried re-opened the livelock: the cohort's own re-asking
+        /// produces the evictions that would trigger the next recovery, so the relief signal sits
+        /// inside the loop it is meant to end. `heldBytes` cannot serve either — LRU frees
+        /// exactly enough to fit, so once full it is pinned at budget and no threshold on it ever
+        /// fires again.
+        ///
+        /// **Any future relief must be driven by an event this cohort cannot itself cause** — a
+        /// deliberate, external one: the viewer closing, the place changing, the app returning
+        /// from background. It is the same rule as the generation split: bulk, deliberate
+        /// invalidations bump; anything the cache can reach on its own does not.
+        case crowded
+
+        /// Whether asking again could ever change the answer by itself.
+        var asksAgain: Bool { self == .unreachable }
+    }
+
+    /// The most of a response that will be accepted — see `body` for what that does and does not
+    /// buy, which is less than it ought to.
+    nonisolated static let maxBytes = 20 * 1024 * 1024
+
+    /// How many fetches may be in the air at once.
+    ///
+    /// Not about politeness. The transport bounds **one** response and says so: the count
+    /// belongs to the caller, because the caller is the only layer that knows how many rows are
+    /// on screen. Without this, thirty rows each holding a body inside the ceiling is thirty
+    /// times the ceiling resident at once, and `httpMaximumConnectionsPerHost` does not bound it
+    /// — it is unenforced here, and it would count hosts rather than bytes anyway.
+    ///
+    /// So the resident worst case is exactly this times `maxBytes`. The tier caps what a decode
+    /// costs and does nothing for the download; this is what caps the download.
+    nonisolated static let maxInFlight = 4
+
+    /// How much decoded picture is kept, in bytes rather than in entries.
+    ///
+    /// Counting entries was the wrong bound: a hundred and twenty of these at their largest is
+    /// most of a gigabyte, and a hundred and twenty thumbnails is nothing at all. The same number
+    /// cannot describe both, and what runs a device out of memory is the bytes.
+    ///
+    /// Six viewer decodes or two hundred and forty-five deck ones. The slack over the four or so
+    /// a screen can want is deliberate: at a tighter budget the viewer tier starts declining
+    /// while units 6 and 7 are still drawing, and four against three is not a margin.
+    nonisolated static let budget = 96 * 1024 * 1024
+
+    /// How many refusals are worth remembering. Bounded for the reason the pictures are: a
+    /// collection that only grows is the leak this class exists in order not to have.
+    nonisolated static let refusals = 512
+
+    /// How many pictures are kept, however small they are.
+    ///
+    /// The byte budget is the memory bound and it is the important one, but it is not a bound on
+    /// *count*. Emoji and avatars come through here too and those are cheap, so a reader who
+    /// scrolls far enough accumulates tens of thousands of entries well inside the budget — and
+    /// every one of them is length in the dictionaries this walks on the main actor. Two bounds,
+    /// because they answer two different questions.
+    nonisolated static let held = 512
+
+    /// How many keys' worth of interest is remembered.
+    ///
+    /// At least twice `held`, and that ratio is load-bearing: `forget` may never drop a key that
+    /// has a picture, so it can only reach its low-water mark out of the keys that do not. With
+    /// half the map guaranteed disposable, trimming always succeeds in one pass.
+    nonisolated static let remembered = 2 * held
+
+    private struct Held {
+        let picture: Image
+        let cost: Int
+    }
+
+    private var pictures: [Key: Held] = [:]
+
+    /// What has been asked for and answered with nothing, and why. Held so a picture that is not
+    /// there is drawn as absent rather than as forever arriving — and so it is asked for once
+    /// rather than on every rebuild of every row that shows it.
+    private(set) var missing: [Key: Absence] = [:]
+
+    /// Bumped only by a **cohort** changing its mind — today, a network that came back. That is a
+    /// fact about a set of addresses which no single view can observe for itself.
+    ///
+    /// Ordinary eviction deliberately does **not** bump it. Eviction is a fact about one key, and
+    /// the view that lost its picture already sees `have` go true→false through `pictures`, which
+    /// is observed. Telling every other view as well is what turns one eviction into a storm, and
+    /// the storm into a refetch loop.
+    private(set) var generation = 0
+
+    /// The task drawing each picture while it is being drawn, so every view wanting the same one
+    /// waits on the same work and a view going away does not take that work with it.
+    @ObservationIgnored private(set) var inFlight: [Key: Task<Void, Never>] = [:]
+
+    /// Held keys, least recently wanted first.
+    ///
+    /// Worked out when it is needed rather than maintained as it changes. Keeping a list in step
+    /// costs an O(n) removal inside `picture`, which runs once per visible row per frame; this
+    /// runs once per admission, which is once per fetch. The hot path is the one that has to be
+    /// cheap.
+    /// Each clock is looked up once and then sorted on, rather than looked up inside the
+    /// comparator: a `Key` hashes a `URL`, and a comparator does that twice per comparison.
+    ///
+    /// The `?? 0` is the same belt as the one at the eviction site and is equally unreachable,
+    /// because `forget` never drops a key that has a picture. Removing it is not a tidy-up: a
+    /// held key with no stamp sorts to the front at zero, and the eviction site then reads
+    /// `0 < startedAt` and drops it immediately. That is the I7 thrash, restored in silence.
+    var order: [Key] {
+        pictures.keys
+            .map { ($0, interest[$0] ?? 0) }
+            .sorted { $0.1 < $1.1 }
+            .map(\.0)
+    }
+
+    @ObservationIgnored private(set) var heldBytes = 0
+
+    /// Counts every expression of interest, so "wanted since this fetch began" is answerable.
+    @ObservationIgnored private(set) var clock = 0
+
+    /// When each key was last asked about — **whether or not there was anything to give back.**
+    ///
+    /// Recording the misses is what makes admission work. A row whose picture has been declined
+    /// still reads for it on every pass, so its interest keeps up with its neighbours'; without
+    /// that the cache cannot tell a row that is still on screen from one that scrolled away, and
+    /// every newcomer looks like the most-wanted thing in the cache.
+    @ObservationIgnored private(set) var interest: [Key: Int] = [:]
+
+    @ObservationIgnored private var active = 0
+    @ObservationIgnored private var queued: [CheckedContinuation<Void, Never>] = []
+
+    @ObservationIgnored let http: any HTTPClient
+
+    init(http: any HTTPClient = ShellPictures.live) {
+        self.http = http
+    }
+
+    /// The picture, where it is already in hand. Draws on the first pass, which is what removes
+    /// the flash of the waiting shape every time a reader scrolls back to a row.
+    func picture(_ url: URL?, scale: CGFloat, tier: Tier) -> Image? {
+        guard let url else { return nil }
+        let key = Key(url: url, scale: scale, tier: tier)
+        wanted(key)
+        return pictures[key]?.picture
+    }
+
+    /// Whether this one has been asked for and came back with nothing. Every kind of nothing says
+    /// yes: the reader is shown the same mark either way, and only `fetch` cares which it was.
+    func isMissing(_ url: URL?, scale: CGFloat, tier: Tier) -> Bool {
+        guard let url else { return false }
+        return missing[Key(url: url, scale: scale, tier: tier)] != nil
+    }
+
+    /// Fetches and decodes it, unless somebody already is, or already has, or already found out
+    /// that asking again cannot help.
+    func fetch(_ url: URL?, scale: CGFloat, tier: Tier) async {
+        guard let url else { return }
+        let key = Key(url: url, scale: scale, tier: tier)
+        guard pictures[key] == nil, missing[key]?.asksAgain ?? true else { return }
+        await work(for: key).value
+    }
+
+    private func work(for key: Key) -> Task<Void, Never> {
+        if let running = inFlight[key] { return running }
+        let client = http
+        // Unstructured on purpose: the caller is a view's `.task`, and that is cancelled by any
+        // rebuild. What it cancels has to be this view's waiting and not the work itself.
+        //
+        // The task is created and registered eagerly so that dedup still works and every asker
+        // waits on this one piece of work; only the network call queues behind the gate.
+        let started = Task { @MainActor in
+            await self.enter()
+            let answer = await Self.load(
+                key.url, using: client, maxPixels: key.tier.maxPixels
+            )
+            self.leave()
+            defer { self.inFlight[key] = nil }
+            switch answer {
+            case .success(let decoded):
+                self.keep(
+                    Image(decorative: decoded, scale: key.scale),
+                    cost: decoded.height * decoded.bytesPerRow,
+                    for: key,
+                    // **Sampled here, on arrival, not where the task was created.** The
+                    // question `startedAt` answers is "when was this newcomer wanted", and at
+                    // the moment of the decision the honest answer is its *current* interest: a
+                    // row still being drawn is still wanted and has re-stamped every pass since
+                    // it was commissioned, so a creation stamp understates its claim and
+                    // declines rows that deserve admission. Measured, arrival is never worse —
+                    // same termination, same request count, and strictly fewer permanent marks.
+                    //
+                    // Zero when no body has asked at all, which is a fetch nobody is drawing
+                    // yet: a neighbour read ahead of the scroll, or a kick on becoming active.
+                    // **Speculative work never displaces work a view has actually asked for** —
+                    // with nothing older than it, such a fetch can evict nothing and is
+                    // admitted only if it fits outright.
+                    startedAt: self.interest[key] ?? 0
+                )
+            case .failure(let absence):
+                self.note(absence, for: key)
+            }
+        }
+        inFlight[key] = started
+        return started
+    }
+
+    private func enter() async {
+        if active < Self.maxInFlight {
+            active += 1
+            return
+        }
+        // Resumed holding the slot the leaver handed over, so `active` does not move.
+        await withCheckedContinuation { queued.append($0) }
+    }
+
+    private func leave() {
+        if queued.isEmpty {
+            active -= 1
+        } else {
+            queued.removeFirst().resume()
+        }
+    }
+
+    /// Admits a decoded picture, or declines it.
+    ///
+    /// Room is made oldest-first, but never past something a view has wanted since this fetch
+    /// began. When room cannot be made without dropping a picture that is being drawn right now,
+    /// the newcomer is declined instead — that branch is the only thing that ends the loop where
+    /// what is dropped is re-asked for and re-asking drops another.
+    func keep(_ picture: Image, cost: Int, for key: Key, startedAt: Int) {
+        let already = pictures[key]?.cost ?? 0
+        var bytes = heldBytes - already + cost
+        var count = pictures.count + (already > 0 ? 0 : 1)
+        var evictable: [Key] = []
+
+        // A `startedAt` of zero can outrank nothing, so there is no order worth working out —
+        // the speculative case skips the sort entirely rather than sorting to find that out.
+        if bytes > Self.budget || count > Self.held, startedAt > 0 {
+            // `order` is sorted by interest, so the first key that is too recent to evict means
+            // every key after it is too. Both guards stop the walk rather than filtering it.
+            for old in order {
+                guard bytes > Self.budget || count > Self.held else { break }
+                // The zero is a belt: `forget` never drops a key that has a picture, so every
+                // key in `order` has an interest entry.
+                guard old != key, let held = pictures[old],
+                      interest[old] ?? 0 < startedAt else { break }
+                evictable.append(old)
+                bytes -= held.cost
+                count -= 1
+            }
+        }
+
+        guard (bytes <= Self.budget && count <= Self.held) || pictures.isEmpty else {
+            note(.crowded, for: key)
+            return
+        }
+        for old in evictable {
+            if let gone = pictures.removeValue(forKey: old) { heldBytes -= gone.cost }
+        }
+
+        heldBytes -= already
+        pictures[key] = Held(picture: picture, cost: cost)
+        heldBytes += cost
+        missing.removeValue(forKey: key)
+        wanted(key)
+
+        // Something got through, so the network is back, so everything written off while it was
+        // down deserves another go. Nothing similar happens for `.crowded`: see `Absence`.
+        forgetUnreachable()
+
+        // Debug-only tripwire on the unit 7 contract. Counting, not inferring.
+        //
+        // Scoped to the shared instance, which is the one the app and every preview draw from:
+        // `RemoteImage` reads `.shared` and nothing else. The suite's admission tests build their
+        // own caches and have to hold six or more viewer pictures on purpose — that is the only
+        // way to reach the declining branch — so an unscoped assert would make the mechanism
+        // untestable rather than make the contract enforced.
+        assert(
+            self !== Self.shared
+                || pictures.keys.filter { $0.tier == .viewer }.count <= 4,
+            "More viewer-tier pictures held than the unit 7 contract allows (3, +1 slack). "
+                + "Past 6 the declining branch becomes reachable and a decline is permanent. "
+                + "See I9."
+        )
+    }
+
+    /// Writes down why there is nothing, bounded.
+    ///
+    /// The entry dropped to stay under the bound is an arbitrary one rather than the oldest:
+    /// `Dictionary.keys` has no order and giving this its own ordering would be a second LRU for
+    /// a negative cache. Losing the wrong refusal costs one extra request; it cannot loop,
+    /// because the entry just written is never the one removed.
+    func note(_ absence: Absence, for key: Key) {
+        missing[key] = absence
+        while missing.count > Self.refusals,
+              let spare = missing.keys.first(where: { $0 != key }) {
+            missing.removeValue(forKey: spare)
+        }
+    }
+
+    private func forgetUnreachable() {
+        guard missing.contains(where: { $0.value == .unreachable }) else { return }
+        missing = missing.filter { $0.value != .unreachable }
+        generation += 1
+    }
+
+    /// Records that somebody asked about this key. Runs inside a view's body, once per visible
+    /// row per frame, so it does no work that grows with what the cache is holding.
+    private func wanted(_ key: Key) {
+        clock += 1
+        interest[key] = clock
+        forget()
+    }
+
+    /// Keeps `interest` bounded, oldest first.
+    ///
+    /// **Never drops a key there is a picture for.** The eviction predicate reads `interest`, so
+    /// a held key missing from it would look infinitely stale and be evictable no matter how
+    /// recently it was drawn — which is the thrash this whole mechanism exists to stop. The
+    /// clause is load-bearing, not tidiness.
+    ///
+    /// Trims to three quarters rather than to the bound, so this does its sorting once every few
+    /// hundred reads instead of on every read once the map is full.
+    private func forget() {
+        guard interest.count > Self.remembered else { return }
+        let target = Self.remembered * 3 / 4
+        let spare = interest
+            .filter { pictures[$0.key] == nil }
+            .sorted { $0.value < $1.value }
+            .map(\.key)
+        for key in spare {
+            interest.removeValue(forKey: key)
+            if interest.count <= target { return }
+        }
+    }
+
+    /// Off the main actor start to finish: a reader scrolling is the one thing this must not
+    /// stand in the way of, and decoding a photograph is long enough to be felt.
+    ///
+    /// `@concurrent` rather than a bare `nonisolated async`, which today means the same thing and
+    /// under a later language mode would not: the function would run on whatever actor called it,
+    /// and what calls this is the main one.
+    @concurrent
+    nonisolated static func load(
+        _ url: URL,
+        using http: any HTTPClient,
+        maxPixels: Int
+    ) async -> Result<CGImage, Absence> {
+        switch await body(url, using: http) {
+        case .success(let data):
+            guard let decoded = decode(data, maxPixels: maxPixels) else { return .failure(.refused) }
+            return .success(decoded)
+        case .failure(let absence):
+            return .failure(absence)
+        }
+    }
+
+    /// What the response carries, and only if it is worth carrying.
+    ///
+    /// The ceiling is enforced on the wire, not here: `live` builds its client with `maxBytes`,
+    /// and the transport refuses a body that declares itself too big before any of it moves, and
+    /// stops one that declared nothing at the byte it trips. This `data.count` check is the last
+    /// belt on a client that does neither — a test fake, or a future transport — and it is what
+    /// makes the guarantee true of every `HTTPClient` and not only of the live one: **nothing
+    /// past `maxBytes` is ever decoded, kept, or drawn.**
+    @concurrent
+    nonisolated static func body(
+        _ url: URL,
+        using http: any HTTPClient
+    ) async -> Result<Data, Absence> {
+        do {
+            let (data, response) = try await http.data(from: url)
+            guard (200 ..< 300).contains(response.statusCode) else { return .failure(.refused) }
+            guard data.count <= maxBytes else { return .failure(.refused) }
+            return .success(data)
+        } catch {
+            return .failure(absence(from: error))
+        }
+    }
+
+    /// A refusal is about the address and is worth remembering; a dark network is about right now
+    /// and is not. Anything that is not plainly the second is treated as the first, because a
+    /// refusal remembered wrongly costs one picture and an outage remembered wrongly costs all of
+    /// them until the app is killed.
+    nonisolated static func absence(from error: any Error) -> Absence {
+        guard let error = error as? URLError else { return .refused }
+        switch error.code {
+        case .notConnectedToInternet, .networkConnectionLost, .timedOut,
+             .cannotFindHost, .dnsLookupFailed:
+            return .unreachable
+        // A reader walking away is not a fact about the address. Nothing here can cancel today —
+        // the work task is unstructured on purpose — so this is insurance against a later change
+        // that makes it cancellable, which would otherwise write a scroll down as a refusal and
+        // leave the row permanently blank.
+        case .cancelled:
+            return .unreachable
+        default:
+            return .refused
+        }
+    }
+
+    /// The first frame of whatever it is, no larger than `maxPixels` on its longest edge and
+    /// never more than four bytes to the pixel.
+    ///
+    /// `ImageIO` rather than `NSImage`/`UIImage` because it is the one API on both platforms that
+    /// reads every format a server sends without being told which it is — and because it is the
+    /// one that can be told to stop short. A thumbnail is never scaled *up*, so a small picture
+    /// comes back at the size it was sent.
+    nonisolated static func decode(_ data: Data, maxPixels: Int) -> CGImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixels,
+        ]
+        guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(
+            source, 0, options as CFDictionary
+        ) else { return nil }
+        return normalise(thumbnail)
+    }
+
+    /// Eight bits to the channel, whatever arrived.
+    ///
+    /// `kCGImageSourceThumbnailMaxPixelSize` caps pixels, not bytes: ImageIO carries a 16-bit
+    /// source's depth straight through the thumbnail, so a hostile instance halves every bound in
+    /// this file for free by sending a 16-bit PNG. Measured: 2048² at 16bpc is 32MB, at 8bpc
+    /// 16MB. Neither `ShouldAllowFloat: false` nor `DecodeRequest: DecodeToSDR` prevents it; both
+    /// were tried. Redrawing does, and it is the only thing that does.
+    ///
+    /// A 16-bit picture at the viewer's full size would be half the entire budget on its own, so
+    /// while it is on screen it is never `order.first` and evicts everything else to stay — which
+    /// is what halved the threshold this guards. Weaker now that the depth cannot survive, but
+    /// the shape of it is why the cap has to be in bytes and not in pixels.
+    ///
+    /// The colour space is carried over, so a Display P3 photograph stays Display P3 — what goes
+    /// is the precision between the 8th and 16th bit, which nothing downstream of here can show.
+    /// An 8-bit source is returned untouched and costs nothing at all. Both fallbacks return the
+    /// original rather than failing the fetch: the cost accounting stays honest either way, and
+    /// only the bound is weaker for that one picture.
+    nonisolated static func normalise(_ image: CGImage) -> CGImage {
+        guard image.bitsPerComponent > 8 else { return image }
+        let space = image.colorSpace.flatMap { $0.supportsOutput ? $0 : nil }
+            ?? CGColorSpace(name: CGColorSpace.sRGB)!
+        guard let context = CGContext(
+            data: nil,
+            width: image.width,
+            height: image.height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: space,
+            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
+                | CGBitmapInfo.byteOrder32Little.rawValue
+        ) else { return image }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        return context.makeImage() ?? image
+    }
+
+    /// Where pictures actually come from, and what refuses every address that is not fetchable —
+    /// which is what keeps a `file:` or `data:` address in somebody's `avatar` field from ever
+    /// being opened.
+    ///
+    /// Built with this caller's own ceiling rather than the transport's default. That default is
+    /// a last line against a hostile instance, not a working size, and a caller asking for a
+    /// thumbnail should say so: left alone it would put the worst case at `maxInFlight` times
+    /// 128 MiB instead of `maxInFlight` times 20.
+    nonisolated static let live: any HTTPClient = URLSessionClient(byteLimit: maxBytes)
+}
+
+/// An avatar, a thumbnail, a picture opened over the app: the same fetch and the same marks
+/// wherever a picture comes off a server rather than out of the bundle.
+///
+/// Drawn from the cache rather than from an `AsyncImage`, so a rebuilt row keeps what it had.
+/// The frame belongs to whoever draws this — the slot is a fixed square, the viewer is whatever
+/// the window is — and all this says is how to fill the space it is handed.
+///
+/// **Do not wrap this in `EquatableView`, and do not move the `cache.picture(…)` read out of
+/// `body`.** Both are the obvious optimisation and both silently restore an unbounded refetch
+/// chain against third-party servers. The cache's admission control depends on every visible
+/// `RemoteImage` re-reading — and so re-stamping its interest — whenever any picture changes.
+/// See `ShellPictures`, I8.
+struct RemoteImage: View {
+    /// What is drawn where a picture is not. A face and a photograph want different marks: a
+    /// person's silhouette over a missing attachment would be worse than no mark at all.
+    enum Standing {
+        case avatar
+        case picture
+    }
+
+    /// What this view is waiting on. The address alone is not it: the cache is keyed by the
+    /// screen and the tier as well, so a window dragged onto a display of another scale wants a
+    /// picture nobody has asked for — and a `.task` keyed on the address would never ask.
+    ///
+    /// `have` is the same problem from the other end. The cache drops what it cannot afford to
+    /// keep, and what it drops can belong to a row still on screen; because `pictures` is
+    /// observed, that row redraws, `have` goes true→false, and this changes. The generation is
+    /// for what no single view can see for itself: a cohort of addresses worth trying again
+    /// because the network came back or room did.
+    private struct Wanted: Equatable {
+        let url: URL?
+        let scale: CGFloat
+        let tier: ShellPictures.Tier
+        let have: Bool
+        let generation: Int
+    }
+
+    let url: URL?
+
+    /// How much picture this call site can afford. **No default on purpose**: a `.deck` default
+    /// quietly makes the viewer soft, and a `.viewer` default quietly lets a row of thumbnails
+    /// decode at full size, each the first time a call site forgets to say. The compiler asks
+    /// instead.
+    let tier: ShellPictures.Tier
+
+    var standing: Standing = .picture
+    var contentMode: ContentMode = .fill
+
+    /// What the author said this picture is. Given one, this stops being decoration and becomes
+    /// something a reader who cannot see it can still be told about.
+    var alt: String?
+    var radius: CGFloat = ShellSpace.tight
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.displayScale) private var displayScale
+
+    private var cache: ShellPictures { .shared }
+
+    var body: some View {
+        let picture = cache.picture(url, scale: displayScale, tier: tier)
+        return Group {
+            if let picture {
+                // The well sits behind it rather than only where a picture is absent: fitted
+                // inside a fixed slot, a picture leaves the rest of that slot over, and what is
+                // left over is this colour and not whatever happens to be under the row.
+                ShellChrome.well(colorScheme).overlay {
+                    picture.resizable().aspectRatio(contentMode: contentMode)
+                }
+            } else if url != nil, !cache.isMissing(url, scale: displayScale, tier: tier) {
+                // Still coming, and there is somewhere for it to come from. The bare plate is the
+                // same one the shell draws under every glyph, and the mark below is what tells a
+                // picture on its way from one that is never arriving.
+                ShellChrome.well(colorScheme)
+            } else {
+                absent
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(alt ?? ""))
+        .accessibilityHidden(alt == nil)
+        .task(
+            id: Wanted(
+                url: url,
+                scale: displayScale,
+                tier: tier,
+                have: picture != nil,
+                generation: cache.generation
+            )
+        ) {
+            await cache.fetch(url, scale: displayScale, tier: tier)
+        }
+    }
+
+    /// Nothing to come, or nothing came. To a reader those are one thing — there is no picture
+    /// here — so they get one mark, and it says which kind of nothing it is. Quiet: it is a fact
+    /// about the row, not a fault anyone has to do something about.
+    private var absent: some View {
+        ShellChrome.well(colorScheme)
+            .overlay {
+                Image(systemName: standing == .avatar ? "person.fill" : "photo")
+                    .font(standing == .avatar ? ShellType.meta : ShellType.body)
+                    .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+            }
+    }
+}
