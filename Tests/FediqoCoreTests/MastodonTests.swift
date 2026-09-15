@@ -24,7 +24,7 @@ struct MastodonTests {
         #expect(notes[0].attachments.isEmpty)
         #expect(notes[1].attachments.map(\.displayURL) == [URL(string: "https://first.example/preview.jpg")])
         #expect(notes[1].attachments.map(\.url) == [URL(string: "https://first.example/full.jpg")])
-        #expect(notes[1].attachments.allSatisfy { $0.kind == .unknown })
+        #expect(notes[1].attachments.allSatisfy { $0.kind == .image })
         let requested = await http.requested
         #expect(requested.first?.path == "/api/v1/timelines/public")
         #expect(requested.first?.query == "limit=40")
@@ -182,9 +182,158 @@ struct MastodonTests {
         #expect(note.attachments[0].previewURL == URL(string: "https://first.example/ok.jpg"))
     }
 
+    @Test("Every type a server sends, and one nobody has heard of — and a gifv is a video")
+    func everyKindDecodes() throws {
+        let note = try Self.note(fixture: "status-media")
+        // The eighth came with neither address and is gone; seven is what is left.
+        #expect(note.attachments.map(\.kind) == [
+            .image, .video, .video, .audio, .unknown, .unknown, .unknown,
+        ])
+        // A gifv is a silent looping MP4, so it plays; the still beside it does not.
+        #expect(note.attachments.map(\.isPlayable) == [
+            false, true, true, true, false, false, false,
+        ])
+    }
+
+    @Test("Alt text written, written empty, and never written are three different answers")
+    func altTextIsWhatTheAuthorWrote() throws {
+        let note = try Self.note(fixture: "status-media")
+        #expect(note.attachments.map(\.alt) == [
+            "a cat asleep on a wall", "", "", "a field recording", "", "", "",
+        ])
+    }
+
+    @Test("A shape is both halves, both positive, or it is no shape at all")
+    func pixelSizeNeedsBothHalves() throws {
+        let note = try Self.note(fixture: "status-media")
+        // Told properly; told about a square; not told; told zero; told half; told nothing
+        // inside `meta`; and sent no `meta` at all. Only the first two said a shape.
+        #expect(note.attachments.map(\.width) == [1920, 480, nil, nil, nil, nil, nil])
+        #expect(note.attachments.map(\.height) == [1080, 480, nil, nil, nil, nil, nil])
+        #expect(note.attachments[0].aspect == 0.5625)
+        #expect(note.attachments[2].aspect == nil)
+    }
+
+    @Test("An attachment described at length and addressed nowhere is still nothing to draw")
+    func describedButAddresslessIsDropped() throws {
+        let note = try Self.note(fixture: "status-media")
+        #expect(note.attachments.count == 7)
+        #expect(note.attachments.allSatisfy { !$0.alt.contains("nowhere to be found") })
+    }
+
+    @Test("Sensitive is true, false, or never said — and never said is not false")
+    func sensitiveKeepsItsThirdAnswer() throws {
+        #expect(try Self.note(Self.status(extra: #""sensitive": true"#)).sensitive == true)
+        #expect(try Self.note(Self.status(extra: #""sensitive": false"#)).sensitive == false)
+
+        let silent = try Self.note(Self.status())
+        #expect(silent.sensitive == nil)
+        // The whole point of the option: a server with no such idea has not said the post is
+        // safe to look at, and reading its silence as a no would uncover what nobody uncovered.
+        #expect(silent.sensitive != false)
+    }
+
+    @Test("A spoiler line, an empty one, and none at all are three different answers")
+    func spoilerKeepsItsThirdAnswer() throws {
+        #expect(try Self.note(Self.status(extra: #""spoiler_text": "eye contact""#)).spoiler == "eye contact")
+
+        let said = try Self.note(Self.status(extra: #""spoiler_text": """#))
+        #expect(said.spoiler == "")
+
+        let silent = try Self.note(Self.status())
+        #expect(silent.spoiler == nil)
+        // A server saying the line is empty is a server that answered; one that never sent the
+        // key did not. Collapsed together, the second would draw a cover nobody put on.
+        #expect(silent.spoiler != "")
+    }
+
+    @Test("A status's pictures and its author's are one alphabet, and a shortcode means one of them")
+    func statusAndAccountEmojiFoldTogether() throws {
+        let note = try Self.note("""
+        {
+          "id": "6",
+          "uri": "https://first.example/users/ada/statuses/6",
+          "created_at": "2024-01-01T00:00:00.000Z",
+          "content": "<p>:blobcat: and :wave:</p>",
+          "account": {
+            "username": "ada", "acct": "ada", "display_name": "Ada :wave:",
+            "emojis": [
+              { "shortcode": "wave", "url": "https://first.example/wave.png" },
+              { "shortcode": "blobcat", "url": "https://first.example/other-blobcat.png" }
+            ]
+          },
+          "emojis": [
+            { "shortcode": "blobcat", "url": "https://first.example/blobcat.png",
+              "static_url": "https://first.example/blobcat-still.png" }
+          ]
+        }
+        """)
+        #expect(note.emojis.map(\.shortcode) == ["blobcat", "wave"])
+        // Named twice, drawn once, and the status's own spelling is the one kept.
+        #expect(note.emojis[0].url == URL(string: "https://first.example/blobcat.png"))
+        #expect(note.emojis[0].staticURL == URL(string: "https://first.example/blobcat-still.png"))
+        #expect(note.emojis[1].staticURL == nil)
+    }
+
+    @Test("An emoji this device will not fetch is an emoji with no picture")
+    func unfetchableEmojiIsDropped() throws {
+        let note = try Self.note(fixture: "status-boost")
+        // `file:` and `http:` are refused at the wire exactly as an attachment's address is —
+        // the same cache fetches both. A shortcode kept with no picture behind it draws a
+        // blank where the author wrote a word, so it goes with the address.
+        #expect(!note.emojis.map(\.shortcode).contains("nowhere"))
+        #expect(!note.emojis.map(\.shortcode).contains("plain"))
+        // A picture with no name is one nothing in the words can ever spell.
+        #expect(note.emojis.allSatisfy { !$0.shortcode.isEmpty })
+        // A refused *still* is only a still we have not got; the emoji itself still has a file.
+        let wave = try #require(note.emojis.first { $0.shortcode == "wave" })
+        #expect(wave.url == URL(string: "https://author.example/wave.png"))
+        #expect(wave.staticURL == nil)
+    }
+
+    @Test("A boost draws three accounts' words, so it carries three accounts' pictures")
+    func boostCarriesEveryAlphabetTheRowDraws() throws {
+        let note = try Self.note(fixture: "status-boost")
+        // The boosted status's own list spells its body and its spoiler line; its author's
+        // spells the name drawn as the author; and the booster's spells the name drawn as
+        // `boostedBy`. All three reach the row, so all three are here.
+        #expect(note.emojis.map(\.shortcode) == ["blobcat", "wave", "trumpet"])
+        #expect(note.author == "Ada :wave:")
+        #expect(note.boostedBy == "Cyd :trumpet:")
+        // The booster's *status* emojis are not among them: nothing on the row is written in
+        // the wrapper's words, because a boost has no words of its own.
+        #expect(!note.emojis.map(\.shortcode).contains("wrapper"))
+        // `blobcat` is registered on both servers. One list per note cannot hold two pictures
+        // for one name, and the boosted status wins because the body is what it spells.
+        #expect(note.emojis[0].url == URL(string: "https://author.example/blobcat.png"))
+        // The cover is the boosted post's, never the wrapper's: a booster cannot uncover
+        // somebody else's post, and the wrapper here says `true` and a line of its own.
+        #expect(note.sensitive == false)
+        #expect(note.spoiler == "")
+    }
+
     private static func note(_ json: String) throws -> Note {
         let dto = try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(json.utf8))
         return dto.asNote(source: Source(host: "first.example", kind: .mastodon), origin: .publicTimeline)
+    }
+
+    private static func note(fixture: String) throws -> Note {
+        let dto = try MastodonJSON.decoder.decode(StatusDTO.self, from: Fixtures.json(fixture))
+        return dto.asNote(source: Source(host: "first.example", kind: .mastodon), origin: .publicTimeline)
+    }
+
+    /// The smallest status a decoder will take, with one more key spliced in. For the cases
+    /// that turn on a single field and would otherwise be a file of boilerplate around it.
+    private static func status(extra: String = "") -> String {
+        """
+        {
+          "id": "1",
+          "uri": "https://first.example/users/ada/statuses/1",
+          "created_at": "2024-01-01T00:00:00.000Z",
+          "content": "<p>x</p>",
+          "account": { "username": "ada", "acct": "ada", "display_name": "Ada" }\(extra.isEmpty ? "" : ",\n  " + extra)
+        }
+        """
     }
 
     private static func status(visibility: String) -> String {
