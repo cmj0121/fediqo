@@ -16,10 +16,12 @@ public struct MastodonJoin: Sendable {
 
     private let http: any HTTPClient
     private let store: ItemStore
+    private let catalogues: EmojiCatalogueStore
 
-    public init(http: any HTTPClient, store: ItemStore) {
+    public init(http: any HTTPClient, store: ItemStore, catalogues: EmojiCatalogueStore) {
         self.http = http
         self.store = store
+        self.catalogues = catalogues
     }
 
     public func join(host raw: String) async throws {
@@ -81,5 +83,12 @@ public struct MastodonJoin: Sendable {
 
         await store.add(source)
         await store.ingest(publicNotes + trendingNotes)
+
+        // Last, and not waited for. The reader pressed a button to get a timeline and the
+        // timeline is now in the store; a catalogue is the largest of the answers a big
+        // instance sends, and holding the join open for it would spend the reader's whole wait
+        // on pictures for shortcodes that may not be on the page. Asked only for a server that
+        // was actually joined, so a host this device refused leaves nothing behind.
+        await catalogues.refresh(host: host) { try await client.customEmojis() }
     }
 }

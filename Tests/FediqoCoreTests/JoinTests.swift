@@ -7,7 +7,8 @@ struct JoinTests {
     @Test("Overlapping uri is one All row with both origins, and it is a trend")
     func overlappingURI() async throws {
         let store = ItemStore()
-        try await MastodonJoin(http: Self.joinHTTP(), store: store).join(host: "first.example")
+        try await MastodonJoin(http: Self.joinHTTP(), store: store, catalogues: EmojiCatalogueStore())
+            .join(host: "first.example")
         let all = await store.all()
         #expect(all.map(\.id) == [
             "https://first.example/users/bob/statuses/new",
@@ -30,7 +31,8 @@ struct JoinTests {
     @Test("All and Trends sort by postedAt descending, not API array order")
     func storeTimeNotAPIOrder() async throws {
         let store = ItemStore()
-        try await MastodonJoin(http: Self.joinHTTP(), store: store).join(host: "first.example")
+        try await MastodonJoin(http: Self.joinHTTP(), store: store, catalogues: EmojiCatalogueStore())
+            .join(host: "first.example")
         let allTimes = await store.all().map(\.postedAt)
         let trendIDs = await store.trends().map(\.id)
         let trendTimes = await store.trends().map(\.postedAt)
@@ -47,7 +49,8 @@ struct JoinTests {
         let store = ItemStore()
         try await MastodonJoin(
             http: Self.joinHTTP(trending: .text("no", status: 404)),
-            store: store
+            store: store,
+            catalogues: EmojiCatalogueStore()
         ).join(host: "first.example")
         #expect(await store.trends().isEmpty)
         #expect(await store.all().map(\.id) == [
@@ -64,7 +67,8 @@ struct JoinTests {
         await #expect(throws: JoinError.publicTimelineFailed) {
             try await MastodonJoin(
                 http: Self.joinHTTP(publicTimeline: .text("no", status: 404)),
-                store: store
+                store: store,
+                catalogues: EmojiCatalogueStore()
             ).join(host: "first.example")
         }
         #expect(await store.sources().isEmpty)
@@ -80,7 +84,8 @@ struct JoinTests {
             "/api/v1/timelines/public": .body(Fixtures.json("public-timeline")),
         ])
         await #expect(throws: JoinError.unsupportedKind(.pleroma)) {
-            try await MastodonJoin(http: http, store: store).join(host: "pleroma.example")
+            try await MastodonJoin(http: http, store: store, catalogues: EmojiCatalogueStore())
+                .join(host: "pleroma.example")
         }
         #expect(JoinError.unsupportedKind(.pleroma) != .unsupportedKind(.unknown))
         #expect(ProtocolKind.pleroma.displayName == "Pleroma")
@@ -96,7 +101,8 @@ struct JoinTests {
             "/api/v2/instance": .body(Fixtures.json("instance-pleroma")),
         ])
         await #expect(throws: JoinError.unsupportedKind(.pleroma)) {
-            try await MastodonJoin(http: http, store: store).join(host: "pleroma.example")
+            try await MastodonJoin(http: http, store: store, catalogues: EmojiCatalogueStore())
+                .join(host: "pleroma.example")
         }
         #expect(await store.sources().isEmpty)
     }
@@ -104,7 +110,7 @@ struct JoinTests {
     @Test("Joining the same host again ingests and does not duplicate the source")
     func joinTwice() async throws {
         let store = ItemStore()
-        let join = MastodonJoin(http: Self.joinHTTP(), store: store)
+        let join = MastodonJoin(http: Self.joinHTTP(), store: store, catalogues: EmojiCatalogueStore())
         try await join.join(host: "https://first.example/about")
         try await join.join(host: "first.example")
         #expect(await store.sources().count == 1)
@@ -116,10 +122,12 @@ struct JoinTests {
         let store = ItemStore()
         let dead = FixtureHTTP(["/": .fail, "/api/v2/instance": .fail])
         await #expect(throws: JoinError.invalidHost) {
-            try await MastodonJoin(http: dead, store: store).join(host: "http://first.example")
+            try await MastodonJoin(http: dead, store: store, catalogues: EmojiCatalogueStore())
+                .join(host: "http://first.example")
         }
         await #expect(throws: JoinError.unreachable) {
-            try await MastodonJoin(http: dead, store: store).join(host: "gone.example")
+            try await MastodonJoin(http: dead, store: store, catalogues: EmojiCatalogueStore())
+                .join(host: "gone.example")
         }
         #expect(await store.sources().isEmpty)
     }
@@ -131,13 +139,15 @@ struct JoinTests {
         await #expect(throws: JoinError.publicTimelineFailed) {
             try await MastodonJoin(
                 http: Self.joinHTTP(publicTimeline: .text("no", status: 401)),
-                store: ItemStore()
+                store: ItemStore(),
+                catalogues: EmojiCatalogueStore()
             ).join(host: "first.example")
         }
         await #expect(throws: JoinError.unreachable) {
             try await MastodonJoin(
                 http: Self.joinHTTP(publicTimeline: .fail),
-                store: ItemStore()
+                store: ItemStore(),
+                catalogues: EmojiCatalogueStore()
             ).join(host: "first.example")
         }
         // 200, and a body that is not a timeline. The host answered; the reader must
@@ -145,7 +155,8 @@ struct JoinTests {
         await #expect(throws: JoinError.publicTimelineFailed) {
             try await MastodonJoin(
                 http: Self.joinHTTP(publicTimeline: .text("<html>a proxy page</html>")),
-                store: ItemStore()
+                store: ItemStore(),
+                catalogues: EmojiCatalogueStore()
             ).join(host: "first.example")
         }
     }

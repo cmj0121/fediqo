@@ -27,6 +27,37 @@ public struct MastodonClient: Sendable {
         )
     }
 
+    /// Every shortcode this server has registered, folded the way a status's own list is.
+    ///
+    /// This is what resolves a shortcode that arrived with no list beside it. A status carries
+    /// its own pictures and costs nothing extra, but a name also turns up where no such list
+    /// came with it, and only the server's own catalogue can answer for those.
+    ///
+    /// Unauthenticated on every Mastodon server, and **optional**: a fork that does not serve it
+    /// answers 404, which is thrown here for the caller to survive. A source with no catalogue
+    /// simply has none.
+    ///
+    /// `visible_in_picker` and `category` are on the wire and are not read. Both exist to
+    /// arrange an emoji picker — which ones to offer, and under which heading — and this app has
+    /// no picker: a reader here never chooses an emoji, only reads one somebody else wrote.
+    /// Keeping them would put two fields in `CustomEmoji` that no screen can draw and every test
+    /// would have to carry. A build that grows a composer with a picker adds them then, against
+    /// a screen that uses them.
+    public func customEmojis() async throws -> [CustomEmoji] {
+        guard let url = Host.httpsURL(host: host, path: "/api/v1/custom_emojis") else {
+            throw MastodonRequestError.invalidURL
+        }
+        let (data, response) = try await http.data(from: url)
+        guard (200..<300).contains(response.statusCode) else {
+            throw MastodonRequestError.http(response.statusCode)
+        }
+        // The same wire object a status carries, with the same rule applied to its addresses:
+        // an emoji this device will not fetch a picture for is a shortcode that can never
+        // resolve, and is dropped rather than indexed.
+        let wire = try MastodonJSON.decoder.decode([StatusDTO.Emoji].self, from: data)
+        return CustomEmoji.folded(wire.compactMap(\.asEmoji))
+    }
+
     private func statuses(
         path: String,
         limit: Int,
