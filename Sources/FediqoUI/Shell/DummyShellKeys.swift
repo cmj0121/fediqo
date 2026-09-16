@@ -1,4 +1,5 @@
 import SwiftUI
+import WebKit
 #if os(macOS)
 import AppKit
 #endif
@@ -69,7 +70,10 @@ private struct DummyKeyMonitor: ViewModifier {
                     let shift = event.modifierFlags.contains(.shift)
                     let control = event.modifierFlags.contains(.control)
                     let kept = MainActor.assumeIsolated {
-                        handle(character, shift, control)
+                        // Asked here rather than in the guard above because a responder chain is
+                        // main-actor's, and this closure is not on it until this point.
+                        guard !dummyWebIsTyping(event.window?.firstResponder) else { return false }
+                        return handle(character, shift, control)
                     }
                     return kept ? nil : event
                 }
@@ -79,6 +83,36 @@ private struct DummyKeyMonitor: ViewModifier {
                 monitor = nil
             }
     }
+}
+
+/// Whether a web view is what the keyboard is talking to.
+///
+/// **A local monitor is the whole application's, not this view's.** It sees the key down for every
+/// window the app has open, which is what `isSheet` was already working around — and the moment
+/// the sign-in page moved out of a sheet and into a window of its own, the exemption stopped
+/// covering it and the shell ate every letter the reader typed at a login form. A reader could not
+/// type `v`, `a`, `m` or `s` into their own password.
+///
+/// Asking about the web view rather than about the window is the rule that does not need patching
+/// again for the next auxiliary window: **a page being typed into owns its own keys**, wherever it
+/// is drawn. The chain is walked upward because the first responder inside a `WKWebView` is one of
+/// WebKit's own internal views, not the `WKWebView` itself.
+///
+/// It deliberately says nothing about text fields. The shell's own fields are inside the shell and
+/// handled by `DummyCommand`, which knows when one has focus; this is only about a subtree this
+/// app does not own and cannot reason about.
+@MainActor
+func dummyWebIsTyping(_ responder: NSResponder?) -> Bool {
+    var current = responder
+    // Bounded rather than `while let`: a responder chain is a linked list built by other people's
+    // code, and a cycle in one would hang the key handler for the whole app rather than drop a
+    // keystroke. Sixteen is far past any real chain.
+    for _ in 0..<16 {
+        guard let responder = current else { return false }
+        if responder is WKWebView { return true }
+        current = responder.nextResponder
+    }
+    return false
 }
 
 /// Tab and Escape by key code: Shift-Tab types backtab, and modifiers turn Tab into a control character.

@@ -446,4 +446,45 @@ struct ForumJoinTests {
         }
         #expect(await store.sources().isEmpty)
     }
+
+    // MARK: - A host behind a filter
+
+    @Test("A challenge at the front door is a refusal, not an unknown protocol")
+    func aChallengedHostIsRefusedNotUnknown() async throws {
+        // The live case this exists for: `challenge.example` answers a challenge page to every path,
+        // including `/robots.txt`. A challenge names no software, so every marker
+        // `HTMLKind.classify` looks for is absent and the detector used to fall through to
+        // `.unknown` — which tells the reader to check their spelling for a host whose spelling
+        // is fine, and closes the only door that opens: a sign-in is offered on a refusal and on
+        // nothing else.
+        let store = ItemStore()
+        let http = FixtureHTTP(["/": .body(Fixtures.html("challenge"), status: 403)])
+
+        await #expect(throws: JoinError.refused(403)) {
+            try await SourceJoin(http: http, store: store, catalogues: EmojiCatalogueStore())
+                .join(host: "closed.example")
+        }
+        #expect(await store.sources().isEmpty)
+    }
+
+    @Test("A challenge dressed as a 200 is still a refusal")
+    func aChallengeAt200IsStillARefusal() async throws {
+        // Cloudflare serves the interstitial at 403 on some paths and 200 on others. Reporting
+        // the literal status would tell the reader a challenge had worked.
+        let store = ItemStore()
+        let http = FixtureHTTP(["/": .body(Fixtures.html("challenge"))])
+        await #expect(throws: JoinError.refused(403)) {
+            try await SourceJoin(http: http, store: store, catalogues: EmojiCatalogueStore())
+                .join(host: "closed.example")
+        }
+    }
+
+    @Test("A forum that names itself is named, even from behind a filter")
+    func softwareMarkersWinOverTheFilter() async throws {
+        // The ordering that matters: a forum merely *sitting behind* a filter still serves its
+        // own front page most of the time, and naming itself is a better answer than naming its
+        // filter. The challenge judgement is only reached when the page named nothing.
+        let http = FixtureHTTP(["/": .body(Fixtures.html("discuz"))])
+        #expect(try await Detector(http: http).detect("install-a.example") == .discuz)
+    }
 }

@@ -34,12 +34,23 @@ struct ForumSignInSheet: View {
             header
             Divider()
             ForumWebViewBox(engine: engine)
-                .frame(minHeight: 320)
+                // **Ideal, not fixed.** A forum's login page is a real web page written for a
+                // browser window, and 520 points wide was making one read like a phone site
+                // inside a desktop app. 800×600 is what it opens at where there is room for it.
+                //
+                // The minimums stay small on purpose: a fixed 800 would be wider than the screen
+                // on every phone, which is the one thing this project's layout rule forbids
+                // outright. On a compact screen the sheet fills the screen and the ideal is
+                // simply never reached — the same page, drawn in what there is.
+                .frame(minWidth: 320, idealWidth: 800, minHeight: 320, idealHeight: 600)
                 .accessibilityLabel(Text(String(format: L10n.t("forum.signin.web.label"), request.host)))
             Divider()
             footer
         }
-        .frame(minWidth: 520, minHeight: 560)
+        // Lower than the 520×560 that stood here, and that is the point: the ideal above is what
+        // decides the opening size now, and a floor that high stopped a reader making the window
+        // small when they wanted to see what was behind it.
+        .frame(minWidth: 380, minHeight: 480)
         .task { await open() }
     }
 

@@ -171,7 +171,8 @@ final class ShellSession {
         checking = true
         defer { checking = false }
         do {
-            try await SourceJoin(http: http, store: store, catalogues: emoji).join(host: raw)
+            try await SourceJoin(http: joiner(for: parsed), store: store, catalogues: emoji)
+                .join(host: raw)
             sources = await store.sources()
             notes = await store.all()
             if queries.isEmpty {
@@ -190,6 +191,22 @@ final class ShellSession {
         } catch {
             refuse = L10n.t("account.refuse.network")
         }
+    }
+
+    /// Which client a join reads through: the browser engine where this reader has already
+    /// signed in to that host, and the ordinary one everywhere else.
+    ///
+    /// **It has to be the engine, and nothing else can stand in for it.** A host behind an
+    /// interactive challenge cannot be read by `URLSessionClient` at all — not with a different
+    /// agent, not with a copied cookie. The challenge is cleared by a person in a browser, and
+    /// the only thing holding what that produced is the engine they cleared it in. Reading a
+    /// second time through anything else gets the challenge back.
+    ///
+    /// **`hasEngine` rather than `transport`**, because `transport(host:)` would *build* one: a
+    /// reader adding an ordinary microblog would silently start a web process for a host that
+    /// never needed it, and this app does not spend a reader's battery on a maybe.
+    private func joiner(for host: String) -> any HTTPClient {
+        forums.hasEngine(host: host) ? forums.transport(host: host) : http
     }
 
     /// Drops everything this device holds from one server — decision 14, in one place.

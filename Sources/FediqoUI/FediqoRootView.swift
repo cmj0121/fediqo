@@ -10,6 +10,11 @@ public struct FediqoRootView: View {
     @State private var jumpToTop = 0
     @State private var composing = false
     @State private var showingShortcuts = false
+    #if os(macOS)
+    /// Owns the sign-in window so that it outlives the body that opened it — a window held only
+    /// by a view's local is a window that closes the next time SwiftUI rebuilds.
+    @State private var signInWindows = ForumSignInWindows()
+    #endif
     @State private var railExpanded = false
     /// Which card each row's deck is turned to, and which rows the reader has uncovered. Held
     /// here rather than in the list, because a list is replaced by every refresh and `m` and `s`
@@ -76,11 +81,29 @@ public struct FediqoRootView: View {
             // the day a forum's session lapses mid-scroll — so a sheet attached to either pane
             // would be a sheet that does not open from the other. One presenter, driven by one
             // piece of session state, is the shape that survives both call sites.
+            // **A window on macOS, a sheet on iOS**, and the split is about what the reader can
+            // do rather than about taste: a macOS sheet cannot be resized by anybody, and what is
+            // inside this one is somebody else's login page drawn at whatever size this app
+            // guessed. A reader who could not see the password field had no way to make it
+            // bigger. On iOS a sheet already fills the screen, so there is nothing a window would
+            // add. See `ForumSignInWindows`.
+            #if os(macOS)
+            .onChange(of: session.signingIn) { _, request in
+                if let request {
+                    signInWindows.show(request, sessions: session.forums) { reached in
+                        session.signInFinished(reached: reached)
+                    }
+                } else {
+                    signInWindows.close()
+                }
+            }
+            #else
             .sheet(item: $session.signingIn) { request in
                 ForumSignInSheet(request: request, sessions: session.forums) { reached in
                     session.signInFinished(reached: reached)
                 }
             }
+            #endif
             .overlay {
                 if showingShortcuts {
                     ShortcutGuide { showingShortcuts = false }

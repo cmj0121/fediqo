@@ -46,6 +46,10 @@ public struct MastodonJoin: Sendable {
             switch error {
             case .invalidHost: throw JoinError.invalidHost
             case .unreachable: throw JoinError.unreachable
+            // 403 because that is the number refusal means in this app — see `DiscuzJoin`'s own
+            // rule. A challenge is routinely dressed as a 200, so its literal status is not worth
+            // carrying; what the reader needs is the sentence that offers them a sign-in.
+            case .challenged: throw JoinError.refused(403)
             }
         } catch {
             throw JoinError.unreachable
@@ -496,6 +500,10 @@ public struct SourceJoin: Sendable {
             switch error {
             case .invalidHost: throw JoinError.invalidHost
             case .unreachable: throw JoinError.unreachable
+            // 403 because that is the number refusal means in this app — see `DiscuzJoin`'s own
+            // rule. A challenge is routinely dressed as a 200, so its literal status is not worth
+            // carrying; what the reader needs is the sentence that offers them a sign-in.
+            case .challenged: throw JoinError.refused(403)
             }
         } catch {
             throw JoinError.unreachable
