@@ -561,4 +561,61 @@ struct EmojiCatalogueTests {
             "/api/v1/custom_emojis": catalogue,
         ])
     }
+
+    // MARK: - Leaving a wait
+
+    @Test("A waiter that is cancelled leaves, and does not sit on a server that never answers",
+          .timeLimit(.minutes(1)))
+    func aCancelledWaiterLeaves() async throws {
+        // The leak this closes: waiting used to be `await task.value`, which honours nobody's
+        // cancellation but the fetch's own. A screen that joins and leaves against a dripping
+        // server parked one task per visit, for the life of the process.
+        let store = EmojiCatalogueStore()
+        let parked = AsyncStream<Void>.makeStream()
+        await store.refresh(host: "slow.example") {
+            // Never answers, and is never cancelled: `forget` is not called here, because the
+            // point is the *waiter* leaving rather than the fetch being called off.
+            for await _ in parked.stream {}
+            return []
+        }
+
+        let waiting = Task { await store.settle(host: "slow.example") }
+        // Cancelling is the whole test: without a ticket of its own this never returns.
+        waiting.cancel()
+        await waiting.value
+
+        // The fetch is still on its way — one reader giving up does not call it off for the
+        // others, and a catalogue half-fetched is worth no less because one screen stopped
+        // looking.
+        #expect(await store.isFetching(host: "slow.example"))
+        parked.continuation.finish()
+    }
+
+    @Test("A waiter is woken when the fetch ends, including when it was called off",
+          .timeLimit(.minutes(1)))
+    func everyEndingWakesTheWaiters() async throws {
+        // A waiter nobody resumes is not a slow wait, it is a hang, and this project's risks
+        // record that `.timeLimit` is not a hang guard. So every path out of the fetch wakes
+        // them, and the cancelled path is the one easiest to forget.
+        let store = EmojiCatalogueStore()
+        let parked = AsyncStream<Void>.makeStream()
+        await store.refresh(host: "slow.example") {
+            for await _ in parked.stream {}
+            return []
+        }
+
+        let first = Task { await store.settle(host: "slow.example") }
+        let second = Task { await store.settle(host: "slow.example") }
+        // `forget` cancels the fetch. Both waiters must still be told it is over.
+        await store.forget(host: "slow.example")
+        parked.continuation.finish()
+        await first.value
+        await second.value
+    }
+
+    @Test("Waiting on a host with nothing on its way is not a wait", .timeLimit(.minutes(1)))
+    func nothingOnItsWayIsNoWait() async {
+        let store = EmojiCatalogueStore()
+        await store.settle(host: "quiet.example")
+    }
 }
