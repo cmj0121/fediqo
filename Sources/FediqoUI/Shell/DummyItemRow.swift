@@ -13,6 +13,13 @@ struct DummyItemRow: View {
     /// owns the wait; the row cannot do it itself — see `resolve`. Per host rather than a counter
     /// for the pane, so a slow instance cannot hold up a row reading through a quick one.
     var catalogueSettled: Bool = false
+    /// Where a forum thread's opening post is fetched and kept — D30.
+    ///
+    /// Handed in rather than reached for as a shared instance, for the reason `ShellSession`
+    /// holds the two picture caches: what Preferences reports and what Clear empties have to be
+    /// the same object by construction, and a preview or a test wired to its own cache would
+    /// otherwise press one and draw the other.
+    let posts: ForumPosts
     @Binding var marks: DummyMarks
     var selected: Bool = false
     /// Which attachment is on top. It belongs to the app rather than to this view, so that a
@@ -412,7 +419,31 @@ struct DummyItemRow: View {
     private func mainBox(_ written: Written) -> some View {
         if narrow {
             VStack(alignment: .leading, spacing: ShellSpace.snug) {
-                coveredWords(written)
+                // **A post that arrives with the list may size its row; a post that arrives
+                // after the row is on screen may not.** That is the whole of the rule, and it is
+                // what splits these two branches.
+                //
+                // A phone in portrait sizes the words band to the words — deliberately, and
+                // since before any of this: there is no room for a second column, and a long
+                // post has always made a tall row here. That is harmless because the row is
+                // drawn once, at its final height, before the reader ever sees it.
+                //
+                // A forum thread's opening post is the case where it stops being harmless. It
+                // lands a beat after the row is on screen, under the thumb that is scrolling the
+                // list, and a band that grew when it landed would push everything below it —
+                // which is the one thing this unit is not allowed to do. So this kind of row
+                // takes the wide layout's fitting on a phone as well: the same `Box.thumb` band,
+                // held open and clipped, so the four states measure one height on every
+                // platform. The cost, stated: a long first post is truncated on a phone where a
+                // long microblog post is not, and the rest of it is one press away in the
+                // thread — which is what `bodyLines` says about the wide layout too.
+                if thread != nil {
+                    coveredWords(written)
+                        .frame(height: thumbSide, alignment: .top)
+                        .clipped()
+                } else {
+                    coveredWords(written)
+                }
                 if item.hasThumb { coveredThumb }
             }
         } else {
@@ -685,14 +716,36 @@ struct DummyItemRow: View {
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                     .lineLimit(1)
             }
-            EmojiText(item.body, emojis: written.body, host: host)
-                .foregroundStyle(
-                    item.title == nil ? ShellChrome.ink(colorScheme) : ShellChrome.inkDim(colorScheme)
-                )
-                .lineLimit(narrow ? nil : bodyLines)
+            // **A forum thread's words are not in hand and are fetched; everything else's came
+            // with the post.** The two are drawn by different views because they are different
+            // facts: a microblog post's body is a string that is either empty or is the words,
+            // and a thread's is one of five states — not here yet, the words, withheld, no words
+            // at all, or a reason there are none. See `ForumPostBand`.
+            //
+            // **Plain `Text` inside that band, not `EmojiText`.** A Discuz! post carries no
+            // custom-emoji list and the forum has no `/api/v1/custom_emojis` for a catalogue to
+            // answer out of, so scanning a stranger's post for shortcodes that can never resolve
+            // would be work with no possible result — and would put a picture in a line on the
+            // strength of a colon somebody typed.
+            if let thread {
+                ForumPostBand(thread: thread, posts: posts, lines: bodyLines)
+            } else {
+                EmojiText(item.body, emojis: written.body, host: host)
+                    .foregroundStyle(
+                        item.title == nil ? ShellChrome.ink(colorScheme) : ShellChrome.inkDim(colorScheme)
+                    )
+                    .lineLimit(narrow ? nil : bodyLines)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
+
+    /// The thread this row stands on, where it stands on one this device can go and read.
+    ///
+    /// Nothing for a microblog post, and nothing for a Discourse thread: both forums draw as
+    /// `.forum` because the shape is where the protocol stops mattering, but a `tid` is Discuz!'s
+    /// number and `DiscuzClient` is what answers for it. See `ForumThreadRef`.
+    var thread: ForumThreadRef? { ForumThreadRef(item) }
 
     /// What fits in the slot's height beside it. A row that grows to whatever somebody
     /// wrote makes the list a series of unrelated heights; the rest of the post is a

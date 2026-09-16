@@ -117,12 +117,48 @@ struct BoardPickerSheet: View {
             .background(ShellChrome.well(colorScheme))
     }
 
+    /// How far a board under a board is set in.
+    ///
+    /// One step and only one: `DiscuzBoard.depth` stops at 1 because a Discuz! index writes a
+    /// board's *direct* children and no further, so a second rung here would be a claim this
+    /// device cannot support. `ShellSpace.room` rather than a new number — it is the scale's own
+    /// "around something that has to stand alone", and a child board is exactly that.
+    private static let rung = ShellSpace.room
+
+    /// One board, and — **D29** — one board under a board, set in and pickable in its own right.
+    ///
+    /// **Indented, and still individually selectable.** A parent's `forumdisplay` does not
+    /// include its children's threads, verified live: `install-d.example` board 300 (拼音输入法) is a
+    /// child of 297 and answers with sixty-three threads of its own, none of which appear under
+    /// 297. So a tick on the parent that quietly meant nine boards would be either a lie about
+    /// what the reader subscribed to or nine boards' worth of traffic they did not ask for. They
+    /// are separate `fid`s in Discuz! and they are separate picks here.
+    ///
+    /// **These rows are emptier than their neighbours and that is the honest cost of listing
+    /// them.** On the index a sub-board is a bare name: no thread count, no post count, no
+    /// last-post time. `figures` already draws a stated figure and nothing at all where the forum
+    /// stated nothing, so a child row usually falls to the "this forum stated no figures" line —
+    /// which is true, and is what makes the row judgeable rather than merely present.
+    ///
+    /// Only one of the four installs measured has any children at all — `install-d.example`, 23 boards
+    /// with 39 under them — so on three of four forums nothing on this screen changes.
     private func row(_ board: DiscuzBoard) -> some View {
         let on = picked.contains(board.fid)
         return Button {
             if on { picked.remove(board.fid) } else { picked.insert(board.fid) }
         } label: {
             HStack(alignment: .top, spacing: ShellSpace.step) {
+                // The set-in is a leading pad on the row's own content rather than on the button,
+                // so the whole width of the row stays pressable: a child board whose hit area
+                // started a rung in would be a smaller target than its parent for no reason a
+                // reader could see.
+                if board.depth > 0 {
+                    Rectangle()
+                        .fill(ShellChrome.hairline(colorScheme))
+                        .frame(width: ShellSpace.hair)
+                        .padding(.leading, Self.rung - ShellSpace.snug)
+                        .accessibilityHidden(true)
+                }
                 tick(on)
                 VStack(alignment: .leading, spacing: ShellSpace.tight) {
                     Text(board.name)
@@ -145,6 +181,25 @@ struct BoardPickerSheet: View {
         .buttonStyle(.plain)
         .accessibilityAddTraits(on ? [.isSelected] : [])
         .accessibilityHint(Text(L10n.t(on ? "board.choose.hint.off" : "board.choose.hint.on")))
+        // The set-in says "under that one" to a reader who can see the list. A reader who cannot
+        // gets one row after another with no geometry at all, so the nesting has to be in words
+        // or it is not there for them — and it is the fact that decides whether a pick is
+        // sensible, because a child is not included in its parent.
+        .accessibilityLabel(Text(spoken(board)))
+    }
+
+    /// What a row says out loud: its name, and whose board it sits under where it sits under one.
+    ///
+    /// Named by the **parent's name and not its number**: a reader is being told where they are
+    /// in a list they can see the rest of, and `fid` 297 means nothing to anybody. Where the
+    /// parent is not on this list — which the index's own reading order makes impossible, and
+    /// which is checked rather than assumed — the row falls back to its name alone rather than to
+    /// a sentence with a hole in it.
+    func spoken(_ board: DiscuzBoard) -> String {
+        guard let parent = board.parent,
+              let above = offer.boards.first(where: { $0.fid == parent })
+        else { return board.name }
+        return String(format: L10n.t("board.choose.under"), board.name, above.name)
     }
 
     /// The tick: a milled plate, filled when it is on. A square well and not a round checkmark,

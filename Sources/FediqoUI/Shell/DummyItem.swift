@@ -208,9 +208,16 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// it: the source joins, the threads arrive, and every one of them is drawn as somebody's
     /// words with its title nowhere. `DummyItemTests` pins both.
     private static func shape(of kind: ProtocolKind) -> DummySourceKind {
+        // **No `default:`, and this one was written down as fixed while it was not.** The rule
+        // exists because this exact function once mapped only `.discourse` and drew a whole
+        // Discuz! forum as microblog posts with every title missing, and the compiler said
+        // nothing. A `default:` here is that failure waiting for the next protocol; every case is
+        // named, so the next one breaks the build at the place that has to decide.
         switch kind {
         case .discourse, .discuz: .forum
-        default: .microblog
+        case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
+             .gotosocial, .unknown:
+            .microblog
         }
     }
 

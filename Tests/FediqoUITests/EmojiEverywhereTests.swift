@@ -53,7 +53,7 @@ struct EmojiEverywhereTests {
     }
 
     private static func row(_ item: DummyItem) -> DummyItemRow {
-        DummyItemRow(item: item, catalogues: EmojiCatalogueStore(),
+        DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(),
                      marks: .constant(DummyMarks()), onToast: { _ in })
     }
 
@@ -261,9 +261,9 @@ struct EmojiEverywhereTests {
     @Test("A covered row's label carries the warning and never the words behind it")
     func aCoveredRowDoesNotAnnounceTheWords() {
         let item = Self.item(body: "the thing nobody asked to read :blobcat:", spoiler: "Blood")
-        let covered = DummyItemRow(item: item, catalogues: EmojiCatalogueStore(),
+        let covered = DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(),
                                    marks: .constant(DummyMarks()), lifted: false, onToast: { _ in })
-        let lifted = DummyItemRow(item: item, catalogues: EmojiCatalogueStore(),
+        let lifted = DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(),
                                   marks: .constant(DummyMarks()), lifted: true, onToast: { _ in })
 
         #expect(covered.spokenCover.contains("Blood"))
@@ -282,7 +282,7 @@ struct EmojiEverywhereTests {
 
     /// A row drawn at a fixed width, measured the way the type scale was measured.
     private static func height(_ item: DummyItem, lifted: Bool, size: DynamicTypeSize) -> CGFloat {
-        let row = DummyItemRow(item: item, catalogues: EmojiCatalogueStore(),
+        let row = DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(),
                                marks: .constant(DummyMarks()), lifted: lifted, onToast: { _ in })
             .dynamicTypeSize(size)
             .frame(width: 720)

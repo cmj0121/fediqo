@@ -215,3 +215,29 @@
 "timeline.rule.board" = "%1$@ on %2$@, newest first.";
 "timeline.empty.board.title" = "This board has nothing here";
 "timeline.empty.board.detail" = "Threads read from this board land here, newest first.";
+
+/* Unit F6 — the first posts this device is holding, in the inventory beside Clear. */
+"prefs.cache.posts" = "%d first posts";
+"prefs.cache.posts.none" = "No first posts held";
+
+/* Unit F6 — the boards under boards, drawn. */
+"board.choose.under" = "%1$@, under %2$@";
+
+/* Unit F6 — a thread's first post, and the four things it can be.
+   Every one of these is this app's own sentence about the post and never the author's
+   writing, which is why each is drawn in the row's quiet register. */
+"item.forum.coming" = "Loading the first post";
+"item.forum.withheld" = "This forum keeps this post for readers who are signed in.";
+"item.forum.silent" = "There are no words in this post.";
+"item.forum.refused" = "This forum would not let this app read this thread.";
+"item.forum.unreadable" = "This forum answered, but there was no post this app could read.";
+"item.forum.unreachable" = "That thread could not be reached.";
+"item.forum.crowded" = "There was no room left to keep this post.";
+
+/* Unit F6 — the rest of the topic. */
+"thread.replies.load" = "Load the replies";
+"thread.replies.loading" = "Loading the replies…";
+"thread.replies.none" = "Nobody has answered this one yet.";
+"thread.replies.count" = "%d replies";
+"thread.reply.floor" = "#%d";
+"thread.reply.quoted" = "Quoted: %@";

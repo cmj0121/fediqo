@@ -37,6 +37,16 @@ final class ShellSession {
     /// `.shared` at a call site is an agreement that a test or a preview breaks in silence.
     let forums: ForumSessions
 
+    /// One thread's opening post, fetched when its row is scrolled to — D30 — and the rest of
+    /// the topic on request — D31.
+    ///
+    /// On the session for the reason the two picture caches and `forums` are: **what Clear
+    /// presses and what Preferences draws have to be the same object**. It is built here rather
+    /// than passed in because it needs two things only the session has — this session's transport
+    /// and this session's forum browsers, without which a thread on a forum the reader signed in
+    /// to comes back withheld.
+    let posts: ForumPosts
+
     /// The sheet the reader is being shown the forum's own page in, or nothing.
     var signingIn: ForumSignInRequest?
 
@@ -101,13 +111,23 @@ final class ShellSession {
         store: ItemStore = ItemStore(),
         pictures: ShellPictures = .shared,
         emojis: EmojiCache = .shared,
-        forums: ForumSessions = ForumSessions()
+        forums: ForumSessions = ForumSessions(),
+        posts: ForumPosts? = nil
     ) {
         self.http = http
         self.store = store
         self.pictures = pictures
         self.emojis = emojis
         self.forums = forums
+        // Built with this session's forum browsers, so a thread on a forum the reader signed in
+        // to is read through the engine that holds the cookies rather than around it.
+        //
+        // **Not built from `http`.** The session's transport is whatever a test or a preview
+        // handed in and, in the product, a `URLSessionClient` at the 128 MiB last line. A thread
+        // page is a caller that knows what it expects — the largest measured on four installs is
+        // 274KB — so it carries its own far tighter ceiling. See `ForumPosts.maxBytes`, and the
+        // plan's standing item about per-caller response ceilings, of which this is the first.
+        self.posts = posts ?? ForumPosts(through: forums)
     }
 
     var availability: ShellAvailability {
@@ -421,6 +441,10 @@ final class ShellSession {
         await emoji.forget(host: host)
         emojis.forget(host: host)
         pictures.forget(host: host)
+        // Six kinds became seven. A forum's opening posts are this device's copy of that server's
+        // words, held for exactly the reason the pictures are, and a Clear that reached the
+        // pictures and left the posts would empty half of what the reader was looking at.
+        posts.forget(host: host)
         await forums.forget(host: host)
         cleared += 1
     }
