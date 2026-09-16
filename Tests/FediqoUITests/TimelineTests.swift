@@ -100,7 +100,9 @@ struct TimelineStreamTests {
         ]))
         session.hostname = "first.example"
         await session.add()
-        let marks = session.sources.map { DummySource.unsigned($0.host) }
+        let marks = session.sources.map {
+            DummySource.unsigned($0.host, kind: DummyItem.shape(of: $0.kind))
+        }
         #expect(marks.map(\.host) == ["first.example"])
         #expect(marks.allSatisfy { $0.account == nil && $0.kind == .microblog && !$0.isSignedIn })
     }
@@ -197,7 +199,7 @@ struct TimelineStreamTests {
         #expect(item.hasAvatar)
         #expect(!item.hasThumb)
         #expect(item.kind == .note)
-        #expect(item.source == DummySource.unsigned("first.example"))
+        #expect(item.source == DummySource.unsigned("first.example", kind: .microblog))
         #expect(item.counts.replies == 4)
         #expect(item.counts.reblogs == 5)
         #expect(item.counts.favourites == 6)

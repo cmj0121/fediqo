@@ -45,6 +45,10 @@ struct SourceMark: View {
         case .microblog: source.isSignedIn ? "person.crop.circle" : "globe"
         case .forum: "text.bubble"
         case .board: "list.bullet"
+        // Provisional: the nearest thing already in the set, chosen so the mark is not a globe
+        // while nothing can produce a `.video` source anyway. M2's PeerTube unit picks the real
+        // one alongside the row that draws a film.
+        case .video: "film"
         }
     }
 

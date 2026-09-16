@@ -28,19 +28,52 @@ struct DummyItemTests {
         )
     }
 
-    @Test("Both forums are drawn as forums, and every microblog as a microblog")
+    @Test("Every protocol is drawn as exactly one shape, and none of them as a board")
     func everyProtocolGetsAShape() {
-        // **Enumerated over `allCases`, because the failure here is silent.** `shape(of:)` ends
-        // in a `default`, so a forum added to `ProtocolKind` and forgotten here does not fail to
-        // build: the source joins, the threads arrive, and every one of them is drawn as
-        // somebody's words with its title nowhere. Listing the two forums and letting the
-        // enumeration assert the rest is what makes the next one a test failure instead.
-        let forums: Set<ProtocolKind> = [.discourse, .discuz]
+        // **Every protocol written out, rather than "these two are forums and the rest are
+        // microblogs".** The shorter spelling agreed with the code by construction: a protocol
+        // added to `ProtocolKind` and left out of the set was *expected* to be a microblog, which
+        // is the exact wrong answer the incident behind `shape(of:)` produced — a whole Discuz!
+        // forum drawn as microblog posts with every title missing. The no-`default:` rule makes
+        // the compiler stop at the switch; this makes the suite stop as well, because a new
+        // protocol has no entry here, `expected[kind]` is nothing, and nothing matches no shape.
+        // Saying it twice is the price of the second question being asked at all.
+        let expected: [ProtocolKind: DummySourceKind] = [
+            .mastodon: .microblog,
+            .pleroma: .microblog,
+            .akkoma: .microblog,
+            .misskey: .microblog,
+            .pixelfed: .microblog,
+            .lemmy: .microblog,
+            .friendica: .microblog,
+            .gotosocial: .microblog,
+            .unknown: .microblog,
+            .discourse: .forum,
+            .discuz: .forum,
+            .peertube: .video,
+        ]
+        let unshaped = Set(ProtocolKind.allCases).subtracting(expected.keys)
+        #expect(unshaped.isEmpty, "no shape stated for \(unshaped.map(\.rawValue).sorted())")
+
         for kind in ProtocolKind.allCases {
             let item = DummyItem(Self.note(kind))
-            let expected: DummySourceKind = forums.contains(kind) ? .forum : .microblog
-            #expect(item.source.kind == expected, "\(kind.rawValue)")
+            #expect(item.source.kind == expected[kind], "\(kind.rawValue)")
+            // `.board` is a query inside a source, never a shape a protocol has. `shape(of:)`
+            // returning it would draw a whole host as one section of itself, and no switch would
+            // complain, because `.board` is a case the row already knows how to draw.
+            #expect(item.source.kind != .board, "\(kind.rawValue)")
         }
+    }
+
+    @Test("A film is not drawn as somebody's words")
+    func aPeerTubeNoteIsAVideo() {
+        // Pinned while it is still unreachable — `.peertube` is refused at every join door, so
+        // nothing here can arrive from a real server yet. It is pinned because the alternative
+        // answers, `.note` and `.thread`, are both plausible and both silently wrong, and M2's
+        // PeerTube unit should be changing a stated expectation rather than discovering one.
+        let item = DummyItem(Self.note(.peertube))
+        #expect(item.source.kind == .video)
+        #expect(item.kind == .video)
     }
 
     @Test("A Discuz! thread carries its title and its board into the row")

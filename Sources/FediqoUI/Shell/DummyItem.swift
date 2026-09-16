@@ -1,10 +1,22 @@
 import FediqoCore
 import Foundation
 
-/// An item in the dummy store. A `note` or a `thread`, never a protocol row.
+/// An item in the dummy store. Somebody's words, a named discussion, or a film — never a
+/// protocol row.
 public enum DummyItemKind: String, Sendable, Hashable {
     case note
     case thread
+    /// **Here so that `DummyItem.kind` is not forced to lie.** Without it a `.video` source has
+    /// to be answered with `.note` or `.thread`, and a film drawn as somebody's words is the
+    /// identical silent wrong answer the no-`default:` rule exists against — arriving through an
+    /// exhaustive switch instead of through a `default:`, which honours the rule in letter and
+    /// breaks it in fact.
+    ///
+    /// **It is an honest answer, not a trap, and the difference matters to whoever adds
+    /// PeerTube.** Nothing in this target switches over `DummyItemKind` — `DummyItem.kind` is
+    /// written and never read — so this case sets no compiler stop anywhere, and adding one more
+    /// would still set none. Provisional and unreachable in this milestone, like `.video` itself.
+    case video
 }
 
 /// Who the author wrote it for, where the dummy said so. Nothing means the shape has no such idea.
@@ -159,6 +171,11 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         switch source.kind {
         case .microblog: .note
         case .forum, .board: .thread
+        // Provisional: an answer that exists so no film is called somebody's words, not a row
+        // anybody has drawn, and nothing reaches it in this milestone. M2's PeerTube unit replaces
+        // it. **It will not be stopped here** — this switch is already exhaustive and nothing
+        // reads what it returns — so the word provisional is the whole of the warning.
+        case .video: .video
         }
     }
 
@@ -214,11 +231,23 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// **Both forums, and they are listed rather than defaulted.** Discourse and Discuz! are
     /// different programs — one publishes JSON and one publishes a page — and the difference is
     /// entirely behind this line: by here they are both a title, a board and an answer count,
-    /// which is the whole of what `.forum` means. Adding a forum to `ProtocolKind` and not to
-    /// this switch is a silent failure rather than a build error, because the `default` catches
-    /// it: the source joins, the threads arrive, and every one of them is drawn as somebody's
-    /// words with its title nowhere. `DummyItemTests` pins both.
-    private static func shape(of kind: ProtocolKind) -> DummySourceKind {
+    /// which is the whole of what `.forum` means. That is what the `default:` underneath used to
+    /// swallow: a forum added to `ProtocolKind` and not to this switch still built, the source
+    /// joined, the threads arrived, and every one of them was drawn as somebody's words with its
+    /// title nowhere. `DummyItemTests` pins every protocol, one by one, for the same reason.
+    ///
+    /// **A film is the third shape, and it is answered before anything can ask.** `.peertube`
+    /// maps to `.video` while `.peertube` is still refused at every join door, so no reader sees
+    /// it this milestone. It is here because the alternative is `.microblog` sitting in its place
+    /// as a plausible answer that nothing would break on.
+    ///
+    /// **Never `.board`.** That case is a query inside a source, not a protocol's shape — see
+    /// `DummySourceKind.board`.
+    ///
+    /// Internal rather than private because the source page asks the same question of a `Source`
+    /// it never turned into an item: `AccountPane` hard-coded `.microblog` and drew every joined
+    /// forum — Discourse and Discuz! alike — with the globe icon.
+    static func shape(of kind: ProtocolKind) -> DummySourceKind {
         // **No `default:`, and this one was written down as fixed while it was not.** The rule
         // exists because this exact function once mapped only `.discourse` and drew a whole
         // Discuz! forum as microblog posts with every title missing, and the compiler said
@@ -226,7 +255,8 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         // named, so the next one breaks the build at the place that has to decide.
         switch kind {
         case .discourse, .discuz: .forum
-        case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
+        case .peertube: .video
+        case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .friendica,
              .gotosocial, .unknown:
             .microblog
         }

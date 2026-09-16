@@ -343,3 +343,36 @@ struct AccountAddTests {
         #expect(session.sources.isEmpty)
     }
 }
+
+/// The shape a joined source is handed to be drawn with — `AccountPane`'s one line of it.
+@Suite("Account mark")
+@MainActor
+struct AccountMarkTests {
+    init() {
+        L10n.language = .english
+    }
+
+    @Test("A joined forum is marked as a forum, and both forums are")
+    func aForumIsNotMarkedAsAMicroblog() {
+        // **The regression this exists for was user-visible and silent for both forums.**
+        // `mark` called `DummySource.unsigned(host)` and let a default argument answer
+        // `.microblog` for everything, so a joined Discourse and a joined Discuz! were both
+        // drawn with the globe — a microblog's mark standing over a named discussion. The
+        // default is gone; this fails if anything puts a fixed kind back in its place.
+        //
+        // Both protocols named rather than one, because Discuz! is only the one that was
+        // noticed. Nothing about the bug was particular to it.
+        #expect(AccountPane.mark(Source(host: "a.example", kind: .discourse)).kind == .forum)
+        #expect(AccountPane.mark(Source(host: "b.example", kind: .discuz)).kind == .forum)
+
+        // The control: the shape that was right by accident stays right on purpose. Without it
+        // a `mark` hard-coded the other way round would pass everything above.
+        #expect(AccountPane.mark(Source(host: "c.example", kind: .mastodon)).kind == .microblog)
+
+        // Stated, not derived from `shape(of:)` — a test that asks the code what it does agrees
+        // with it whatever it does.
+        let mark = AccountPane.mark(Source(host: "a.example", kind: .discourse))
+        #expect(mark.host == "a.example")
+        #expect(!mark.isSignedIn)
+    }
+}

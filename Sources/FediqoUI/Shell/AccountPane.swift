@@ -349,7 +349,14 @@ struct AccountPane: View {
         value.formatted(.number.notation(.compactName))
     }
 
-    private static func mark(_ source: Source) -> DummySource {
-        .unsigned(source.host)
+    /// The mark a joined source is drawn with. Internal rather than private only so that
+    /// `AccountMarkTests` can pin it: the globe it used to draw over every forum was invisible
+    /// to the suite, because a view's private helper is reachable from nothing.
+    static func mark(_ source: Source) -> DummySource {
+        // The shape the timeline already gives this protocol, rather than the `.microblog` that
+        // a deleted default argument used to supply here — which is why **both** a joined
+        // Discourse and a joined Discuz! drew with the globe icon, a microblog's mark over a
+        // forum. The source page reworks this row properly.
+        .unsigned(source.host, kind: DummyItem.shape(of: source.kind))
     }
 }
