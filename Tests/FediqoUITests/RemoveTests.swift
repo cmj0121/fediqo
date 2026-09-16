@@ -186,6 +186,83 @@ struct RemoveTests {
         #expect(session.notes.isEmpty, "a row nobody is left reading stayed")
     }
 
+    // MARK: - Decision 16 — what a row is still fetched from
+
+    /// **The test this unit exists for: after Remove, nothing this device fetches is addressed to
+    /// the removed server.**
+    ///
+    /// Every avatar and emoji request a row makes is tagged with a host — `DummyItemRow` reads
+    /// `item.source.host` at three places and `FediqoRootView` at two — and the tag comes from the
+    /// note's stamp. Unit 3 kept the stamp, correctly, as a record of how that copy was *parsed*;
+    /// what it did not say is that the same field is read as fetch provenance. So a status two
+    /// instances both carried went on being fetched from the instance the reader removed, in an app
+    /// whose whole claim is that nothing leaves this device except to the servers they chose.
+    ///
+    /// Asserted over **every** host any fetch could be tagged with, rather than over the one row
+    /// this test happens to know about: the stamp and `alsoFrom` together are the whole of what
+    /// `DummyItemRow` and `FediqoRootView` can address a request to, so a set that does not contain
+    /// the removed host is the property itself and not a sample of it. Driven through
+    /// `items(from:among:)`, which is the call both screens make — a pin on `ItemStore` alone would
+    /// pass with the wiring disconnected, which is this milestone's recurring failure.
+    @Test("After Remove, no fetch this device can make is addressed to the server that went")
+    func nothingIsStillFetchedFromARemovedServer() async {
+        let session = ShellSession(http: FixtureHTTP(), pictures: ShellPictures(http: FixtureHTTP()))
+        let one = Source(host: alpha, kind: .mastodon)
+        let two = Source(host: beta, kind: .mastodon)
+        let uri = "https://origin.example/users/ada/statuses/1"
+        await seed(
+            session, sources: [one, two],
+            notes: [note(uri, from: one), note(uri, from: two), note("only-beta", from: two)]
+        )
+
+        let before = DummyTimeline(id: "all").items(from: session.notes, among: session.sources)
+        let shared = before.first { $0.id == uri }
+        #expect(shared?.source.host == alpha, "the premise: this row is fetched from alpha today")
+        #expect(shared?.shownHosts == [alpha, beta], "and the row says so, which is the other half")
+
+        await session.remove(host: alpha)
+
+        let after = DummyTimeline(id: "all").items(from: session.notes, among: session.sources)
+        let addressable = Set(after.flatMap { [$0.source.host] + $0.alsoFrom.map(\.host) })
+        #expect(
+            !addressable.contains(alpha),
+            "a row is still addressed to a server the reader let go of"
+        )
+        #expect(addressable == [beta])
+        #expect(after.first { $0.id == uri }?.shownHosts == [beta], "and the row no longer names it")
+    }
+
+    /// The other half of decision 16, and the reason the half above is not enough on its own: a row
+    /// two servers carry has to **say** so, or the list is honest about what it fetches and silent
+    /// about where the reader's timeline came from. `alsoFrom` was built for this in unit 3 and has
+    /// been empty ever since, because a host needs a protocol behind it to be drawn and only the
+    /// list of joined sources holds one.
+    @Test("A row two servers carry names both, with the shape each of them is")
+    func aSharedRowNamesEveryServerItCameThrough() async {
+        let session = ShellSession(http: FixtureHTTP(), pictures: ShellPictures(http: FixtureHTTP()))
+        let micro = Source(host: alpha, kind: .mastodon)
+        let forum = Source(host: beta, kind: .discourse)
+        let uri = "https://origin.example/users/ada/statuses/1"
+        await seed(
+            session, sources: [micro, forum],
+            notes: [note(uri, from: micro), note(uri, from: forum)]
+        )
+
+        let items = DummyTimeline(id: "all").items(from: session.notes, among: session.sources)
+        let row = items.first { $0.id == uri }
+        #expect(row?.alsoFrom.map(\.host) == [beta])
+        // The shape comes from the joined source's protocol, which is the one thing `Note.hosts`
+        // cannot carry — a bare host has no shape, and guessing `.microblog` for it is the failure
+        // `DummySource.unsigned`'s deleted default is a monument to.
+        #expect(row?.alsoFrom.first?.kind == .forum)
+        #expect(row?.shownHosts == [alpha, beta])
+
+        // Told nothing about what is joined, it says only what it is stamped with. Not a
+        // degradation to tolerate: it is what `[]` means, and it is why the argument is required.
+        let alone = DummyTimeline(id: "all").items(from: session.notes, among: [])
+        #expect(alone.first { $0.id == uri }?.alsoFrom.isEmpty == true)
+    }
+
     // MARK: - The order
 
     /// **The cache-ordering rule, and the only thing that can catch it breaking.**

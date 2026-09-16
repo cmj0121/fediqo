@@ -362,12 +362,12 @@ struct BoardChoiceTests {
         let query = DummyTimeline(
             board: BoardQuery(host: "forum.example", fid: 39, name: "启动盘工具")
         )
-        #expect(query.items(from: notes).map(\.id) == ["a"])
+        #expect(query.items(from: notes, among: []).map(\.id) == ["a"])
         #expect(query.id == "board:forum.example:39")
         #expect(query.name == "启动盘工具")
         #expect(query.emptyKey == "timeline.empty.board")
         // All still means all of it, boards included.
-        #expect(DummyTimeline(id: "all").items(from: notes).count == 4)
+        #expect(DummyTimeline(id: "all").items(from: notes, among: []).count == 4)
     }
 
     /// A board query rebuilt from its id alone knows it is a board and not **which** board, so
@@ -406,10 +406,10 @@ struct BoardChoiceTests {
         session.timelineID = id
         let resolved = session.timeline(for: id)
         #expect(resolved.board?.fid == 33)
-        #expect(!resolved.items(from: session.notes).isEmpty)
+        #expect(!resolved.items(from: session.notes, among: []).isEmpty)
         // The same id, rebuilt rather than resolved, is the failure this guards against.
         #expect(DummyTimeline(id: id).board == nil)
-        #expect(DummyTimeline(id: id).items(from: session.notes).isEmpty)
+        #expect(DummyTimeline(id: id).items(from: session.notes, among: []).isEmpty)
     }
 
     // MARK: - Saying what did not work
@@ -831,7 +831,7 @@ struct BoardChoiceTests {
         let query = DummyTimeline(
             board: BoardQuery(host: "forum.example", fid: 39, name: "What the index calls it")
         )
-        #expect(query.items(from: [onTheBoardPage, fromAListing, elsewhere]).map(\.id) == ["a", "b"])
+        #expect(query.items(from: [onTheBoardPage, fromAListing, elsewhere], among: []).map(\.id) == ["a", "b"])
 
         // And the number is not a name: a board whose id says 40 is not this tab, whatever it is
         // called. Without this the fallback would quietly re-admit everything it was added for.
@@ -840,6 +840,6 @@ struct BoardChoiceTests {
             title: "four", board: "What the index calls it", boardID: "40",
             postedAt: .distantPast, origins: [.publicTimeline]
         )
-        #expect(query.items(from: [renamedToMatch]).isEmpty)
+        #expect(query.items(from: [renamedToMatch], among: []).isEmpty)
     }
 }

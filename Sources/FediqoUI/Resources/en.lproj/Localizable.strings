@@ -3,7 +3,7 @@
 "shell.notices.title" = "Notices";
 "shell.notices.summary" = "Who has been in touch";
 "shell.account.title" = "Account";
-"shell.account.summary" = "This timeline's source";
+"shell.account.summary" = "The servers you read";
 "shell.usage.title" = "Usage";
 "shell.usage.summary" = "What this device is keeping";
 "shell.preferences.title" = "Preferences";
@@ -292,3 +292,15 @@
 "join.preview.closed" = "Reading this forum needs an account, so subscribing will most likely be refused.";
 "join.preview.closed.hint" = "Subscribing to this server will most likely be refused.";
 "join.preview.turnedAway" = "Something in front of this server turned Fediqo away, so subscribing will most likely be refused. Signing in usually clears it.";
+
+/* Unit 5 — one row per server, and what it is. */
+"account.sources.title"          = "Sources";
+"account.sources.detail"         = "Everything this device reads. Removing one takes its boards and its posts with it.";
+"account.sources.held"           = "What each one has left on this device is on Preferences.";
+"account.source.boards"          = "%1$d boards: %2$@";
+"account.source.unread"          = "Its description could not be read.";
+"account.source.remove"          = "Remove";
+"account.source.remove.label"    = "Remove %@ and everything it left here";
+"account.source.signin"          = "Sign in";
+"account.source.signout"         = "Sign out";
+"account.source.signout.label"   = "Sign out of %@ and forget what it left here";

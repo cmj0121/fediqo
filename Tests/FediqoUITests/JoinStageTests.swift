@@ -83,6 +83,17 @@ struct JoinStageTests {
     </div>
     """#
 
+    /// One board's thread list. Shared by the two tests that drive a subscribe through the gate,
+    /// because neither is about the markup and a second copy is a second thing to get wrong.
+    private static let oneBoard = #"""
+    <html><head><meta name="generator" content="Discuz! X5.0" /></head><body>
+    <h1 class="xs2"><a href="forum.php?mod=forumdisplay&fid=33">启动盘工具</a></h1>
+    <table id="threadlisttableid"><tbody id="normalthread_40125"><tr>
+    <th class="common"><a href="forum.php?mod=viewthread&tid=40125" class="s xst">一键安装说明</a></th>
+    <td class="by"><cite><a href="home.php?mod=space&uid=8">tinbox</a></cite><em>2026-9-15 13:12</em></td>
+    </tr></tbody></table></body></html>
+    """#
+
     private static func forumRoutes() -> [String: FixtureHTTP.Outcome] {
         [
             "/": .text(discuzFront),
@@ -722,18 +733,129 @@ struct JoinStageTests {
     /// One word per shape, and the same one the source row will use — §1.1. `.board` is
     /// unreachable from `shape(of:)` and still has an answer, because a case with no answer is a
     /// key echoed back on somebody's screen.
+    ///
+    /// **Asked rather than assigned.** This test used to set `L10n.language` in its own loop.
+    /// `L10n.language` is a `nonisolated(unsafe) static var` that nine suite `init`s write, and
+    /// suites run in parallel — so between this test's two lines another suite's test could read a
+    /// language this one had just set for itself, and fail for a reason nowhere near it. Nothing
+    /// here was ever wrong about shapes; it was a flake waiting on scheduling, and the parameter
+    /// on `shapeWord` is what lets it go away.
     @Test("Every shape has one word, in every language")
     func everyShapeHasAWord() {
         for shape in [DummySourceKind.microblog, .forum, .board, .video] {
             for language in [DummyLanguage.english, .taiwanese] {
-                L10n.language = language
-                #expect(!DummyItem.shapeWord(shape).hasPrefix("source.shape."))
+                #expect(!DummyItem.shapeWord(shape, language: language).hasPrefix("source.shape."))
             }
         }
-        L10n.language = .english
-        #expect(DummyItem.shapeWord(.forum) == DummyItem.shapeWord(.board))
-        #expect(DummyItem.shapeWord(.microblog) == "microblog")
-        #expect(DummyItem.shapeWord(.video) == "video")
+        #expect(DummyItem.shapeWord(.forum, language: .english)
+            == DummyItem.shapeWord(.board, language: .english))
+        #expect(DummyItem.shapeWord(.microblog, language: .english) == "microblog")
+        #expect(DummyItem.shapeWord(.video, language: .english) == "video")
+    }
+
+    /// **A server the reader removed mid-subscribe does not come back** — the finding QA left on
+    /// unit 3, reachable from the moment a row draws a Remove button.
+    ///
+    /// The shape is risk 9's exactly: `DiscuzBoardJoin.subscribe` reads one board per request and
+    /// writes `add`, `subscribe` and `ingest` at the *end* of all of them, so a pick of several
+    /// boards keeps the wire busy for seconds — ample time to press Remove — and then puts the
+    /// source and every board pick back behind the reader.
+    ///
+    /// Driven through the gate rather than by arranging the calls to interleave by luck: the press
+    /// is parked inside Core with the store not yet written, which is the one moment the bug
+    /// exists in.
+    @Test("A server removed while its boards are still being read does not come back")
+    func aRemovedSourceIsNotResurrectedByAnInFlightSubscribe() async {
+        let board = "https://\(Self.forum)/forum.php?mod=forumdisplay&fid=33"
+        var routes = Self.forumRoutes()
+        routes[board] = .text(Self.oneBoard)
+        let http = GatedHTTP(routes, holding: board)
+        let session = ShellSession(http: http, store: ItemStore())
+        // Armed before anything awaits, for the reason the two tests above give: nothing else
+        // releases this gate, and `.timeLimit` does not rescue a task held on a continuation.
+        let watchdog = Task {
+            try? await Task.sleep(for: .seconds(5))
+            await http.gate.open()
+        }
+        defer { watchdog.cancel() }
+
+        session.hostname = Self.forum
+        await session.add()
+        await session.confirm()
+        guard let offer = session.choosing?.offer else {
+            Issue.record("a Discuz! should have paused for the reader to choose")
+            return
+        }
+
+        let press = Task { await session.subscribe(offer.boards.filter { $0.fid == 33 }) }
+        #expect(await Self.spun { session.checking }, "the pick never reached the wire")
+
+        // The reader presses Remove while the boards are being read one at a time.
+        await session.remove(host: Self.forum)
+        await http.gate.open()
+        await press.value
+
+        #expect(session.sources.isEmpty, """
+            The subscribe wrote the source back after the reader removed it. A press cannot \
+            resurrect a server, and the generation token is what says so.
+            """)
+        #expect(session.notes.isEmpty, "its threads came back with it")
+        #expect(session.queries.isEmpty, "and its board tabs came back with them")
+        #expect(await session.store.sources().isEmpty, """
+            The list agrees and the store does not, which is the worse half: the source is added \
+            and invisible until something else happens to refresh the list.
+            """)
+        #expect(session.unread.isEmpty, "a sentence was left about a server that is gone")
+    }
+
+    /// The other side of the same token: **a Remove of a *different* server must not abandon this
+    /// one's subscribe.** `remove` bumps `errand` only where `progressHost` names the host going
+    /// away, and that narrowing is what this pins.
+    ///
+    /// **Driven in flight, which the first version of this test was not.** It called `remove`
+    /// *before* `subscribe`, and `subscribe` bumps the token at entry and reads `mine` after — so
+    /// `mine == errand` held whatever the earlier Remove had done, and QA showed that making the
+    /// bump unconditional, which is exactly the narrowing this test exists to protect, left the
+    /// whole suite green. The Remove has to land while the boards are on the wire, so the gate is
+    /// the only way to write it.
+    @Test("Removing one server does not abandon a subscribe to a different one")
+    func removingOneServerLeavesAnotherSubscribeAlone() async {
+        let board = "https://\(Self.forum)/forum.php?mod=forumdisplay&fid=33"
+        var routes = Self.forumRoutes()
+        routes[board] = .text(Self.oneBoard)
+        let http = GatedHTTP(routes, holding: board)
+        let session = ShellSession(http: http, store: ItemStore())
+        let watchdog = Task {
+            try? await Task.sleep(for: .seconds(5))
+            await http.gate.open()
+        }
+        defer { watchdog.cancel() }
+
+        await session.store.add(Source(host: "elsewhere.example", kind: .mastodon))
+        session.sources = await session.store.sources()
+
+        session.hostname = Self.forum
+        await session.add()
+        await session.confirm()
+        guard let offer = session.choosing?.offer else {
+            Issue.record("a Discuz! should have paused for the reader to choose")
+            return
+        }
+
+        let press = Task { await session.subscribe(offer.boards.filter { $0.fid == 33 }) }
+        #expect(await Self.spun { session.checking }, "the pick never reached the wire")
+
+        // Somebody else's server goes, while this errand is about the forum and parked on a board.
+        await session.remove(host: "elsewhere.example")
+        await http.gate.open()
+        await press.value
+
+        #expect(session.sources.map(\.host) == [Self.forum], """
+            The pick was thrown away by a Remove that had nothing to do with it. The token is \
+            bumped only where the errand is about the host that went.
+            """)
+        #expect(session.sources.first?.boards.map(\.fid) == [33])
+        #expect(!session.notes.isEmpty, "its threads went with the pick")
     }
 
     /// The header's spoken line, which the source row reuses from the same key so that the same

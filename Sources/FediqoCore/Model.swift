@@ -204,7 +204,20 @@ public struct Attachment: Sendable, Hashable {
 /// A note this device has stored. Origins remember how it arrived.
 public struct Note: Identifiable, Hashable, Sendable {
     public let id: String
-    public let source: Source
+    /// Which server handed this copy over, and **what future fetches about it are tagged with**.
+    ///
+    /// Two jobs in one field, and decision 16 is the ruling that they cannot be separated cheaply
+    /// enough to bother. As a record of parsing it is exact: the handle, the reply and the emoji in
+    /// this copy were all resolved against this host. As fetch provenance it is what
+    /// `DummyItemRow` and `FediqoRootView` stamp on every avatar and emoji request they make for
+    /// this row — so a stamp naming a server the reader has removed keeps this device asking that
+    /// server for pictures, in an app whose whole claim is that nothing leaves it except to the
+    /// servers the reader chose.
+    ///
+    /// **`internal(set)` for that one writer**, the same door `hosts` below keeps shut and for a
+    /// stricter reason: `ItemStore.remove(host:)` re-stamps a surviving note to a source that
+    /// remains, and nothing outside this module may rewrite where a note says it came from.
+    public internal(set) var source: Source
     public let author: String
     public let handle: String
     public let body: String

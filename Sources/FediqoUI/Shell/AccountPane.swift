@@ -19,12 +19,31 @@ struct AccountPane: View {
         static let icon: CGFloat = 18
     }
 
+    /// **The whole page scrolls, not a list inside it.** `PreferencesPane` is a `Form` and every
+    /// other pane here scrolls as one thing; this one briefly did the opposite — a fixed `VStack`
+    /// with the rows in an inner `ScrollView` — and that puts the masthead, the field, Browse, the
+    /// section title, its paragraph and the footnote all ahead of the list for height. At 320pt in
+    /// Chinese at a large Dynamic Type size the list is squeezed to a sliver or to nothing, and
+    /// there is nothing the reader can scroll to reach it. No test can see that, which is the
+    /// reason it is written down here.
     var body: some View {
-        VStack(alignment: .leading, spacing: ShellSpace.room) {
+        ScrollView {
+            VStack(alignment: .leading, spacing: ShellSpace.room) {
             masthead
             adding
+            // **Nothing at all where nothing is joined** — not a hairline, not a header, not an
+            // empty state. The hero above already says what the app is for and names the next act,
+            // and Browse is beside the field; a second invitation under a rule would be two of
+            // them on one screen, with the mascot arguing against the other. `PreferencesPane`
+            // draws its empty state and is right to, because it has no hero to be contradicted by.
+            if !session.sources.isEmpty {
+                hairline
+                sources
+            }
+            }
+            .padding(ShellSpace.pad)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .padding(ShellSpace.pad)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onChange(of: searchFocused) { _, on in
             session.searchFocused = on
@@ -90,7 +109,7 @@ struct AccountPane: View {
         HStack(alignment: .center, spacing: ShellSpace.snug) {
             searchField
                 .layoutPriority(1)
-            Button(L10n.t("account.browse")) { session.browse() }
+            Button(L10n.t("account.browse")) { browse() }
                 .font(ShellType.body)
                 .disabled(busy)
                 .help(L10n.t("account.browse.label"))
@@ -115,7 +134,7 @@ struct AccountPane: View {
                 .textFieldStyle(.plain)
                 .focused($searchFocused)
                 .disabled(busy)
-                .onSubmit { session.search() }
+                .onSubmit { Task { await typedHost() } }
                 #if os(iOS)
                 .textInputAutocapitalization(.never)
                 .keyboardType(.URL)
@@ -123,7 +142,7 @@ struct AccountPane: View {
                 .autocorrectionDisabled()
                 .accessibilityLabel(L10n.t("account.search.placeholder"))
             Button {
-                session.search()
+                Task { await typedHost() }
             } label: {
                 Image(systemName: "magnifyingglass")
                     .font(ShellType.body.weight(.semibold))
@@ -224,11 +243,124 @@ struct AccountPane: View {
     private var offer: some View {
         if let host = session.offerSignIn {
             Button(String(format: L10n.t("account.refuse.signin"), host)) {
-                Task { await session.signIn(host: host) }
+                Task { await offeredSignIn(host) }
             }
             .font(ShellType.meta)
             .accessibilityLabel(Text(String(format: L10n.t("account.refuse.signin.label"), host)))
         }
+    }
+
+    private var hairline: some View {
+        Rectangle()
+            .fill(ShellChrome.hairline(colorScheme))
+            .frame(height: ShellSpace.hair)
+            .accessibilityHidden(true)
+    }
+
+    /// The sources this device reads, one row each.
+    ///
+    /// **This list and `PreferencesPane`'s answer different questions and are kept visibly apart.**
+    /// This one is *what am I reading, and what is it* — identity: protocol, shape, boards, and the
+    /// one figure the server stated about itself. That one is *what is this device holding* — an
+    /// inventory, every line of it with a byte count or a date. So **no byte figure and no date
+    /// appears on a row here, ever**, the shape glyph appears only here, and the footnote below
+    /// names the other list and its job rather than repeating it. Clear is in both, which is one
+    /// act reached from two questions and not a duplicate; Remove is only here, because removing is
+    /// about what you read and not about what is held.
+    private var sources: some View {
+        VStack(alignment: .leading, spacing: ShellSpace.snug) {
+            // `name` and not `pane`: `pane` is documented as a page's own title, one per page, and
+            // this page's is "Account".
+            Text(L10n.t("account.sources.title"))
+                .font(ShellType.name)
+                .foregroundStyle(ShellChrome.ink(colorScheme))
+            // The sentence that says which question this list answers and what Remove costs,
+            // before the reader meets a Remove button.
+            Text(L10n.t("account.sources.detail"))
+                .font(ShellType.meta)
+                .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+            // **A plain stack, because the page is the thing that scrolls.** A `ScrollView` here
+            // would be the inner one the page comment above is about.
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(session.rows) { row in
+                    SourceRowView(
+                        row: row,
+                        signedIn: session.forums.reachedSignIn(host: row.source.host),
+                        signIn: { Task { await press(row) } },
+                        clear: { Task { await clear(row) } },
+                        remove: { askRemove(row) }
+                    )
+                    // **Between rows and not after every one.** A rule under the last row is a
+                    // list that looks cut off rather than finished, with the footnote below it
+                    // hanging off the end of a table.
+                    if row.id != session.rows.last?.id { hairline }
+                }
+            }
+            Text(L10n.t("account.sources.held"))
+                .font(ShellType.mark)
+                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    // MARK: - What every control on this page actually does
+    //
+    // **One named method per interactive element, and no logic in any closure.** This page shipped
+    // a search field whose button called `ShellSession.search()`, which trimmed the text and
+    // cleared the error and *never looked anything up* — with the Add button gone into the sheet,
+    // there was no way left to add a source by typing its hostname, and 436 UI tests were green
+    // because every one of them called `session.add()` directly. That is the third time on this
+    // branch that a rule was pinned at the session while the thing that calls it was reachable
+    // from nothing. So each control below is a method a test can call, and the closures in the
+    // body do nothing but call one.
+
+    /// The reader typed a hostname and asked for it — the field's Return, and the magnifier.
+    ///
+    /// **Both look, and it is the same act.** A reader who has typed `mastodon.social` and pressed
+    /// Return has asked for that server; a magnifying glass beside a field is the same request
+    /// made with the mouse. Neither is a catalogue filter any more — the directory's filter lives
+    /// in the sheet, next to the list it filters — so a control here that only tidied the text was
+    /// a control pretending to be one.
+    ///
+    /// Nothing is added by this. `add()` looks and opens the preview, and the reader still has to
+    /// press Subscribe; every guard that press has — the duplicate check, the parse, the sheet
+    /// already being up — is `look`'s and applies unchanged.
+    func typedHost() async {
+        await session.add()
+    }
+
+    /// Browse pressed. The catalogue is fetched here and not on the page appearing (decision 10).
+    func browse() {
+        session.browse()
+    }
+
+    /// The sign-in a refusal offered, taken.
+    func offeredSignIn(_ host: String) async {
+        await session.signIn(host: host)
+    }
+
+    /// A row's sign-in toggle, either way round.
+    ///
+    /// **Which way it goes is `reachedSignIn`'s answer and not this view's** — see its doc comment
+    /// for why "signed in" here can only ever mean as far as this device last saw.
+    func press(_ row: SourceRow) async {
+        if session.forums.reachedSignIn(host: row.source.host) {
+            await session.signOut(host: row.source.host)
+        } else {
+            await session.signIn(host: row.source.host)
+        }
+    }
+
+    /// A row's Clear. The same act, and the same key, as the one on Preferences.
+    func clear(_ row: SourceRow) async {
+        await session.clear(host: row.source.host)
+    }
+
+    /// A row's Remove. **Destroys nothing** — it raises the question, and only the dialog's
+    /// confirm reaches `remove(host:)`.
+    func askRemove(_ row: SourceRow) {
+        session.removing = row.source.host
     }
 
     /// The mark a joined source is drawn with. Internal rather than private only so that

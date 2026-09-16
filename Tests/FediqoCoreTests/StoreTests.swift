@@ -216,16 +216,70 @@ struct StoreTests {
         )
         let shared = left.first { $0.id == uri }
         #expect(shared?.hosts == ["second.example"], "the removed host is still named as a route")
-        // The stamp stays where it was. It is a record of how this copy was parsed — the handle,
-        // the reply and the emoji were all resolved against `first.example` — and rewriting it to
-        // the surviving host would be inventing a reading nobody made.
-        #expect(shared?.source.host == "first.example")
+        // **The stamp moves to a server that remains — decision 16, and the reversal of what this
+        // line asserted at `8161bf9`.** It used to read `first.example` on the argument that the
+        // stamp records how this copy was parsed and rewriting it would invent a reading nobody
+        // made. The half that argument missed is that the stamp is also read as *fetch*
+        // provenance: `DummyItemRow` and `FediqoRootView` tag avatar and emoji requests with it,
+        // so leaving it here kept this device asking a removed server for pictures. What the old
+        // argument was protecting — the handle, the reply and the emoji resolved against
+        // `first.example` — are values that were read long ago and are untouched by this.
+        #expect(shared?.source.host == "second.example")
+        #expect(shared?.source.kind == .mastodon)
         #expect(shared?.origins == [.publicTimeline, .trending])
 
         await store.remove(host: other.host)
 
         #expect(await store.all().isEmpty, "nobody is left reading it and it stayed")
         #expect(await store.sources().isEmpty)
+    }
+
+    /// **Decision 16, from the side the reader can feel: a removed server stops being fetched
+    /// from.** Every avatar and emoji request this app makes for a row is tagged with
+    /// `note.source.host` — `DummyItemRow` and `FediqoRootView` both do it — so the stamp is not
+    /// only a record of parsing, and a stale one is this device talking to a server nobody chose.
+    ///
+    /// Three facts, because only the first is obvious. A note stamped with the host going away is
+    /// re-stamped. A note stamped with a host that stays is **left alone**, because there is
+    /// nothing wrong with it and rewriting it would churn the reading for no one. And the kind
+    /// travels with the host, so whatever reads the stamp gets a whole source rather than a
+    /// hostname with somebody else's protocol behind it.
+    @Test("Removing a server re-stamps the rows it was the stamp for, so nothing is fetched from it")
+    func removingReStampsWhatWouldStillBeFetched() async {
+        let store = ItemStore()
+        let third = Source(host: "third.example", kind: .pleroma)
+        let uri = "https://origin.example/users/ada/statuses/1"
+        let onlyFirst = "https://origin.example/users/ada/statuses/2"
+        await store.add(source)
+        await store.add(other)
+        await store.add(third)
+        await store.ingest([
+            note(id: uri, postedAt: origin, origins: [.publicTimeline]),
+            note(id: onlyFirst, postedAt: origin, origins: [.publicTimeline]),
+        ])
+        await store.ingest([note(id: uri, postedAt: origin, origins: [.publicTimeline], from: third)])
+        await store.ingest([
+            note(id: "shared-by-two-survivors", postedAt: origin, origins: [.publicTimeline], from: other)
+        ])
+        await store.ingest([
+            note(id: "shared-by-two-survivors", postedAt: origin, origins: [.publicTimeline], from: third)
+        ])
+
+        await store.remove(host: source.host)
+
+        let left = await store.all()
+        #expect(
+            left.allSatisfy { $0.source.host != "first.example" },
+            "a fetch tagged with the removed host is a fetch this device still makes to it"
+        )
+        #expect(left.first { $0.id == uri }?.source.host == "third.example")
+        #expect(left.first { $0.id == uri }?.source.kind == .pleroma)
+        #expect(left.map(\.id).contains(onlyFirst) == false, "nobody was left reading it")
+
+        // Untouched, because its stamp names a server that is still joined. Re-stamping it would
+        // be movement with no fault behind it.
+        let untouched = left.first { $0.id == "shared-by-two-survivors" }
+        #expect(untouched?.source.host == "second.example")
     }
 
     /// The set is seeded from the stamp at the wire boundary and is never empty, which is what

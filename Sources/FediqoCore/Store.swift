@@ -71,6 +71,15 @@ public actor ItemStore {
     /// way to. So each note is struck off for this host, and only a note nobody is left reading is
     /// dropped.
     ///
+    /// **A note that survives is re-stamped to a source that remains — decision 16.** Unit 3 left
+    /// the stamp alone on the argument that it records how *this copy* was parsed, which is true
+    /// and is not the whole of what the stamp is: `DummyItemRow` and `FediqoRootView` tag every
+    /// avatar and emoji fetch with `note.source.host`, so a row two instances both carry went on
+    /// being fetched from the instance the reader had just removed. The already-resolved handle,
+    /// reply and emoji are untouched by this — they are values, already read — so re-stamping
+    /// costs exactly what the keep-the-stamp argument was protecting, which is nothing, and buys
+    /// the thing the argument never claimed: this device stops talking to a server nobody chose.
+    ///
     /// Silent where the host is not here, for the reason `subscribe(host:to:)` is: nothing in this
     /// package puts a source in the list, or takes one out of it, by a side door.
     public func remove(host raw: String) {
@@ -79,7 +88,21 @@ public actor ItemStore {
         notes = notes.compactMapValues { note in
             var note = note
             guard note.hosts.remove(host) != nil else { return note }
-            return note.hosts.isEmpty ? nil : note
+            guard !note.hosts.isEmpty else { return nil }
+            // Only a note that was stamped with the host going away needs a new stamp, and the
+            // new one is a source still in the list that this note actually arrived through —
+            // join order, so two survivors give the one the reader joined first rather than
+            // whichever the set happens to iterate to. `hosts` is a `Set` and has no order of its
+            // own; `sourceList` has the only order anybody here can defend.
+            if note.source.host == host,
+               let survivor = sourceList.first(where: { note.hosts.contains($0.host) }) {
+                // Boards deliberately dropped, which is `DiscuzBoardJoin.subscribe`'s own rule
+                // about what a stamp is: a note records which server it came from and is not a
+                // live view of that server's settings, so a stamp carrying subscriptions would go
+                // stale the moment the reader picked a ninth board.
+                note.source = Source(host: survivor.host, kind: survivor.kind)
+            }
+            return note
         }
     }
 

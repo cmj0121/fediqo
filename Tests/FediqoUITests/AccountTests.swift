@@ -174,7 +174,7 @@ struct AccountAddTests {
         #expect(!session.availability.timelineEnabled)
     }
 
-    @Test("Keyword filters domain and description live, without joining")
+    @Test("Keyword filters domain and description live, and filtering joins nothing")
     func keywordFiltersCatalog() async {
         // Two rows, and each one is reached by a different half of the filter: the first by a
         // word out of its description, the second by a piece of its domain. Nothing here joins,
@@ -191,21 +191,19 @@ struct AccountAddTests {
         #expect(session.extraJoinHost == nil)
         session.hostname = "flagship"
         #expect(session.visibleServers.map(\.domain) == ["first.example"])
-        session.search()
         #expect(session.sources.isEmpty)
         #expect(!session.availability.timelineEnabled)
         session.hostname = ""
         #expect(session.visibleServers.map(\.domain) == ["first.example", "second.example"])
     }
 
-    @Test("A typed host not in the catalog is an extra row; search does not join")
+    @Test("A typed host not in the catalog is an extra row the sheet offers")
     func extraJoinHostDoesNotJoin() async {
         let session = ShellSession(http: FixtureHTTP(["/servers": .text(#"""
         [{"domain": "first.example", "description": "The flagship server"}]
         """#)]))
         await session.loadCatalog()
         session.hostname = "my.example"
-        session.search()
         #expect(session.extraJoinHost == "my.example")
         #expect(session.visibleServers.isEmpty)
         #expect(session.sources.isEmpty)
@@ -231,7 +229,6 @@ struct AccountAddTests {
         """#)]))
         await session.loadCatalog()
         session.hostname = "first.example"
-        session.search()
         #expect(session.extraJoinHost == nil)
         #expect(session.visibleServers.map(\.domain) == ["first.example"])
         #expect(session.sources.isEmpty)

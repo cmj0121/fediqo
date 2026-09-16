@@ -127,6 +127,13 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     public let counts: DummyCounts
     public let marks: DummyMarks
     /// Other hosts that also carried this item. Empty for a single source.
+    ///
+    /// **Filled from `Note.hosts`, which is the only thing that knows.** `source` is a stamp: for
+    /// a Mastodon status, whose id is host-independent, it names whichever joined instance handed
+    /// the row over first and says nothing about the second. Two instances carrying one status are
+    /// one stored row, and a row drawn from it that named one host was under-reporting where the
+    /// reader's timeline came from — decision 9's cost, and the half of it `ItemStore.remove`
+    /// cannot pay.
     public let alsoFrom: [DummySource]
 
     /// Hosts to name on the row, stable and unique. First is drawn; the rest are +n.
@@ -190,7 +197,16 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         DummyConversation(ancestors: [], post: self, descendants: [])
     }
 
-    public init(_ note: Note) {
+    /// One stored note, drawn as a row.
+    ///
+    /// **`among` has no default, for the reason `DummySource.unsigned`'s `kind` has none.** A
+    /// note knows every host it arrived through and none of their protocols, so `alsoFrom` cannot
+    /// be built here without being told what this device reads — and an empty default would be
+    /// the right answer at every test call site and a silent wrong one at the two that reach a
+    /// screen, which is exactly the shape that drew a globe over every joined forum. `[]` is a
+    /// real answer, meaning "nothing else is joined", and it should be written down where it is
+    /// true rather than inherited by omission where it is not.
+    public init(_ note: Note, among sources: [Source]) {
         id = note.id
         source = DummySource.unsigned(note.source.host, kind: Self.shape(of: note.source.kind))
         author = note.author
@@ -217,7 +233,29 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
             favourites: note.counts.favourites
         )
         marks = DummyMarks()
-        alsoFrom = []
+        alsoFrom = Self.others(note, among: sources)
+    }
+
+    /// The hosts this note also arrived through, as sources a row can draw.
+    ///
+    /// **Sorted, because `Note.hosts` is a `Set` and has no order to inherit.** `shownHosts` sorts
+    /// again for what it draws; this sorts so that two `DummyItem`s built from one note are equal,
+    /// which `Hashable` promises and a `Set`'s iteration order does not give.
+    ///
+    /// **A host with no source behind it is left out, and that is not a swallowed case.**
+    /// `ItemStore.remove` strikes a host out of `hosts` at the same moment it takes the source out
+    /// of the list, and `ingest` only ever unions a host that a join had already added — so a host
+    /// in this set with nothing joined under it is a state the store does not produce. What it
+    /// would take to draw one is a protocol name for a server this device is not reading, which is
+    /// a shape nothing here has.
+    private static func others(_ note: Note, among sources: [Source]) -> [DummySource] {
+        note.hosts
+            .subtracting([note.source.host])
+            .sorted()
+            .compactMap { host in
+                guard let kind = sources.first(where: { $0.host == host })?.kind else { return nil }
+                return DummySource.unsigned(host, kind: Self.shape(of: kind))
+            }
     }
 
     /// Which shape of row a protocol gets. **The protocol stays behind; the timeline sees a
@@ -273,11 +311,17 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// into somebody else's answer is how this file shipped a forum drawn as microblog posts.
     /// `.video`'s string ships in M1 although nothing draws it, so unit 8 is not a build break
     /// waiting on a translator.
-    static func shapeWord(_ shape: DummySourceKind) -> String {
+    /// `language` resolves the way `L10n.t(_:language:)` resolves — nothing means the shell's
+    /// current language. It is here so a test can ask for a language instead of **assigning** one:
+    /// `L10n.language` is a `nonisolated(unsafe) static var` that nine suite `init`s write and that
+    /// suites running in parallel share, so a test that sets it mid-test can be read by another
+    /// suite's test between two of its own lines. This file's own `everyShapeHasAWord` was doing
+    /// exactly that, which is the flake this parameter retires.
+    static func shapeWord(_ shape: DummySourceKind, language: DummyLanguage? = nil) -> String {
         switch shape {
-        case .microblog: L10n.t("source.shape.microblog")
-        case .forum, .board: L10n.t("source.shape.forum")
-        case .video: L10n.t("source.shape.video")
+        case .microblog: L10n.t("source.shape.microblog", language: language)
+        case .forum, .board: L10n.t("source.shape.forum", language: language)
+        case .video: L10n.t("source.shape.video", language: language)
         }
     }
 

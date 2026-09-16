@@ -113,6 +113,12 @@ public struct FediqoRootView: View {
                         // They pressed Subscribe before they were turned away; this finishes that
                         // press rather than asking for it again.
                         //
+                        // **And the `if` is not only "was it reached".** A sign-in pressed on a
+                        // row of a server already joined is an errand that ends with the sign-in
+                        // itself, and `signInFinished` says no to those — see its doc comment for
+                        // what the reader sees instead, and for what this branch shipped without
+                        // it.
+                        //
                         // This branch lost both the retry and the host when the page moved out of
                         // the sheet — the window was given the body the sheet had at the time,
                         // and the sheet grew them afterwards. Whatever is done to one of these
@@ -137,6 +143,10 @@ public struct FediqoRootView: View {
                     // **`resumeAfterSignIn` and not `add`**: the preview is a question this
                     // reader has already answered, so the retry finishes the press instead of
                     // asking for it a second time.
+                    //
+                    // **And the `if` is not only "was it reached".** A sign-in pressed on a row
+                    // of a server already joined ends with the sign-in itself, and
+                    // `signInFinished` says no to those — see its doc comment.
                     if session.signInFinished(reached: reached, host: request.host) {
                         Task { await session.resumeAfterSignIn() }
                     }
@@ -602,7 +612,7 @@ public struct FediqoRootView: View {
     /// would give the keys a stream that matched no note, so `j` and `k` would move through
     /// nothing on exactly the tabs this unit added. See `ShellSession.timeline(for:)`.
     private var streamItems: [DummyItem] {
-        session.timeline(for: session.timelineID).items(from: session.notes)
+        session.timeline(for: session.timelineID).items(from: session.notes, among: session.sources)
     }
 
     /// Whichever list is in front: the open conversation, or the stream under it.

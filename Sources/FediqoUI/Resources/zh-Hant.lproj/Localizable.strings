@@ -3,7 +3,7 @@
 "shell.notices.title" = "通知";
 "shell.notices.summary" = "誰來找你";
 "shell.account.title" = "帳號";
-"shell.account.summary" = "這條時間軸的來源";
+"shell.account.summary" = "你讀的主機";
 "shell.usage.title" = "用量";
 "shell.usage.summary" = "這台機器上留了什麼";
 "shell.preferences.title" = "偏好";
@@ -290,3 +290,15 @@
 "join.preview.closed" = "要讀這個論壇得先有帳號，所以訂閱多半會被拒絕。";
 "join.preview.closed.hint" = "訂閱這台主機多半會被拒絕。";
 "join.preview.turnedAway" = "這台主機前面有東西把 Fediqo 擋掉了，所以訂閱多半會被拒絕。登入通常就能解決。";
+
+/* Unit 5 — one row per server, and what it is. */
+"account.sources.title"          = "來源";
+"account.sources.detail"         = "這個裝置讀的全部。移除其中一個，它的版塊和它的文章都會跟著走。";
+"account.sources.held"           = "每一個在這個裝置上還留著什麼，在偏好設定裡。";
+"account.source.boards"          = "%1$d 個版塊：%2$@";
+"account.source.unread"          = "讀不到它的自我介紹。";
+"account.source.remove"          = "移除";
+"account.source.remove.label"    = "移除 %@，連同它留在這裡的東西";
+"account.source.signin"          = "登入";
+"account.source.signout"         = "登出";
+"account.source.signout.label"   = "登出 %@，並忘掉它留在這裡的東西";

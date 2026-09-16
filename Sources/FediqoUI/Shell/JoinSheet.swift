@@ -508,8 +508,20 @@ struct JoinSheet: View {
         return locale.localizedString(forLanguageCode: trimmed) ?? trimmed
     }
 
-    static func compact(_ value: Int) -> String {
-        value.formatted(.number.notation(.compactName))
+    /// A count, shortened, **in the shell's language rather than the device's**.
+    ///
+    /// `.formatted` with no locale follows the system, and this app lets the reader pick a language
+    /// the device is not set to — so on a `zh-TW` machine with the shell in English this returned
+    /// "9.1萬" and the line read "9.1萬 posts". One sentence in two languages, on all three surfaces
+    /// that draw a figure: the directory's rows, the preview, and the source row. They share this
+    /// one function, which is why there is one fix and not three.
+    ///
+    /// `language` is threaded rather than read off a global at the point of use, and resolves the
+    /// same way `L10n.t(_:language:)` does — nothing means the shell's current language. A `static
+    /// func` has no environment to ask, and the answer must not be allowed to differ from the one
+    /// the surrounding string came back in.
+    static func compact(_ value: Int, language: DummyLanguage? = nil) -> String {
+        value.formatted(.number.notation(.compactName).locale(L10n.locale(language)))
     }
 
     // MARK: - Stage: previewing
@@ -674,20 +686,59 @@ struct JoinSheet: View {
     }
 
     static func figureLine(_ profile: SourceProfile) -> Text? {
+        dotted(figurePieces(profile))
+    }
+
+    /// Readings joined by `" · "`, as **concatenated `Text` and never as a formatted `String`** —
+    /// `BoardPickerSheet.stated(_:)`'s technique and the house's answer to this exact problem: the
+    /// line wraps instead of clipping at a 460pt sheet in Chinese.
+    ///
+    /// Shared with the source page's rows, which draw the same figures about the same server. Two
+    /// copies of a five-line loop is not the cost; two places that can come to disagree about what
+    /// separates two readings is.
+    static func dotted(_ pieces: [String]) -> Text? {
         var line: Text?
-        func add(_ piece: Text) {
-            line = line.map { $0 + Text(verbatim: " · ") + piece } ?? piece
-        }
-        if let active = profile.activeMonth {
-            add(Text(String(format: L10n.t("join.preview.activeMonth"), compact(active))))
-        }
-        if let people = profile.people {
-            add(Text(String(format: L10n.t("account.catalog.people"), compact(people))))
-        }
-        if let posts = profile.posts {
-            add(Text(String(format: L10n.t("join.preview.posts"), compact(posts))))
+        for piece in pieces {
+            line = line.map { $0 + Text(verbatim: " · ") + Text(piece) } ?? Text(piece)
         }
         return line
+    }
+
+    /// The figures a server stated, each already a sentence, in the order they are read.
+    ///
+    /// **Split out from `figureLine` because the source page needs the same facts twice over.** It
+    /// draws them as a concatenated `Text`, like this sheet, *and* has to put them into one spoken
+    /// label for a row collapsed to a single accessibility element — and a `Text` cannot be read
+    /// back out. Two spellings of "what this server stated about its size" is two things to drift,
+    /// which is the whole argument `shapeWord` already won for the shape.
+    ///
+    /// Nothing where the server stated nothing: a fact it did not state is drawn as nothing and
+    /// never as a zero, which is this house's second rule.
+    /// `language` is threaded to **both** halves of every piece — the sentence and the number in
+    /// it — so the two cannot come back in different languages. That is the failure this parameter
+    /// exists for: `L10n.t` was already resolving the shell's language while `compact` quietly
+    /// resolved the device's.
+    static func figurePieces(_ profile: SourceProfile, language: DummyLanguage? = nil) -> [String] {
+        var pieces: [String] = []
+        if let active = profile.activeMonth {
+            pieces.append(String(
+                format: L10n.t("join.preview.activeMonth", language: language),
+                compact(active, language: language)
+            ))
+        }
+        if let people = profile.people {
+            pieces.append(String(
+                format: L10n.t("account.catalog.people", language: language),
+                compact(people, language: language)
+            ))
+        }
+        if let posts = profile.posts {
+            pieces.append(String(
+                format: L10n.t("join.preview.posts", language: language),
+                compact(posts, language: language)
+            ))
+        }
+        return pieces
     }
 
     /// **No `default:`.** A registration state swept into somebody else's sentence is a reader

@@ -88,11 +88,11 @@ struct ForumPostsTests {
         let notes = try await DiscuzClient(http: http, host: Self.host).board(34, source: source)
         let first = try #require(notes.first)
 
-        let ref = try #require(ForumThreadRef(DummyItem(first)))
+        let ref = try #require(ForumThreadRef(DummyItem(first, among: [])))
         #expect(ref.host == Self.host)
         #expect(ref.tid == 40125)
         // And the row agrees with the ref, because the row is what asks.
-        #expect(Self.row(DummyItem(first)).thread == ref)
+        #expect(Self.row(DummyItem(first, among: [])).thread == ref)
     }
 
     /// A row that is not a Discuz! thread has no thread behind it, and every one of these would
@@ -816,7 +816,7 @@ struct ForumPostsTests {
             title: title,
             postedAt: .distantPast,
             origins: [.publicTimeline]
-        ))
+        ), among: [])
     }
 }
 

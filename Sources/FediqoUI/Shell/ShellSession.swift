@@ -98,6 +98,25 @@ final class ShellSession {
     /// keyed by what somebody typed would hold two rows for one server.
     private(set) var profiles: [String: ProfileAnswer] = [:]
 
+    /// The source page's list, in join order, and **costing no request**.
+    ///
+    /// Every row is built from what this session already holds: the sources the store handed back,
+    /// and the answer each host gave when it was looked at. A source the reader joined through some
+    /// route that never previewed it has no entry in `profiles` and reads `.unasked`, which is a
+    /// real answer and not a hole — the row then draws its host and its shape, honestly, rather
+    /// than going and asking the server to fill a gap nobody is waiting on.
+    ///
+    /// Derived rather than stored, for the reason `choosing` is: a second copy of `sources` kept
+    /// beside `sources` is a copy that goes stale the moment a board is picked.
+    var rows: [SourceRow] {
+        sources.map { source in
+            SourceRow(
+                source: source,
+                profile: profiles[source.host] ?? .unasked(host: source.host, kind: source.kind)
+            )
+        }
+    }
+
     /// Which errand the sheet is showing, counted up.
     ///
     /// **`checking` stopped covering the flow when adding split in two.** The preview sheet is up
@@ -210,12 +229,6 @@ final class ShellSession {
     static func matches(_ server: CatalogServer, query: String) -> Bool {
         server.domain.localizedCaseInsensitiveContains(query)
             || server.summary.localizedCaseInsensitiveContains(query)
-    }
-
-    /// Enter and the search icon. The list already filters as the field changes.
-    func search() {
-        refuse = nil
-        hostname = query
     }
 
     func loadCatalog() async {
@@ -445,6 +458,7 @@ final class ShellSession {
         // the same offer — and so a call that declines to act does not close the sheet on a
         // reader whose pick then went nowhere.
         errand += 1
+        let mine = errand
         stage = nil
         guard !picks.isEmpty else { return }
         refuse = nil
@@ -456,7 +470,30 @@ final class ShellSession {
         defer { checking = false }
         do {
             let outcome = try await joiner(for: offer.host).subscribe(offer, to: picks)
-            unread = outcome.unread
+            // **The reader removed this server while its boards were being read, so it must not
+            // come back.** One request per board means this runs for seconds, which is ample time
+            // to press Remove on a row — and Core writes `add`, `subscribe` and `ingest` at the
+            // end of that call, after the removal, putting the source and every board pick back.
+            //
+            // **"Which side of the token is this write on" has a third answer here, and that is
+            // the whole of why this branch exists.** In `take`, the two writes divide cleanly: the
+            // stage write is refused on a stale token, and `adopt()` is not, because the store is
+            // already written by then and skipping it would leave a source added and invisible.
+            // Here the resurrecting write is not one of *this* function's writes at all — Core
+            // performs it inside the call above — so by the time the token can be read the store
+            // has **already** been put back. Guarding `adopt()` would therefore only hide the
+            // resurrection rather than prevent it: the list would agree with the reader and the
+            // store would not, until the next join refreshed it and the server reappeared.
+            //
+            // So the stale branch takes the write back instead of declining to read it.
+            // `store.remove` undoes exactly what `subscribe` wrote — the source, its boards and its
+            // threads — and `adopt()` then runs unconditionally, so the list and the store agree
+            // whichever way the token went.
+            if mine == errand {
+                unread = outcome.unread
+            } else {
+                await store.remove(host: offer.host)
+            }
             await adopt()
             // Where a board that failed was the only thing the reader was after, the rail is
             // still worth landing them on the one that worked — `adopt` does that — but the
@@ -659,6 +696,20 @@ final class ShellSession {
         cleared += 1
     }
 
+    /// The reader is done being signed in to one forum, and nothing else about it changes.
+    ///
+    /// **Narrower than Clear on purpose.** Clear empties every cache this device holds of a server;
+    /// this takes only what being signed in produced — the browser holding the session, its cookies
+    /// and the saved password — and leaves the pictures, the emoji and the first posts where they
+    /// are. A reader signing out of a forum has not asked to stop reading it, and emptying their
+    /// caches for them would answer a question they did not ask.
+    ///
+    /// Through `forums.forget` and not through anything of its own, which is what makes `Clear` and
+    /// `Remove` clear the sign-in too: there is one door and all three go through it (decision 13).
+    func signOut(host: String) async {
+        await forums.forget(host: host.lowercased())
+    }
+
     /// The reader has stopped reading a server: it goes, and everything it left here goes with it.
     ///
     /// **Remove subsumes Clear rather than sitting beside it.** Clear's promise is that what goes
@@ -706,6 +757,18 @@ final class ShellSession {
         // something else has not asked for their list to be taken away.
         if stage?.host?.lowercased() == host { dismissStage() }
         if progressHost.lowercased() == host {
+            // **The errand in flight is about the server that just went, so it ends here.** This
+            // is the same token `add`, `take` and `subscribe` compare before they write, bumped by
+            // the one act that can invalidate an errand from outside it. Without it, a `subscribe`
+            // whose boards are still being read one at a time returns after this and writes the
+            // source, its board picks and its threads straight back into the store — the reader
+            // presses Remove, watches the row go, and watches it come back seconds later.
+            //
+            // **Only where the errand is about *this* host**, which is the question this branch
+            // already exists to ask. Removing one server while another is being added is two
+            // unrelated acts, and bumping unconditionally would abandon a join the reader is still
+            // waiting on, for a press that had nothing to do with it.
+            errand += 1
             refuse = nil
             unread = []
             unreadAll = 0
@@ -723,6 +786,9 @@ final class ShellSession {
         guard let host = try? Host.parse(raw) else { return }
         switch await forums.signIn(host: host) {
         case .signedIn:
+            // The automatic path, and one of the two things that can witness a sign-in being
+            // reached — decision 13. The other is the reader closing the forum's own page below.
+            forums.recordSignIn(host: host)
             signingIn = nil
             offerSignIn = nil
         case .handOver(let stop):
@@ -733,21 +799,57 @@ final class ShellSession {
     /// The sheet closed. A sign-in that was reached clears the offer; one that was not leaves it
     /// where it is, so the reader can try again without retyping the host.
     ///
-    /// **Reaching a sign-in is not the end of the errand.** The reader typed a host, was turned
-    /// away, and went and signed in — what they were doing the whole time was adding that forum,
-    /// and landing them back at an empty field having lost what they typed would make them start
-    /// again. So a sign-in that was reached says so, and the caller takes them back to `begin`,
-    /// which this time goes through the browser that now holds the session.
+    /// **Two different errands end here, and the answer is which one it was.**
+    ///
+    /// *A host that is not a source yet.* The reader typed it, was turned away, and went and
+    /// signed in — what they were doing the whole time was adding that forum, and landing them
+    /// back at an empty field having lost what they typed would make them start again. So this
+    /// says yes, and the caller takes them back to `begin`, which this time goes through the
+    /// browser that now holds the session.
+    ///
+    /// *A host that is already a source.* This is the row's toggle (decision 13), and there is
+    /// nothing to resume: the server is read, its boards are picked, and **the sign-in was the
+    /// whole errand**. So this says no. It is quiet and it is not silent — `recordSignIn` above
+    /// has already run, `ForumSessions` is observed, and the row's toggle is drawn from
+    /// `reachedSignIn`, so it reads Sign out by the time the sheet is gone. That is the reader's
+    /// answer, and it is why no sentence is needed under the field for a press that was not made
+    /// there.
+    ///
+    /// **Decided here rather than by the caller or inside `resumeAfterSignIn`**, because this is
+    /// the last place the host behind the sheet is known. `resumeAfterSignIn` goes by `hostname`,
+    /// so a guard put there would be asking about whatever is in the field — and a reader
+    /// pressing a button on a row may have been half-way through typing a different server into
+    /// it, which would turn a refusal into an unasked-for join.
+    ///
+    /// **The incident.** Both call sites in `FediqoRootView` ran the retry on any sign-in that
+    /// was reached, so a reader who pressed Sign in on a joined Discuz! row and signed in was
+    /// answered with "You are already reading this server" — `look`'s duplicate guard, reporting
+    /// an errand nobody had started. It shipped in M1 and the suite stayed green, because
+    /// `resumeAfterSignIn` was driven only from the typed-host path.
     ///
     /// Answered rather than acted on, so the decision is a value a test can read and not a task
     /// this object spawned on its own.
     @discardableResult
     func signInFinished(reached: Bool, host: String? = nil) -> Bool {
+        // Whose page it was, asked before the sheet state is dropped. The argument where the caller
+        // named one, and the sheet's own host otherwise — the two always agree in the app, and a
+        // caller that names nothing is still telling the truth about a sheet that was up.
+        let was = host ?? signingIn?.host
         signingIn = nil
         guard reached else { return false }
         offerSignIn = nil
+        // The other witness — decision 13. A reader who closed the forum's own page having got
+        // there is the only evidence this device will ever have of a sign-in it did not perform.
+        if let was { forums.recordSignIn(host: was) }
+        // The row's errand, and it is finished: recorded on the line above, and drawn by the
+        // toggle that reads it. Asked before the field is written, because writing the field is
+        // the other errand's business and not this one's.
+        if let was, isAdded(was) { return false }
         // What they typed, restored from the host they signed in to — the field may have been
         // edited while the sheet was up, and the errand belongs to the host behind the sheet.
+        // **Only where the field is what the errand was about.** A reader who pressed a button on
+        // a row was not typing a hostname at all, so putting the row's host there would take away
+        // what they were in the middle of typing to answer a question they did not ask.
         if let host { hostname = host }
         return true
     }

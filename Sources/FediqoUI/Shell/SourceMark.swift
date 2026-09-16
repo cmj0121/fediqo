@@ -41,8 +41,23 @@ struct SourceMark: View {
     }
 
     private var markSymbol: String {
-        switch source.kind {
-        case .microblog: source.isSignedIn ? "person.crop.circle" : "globe"
+        // A signed-in microblog is drawn as a person rather than as a place, which is the one
+        // thing a shape alone cannot say. Everything else is the shape's own glyph, and the table
+        // is shared rather than restated so that the source page's rows and this mark cannot come
+        // to disagree about what a forum looks like.
+        if source.kind == .microblog, source.isSignedIn { return "person.crop.circle" }
+        return Self.symbol(source.kind)
+    }
+
+    /// The glyph for a shape, with nobody signed in. **The one table**, read by this mark and by
+    /// the source page's rows.
+    ///
+    /// **No `default:`**, the rule this branch states everywhere it switches over a closed set: a
+    /// shape swept into somebody else's glyph is a film drawn with a globe over it, and nothing
+    /// would break.
+    static func symbol(_ kind: DummySourceKind) -> String {
+        switch kind {
+        case .microblog: "globe"
         case .forum: "text.bubble"
         case .board: "list.bullet"
         // Provisional: the nearest thing already in the set, chosen so the mark is not a globe

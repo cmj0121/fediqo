@@ -256,4 +256,77 @@ struct ForumTransportTests {
         session.signInFinished(reached: true)
         #expect(session.offerSignIn == nil)
     }
+
+    // MARK: - Decision 13 — a truthful sign-in predicate
+
+    /// **Neither existing question answers the one the row's toggle asks, and this is the check.**
+    ///
+    /// `hasPassword` is about the Keychain and `hasEngine` is about this run's browsers, and the
+    /// two cases below are the ones that make them wrong rather than merely different: a reader
+    /// signed in by cookie having saved nothing, and a reader who was handed the forum's own page
+    /// and gave up. A row drawn from either would offer Sign out to somebody who never signed in,
+    /// or Sign in to somebody who did.
+    @Test("Neither a saved password nor a browser is a sign-in, and the new predicate is")
+    func reachedSignInIsNotTheOtherTwoQuestions() async {
+        let credentials = MemoryCredentials()
+        try? credentials.save(ForumCredential(host: "saved.example", username: "u", password: "p"))
+        let forums = ForumSessions(credentials: credentials)
+
+        // A password saved and nobody signed in. `hasPassword` says yes; the question is no.
+        #expect(forums.hasPassword(host: "saved.example"))
+        #expect(!forums.reachedSignIn(host: "saved.example"))
+
+        // The reader who was handed the forum's own page and gave up. This is the case
+        // `hasEngine` gets wrong — it answers yes from the moment `engine(host:)` builds a browser,
+        // which `joiner(for:)` does on its own — and the engine's own half is left unasserted here
+        // on purpose: standing a `WKWebView` up inside the suite is a web process per run, and the
+        // rest of this file deliberately asserts `!hasEngine` rather than building one.
+        let session = ShellSession(http: FixtureHTTP(), forums: forums)
+        await session.signIn(host: "gaveup.example")
+        #expect(session.signingIn?.host == "gaveup.example", "the premise: the page was handed over")
+        session.signInFinished(reached: false, host: "gaveup.example")
+        #expect(!forums.reachedSignIn(host: "gaveup.example"))
+
+        // And the reader who did get there, with nothing saved — the case `hasPassword` misses.
+        session.signingIn = ForumSignInRequest(host: "cookie.example", stop: .noCredential)
+        session.signInFinished(reached: true, host: "cookie.example")
+        #expect(forums.reachedSignIn(host: "cookie.example"))
+        #expect(!forums.hasPassword(host: "cookie.example"), "the case that makes the two differ")
+        #expect(forums.reachedSignIn(host: "COOKIE.Example"), "the host was not folded")
+    }
+
+    /// Cleared by `forget(host:)` and therefore by Clear and by Remove, which is decision 13's
+    /// other half: the cookies that sign-in produced have just gone, so a row still offering to
+    /// sign the reader out would be offering to end a session that no longer exists.
+    @Test("Clear and Remove both take the sign-in with them, and only for their own host")
+    func clearAndRemoveTakeTheSignIn() async {
+        let forums = ForumSessions(credentials: MemoryCredentials())
+        let session = ShellSession(http: FixtureHTTP(), forums: forums)
+        forums.recordSignIn(host: "one.example")
+        forums.recordSignIn(host: "two.example")
+
+        await session.clear(host: "one.example")
+        #expect(!forums.reachedSignIn(host: "one.example"))
+        #expect(forums.reachedSignIn(host: "two.example"), "a Clear reached a server it was not for")
+
+        await session.remove(host: "TWO.Example")
+        #expect(!forums.reachedSignIn(host: "two.example"))
+    }
+
+    /// Sign out is narrower than Clear on purpose: a reader who signed out has not asked to stop
+    /// reading the forum, so what it takes is the session and nothing else.
+    @Test("Sign out ends the sign-in and leaves the source and its pictures alone")
+    func signOutIsNarrowerThanClear() async {
+        let forums = ForumSessions(credentials: MemoryCredentials())
+        let session = ShellSession(http: FixtureHTTP(), forums: forums)
+        await session.store.add(Source(host: "bbs.example.org", kind: .discuz))
+        session.sources = await session.store.sources()
+        forums.recordSignIn(host: "bbs.example.org")
+
+        await session.signOut(host: "BBS.Example.ORG")
+
+        #expect(!forums.reachedSignIn(host: "bbs.example.org"))
+        #expect(session.sources.map(\.host) == ["bbs.example.org"], "signing out removed the source")
+        #expect(session.cleared == 0, "signing out emptied caches nobody asked it to")
+    }
 }

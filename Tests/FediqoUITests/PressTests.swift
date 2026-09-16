@@ -24,7 +24,7 @@ struct PressTests {
                 )
             },
             spoiler: spoiler
-        ))
+        ), among: [])
     }
 
     private static let list = [item("a", attachments: 3), item("b", spoiler: "Blood"), item("c")]

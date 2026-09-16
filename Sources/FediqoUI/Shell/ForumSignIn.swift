@@ -101,6 +101,23 @@ final class ForumSessions {
     /// change — a save, a forget, a Clear — which is three places, all of them here.
     private(set) var savedHosts: Set<String> = []
 
+    /// Which hosts a sign-in was confirmed reached on **as far as this device last saw**.
+    ///
+    /// That qualifier is the whole of what this can promise, and saying less than it out loud
+    /// would be a control that lies. A forum's cookie expires without telling anybody: nothing
+    /// asks this app, nothing arrives to say so, and the next read simply comes back signed out.
+    /// So this is a record of the last thing this device witnessed, never a claim about the
+    /// session's present state — and a row drawing "Sign out" from it is saying "you signed in
+    /// here", which is true, rather than "you are signed in here", which nobody can know without
+    /// asking the forum.
+    ///
+    /// **Neither existing question answers this one — decision 13, and both were checked.**
+    /// `hasPassword(host:)` is about what the Keychain holds: a reader can be signed in by cookie
+    /// having saved nothing, and can have a password saved while signed out. `hasEngine(host:)` is
+    /// about what this run built: an engine exists the moment the reader is *offered* a sign-in,
+    /// including the case where they looked at the forum's page and gave up.
+    private(set) var reachedHosts: Set<String> = []
+
     init(credentials: any ForumCredentialStore = KeychainCredentials()) {
         self.credentials = credentials
         refreshSavedHosts()
@@ -206,6 +223,19 @@ final class ForumSessions {
         savedHosts.contains(host.lowercased())
     }
 
+    /// Whether this device has seen a sign-in reached on that host — **signed in as far as this
+    /// device last saw**, and no further. See `reachedHosts` for why that is the honest ceiling.
+    func reachedSignIn(host: String) -> Bool {
+        reachedHosts.contains(host.lowercased())
+    }
+
+    /// One was reached. Recorded rather than inferred, because the only two things that can see it
+    /// happen are the automatic sign-in below and the reader closing the forum's own page having
+    /// got there.
+    func recordSignIn(host: String) {
+        reachedHosts.insert(host.lowercased())
+    }
+
     // MARK: - Clearing
 
     /// D25: everything this host left here goes, including the cookies and the saved password.
@@ -224,6 +254,11 @@ final class ForumSessions {
             engines[host] = nil
         }
         forgetPassword(host: host)
+        // The cookies this run signed in with have just gone, so what this device last saw is no
+        // longer true of anything it holds. Decision 13 puts the clearing here on purpose: Clear
+        // and Remove both arrive through this one door, so neither can leave a row offering to
+        // sign a reader out of a session that no longer exists.
+        reachedHosts.remove(host)
     }
 
     func refreshSavedHosts() {

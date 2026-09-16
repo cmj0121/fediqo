@@ -58,7 +58,7 @@ struct ThreadReadingTests {
             postedAt: .distantPast,
             origins: [.publicTimeline],
             url: url
-        ))
+        ), among: [])
     }
 
     private static func post(
@@ -218,7 +218,7 @@ struct ThreadReadingTests {
             id: "109252111", source: Source(host: Self.host, kind: .mastodon),
             author: "ada", handle: "@ada@\(Self.host)", body: "hi",
             postedAt: .distantPast, origins: [.publicTimeline], avatarURL: sent
-        ))
+        ), among: [])
         #expect(Self.row(note, posts: posts).thread == nil)
         #expect(Self.row(note, posts: posts).avatarURL == sent)
     }
@@ -308,7 +308,7 @@ struct ThreadReadingTests {
             .board(34, source: Source(host: Self.host, kind: .discuz))
         #expect(!notes.isEmpty)
         for note in notes {
-            let item = DummyItem(note)
+            let item = DummyItem(note, among: [])
             #expect(item.sensitive == nil, "a Discuz! thread said something about being sensitive")
             #expect(item.spoiler == nil, "a Discuz! thread carried a cover line")
             #expect(!item.covered)
