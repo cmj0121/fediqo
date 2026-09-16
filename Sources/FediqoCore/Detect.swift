@@ -7,6 +7,16 @@ public enum HostError: Error, Equatable, Sendable {
 public enum DetectError: Error, Equatable, Sendable {
     case invalidHost
     case unreachable
+    /// Something in front of the host answered instead of the host: a filter's interactive
+    /// challenge, where a person in a browser is what it is waiting for.
+    ///
+    /// **Its own case because `.unknown` is a lie here.** A challenge page names no software, so
+    /// every marker `HTMLKind.classify` looks for is absent and the detector used to fall through
+    /// and report "unknown protocol" — which tells the reader to check their spelling, for a host
+    /// whose spelling is fine. It also strands them: the sign-in that *would* get past this is
+    /// only ever offered on a refusal, so reporting it as an unknown protocol closes the one door
+    /// that opens.
+    case challenged
 }
 
 /// A hostname this device can fetch. No scheme, no path, lowercase. IPv6 stays bracketed.
@@ -104,12 +114,54 @@ public enum HTMLKind: Equatable, Sendable {
         if matches(labeled, "peertube") { return .named(.peertube) }
         if matches(labeled, "friendica") { return .named(.friendica) }
         if matches(labeled, "gotosocial") { return .named(.gotosocial) }
+        // Discourse names itself in the generator tag on every server-rendered page, and the tag
+        // is in the HTML rather than built by script, so it survives a reader with no JavaScript
+        // and a fetch that never runs any.
+        if matches(labeled, "discourse") { return .named(.discourse) }
+        // Discuz! names itself the same way — `<meta name="generator" content="Discuz! X3.4" />`,
+        // confirmed live on four installs across X3.4, X3.5 and X5.0 — and the tag is in the
+        // markup rather than written by script, so it survives a fetch that runs none.
+        //
+        // **Beside `discourse` rather than anywhere in particular, and that is checked.** The two
+        // names share four letters and neither contains the other, so no ordering between them can
+        // go wrong; the same is true of every other name in this list. `DetectTests` asserts that
+        // for the whole list rather than for this pair, because the hazard is the name added
+        // *next* — the list is only safe while it stays mutually exclusive, and a comment saying
+        // so is not a check.
+        if matches(labeled, "discuz") { return .named(.discuz) }
         if matches(labeled, "mastodon") { return .named(.mastodon) }
+        // **A second look for Discuz!, for the installs that strip the meta tag.** The tag is a
+        // template's to remove and plenty of administrators do; what a Discuz! cannot remove and
+        // keep working are its own addresses. `forum.php?mod=forumdisplay` and `mod=viewthread`
+        // are that program's URLs and nobody else's, and the footer line is the one most themes
+        // leave alone. Both are checked **after** every other software above, so a host that
+        // names itself is still taken at its word and this can only rescue a page that named
+        // nothing.
+        if matches(labeled, "discuz") == false, isDiscuzByItsOwnAddresses(html) {
+            return .named(.discuz)
+        }
         if hasID(html, "mastodon") { return .named(.mastodon) }
         if html.range(of: "joinmastodon.org", options: .caseInsensitive) != nil {
             return .named(.mastodon)
         }
         return .unknown
+    }
+
+    /// Discuz! recognised by what it serves rather than by what it says about itself.
+    ///
+    /// Each of these is something no other forum writes: `mod=forumdisplay` and `mod=viewthread`
+    /// are Discuz!'s own query strings, and the footer credit carries the product's name with its
+    /// exclamation mark. One is enough — a front page need not link a thread, and an index need
+    /// not carry the footer — but each is specific enough on its own that "one of these" does not
+    /// widen into a guess.
+    private static func isDiscuzByItsOwnAddresses(_ html: String) -> Bool {
+        let marks = [
+            "forum.php?mod=forumdisplay",
+            "forum.php?mod=viewthread",
+            "mod=forumdisplay&amp;fid=",
+            "Powered by Discuz",
+        ]
+        return marks.contains { html.range(of: $0, options: .caseInsensitive) != nil }
     }
 
     private static func matches(_ text: String, _ software: String) -> Bool {
@@ -166,13 +218,45 @@ public struct Detector: Sendable {
         do {
             let (data, _) = try await http.data(from: root)
             htmlTalked = true
-            if let html = String(data: data, encoding: .utf8),
-               case .named(let kind) = HTMLKind.classify(html)
-            {
+            // **Decoded lossily, and that is the correct decode for this one job.** The strict
+            // `String(data:encoding:.utf8)` that stood here returns `nil` for the *entire* page
+            // if a single byte in it is not UTF-8 — not a mangled string somebody might notice,
+            // but nothing at all, after which detection falls through to the probe and reports a
+            // running forum as an unknown protocol.
+            //
+            // That is not a hypothetical. `install-a.example` is a live Discuz! X3.4 whose front
+            // page declares UTF-8 and is UTF-8, apart from a handful of leftover GBK bytes in one
+            // JavaScript comment — and it detected as `.unknown` until this line changed. A
+            // wholly GBK install, which a great many Discuz! still are, fails the same way for a
+            // better reason.
+            //
+            // Lossy is *sufficient* here rather than merely better, and the reason is worth
+            // stating because it is what makes this safe for every protocol and not just the
+            // new one: **every marker `HTMLKind.classify` looks for is ASCII** — the software
+            // names, `joinmastodon.org`, `__misskey_boot__`, the `meta` and `id` patterns — and
+            // UTF-8 decoding never substitutes a replacement character for a byte below 0x80. So
+            // the bytes that matter arrive unchanged, and only the parts nobody reads are
+            // damaged. Guessing an encoding would be the wrong tool: a guess can be wrong, and
+            // this cannot.
+            let html = String(decoding: data, as: UTF8.self)
+            if case .named(let kind) = HTMLKind.classify(html) {
                 return kind
             }
+            // Judged after the software markers and before anything else, and that order is
+            // deliberate: a forum that merely *sits behind* a filter still serves its own front
+            // page most of the time, and naming itself is a better answer than naming its filter.
+            // This is only reached when the page named nothing — which is exactly what a
+            // challenge page does.
+            if DiscuzPage.isChallenge(html) { throw DetectError.challenged }
         } catch {
             if error is CancellationError { throw error }
+            // **Rethrown, where every other failure here is swallowed on purpose.** This block
+            // treats a failed front page as "no answer yet" and falls through to the probe,
+            // which is right for a timeout or a 404. A challenge is the opposite: the host
+            // answered, and what answered was a filter saying no. Falling through would spend a
+            // second request on a probe that cannot succeed either, and then report `.unknown` —
+            // the sentence that sends the reader to check a spelling that is fine.
+            if let refusal = error as? DetectError, refusal == .challenged { throw refusal }
         }
 
         var probeTalked = false

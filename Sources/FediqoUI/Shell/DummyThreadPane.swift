@@ -11,6 +11,9 @@ struct DummyThreadPane: View {
     /// Passed through with the store: the pane above owns the wait for this source's catalogue.
     /// A thread is one post's conversation, so every row in it reads through the same server.
     var catalogueSettled: Bool = false
+    /// Where the opening post and the rest of the topic are kept. Passed through to every row,
+    /// and read here for D31's list.
+    let posts: ForumPosts
     @Binding var selectedID: String?
     var marks: (DummyItem) -> Binding<DummyMarks>
     @Binding var decks: ShellDecks
@@ -22,6 +25,7 @@ struct DummyThreadPane: View {
     var onToast: (String) -> Void
     var onBack: () -> Void
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.openURL) private var openURL
 
     private let step: CGFloat = 16
     private let deepest = 4
@@ -41,6 +45,7 @@ struct DummyThreadPane: View {
                     .font(ShellType.pane)
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                 Spacer()
+                outward
                 Text(L10n.t("thread.leaveHint"))
                     .font(ShellType.meta)
                     .foregroundStyle(ShellChrome.inkFaint(colorScheme))
@@ -62,6 +67,7 @@ struct DummyThreadPane: View {
                         ForEach(conversation.descendants, id: \.item.id) { entry in
                             threaded(entry.item, dimmed: false)
                         }
+                        if let thread { rest(of: thread) }
                     }
                     .padding(.vertical, 8)
                     .padding(.trailing, 8)
@@ -82,14 +88,85 @@ struct DummyThreadPane: View {
         }
     }
 
+    // MARK: - Out of the app, and on purpose
+
+    /// **Where this post actually lives** — the reader's "give a interactive button to open the
+    /// native browser of the original link".
+    ///
+    /// ## Why it is here and not on the row
+    ///
+    /// Three reasons, and they are the same three that put the way in to the replies in this pane
+    /// rather than on the row.
+    ///
+    /// 1. *`Note.url` names a thread, and this pane is the thread.* On a timeline row it would be
+    ///    a control for somewhere the reader has not decided to go yet; here it is a control for
+    ///    the thing they are looking at.
+    /// 2. *The row is four fixed bands and one height.* A fifth mark in the marks band is a
+    ///    control multiplying, which is the thing this branch keeps writing down that it will not
+    ///    do — and it would be forty of them down a list, each one a way out of the app.
+    /// 3. *Leaving the app is not something to do by accident.* Forty small glyphs under a pointer
+    ///    are forty chances to; one control, in a header the reader navigated to deliberately, is
+    ///    none. It sits beside `Back` and `Esc or q` — the bar that is already about leaving —
+    ///    rather than among the marks that act on the post.
+    ///
+    /// ## Why it names the host
+    ///
+    /// "Open in browser" tells the reader what will happen and not where they will end up. The
+    /// host is the fact that matters about an outward link, it is the fact a reader checks before
+    /// following one, and it is the one thing this app knows for certain — `source.host` is
+    /// parsed, and not lifted from anybody's markup.
+    ///
+    /// ## What is refused
+    ///
+    /// **`Host.allowsFetch`, at a boundary that is not a fetch**, and that is deliberate rather
+    /// than sloppy naming: it is `Host.isFetchable` re-exported, decision 9's "this device will
+    /// go there" — `https`, and a host to reach — and handing a `URL` to the system browser is
+    /// exactly as much of a wire boundary as handing one to `URLSession`. `URL(string:)` will
+    /// build `javascript:`, `data:` and `file:///` out of a stranger's JSON, and `openURL` would
+    /// do as it was told with any of them.
+    ///
+    /// Core admits the address at ingestion and this admits it again at the door. That is belt and
+    /// braces on purpose and not the convention this branch warns about: the rule is *in the
+    /// data* — `Mastodon` and `Discuz` both build `Note.url` through it — and this is a second
+    /// reading of the same one function, not a second expression of the rule.
+    ///
+    /// **No button at all where the address does not pass**, rather than a disabled one. A
+    /// control the reader cannot press is a question about this app; nothing is the honest answer
+    /// to "this post named nowhere to go".
+    @ViewBuilder
+    private var outward: some View {
+        if let url = root.url, Host.allowsFetch(url) {
+            Button {
+                openURL(url)
+            } label: {
+                Label(
+                    String(format: L10n.t("thread.open"), root.source.host),
+                    systemImage: "arrow.up.forward.app"
+                )
+                .font(ShellType.meta.weight(.medium))
+                .lineLimit(1)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(ShellChrome.selectInk(colorScheme))
+            .help(String(format: L10n.t("thread.open.hint"), url.absoluteString))
+            .accessibilityHint(Text(L10n.t("thread.open.leaves")))
+        }
+    }
+
     private func threaded(_ item: DummyItem, dimmed: Bool) -> some View {
         let depth = conversation.depth(of: item.id)
         return DummyItemRow(
             item: item,
             catalogues: catalogues,
             catalogueSettled: catalogueSettled,
+            posts: posts,
             marks: marks(item),
             selected: item.id == selectedID,
+            // **Every row in this pane, not only the root.** The pane is the place a post is read
+            // rather than scanned, which is as true of a post the reader arrived through as of
+            // the one they opened — and a rule that held only for the middle row would be one
+            // more thing to remember. `ForumReplyRow` below has said the same since F6.
+            inFull: true,
             top: decks.top(of: item.id, of: item.attachments.count),
             lifted: decks.isLifted(item.id),
             player: player(of: item),
@@ -114,6 +191,122 @@ struct DummyThreadPane: View {
         )
     }
 
+    // MARK: - The rest of the topic — D31
+
+    /// The thread this pane is standing on, where it is a Discuz! one there is more of to read.
+    private var thread: ForumThreadRef? { ForumThreadRef(root) }
+
+    /// **Where "load other threads" lives, and why it is here rather than on the row.**
+    ///
+    /// The reader asked for "the options to load other threads" and, asked directly, said that
+    /// "other threads" means the replies of the same topic — D31. That leaves one question, which
+    /// is where the way in goes: the row, or this pane.
+    ///
+    /// **This pane, for three reasons that all point the same way.**
+    ///
+    /// 1. *The row is four fixed bands and one height.* That invariant is the row's whole design
+    ///    and it is a defence as much as a look — a hostile instance sizing a row is a layout
+    ///    attack that lands on every row of a timeline at once. Twenty replies of unbounded
+    ///    length cannot go in it, and a control in it that opened them somewhere else would be a
+    ///    second door to the place `Return` already goes.
+    /// 2. *There is already a door, and the reader already knows it.* `Return` and `Space` mean
+    ///    expand — `DummyCommand.expandPost` — and this pane is what they open. Adding a key or a
+    ///    button for "the rest of this topic" would be a second way to say the same thing, and
+    ///    this branch's own rule is that keys do not navigate implicitly and controls do not
+    ///    multiply.
+    /// 3. *This pane was built to draw answers and draws none.* Its own doc says "the way up, the
+    ///    post, then answers", and `DummyItem.dummyConversation()` hands it an empty list because
+    ///    fetching a conversation was out of the branch that wrote it. A forum thread is the
+    ///    first thing this app has ever had real answers for.
+    ///
+    /// **Pressed, not automatic**, which is the other half of D31. Opening a thread already costs
+    /// a request for the page the opening post came off — `post(tid:)` and `replies(tid:)` each
+    /// fetch it for themselves, which is Core's shape and is recorded for the plan rather than
+    /// worked around here. So the reader gets the topic they opened and asks for the rest of it
+    /// if they want it, which is the same bargain the row makes one level up.
+    @ViewBuilder
+    private func rest(of thread: ForumThreadRef) -> some View {
+        // Read in `body`, so this pane's interest in the replies is stamped on every pass. I8.
+        let standing = posts.standing(of: thread)
+        VStack(alignment: .leading, spacing: ShellSpace.snug) {
+            Rectangle()
+                .fill(ShellChrome.hairline(colorScheme))
+                .frame(height: ShellSpace.hair)
+            // **No `default:`.** A sixth standing has to be given a shape here.
+            switch standing {
+            case .unasked:
+                way(in: thread)
+            case .coming:
+                // **The reader pressed something and is owed a sign that it took.** A static
+                // "Loading the replies…" is indistinguishable from the same sentence a minute
+                // later, which is what the reader wrote in about first. See `ForumWaiting`.
+                ForumWaiting(line: L10n.t("thread.replies.loading"))
+            case .none:
+                quiet(L10n.t("thread.replies.none"))
+            case .loaded(let replies):
+                Text(String(format: L10n.t("thread.replies.count"), replies.count))
+                    .font(ShellType.name)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                ForEach(replies) { reply in
+                    ForumReplyRow(post: reply, host: thread.host)
+                }
+            case .absent(let absence):
+                quiet(ForumPostBand.sentence(for: absence))
+                // **A second go, where a second go could change the answer.** The network having
+                // been dark is the one kind of nothing that asking again fixes, and
+                // `Absence.asksAgain` is where that judgement already lives. The other three are
+                // settled facts about the forum and get no button, because a control guaranteed
+                // to change nothing is worse than none.
+                if standing.wantsPressing { way(in: thread) }
+            }
+        }
+        .padding(.top, ShellSpace.snug)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The way in to the rest of the topic — **the pointer's half of the key `s`**.
+    ///
+    /// The mark and the key are one rule and not two: this is drawn exactly where
+    /// `ForumRepliesStanding.wantsPressing` is true, and that is the second half of what
+    /// `DummyCommand.reveal(hasCover:repliesWanted:)` reads, so a reader cannot find a button the
+    /// key will not press or press a key on a state that offers no button. That is this branch's
+    /// own arrangement for `a` and the card's play mark, stated in `FediqoRootView.playRow`.
+    ///
+    /// The key cap is drawn beside the words. A reader who has never opened the guide finds the
+    /// shortcut at the moment they are looking for the thing it does, which is the only moment it
+    /// is worth telling them — and this is the post whose cover `s` would otherwise be for, so
+    /// seeing the cap here is also how they learn that on a forum it is free.
+    private func way(in thread: ForumThreadRef) -> some View {
+        Button {
+            Task { await posts.fetchReplies(thread) }
+        } label: {
+            HStack(spacing: ShellSpace.snug) {
+                Label(L10n.t("thread.replies.load"), systemImage: "arrow.down.circle")
+                    .font(ShellType.meta.weight(.medium))
+                Text(verbatim: "s")
+                    .font(ShellType.mark.monospaced())
+                    .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                    .padding(.horizontal, ShellSpace.tight)
+                    .background(
+                        RoundedRectangle(cornerRadius: ShellSpace.tight, style: .continuous)
+                            .fill(ShellChrome.well(colorScheme))
+                    )
+                    // The cap is a hint for the eye; a screen reader is already told the key by
+                    // the guide, and a lone letter read out in the middle of a label is noise.
+                    .accessibilityHidden(true)
+            }
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(ShellChrome.selectInk(colorScheme))
+    }
+
+    private func quiet(_ text: String) -> some View {
+        Text(text)
+            .font(ShellType.meta)
+            .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
     private func indent(_ depth: Int) -> CGFloat {
         CGFloat(min(depth, deepest)) * step
     }
@@ -126,6 +319,168 @@ struct DummyThreadPane: View {
                 .frame(width: ShellSpace.hair)
                 .padding(.leading, indent(depth) - ShellSpace.snug)
                 .padding(.vertical, 6)
+        }
+    }
+}
+
+/// One reply of a forum topic — D31's payload.
+///
+/// **Not a `DummyItemRow`, and that is a decision rather than a shortcut.** A reply is not the
+/// same object as a thread: it has a floor, it may quote somebody, it has no title, no board, no
+/// attachment deck and no marks, and — on one of the four measured installs — it usually has no
+/// words at all, because a signed-out reader is shown the forum's notice instead. Dressing it as
+/// a `DummyItem` would mean inventing a `Note` in the UI layer to satisfy a row built for a
+/// timeline, and every one of those five differences would have to be thrown away to do it.
+///
+/// **It is not held to one height either, and that is also deliberate.** The timeline's one-height
+/// rule is about a list the reader is scrolling, where a row that grows moves everything under
+/// the thumb. This pane is what the reader opened in order to *read*, its contents arrive in one
+/// answer to one press rather than a row at a time, and truncating the replies would be the
+/// complaint this whole unit exists to answer, one level down.
+struct ForumReplyRow: View {
+    let post: DiscuzPost
+    /// The forum this reply was read through — what the reader's per-server Clear button reaches
+    /// its picture by. Handed in because a `DiscuzPost` carries a `tid` and not a host, and
+    /// because an avatar address is often on a different machine entirely.
+    let host: String
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// How big a reply's picture is drawn.
+    ///
+    /// **Smaller than the row's 36pt, on purpose.** A reply is not a thread: the pane's one
+    /// `DummyItemRow` at the top is what the reader opened, and twenty replies each carrying a
+    /// full-size avatar would read as twenty more of those. Scaled with the type, for the reason
+    /// every other fitting in this shell is — the alternative is big text beside small furniture.
+    @ScaledMetric(relativeTo: .body) private var side: CGFloat = 24
+
+    var body: some View {
+        HStack(alignment: .top, spacing: ShellSpace.snug) {
+            avatar
+            VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                who
+                if let quoted = post.quoted, !quoted.isEmpty { quotation(quoted) }
+                words
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, ShellSpace.tight)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// Whoever wrote this reply, drawn.
+    ///
+    /// **The picture came off the page the words came off**, which is the whole reason a reply can
+    /// have one at all: `DiscuzClient.replies(tid:)` reads the thread page, and every template
+    /// that writes an avatar writes it beside the post it belongs to. No second request, and no
+    /// address guessed out of a uid.
+    ///
+    /// The plate where there is none, exactly as the row draws it — and there are three ways to
+    /// have none, all of them measured: the member uploaded nothing and the forum serves its
+    /// `noavatar` placeholder, the forum has hidden the picture (`頭像被屏蔽`, three posts in ten
+    /// on one `install-d.example` thread), or the template writes its avatars in with JavaScript and
+    /// there was nothing on the page to read.
+    @ViewBuilder
+    private var avatar: some View {
+        Group {
+            if let url = post.avatarURL {
+                RemoteImage(
+                    url: url,
+                    tier: .deck,
+                    // **The forum this reply was read through, never the address's own host.**
+                    // Decision 14: the Clear button can only ever name a server the reader added,
+                    // and `install-d.example` serves its avatars off `avatars-d.example` — filing them under
+                    // that would make exactly the entry no Clear can reach that I10 exists to
+                    // prevent. The same rule, and the same wording, as `DummyItemRow.avatar`.
+                    host: host,
+                    standing: .avatar,
+                    alt: nil,
+                    radius: ShellSpace.tight
+                )
+            } else {
+                RoundedRectangle(cornerRadius: ShellSpace.tight, style: .continuous)
+                    .fill(ShellChrome.well(colorScheme))
+            }
+        }
+        .frame(width: side, height: side)
+        .accessibilityHidden(true)
+    }
+
+    /// Who wrote it, which floor it is, and when — each drawn only where the page said.
+    ///
+    /// **A figure the forum did not state draws nothing, never a zero**, which is this branch's
+    /// standing rule and is unusually live here: the mobile template writes `昨天 22:48` with no
+    /// machine-readable date, so `postedAt` is `nil` far more often on a post than on a thread
+    /// row, and a floor is missing entirely on the third-party template `install-a.example` serves.
+    private var who: some View {
+        HStack(spacing: ShellSpace.snug) {
+            if let floor = post.floor {
+                Text(String(format: L10n.t("thread.reply.floor"), floor))
+                    .font(ShellType.reading)
+                    .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+            }
+            Text(post.author)
+                .font(ShellType.name)
+                .foregroundStyle(ShellChrome.ink(colorScheme))
+                .lineLimit(1)
+            if let at = post.postedAt {
+                Text(at, format: .relative(presentation: .named))
+                    .font(ShellType.meta)
+                    .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// What this reply reproduced of somebody else's, drawn as a quotation.
+    ///
+    /// Core keeps it out of `body` and keeps it rather than dropping it, and says why: a reply
+    /// that opens by quoting the whole post above it would fill the words with a stranger's
+    /// sentence and never show its own. Drawn behind a rule and dimmed, so whose words are whose
+    /// is a thing the reader can see rather than infer.
+    private func quotation(_ text: String) -> some View {
+        Text(text)
+            .font(ShellType.meta)
+            .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.leading, ShellSpace.snug)
+            .overlay(alignment: .leading) {
+                Rectangle()
+                    .fill(ShellChrome.hairline(colorScheme))
+                    .frame(width: ShellSpace.hair)
+            }
+            .accessibilityLabel(Text(String(format: L10n.t("thread.reply.quoted"), text)))
+    }
+
+    /// The three things a reply's words can be, and they are three rather than two.
+    ///
+    /// **Withheld is not empty.** `install-a.example` answers a signed-out reader
+    /// `游客请登录后查看回复内容` for 19 replies in 20, and Core marks that rather than putting the
+    /// forum's sentence in `body` under this person's name. If this drew nothing for it, the row
+    /// would say that nineteen people wrote nothing — which is false about all nineteen of them,
+    /// and is the reader being quietly told the forum is empty when what happened is that they
+    /// are not signed in to it.
+    @ViewBuilder
+    private var words: some View {
+        if post.isWithheld {
+            HStack(alignment: .firstTextBaseline, spacing: ShellSpace.tight) {
+                Image(systemName: "lock")
+                Text(L10n.t("item.forum.withheld"))
+            }
+            .font(ShellType.meta)
+            .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+        } else if post.body.isEmpty {
+            // The forum answered, the post was not withheld, and there were no words in it: a
+            // picture, an attachment, a poll. Nothing drawn, for the reason `ForumPostBand` draws
+            // nothing in the same case — a sentence here would be this app talking over somebody
+            // who posted a photograph.
+            EmptyView()
+        } else {
+            Text(post.body)
+                .font(ShellType.body)
+                .foregroundStyle(ShellChrome.ink(colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
         }
     }
 }

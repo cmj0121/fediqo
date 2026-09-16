@@ -249,7 +249,15 @@ struct StatusDTO: Decodable, Sendable {
             sensitive: subject.sensitive,
             spoiler: subject.spoilerText,
             emojis: Self.emojis(of: subject, boostedBy: booster),
-            url: subject.url.flatMap(URL.init(string:)),
+            // **Decision 9's rule, at the field it had been missed at.** The avatar two lines up,
+            // the attachments and the emoji all go through `Host.fetchableURL`; this one went
+            // through bare `URL(string:)`, so `javascript:`, `data:` and `file:///` all survived
+            // out of a stranger's JSON into a `Note`. It had been harmless only because nothing
+            // opened it — unit F7 gives the reader a button that does, and a check added at that
+            // button alone would be the rule enforced at the consumer's door that this branch has
+            // twice written down as the shape it gets wrong. So it is fixed here, where the data
+            // stops being ours, and checked there as well.
+            url: Host.fetchableURL(subject.url),
             counts: Counts(
                 replies: subject.repliesCount,
                 reblogs: subject.reblogsCount,

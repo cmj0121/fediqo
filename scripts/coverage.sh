@@ -25,10 +25,25 @@ else
 fi
 
 BIN_PATH="$(swift build --show-bin-path)"
-BINARY="$BIN_PATH/FediqoPackageTests.xctest/Contents/MacOS/FediqoPackageTests"
 PROFILE="$BIN_PATH/codecov/default.profdata"
 
-[ -x "$BINARY" ]  || { echo "no test binary at $BINARY"; exit 1; }
+# Which bundles a build leaves behind is a fact about the toolchain, not about this package.
+# Up to Xcode 26 SwiftPM wrote one combined `FediqoPackageTests.xctest`; Xcode 27's build system
+# writes one bundle per test target instead, and the gate died with "no test binary" the morning
+# the machine updated itself. Both layouts are accepted, and a layout nobody has seen yet fails
+# loudly rather than reporting the coverage of whatever it did find.
+# llvm-cov takes the first binary as a positional and every further one behind `-object`,
+# so they are collected in that shape rather than as a plain list.
+BINARIES=()
+for bundle in "$BIN_PATH"/*.xctest; do
+    [ -d "$bundle" ] || continue
+    name="$(basename "$bundle" .xctest)"
+    exe="$bundle/Contents/MacOS/$name"
+    [ -x "$exe" ] || continue
+    if [ "${#BINARIES[@]}" -eq 0 ]; then BINARIES+=("$exe"); else BINARIES+=(-object "$exe"); fi
+done
+
+[ "${#BINARIES[@]}" -gt 0 ] || { echo "no test bundle under $BIN_PATH"; exit 1; }
 [ -f "$PROFILE" ] || { echo "no coverage profile at $PROFILE"; exit 1; }
 
 SUMMARY="$(mktemp -t fediqo-coverage)"
@@ -37,6 +52,6 @@ trap 'rm -f "$SUMMARY"' EXIT
 # what this gate is for: ignore them, and count only Core.
 xcrun llvm-cov export -summary-only \
     -ignore-filename-regex='Sources/FediqoUI/|Tests/|\.build/' \
-    -instr-profile "$PROFILE" "$BINARY" "$MEASURED" > "$SUMMARY"
+    -instr-profile "$PROFILE" "${BINARIES[@]}" "$MEASURED" > "$SUMMARY"
 
 python3 scripts/coverage_gate.py "$SUMMARY" "$THRESHOLD" "$MEASURED"

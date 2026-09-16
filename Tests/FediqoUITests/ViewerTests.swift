@@ -205,11 +205,11 @@ struct ViewerTests {
     func coveringBlursInPlace() {
         let shell = Shell(items: Self.list, selected: "b")
         #expect(shell.press(.viewAttachment))
-        #expect(shell.press(.liftCover))
+        #expect(shell.press(.reveal))
         #expect(shell.decks.isLifted("b"))
         #expect(shell.viewing == "b")
         // And another `s` puts it back, still without leaving.
-        #expect(shell.press(.liftCover))
+        #expect(shell.press(.reveal))
         #expect(!shell.decks.isLifted("b"))
         #expect(shell.viewing == "b")
         // `Escape` still means leave.
@@ -275,7 +275,7 @@ struct ViewerTests {
         #expect(!shell.press(.playAttachment))
         #expect(shell.playing.url == nil)
         // Lifted, it plays.
-        #expect(shell.press(.liftCover))
+        #expect(shell.press(.reveal))
         #expect(shell.press(.playAttachment))
         #expect(shell.playing.here(Self.film, of: "b", on: .row) == Self.film)
     }
@@ -457,7 +457,7 @@ struct ViewerTests {
                     playing.stop()
                     return true
                 }
-            case .liftCover:
+            case .reveal:
                 return onActedItem { item in
                     guard item.covered else { return false }
                     return decks.toggleCover(item.id)

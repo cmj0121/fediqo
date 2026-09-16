@@ -7,9 +7,9 @@ struct HostTests {
     @Test("A host or https URL is the lowercase host, path stripped")
     func parseHostAndHTTPSURL() throws {
         #expect(try Host.parse("first.example") == "first.example")
-        #expect(try Host.parse("  first.example  ") == "first.example")
+        #expect(try Host.parse("  First.Example  ") == "first.example")
         #expect(try Host.parse("https://first.example/about?foo=1#bar") == "first.example")
-        #expect(try Host.parse("HTTPS://first.example/") == "first.example")
+        #expect(try Host.parse("HTTPS://FIRST.EXAMPLE/") == "first.example")
         #expect(try Host.parse("https://[::1]/about") == "[::1]")
         #expect(try Host.parse("https://[2001:DB8::1]/") == "[2001:db8::1]")
         #expect(try Host.parse("[::1]") == "[::1]")
@@ -90,7 +90,52 @@ struct HostTests {
         #expect(ProtocolKind.peertube.displayName == "PeerTube")
         #expect(ProtocolKind.friendica.displayName == "Friendica")
         #expect(ProtocolKind.gotosocial.displayName == "GoToSocial")
+        #expect(ProtocolKind.discourse.displayName == "Discourse")
         #expect(ProtocolKind.unknown.displayName == "unknown protocol")
-        #expect(ProtocolKind.allCases.count == 10)
+
+        // Over `allCases` rather than against a number. A count is a reminder to come back here,
+        // which is exactly what a new case does not get; this says the property that actually
+        // matters — every kind this app can name has a name, and no two of them share one, so a
+        // case added by copy-and-paste is caught rather than counted.
+        let names = ProtocolKind.allCases.map(\.displayName)
+        #expect(names.allSatisfy { !$0.isEmpty })
+        #expect(Set(names).count == names.count)
+    }
+
+    // A template is free to delete the generator tag and plenty of administrators do, so a
+    // detector resting on it alone reports a running forum as an unknown protocol — the sentence
+    // that sends a reader to check a spelling that is fine, and that closes the sign-in door,
+    // which is only ever offered on a refusal.
+    @Test("Discuz! is recognised by its own addresses when the meta tag has been stripped")
+    func discuzWithoutItsMetaTag() {
+        let stripped = """
+        <html><head><title>\u{4e00}\u{500b}\u{8ad6}\u{58c7}</title></head>
+        <body><a href="forum.php?mod=forumdisplay&fid=2">\u{7248}\u{9762}</a></body></html>
+        """
+        #expect(HTMLKind.classify(stripped) == .named(.discuz))
+
+        let footerOnly = "<html><body><div id=\"ft\">Powered by Discuz! X3.4</div></body></html>"
+        #expect(HTMLKind.classify(footerOnly) == .named(.discuz))
+
+        let thread = "<html><body><a href=\"forum.php?mod=viewthread&tid=9\">x</a></body></html>"
+        #expect(HTMLKind.classify(thread) == .named(.discuz))
+    }
+
+    @Test("A page that names other software is still taken at its word")
+    func theSecondLookNeverOverrules() {
+        // The second look runs last, so a host that names itself is never overruled by a link
+        // that happens to look like somebody else's. A forum linking to a Discuz! is not one.
+        let mastodon = """
+        <html><head><meta name="generator" content="Mastodon" /></head>
+        <body><a href="https://elsewhere.test/forum.php?mod=forumdisplay&fid=2">a</a></body></html>
+        """
+        #expect(HTMLKind.classify(mastodon) == .named(.mastodon))
+    }
+
+    @Test("A page that names nothing and serves nothing of Discuz!'s is still unknown")
+    func theSecondLookIsNotAGuess() {
+        #expect(HTMLKind.classify("<html><body>hello</body></html>") == .unknown)
+        // "forum" on its own is not Discuz!, and neither is somebody else's forum software.
+        #expect(HTMLKind.classify("<html><body><a href=\"/forum/2\">board</a></body></html>") == .unknown)
     }
 }

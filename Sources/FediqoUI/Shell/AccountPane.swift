@@ -124,8 +124,15 @@ struct AccountPane: View {
         }
     }
 
+    /// Whether the pane has anything to say under the field.
+    ///
+    /// **A partial pick is one of the things it has to say.** A pick where some boards read and
+    /// some did not sets no `refuse` — it was not a failed join, the source is in the list and
+    /// its tabs are in the rail — so a gate asking only about `checking` and `refuse` would build
+    /// the sentence naming the boards that failed and then never draw it. That is the exact shape
+    /// this branch keeps writing down: the answer exists and nobody is asked for it.
     private var statusVisible: Bool {
-        session.checking || session.refuse != nil
+        session.checking || session.refuse != nil || !session.unread.isEmpty
     }
 
     @ViewBuilder
@@ -138,9 +145,69 @@ struct AccountPane: View {
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
             }
         } else if let refuse = session.refuse {
-            Text(refuse)
+            VStack(alignment: .leading, spacing: ShellSpace.snug) {
+                Text(refuse)
+                    .font(ShellType.meta)
+                    .foregroundStyle(ShellChrome.alarm(colorScheme))
+                // Where *every* board failed there is no list to draw — Core threw the first
+                // board's reason and kept none — so what can still be said is how much the
+                // sentence above is about.
+                if session.unreadAll > 0 {
+                    Text(String(format: L10n.t("board.unread.all"), session.unreadAll))
+                        .font(ShellType.mark)
+                        .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                offer
+            }
+        } else if !session.unread.isEmpty {
+            unreadReport
+        }
+    }
+
+    /// Boards the reader picked that could not be read.
+    ///
+    /// **A partial pick is not a silence.** They chose these off a list this app drew for them,
+    /// and some of them did not answer — `install-a.example` board 37 has 114,662 threads and serves
+    /// them as picture cards with no date on any, so it fails and is not subscribed to. Leaving
+    /// it out of the rail with no sentence would leave the reader counting tabs to work out which
+    /// of their choices went missing, and guessing why.
+    ///
+    /// Drawn where the refusal is drawn, because the reader pressed Add here and this is the rest
+    /// of that answer. Not in alarm: the boards that worked did work, and this is the footnote to
+    /// a success rather than a failure of its own.
+    @ViewBuilder
+    private var unreadReport: some View {
+        VStack(alignment: .leading, spacing: ShellSpace.tight) {
+            Text(String(format: L10n.t("board.unread.some"), session.unread.count))
                 .font(ShellType.meta)
-                .foregroundStyle(ShellChrome.alarm(colorScheme))
+                .foregroundStyle(ShellChrome.ink(colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+            ForEach(session.unread, id: \.board.fid) { entry in
+                Text(ShellSession.unreadMessage(entry))
+                    .font(ShellType.mark)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The one thing a reader can do about a server that turned this app away.
+    ///
+    /// This branch recorded the hole and left it open — the refusal message "tells the reader
+    /// what happened and offers them nothing to do about it". A reader with an account on that
+    /// forum *is* somebody it can be opened for, and the honest route is the one the forum's
+    /// owner controls: their own sign-in page, in a real browser engine, with them typing into
+    /// it. Offered only after a refusal, never beside a typo.
+    @ViewBuilder
+    private var offer: some View {
+        if let host = session.offerSignIn {
+            Button(String(format: L10n.t("account.refuse.signin"), host)) {
+                Task { await session.signIn(host: host) }
+            }
+            .font(ShellType.meta)
+            .accessibilityLabel(Text(String(format: L10n.t("account.refuse.signin.label"), host)))
         }
     }
 

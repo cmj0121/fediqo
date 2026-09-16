@@ -10,6 +10,11 @@ public struct FediqoRootView: View {
     @State private var jumpToTop = 0
     @State private var composing = false
     @State private var showingShortcuts = false
+    #if os(macOS)
+    /// Owns the sign-in window so that it outlives the body that opened it — a window held only
+    /// by a view's local is a window that closes the next time SwiftUI rebuilds.
+    @State private var signInWindows = ForumSignInWindows()
+    #endif
     @State private var railExpanded = false
     /// Which card each row's deck is turned to, and which rows the reader has uncovered. Held
     /// here rather than in the list, because a list is replaced by every refresh and `m` and `s`
@@ -70,6 +75,65 @@ public struct FediqoRootView: View {
                     #if os(iOS)
                     .presentationDetents([.medium, .large])
                     #endif
+            }
+            // **On the root, beside the composer's, and not on a pane.** A sign-in is asked for
+            // from Account, where a refusal is reported, and it will be asked for from a timeline
+            // the day a forum's session lapses mid-scroll — so a sheet attached to either pane
+            // would be a sheet that does not open from the other. One presenter, driven by one
+            // piece of session state, is the shape that survives both call sites.
+            // **A window on macOS, a sheet on iOS**, and the split is about what the reader can
+            // do rather than about taste: a macOS sheet cannot be resized by anybody, and what is
+            // inside this one is somebody else's login page drawn at whatever size this app
+            // guessed. A reader who could not see the password field had no way to make it
+            // bigger. On iOS a sheet already fills the screen, so there is nothing a window would
+            // add. See `ForumSignInWindows`.
+            #if os(macOS)
+            .onChange(of: session.signingIn) { _, request in
+                if let request {
+                    signInWindows.show(request, sessions: session.forums) { reached in
+                        // **The same two lines as the sheet below, and they have to be.** A
+                        // sign-in that was reached goes straight back to `begin`: the reader
+                        // typed a host, was turned away, went and signed in, and the errand was
+                        // always "add this forum". Without the retry the window closes onto the
+                        // refusal it was opened from, which reads as a sign-in that did nothing.
+                        //
+                        // This branch lost both the retry and the host when the page moved out of
+                        // the sheet — the window was given the body the sheet had at the time,
+                        // and the sheet grew them afterwards. Whatever is done to one of these
+                        // two callbacks belongs in the other on the same day.
+                        if session.signInFinished(reached: reached, host: request.host) {
+                            Task { await session.add() }
+                        }
+                    }
+                } else {
+                    signInWindows.close()
+                }
+            }
+            #else
+            .sheet(item: $session.signingIn) { request in
+                ForumSignInSheet(request: request, sessions: session.forums) { reached in
+                    // **A sign-in that was reached goes straight back to `begin`.** The reader
+                    // typed a host, was turned away, and went and signed in; the errand was
+                    // always "add this forum", and landing them at an empty field having lost
+                    // what they typed would make them start it again. This second pass goes
+                    // through the browser that now holds the session — see `ShellSession.joiner`.
+                    if session.signInFinished(reached: reached, host: request.host) {
+                        Task { await session.add() }
+                    }
+                }
+            }
+            #endif
+            // **The pause, on the root beside the other two.** A forum join stops to ask which
+            // boards, and until it is answered nothing has been added — so dismissing this by
+            // any route at all, the button or a swipe, is a complete cancel with nothing to undo.
+            // Attached here rather than to Account for the reason the sign-in sheet is: one
+            // presenter, driven by one piece of session state, survives a second call site.
+            .sheet(item: $session.choosing) { choice in
+                BoardPickerSheet(
+                    choice: choice,
+                    subscribe: { picks in Task { await session.subscribe(picks) } },
+                    cancel: { session.cancelChoosing() }
+                )
             }
             .overlay {
                 if showingShortcuts {
@@ -172,15 +236,8 @@ public struct FediqoRootView: View {
                 if inViewer { ShellPictures.shared.releaseViewerTier() }
                 return true
             }
-        case .liftCover:
-            // **Blurs in place and never navigates.** Not "toggle, and also close the viewer if
-            // that leaves nothing to show" — a conditional rule inside the layer order is the
-            // named risk, and the blur at size is what confirms the press took. Two intents, two
-            // keys: `Escape` is still how a reader leaves.
-            return onActedItem { item in
-                guard item.covered else { return false }
-                return decks.toggleCover(item.id)
-            }
+        case .reveal:
+            return revealFocused()
         case .viewAttachment:
             return openViewer()
         case .playAttachment:
@@ -189,10 +246,18 @@ public struct FediqoRootView: View {
             // `q` leaves what is in front of it and reaches past nothing — the same one
             // expression of the order `Escape` reads. It used to intersect a local subset of the
             // layers, which was the order written down a second time.
+            //
+            // **No `default:`, and this one was found still here.** The plan records a `default:`
+            // over a protocol kind shipping a silent wrong answer once already and says the shape
+            // is gone; it was not — it was in this switch, over `DummyLayer?`, six commits later.
+            // `.dismiss` below has always enumerated all four and `nil` besides, which is what
+            // made the difference invisible: the two halves of one rule, written two ways, one of
+            // them free to fall through. A fifth layer added to `DummyLayer` now has to say what
+            // `q` does about it.
             switch DummyCommand.outermost(of: openLayers) {
             case .viewer: return closeViewer()
             case .thread: return popThread()
-            default: return false
+            case .shortcuts, .selection, nil: return false
             }
         case .showShortcuts:
             // Closing is always allowed; opening obeys the entry rule, so `?` under an open
@@ -363,7 +428,7 @@ public struct FediqoRootView: View {
                     of: item.id,
                     on: .viewer
                 ),
-                onToggleCover: { _ = apply(.liftCover) },
+                onToggleCover: { _ = apply(.reveal) },
                 onPlay: { _ = apply(.playAttachment) },
                 onGone: { playback.stop() },
                 onClose: { _ = closeViewer() }
@@ -465,8 +530,12 @@ public struct FediqoRootView: View {
         return true
     }
 
+    /// **Resolved out of the session's list, not rebuilt from the id.** A board query knows which
+    /// board it is by carrying it; an id alone says only that it is one. Reconstructing here
+    /// would give the keys a stream that matched no note, so `j` and `k` would move through
+    /// nothing on exactly the tabs this unit added. See `ShellSession.timeline(for:)`.
     private var streamItems: [DummyItem] {
-        DummyTimeline(id: session.timelineID ?? "").items(from: session.notes)
+        session.timeline(for: session.timelineID).items(from: session.notes)
     }
 
     /// Whichever list is in front: the open conversation, or the stream under it.
@@ -492,6 +561,65 @@ public struct FediqoRootView: View {
         }
         jumpToTop += 1
         return true
+    }
+
+    /// `s` — the author's cover where there is one, the rest of the topic where there is not.
+    ///
+    /// **The acting half only.** Which of the two this press means is
+    /// `DummyCommand.reveal(hasCover:repliesWanted:)` and is decided nowhere else; what is here is
+    /// the three things to do about the answer, and the two facts the rule needs. Written this way
+    /// so that the pane's mark and this key read one function rather than two agreeing `if`s —
+    /// this branch's own arrangement for `a` and the card's play mark, stated in `playRow`.
+    ///
+    /// Everything about the cover is exactly as it was, including that it lands on the viewed post
+    /// where the viewer is open: `onActedItem` is what makes `m`, `a` and `s` mean the same thing
+    /// with the viewer up, and none of that moved. **No `default:`** — a fourth thing `s` could
+    /// mean has to be given a line here.
+    private func revealFocused() -> Bool {
+        onActedItem { item in
+            switch DummyCommand.reveal(
+                hasCover: item.covered,
+                repliesWanted: repliesWanted(of: item)
+            ) {
+            case .cover:
+                // **Blurs in place and never navigates.** Not "toggle, and also close the viewer
+                // if that leaves nothing to show" — a conditional rule inside the layer order is
+                // the named risk, and the blur at size is what confirms the press took. Two
+                // intents, two keys: `Escape` is still how a reader leaves.
+                return decks.toggleCover(item.id)
+            case .replies:
+                guard let thread = ForumThreadRef(item) else { return false }
+                Task { await session.posts.fetchReplies(thread) }
+                return true
+            case .nothing:
+                return false
+            }
+        }
+    }
+
+    /// Whether pressing for this post's replies could do anything at all.
+    ///
+    /// Three conditions, and each one is a real state rather than a guard written defensively.
+    ///
+    /// 1. **The pane is open on this very post.** The replies are drawn in `DummyThreadPane` and
+    ///    nowhere else, so from the timeline `s` would put a page on the wire for something the
+    ///    reader cannot see — work with no visible result, which is the fault the whole unit is
+    ///    about. A reader reaches the replies the way they always have: `Return`, then `s`.
+    /// 2. **With no viewer over it.** `onActedItem` hands `s` the viewed post while the viewer is
+    ///    up, and a fetch landing behind an opaque picture is the same invisible work one layer
+    ///    further out. With the viewer open `s` keeps its one old meaning and nothing else.
+    /// 3. **It is a Discuz! thread whose replies want asking for.** A Discourse topic and a
+    ///    microblog post are both `nil` at `ForumThreadRef`, for the reason that type gives, and
+    ///    `wantsPressing` is where "asking again could change the answer" already lives.
+    ///
+    /// **`standing(of:)` stamps interest, and that is fine here.** It is the same read the pane's
+    /// body makes on every pass; stamping more often can only make an entry look *less* stale to
+    /// the eviction predicate. What I8 forbids is a band that stops reading, not one read twice.
+    private func repliesWanted(of item: DummyItem) -> Bool {
+        guard place == .timeline, viewedItem == nil, threadStack.last == item.id,
+              let thread = ForumThreadRef(item)
+        else { return false }
+        return session.posts.standing(of: thread).wantsPressing
     }
 
     private func openThread() -> Bool {

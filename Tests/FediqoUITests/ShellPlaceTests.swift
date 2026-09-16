@@ -125,10 +125,19 @@ struct EmptySessionTests {
         )
     }
 
-    @Test("Timeline enables when All and Trends exist")
-    func timelineEnablesWhenAllAndTrendsExist() {
-        #expect(!ShellAvailability(queryIDs: ["all"]).allows(.timeline))
+    /// **`all` on its own is now enough, and that is the change D27 forced.**
+    ///
+    /// This used to require Trends as well, which held while every source that could be joined
+    /// was a microblog. A forum has no trending read at all, so F4 stopped offering it one — and
+    /// had this gate kept asking for `trends`, a reader whose only source is a forum would have
+    /// been locked out of the one place their boards are drawn.
+    @Test("Timeline enables on All, with or without Trends")
+    func timelineEnablesOnAll() {
+        #expect(ShellAvailability(queryIDs: ["all"]).allows(.timeline))
+        // A board query is not a substitute for All: All is what the place is built around, and
+        // a query list without it is a list nothing rebuilt.
         #expect(!ShellAvailability(queryIDs: ["trends"]).allows(.timeline))
+        #expect(!ShellAvailability(queryIDs: ["board:forum.example:33"]).allows(.timeline))
         let ready = ShellAvailability(queryIDs: ["all", "trends"])
         #expect(ready.allows(.timeline))
         #expect(!ready.allows(.notices))

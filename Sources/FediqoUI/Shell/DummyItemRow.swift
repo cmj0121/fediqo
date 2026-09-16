@@ -13,8 +13,38 @@ struct DummyItemRow: View {
     /// owns the wait; the row cannot do it itself — see `resolve`. Per host rather than a counter
     /// for the pane, so a slow instance cannot hold up a row reading through a quick one.
     var catalogueSettled: Bool = false
+    /// Where a forum thread's opening post is fetched and kept — D30.
+    ///
+    /// Handed in rather than reached for as a shared instance, for the reason `ShellSession`
+    /// holds the two picture caches: what Preferences reports and what Clear empties have to be
+    /// the same object by construction, and a preview or a test wired to its own cache would
+    /// otherwise press one and draw the other.
+    let posts: ForumPosts
     @Binding var marks: DummyMarks
     var selected: Bool = false
+    /// Whether this row is the post the reader opened **in order to read** — the thread pane, and
+    /// nowhere else.
+    ///
+    /// **The row's one height is not negotiable and this does not negotiate it.** It is a fact
+    /// about a *list*: forty rows under a thumb, where a band that grows moves everything below
+    /// it and a hostile instance sizing one row is a layout attack that lands on all of them. The
+    /// timeline keeps every word of that, and `false` is what every call site there passes.
+    ///
+    /// The pane is the other case, and F6 already wrote down the answer for it one level down.
+    /// `ForumReplyRow` is held to no height at all, and says why: "the timeline's one-height rule
+    /// is about a list the reader is scrolling… this pane is what the reader opened in order to
+    /// *read*". The opening post is the same case and was not given the same answer — so the post
+    /// the reader pressed `Return` on was cut to three lines while the twenty replies under it ran
+    /// to whatever length they liked, which is the complaint "the main thread does not load well".
+    ///
+    /// **It is also what `Return` has always promised.** `DummyCommand.expandPost` is called
+    /// *expand* and the guide says "Open the thread"; before this, expanding a post showed the
+    /// reader exactly the same three lines the row already had.
+    ///
+    /// Two things and no third: the words lose their line limit, and the band stops being pinned
+    /// to `Box.thumb` and clipped. Everything else about the row — the four bands, the slot, the
+    /// marks, the cover — is identical, because none of it was ever the problem.
+    var inFull: Bool = false
     /// Which attachment is on top. It belongs to the app rather than to this view, so that a
     /// refresh that replaces the list leaves a reader who turned to the third one looking at the
     /// third one. See `ShellDecks`.
@@ -320,9 +350,29 @@ struct DummyItemRow: View {
     /// **The cover does not reach here.** One cover over the row means the author's words and what
     /// they attached; who wrote it is not what `sensitive` is a fact about, and a timeline of
     /// blurred faces would say something about the authors that nobody said.
+    ///
+    /// **Which address, and where a forum's comes from.** The post's own wherever it brought one,
+    /// and for a Discuz! thread it never does: the thread table carries no avatar, so
+    /// `DummyItem.avatarURL` is `nil` for every row on every forum this app reads — the reader's
+    /// "the user's avatar does not loaded". The picture is on the thread *page*, and D30 already
+    /// fetches that page when the row is scrolled to, so it arrives in an answer this row was
+    /// waiting for anyway. `ForumPosts.avatar(of:)` is the reader; `DiscuzPost.avatarURL` is where
+    /// it was parsed from, on six templates that spell it six ways.
+    ///
+    /// **Read in `body`, like every other cache read on this row** — `avatar(of:)` stamps
+    /// interest, and a read moved out of the body is the I8 failure. The order is the post's own
+    /// first: a forum that ever does start sending an avatar with its thread table should win over
+    /// a page this device may not have fetched yet, and a microblog row never reaches the second
+    /// term at all because it has no `thread`.
+    var avatarURL: URL? {
+        if let url = item.avatarURL { return url }
+        guard let thread else { return nil }
+        return posts.avatar(of: thread)
+    }
+
     private var avatar: some View {
         Group {
-            if let url = item.avatarURL {
+            if let url = avatarURL {
                 RemoteImage(
                     url: url,
                     tier: .deck,
@@ -412,8 +462,44 @@ struct DummyItemRow: View {
     private func mainBox(_ written: Written) -> some View {
         if narrow {
             VStack(alignment: .leading, spacing: ShellSpace.snug) {
-                coveredWords(written)
+                // **A post that arrives with the list may size its row; a post that arrives
+                // after the row is on screen may not.** That is the whole of the rule, and it is
+                // what splits these two branches.
+                //
+                // A phone in portrait sizes the words band to the words — deliberately, and
+                // since before any of this: there is no room for a second column, and a long
+                // post has always made a tall row here. That is harmless because the row is
+                // drawn once, at its final height, before the reader ever sees it.
+                //
+                // A forum thread's opening post is the case where it stops being harmless. It
+                // lands a beat after the row is on screen, under the thumb that is scrolling the
+                // list, and a band that grew when it landed would push everything below it —
+                // which is the one thing this unit is not allowed to do. So this kind of row
+                // takes the wide layout's fitting on a phone as well: the same `Box.thumb` band,
+                // held open and clipped, so the four states measure one height on every
+                // platform. The cost, stated: a long first post is truncated on a phone where a
+                // long microblog post is not, and the rest of it is one press away in the
+                // thread — which is what `bodyLines` says about the wide layout too.
+                // **`inFull` is the pane, and the pane is not a list under a thumb.** The
+                // sentence above — a post that arrives after the row is on screen may not size
+                // it — is a rule about the timeline; in the thread pane there is one post, the
+                // reader opened it to read it, and holding it to 96pt on a phone would truncate
+                // the one thing they asked for. See `inFull`.
+                if thread != nil, !inFull {
+                    coveredWords(written)
+                        .frame(height: thumbSide, alignment: .top)
+                        .clipped()
+                } else {
+                    coveredWords(written)
+                }
                 if item.hasThumb { coveredThumb }
+            }
+        } else if inFull {
+            // The two columns, and neither of them pinned. Top-aligned rather than height-locked,
+            // so the words run to their own length beside a slot that keeps its square.
+            HStack(alignment: .top, spacing: ShellSpace.step) {
+                coveredWords(written)
+                coveredThumb
             }
         } else {
             HStack(alignment: .top, spacing: ShellSpace.step) {
@@ -685,19 +771,49 @@ struct DummyItemRow: View {
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                     .lineLimit(1)
             }
-            EmojiText(item.body, emojis: written.body, host: host)
-                .foregroundStyle(
-                    item.title == nil ? ShellChrome.ink(colorScheme) : ShellChrome.inkDim(colorScheme)
-                )
-                .lineLimit(narrow ? nil : bodyLines)
+            // **A forum thread's words are not in hand and are fetched; everything else's came
+            // with the post.** The two are drawn by different views because they are different
+            // facts: a microblog post's body is a string that is either empty or is the words,
+            // and a thread's is one of five states — not here yet, the words, withheld, no words
+            // at all, or a reason there are none. See `ForumPostBand`.
+            //
+            // **Plain `Text` inside that band, not `EmojiText`.** A Discuz! post carries no
+            // custom-emoji list and the forum has no `/api/v1/custom_emojis` for a catalogue to
+            // answer out of, so scanning a stranger's post for shortcodes that can never resolve
+            // would be work with no possible result — and would put a picture in a line on the
+            // strength of a colon somebody typed.
+            if let thread {
+                ForumPostBand(thread: thread, posts: posts, lines: wordLines)
+            } else {
+                EmojiText(item.body, emojis: written.body, host: host)
+                    .foregroundStyle(
+                        item.title == nil ? ShellChrome.ink(colorScheme) : ShellChrome.inkDim(colorScheme)
+                    )
+                    .lineLimit(narrow ? nil : wordLines)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// The thread this row stands on, where it stands on one this device can go and read.
+    ///
+    /// Nothing for a microblog post, and nothing for a Discourse thread: both forums draw as
+    /// `.forum` because the shape is where the protocol stops mattering, but a `tid` is Discuz!'s
+    /// number and `DiscuzClient` is what answers for it. See `ForumThreadRef`.
+    var thread: ForumThreadRef? { ForumThreadRef(item) }
+
+    /// How many lines the words actually get: the slot's worth in a list, all of them in the pane.
+    ///
+    /// Named apart from `bodyLines` so that the *fitting* and the *decision to apply it* stay two
+    /// things. `bodyLines` is arithmetic about how much room the slot leaves once a title and a
+    /// board name have taken their line; this is the one question a call site answers. A test can
+    /// then assert the arithmetic without a screen and the rule without arithmetic.
+    var wordLines: Int? { inFull ? nil : bodyLines }
+
     /// What fits in the slot's height beside it. A row that grows to whatever somebody
     /// wrote makes the list a series of unrelated heights; the rest of the post is a
     /// press away, which is what the thread is for.
-    private var bodyLines: Int {
+    var bodyLines: Int {
         var lines = 4
         if item.title != nil { lines -= 1 }
         if item.source.kind == .board, item.board != nil { lines -= 1 }

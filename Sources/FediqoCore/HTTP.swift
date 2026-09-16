@@ -40,7 +40,7 @@ public struct URLSessionClient: HTTPClient, Sendable {
         }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        request.setValue("Fediqo", forHTTPHeaderField: "User-Agent")
+        request.setValue(Fediqo.userAgent, forHTTPHeaderField: "User-Agent")
 
         let body: Data
         let response: URLResponse?

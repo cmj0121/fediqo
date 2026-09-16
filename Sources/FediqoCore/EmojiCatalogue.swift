@@ -162,6 +162,14 @@ public actor EmojiCatalogueStore {
     private var catalogues: [String: EmojiCatalogue] = [:]
     private var inFlight: [String: Fetch] = [:]
     private var generation = 0
+    /// Everyone waiting on a host's fetch, by a ticket of their own.
+    ///
+    /// **A ticket rather than a list, so that one waiter can leave without disturbing the rest.**
+    /// Waiting used to be `await task.value`, which cannot be left at all: a caller cancelled
+    /// while waiting stayed parked on a dripping server until it answered, and a pane that joins
+    /// and leaves repeatedly leaked one such task per visit.
+    private var waiters: [String: [Int: CheckedContinuation<Void, Never>]] = [:]
+    private var ticket = 0
     private let now: @Sendable () -> Date
 
     /// `now` is injected so that a test can age a catalogue without waiting a day for it.
@@ -203,14 +211,71 @@ public actor EmojiCatalogueStore {
             // for this server's catalogue to be dropped, and an answer arriving behind them is
             // one they did not ask to keep. A client that does not honour cancellation and
             // hands back a body anyway is stopped here rather than on the network.
-            guard !Task.isCancelled, let emojis else { return }
-            catalogues[key] = EmojiCatalogue(emojis, host: key, fetchedAt: now())
+            if !Task.isCancelled, let emojis {
+                catalogues[key] = EmojiCatalogue(emojis, host: key, fetchedAt: now())
+            }
+            // **Last, and on every path out of here, including the cancelled one.** A waiter that
+            // is never resumed is not a slow wait, it is a hang — and this project's own risks
+            // record that `.timeLimit` will not catch one. Whatever happened to the fetch, the
+            // people waiting on it are owed the news that it is over.
+            wake(key)
         })
     }
 
     /// Wait for a fetch already on its way for this host. Nothing on its way is not a wait.
+    ///
+    /// **A waiter can leave.** This was `await inFlight[key]?.task.value`, which honours nobody's
+    /// cancellation but the fetch's own: a caller cancelled while waiting stayed parked until a
+    /// dripping server answered, and a screen that joins and leaves repeatedly parked one more
+    /// task each time. Waiting on a ticket of one's own means leaving is deregistering.
+    ///
+    /// **Resumed exactly once, whichever happens first.** The ticket is removed from the table in
+    /// the same actor step that resumes it, so the fetch finishing and the waiter cancelling
+    /// cannot both resume the same continuation — one of them finds it gone. Resuming twice traps;
+    /// resuming never hangs; and there is no third outcome to get right.
     public func settle(host: String) async {
-        await inFlight[Self.key(host)]?.task.value
+        let key = Self.key(host)
+        guard inFlight[key] != nil else { return }
+
+        ticket += 1
+        let id = ticket
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                // **Checked here, inside the actor, rather than before the handler is armed.**
+                // Cancellation that arrives before the ticket is in the table would otherwise find
+                // nothing to deregister and leave this waiter parked forever — the hang the whole
+                // change is meant to remove.
+                if Task.isCancelled {
+                    continuation.resume()
+                } else {
+                    waiters[key, default: [:]][id] = continuation
+                }
+            }
+        } onCancel: {
+            // `onCancel` runs outside the actor, so getting back in is a hop. The ticket makes
+            // that safe: by the time this arrives the fetch may have resumed and removed it
+            // already, and finding nothing is the ordinary case rather than an error.
+            Task { await self.stopWaiting(key: key, id: id) }
+        }
+    }
+
+    /// Whether a fetch for this host is still on its way. For a test that needs to say "one
+    /// reader leaving does not call the fetch off for the others", which is the property that
+    /// makes leaving safe rather than merely possible.
+    func isFetching(host: String) -> Bool { inFlight[Self.key(host)] != nil }
+
+    /// One waiter gives up. The fetch carries on — other readers may still want it, and a
+    /// catalogue half-fetched is worth no less because one screen stopped looking.
+    private func stopWaiting(key: String, id: Int) {
+        guard let continuation = waiters[key]?.removeValue(forKey: id) else { return }
+        if waiters[key]?.isEmpty == true { waiters[key] = nil }
+        continuation.resume()
+    }
+
+    /// Tells everyone waiting on this host that the fetch is over, however it ended.
+    private func wake(_ key: String) {
+        guard let parked = waiters.removeValue(forKey: key) else { return }
+        for continuation in parked.values { continuation.resume() }
     }
 
     public func catalogue(host: String) -> EmojiCatalogue? { catalogues[Self.key(host)] }

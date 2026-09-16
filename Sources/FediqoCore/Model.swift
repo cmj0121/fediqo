@@ -11,6 +11,13 @@ public enum ProtocolKind: String, Sendable, Hashable, CaseIterable {
     case peertube
     case friendica
     case gotosocial
+    /// A forum rather than a microblog. Kept in the same list because what this app asks a
+    /// host is "what do you speak", and a forum is an answer to that question — the shape of
+    /// what comes back differs, not the question.
+    case discourse
+    /// The other forum, and a different program with a different answer to "how do I read you":
+    /// Discourse publishes JSON, Discuz! publishes a page. Same question, same list.
+    case discuz
     case unknown
 
     public var displayName: String {
@@ -24,20 +31,66 @@ public enum ProtocolKind: String, Sendable, Hashable, CaseIterable {
         case .peertube: "PeerTube"
         case .friendica: "Friendica"
         case .gotosocial: "GoToSocial"
+        case .discourse: "Discourse"
+        // With the exclamation mark. It is part of the product's name rather than punctuation
+        // this app added, and it is how the software writes itself in its own generator tag.
+        case .discuz: "Discuz!"
         case .unknown: "unknown protocol"
         }
     }
 }
 
+/// One board of a forum the reader subscribed to.
+///
+/// **The number is the subscription and the name is the label.** A forum renames a board when a
+/// moderator decides to; the `fid` it is served at does not change. Both are kept because a rail
+/// listing `fid 34` is no use to anybody, and only one of them is the identity.
+public struct BoardSubscription: Identifiable, Hashable, Sendable {
+    public var id: Int { fid }
+    public let fid: Int
+    public let name: String
+
+    public init(fid: Int, name: String) {
+        self.fid = fid
+        self.name = name
+    }
+}
+
 /// A server this device reads. Unsigned: the host is the source.
+///
+/// **One source per host, carrying the boards the reader chose — never one source per board**
+/// (D26). Everything per-server in this app is keyed by host: the picture cache's tags, the emoji
+/// catalogue, `Clear`, the join list. A reader subscribing to eight boards would otherwise become
+/// eight servers in every one of them, and pressing Clear on one of the eight would mean
+/// something nobody could predict. A board is a *query within* a source — which is the thing the
+/// rail already draws (D27) — so `id` stays the host and the subscriptions ride along.
+///
+/// **A note's copy of this is a stamp, not a live view.** `Note.source` records which server the
+/// note came from; the subscription list that matters is the one on the source in the store,
+/// which is the only copy anything updates. Reading `boards` off a note would be reading what was
+/// true when the note was parsed.
 public struct Source: Identifiable, Hashable, Sendable {
     public var id: String { host }
     public let host: String
     public let kind: ProtocolKind
+    /// The boards subscribed to, in the order they were picked. Empty for every source that has
+    /// no such idea, which is every microblog and every Discourse.
+    ///
+    /// **At most one entry per `fid`, enforced here.** The guarantee is in the data rather than
+    /// in a convention each caller remembers — this branch's second earned convention — because a
+    /// forum that renamed a board between two reads would otherwise give a reader two
+    /// subscriptions to one board, with two names, and no way to tell which.
+    public let boards: [BoardSubscription]
 
-    public init(host: String, kind: ProtocolKind) {
+    public init(host: String, kind: ProtocolKind, boards: [BoardSubscription] = []) {
         self.host = host.lowercased()
         self.kind = kind
+        var seen: Set<Int> = []
+        self.boards = boards.filter { seen.insert($0.fid).inserted }
+    }
+
+    public func subscribes(to fid: Int) -> Bool {
+        boards.contains { $0.fid == fid }
     }
 }
 
@@ -155,6 +208,31 @@ public struct Note: Identifiable, Hashable, Sendable {
     public let author: String
     public let handle: String
     public let body: String
+    /// What the post is called, where the source has such a thing.
+    ///
+    /// **A microblog has none and a forum's is the post.** A Mastodon status is its words; a
+    /// forum topic is a title with a discussion under it, and `/latest.json` often sends no
+    /// excerpt at all — so a row that dropped this would draw a forum as a column of blank
+    /// posts. Optional rather than empty-string, because "this source has no such idea" and
+    /// "the author left it blank" are different facts and only the first is true here.
+    public let title: String?
+    /// The section of the source this was posted in — a forum's category. Nothing where the
+    /// source has no such division, which is every microblog.
+    public let board: String?
+    /// What the source calls that section, as against what it *shows* the reader.
+    ///
+    /// **A name is not an identity and must not be used as one.** A board's heading on its own
+    /// page and its name in the forum's index are written by hand and are free to differ — they
+    /// were byte-identical on all twenty-two boards measured, which is exactly the kind of fact
+    /// that is true until it is not. Matching a subscription to its threads by name turns any
+    /// such difference, or an administrator renaming a board between two reads, into a tab that
+    /// silently draws nothing: visibly wrong, but wrong with no error anywhere to explain it.
+    ///
+    /// A `String` rather than the number Discuz! uses, because a section id is whatever the
+    /// source says it is and Discourse's is its own; this is the identity, not the format.
+    /// Nothing where the page carried no id — a forum's cross-board listing names no section per
+    /// row — and a reader of this must fall back to the name rather than assume.
+    public let boardID: String?
     public let postedAt: Date
     public var origins: Set<FetchOrigin>
     public let reply: Reply?
@@ -183,6 +261,9 @@ public struct Note: Identifiable, Hashable, Sendable {
         author: String,
         handle: String,
         body: String,
+        title: String? = nil,
+        board: String? = nil,
+        boardID: String? = nil,
         postedAt: Date,
         origins: Set<FetchOrigin>,
         reply: Reply? = nil,
@@ -201,6 +282,9 @@ public struct Note: Identifiable, Hashable, Sendable {
         self.author = author
         self.handle = handle
         self.body = body
+        self.title = title
+        self.board = board
+        self.boardID = boardID
         self.postedAt = postedAt
         self.origins = origins
         self.reply = reply

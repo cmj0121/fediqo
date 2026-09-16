@@ -34,6 +34,7 @@
 "account.catalog.weekly" = "%@ active this week";
 "account.catalog.people" = "%@ people";
 "account.refuse.closed" = "%@ answered, but would not hand over its public timeline.";
+"account.refuse.refused" = "%1$@ turned this app away (HTTP %2$d). Something in front of it is filtering readers it does not recognise.";
 "account.catalog.langUnknown" = "Language unknown";
 
 "rail.open.title" = "Open";
@@ -61,7 +62,7 @@
 "shortcut.view" = "Open what is attached, at the size of the app";
 "shortcut.play" = "Play what is attached, or stop it";
 "shortcut.turn" = "Turn to the next attachment";
-"shortcut.cover" = "Lift the cover the author put over this post, or put it back";
+"shortcut.reveal" = "Lift the author's cover — or, where there is none, load the rest of this topic";
 "shortcut.compose" = "New post";
 "shortcut.list" = "This list";
 "shortcut.back" = "Back to the list";
@@ -165,7 +166,7 @@
 "prefs.fontSize.largest" = "Largest";
 
 "prefs.cache" = "Held for this run";
-"prefs.cache.footer" = "None of this is written to disk. Every server is read again from scratch the next time Fediqo opens, and a server's emoji names are read again by themselves after a day.";
+"prefs.cache.footer" = "None of this is written to disk, with one exception. Every server is read again from scratch the next time Fediqo opens, and a server's emoji names are read again by themselves after a day. The exception is a password you asked Fediqo to save: that is kept in this device's Keychain, and Clear deletes it along with everything else.";
 "prefs.cache.empty" = "Add a source on Account. What each one sends is held here until you close Fediqo.";
 "prefs.cache.catalogue" = "%d emoji names, read";
 "prefs.cache.catalogue.none" = "No emoji names held";
@@ -173,3 +174,75 @@
 "prefs.cache.pictures.none" = "No pictures held";
 "prefs.cache.clear" = "Clear";
 "prefs.cache.clear.label" = "Clear what this device holds from %@";
+
+/* Unit F2 — the signed-in transport. */
+"account.refuse.signin" = "Sign in to %@ yourself";
+"account.refuse.signin.label" = "Open %@'s own sign-in page";
+"forum.signin.title" = "Sign in to %@";
+"forum.signin.web.label" = "%@'s own page";
+"forum.signin.save" = "Save my username and password on this device";
+"forum.signin.save.off" = "This app never sees your password. You are typing into this forum's own page, and nothing here reads what you type.";
+"forum.signin.save.on" = "This app will see your password, because signing you in by itself means holding it. It goes into this device's Keychain, is sent to nowhere but this forum, and is never copied to iCloud. Clearing this server, or forgetting it on Preferences, deletes it.";
+"forum.signin.cancel" = "Cancel";
+"forum.signin.done" = "Done";
+"forum.stop.first" = "The first sign-in is yours. Type into this forum's own page below.";
+"forum.stop.wall" = "Something in front of this forum wants to check the browser. It usually passes by itself; if it asks you something, answer it below.";
+"forum.stop.captcha" = "This forum is asking for a verification code, which a saved password cannot answer. Finish signing in below.";
+"forum.stop.question" = "This account has a security question, which a saved password cannot answer. Finish signing in below.";
+"forum.stop.refused" = "This forum did not accept the saved username and password.";
+"forum.stop.unreadable" = "This forum's answer could not be read. Sign in below and see what it says.";
+"forum.stop.unreachable" = "This forum did not answer. Try below.";
+"prefs.password.held" = "Password held on this device";
+"prefs.password.forget" = "Forget it";
+"prefs.password.forget.label" = "Forget the password held for %@";
+
+/* Unit F4 — choosing boards. */
+"board.choose.title" = "Boards on %@";
+"board.choose.detail" = "Pick the boards you want to read. Nothing is added until you do.";
+"board.choose.count" = "%1$d of %2$d picked";
+"board.choose.cancel" = "Cancel";
+"board.choose.subscribe" = "Subscribe";
+"board.choose.threads" = "%d threads";
+"board.choose.posts" = "%d posts";
+"board.choose.unstated" = "This forum stated no figures for this board";
+"board.choose.hint.on" = "Subscribe to this board";
+"board.choose.hint.off" = "Stop subscribing to this board";
+"board.unread.some" = "%d of the boards you picked could not be read, and were not subscribed to:";
+"board.unread.all" = "None of the %d boards you picked could be read, so nothing was added.";
+"board.unread.refused" = "%1$@ — this forum would not let this app read it (HTTP %2$d).";
+"board.unread.unreadable" = "%@ — this forum answered, but there was no thread list on that board.";
+"board.unread.network" = "%@ — that board could not be reached.";
+"timeline.rule.board" = "%1$@ on %2$@, newest first.";
+"timeline.empty.board.title" = "This board has nothing here";
+"timeline.empty.board.detail" = "Threads read from this board land here, newest first.";
+
+/* Unit F6 — the first posts this device is holding, in the inventory beside Clear. */
+"prefs.cache.posts" = "%d first posts";
+"prefs.cache.posts.none" = "No first posts held";
+
+/* Unit F6 — the boards under boards, drawn. */
+"board.choose.under" = "%1$@, under %2$@";
+
+/* Unit F6 — a thread's first post, and the four things it can be.
+   Every one of these is this app's own sentence about the post and never the author's
+   writing, which is why each is drawn in the row's quiet register. */
+"item.forum.coming" = "Loading the first post";
+"item.forum.withheld" = "This forum keeps this post for readers who are signed in.";
+"item.forum.silent" = "There are no words in this post.";
+"item.forum.refused" = "This forum would not let this app read this thread.";
+"item.forum.unreadable" = "This forum answered, but there was no post this app could read.";
+"item.forum.unreachable" = "That thread could not be reached.";
+"item.forum.crowded" = "There was no room left to keep this post.";
+
+/* Unit F6 — the rest of the topic. */
+"thread.replies.load" = "Load the replies";
+"thread.replies.loading" = "Loading the replies…";
+"thread.replies.none" = "Nobody has answered this one yet.";
+"thread.replies.count" = "%d replies";
+"thread.reply.floor" = "#%d";
+"thread.reply.quoted" = "Quoted: %@";
+
+/* Unit F7 — reading a thread properly. */
+"thread.open" = "Open on %@";
+"thread.open.hint" = "Opens %@ in your browser";
+"thread.open.leaves" = "Leaves this app and opens your browser";

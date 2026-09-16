@@ -210,7 +210,7 @@ struct DeckTests {
             "item.covered.hide",
             "item.covered.label",
             "item.lifted.label",
-            "shortcut.cover",
+            "shortcut.reveal",
         ]
         for language in [DummyLanguage.english, .taiwanese] {
             for key in keys {

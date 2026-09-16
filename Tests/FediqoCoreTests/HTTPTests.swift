@@ -5,7 +5,7 @@ import os
 
 @Suite("HTTP", .serialized)
 struct HTTPTests {
-    @Test("URLSessionClient GETs HTTPS with User-Agent Fediqo, never DNS")
+    @Test("URLSessionClient GETs HTTPS saying who it is, never DNS")
     func urlSessionClientGET() async throws {
         StubURLProtocol.prepare(status: 200, body: Data("ok".utf8), http: true)
         defer { StubURLProtocol.reset() }
@@ -19,7 +19,16 @@ struct HTTPTests {
         let request = StubURLProtocol.lastRequest()
         #expect(request?.url == url)
         #expect(request?.httpMethod == "GET")
-        #expect(request?.value(forHTTPHeaderField: "User-Agent") == "Fediqo")
+        // Against the constant rather than a literal, so the one place the agent is written is
+        // the one place it can be changed — and then the two properties that matter said out
+        // loud: it names the app and a way to reach whoever wrote it, and it does not claim to
+        // be a browser. A filter in front of a server may turn this app away; getting past one
+        // by impersonation is not something this package does.
+        let agent = try #require(request?.value(forHTTPHeaderField: "User-Agent"))
+        #expect(agent == Fediqo.userAgent)
+        #expect(agent.contains("Fediqo"))
+        #expect(agent.contains("https://"))
+        #expect(!agent.contains("Mozilla"))
     }
 
     @Test("URLSessionClient refuses HTTP without touching the network")

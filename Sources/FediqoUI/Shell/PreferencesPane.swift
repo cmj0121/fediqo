@@ -141,6 +141,8 @@ struct PreferencesPane: View {
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                 catalogueLine(for: source)
                 pictureLine(source, in: session)
+                postLine(source, in: session)
+                passwordLine(source, in: session)
             }
             Spacer(minLength: ShellSpace.snug)
             // No `.accessibilityElement(children: .ignore)` on the row around it. A container
@@ -195,6 +197,60 @@ struct PreferencesPane: View {
                     + Text(verbatim: " · ")
                     + Text(bytes, format: .byteCount(style: .memory))
             )
+        }
+    }
+
+    /// The forum posts this device is holding from this server — D30's cache, in the inventory.
+    ///
+    /// **Drawn only for a forum**, which is the one place this cache can ever hold anything: a
+    /// `tid` is Discuz!'s number and `ForumThreadRef` refuses everything else, so a line under
+    /// `first.example` reading "no first posts held" would be a true sentence about a thing
+    /// that was never possible. Every other line in this row is about something every source can
+    /// have.
+    ///
+    /// Read off **this session's** cache, for the reason `pictureLine` is: the figure and the
+    /// button beside it have to be answers about the same object.
+    @ViewBuilder
+    private func postLine(_ source: Source, in session: ShellSession) -> some View {
+        if source.kind == .discuz {
+            let held = session.posts.holding(host: source.host)
+            if held.count == 0 {
+                reading(Text(L10n.t("prefs.cache.posts.none")))
+            } else {
+                reading(
+                    Text(String(format: L10n.t("prefs.cache.posts"), held.count))
+                        + Text(verbatim: " · ")
+                        + Text(Int64(held.bytes), format: .byteCount(style: .memory))
+                )
+            }
+        }
+    }
+
+    /// Whether a password is being held for this server, and a way to stop holding it.
+    ///
+    /// **Drawn before the Clear beside it is pressed, and that is the point.** Clear now takes
+    /// the saved password with everything else (D25), which is a heavier thing than "empties the
+    /// cache" — so the row says a password is here *before* the press, and offers a Forget of its
+    /// own for the reader who wants only that and would like to keep their pictures.
+    ///
+    /// Read off `savedHosts`, which the session holds, rather than off the Keychain: a body runs
+    /// whenever anything it touches moves, and a Keychain lookup per row per frame is a trip into
+    /// another process to draw one line.
+    @ViewBuilder
+    private func passwordLine(_ source: Source, in session: ShellSession) -> some View {
+        if session.forums.hasPassword(host: source.host) {
+            HStack(spacing: ShellSpace.snug) {
+                reading(Text(L10n.t("prefs.password.held")))
+                Button(L10n.t("prefs.password.forget")) {
+                    session.forums.forgetPassword(host: source.host)
+                }
+                .font(ShellType.mark)
+                .buttonStyle(.plain)
+                .foregroundStyle(ShellChrome.phosphor(colorScheme))
+                .accessibilityLabel(
+                    Text(String(format: L10n.t("prefs.password.forget.label"), source.host))
+                )
+            }
         }
     }
 

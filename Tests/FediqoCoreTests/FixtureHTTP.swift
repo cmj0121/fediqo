@@ -46,20 +46,3 @@ actor FixtureHTTP: HTTPClient {
         HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil)!
     }
 }
-
-enum Fixtures {
-    static func html(_ name: String) -> Data { resource(name, ext: "html", folder: "html") }
-    static func json(_ name: String) -> Data { resource(name, ext: "json", folder: "json") }
-
-    private static func resource(_ name: String, ext: String, folder: String) -> Data {
-        let bundle = Bundle.module
-        if let url = bundle.url(forResource: name, withExtension: ext, subdirectory: folder)
-            ?? bundle.url(forResource: name, withExtension: ext, subdirectory: "Fixtures/\(folder)")
-            ?? bundle.url(forResource: name, withExtension: ext)
-        {
-            return try! Data(contentsOf: url)
-        }
-        let found = bundle.urls(forResourcesWithExtension: ext, subdirectory: nil) ?? []
-        fatalError("missing \(name).\(ext) in \(bundle.bundlePath); have \(found)")
-    }
-}

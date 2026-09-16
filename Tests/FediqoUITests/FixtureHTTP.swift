@@ -46,16 +46,3 @@ actor FixtureHTTP: HTTPClient {
         HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil)!
     }
 }
-
-enum Fixtures {
-    static func html(_ name: String) -> Data { resource(name, ext: "html", folder: "html") }
-    static func json(_ name: String) -> Data { resource(name, ext: "json", folder: "json") }
-
-    private static func resource(_ name: String, ext: String, folder: String) -> Data {
-        let url = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("FediqoCoreTests/Fixtures/\(folder)/\(name).\(ext)")
-        return try! Data(contentsOf: url)
-    }
-}

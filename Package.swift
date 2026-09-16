@@ -36,6 +36,13 @@ let package = Package(
             // remember, and the one that forgets does not find out until a reader presses `a`.
             linkerSettings: [.linkedFramework("AVKit")]
         ),
+        // **No resources, and that is the point.** This target carried a `Fixtures` directory of
+        // captured pages until unit S removed it: a fixture that is a capture of somebody's
+        // running forum is a copy of their server in this repository, and the reader asked for
+        // none of it to be left. What a test needs now it writes inline, as the smallest literal
+        // that carries the one property it pins. A `resources:` line naming a directory that is
+        // not there is not a soft failure — SwiftPM warns at manifest time and then fails the
+        // build outright when it tries to copy it — so the declaration goes with the directory.
         .testTarget(
             name: "FediqoCoreTests",
             dependencies: ["FediqoCore"],

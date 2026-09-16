@@ -71,8 +71,17 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     public let author: String
     public let handle: String?
     public let titleKey: String?
+    /// The same thing a stranger's server actually sent, where one did.
+    ///
+    /// **Two fields for one line, because they are two different things.** `titleKey` names a
+    /// line this app wrote and will translate; this is a line somebody else wrote, in whatever
+    /// language they wrote it, and translating it would be rewriting their post. A fixture sets
+    /// the first, a forum sets the second, and nothing sets both.
+    public var titleText: String?
     public let body: String
     public let boardKey: String?
+    /// The section name a forum sent, as against `boardKey`'s translated one. See `titleText`.
+    public var boardText: String?
     public let postedAt: Date
     public let workRelated: Bool
     public let answering: DummyAnswering
@@ -80,6 +89,16 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     public let audience: DummyAudience?
     /// The author's picture, where the source sent an address for one.
     public let avatarURL: URL?
+    /// Where this post lives on the web it came from — the canonical address, as its own server
+    /// spells it, for the reader who wants to go and read it there.
+    ///
+    /// **Carried, not rebuilt.** A Discuz! thread's is assembled in Core out of a parsed host and
+    /// an integer; a Discourse topic's is assembled the same way; a Mastodon status's comes out of
+    /// that instance's JSON and is admitted by `Host.fetchableURL` at the wire boundary. Which of
+    /// the three it is stops mattering by the time it is here, which is the point of a `Note`
+    /// carrying it. Nothing where the source named no address, or named one this device will not
+    /// go to.
+    public let url: URL?
     public let attachments: [Attachment]
     /// Whether the author covered it, or nothing where the source never said. Carried as the
     /// three answers it has, not folded down to two — see `covered`.
@@ -143,8 +162,8 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         }
     }
 
-    public var title: String? { titleKey.map { L10n.t($0) } }
-    public var board: String? { boardKey.map { L10n.t($0) } }
+    public var title: String? { titleKey.map { L10n.t($0) } ?? titleText }
+    public var board: String? { boardKey.map { L10n.t($0) } ?? boardText }
 
     /// Not the live stream. Named queries do not read this.
     public static let stored: [DummyItem] = []
@@ -156,18 +175,21 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
 
     public init(_ note: Note) {
         id = note.id
-        source = DummySource.unsigned(note.source.host)
+        source = DummySource.unsigned(note.source.host, kind: Self.shape(of: note.source.kind))
         author = note.author
         handle = note.handle
         titleKey = nil
+        titleText = note.title
         body = note.body
         boardKey = nil
+        boardText = note.board
         postedAt = note.postedAt
         workRelated = false
         answering = Self.answering(note.reply)
         boostedBy = note.boostedBy
         audience = note.audience.map(DummyAudience.init)
         avatarURL = note.avatarURL
+        url = note.url
         attachments = note.attachments
         sensitive = note.sensitive
         spoiler = note.spoiler
@@ -179,6 +201,35 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         )
         marks = DummyMarks()
         alsoFrom = []
+    }
+
+    /// Which shape of row a protocol gets. **The protocol stays behind; the timeline sees a
+    /// shape** — that is `DummySourceKind`'s own rule, and this is the one place it is applied.
+    ///
+    /// Everything federated is a microblog whatever its software, because what they have in
+    /// common is that a post is somebody's words. A forum is the other shape: a named discussion
+    /// with a section and a count of answers, which the row already knows how to draw as a
+    /// thread.
+    ///
+    /// **Both forums, and they are listed rather than defaulted.** Discourse and Discuz! are
+    /// different programs — one publishes JSON and one publishes a page — and the difference is
+    /// entirely behind this line: by here they are both a title, a board and an answer count,
+    /// which is the whole of what `.forum` means. Adding a forum to `ProtocolKind` and not to
+    /// this switch is a silent failure rather than a build error, because the `default` catches
+    /// it: the source joins, the threads arrive, and every one of them is drawn as somebody's
+    /// words with its title nowhere. `DummyItemTests` pins both.
+    private static func shape(of kind: ProtocolKind) -> DummySourceKind {
+        // **No `default:`, and this one was written down as fixed while it was not.** The rule
+        // exists because this exact function once mapped only `.discourse` and drew a whole
+        // Discuz! forum as microblog posts with every title missing, and the compiler said
+        // nothing. A `default:` here is that failure waiting for the next protocol; every case is
+        // named, so the next one breaks the build at the place that has to decide.
+        switch kind {
+        case .discourse, .discuz: .forum
+        case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
+             .gotosocial, .unknown:
+            .microblog
+        }
     }
 
     private static func answering(_ reply: Reply?) -> DummyAnswering {

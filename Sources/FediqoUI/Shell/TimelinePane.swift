@@ -25,7 +25,9 @@ struct TimelinePane: View {
     @State private var toastTick = 0
     @Environment(\.colorScheme) private var colorScheme
 
-    private var timeline: DummyTimeline { DummyTimeline(id: session.timelineID ?? "") }
+    /// **Asked of the session rather than rebuilt from the id.** A board query carries which
+    /// board it is; an id carries only that it is one — see `ShellSession.timeline(for:)`.
+    private var timeline: DummyTimeline { session.timeline(for: session.timelineID) }
 
     private var items: [DummyItem] { timeline.items(from: session.notes) }
 
@@ -45,6 +47,7 @@ struct TimelinePane: View {
                     root: opened,
                     catalogues: session.emoji,
                     catalogueSettled: settledHosts.contains(opened.source.host),
+                    posts: session.posts,
                     selectedID: $selectedID,
                     marks: markBinding,
                     decks: $decks,
@@ -166,6 +169,7 @@ struct TimelinePane: View {
                             item: item,
                             catalogues: session.emoji,
                             catalogueSettled: settledHosts.contains(item.source.host),
+                            posts: session.posts,
                             marks: markBinding(item),
                             selected: item.id == selectedID,
                             top: decks.top(of: item.id, of: item.attachments.count),
@@ -229,6 +233,14 @@ struct TimelinePane: View {
         }
     }
 
+    /// The title, the queries, and the rule the current one is under.
+    ///
+    /// **The pills scroll, because there can now be thirty-five of them.** Two queries fit beside
+    /// a title; `all` plus the 33 boards of `install-a.example` does not, and an `HStack` asked to
+    /// hold them squeezes every pill until none of the names can be read — at phone width it
+    /// squeezes them out of the window entirely. So the row scrolls sideways and the rule moves
+    /// below it, where it has the full width a sentence wants rather than whatever a row of
+    /// thirty-five pills left over.
     private var header: some View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
             HStack(alignment: .center, spacing: ShellSpace.step) {
@@ -236,18 +248,23 @@ struct TimelinePane: View {
                     .font(ShellType.pane)
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                     .fixedSize()
-                HStack(spacing: ShellSpace.tight) {
-                    ForEach(session.queries) { query in
-                        queryPill(query)
+                ScrollView(.horizontal) {
+                    HStack(spacing: ShellSpace.tight) {
+                        ForEach(session.queries) { query in
+                            queryPill(query)
+                        }
                     }
+                    .padding(.vertical, ShellSpace.hair)
                 }
-                if session.timelineID != nil {
-                    Text(timeline.rule)
-                        .font(ShellType.meta)
-                        .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                        .lineLimit(1)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
+                .scrollIndicators(.never)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if session.timelineID != nil {
+                Text(timeline.rule)
+                    .font(ShellType.meta)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .accessibilityElement(children: .contain)
@@ -258,7 +275,12 @@ struct TimelinePane: View {
         return Button {
             session.timelineID = query.id
         } label: {
+            // A board's name is whatever the forum called it, and some of them are long —
+            // `路由器讨论区（网络与网络设备讨论）` is a real one. One line, at its own width, and
+            // the row it sits in scrolls.
             Text(query.name)
+                .lineLimit(1)
+                .fixedSize()
                 .font(ShellType.meta.weight(selected ? .semibold : .regular))
                 .foregroundStyle(selected ? ShellChrome.selectInk(colorScheme) : ShellChrome.inkDim(colorScheme))
                 .padding(.horizontal, ShellSpace.snug)
