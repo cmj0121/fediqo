@@ -91,7 +91,19 @@ public struct FediqoRootView: View {
             .onChange(of: session.signingIn) { _, request in
                 if let request {
                     signInWindows.show(request, sessions: session.forums) { reached in
-                        session.signInFinished(reached: reached)
+                        // **The same two lines as the sheet below, and they have to be.** A
+                        // sign-in that was reached goes straight back to `begin`: the reader
+                        // typed a host, was turned away, went and signed in, and the errand was
+                        // always "add this forum". Without the retry the window closes onto the
+                        // refusal it was opened from, which reads as a sign-in that did nothing.
+                        //
+                        // This branch lost both the retry and the host when the page moved out of
+                        // the sheet — the window was given the body the sheet had at the time,
+                        // and the sheet grew them afterwards. Whatever is done to one of these
+                        // two callbacks belongs in the other on the same day.
+                        if session.signInFinished(reached: reached, host: request.host) {
+                            Task { await session.add() }
+                        }
                     }
                 } else {
                     signInWindows.close()
@@ -100,10 +112,29 @@ public struct FediqoRootView: View {
             #else
             .sheet(item: $session.signingIn) { request in
                 ForumSignInSheet(request: request, sessions: session.forums) { reached in
-                    session.signInFinished(reached: reached)
+                    // **A sign-in that was reached goes straight back to `begin`.** The reader
+                    // typed a host, was turned away, and went and signed in; the errand was
+                    // always "add this forum", and landing them at an empty field having lost
+                    // what they typed would make them start it again. This second pass goes
+                    // through the browser that now holds the session — see `ShellSession.joiner`.
+                    if session.signInFinished(reached: reached, host: request.host) {
+                        Task { await session.add() }
+                    }
                 }
             }
             #endif
+            // **The pause, on the root beside the other two.** A forum join stops to ask which
+            // boards, and until it is answered nothing has been added — so dismissing this by
+            // any route at all, the button or a swipe, is a complete cancel with nothing to undo.
+            // Attached here rather than to Account for the reason the sign-in sheet is: one
+            // presenter, driven by one piece of session state, survives a second call site.
+            .sheet(item: $session.choosing) { choice in
+                BoardPickerSheet(
+                    choice: choice,
+                    subscribe: { picks in Task { await session.subscribe(picks) } },
+                    cancel: { session.cancelChoosing() }
+                )
+            }
             .overlay {
                 if showingShortcuts {
                     ShortcutGuide { showingShortcuts = false }
@@ -498,8 +529,12 @@ public struct FediqoRootView: View {
         return true
     }
 
+    /// **Resolved out of the session's list, not rebuilt from the id.** A board query knows which
+    /// board it is by carrying it; an id alone says only that it is one. Reconstructing here
+    /// would give the keys a stream that matched no note, so `j` and `k` would move through
+    /// nothing on exactly the tabs this unit added. See `ShellSession.timeline(for:)`.
     private var streamItems: [DummyItem] {
-        DummyTimeline(id: session.timelineID ?? "").items(from: session.notes)
+        session.timeline(for: session.timelineID).items(from: session.notes)
     }
 
     /// Whichever list is in front: the open conversation, or the stream under it.

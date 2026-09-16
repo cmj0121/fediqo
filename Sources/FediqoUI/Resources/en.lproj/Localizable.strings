@@ -195,3 +195,23 @@
 "prefs.password.held" = "Password held on this device";
 "prefs.password.forget" = "Forget it";
 "prefs.password.forget.label" = "Forget the password held for %@";
+
+/* Unit F4 — choosing boards. */
+"board.choose.title" = "Boards on %@";
+"board.choose.detail" = "Pick the boards you want to read. Nothing is added until you do.";
+"board.choose.count" = "%1$d of %2$d picked";
+"board.choose.cancel" = "Cancel";
+"board.choose.subscribe" = "Subscribe";
+"board.choose.threads" = "%d threads";
+"board.choose.posts" = "%d posts";
+"board.choose.unstated" = "This forum stated no figures for this board";
+"board.choose.hint.on" = "Subscribe to this board";
+"board.choose.hint.off" = "Stop subscribing to this board";
+"board.unread.some" = "%d of the boards you picked could not be read, and were not subscribed to:";
+"board.unread.all" = "None of the %d boards you picked could be read, so nothing was added.";
+"board.unread.refused" = "%1$@ — this forum would not let this app read it (HTTP %2$d).";
+"board.unread.unreadable" = "%@ — this forum answered, but there was no thread list on that board.";
+"board.unread.network" = "%@ — that board could not be reached.";
+"timeline.rule.board" = "%1$@ on %2$@, newest first.";
+"timeline.empty.board.title" = "This board has nothing here";
+"timeline.empty.board.detail" = "Threads read from this board land here, newest first.";

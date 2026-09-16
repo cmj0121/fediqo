@@ -219,6 +219,20 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// The section of the source this was posted in — a forum's category. Nothing where the
     /// source has no such division, which is every microblog.
     public let board: String?
+    /// What the source calls that section, as against what it *shows* the reader.
+    ///
+    /// **A name is not an identity and must not be used as one.** A board's heading on its own
+    /// page and its name in the forum's index are written by hand and are free to differ — they
+    /// were byte-identical on all twenty-two boards measured, which is exactly the kind of fact
+    /// that is true until it is not. Matching a subscription to its threads by name turns any
+    /// such difference, or an administrator renaming a board between two reads, into a tab that
+    /// silently draws nothing: visibly wrong, but wrong with no error anywhere to explain it.
+    ///
+    /// A `String` rather than the number Discuz! uses, because a section id is whatever the
+    /// source says it is and Discourse's is its own; this is the identity, not the format.
+    /// Nothing where the page carried no id — a forum's cross-board listing names no section per
+    /// row — and a reader of this must fall back to the name rather than assume.
+    public let boardID: String?
     public let postedAt: Date
     public var origins: Set<FetchOrigin>
     public let reply: Reply?
@@ -249,6 +263,7 @@ public struct Note: Identifiable, Hashable, Sendable {
         body: String,
         title: String? = nil,
         board: String? = nil,
+        boardID: String? = nil,
         postedAt: Date,
         origins: Set<FetchOrigin>,
         reply: Reply? = nil,
@@ -269,6 +284,7 @@ public struct Note: Identifiable, Hashable, Sendable {
         self.body = body
         self.title = title
         self.board = board
+        self.boardID = boardID
         self.postedAt = postedAt
         self.origins = origins
         self.reply = reply

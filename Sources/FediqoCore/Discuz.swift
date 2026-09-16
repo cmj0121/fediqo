@@ -70,7 +70,7 @@ public struct DiscuzClient: Sendable {
         ) else {
             throw DiscuzRequestError.invalidURL
         }
-        return try await read(url, source: source, named: named)
+        return try await read(url, source: source, named: named, boardID: String(fid))
     }
 
     /// One subscribed board's thread list — what a reader who picked this board is reading.
@@ -140,7 +140,12 @@ public struct DiscuzClient: Sendable {
     }
 
     /// One page fetched, judged by `page`, and turned into rows.
-    private func read(_ url: URL, source: Source, named: String? = nil) async throws -> [Note] {
+    private func read(
+        _ url: URL,
+        source: Source,
+        named: String? = nil,
+        boardID: String? = nil
+    ) async throws -> [Note] {
         let html = try await page(url)
 
         let rows = DiscuzPage.threads(in: html)
@@ -162,7 +167,9 @@ public struct DiscuzClient: Sendable {
         guard !rows.isEmpty else { throw DiscuzRequestError.noThreads }
 
         let heading = DiscuzPage.boardHeading(in: html) ?? named
-        return rows.map { $0.asNote(source: source, host: host, board: heading) }
+        // The number, where this read was a board's own page. A cross-board listing passes
+        // nothing, because its rows name a section but carry no id — see `Note.boardID`.
+        return rows.map { $0.asNote(source: source, host: host, board: heading, boardID: boardID) }
     }
 
     /// Turns a status code into the one distinction that changes what a reader should be told.
@@ -740,7 +747,7 @@ struct DiscuzThread: Equatable, Sendable {
     let postedAt: Date?
     let replies: Int?
 
-    func asNote(source: Source, host: String, board heading: String?) -> Note {
+    func asNote(source: Source, host: String, board heading: String?, boardID: String? = nil) -> Note {
         Note(
             // Prefixed and host-qualified, as Discourse's are: a forum's thread numbers, another
             // forum's thread numbers and a microblog's status ids all share one store, and `82`
@@ -762,6 +769,7 @@ struct DiscuzThread: Equatable, Sendable {
             // the other way round: on a guide page the heading is 最新发表, which is the name of
             // a view and not of a section, and it would overwrite fifty correct answers.
             board: board ?? heading,
+            boardID: boardID,
             // **When it was posted, not when it was last bumped.** The date taken is the one in
             // the row's *first* person-cell, which is the thread's author; the last cell's date
             // belongs to whoever answered most recently and would date somebody's question by a

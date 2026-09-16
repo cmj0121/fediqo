@@ -195,3 +195,23 @@
 "prefs.password.held" = "這台裝置存著密碼";
 "prefs.password.forget" = "忘掉";
 "prefs.password.forget.label" = "忘掉這台裝置為 %@ 存的密碼";
+
+/* Unit F4 — choosing boards. */
+"board.choose.title" = "%@ 的版塊";
+"board.choose.detail" = "挑你想看的版塊。沒挑之前不會加進來。";
+"board.choose.count" = "已挑 %1$d／%2$d 個";
+"board.choose.cancel" = "取消";
+"board.choose.subscribe" = "訂閱";
+"board.choose.threads" = "%d 主題";
+"board.choose.posts" = "%d 回覆";
+"board.choose.unstated" = "這個論壇沒有寫這個版塊的數字";
+"board.choose.hint.on" = "訂閱這個版塊";
+"board.choose.hint.off" = "取消訂閱這個版塊";
+"board.unread.some" = "你挑的版塊裡有 %d 個讀不到，沒有訂閱：";
+"board.unread.all" = "你挑的 %d 個版塊都讀不到，所以什麼都沒加進來。";
+"board.unread.refused" = "%1$@ — 這個論壇不讓這個 App 讀它（HTTP %2$d）。";
+"board.unread.unreadable" = "%@ — 這個論壇有回應，但那個版塊上沒有主題列表。";
+"board.unread.network" = "%@ — 連不上那個版塊。";
+"timeline.rule.board" = "%2$@ 的 %1$@，最新的在前。";
+"timeline.empty.board.title" = "這個版塊這裡沒有東西";
+"timeline.empty.board.detail" = "從這個版塊讀到的主題會落在這裡，最新的在前。";

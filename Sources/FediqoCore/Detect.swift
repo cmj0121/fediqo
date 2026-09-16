@@ -130,11 +130,38 @@ public enum HTMLKind: Equatable, Sendable {
         // so is not a check.
         if matches(labeled, "discuz") { return .named(.discuz) }
         if matches(labeled, "mastodon") { return .named(.mastodon) }
+        // **A second look for Discuz!, for the installs that strip the meta tag.** The tag is a
+        // template's to remove and plenty of administrators do; what a Discuz! cannot remove and
+        // keep working are its own addresses. `forum.php?mod=forumdisplay` and `mod=viewthread`
+        // are that program's URLs and nobody else's, and the footer line is the one most themes
+        // leave alone. Both are checked **after** every other software above, so a host that
+        // names itself is still taken at its word and this can only rescue a page that named
+        // nothing.
+        if matches(labeled, "discuz") == false, isDiscuzByItsOwnAddresses(html) {
+            return .named(.discuz)
+        }
         if hasID(html, "mastodon") { return .named(.mastodon) }
         if html.range(of: "joinmastodon.org", options: .caseInsensitive) != nil {
             return .named(.mastodon)
         }
         return .unknown
+    }
+
+    /// Discuz! recognised by what it serves rather than by what it says about itself.
+    ///
+    /// Each of these is something no other forum writes: `mod=forumdisplay` and `mod=viewthread`
+    /// are Discuz!'s own query strings, and the footer credit carries the product's name with its
+    /// exclamation mark. One is enough — a front page need not link a thread, and an index need
+    /// not carry the footer — but each is specific enough on its own that "one of these" does not
+    /// widen into a guess.
+    private static func isDiscuzByItsOwnAddresses(_ html: String) -> Bool {
+        let marks = [
+            "forum.php?mod=forumdisplay",
+            "forum.php?mod=viewthread",
+            "mod=forumdisplay&amp;fid=",
+            "Powered by Discuz",
+        ]
+        return marks.contains { html.range(of: $0, options: .caseInsensitive) != nil }
     }
 
     private static func matches(_ text: String, _ software: String) -> Bool {
