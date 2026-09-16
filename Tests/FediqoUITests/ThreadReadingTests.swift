@@ -25,13 +25,13 @@ import SwiftUI
 @Suite("Reading a thread properly")
 struct ThreadReadingTests {
     private static let host = "install-c.example"
-    private static let tid = 453475
+    private static let tid = 70241
 
     init() {
         L10n.language = .english
     }
 
-    // MARK: - Fixtures
+    // MARK: - Addresses and values
 
     private static func threadAddress(_ host: String = host, _ tid: Int = tid) -> String {
         "https://\(host)/forum.php?mod=viewthread&tid=\(tid)&mobile=2"
@@ -44,15 +44,15 @@ struct ThreadReadingTests {
     /// A row's item, built through a `Note` the way the product builds one.
     private static func item(
         id: String = "discuz:\(host):\(tid)",
-        title: String? = "应用商店一键下载安装",
+        title: String? = "工具箱一键下载安装",
         kind: ProtocolKind = .discuz,
         url: URL? = nil
     ) -> DummyItem {
         DummyItem(Note(
             id: id,
             source: Source(host: host, kind: kind),
-            author: "nanshu",
-            handle: "@nanshu@\(host)",
+            author: "tinbox",
+            handle: "@tinbox@\(host)",
             body: "",
             title: title,
             postedAt: .distantPast,
@@ -67,8 +67,8 @@ struct ThreadReadingTests {
         avatar: URL? = nil
     ) -> DiscuzPost {
         DiscuzPost(
-            pid: pid, tid: tid, floor: 1, author: "nanshu",
-            handle: "@nanshu@\(host)", body: body, avatarURL: avatar
+            pid: pid, tid: tid, floor: 1, author: "tinbox",
+            handle: "@tinbox@\(host)", body: body, avatarURL: avatar
         )
     }
 
@@ -175,8 +175,18 @@ struct ThreadReadingTests {
     /// one request, not two.
     @Test("A forum row's avatar comes off the post D30 already fetched")
     func theAvatarArrivesWithTheOpeningPost() async throws {
+        // The touch template's avatar box, which is where the picture actually is: a
+        // `<div class="avatar">` whose `<img>` defers the address to `data-src`, written
+        // relative to the forum. Both halves matter to the address asserted below.
         let http = FixtureHTTP([
-            Self.threadAddress(): .body(Fixtures.html("discuz-x50-thread")),
+            Self.threadAddress(): .text(#"""
+            <div class="plc" id="pid9101">
+            <div class="avatar"><img data-src="./data/avatar/000/11/22/33_avatar_small.jpg" class="_avt"></div>
+            <ul class="authi"><li>1<sup>#</sup></li>
+            <li><a href="home.php?mod=space&uid=8">tinbox</a></li></ul>
+            <div class="message">工具箱一键下载安装。</div>
+            </div>
+            """#),
         ])
         let posts = ForumPosts(http: http)
         let item = Self.item()
@@ -186,7 +196,7 @@ struct ThreadReadingTests {
         await posts.fetch(Self.ref())
         let drawn = try #require(Self.row(item, posts: posts).avatarURL)
         #expect(drawn.absoluteString
-            == "https://install-c.example/data/avatar/000/28/23/90_avatar_small.jpg")
+            == "https://install-c.example/data/avatar/000/11/22/33_avatar_small.jpg")
         #expect(await http.requested.count == 1, "the picture cost no request of its own")
     }
 
@@ -274,9 +284,25 @@ struct ThreadReadingTests {
     /// a reader.
     @Test("A forum row has no cover, which is why s had nothing to do on one")
     func aForumRowHasNoCover() async throws {
+        // Two threads, because "every one of them" is the shape of the assertion: a cover that
+        // appeared on one row and not another would pass a one-row page.
         let http = FixtureHTTP([
-            "https://\(Self.host)/forum.php?mod=forumdisplay&fid=34":
-                .body(Fixtures.html("discuz-x50-board")),
+            "https://\(Self.host)/forum.php?mod=forumdisplay&fid=34": .text(#"""
+            <html><head><meta name="generator" content="Discuz! X5.0" /></head><body>
+            <h1 class="xs2"><a href="forum.php?mod=forumdisplay&fid=34">工具箱讨论区</a></h1>
+            <table id="threadlisttableid">
+            <tbody id="stickthread_40001"><tr>
+            <th class="common"><a href="forum.php?mod=viewthread&tid=40001" class="s xst">版规，先读这个</a></th>
+            <td class="by"><cite><a href="home.php?mod=space&uid=1">boardkeeper</a></cite><em>2024-3-1 09:00</em></td>
+            <td class="num"><a href="forum.php?mod=viewthread&tid=40001" class="xi2">2</a><em>80</em></td>
+            </tr></tbody>
+            <tbody id="normalthread_40125"><tr>
+            <th class="common"><a href="forum.php?mod=viewthread&tid=40125" class="s xst">工具箱一键下载安装</a></th>
+            <td class="by"><cite><a href="home.php?mod=space&uid=8">tinbox</a></cite><em>2026-9-15 13:12</em></td>
+            <td class="num"><a href="forum.php?mod=viewthread&tid=40125" class="xi2">7</a><em>120</em></td>
+            </tr></tbody>
+            </table></body></html>
+            """#),
         ])
         let notes = try await DiscuzClient(http: http, host: Self.host)
             .board(34, source: Source(host: Self.host, kind: .discuz))
@@ -374,7 +400,14 @@ struct ThreadReadingTests {
     @Test("Pressing again while the replies are coming does not ask twice")
     func aSecondPressAsksNothing() async {
         let http = FixtureHTTP([
-            Self.threadAddress(): .body(Fixtures.html("discuz-x50-thread")),
+            Self.threadAddress(): .text(#"""
+            <div class="plc" id="pid9101"><ul class="authi"><li>1<sup>#</sup></li>
+            <li><a href="home.php?mod=space&uid=8">tinbox</a></li></ul>
+            <div class="message">工具箱一键下载安装。</div></div>
+            <div class="plc" id="pid9102"><ul class="authi"><li>2<sup>#</sup></li>
+            <li><a href="home.php?mod=space&uid=9">greenpine</a></li></ul>
+            <div class="message">学到了。</div></div>
+            """#),
         ])
         let posts = ForumPosts(http: http)
         #expect(posts.standing(of: Self.ref()).wantsPressing)

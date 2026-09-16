@@ -3,13 +3,20 @@ repos:
     rev: v5.0.0
     hooks:
       - id: check-yaml
-      # A fixture is what a stranger's server actually sent, and tidying it is the one thing
-      # that must never happen to it. `trailing-whitespace` was rewriting captured Discuz!
-      # pages on the way in -- two of the new index captures lost sixteen and thirteen bytes
-      # of real trailing space each -- which is this branch's own recorded lesson happening
-      # again through a different door: **a fixture written out through anything that repairs
-      # it describes a cleaner world than the code meets.** Nothing here is hand-edited and
-      # nothing here is read by a person, so there is nothing for either hook to do but damage.
+      # **There is no `Tests/**/Fixtures/` any more, and the exclusion stays anyway.**
+      #
+      # It was put here because a fixture is what a stranger's server actually sent, and tidying
+      # it is the one thing that must never happen to it: `trailing-whitespace` was rewriting
+      # captured Discuz! pages on the way in -- two index captures lost sixteen and thirteen
+      # bytes of real trailing space each -- which is this branch's own recorded lesson arriving
+      # through a different door. **A fixture written out through anything that repairs it
+      # describes a cleaner world than the code meets.**
+      #
+      # Unit S then removed every capture in the repository on the reader's instruction, so the
+      # path these two lines guard is currently empty. They are kept rather than deleted because
+      # the day somebody adds a byte-exact capture back is exactly the day the hooks would
+      # silently tidy it, and rediscovering that costs an afternoon. An exclusion for a directory
+      # that is not there costs nothing.
       - id: end-of-file-fixer
         exclude: ^Tests/.*/Fixtures/
       - id: trailing-whitespace

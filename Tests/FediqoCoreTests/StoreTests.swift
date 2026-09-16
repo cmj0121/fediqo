@@ -12,7 +12,7 @@ struct StoreTests {
     func addIsIdempotentByHost() async {
         let store = ItemStore()
         await store.add(source)
-        await store.add(Source(host: "first.example", kind: .pleroma))
+        await store.add(Source(host: "First.Example", kind: .pleroma))
         await store.add(other)
         #expect(await store.sources().map(\.id) == ["first.example", "second.example"])
         #expect(await store.sources().first?.kind == .mastodon)
@@ -27,7 +27,7 @@ struct StoreTests {
         let forum = Source(
             host: "install-c.example",
             kind: .discuz,
-            boards: [BoardSubscription(fid: 33, name: "启动盘工具"), BoardSubscription(fid: 41, name: "Linux系统")]
+            boards: [BoardSubscription(fid: 33, name: "启动盘工具"), BoardSubscription(fid: 41, name: "自由系统")]
         )
         #expect(forum.id == "install-c.example")
         #expect(forum.boards.map(\.fid) == [33, 41])
@@ -60,7 +60,7 @@ struct StoreTests {
         await store.add(source)
         await store.add(forum)
         await store.subscribe(
-            host: "install-c.example",
+            host: "Install-C.EXAMPLE",
             to: [BoardSubscription(fid: 33, name: "a"), BoardSubscription(fid: 41, name: "b")]
         )
 

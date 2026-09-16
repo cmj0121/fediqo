@@ -192,7 +192,12 @@ struct ForumTransportTests {
         // A refusal is the one failure where the host is fine, the spelling is fine, and this app
         // was turned away on purpose — which is the one a reader with an account can answer.
         let session = ShellSession(http: FixtureHTTP([
-            "/": .text(String(data: Fixtures.forumHTML(), encoding: .utf8)!),
+            // Enough for the detector to name it a Discourse, and nothing more: the generator
+            // tag is the one thing being relied on, so it is the one thing written down.
+            "/": .text(#"""
+            <html><head><meta name="generator" content="Discourse 3.2.0" /></head>
+            <body>a forum</body></html>
+            """#),
             "/latest.json": .text("nope", status: 403),
         ]), forums: ForumSessions(credentials: MemoryCredentials()))
         session.hostname = "forum.example"
@@ -249,15 +254,5 @@ struct ForumTransportTests {
 
         session.signInFinished(reached: true)
         #expect(session.offerSignIn == nil)
-    }
-}
-
-extension Fixtures {
-    /// A minimal forum front page, enough for the detector to name it.
-    static func forumHTML() -> Data {
-        Data("""
-        <html><head><meta name="generator" content="Discourse 3.2.0" /></head>
-        <body>a forum</body></html>
-        """.utf8)
     }
 }

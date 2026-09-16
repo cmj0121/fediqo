@@ -12,7 +12,43 @@ struct TimelineStreamTests {
 
     @Test("All IDs match the store; Trends is origin; overlapping uri is one All row and a trend")
     func allAndTrendsFromStore() async {
-        let session = ShellSession(http: Self.joinHTTP())
+        // Three public statuses out of order, and two trending ones — of which the middle status
+        // is **both**, and the trending copy of it is deliberately different (another account,
+        // other words) so that "one row, and the first payload wins" is a thing this can see.
+        let session = ShellSession(http: FixtureHTTP([
+            "/": .text(#"""
+            <html><head><meta name="application-name" content="Mastodon"></head><body></body></html>
+            """#),
+            "/api/v2/instance": .text(#"{"domain": "first.example", "title": "First"}"#),
+            "/api/v1/timelines/public": .text(#"""
+            [
+              {"id": "100", "uri": "https://first.example/users/ada/statuses/old",
+               "created_at": "2024-01-01T00:00:00.000Z", "content": "<p>Oldest public</p>",
+               "visibility": "public",
+               "account": {"username": "ada", "acct": "ada", "display_name": "Ada"}},
+              {"id": "200", "uri": "https://first.example/users/ada/statuses/shared",
+               "created_at": "2024-06-01T00:00:00.000Z", "content": "<p>Shared with trends</p>",
+               "visibility": "public",
+               "account": {"username": "ada", "acct": "ada", "display_name": "Ada"}},
+              {"id": "300", "uri": "https://first.example/users/bob/statuses/new",
+               "created_at": "2024-12-01T00:00:00.000Z", "content": "<p>Newest public</p>",
+               "visibility": "unlisted",
+               "account": {"username": "bob", "acct": "bob@second.example", "display_name": "Bob"}}
+            ]
+            """#),
+            "/api/v1/trends/statuses": .text(#"""
+            [
+              {"id": "200", "uri": "https://first.example/users/ada/statuses/shared",
+               "created_at": "2024-06-01T00:00:00.000Z",
+               "content": "<p>Shared with trends, later payload</p>", "visibility": "public",
+               "account": {"username": "other", "acct": "other", "display_name": "Other"}},
+              {"id": "400", "uri": "https://first.example/users/ada/statuses/trend-only",
+               "created_at": "2024-09-01T00:00:00.000Z", "content": "<p>Trend only</p>",
+               "visibility": "public",
+               "account": {"username": "ada", "acct": "ada", "display_name": "Ada"}}
+            ]
+            """#),
+        ]))
         session.hostname = "first.example"
         await session.add()
         #expect(session.timelineID == "all")
@@ -42,12 +78,26 @@ struct TimelineStreamTests {
         #expect(trends.map(\.postedAt) == trends.map(\.postedAt).sorted(by: >))
         #expect(all.map(\.id).first == "https://first.example/users/bob/statuses/new")
         #expect(all.contains { $0.body == "Newest public" })
+        // The public payload's words, not the trending one's: one uri is one row, and the first
+        // answer in is the one kept.
         #expect(all.contains { $0.body == "Shared with trends" })
     }
 
     @Test("Source marks are unsigned hosts from the session")
     func sourceMarksAreUnsignedHosts() async {
-        let session = ShellSession(http: Self.joinHTTP())
+        let session = ShellSession(http: FixtureHTTP([
+            "/": .text(#"""
+            <html><head><meta name="application-name" content="Mastodon"></head><body></body></html>
+            """#),
+            "/api/v2/instance": .text(#"{"domain": "first.example", "title": "First"}"#),
+            "/api/v1/timelines/public": .text(#"""
+            [{"id": "100", "uri": "https://first.example/users/ada/statuses/old",
+              "created_at": "2024-01-01T00:00:00.000Z", "content": "<p>Oldest public</p>",
+              "visibility": "public",
+              "account": {"username": "ada", "acct": "ada", "display_name": "Ada"}}]
+            """#),
+            "/api/v1/trends/statuses": .text("[]"),
+        ]))
         session.hostname = "first.example"
         await session.add()
         let marks = session.sources.map { DummySource.unsigned($0.host) }
@@ -57,7 +107,21 @@ struct TimelineStreamTests {
 
     @Test("Empty Trends is a different key than empty All")
     func emptyTrendsCopy() async {
-        let session = ShellSession(http: Self.joinHTTP(trending: .fail))
+        // A server whose public timeline answers and whose trending read does not: the two
+        // panes have to have two different things to say about the two different emptinesses.
+        let session = ShellSession(http: FixtureHTTP([
+            "/": .text(#"""
+            <html><head><meta name="application-name" content="Mastodon"></head><body></body></html>
+            """#),
+            "/api/v2/instance": .text(#"{"domain": "first.example", "title": "First"}"#),
+            "/api/v1/timelines/public": .text(#"""
+            [{"id": "100", "uri": "https://first.example/users/ada/statuses/old",
+              "created_at": "2024-01-01T00:00:00.000Z", "content": "<p>Oldest public</p>",
+              "visibility": "public",
+              "account": {"username": "ada", "acct": "ada", "display_name": "Ada"}}]
+            """#),
+            "/api/v1/trends/statuses": .fail,
+        ]))
         session.hostname = "first.example"
         await session.add()
         #expect(!DummyTimeline(id: "all").items(from: session.notes).isEmpty)
@@ -76,7 +140,25 @@ struct TimelineStreamTests {
 
     @Test("j/k walks live list IDs, not DummyItem.stored")
     func liveIDsNotStored() async {
-        let session = ShellSession(http: Self.joinHTTP())
+        let session = ShellSession(http: FixtureHTTP([
+            "/": .text(#"""
+            <html><head><meta name="application-name" content="Mastodon"></head><body></body></html>
+            """#),
+            "/api/v2/instance": .text(#"{"domain": "first.example", "title": "First"}"#),
+            "/api/v1/timelines/public": .text(#"""
+            [
+              {"id": "100", "uri": "https://first.example/users/ada/statuses/old",
+               "created_at": "2024-01-01T00:00:00.000Z", "content": "<p>Oldest public</p>",
+               "visibility": "public",
+               "account": {"username": "ada", "acct": "ada", "display_name": "Ada"}},
+              {"id": "300", "uri": "https://first.example/users/bob/statuses/new",
+               "created_at": "2024-12-01T00:00:00.000Z", "content": "<p>Newest public</p>",
+               "visibility": "public",
+               "account": {"username": "bob", "acct": "bob", "display_name": "Bob"}}
+            ]
+            """#),
+            "/api/v1/trends/statuses": .text("[]"),
+        ]))
         session.hostname = "first.example"
         await session.add()
         let ids = DummyTimeline(id: session.timelineID ?? "all").items(from: session.notes).map(\.id)
@@ -195,17 +277,5 @@ struct TimelineStreamTests {
             )
         )
         #expect(mentioned.audience == .mentioned)
-    }
-
-    private static func joinHTTP(
-        trending: FixtureHTTP.Outcome = .body(Fixtures.json("trending-statuses"))
-    ) -> FixtureHTTP {
-        FixtureHTTP([
-            "/": .body(Fixtures.html("mastodon")),
-            "/api/v2/instance": .body(Fixtures.json("instance-v2")),
-            "/api/v1/timelines/public": .body(Fixtures.json("public-timeline")),
-            "/api/v1/trends/statuses": trending,
-            "/servers": .body(Fixtures.json("servers")),
-        ])
     }
 }

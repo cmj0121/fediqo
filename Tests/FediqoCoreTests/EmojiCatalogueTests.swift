@@ -9,8 +9,23 @@ struct EmojiCatalogueTests {
 
     @Test("The catalogue is decoded, folded, and answers by shortcode")
     func decodedAndLookedUp() async throws {
+        // Seven registrations, of which three are ones this device will draw: `blobcat` twice,
+        // a hyphenated name, a nameless one, and two addresses this device will not go to.
+        let catalogueJSON = """
+        [
+          { "shortcode": "blobcat", "url": "https://first.example/emoji/blobcat.png",
+            "static_url": "https://first.example/emoji/blobcat-still.png" },
+          { "shortcode": "wave", "url": "https://first.example/emoji/wave.png",
+            "static_url": "http://first.example/emoji/wave-still.png" },
+          { "shortcode": "blob-cat", "url": "https://first.example/emoji/blob-cat.png" },
+          { "shortcode": "blobcat", "url": "https://first.example/emoji/blobcat-second.png" },
+          { "shortcode": "", "url": "https://first.example/emoji/nameless.png" },
+          { "shortcode": "nowhere", "url": "file:///etc/passwd" },
+          { "shortcode": "plain", "url": "http://first.example/emoji/plain.png" }
+        ]
+        """
         let http = FixtureHTTP([
-            "/api/v1/custom_emojis": .body(Fixtures.json("custom-emojis")),
+            "/api/v1/custom_emojis": .body(Data(catalogueJSON.utf8)),
         ])
         let emojis = try await MastodonClient(http: http, host: "first.example").customEmojis()
 
@@ -19,7 +34,7 @@ struct EmojiCatalogueTests {
         #expect(emojis[0].url == URL(string: "https://first.example/emoji/blobcat.png"))
         #expect(emojis[0].staticURL == URL(string: "https://first.example/emoji/blobcat-still.png"))
 
-        let catalogue = EmojiCatalogue(emojis, host: "first.example", fetchedAt: noon)
+        let catalogue = EmojiCatalogue(emojis, host: "First.Example", fetchedAt: noon)
         #expect(catalogue.count == 3)
         #expect(catalogue.lookup("blobcat")?.url == emojis[0].url)
         // A hyphen is whatever the server registered, exactly as `runs` already allows.
@@ -57,10 +72,20 @@ struct EmojiCatalogueTests {
 
     @Test("`visible_in_picker` and `category` are on the wire and change nothing")
     func pickerFieldsAreIgnored() async throws {
-        // The fixture carries both on every entry, one of them `false`. This app has no picker,
-        // so an emoji nobody would offer in one is still an emoji somebody wrote in a post.
+        // Both keys on every entry, `wave`'s picker flag `false`. This app has no picker, so an
+        // emoji nobody would offer in one is still an emoji somebody wrote in a post.
+        let catalogueJSON = """
+        [
+          { "shortcode": "blobcat", "url": "https://first.example/emoji/blobcat.png",
+            "visible_in_picker": true, "category": "Blobs" },
+          { "shortcode": "wave", "url": "https://first.example/emoji/wave.png",
+            "visible_in_picker": false },
+          { "shortcode": "blob-cat", "url": "https://first.example/emoji/blob-cat.png",
+            "visible_in_picker": true, "category": "Blobs" }
+        ]
+        """
         let http = FixtureHTTP([
-            "/api/v1/custom_emojis": .body(Fixtures.json("custom-emojis")),
+            "/api/v1/custom_emojis": .body(Data(catalogueJSON.utf8)),
         ])
         let emojis = try await MastodonClient(http: http, host: "first.example").customEmojis()
         #expect(emojis.contains { $0.shortcode == "wave" })
@@ -68,8 +93,19 @@ struct EmojiCatalogueTests {
 
     @Test("An emoji with an address this device will not go to is dropped")
     func refusedAddressIsDropped() async throws {
+        let catalogueJSON = """
+        [
+          { "shortcode": "blobcat", "url": "https://first.example/emoji/blobcat.png",
+            "static_url": "https://first.example/emoji/blobcat-still.png" },
+          { "shortcode": "wave", "url": "https://first.example/emoji/wave.png",
+            "static_url": "http://first.example/emoji/wave-still.png" },
+          { "shortcode": "", "url": "https://first.example/emoji/nameless.png" },
+          { "shortcode": "nowhere", "url": "file:///etc/passwd" },
+          { "shortcode": "plain", "url": "http://first.example/emoji/plain.png" }
+        ]
+        """
         let http = FixtureHTTP([
-            "/api/v1/custom_emojis": .body(Fixtures.json("custom-emojis")),
+            "/api/v1/custom_emojis": .body(Data(catalogueJSON.utf8)),
         ])
         let emojis = try await MastodonClient(http: http, host: "first.example").customEmojis()
         let names = emojis.map(\.shortcode)
@@ -96,7 +132,7 @@ struct EmojiCatalogueTests {
             == URL(string: "https://second.example/emoji/blobcat.png"))
         #expect(await store.alphabet(own: [], host: "nowhere.example").isEmpty)
         // The host is a host however the reader spelled it, the way `Source` takes it.
-        #expect(await store.alphabet(own: [], host: "first.example").lookup("blobcat") != nil)
+        #expect(await store.alphabet(own: [], host: "First.Example").lookup("blobcat") != nil)
     }
 
     @Test("A post's own picture wins over the server's registration of the same name")
@@ -357,7 +393,7 @@ struct EmojiCatalogueTests {
         await Self.hold([Self.emoji("blobcat", on: "first.example")], host: "first.example", in: store)
         await Self.hold([Self.emoji("blobcat", on: "second.example")], host: "second.example", in: store)
 
-        await store.forget(host: "first.example")
+        await store.forget(host: "First.Example")
         #expect(await store.catalogue(host: "first.example") == nil)
         #expect(await store.needsFetch(host: "first.example"))
         #expect(await store.alphabet(own: [], host: "second.example").lookup("blobcat") != nil)
@@ -423,7 +459,7 @@ struct EmojiCatalogueTests {
         #expect(await catalogues.alphabet(own: [], host: "first.example").lookup("blobcat")?.url
             == URL(string: "https://first.example/emoji/blobcat.png"))
 
-        try await join.join(host: "first.example")
+        try await join.join(host: "First.Example")
         await catalogues.settle(host: "first.example")
         #expect(await http.paths.filter { $0 == "/api/v1/custom_emojis" }.count == 1)
     }
@@ -549,16 +585,105 @@ struct EmojiCatalogueTests {
         CustomEmoji(shortcode: shortcode, url: URL(string: "https://\(host)/emoji/\(shortcode).png")!)
     }
 
+    /// A whole Mastodon written out here rather than a page taken off one: the front page, the
+    /// probe, the two timelines a join reads, and the catalogue this suite is about. It is one
+    /// server, not a sample document, and the only thing more than one test can share is a
+    /// server — every test above that turns on a *shape* writes its own literal.
     private static func joinHTTP(
-        publicTimeline: FixtureHTTP.Outcome = .body(Fixtures.json("public-timeline")),
-        catalogue: FixtureHTTP.Outcome = .body(Fixtures.json("custom-emojis"))
+        publicTimeline: FixtureHTTP.Outcome? = nil,
+        catalogue: FixtureHTTP.Outcome? = nil
     ) -> FixtureHTTP {
-        FixtureHTTP([
-            "/": .body(Fixtures.html("mastodon")),
-            "/api/v2/instance": .body(Fixtures.json("instance-v2")),
-            "/api/v1/timelines/public": publicTimeline,
-            "/api/v1/trends/statuses": .body(Fixtures.json("trending-statuses")),
-            "/api/v1/custom_emojis": catalogue,
+        let front = """
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+          <meta charset="utf-8">
+          <meta name="application-name" content="Mastodon">
+          <link rel="help" href="https://joinmastodon.org/">
+          <title>Mastodon</title>
+        </head>
+        <body>
+          <div id="mastodon"></div>
+        </body>
+        </html>
+        """
+        let instance = """
+        {
+          "domain": "first.example",
+          "title": "The first server",
+          "version": "4.3.0",
+          "description": "A server this test wrote"
+        }
+        """
+        let publicBody = """
+        [
+          {
+            "id": "100",
+            "uri": "https://first.example/users/ada/statuses/old",
+            "created_at": "2024-01-01T00:00:00.000Z",
+            "content": "<p>Oldest public</p>",
+            "visibility": "public",
+            "account": { "username": "ada", "acct": "ada", "display_name": "Ada" }
+          },
+          {
+            "id": "200",
+            "uri": "https://first.example/users/ada/statuses/shared",
+            "created_at": "2024-06-01T00:00:00.000Z",
+            "content": "<p>Shared with trends</p>",
+            "visibility": "public",
+            "account": { "username": "ada", "acct": "ada", "display_name": "Ada" }
+          },
+          {
+            "id": "300",
+            "uri": "https://first.example/users/bob/statuses/new",
+            "created_at": "2024-12-01T00:00:00.000Z",
+            "content": "<p>Newest public</p>",
+            "visibility": "unlisted",
+            "account": { "username": "bob", "acct": "bob@second.example", "display_name": "Bob" }
+          }
+        ]
+        """
+        let trendingBody = """
+        [
+          {
+            "id": "200",
+            "uri": "https://first.example/users/ada/statuses/shared",
+            "created_at": "2024-06-01T00:00:00.000Z",
+            "content": "<p>Shared with trends, later payload</p>",
+            "visibility": "public",
+            "account": { "username": "other", "acct": "other", "display_name": "Other" }
+          },
+          {
+            "id": "400",
+            "uri": "https://first.example/users/ada/statuses/trend-only",
+            "created_at": "2024-09-01T00:00:00.000Z",
+            "content": "<p>Trend only</p>",
+            "visibility": "public",
+            "account": { "username": "ada", "acct": "ada", "display_name": "Ada" }
+          }
+        ]
+        """
+        // Seven registrations, three of them drawable — the same seven the decoding tests above
+        // spell out, so that `count == 3` here means what it means there.
+        let catalogueBody = """
+        [
+          { "shortcode": "blobcat", "url": "https://first.example/emoji/blobcat.png",
+            "static_url": "https://first.example/emoji/blobcat-still.png" },
+          { "shortcode": "wave", "url": "https://first.example/emoji/wave.png",
+            "static_url": "http://first.example/emoji/wave-still.png" },
+          { "shortcode": "blob-cat", "url": "https://first.example/emoji/blob-cat.png" },
+          { "shortcode": "blobcat", "url": "https://first.example/emoji/blobcat-second.png" },
+          { "shortcode": "", "url": "https://first.example/emoji/nameless.png" },
+          { "shortcode": "nowhere", "url": "file:///etc/passwd" },
+          { "shortcode": "plain", "url": "http://first.example/emoji/plain.png" }
+        ]
+        """
+        return FixtureHTTP([
+            "/": .body(Data(front.utf8)),
+            "/api/v2/instance": .body(Data(instance.utf8)),
+            "/api/v1/timelines/public": publicTimeline ?? .body(Data(publicBody.utf8)),
+            "/api/v1/trends/statuses": .body(Data(trendingBody.utf8)),
+            "/api/v1/custom_emojis": catalogue ?? .body(Data(catalogueBody.utf8)),
         ])
     }
 

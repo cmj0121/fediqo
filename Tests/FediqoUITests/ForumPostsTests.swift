@@ -24,33 +24,25 @@ import SwiftUI
 @Suite("Drawn as it arrives")
 struct ForumPostsTests {
     private static let host = "install-c.example"
-    private static let tid = 453475
+    private static let tid = 70241
 
     init() {
         L10n.language = .english
     }
 
-    // MARK: - Fixtures
+    // MARK: - Addresses and values
 
     /// The address `DiscuzClient` builds for one thread. Written out rather than assembled,
     /// because a route that silently stopped matching would make every test here pass by
-    /// answering `unmapped` — which is the failure mode a fixture router has.
+    /// answering `unmapped` — which is the failure mode a route table has.
     private static func threadAddress(_ host: String = host, _ tid: Int = tid) -> String {
         "https://\(host)/forum.php?mod=viewthread&tid=\(tid)&mobile=2"
-    }
-
-    private static func thread(
-        _ fixture: String = "discuz-x50-thread",
-        host: String = host,
-        tid: Int = tid
-    ) -> FixtureHTTP {
-        FixtureHTTP([threadAddress(host, tid): .body(Fixtures.html(fixture))])
     }
 
     private static func post(
         pid: Int = 1,
         floor: Int? = 1,
-        author: String = "nanshu",
+        author: String = "tinbox",
         body: String = "",
         quoted: String? = nil,
         withheld: Bool = false
@@ -75,9 +67,22 @@ struct ForumPostsTests {
     /// row's post fetch off in silence.
     @Test("The id a thread is stored under is the id a row reads its number back out of")
     func theIdSpellingStillAgrees() async throws {
+        // One board listing, written the way a Discuz! thread table is written — a
+        // `<tbody id="normalthread_N">` around a title anchor marked `xst` and a person-cell
+        // wrapped in `<cite>`. The number in the `<tbody>` id is the only thing this test is
+        // about: it has to come out the other end as the number a row reads back.
         let http = FixtureHTTP([
-            "https://\(Self.host)/forum.php?mod=forumdisplay&fid=34":
-                .body(Fixtures.html("discuz-x50-board")),
+            "https://\(Self.host)/forum.php?mod=forumdisplay&fid=34": .text(#"""
+            <html><head><meta name="generator" content="Discuz! X5.0" /></head><body>
+            <h1 class="xs2"><a href="forum.php?mod=forumdisplay&fid=34">工具箱讨论区</a></h1>
+            <table id="threadlisttableid">
+            <tbody id="normalthread_40125"><tr>
+            <th class="common"><a href="forum.php?mod=viewthread&tid=40125" class="s xst">工具箱一键下载安装</a></th>
+            <td class="by"><cite><a href="home.php?mod=space&uid=8">tinbox</a></cite><em>2026-9-15 13:12</em></td>
+            <td class="num"><a href="forum.php?mod=viewthread&tid=40125" class="xi2">7</a><em>120</em></td>
+            </tr></tbody>
+            </table></body></html>
+            """#),
         ])
         let source = Source(host: Self.host, kind: .discuz)
         let notes = try await DiscuzClient(http: http, host: Self.host).board(34, source: source)
@@ -85,7 +90,7 @@ struct ForumPostsTests {
 
         let ref = try #require(ForumThreadRef(DummyItem(first)))
         #expect(ref.host == Self.host)
-        #expect(ref.tid == 403684)
+        #expect(ref.tid == 40125)
         // And the row agrees with the ref, because the row is what asks.
         #expect(Self.row(DummyItem(first)).thread == ref)
     }
@@ -101,7 +106,7 @@ struct ForumPostsTests {
         func ref(_ id: String) -> ForumThreadRef? {
             ForumThreadRef(Self.item(id: id))
         }
-        #expect(ref("discuz:\(Self.host):453475") != nil)
+        #expect(ref("discuz:\(Self.host):\(Self.tid)") != nil)
         #expect(ref("discourse:forum.example:12") == nil)
         #expect(ref("109252111") == nil)
         #expect(ref("") == nil)
@@ -116,7 +121,7 @@ struct ForumPostsTests {
         #expect(ref("discuz:a:b:5") == nil)
 
         // Decision 21: folded once, where it enters.
-        #expect(ref("discuz:install-c.example:7")?.host == "install-c.example")
+        #expect(ref("discuz:Install-C.EXAMPLE:7")?.host == "install-c.example")
     }
 
     // MARK: - What a post is worth to a row
@@ -176,7 +181,16 @@ struct ForumPostsTests {
 
     @Test("A row's first post is fetched once, kept, and not fetched again")
     func oneFetchAndThenItIsKept() async throws {
-        let http = Self.thread()
+        // Discuz!'s own touch template, cut to the three things a post is: the `plc` box with the
+        // `pid`, the `authi` list that carries the floor and the author, and the `message` the
+        // words are in. The words are asserted below, so the words are written here.
+        let http = FixtureHTTP([Self.threadAddress(): .text(#"""
+        <div class="plc cl" id="pid9101">
+        <ul class="authi"><li class="mtit">1<sup>#</sup></li>
+        <li><a href="home.php?mod=space&uid=8">tinbox</a></li></ul>
+        <div class="message">工具箱一键下载安装，脚本在附件里。</div>
+        </div>
+        """#)])
         let posts = ForumPosts(http: http)
         let ref = Self.ref()
 
@@ -187,7 +201,7 @@ struct ForumPostsTests {
             Issue.record("the opening post did not arrive: \(posts.reading(ref))")
             return
         }
-        #expect(text.contains("应用商店"))
+        #expect(text.contains("工具箱"))
         #expect(await http.requested.count == 1)
 
         // Asked again, for a row scrolled back to: nothing goes on the wire.
@@ -203,7 +217,11 @@ struct ForumPostsTests {
     /// and two rows must not be two requests.
     @Test("Two rows wanting one thread wait on one request")
     func twoRowsShareOneFetch() async throws {
-        let http = Self.thread()
+        let http = FixtureHTTP([Self.threadAddress(): .text(#"""
+        <div class="plc" id="pid9101"><ul class="authi"><li>1<sup>#</sup></li>
+        <li><a href="home.php?mod=space&uid=8">tinbox</a></li></ul>
+        <div class="message">一句话。</div></div>
+        """#)])
         let posts = ForumPosts(http: http)
         let ref = Self.ref()
 
@@ -232,7 +250,11 @@ struct ForumPostsTests {
     func unreachableIsLiftedWhenAnythingLands() async throws {
         let http = FixtureHTTP([
             Self.threadAddress(): .fail,
-            Self.threadAddress(Self.host, 99): .body(Fixtures.html("discuz-x50-thread")),
+            Self.threadAddress(Self.host, 99): .text(#"""
+            <div class="plc" id="pid9109"><ul class="authi"><li>1<sup>#</sup></li>
+            <li><a href="home.php?mod=space&uid=8">tinbox</a></li></ul>
+            <div class="message">另一篇。</div></div>
+            """#),
         ])
         let posts = ForumPosts(http: http)
         let dark = Self.ref()
@@ -362,8 +384,13 @@ struct ForumPostsTests {
 
     @Test("Clear drops a forum's posts, and tells the bands still on screen")
     func clearReachesThePosts() async throws {
+        let http = FixtureHTTP([Self.threadAddress(): .text(#"""
+        <div class="plc" id="pid9101"><ul class="authi"><li>1<sup>#</sup></li>
+        <li><a href="home.php?mod=space&uid=8">tinbox</a></li></ul>
+        <div class="message">一句话。</div></div>
+        """#)])
         let session = ShellSession(
-            http: FixtureHTTP(), store: ItemStore(), posts: ForumPosts(http: Self.thread())
+            http: FixtureHTTP(), store: ItemStore(), posts: ForumPosts(http: http)
         )
         let ref = Self.ref()
         await session.posts.fetch(ref)
@@ -386,8 +413,13 @@ struct ForumPostsTests {
     /// pressed something else would draw a figure that never moved.
     @Test("What Preferences reports and what Clear empties are the same posts")
     func theInventoryAndTheButtonAgree() async throws {
+        let http = FixtureHTTP([Self.threadAddress(): .text(#"""
+        <div class="plc" id="pid9101"><ul class="authi"><li>1<sup>#</sup></li>
+        <li><a href="home.php?mod=space&uid=8">tinbox</a></li></ul>
+        <div class="message">一句话。</div></div>
+        """#)])
         let session = ShellSession(
-            http: FixtureHTTP(), store: ItemStore(), posts: ForumPosts(http: Self.thread())
+            http: FixtureHTTP(), store: ItemStore(), posts: ForumPosts(http: http)
         )
         await session.posts.fetch(Self.ref())
         let held = session.posts.holding(host: Self.host)
@@ -411,7 +443,11 @@ struct ForumPostsTests {
     /// first assertion rather than merely getting slower.
     @Test("A post that lands after a Clear is dropped, not filed back under the cleared forum")
     func aFetchLandingAfterAClearIsDropped() async throws {
-        let gate = GateHTTP(Fixtures.html("discuz-x50-thread"))
+        let gate = GateHTTP(Data(#"""
+        <div class="plc" id="pid9101"><ul class="authi"><li>1<sup>#</sup></li>
+        <li><a href="home.php?mod=space&uid=8">tinbox</a></li></ul>
+        <div class="message">一句话。</div></div>
+        """#.utf8))
         let posts = ForumPosts(http: gate)
         let ref = Self.ref()
 
@@ -435,7 +471,25 @@ struct ForumPostsTests {
     /// A pane that folded them would draw a button for a topic with no replies, forever.
     @Test("The replies are asked for on a press, and arrive as the topic's own replies")
     func theRepliesArriveOnRequest() async throws {
-        let http = Self.thread()
+        // One topic with an opening post and four answers, each on its own floor. The count and
+        // the floors are what is asserted, so five numbered posts is what is written.
+        let http = FixtureHTTP([Self.threadAddress(): .text(#"""
+        <div class="plc" id="pid9101"><ul class="authi"><li>1<sup>#</sup></li>
+        <li><a href="home.php?mod=space&uid=8">tinbox</a></li></ul>
+        <div class="message">工具箱一键下载安装。</div></div>
+        <div class="plc" id="pid9102"><ul class="authi"><li>2<sup>#</sup></li>
+        <li><a href="home.php?mod=space&uid=9">greenpine</a></li></ul>
+        <div class="message">学到了。</div></div>
+        <div class="plc" id="pid9103"><ul class="authi"><li>3<sup>#</sup></li>
+        <li><a href="home.php?mod=space&uid=10">mossy</a></li></ul>
+        <div class="message">收藏了。</div></div>
+        <div class="plc" id="pid9104"><ul class="authi"><li>4<sup>#</sup></li>
+        <li><a href="home.php?mod=space&uid=11">halfmoon</a></li></ul>
+        <div class="message">试过可以用。</div></div>
+        <div class="plc" id="pid9105"><ul class="authi"><li>5<sup>#</sup></li>
+        <li><a href="home.php?mod=space&uid=12">quietriver</a></li></ul>
+        <div class="message">再顶一次。</div></div>
+        """#)])
         let posts = ForumPosts(http: http)
         let ref = Self.ref()
 
@@ -454,15 +508,52 @@ struct ForumPostsTests {
     }
 
     /// The case the whole `isWithheld` distinction exists for, at the layer that draws it:
-    /// `install-a.example` answers a signed-out reader with its own notice for 19 replies in 20, and
-    /// a pane that drew those as empty would be telling the reader that nineteen people wrote
+    /// `install-a.example` answers a signed-out reader with its own notice for 19 replies in 20,
+    /// and a pane that drew those as empty would be telling the reader that nineteen people wrote
     /// nothing.
+    ///
+    /// The third-party (Comiis) template, because that is the install this happens on: a
+    /// `comiis_postli` box per post, the author in `comiis_postli_top`, the words in
+    /// `comiis_message_table` — and, in place of the words, `<div class="locked">`. The opening
+    /// post is **unnumbered** here, which is the other thing that template does and the reason
+    /// `post(tid:)` falls back to document order.
     @Test("Withheld replies reach the pane as withheld, not as people who wrote nothing")
     func withheldRepliesSurviveToThePane() async throws {
-        let posts = ForumPosts(
-            http: Self.thread("discuz-x34-thread", host: "install-a.example", tid: 620841)
-        )
-        let ref = Self.ref(620841, host: "install-a.example")
+        let http = FixtureHTTP([
+            Self.threadAddress("install-a.example", 88012): .text(#"""
+            <div class="comiis_postli" id="pid19101">
+            <div class="comiis_postli_top"><h2><a href="home.php?mod=space&uid=71">小北</a></h2></div>
+            <div class="comiis_postli_time"><span>22&nbsp;分钟前</span></div>
+            <div class="comiis_a comiis_message_table cl">旧插座该换了。</div>
+            </div>
+            <div class="comiis_postli" id="pid19102">
+            <div class="comiis_postli_top"><h2><span>2<sup>#</sup></span><a href="home.php?mod=space&uid=72">灯下客</a></h2></div>
+            <div class="comiis_postli_time"><span>16&nbsp;分钟前</span></div>
+            <div class="comiis_a comiis_message_table cl">
+            <div class="locked">游客请<a href="member.php?mod=logging&action=login">登录</a>后查看回复内容</div>
+            </div></div>
+            <div class="comiis_postli" id="pid19103">
+            <div class="comiis_postli_top"><h2><span>3<sup>#</sup></span><a href="home.php?mod=space&uid=73">南窗</a></h2></div>
+            <div class="comiis_postli_time"><span>15&nbsp;分钟前</span></div>
+            <div class="comiis_a comiis_message_table cl">
+            <div class="locked">游客请<a href="member.php?mod=logging&action=login">登录</a>后查看回复内容</div>
+            </div></div>
+            <div class="comiis_postli" id="pid19104">
+            <div class="comiis_postli_top"><h2><span>4<sup>#</sup></span><a href="home.php?mod=space&uid=74">半山</a></h2></div>
+            <div class="comiis_postli_time"><span>11&nbsp;分钟前</span></div>
+            <div class="comiis_a comiis_message_table cl">
+            <div class="locked">游客请<a href="member.php?mod=logging&action=login">登录</a>后查看回复内容</div>
+            </div></div>
+            <div class="comiis_postli" id="pid19105">
+            <div class="comiis_postli_top"><h2><span>5<sup>#</sup></span><a href="home.php?mod=space&uid=75">老陈</a></h2></div>
+            <div class="comiis_postli_time"><span>9&nbsp;分钟前</span></div>
+            <div class="comiis_a comiis_message_table cl">
+            <div class="locked">游客请<a href="member.php?mod=logging&action=login">登录</a>后查看回复内容</div>
+            </div></div>
+            """#),
+        ])
+        let posts = ForumPosts(http: http)
+        let ref = Self.ref(88012, host: "install-a.example")
         await posts.fetchReplies(ref)
 
         guard case .loaded(let replies) = posts.standing(of: ref) else {
@@ -483,7 +574,14 @@ struct ForumPostsTests {
     /// there unchanged until the replies land.
     @Test("Pressing for the replies is visible before they arrive")
     func theWaitIsVisible() async throws {
-        let gate = GateHTTP(Fixtures.html("discuz-x50-thread"))
+        let gate = GateHTTP(Data(#"""
+        <div class="plc" id="pid9101"><ul class="authi"><li>1<sup>#</sup></li>
+        <li><a href="home.php?mod=space&uid=8">tinbox</a></li></ul>
+        <div class="message">一句话。</div></div>
+        <div class="plc" id="pid9102"><ul class="authi"><li>2<sup>#</sup></li>
+        <li><a href="home.php?mod=space&uid=9">greenpine</a></li></ul>
+        <div class="message">回一句。</div></div>
+        """#.utf8))
         let posts = ForumPosts(http: gate)
         let ref = Self.ref()
 
@@ -509,7 +607,14 @@ struct ForumPostsTests {
 
     @Test("The two parts of one thread are two entries and do not stand in for each other")
     func openingAndRepliesAreSeparate() async throws {
-        let posts = ForumPosts(http: Self.thread())
+        let posts = ForumPosts(http: FixtureHTTP([Self.threadAddress(): .text(#"""
+        <div class="plc" id="pid9101"><ul class="authi"><li>1<sup>#</sup></li>
+        <li><a href="home.php?mod=space&uid=8">tinbox</a></li></ul>
+        <div class="message">一句话。</div></div>
+        <div class="plc" id="pid9102"><ul class="authi"><li>2<sup>#</sup></li>
+        <li><a href="home.php?mod=space&uid=9">greenpine</a></li></ul>
+        <div class="message">回一句。</div></div>
+        """#)]))
         let ref = Self.ref()
 
         await posts.fetch(ref)
@@ -530,8 +635,26 @@ struct ForumPostsTests {
     /// included in its parent, so whether a row is one is what decides whether a pick is sensible.
     @Test("A board under a board says whose it is, by name and never by number")
     func aSubBoardNamesItsParentOutLoud() async throws {
+        // `install-d.example`'s wide `list` index: one board to a `<tr>`, its own name in an
+        // `<h2>`, and its children written as bare anchors in the same cell. That shape is the
+        // only reason there is a child here to be named at all.
         let http = FixtureHTTP([
-            "https://install-d.example/forum.php": .body(Fixtures.html("discuz-gbk-index")),
+            "https://install-d.example/forum.php": .text(#"""
+            <html><head><meta name="generator" content="Discuz! X3.4" /></head><body>
+            <h2><a href="https://install-d.example/forum.php?gid=296">官方区</a></h2>
+            <div id="category_296" class="bm_c">
+            <table class="fl_tb"><tr>
+            <td class="fl_icn"><a href="https://install-d.example/forum-297-1.html"><img src="/icon.png" alt="" /></a></td>
+            <td>
+            <h2><a href="https://install-d.example/forum-297-1.html">官方软件区</a></h2>
+            <p class="xg2">官方软件讨论区</p>
+            <p>子版块: <a href="https://install-d.example/forum-300-1.html">输入法工具</a></p>
+            </td>
+            <td class="fl_i"><span class="xi2">370</span><span class="xg1"> / 6414</span></td>
+            <td class="fl_by"><div><cite>2026-3-15 13:25</cite></div></td>
+            </tr></table>
+            </div></body></html>
+            """#),
         ])
         let categories = try await DiscuzClient(http: http, host: "install-d.example").boards()
         let boards = categories.flatMap(\.boards)
@@ -543,9 +666,9 @@ struct ForumPostsTests {
             cancel: {}
         )
 
-        let child = try #require(boards.first { $0.name == "拼音输入法" })
+        let child = try #require(boards.first { $0.name == "输入法工具" })
         #expect(child.depth == 1)
-        #expect(sheet.spoken(child) == "拼音输入法, under 官方软件区")
+        #expect(sheet.spoken(child) == "输入法工具, under 官方软件区")
         // A board at the top says its name and nothing more: there is nothing to say.
         let top = try #require(boards.first { $0.fid == 297 })
         #expect(sheet.spoken(top) == "官方软件区")
@@ -558,12 +681,38 @@ struct ForumPostsTests {
     /// subscription, one tab, reading that board's own number.
     @Test("Picking a board under a board subscribes to that board and to nothing else")
     func aSubBoardIsItsOwnPick() async throws {
-        let index = Fixtures.html("discuz-gbk-index")
         let http = FixtureHTTP([
-            "/": .body(Fixtures.html("discuz")),
-            "https://install-d.example/forum.php": .body(index),
-            "https://install-d.example/forum.php?mod=forumdisplay&fid=300":
-                .body(Fixtures.html("discuz-x50-board")),
+            // Enough for the detector to name it a Discuz!.
+            "/": .text(#"""
+            <html><head><meta name="generator" content="Discuz! X3.4" /></head><body></body></html>
+            """#),
+            // The index, with 300 written as a bare anchor inside 297's own cell.
+            "https://install-d.example/forum.php": .text(#"""
+            <html><head><meta name="generator" content="Discuz! X3.4" /></head><body>
+            <h2><a href="https://install-d.example/forum.php?gid=296">官方区</a></h2>
+            <div id="category_296" class="bm_c">
+            <table class="fl_tb"><tr>
+            <td>
+            <h2><a href="https://install-d.example/forum-297-1.html">官方软件区</a></h2>
+            <p>子版块: <a href="https://install-d.example/forum-300-1.html">输入法工具</a></p>
+            </td>
+            <td class="fl_i"><span class="xi2">370</span><span class="xg1"> / 6414</span></td>
+            </tr></table>
+            </div></body></html>
+            """#),
+            // 300's own listing — proof it answers for itself, which is the whole argument for
+            // making it a separate pick.
+            "https://install-d.example/forum.php?mod=forumdisplay&fid=300": .text(#"""
+            <html><head><meta name="generator" content="Discuz! X3.4" /></head><body>
+            <h1 class="xs2"><a href="forum.php?mod=forumdisplay&fid=300">输入法工具</a></h1>
+            <table id="threadlisttableid">
+            <tbody id="normalthread_51180"><tr>
+            <th class="common"><a href="forum.php?mod=viewthread&tid=51180" class="s xst">候选框不见了</a></th>
+            <td class="by"><cite><a href="home.php?mod=space&uid=21">mudbank</a></cite><em>2026-3-15 13:25</em></td>
+            <td class="num"><a href="forum.php?mod=viewthread&tid=51180" class="xi2">3</a><em>90</em></td>
+            </tr></tbody>
+            </table></body></html>
+            """#),
         ])
         let session = ShellSession(http: http, store: ItemStore())
         session.hostname = "install-d.example"
@@ -617,7 +766,7 @@ struct ForumPostsTests {
     @Test("A row is one height whether or not its first post has arrived")
     func theRowDoesNotMoveWhenThePostLands() {
         let item = Self.item(id: "discuz:\(Self.host):\(Self.tid)",
-                             title: "应用商店一键下载安装", kind: .discuz)
+                             title: "工具箱一键下载安装", kind: .discuz)
         let ref = try! #require(ForumThreadRef(item))
         let key = ForumPosts.Key(ref, .opening)
         let long = String(repeating: "写了很长的一段话，长到一行放不下。", count: 40)
@@ -663,8 +812,8 @@ struct ForumPostsTests {
         DummyItem(Note(
             id: id,
             source: Source(host: host, kind: kind),
-            author: "nanshu",
-            handle: "@nanshu@\(host)",
+            author: "tinbox",
+            handle: "@tinbox@\(host)",
             body: body,
             title: title,
             postedAt: .distantPast,

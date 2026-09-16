@@ -6,8 +6,10 @@ import Foundation
 /// per-page `loginhash` in the form's action, and refuses a post carrying neither — so a client
 /// that hard-codes an action URL works once, on the machine it was written on, and then never
 /// again. Measured on `install-e.example` (Discuz! X3.4): the action is
-/// `member.php?mod=logging&action=login&loginsubmit=yes&loginhash=KQ8ZM` and the hidden field is
-/// `formhash` = `7c41ea90`, both of which change on every load.
+/// `member.php?mod=logging&action=login&loginsubmit=yes&loginhash=<five characters>` and the
+/// hidden field is `formhash` = `<eight hex digits>`, both of which change on every load. The
+/// shapes are the measurement; the values that were here were one forum's, on one morning, and
+/// are not this repository's to keep.
 ///
 /// This type does not build a request out of any of it. The post is made by the web view, by
 /// submitting the form the reader's own engine loaded — see `ForumLoginScript`. What is read

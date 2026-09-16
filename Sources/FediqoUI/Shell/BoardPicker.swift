@@ -128,7 +128,7 @@ struct BoardPickerSheet: View {
     /// One board, and — **D29** — one board under a board, set in and pickable in its own right.
     ///
     /// **Indented, and still individually selectable.** A parent's `forumdisplay` does not
-    /// include its children's threads, verified live: `install-d.example` board 300 (拼音输入法) is a
+    /// include its children's threads, verified live: `install-d.example` board 300 is a
     /// child of 297 and answers with sixty-three threads of its own, none of which appear under
     /// 297. So a tick on the parent that quietly meant nine boards would be either a lie about
     /// what the reader subscribed to or nine boards' worth of traffic they did not ask for. They

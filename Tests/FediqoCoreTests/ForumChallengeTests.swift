@@ -9,21 +9,46 @@ import Testing
 /// challenge pages passes every test it has and then reads a forum thread *about* Cloudflare as a
 /// wall — which is a reader shown a sign-in sheet for a page they were already allowed to see,
 /// forever, with nothing in any log to say why.
+///
+/// **Where the challenge markup below comes from.** It used to be a capture of a live managed
+/// challenge, taken with this app's own agent. That page carried a session token, a ray id, a
+/// nonce and the name of the zone it was protecting, so it is gone and none of it is reproduced
+/// here. What is written out instead carries **only the markers the reader looks for and no
+/// values at all** — the arrangement is kept (the two structural markers a managed challenge
+/// actually emits, the widget host named in the content-security-policy meta rather than in a
+/// script src, the noscript sentence, the `Just a moment` title) but the page is no longer
+/// evidence of what Cloudflare serves today.
 @Suite("A wall in front of a forum")
 struct ForumChallengeTests {
-    /// The real thing: `https://www.challenge.example/forum.php`, captured with this app's own agent.
-    private var live: String { String(data: Fixtures.html("cloudflare-challenge"), encoding: .utf8)! }
+    /// A managed challenge with every token, ray id, nonce and zone name taken out.
+    private var challengePage: String {
+        #"""
+        <!DOCTYPE html><html lang="en-US"><head><title>Just a moment...</title>
+        <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+        <meta name="robots" content="noindex,nofollow">
+        <meta http-equiv="content-security-policy" content="default-src 'none'; script-src 'unsafe-eval' https://challenges.cloudflare.com; img-src 'self' https://challenges.cloudflare.com; frame-src 'self' https://challenges.cloudflare.com blob:; worker-src blob:; base-uri 'self'">
+        <meta http-equiv="refresh" content="360"></head>
+        <body><div class="main-wrapper" role="main"><div class="main-content"><noscript><div class="h2">
+        <span id="challenge-error-text">Enable JavaScript and cookies to continue</span>
+        </div></noscript></div></div>
+        <script>(function(){window._cf_chl_opt = {cType: 'managed'};
+        var a = document.createElement('script');
+        a.src = '/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1';
+        document.getElementsByTagName('head')[0].appendChild(a);}());</script>
+        </body></html>
+        """#
+    }
 
-    @Test("The live challenge page from the reader's own forum is read as a wall")
-    func liveChallengeIsAWall() {
-        let page = ForumWallReader.read(html: live, status: 403, mitigated: "challenge")
-        #expect(page == .wall(ForumWall(sort: .challenge, status: 403)), "the reader's forum read as content")
+    @Test("A managed challenge page is read as a wall")
+    func challengePageIsAWall() {
+        let page = ForumWallReader.read(html: challengePage, status: 403, mitigated: "challenge")
+        #expect(page == .wall(ForumWall(sort: .challenge, status: 403)), "a challenge read as content")
     }
 
     @Test("The same page is read as a wall from its body alone, with no header to help")
-    func liveChallengeFromBodyAlone() {
+    func challengeFromBodyAlone() {
         // A filter that does not send `cf-mitigated` must not be a filter this app walks into.
-        let page = ForumWallReader.read(html: live)
+        let page = ForumWallReader.read(html: challengePage)
         guard case .wall(let wall) = page else {
             Issue.record("the body markers did not carry it on their own")
             return
@@ -81,7 +106,7 @@ struct ForumChallengeTests {
     @Test("A forum thread about Cloudflare is still a forum")
     func prosePhrasesAreNotEnough() {
         let thread = """
-        <html><head><title>walled</title></head><body>
+        <html><head><title>A forum</title></head><body>
         <h1>Why does it say Just a moment</h1>
         <p>Enable JavaScript and cookies to continue is what Cloudflare shows. Checking your
         browser is the old wording. Ours says cType: 'managed'.</p>
@@ -91,18 +116,24 @@ struct ForumChallengeTests {
                 "a thread about the problem was read as the problem")
     }
 
-    @Test("A phrase counts once Cloudflare's own widget host is on the page with it")
-    func phrasePlusWidgetHost() {
-        let html = """
-        <html><body><div>Just a moment</div>
-        <script src="https://challenges.cloudflare.com/turnstile/v0/api.js"></script>
-        </body></html>
-        """
-        guard case .wall(let wall) = ForumWallReader.read(html: html) else {
-            Issue.record("the pairing did not carry it")
-            return
+    @Test("Every phrase counts once Cloudflare's own widget host is on the page with it")
+    func everyPhrasePlusWidgetHost() {
+        // Enumerated for the same reason the structural markers are: the list is the promise,
+        // and a phrase quietly dropped from it is a wall this app walks into and reports as an
+        // empty forum. Each phrase is tried alone with the widget host beside it, which is the
+        // pairing that makes a phrase evidence rather than a coincidence.
+        for phrase in ForumWallReader.phrases {
+            let html = """
+            <html><body><div>\(phrase)</div>
+            <script src="https://\(ForumWallReader.widgetHost)/turnstile/v0/api.js"></script>
+            </body></html>
+            """
+            guard case .wall(let wall) = ForumWallReader.read(html: html) else {
+                Issue.record("\(phrase) did not carry a page beside the widget host")
+                continue
+            }
+            #expect(wall.sort == .challenge, "\(phrase) was read as something other than a check")
         }
-        #expect(wall.sort == .challenge)
     }
 
     @Test("A 403 a forum sent about one of its own boards is the forum talking")
@@ -133,7 +164,23 @@ struct ForumChallengeTests {
 
     @Test("An ordinary forum page comes back untouched")
     func contentIsHandedBackWhole() {
-        let html = String(data: Fixtures.html("discourse"), encoding: .utf8)!
+        // A forum's own front page, carrying none of the markers — and, deliberately, carrying
+        // the word Cloudflare nowhere at all, so that what this pins is the ordinary case.
+        let html = #"""
+        <!DOCTYPE html>
+        <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <title>A forum</title>
+            <meta name="generator" content="Discourse 2026.9.0-latest">
+          </head>
+          <body class="crawler">
+            <div id="main-outlet"><h1>Latest topics</h1>
+              <a href="/t/give-retry-after-a-documented-default/41207">Give retry_after a documented default</a>
+            </div>
+          </body>
+        </html>
+        """#
         #expect(ForumWallReader.read(html: html, status: 200) == .content(html))
     }
 

@@ -24,12 +24,20 @@ struct BoardChoiceTests {
     /// Routed by whole address and not by path: a Discuz!'s index and every one of its boards are
     /// the same `/forum.php`, and the query is what tells them apart — the rule `ForumJoinTests`
     /// states, at the other end of the same wire.
+    ///
+    /// **What is shared here is the wiring, not the page.** Every test below writes the markup
+    /// it depends on into its own call: the index it is offered, and the answer each board it
+    /// picks gives back. This only says which address each of those answers at, which is the one
+    /// thing no test is about and every test would otherwise repeat wrongly.
     private static func forumHTTP(
-        index: FixtureHTTP.Outcome = .body(Fixtures.html("discuz-x50-index")),
+        index: FixtureHTTP.Outcome,
         boards: [Int: FixtureHTTP.Outcome] = [:]
     ) -> FixtureHTTP {
         var routes: [String: FixtureHTTP.Outcome] = [
-            "/": .body(Fixtures.html("discuz")),
+            // Enough for the detector to name it a Discuz!.
+            "/": .text(#"""
+            <html><head><meta name="generator" content="Discuz! X5.0" /></head><body></body></html>
+            """#),
             "https://\(host)/forum.php": index,
         ]
         for (fid, outcome) in boards {
@@ -37,8 +45,6 @@ struct BoardChoiceTests {
         }
         return FixtureHTTP(routes)
     }
-
-    private static let aBoard = FixtureHTTP.Outcome.body(Fixtures.html("discuz-x50-board"))
 
     private static func session(_ http: FixtureHTTP) -> ShellSession {
         ShellSession(http: http, store: ItemStore())
@@ -48,7 +54,18 @@ struct BoardChoiceTests {
 
     @Test("Adding a forum stops at the picker, and adds nothing")
     func addingAForumPauses() async {
-        let session = Self.session(Self.forumHTTP())
+        // A grid index with two boards under one category — enough that "the picker was offered
+        // boards" is a claim with something behind it.
+        let session = Self.session(Self.forumHTTP(index: .text(#"""
+        <html><head><meta name="generator" content="Discuz! X5.0" /></head><body>
+        <h2><a href="forum.php?gid=56">::工具区::</a></h2>
+        <div id="category_56" class="bm_c">
+        <dl><dt><a href="forum.php?mod=forumdisplay&fid=33">启动盘工具</a></dt>
+        <dd><em>主题: 4207</em>, <em>帖数: 60318</em></dd></dl>
+        <dl><dt><a href="forum.php?mod=forumdisplay&fid=41">虚拟机专区</a></dt>
+        <dd><em>主题: 1854</em>, <em>帖数: 16821</em></dd></dl>
+        </div></body></html>
+        """#)))
         session.hostname = Self.host
         await session.add()
 
@@ -71,10 +88,17 @@ struct BoardChoiceTests {
     @Test("A microblog does not stop to ask, and still gets All and Trends")
     func aMicroblogDoesNotPause() async {
         let session = Self.session(FixtureHTTP([
-            "/": .body(Fixtures.html("mastodon")),
-            "/api/v2/instance": .body(Fixtures.json("instance-v2")),
-            "/api/v1/timelines/public": .body(Fixtures.json("public-timeline")),
-            "/api/v1/trends/statuses": .body(Fixtures.json("trending-statuses")),
+            "/": .text(#"""
+            <html><head><meta name="application-name" content="Mastodon"></head><body></body></html>
+            """#),
+            "/api/v2/instance": .text(#"{"domain": "first.example", "title": "First"}"#),
+            "/api/v1/timelines/public": .text(#"""
+            [{"id": "100", "uri": "https://first.example/users/ada/statuses/1",
+              "created_at": "2024-01-01T00:00:00.000Z", "content": "<p>Hello</p>",
+              "visibility": "public",
+              "account": {"username": "ada", "acct": "ada", "display_name": "Ada"}}]
+            """#),
+            "/api/v1/trends/statuses": .text("[]"),
         ]))
         session.hostname = "first.example"
         await session.add()
@@ -88,7 +112,15 @@ struct BoardChoiceTests {
 
     @Test("Closing the picker joins nothing, and the same host can be typed again")
     func cancellingThePickerLeavesNothing() async {
-        let http = Self.forumHTTP(boards: [33: Self.aBoard])
+        // Nothing is ever picked here, so no board is ever read: an index is all this needs.
+        let http = Self.forumHTTP(index: .text(#"""
+        <html><head><meta name="generator" content="Discuz! X5.0" /></head><body>
+        <h2><a href="forum.php?gid=56">::工具区::</a></h2>
+        <div id="category_56" class="bm_c">
+        <dl><dt><a href="forum.php?mod=forumdisplay&fid=33">启动盘工具</a></dt>
+        <dd><em>主题: 4207</em></dd></dl>
+        </div></body></html>
+        """#))
         let session = Self.session(http)
         session.hostname = Self.host
         await session.add()
@@ -114,7 +146,16 @@ struct BoardChoiceTests {
 
     @Test("Subscribing to nothing is not a failure, and adds nothing")
     func anEmptyPickIsNotAFailure() async {
-        let session = Self.session(Self.forumHTTP(boards: [33: Self.aBoard]))
+        // No board is picked, so no board page is asked for — and the assertion that nothing was
+        // added would be worthless if there had been nothing to add.
+        let session = Self.session(Self.forumHTTP(index: .text(#"""
+        <html><head><meta name="generator" content="Discuz! X5.0" /></head><body>
+        <h2><a href="forum.php?gid=56">::工具区::</a></h2>
+        <div id="category_56" class="bm_c">
+        <dl><dt><a href="forum.php?mod=forumdisplay&fid=33">启动盘工具</a></dt>
+        <dd><em>主题: 4207</em></dd></dl>
+        </div></body></html>
+        """#)))
         session.hostname = Self.host
         await session.add()
 
@@ -132,7 +173,8 @@ struct BoardChoiceTests {
 
     @Test("A pick with no offer in hand does nothing at all")
     func aPickWithoutAnOfferDoesNothing() async {
-        let session = Self.session(Self.forumHTTP())
+        // Nothing is ever fetched: `add` is never called, which is the premise.
+        let session = Self.session(Self.forumHTTP(index: .text("")))
         await session.subscribe([])
         #expect(session.sources.isEmpty)
         #expect(session.refuse == nil)
@@ -142,7 +184,38 @@ struct BoardChoiceTests {
 
     @Test("The boards the reader kept become the source, its notes and its tabs")
     func subscribingAddsTheBoardsAsQueries() async {
-        let session = Self.session(Self.forumHTTP(boards: [33: Self.aBoard, 41: Self.aBoard]))
+        // Two boards, and each one answers with a thread of its own — two boards that returned
+        // the same thread would be one note in the store and would not show two tabs filling.
+        let session = Self.session(Self.forumHTTP(
+            index: .text(#"""
+            <html><head><meta name="generator" content="Discuz! X5.0" /></head><body>
+            <h2><a href="forum.php?gid=56">::工具区::</a></h2>
+            <div id="category_56" class="bm_c">
+            <dl><dt><a href="forum.php?mod=forumdisplay&fid=33">启动盘工具</a></dt>
+            <dd><em>主题: 4207</em></dd></dl>
+            <dl><dt><a href="forum.php?mod=forumdisplay&fid=41">虚拟机专区</a></dt>
+            <dd><em>主题: 1854</em></dd></dl>
+            </div></body></html>
+            """#),
+            boards: [
+                33: .text(#"""
+                <html><head><meta name="generator" content="Discuz! X5.0" /></head><body>
+                <h1 class="xs2"><a href="forum.php?mod=forumdisplay&fid=33">启动盘工具</a></h1>
+                <table id="threadlisttableid"><tbody id="normalthread_40125"><tr>
+                <th class="common"><a href="forum.php?mod=viewthread&tid=40125" class="s xst">一键安装说明</a></th>
+                <td class="by"><cite><a href="home.php?mod=space&uid=8">tinbox</a></cite><em>2026-9-15 13:12</em></td>
+                </tr></tbody></table></body></html>
+                """#),
+                41: .text(#"""
+                <html><head><meta name="generator" content="Discuz! X5.0" /></head><body>
+                <h1 class="xs2"><a href="forum.php?mod=forumdisplay&fid=41">虚拟机专区</a></h1>
+                <table id="threadlisttableid"><tbody id="normalthread_40230"><tr>
+                <th class="common"><a href="forum.php?mod=viewthread&tid=40230" class="s xst">磁盘直通怎么开</a></th>
+                <td class="by"><cite><a href="home.php?mod=space&uid=9">greenpine</a></cite><em>2026-9-14 08:03</em></td>
+                </tr></tbody></table></body></html>
+                """#),
+            ]
+        ))
         session.hostname = Self.host
         await session.add()
         guard let offer = session.choosing?.offer else {
@@ -173,7 +246,24 @@ struct BoardChoiceTests {
     /// hour.
     @Test("A forum is offered no Trends tab")
     func aForumIsOfferedNoTrends() async {
-        let session = Self.session(Self.forumHTTP(boards: [33: Self.aBoard]))
+        let session = Self.session(Self.forumHTTP(
+            index: .text(#"""
+            <html><head><meta name="generator" content="Discuz! X5.0" /></head><body>
+            <h2><a href="forum.php?gid=56">::工具区::</a></h2>
+            <div id="category_56" class="bm_c">
+            <dl><dt><a href="forum.php?mod=forumdisplay&fid=33">启动盘工具</a></dt>
+            <dd><em>主题: 4207</em></dd></dl>
+            </div></body></html>
+            """#),
+            boards: [33: .text(#"""
+            <html><head><meta name="generator" content="Discuz! X5.0" /></head><body>
+            <h1 class="xs2"><a href="forum.php?mod=forumdisplay&fid=33">启动盘工具</a></h1>
+            <table id="threadlisttableid"><tbody id="normalthread_40125"><tr>
+            <th class="common"><a href="forum.php?mod=viewthread&tid=40125" class="s xst">一键安装说明</a></th>
+            <td class="by"><cite><a href="home.php?mod=space&uid=8">tinbox</a></cite><em>2026-9-15 13:12</em></td>
+            </tr></tbody></table></body></html>
+            """#)]
+        ))
         session.hostname = Self.host
         await session.add()
         guard let offer = session.choosing?.offer else {
@@ -207,18 +297,18 @@ struct BoardChoiceTests {
         let forum = Source(host: "forum.example", kind: .discuz)
         let other = Source(host: "other.example", kind: .discuz)
         let notes = [
-            Self.note("a", forum, board: "PE讨论区"),
-            Self.note("b", forum, board: "杂谈区"),
+            Self.note("a", forum, board: "启动盘工具"),
+            Self.note("b", forum, board: "闲话区"),
             // Same board name, different forum. The host is half the identity for exactly this.
-            Self.note("c", other, board: "PE讨论区"),
+            Self.note("c", other, board: "启动盘工具"),
             Self.note("d", forum, board: nil),
         ]
         let query = DummyTimeline(
-            board: BoardQuery(host: "forum.example", fid: 39, name: "PE讨论区")
+            board: BoardQuery(host: "forum.example", fid: 39, name: "启动盘工具")
         )
         #expect(query.items(from: notes).map(\.id) == ["a"])
         #expect(query.id == "board:forum.example:39")
-        #expect(query.name == "PE讨论区")
+        #expect(query.name == "启动盘工具")
         #expect(query.emptyKey == "timeline.empty.board")
         // All still means all of it, boards included.
         #expect(DummyTimeline(id: "all").items(from: notes).count == 4)
@@ -229,7 +319,24 @@ struct BoardChoiceTests {
     /// would draw a tab matching no note — silently, and only on the tabs this unit added.
     @Test("A board query is resolved from the session, not rebuilt from its id")
     func aBoardQueryIsResolvedNotRebuilt() async {
-        let session = Self.session(Self.forumHTTP(boards: [33: Self.aBoard]))
+        let session = Self.session(Self.forumHTTP(
+            index: .text(#"""
+            <html><head><meta name="generator" content="Discuz! X5.0" /></head><body>
+            <h2><a href="forum.php?gid=56">::工具区::</a></h2>
+            <div id="category_56" class="bm_c">
+            <dl><dt><a href="forum.php?mod=forumdisplay&fid=33">启动盘工具</a></dt>
+            <dd><em>主题: 4207</em></dd></dl>
+            </div></body></html>
+            """#),
+            boards: [33: .text(#"""
+            <html><head><meta name="generator" content="Discuz! X5.0" /></head><body>
+            <h1 class="xs2"><a href="forum.php?mod=forumdisplay&fid=33">启动盘工具</a></h1>
+            <table id="threadlisttableid"><tbody id="normalthread_40125"><tr>
+            <th class="common"><a href="forum.php?mod=viewthread&tid=40125" class="s xst">一键安装说明</a></th>
+            <td class="by"><cite><a href="home.php?mod=space&uid=8">tinbox</a></cite><em>2026-9-15 13:12</em></td>
+            </tr></tbody></table></body></html>
+            """#)]
+        ))
         session.hostname = Self.host
         await session.add()
         guard let offer = session.choosing?.offer else {
@@ -252,12 +359,38 @@ struct BoardChoiceTests {
 
     @Test("A board that could not be read is left out of the rail and named")
     func anUnreadBoardIsNamed() async {
-        // `install-a.example` board 37 is the live one: 114,662 threads served as picture cards with
-        // no date on any of them, and no query parameter turns it back into a list.
-        let session = Self.session(Self.forumHTTP(boards: [
-            33: Self.aBoard,
-            41: .body(Fixtures.html("discuz-empty-guide")),
-        ]))
+        // `install-a.example` board 37 is the live one this is modelled on: 114,662 threads
+        // served as picture cards with no date on any of them, and no query parameter turns it
+        // back into a list. What reaches this app is what board 41 answers with below — a real
+        // page, a real board, and an **empty** thread table.
+        let session = Self.session(Self.forumHTTP(
+            index: .text(#"""
+            <html><head><meta name="generator" content="Discuz! X5.0" /></head><body>
+            <h2><a href="forum.php?gid=56">::工具区::</a></h2>
+            <div id="category_56" class="bm_c">
+            <dl><dt><a href="forum.php?mod=forumdisplay&fid=33">启动盘工具</a></dt>
+            <dd><em>主题: 4207</em></dd></dl>
+            <dl><dt><a href="forum.php?mod=forumdisplay&fid=41">虚拟机专区</a></dt>
+            <dd><em>主题: 1854</em></dd></dl>
+            </div></body></html>
+            """#),
+            boards: [
+                33: .text(#"""
+                <html><head><meta name="generator" content="Discuz! X5.0" /></head><body>
+                <h1 class="xs2"><a href="forum.php?mod=forumdisplay&fid=33">启动盘工具</a></h1>
+                <table id="threadlisttableid"><tbody id="normalthread_40125"><tr>
+                <th class="common"><a href="forum.php?mod=viewthread&tid=40125" class="s xst">一键安装说明</a></th>
+                <td class="by"><cite><a href="home.php?mod=space&uid=8">tinbox</a></cite><em>2026-9-15 13:12</em></td>
+                </tr></tbody></table></body></html>
+                """#),
+                41: .text(#"""
+                <html><head><meta name="generator" content="Discuz! X5.0" /></head><body>
+                <h1 class="xs2">最新回复</h1>
+                <table cellspacing="0" cellpadding="0"></table>
+                </body></html>
+                """#),
+            ]
+        ))
         session.hostname = Self.host
         await session.add()
         guard let offer = session.choosing?.offer else {
@@ -283,10 +416,25 @@ struct BoardChoiceTests {
 
     @Test("Where every picked board fails, nothing is added and the count is still said")
     func everyBoardFailing() async {
-        let session = Self.session(Self.forumHTTP(boards: [
-            33: .body(Fixtures.html("discuz-empty-guide")),
-            41: .body(Fixtures.html("discuz-empty-guide")),
-        ]))
+        let unreadable = FixtureHTTP.Outcome.text(#"""
+        <html><head><meta name="generator" content="Discuz! X5.0" /></head><body>
+        <h1 class="xs2">最新回复</h1>
+        <table cellspacing="0" cellpadding="0"></table>
+        </body></html>
+        """#)
+        let session = Self.session(Self.forumHTTP(
+            index: .text(#"""
+            <html><head><meta name="generator" content="Discuz! X5.0" /></head><body>
+            <h2><a href="forum.php?gid=56">::工具区::</a></h2>
+            <div id="category_56" class="bm_c">
+            <dl><dt><a href="forum.php?mod=forumdisplay&fid=33">启动盘工具</a></dt>
+            <dd><em>主题: 4207</em></dd></dl>
+            <dl><dt><a href="forum.php?mod=forumdisplay&fid=41">虚拟机专区</a></dt>
+            <dd><em>主题: 1854</em></dd></dl>
+            </div></body></html>
+            """#),
+            boards: [33: unreadable, 41: unreadable]
+        ))
         session.hostname = Self.host
         await session.add()
         guard let offer = session.choosing?.offer else {
@@ -306,7 +454,7 @@ struct BoardChoiceTests {
 
     @Test("Every reason a board can go unread has a sentence naming the board")
     func everyUnreadReasonHasASentence() {
-        let board = DiscuzBoard(fid: 7, name: "国外杀毒软件", category: "安全区", gid: 13)
+        let board = DiscuzBoard(fid: 7, name: "启动盘工具", category: "工具软件", gid: 13)
         let reasons: [JoinError] = [
             .refused(403), .publicTimelineFailed, .unreachable, .unreachable,
             .invalidHost, .unsupportedKind(.discuz),
@@ -323,9 +471,21 @@ struct BoardChoiceTests {
 
     @Test("A forum that refuses offers a sign-in, and keeps what the reader typed")
     func aRefusedForumOffersSignIn() async {
+        // Discuz!'s own notice page, and the one thing that identifies it: `id="messagetext"`.
+        // It arrives at status 200 with real Discuz! markup, which is why nothing above the
+        // parser catches it.
         let session = Self.session(FixtureHTTP([
-            "/": .body(Fixtures.html("discuz")),
-            "https://\(Self.host)/forum.php": .body(Fixtures.html("discuz-restricted")),
+            "/": .text(#"""
+            <html><head><meta name="generator" content="Discuz! X3.4" /></head><body></body></html>
+            """#),
+            "https://\(Self.host)/forum.php": .text(#"""
+            <html><head><meta name="generator" content="Discuz! X3.4" /></head><body>
+            <div id="ct" class="ct1 wp cl"><div class="mn"><div class="nfl">
+            <div id="messagetext" class="alert_info">
+            <p>抱歉，您的权限不足，无法访问本版块。</p>
+            </div></div></div></div>
+            </body></html>
+            """#),
         ]))
         session.hostname = Self.host
         await session.add()
@@ -342,9 +502,24 @@ struct BoardChoiceTests {
 
     @Test("A forum with no board this reader may see is refused, not mis-spelled")
     func aForumWithNoBoardsIsRefused() async {
+        // A complete, ordinary Discuz! index with **no forum list on it** — what a signed-out
+        // reader gets on `install-e.example`. What it has instead is a hand-written block whose
+        // id is `category_-99999`, holding campus links rather than boards: a section with no
+        // `gid` heading and nothing under it a reader could pick.
         let session = Self.session(FixtureHTTP([
-            "/": .body(Fixtures.html("discuz")),
-            "https://\(Self.host)/forum.php": .body(Fixtures.html("discuz-empty-index")),
+            "/": .text(#"""
+            <html><head><meta name="generator" content="Discuz! X3.4" /></head><body></body></html>
+            """#),
+            "https://\(Self.host)/forum.php": .text(#"""
+            <html><head><meta name="generator" content="Discuz! X3.4" /></head><body>
+            <div class="bm bmw cl"><div class="bm_h cl"><h2><a href="#">校内服务</a></h2></div>
+            <div id="category_-99999" class="bm_c">
+            <table class="fl_tb"><tr class="fl_row">
+            <td class="fl_g"><a href="https://\#(Self.host)/forum.php?mod=viewthread&amp;tid=1430861">班车时刻</a></td>
+            <td class="fl_g"><a href="/calendar">学年日历</a></td>
+            </tr></table>
+            </div></div></body></html>
+            """#),
         ]))
         session.hostname = Self.host
         await session.add()
@@ -360,7 +535,8 @@ struct BoardChoiceTests {
     /// the answer is a yes the caller acts on rather than an empty field.
     @Test("A sign-in that was reached asks for the join again; one that was not, does not")
     func signingInResumesTheJoin() {
-        let session = Self.session(Self.forumHTTP())
+        // Nothing is fetched: this is entirely about what `signInFinished` answers and leaves.
+        let session = Self.session(Self.forumHTTP(index: .text("")))
         session.offerSignIn = Self.host
         session.hostname = "something else entirely"
 
@@ -377,7 +553,14 @@ struct BoardChoiceTests {
 
     @Test("A sign-in reached, and the join runs again to the picker")
     func theJoinRunsAgainAfterASignIn() async {
-        let session = Self.session(Self.forumHTTP())
+        let session = Self.session(Self.forumHTTP(index: .text(#"""
+        <html><head><meta name="generator" content="Discuz! X5.0" /></head><body>
+        <h2><a href="forum.php?gid=56">::工具区::</a></h2>
+        <div id="category_56" class="bm_c">
+        <dl><dt><a href="forum.php?mod=forumdisplay&fid=33">启动盘工具</a></dt>
+        <dd><em>主题: 4207</em></dd></dl>
+        </div></body></html>
+        """#)))
         session.hostname = Self.host
         _ = session.signInFinished(reached: true, host: Self.host)
         await session.add()
@@ -397,7 +580,24 @@ struct BoardChoiceTests {
     /// argument that carried D25 has nothing to carry here.
     @Test("Clearing a forum keeps the boards the reader chose")
     func clearKeepsTheSubscriptions() async {
-        let session = Self.session(Self.forumHTTP(boards: [33: Self.aBoard]))
+        let session = Self.session(Self.forumHTTP(
+            index: .text(#"""
+            <html><head><meta name="generator" content="Discuz! X5.0" /></head><body>
+            <h2><a href="forum.php?gid=56">::工具区::</a></h2>
+            <div id="category_56" class="bm_c">
+            <dl><dt><a href="forum.php?mod=forumdisplay&fid=33">启动盘工具</a></dt>
+            <dd><em>主题: 4207</em></dd></dl>
+            </div></body></html>
+            """#),
+            boards: [33: .text(#"""
+            <html><head><meta name="generator" content="Discuz! X5.0" /></head><body>
+            <h1 class="xs2"><a href="forum.php?mod=forumdisplay&fid=33">启动盘工具</a></h1>
+            <table id="threadlisttableid"><tbody id="normalthread_40125"><tr>
+            <th class="common"><a href="forum.php?mod=viewthread&tid=40125" class="s xst">一键安装说明</a></th>
+            <td class="by"><cite><a href="home.php?mod=space&uid=8">tinbox</a></cite><em>2026-9-15 13:12</em></td>
+            </tr></tbody></table></body></html>
+            """#)]
+        ))
         session.hostname = Self.host
         await session.add()
         guard let offer = session.choosing?.offer else {
@@ -419,8 +619,8 @@ struct BoardChoiceTests {
 
     @Test("A board the forum stated no figures for does not draw a zero")
     func nothingIsNotZero() {
-        // `install-b.example` has both in one index: a board with a true, stated 0 threads, and a
-        // board where the template writes `...` and there is no figure at all.
+        // `install-b.example` has both in one index: a board with a true, stated 0 threads, and
+        // a board where the template writes `...` and there is no figure at all.
         let stated = DiscuzBoard(
             fid: 36, name: "Templates", category: "Discuz! Support", gid: 1, threads: 0, posts: 0
         )

@@ -8,8 +8,66 @@ struct MastodonTests {
 
     @Test("Public timeline is origin public, limited to 40")
     func publicTimelineMaps() async throws {
+        let timeline = """
+        [
+          {
+            "id": "100",
+            "uri": "https://first.example/users/ada/statuses/old",
+            "url": "https://first.example/@ada/old",
+            "created_at": "2024-01-01T00:00:00.000Z",
+            "content": "<p>Oldest public</p>",
+            "visibility": "public",
+            "in_reply_to_id": null,
+            "account": {
+              "username": "ada", "acct": "ada", "display_name": "Ada",
+              "avatar": "https://first.example/ada.png"
+            },
+            "media_attachments": [],
+            "mentions": [],
+            "reblog": null
+          },
+          {
+            "id": "200",
+            "uri": "https://first.example/users/ada/statuses/shared",
+            "url": "https://first.example/@ada/shared",
+            "created_at": "2024-06-01T00:00:00.000Z",
+            "content": "<p>Shared with trends</p>",
+            "visibility": "public",
+            "in_reply_to_id": null,
+            "account": {
+              "username": "ada", "acct": "ada", "display_name": "Ada",
+              "avatar": "https://first.example/ada.png"
+            },
+            "media_attachments": [
+              {
+                "type": "image",
+                "url": "https://first.example/full.jpg",
+                "preview_url": "https://first.example/preview.jpg"
+              }
+            ],
+            "mentions": [],
+            "reblog": null
+          },
+          {
+            "id": "300",
+            "uri": "https://first.example/users/bob/statuses/new",
+            "url": "https://first.example/@bob/new",
+            "created_at": "2024-12-01T00:00:00.000Z",
+            "content": "<p>Newest public</p>",
+            "visibility": "unlisted",
+            "in_reply_to_id": null,
+            "account": {
+              "username": "bob", "acct": "bob@second.example",
+              "display_name": "Bob", "avatar": null
+            },
+            "media_attachments": [],
+            "mentions": [],
+            "reblog": null
+          }
+        ]
+        """
         let http = FixtureHTTP([
-            "/api/v1/timelines/public": .body(Fixtures.json("public-timeline")),
+            "/api/v1/timelines/public": .body(Data(timeline.utf8)),
         ])
         let notes = try await MastodonClient(http: http, host: "first.example")
             .publicTimeline(source: source)
@@ -32,8 +90,28 @@ struct MastodonTests {
 
     @Test("Trending is origin trending, limited to 20")
     func trendingMaps() async throws {
+        let trending = """
+        [
+          {
+            "id": "200",
+            "uri": "https://first.example/users/ada/statuses/shared",
+            "created_at": "2024-06-01T00:00:00.000Z",
+            "content": "<p>Shared with trends</p>",
+            "visibility": "public",
+            "account": { "username": "ada", "acct": "ada", "display_name": "Ada" }
+          },
+          {
+            "id": "400",
+            "uri": "https://first.example/users/ada/statuses/trend-only",
+            "created_at": "2024-09-01T00:00:00.000Z",
+            "content": "<p>Trend only</p>",
+            "visibility": "public",
+            "account": { "username": "ada", "acct": "ada", "display_name": "Ada" }
+          }
+        ]
+        """
         let http = FixtureHTTP([
-            "/api/v1/trends/statuses": .body(Fixtures.json("trending-statuses")),
+            "/api/v1/trends/statuses": .body(Data(trending.utf8)),
         ])
         let notes = try await MastodonClient(http: http, host: "first.example")
             .trending(source: source)
@@ -210,7 +288,28 @@ struct MastodonTests {
 
     @Test("Every type a server sends, and one nobody has heard of — and a gifv is a video")
     func everyKindDecodes() throws {
-        let note = try Self.note(fixture: "status-media")
+        // Every `type` a Mastodon sends, one no server has ever sent, one entry that names no
+        // type at all, and a last one with neither address. Kind and playability turn on
+        // nothing else, so nothing else is here.
+        let note = try Self.note("""
+        {
+          "id": "media",
+          "uri": "https://first.example/users/ada/statuses/media",
+          "created_at": "2024-01-01T00:00:00.000Z",
+          "content": "<p>Everything a server calls an attachment</p>",
+          "account": { "username": "ada", "acct": "ada", "display_name": "Ada" },
+          "media_attachments": [
+            { "type": "image", "url": "https://first.example/0.jpg" },
+            { "type": "gifv", "url": "https://first.example/1.mp4" },
+            { "type": "video", "url": "https://first.example/2.mp4" },
+            { "type": "audio", "url": "https://first.example/3.mp3" },
+            { "type": "unknown", "url": "https://first.example/4.bin" },
+            { "type": "hologram", "url": "https://first.example/5.holo" },
+            { "url": "https://first.example/6.jpg" },
+            { "type": "image", "url": null, "preview_url": null }
+          ]
+        }
+        """)
         // The eighth came with neither address and is gone; seven is what is left.
         #expect(note.attachments.map(\.kind) == [
             .image, .video, .video, .audio, .unknown, .unknown, .unknown,
@@ -223,7 +322,28 @@ struct MastodonTests {
 
     @Test("Alt text written, written empty, and never written are three different answers")
     func altTextIsWhatTheAuthorWrote() throws {
-        let note = try Self.note(fixture: "status-media")
+        // Written; written and left empty; never sent at all — and the eighth, described at
+        // length but addressed nowhere, which is dropped before its words can reach a row.
+        let note = try Self.note("""
+        {
+          "id": "media",
+          "uri": "https://first.example/users/ada/statuses/media",
+          "created_at": "2024-01-01T00:00:00.000Z",
+          "content": "<p>Everything a server calls an attachment</p>",
+          "account": { "username": "ada", "acct": "ada", "display_name": "Ada" },
+          "media_attachments": [
+            { "url": "https://first.example/0.jpg", "description": "a cat asleep on a wall" },
+            { "url": "https://first.example/1.mp4", "description": "" },
+            { "url": "https://first.example/2.mp4" },
+            { "url": "https://first.example/3.mp3", "description": "a field recording" },
+            { "url": "https://first.example/4.bin" },
+            { "url": "https://first.example/5.holo" },
+            { "url": "https://first.example/6.jpg" },
+            { "url": null, "preview_url": null,
+              "description": "described at length, and nowhere to be found" }
+          ]
+        }
+        """)
         #expect(note.attachments.map(\.alt) == [
             "a cat asleep on a wall", "", "", "a field recording", "", "", "",
         ])
@@ -231,7 +351,29 @@ struct MastodonTests {
 
     @Test("A shape is both halves, both positive, or it is no shape at all")
     func pixelSizeNeedsBothHalves() throws {
-        let note = try Self.note(fixture: "status-media")
+        let note = try Self.note("""
+        {
+          "id": "media",
+          "uri": "https://first.example/users/ada/statuses/media",
+          "created_at": "2024-01-01T00:00:00.000Z",
+          "content": "<p>Everything a server calls an attachment</p>",
+          "account": { "username": "ada", "acct": "ada", "display_name": "Ada" },
+          "media_attachments": [
+            { "url": "https://first.example/0.jpg",
+              "meta": { "original": { "width": 1920, "height": 1080 } } },
+            { "url": "https://first.example/1.mp4",
+              "meta": { "original": { "width": 480, "height": 480 } } },
+            { "url": "https://first.example/2.mp4" },
+            { "url": "https://first.example/3.mp3",
+              "meta": { "original": { "width": 0, "height": 0 } } },
+            { "url": "https://first.example/4.bin",
+              "meta": { "original": { "width": 640 } } },
+            { "url": "https://first.example/5.holo", "meta": { "original": null } },
+            { "url": "https://first.example/6.jpg" },
+            { "url": null, "preview_url": null }
+          ]
+        }
+        """)
         // Told properly; told about a square; not told; told zero; told half; told nothing
         // inside `meta`; and sent no `meta` at all. Only the first two said a shape.
         #expect(note.attachments.map(\.width) == [1920, 480, nil, nil, nil, nil, nil])
@@ -242,7 +384,26 @@ struct MastodonTests {
 
     @Test("An attachment described at length and addressed nowhere is still nothing to draw")
     func describedButAddresslessIsDropped() throws {
-        let note = try Self.note(fixture: "status-media")
+        let note = try Self.note("""
+        {
+          "id": "media",
+          "uri": "https://first.example/users/ada/statuses/media",
+          "created_at": "2024-01-01T00:00:00.000Z",
+          "content": "<p>Everything a server calls an attachment</p>",
+          "account": { "username": "ada", "acct": "ada", "display_name": "Ada" },
+          "media_attachments": [
+            { "type": "image", "url": "https://first.example/0.jpg" },
+            { "type": "gifv", "url": "https://first.example/1.mp4" },
+            { "type": "video", "url": "https://first.example/2.mp4" },
+            { "type": "audio", "url": "https://first.example/3.mp3" },
+            { "type": "unknown", "url": "https://first.example/4.bin" },
+            { "type": "hologram", "url": "https://first.example/5.holo" },
+            { "url": "https://first.example/6.jpg" },
+            { "type": "image", "url": null, "preview_url": null,
+              "description": "described at length, and nowhere to be found" }
+          ]
+        }
+        """)
         #expect(note.attachments.count == 7)
         #expect(note.attachments.allSatisfy { !$0.alt.contains("nowhere to be found") })
     }
@@ -303,7 +464,40 @@ struct MastodonTests {
 
     @Test("An emoji this device will not fetch is an emoji with no picture")
     func unfetchableEmojiIsDropped() throws {
-        let note = try Self.note(fixture: "status-boost")
+        let note = try Self.note("""
+        {
+          "id": "boost",
+          "uri": "https://first.example/users/cyd/statuses/boost",
+          "created_at": "2024-08-01T00:00:00.000Z",
+          "content": "",
+          "account": { "username": "cyd", "acct": "cyd", "display_name": "Cyd" },
+          "reblog": {
+            "id": "original",
+            "uri": "https://author.example/users/ada/statuses/1",
+            "created_at": "2024-01-15T12:00:00Z",
+            "content": "<p>A post written partly in :blobcat:</p>",
+            "visibility": "public",
+            "account": {
+              "username": "ada", "acct": "ada@author.example", "display_name": "Ada :wave:",
+              "emojis": [
+                { "shortcode": "wave", "url": "https://author.example/wave.png",
+                  "static_url": "file:///tmp/wave.png" }
+              ]
+            },
+            "emojis": [
+              { "shortcode": "blobcat", "url": "https://author.example/blobcat.png",
+                "static_url": "https://author.example/blobcat-still.png" },
+              { "shortcode": "nowhere", "url": "file:///etc/passwd", "static_url": null },
+              { "shortcode": "plain", "url": "http://author.example/plain.png",
+                "static_url": null },
+              { "shortcode": "", "url": "https://author.example/nameless.png",
+                "static_url": null }
+            ],
+            "media_attachments": [],
+            "mentions": []
+          }
+        }
+        """)
         // `file:` and `http:` are refused at the wire exactly as an attachment's address is —
         // the same cache fetches both. A shortcode kept with no picture behind it draws a
         // blank where the author wrote a word, so it goes with the address.
@@ -319,7 +513,60 @@ struct MastodonTests {
 
     @Test("A boost draws three accounts' words, so it carries three accounts' pictures")
     func boostCarriesEveryAlphabetTheRowDraws() throws {
-        let note = try Self.note(fixture: "status-boost")
+        let note = try Self.note("""
+        {
+          "id": "boost",
+          "uri": "https://first.example/users/cyd/statuses/boost",
+          "created_at": "2024-08-01T00:00:00.000Z",
+          "content": "",
+          "sensitive": true,
+          "spoiler_text": "the wrapper's own line",
+          "account": {
+            "username": "cyd", "acct": "cyd", "display_name": "Cyd :trumpet:",
+            "emojis": [
+              { "shortcode": "trumpet", "url": "https://booster.example/trumpet.png",
+                "static_url": "https://booster.example/trumpet-still.png" },
+              { "shortcode": "blobcat", "url": "https://booster.example/blobcat.png",
+                "static_url": null }
+            ]
+          },
+          "emojis": [
+            { "shortcode": "wrapper", "url": "https://booster.example/wrapper.png",
+              "static_url": null }
+          ],
+          "media_attachments": [],
+          "mentions": [],
+          "reblog": {
+            "id": "original",
+            "uri": "https://author.example/users/ada/statuses/1",
+            "url": "https://author.example/@ada/1",
+            "created_at": "2024-01-15T12:00:00Z",
+            "content": "<p>A post written partly in :blobcat:</p>",
+            "visibility": "public",
+            "sensitive": false,
+            "spoiler_text": "",
+            "account": {
+              "username": "ada", "acct": "ada@author.example", "display_name": "Ada :wave:",
+              "avatar": "https://author.example/ada.png",
+              "emojis": [
+                { "shortcode": "wave", "url": "https://author.example/wave.png",
+                  "static_url": "file:///tmp/wave.png" }
+              ]
+            },
+            "emojis": [
+              { "shortcode": "blobcat", "url": "https://author.example/blobcat.png",
+                "static_url": "https://author.example/blobcat-still.png" },
+              { "shortcode": "nowhere", "url": "file:///etc/passwd", "static_url": null },
+              { "shortcode": "plain", "url": "http://author.example/plain.png",
+                "static_url": null },
+              { "shortcode": "", "url": "https://author.example/nameless.png",
+                "static_url": null }
+            ],
+            "media_attachments": [],
+            "mentions": []
+          }
+        }
+        """)
         // The boosted status's own list spells its body and its spoiler line; its author's
         // spells the name drawn as the author; and the booster's spells the name drawn as
         // `boostedBy`. All three reach the row, so all three are here.
@@ -340,11 +587,6 @@ struct MastodonTests {
 
     private static func note(_ json: String) throws -> Note {
         let dto = try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(json.utf8))
-        return dto.asNote(source: Source(host: "first.example", kind: .mastodon), origin: .publicTimeline)
-    }
-
-    private static func note(fixture: String) throws -> Note {
-        let dto = try MastodonJSON.decoder.decode(StatusDTO.self, from: Fixtures.json(fixture))
         return dto.asNote(source: Source(host: "first.example", kind: .mastodon), origin: .publicTimeline)
     }
 

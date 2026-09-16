@@ -1,5 +1,32 @@
 import Foundation
 
+// MARK: - The installs these measurements were taken on
+//
+// Almost every rule in this file is here because a running forum did something a reasonable
+// person would not have guessed, and the comments say which forum and what it did. Those forums
+// are **not named**: the reader asked that no real server be left anywhere in this repository,
+// and a measurement does not need an identity to be worth reading — it needs a *property*.
+//
+// So each install is named by what it is. This is the one place the table lives; everything in
+// `Sources` and `Tests` uses these names and nothing anywhere maps them back, which is the whole
+// object of the exercise.
+//
+// | codename | what it stands for |
+// | --- | --- |
+// | `install-a.example` | X3.4. Grid index; classic rewrite `forum-N-1.html`; **declares UTF-8 and carries stray non-UTF-8 bytes**; a third-party mobile template that is not Discuz!'s markup; replies withheld from a signed-out reader; a picture replaced by a `javascript:` link |
+// | `install-b.example` | X3.5/X5.0 **English**. Grid index; SEO slug addresses; counts with no `title` behind them; a board that has never been posted in and says so with `...`; a `[quote]` around something that is not a person; a Copy Code button |
+// | `install-c.example` | X5.0. Grid index; canonical `forum.php?mod=forumdisplay&fid=N`; abbreviated counts (`5万`) keeping the exact figure in a `title`; a touch template that **lazy-loads** its avatars into `data-src`; a desktop template whose avatar box is `favatar` and is filled in by script, so there is no `<img>` to read; pinned threads |
+// | `install-d.example` | X3.4 served **GBK** — and UTF-8 on its own mobile page, so one forum is two encodings. The **wide list** index layout: a board's name is an `<h2>`, which is what makes "the heading nearest this section" the wrong rule; sub-boards written as bare links inside a parent's cell; avatars on two hosts, neither of them the forum; a favourite button in the same list as the author's name |
+// | `install-e.example` | X3.4 with **nothing a signed-out reader may see**: a hand-written `id="category_-99999"` block in place of a forum list, Discuz!'s own `messagetext` notice on every board, an empty guide table, and the sign-in page |
+// | `install-f.example` | Discourse |
+// | `challenge.example` | a forum behind a managed challenge |
+// | `avatars-d.example` | `install-d`'s avatar host on the touch template |
+// | `files-d.example` | `install-d`'s avatar host on the desktop template — a *second* host that is not the forum |
+//
+// **The numbers are kept and the identities are not.** A count, a byte size, a ratio or a claim
+// about markup is the evidence an argument here rests on; the name of the server it came off is
+// not part of the argument.
+
 /// A Discuz! forum, read the way this app reads everything else — one unauthenticated GET — and
 /// unlike everything else, read out of **markup rather than a document**.
 ///
@@ -20,8 +47,8 @@ import Foundation
 /// `install-c.example`, the first row of `view=new` was posted in 2024.
 ///
 /// **What varies, and what does not.** Three installs, three major versions, and no two of them
-/// address a thread the same way — `thread-620795-1-1.html`, `forum.php?mod=viewthread&tid=…`,
-/// and on `install-b.example` an SEO slug, `-paid-discuz-x5-0-english-language-pack-82-1-1.html`.
+/// address a thread the same way — `thread-410728-1-1.html`, `forum.php?mod=viewthread&tid=…`,
+/// and on `install-b.example` an SEO slug, `-english-language-pack-4201-1-1.html`.
 /// What all three share is the table: `<tbody id="normalthread_<tid>">` around a row whose cells
 /// are `td.icn`, `th`, then the `td.by` / `td.num` run this file reads. So the **structure** is
 /// what is parsed and the **addresses are not read at all** — see `DiscuzThread.asNote`.
@@ -371,7 +398,7 @@ public struct DiscuzBoard: Identifiable, Hashable, Sendable {
     /// A sub-board is a separate `fid` in Discuz! and it is a separate pick here, because a
     /// parent's `forumdisplay` does *not* include its children's threads: a checkbox that quietly
     /// meant nine boards would be either a lie or nine boards' worth of traffic nobody asked for.
-    /// Verified live — `install-d.example` board 300 (拼音输入法, a child of 297) answers
+    /// Verified live — `install-d.example` board 300 (a child of 297) answers
     /// `forum.php?mod=forumdisplay&fid=300` with its own heading and sixty-three threads of its
     /// own, none of which appear under 297.
     ///
@@ -675,9 +702,9 @@ enum DiscuzIndex {
     /// One number the index stated, or nothing where it stated something this device cannot read.
     ///
     /// **The `title` first, because an abbreviated count is not a number.** `install-c.example` and
-    /// `install-d.example` both write `<span title="58779">5万</span>` once a figure passes ten
-    /// thousand, and reading the text would report a board with fifty-eight thousand threads as
-    /// having five. `install-b.example` abbreviates nothing and carries no `title` at all, so both
+    /// `install-d.example` both write `<span title="31842">3万</span>` once a figure passes ten
+    /// thousand, and reading the text would report a board with thirty-one thousand threads as
+    /// having three. `install-b.example` abbreviates nothing and carries no `title` at all, so both
     /// are needed and neither is a fallback for the other.
     ///
     /// The text is taken after the last `:`, `：` or `/`, which is every separator the four
@@ -1227,8 +1254,8 @@ enum DiscuzPage {
             //
             // **One caveat, measured and not fixed here.** Discuz! pins a thread to one board
             // (`tpin1`) or to *every* board (`tpin3`), and a globally pinned one is written into
-            // a listing it does not belong to: `install-c.example` thread 403684 reads under board 34
-            // 杂谈区 and the thread itself is in 版务公开. Its number, title, author, date and
+            // a listing it does not belong to: `install-c.example`'s globally pinned thread reads
+            // under a board it is not in. Its number, title, author, date and
             // answer count are all correct — checked against the thread — and only the board it
             // is filed under is the board it was *read in* rather than the board it is in. The
             // marker that would tell the two apart was found on one skin out of four, which is

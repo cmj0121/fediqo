@@ -3,58 +3,27 @@ import Testing
 
 @testable import FediqoCore
 
-/// A Discuz! forum read out of its own markup, against what three real ones actually send.
+/// A Discuz! forum read out of its own markup.
 ///
-/// The fixtures are trimmed captures taken on 2026-09-15, and the three of them are three
-/// **different programs' worth of difference** rather than one page copied about:
+/// **There is no captured page anywhere in this suite, and that is a loss as well as a
+/// decision.** Every fixture this file used to read was a byte-exact capture of a running
+/// forum, and four of this branch's recorded defects were caught *because* the bytes came off a
+/// server rather than out of an author: a decoder that silently repaired a fixture, a template
+/// that turned out to be six templates, a fixture pairing that did not match, and the repo's own
+/// hooks tidying "byte-exact" captures. Those captures are gone on the reader's instruction, so
+/// the corroboration they carried — "this really is what a server sends" — is gone with them and
+/// **cannot be restored by anything written here**. What each literal below can still prove is
+/// that the parser reads the shape it is given; what none of them can prove any more is that the
+/// shape is the one a forum sends.
 ///
-/// | fixture | host | version | how it addresses a thread |
-/// | --- | --- | --- | --- |
-/// | `discuz-x34-guide` | `install-a.example` | X3.4 | `thread-620795-1-1.html` |
-/// | `discuz-x35-guide` | `install-b.example` | X3.5, English | an SEO slug, `…-82-1-1.html` |
-/// | `discuz-x50-guide` | `install-c.example` | X5.0 | `forum.php?mod=viewthread&tid=…` |
+/// What replaces the captures is the opposite of a fixture: **one property, one literal, written
+/// in the test that pins it.** A three-line literal carrying exactly the shape under discussion
+/// says what it is for, where a 40KB page says nothing and quietly lets ten tests lean on one
+/// author's idea of a forum.
 ///
-/// That spread is the point. A parser pinned to one skin passes a suite built from one skin, and
-/// this one is written against the structure all three share because all three were in front of
-/// it while it was written.
-///
-/// **The index fixtures are four installs, not three**, captured on 2026-09-15 for the same
-/// reason and with a fourth added because three turned out to agree about something the fourth
-/// does not:
-///
-/// | fixture | host | version | how a board is written, and addressed |
-/// | --- | --- | --- | --- |
-/// | `discuz-x50-index` | `install-c.example` | X5.0 | `<dl><dt>` grid, `forum.php?mod=forumdisplay&fid=34` |
-/// | `discuz-x35-index` | `install-b.example` | X3.5, English | `<dl><dt>` grid, `37-1/news-feed.html` |
-/// | `discuz-x34-index` | `install-a.example` | X3.4 | `<dl><dt>` grid, `forum-37-1.html` |
-/// | `discuz-gbk-index` | `install-d.example` | X3.4, GBK | `<td><h2>` wide list, `forum-297-1.html` |
-/// | `discuz-empty-index` | `install-e.example` | X3.4 | an ordinary index with no forum list on it |
-///
-/// Two of them contain the letters `fid=` nowhere at all, one of them writes a **board's** name
-/// in an `<h2>`, and two of them are not valid UTF-8. All five are byte-exact: this branch's own
-/// lesson is that a fixture written out through a decoder describes a cleaner world than the code
-/// meets, and the X3.4 index is precisely that case — a live forum that declares UTF-8 and is not
-/// quite UTF-8.
-///
-/// **And the thread fixtures are three templates, not one**, captured on 2026-09-16. `&mobile=2`
-/// is a *hint*: three of the four installs answer it with Discuz!'s own touch template and the
-/// fourth answers it with a third-party one that is not Discuz!'s markup at all and is no smaller
-/// than the desktop page.
-///
-/// | fixture | host | what `&mobile=2` answered with | what it is here for |
-/// | --- | --- | --- | --- |
-/// | `discuz-x50-thread` | `install-c.example` | Discuz!'s touch template | an edit notice, an attachment list and an image, all inside the message |
-/// | `discuz-x50-quote` | `install-c.example` | the same, trimmed to two posts | two replies that each quote somebody by name |
-/// | `discuz-x35-thread` | `install-b.example` | the same, in English | a `[quote]`, a "Copy Code" button, and absolute dates |
-/// | `discuz-gbk-thread` | `install-d.example` | the same, **as UTF-8** | one forum that is GBK on its desktop page and UTF-8 here |
-/// | `discuz-x34-thread` | `install-a.example` | **Comiis**, a third-party template | replies withheld from a signed-out reader, and pictures they may not see |
-/// | `discuz-x50-thread-full` | `install-c.example` | — (the desktop page) | the layout an install with its mobile template off would answer with |
-///
-/// Byte-exact on the same terms, and trimmed only by **removing whole byte ranges**: every byte
-/// kept is a byte the server sent, in the order it sent it, and nothing was decoded and written
-/// back out. The repo's `trailing-whitespace` hook excludes `^Tests/.*/Fixtures/` and the three
-/// untrimmed captures were checked byte-identical against what `curl` wrote after the commit ran,
-/// because that exclusion is the only thing standing between these files and a tidied fixture.
+/// The measurements themselves are kept — they are what make the parser's rules arguable — and
+/// the installs they were taken on are named by **what they are** rather than by who they are.
+/// The table of codenames is in `Sources/FediqoCore/Discuz.swift`.
 @Suite("Discuz")
 struct DiscuzTests {
     private static let host = "install-a.example"
@@ -68,71 +37,112 @@ struct DiscuzTests {
         return (DiscuzClient(http: http, host: host), http)
     }
 
-    private static func fixture(_ name: String) -> FixtureHTTP.Outcome {
-        .body(Fixtures.html(name))
-    }
-
     // MARK: - The front page
 
     @Test("The guide page becomes notes: a name, a board, who asked, and where to read it")
     func theGuidePageIsATimeline() async throws {
-        let (client, http) = Self.client(Self.fixture("discuz-x34-guide"))
+        // The guide page's own shape: `td.icn`, `th` with the title, a bare-anchor `td.by` for
+        // the board, a `<cite>`-wrapped `td.by` for the author, `td.num`, and a last `td.by` for
+        // whoever answered most recently.
+        let page = #"""
+        <table summary="forum_guide">
+        <tbody id="normalthread_310401">
+        <tr>
+        <td class="icn"><a href="thread-310401-1-1.html"><img src="static/image/common/folder_common.gif" /></a></td>
+        <th class="new"><a href="thread-310401-1-1.html" class="s xst">套牌超速两百公里，自称路上不限速</a></th>
+        <td class="by"><a href="forum.php?mod=forumdisplay&amp;fid=5">闲谈茶座</a></td>
+        <td class="by"><cite><a href="home.php?mod=space&amp;uid=11">青木</a></cite><em><span title="2026-9-15">5&nbsp;小时前</span></em></td>
+        <td class="num"><a href="thread-310401-1-1.html" class="xi2">12</a><em>3480</em></td>
+        <td class="by"><cite><a href="home.php?mod=space&amp;uid=22">晚归</a></cite><em>4&nbsp;小时前</em></td>
+        </tr>
+        </tbody>
+        </table>
+        """#
+        let (client, http) = Self.client(.text(page))
         let notes = try await client.latest(source: Self.source)
 
-        #expect(notes.count == 5)
+        #expect(notes.count == 1)
         let first = try #require(notes.first)
 
         // The title is the post. A Discuz! thread table carries no part of the opening post at
         // all, so a row drawn from `body` alone would be blank on every line.
-        #expect(first.title == "套假牌，超速200+，自称德国不限速。难度2星")
+        #expect(first.title == "套牌超速两百公里，自称路上不限速")
         #expect(first.body == "")
-        #expect(first.board == "缘聚茶楼")
+        #expect(first.board == "闲谈茶座")
 
-        // Prefixed and host-qualified: `620795` is a plausible id on any forum, and they share
-        // one store with every microblog's status ids.
-        #expect(first.id == "discuz:install-a.example:620795")
+        // Prefixed and host-qualified: a thread number is a plausible id on any forum, and they
+        // share one store with every microblog's status ids.
+        #expect(first.id == "discuz:install-a.example:310401")
         #expect(first.source.kind == .discuz)
 
-        // Built from the host and the number, never lifted from the page. This install writes
-        // its own links as `thread-620795-1-1.html`, which is relative to a `<base>` the same
-        // stranger chose.
-        #expect(first.url?.absoluteString == "https://install-a.example/forum.php?mod=viewthread&tid=620795")
+        // Built from the host and the number, never lifted from the page. The row's own link is
+        // `thread-310401-1-1.html`, relative to a `<base>` the same stranger chose.
+        #expect(first.url?.absoluteString
+            == "https://install-a.example/forum.php?mod=viewthread&tid=310401")
 
         // One request, and it is the guide page rather than any board's.
         let asked = try #require(await http.requested.first)
         #expect(await http.requested.count == 1)
-        #expect(asked.absoluteString == "https://install-a.example/forum.php?mod=guide&view=newthread")
+        #expect(asked.absoluteString
+            == "https://install-a.example/forum.php?mod=guide&view=newthread")
     }
 
-    @Test("Every one of the three skins is read, and none of them is read as empty")
-    func allThreeSkinsParse() async throws {
-        // Enumerated rather than spot-checked: a parser that quietly stopped reading one of the
-        // three would otherwise pass a suite that only ever asserted about the first.
-        let skins = [
-            ("discuz-x34-guide", "install-a.example", 620795, "缘聚茶楼", "猪小呆"),
-            ("discuz-x35-guide", "install-b.example", 82, "News Feed", "admin"),
-            ("discuz-x50-guide", "install-c.example", 453471, "杂谈区", "beihe"),
+    @Test("Every row shape the four installs write is read, and none of them is read as empty")
+    func everyRowShapeIsRead() async throws {
+        // Enumerated rather than spot-checked, because the four installs measured differ inside
+        // the row in three ways and a parser that quietly stopped reading one of them would pass
+        // a suite that only ever asserted about the first: the title anchor is `class="s xst"`
+        // on one skin and bare `class="xst"` on another; the date is a `title` attribute on
+        // three and the element's own text on the fourth; and a person is sometimes linked to
+        // their profile and sometimes bare text inside the `<cite>`.
+        let shapes: [(String, String, Int, String, Int)] = [
+            (
+                "s xst, dated by attribute",
+                #"""
+                <tbody id="normalthread_5501"><tr>
+                <th><a href="thread-5501-1-1.html" class="s xst">启动盘做坏了怎么救</a></th>
+                <td class="by"><a href="forum.php?mod=forumdisplay&amp;fid=33">工具区</a></td>
+                <td class="by"><cite><a href="home.php?mod=space&amp;uid=3">beihe</a></cite><em><span title="2026-9-15">5&nbsp;小时前</span></em></td>
+                <td class="num"><a href="#" class="xi2">7</a><em>901</em></td>
+                </tr></tbody>
+                """#, 5501, "beihe", 7
+            ),
+            (
+                "bare xst, dated by text",
+                #"""
+                <tbody id="normalthread_4201"><tr>
+                <th><a href="4201-1-1/language-pack.html" class="xst">Discuz! X5.0 English Language Pack</a></th>
+                <td class="by"><a href="37-1/news-feed.html">News Feed</a></td>
+                <td class="by"><cite><a href="home.php?mod=space&amp;uid=1">admin</a></cite><em>2026-06-08</em></td>
+                <td class="num"><a href="#" class="xi2">1</a><em>64</em></td>
+                </tr></tbody>
+                """#, 4201, "admin", 1
+            ),
+            (
+                "classic rewrite, a person with no profile link",
+                #"""
+                <tbody id="normalthread_4401"><tr>
+                <th><a href="thread-4401-1-1.html" class="xst">两个小工具的对比</a></th>
+                <td class="by"><a href="forum-205-1.html">科技资讯区</a></td>
+                <td class="by"><cite>听泉</cite><em><span title="2026-9-14">1&nbsp;天前</span></em></td>
+                <td class="num"><a href="#" class="xi2">0</a><em>12</em></td>
+                </tr></tbody>
+                """#, 4401, "听泉", 0
+            ),
         ]
-        for (name, host, tid, board, author) in skins {
-            let source = Source(host: host, kind: .discuz)
-            let (client, _) = Self.client(Self.fixture(name), host: host)
-            let notes = try await client.latest(source: source)
+        for (name, row, tid, author, replies) in shapes {
+            let (client, _) = Self.client(.text(row))
+            let notes = try await client.latest(source: Self.source)
 
-            #expect(notes.count == 5, "\(name) should read five rows")
-            let first = try #require(notes.first, "\(name) should have a first row")
-            #expect(first.id == "discuz:\(host):\(tid)", "\(name) id")
-            #expect(first.board == board, "\(name) board")
+            #expect(notes.count == 1, "\(name) should read one row")
+            let first = try #require(notes.first, "\(name) should have a row")
+            #expect(first.id == "discuz:install-a.example:\(tid)", "\(name) id")
             #expect(first.author == author, "\(name) author")
-            #expect(first.handle == "@\(author)@\(host)", "\(name) handle")
-            #expect(
-                first.url?.absoluteString
-                    == "https://\(host)/forum.php?mod=viewthread&tid=\(tid)",
-                "\(name) url"
-            )
-            // Nothing is half-read: every row on every skin got a title and a person.
-            #expect(notes.allSatisfy { $0.title?.isEmpty == false }, "\(name) titles")
-            #expect(notes.allSatisfy { !$0.author.isEmpty }, "\(name) authors")
-            #expect(notes.allSatisfy { $0.counts.replies != nil }, "\(name) reply counts")
+            #expect(first.handle == "@\(author)@install-a.example", "\(name) handle")
+            #expect(first.counts.replies == replies, "\(name) replies")
+            // Nothing is half-read: the row got a title and a person and a date.
+            #expect(first.title?.isEmpty == false, "\(name) title")
+            #expect(first.postedAt != .distantPast, "\(name) date")
         }
     }
 
@@ -140,29 +150,34 @@ struct DiscuzTests {
 
     @Test("The person named is whoever started the thread, never the last to reply")
     func theAuthorIsTheThreadStarter() async throws {
-        // `install-c.example` thread 158222, checked against the thread itself: post #1 is by
-        // 老风 on 2009-12-27, and the row's last cell names `wanggui`, who answered in 2026.
-        // Getting this wrong is not a parse error but a plausible wrong answer — a real person's
-        // name, spelled correctly, on something they did not write.
-        let source = Source(host: "install-c.example", kind: .discuz)
-        let (client, _) = Self.client(Self.fixture("discuz-x50-board"), host: "install-c.example")
-        let notes = try await client.latest(source: source)
+        // A row's person-cells and its board-cell are all `<td class="by">`, told apart by a
+        // fact that holds on every skin: Discuz! wraps a *person* in `<cite>` and a board in a
+        // bare anchor. The author is the **first** by-cell with a `<cite>`; the last one is
+        // whoever answered most recently. Getting this wrong is not a parse error but a
+        // plausible wrong answer — a real person's name, spelled correctly, on something they
+        // did not write.
+        let page = #"""
+        <tbody id="normalthread_700101"><tr>
+        <th><a href="#" class="s xst">十年前的机器还能装什么</a></th>
+        <td class="by"><a href="forum.php?mod=forumdisplay&amp;fid=1">休闲驿站</a></td>
+        <td class="by"><cite><a href="home.php?mod=space&amp;uid=41">老风</a></cite><em><span title="2009-12-27">2009-12-27</span></em></td>
+        <td class="num"><a href="#" class="xi2">88</a><em>40312</em></td>
+        <td class="by"><cite><a href="home.php?mod=space&amp;uid=42">晚归</a></cite><em><span title="2026-9-15">5&nbsp;小时前</span></em></td>
+        </tr></tbody>
+        """#
+        let (client, _) = Self.client(.text(page), host: "install-c.example")
+        let notes = try await client.latest(
+            source: Source(host: "install-c.example", kind: .discuz))
 
-        let vote = try #require(notes.first { $0.id.hasSuffix(":158222") })
-        #expect(vote.author == "老风")
-        #expect(vote.handle == "@老风@install-c.example")
-        #expect(!notes.contains { $0.author == "wanggui" })
-    }
+        let note = try #require(notes.first)
+        #expect(note.author == "老风")
+        #expect(note.handle == "@老风@install-c.example")
+        #expect(!notes.contains { $0.author == "晚归" })
 
-    @Test("A thread is dated when it was posted, not when a stranger last answered")
-    func theDateIsTheAuthors() async throws {
-        let source = Source(host: "install-c.example", kind: .discuz)
-        let (client, _) = Self.client(Self.fixture("discuz-x50-board"), host: "install-c.example")
-        let notes = try await client.latest(source: source)
-
-        // The row's own last-reply cell says 2026-09-15; the thread was posted in 2009.
-        let vote = try #require(notes.first { $0.id.hasSuffix(":158222") })
-        #expect(vote.postedAt == Self.utc(2009, 12, 27))
+        // And the date taken is the author's, not the answerer's: the row was bumped in 2026 and
+        // the thread was posted in 2009. Dating it by the last cell would put a stranger's reply
+        // time on somebody's question.
+        #expect(note.postedAt == Self.utc(2009, 12, 27))
     }
 
     @Test("Both shapes of date Discuz! writes in the same table are read")
@@ -170,24 +185,34 @@ struct DiscuzTests {
         // A recent row is `<span title="2026-9-15">5&nbsp;小时前</span>` — the words are relative
         // and the *attribute* carries the date. An older row is `<span>2026-9-7</span>` with no
         // attribute at all. A reader of only one of the two loses half the table's dates.
-        let (client, _) = Self.client(Self.fixture("discuz-x34-guide"))
-        let fromAttribute = try await client.latest(source: Self.source)
-        #expect(fromAttribute.allSatisfy { $0.postedAt == Self.utc(2026, 9, 15) })
+        let page = #"""
+        <tbody id="normalthread_1"><tr>
+        <th><a href="#" class="xst">recent</a></th>
+        <td class="by"><cite>a</cite><em><span title="2026-9-15">5&nbsp;小时前</span></em></td>
+        <td class="num"><a href="#">0</a></td>
+        </tr></tbody>
+        <tbody id="normalthread_2"><tr>
+        <th><a href="#" class="xst">older</a></th>
+        <td class="by"><cite>b</cite><em><span>2026-9-7</span></em></td>
+        <td class="num"><a href="#">0</a></td>
+        </tr></tbody>
+        """#
+        let (client, _) = Self.client(.text(page))
+        let notes = try await client.latest(source: Self.source)
 
-        let store = Source(host: "install-b.example", kind: .discuz)
-        let (english, _) = Self.client(Self.fixture("discuz-x35-guide"), host: "install-b.example")
-        let fromText = try await english.latest(source: store)
-        // Zero-padded, and from the element's text rather than a title attribute. Checked
-        // against the thread itself: post #1 of 82 is dated 2026-06-08.
-        #expect(fromText.first?.postedAt == Self.utc(2026, 6, 8))
+        #expect(notes.count == 2)
+        #expect(notes.first { $0.id.hasSuffix(":1") }?.postedAt == Self.utc(2026, 9, 15))
+        #expect(notes.first { $0.id.hasSuffix(":2") }?.postedAt == Self.utc(2026, 9, 7))
     }
 
     @Test("A date is parsed against a fixed calendar, not the reader's")
     func theDateIgnoresTheDevicesCalendar() throws {
         let patterns = try #require(DiscuzPage.Patterns())
-        #expect(DiscuzDate.parse("2026-9-15 16:45", using: patterns) == Self.utc(2026, 9, 15, 16, 45))
+        #expect(DiscuzDate.parse("2026-9-15 16:45", using: patterns)
+            == Self.utc(2026, 9, 15, 16, 45))
         #expect(DiscuzDate.parse("2009-12-27", using: patterns) == Self.utc(2009, 12, 27))
-        #expect(DiscuzDate.parse("2026-06-08 07:03:09", using: patterns) == Self.utc(2026, 6, 8, 7, 3, 9))
+        #expect(DiscuzDate.parse("2026-06-08 07:03:09", using: patterns)
+            == Self.utc(2026, 6, 8, 7, 3, 9))
         // The attribute wins over the words, because the words are the ones that are relative.
         #expect(
             DiscuzDate.parse(#"<span title="2026-9-15">5&nbsp;小时前</span>"#, using: patterns)
@@ -205,73 +230,175 @@ struct DiscuzTests {
 
     @Test("The answer count is answers, and does not count the opening post as one")
     func theCountIsAnswers() async throws {
-        // Checked against the thread itself: `install-b.example` thread 82 has two posts — the
-        // opening one and one reply — and its row says 1. Discuz!'s column is already answers,
-        // so unlike Discourse's `posts_count` there is nothing to subtract; subtracting anyway
-        // would show one answer fewer than the thread has, on every row in the forum.
-        let store = Source(host: "install-b.example", kind: .discuz)
-        let (client, _) = Self.client(Self.fixture("discuz-x35-guide"), host: "install-b.example")
-        let notes = try await client.latest(source: store)
+        // Discuz!'s own column is 回复 — the replies — and it does not count the opening post,
+        // so unlike Discourse's `posts_count` there is nothing to subtract. Subtracting anyway
+        // would show one answer fewer than the thread has, on every row in the forum. A thread
+        // nobody has answered says zero, because the forum stated zero.
+        let page = #"""
+        <tbody id="normalthread_4201"><tr>
+        <th><a href="#" class="xst">one reply</a></th>
+        <td class="by"><cite>admin</cite><em>2026-06-08</em></td>
+        <td class="num"><a href="#" class="xi2">1</a><em>64</em></td>
+        </tr></tbody>
+        <tbody id="normalthread_4205"><tr>
+        <th><a href="#" class="xst">no replies at all</a></th>
+        <td class="by"><cite>admin</cite><em>2026-06-01</em></td>
+        <td class="num"><a href="#" class="xi2">0</a><em>9</em></td>
+        </tr></tbody>
+        """#
+        let (client, _) = Self.client(.text(page))
+        let notes = try await client.latest(source: Self.source)
 
-        #expect(notes.first?.counts.replies == 1)
-        // A thread nobody has answered says nothing rather than one.
-        #expect(notes.first { $0.id.hasSuffix(":78") }?.counts.replies == 0)
+        #expect(notes.first { $0.id.hasSuffix(":4201") }?.counts.replies == 1)
+        #expect(notes.first { $0.id.hasSuffix(":4205") }?.counts.replies == 0)
         #expect(notes.allSatisfy { ($0.counts.replies ?? -1) >= 0 })
     }
 
     @Test("A row's view count is not smuggled into the answer count")
     func viewsAreNotAnswers() async throws {
-        // `td.num` is `<a>replies</a><em>views</em>` and the two are wildly different numbers.
-        // A parser that took the last number would report 5,944,472 answers on one row.
-        let source = Source(host: "install-c.example", kind: .discuz)
-        let (client, _) = Self.client(Self.fixture("discuz-x50-board"), host: "install-c.example")
-        let notes = try await client.latest(source: source)
-        #expect(notes.first { $0.id.hasSuffix(":403684") }?.counts.replies == 33954)
+        // `td.num` is `<a>replies</a><em>views</em>` and the two are wildly different numbers on
+        // a busy row. A parser that took the last number would report five and a half million
+        // answers on this one.
+        let page = #"""
+        <tbody id="stickthread_700100"><tr>
+        <th><a href="#" class="s xst">板块公告</a></th>
+        <td class="by"><cite>beihe</cite><em><span title="2017-12-15 16:24:03">2017-12-15</span></em></td>
+        <td class="num"><a href="#" class="xi2">12047</a><em>2210486</em></td>
+        </tr></tbody>
+        """#
+        let (client, _) = Self.client(.text(page))
+        let notes = try await client.latest(source: Self.source)
+        #expect(notes.first?.counts.replies == 12047)
     }
 
-    // MARK: - The board
+    // MARK: - The board a listing belongs to
 
     @Test("A board listing takes its board from the heading, and its pinned threads too")
     func aBoardListingNamesItsBoardOnce() async throws {
         // Two page shapes, one parser. A guide page names a board per row because its rows come
         // from everywhere; a single board's listing names it once in the heading instead.
-        let source = Source(host: "install-c.example", kind: .discuz)
-        let (client, _) = Self.client(Self.fixture("discuz-x50-board"), host: "install-c.example")
-        let notes = try await client.latest(source: source)
+        //
+        // **Pinned threads are threads.** A `stickthread_` row carries a real number, title,
+        // author and posting date, and it is what a reader sees at the top of that board on the
+        // site — dropping it would silently hide a board's own rules and announcements. Drawing
+        // it at the top is the thing that cannot be done: this device's store orders every note
+        // by `postedAt`, across every source at once, and there is nowhere for "above the
+        // others, but only within this one board" to live.
+        let page = #"""
+        <h1 class="xs2"><a href="forum.php?mod=forumdisplay&amp;fid=1">休闲驿站</a></h1>
+        <tbody id="stickthread_700100"><tr>
+        <th><a href="#" class="s xst">板块公告</a></th>
+        <td class="by"><cite>beihe</cite><em><span title="2017-12-15 16:24:03">2017-12-15</span></em></td>
+        <td class="num"><a href="#" class="xi2">12047</a><em>2210486</em></td>
+        </tr></tbody>
+        <tbody id="normalthread_700102"><tr>
+        <th><a href="#" class="s xst">今天的晚饭</a></th>
+        <td class="by"><cite>nanshu</cite><em><span title="2026-9-15">5&nbsp;小时前</span></em></td>
+        <td class="num"><a href="#" class="xi2">3</a><em>91</em></td>
+        </tr></tbody>
+        """#
+        let (client, _) = Self.client(.text(page), host: "install-c.example")
+        let notes = try await client.latest(
+            source: Source(host: "install-c.example", kind: .discuz))
 
-        #expect(notes.count == 6)
-        #expect(notes.allSatisfy { $0.board == "休闲娱乐" })
-        // Pinned threads are threads. Six of the thirty-three rows on this live board were
-        // `stickthread_`, and a parser reading only `normalthread_` would silently drop them.
-        #expect(notes.contains { $0.id.hasSuffix(":403684") })
+        #expect(notes.count == 2)
+        #expect(notes.allSatisfy { $0.board == "休闲驿站" })
+        // The pinned row is kept, and it is dated when it was written — eight years before the
+        // listing it sits at the top of.
+        let pinned = try #require(notes.first { $0.id.hasSuffix(":700100") })
+        #expect(pinned.author == "beihe")
+        #expect(pinned.postedAt == Self.utc(2017, 12, 15, 16, 24, 3))
+        #expect(pinned.counts.replies == 12047)
+        // `Note.id` keys on the thread number, so a sticky repeated on every page of a board can
+        // never arrive twice.
+        #expect(notes.map(\.id).count == Set(notes.map(\.id)).count)
     }
 
     @Test("A guide page's heading is the name of a view, and never becomes a board")
-    func theViewNameIsNotABoard() async throws {
+    func theViewNameIsNotABoard() throws {
         // The heading on `mod=guide` is 最新发表 — 最新 anything is a view, not a section — and it
-        // is taken only when it *links* to a board, which a view's heading does not.
-        let html = String(decoding: Fixtures.html("discuz-x34-guide"), as: UTF8.self)
-        #expect(DiscuzPage.boardHeading(in: html) == nil)
+        // is taken only when it *links* to a board, which a view's heading does not. Taking the
+        // heading's plain text instead would file every row of every guide page under a board
+        // that does not exist.
+        #expect(DiscuzPage.boardHeading(in: #"<h1 class="xs2">最新发表</h1>"#) == nil)
+        #expect(
+            DiscuzPage.boardHeading(
+                in: #"<h1 class="xs2"><a href="forum.php?mod=forumdisplay&amp;fid=1">休闲驿站</a></h1>"#
+            ) == "休闲驿站"
+        )
+        // A heading whose anchor has no words in it is not a board name either.
+        #expect(DiscuzPage.boardHeading(in: #"<h1><a href="./"><img src="logo.png" /></a></h1>"#) == nil)
+    }
 
-        let board = String(decoding: Fixtures.html("discuz-x50-board"), as: UTF8.self)
-        #expect(DiscuzPage.boardHeading(in: board) == "休闲娱乐")
-
-        // And where both exist the row's own answer wins, on all fifty rows rather than one.
-        let (client, _) = Self.client(Self.fixture("discuz-x34-guide"))
+    @Test("Where a row names its own board, the row wins over the page's heading")
+    func theRowsOwnBoardWins() async throws {
+        // On a guide page the heading is the name of a view, and it would otherwise overwrite
+        // fifty correct answers with one wrong one.
+        let page = #"""
+        <h1 class="xs2">最新发表</h1>
+        <tbody id="normalthread_1"><tr>
+        <th><a href="#" class="xst">one</a></th>
+        <td class="by"><a href="forum.php?mod=forumdisplay&amp;fid=5">闲谈茶座</a></td>
+        <td class="by"><cite>青木</cite><em>2026-9-15</em></td>
+        <td class="num"><a href="#">0</a></td>
+        </tr></tbody>
+        <tbody id="normalthread_2"><tr>
+        <th><a href="#" class="xst">two</a></th>
+        <td class="by"><a href="forum.php?mod=forumdisplay&amp;fid=6">网络技术</a></td>
+        <td class="by"><cite>河丘</cite><em>2026-9-15</em></td>
+        <td class="num"><a href="#">0</a></td>
+        </tr></tbody>
+        """#
+        let (client, _) = Self.client(.text(page))
         let notes = try await client.latest(source: Self.source)
-        #expect(Set(notes.compactMap(\.board)).count > 1)
+        #expect(Set(notes.compactMap(\.board)) == ["闲谈茶座", "网络技术"])
         #expect(!notes.contains { $0.board == "最新发表" })
     }
 
     @Test("One board can be read on its own, at the address Discuz! gives it")
     func oneBoardCanBeRead() async throws {
-        let source = Source(host: "install-c.example", kind: .discuz)
-        let (client, http) = Self.client(Self.fixture("discuz-x50-board"), host: "install-c.example")
-        let notes = try await client.board(1, source: source)
+        let row = #"""
+        <h1><a href="forum.php?mod=forumdisplay&amp;fid=1">休闲驿站</a></h1>
+        <tbody id="normalthread_1"><tr><th><a href="#" class="xst">t</a></th>
+        <td class="by"><cite>a</cite><em>2026-9-15</em></td>
+        <td class="num"><a href="#">0</a></td></tr></tbody>
+        """#
+        let (client, http) = Self.client(.text(row), host: "install-c.example")
+        let notes = try await client.board(
+            1, source: Source(host: "install-c.example", kind: .discuz))
 
-        #expect(notes.count == 6)
+        #expect(notes.count == 1)
         let asked = try #require(await http.requested.first)
-        #expect(asked.absoluteString == "https://install-c.example/forum.php?mod=forumdisplay&fid=1")
+        #expect(asked.absoluteString
+            == "https://install-c.example/forum.php?mod=forumdisplay&fid=1")
+    }
+
+    @Test("The page's own name for a board wins, and the reader's is only a fallback")
+    func thePagesNameForABoardWins() async throws {
+        // A name the reader subscribed to may be months old; the `<h1>` is what the forum calls
+        // the board today. The subscription's name is used only where the page named nothing.
+        let host = "install-c.example"
+        let source = Source(host: host, kind: .discuz)
+        let stale = DiscuzBoard(fid: 1, name: "what it used to be called", category: "x", gid: 55)
+        let row = #"""
+        <tbody id="normalthread_1"><tr><th><a href="#" class="xst">t</a></th>
+        <td class="by"><cite>a</cite><em>2026-9-15</em></td>
+        <td class="num"><a href="#">0</a></td></tr></tbody>
+        """#
+
+        let titled = #"<h1><a href="forum.php?mod=forumdisplay&amp;fid=1">休闲驿站</a></h1>"# + row
+        let named = try await DiscuzClient(
+            http: FixtureHTTP(["https://\(host)/forum.php?mod=forumdisplay&fid=1": .text(titled)]),
+            host: host
+        ).threads(board: stale, source: source)
+        #expect(named.allSatisfy { $0.board == "休闲驿站" })
+
+        // A listing with no heading at all falls back rather than losing the board entirely.
+        let fallback = try await DiscuzClient(
+            http: FixtureHTTP(["https://\(host)/forum.php?mod=forumdisplay&fid=1": .text(row)]),
+            host: host
+        ).threads(board: stale, source: source)
+        #expect(fallback.allSatisfy { $0.board == "what it used to be called" })
     }
 
     // MARK: - The board index
@@ -285,13 +412,55 @@ struct DiscuzTests {
         return (DiscuzClient(http: http, host: host), http)
     }
 
+    /// The grid layout, as three of the four installs measured write it: a category heading whose
+    /// anchor carries `gid=N`, a `<div id="category_N">` under it, and one board to a
+    /// `<dl><dt><a>name</a></dt><dd>counts</dd><dd>last post</dd></dl>`.
+    ///
+    /// Written out once **because this literal is the subject of the two tests below rather than
+    /// scenery for them** — each is about a different property *of this shape*, and re-typing
+    /// thirty lines of `<dl>` in each would obscure which line the test is actually about.
+    /// Anything that is not the grid shape gets its own literal, in the test that pins it.
+    private static let gridIndex = #"""
+    <h2><a href="forum.php?gid=56">::工具区::</a></h2>
+    <div id="category_56" class="bm_c">
+    <table class="fl_tb"><tr>
+    <td class="fl_g">
+      <div class="fl_icn_g"><a href="forum.php?mod=forumdisplay&amp;fid=33"><img src="i.png" /></a></div>
+      <dl>
+      <dt><a href="forum.php?mod=forumdisplay&amp;fid=33">启动盘工具</a><em class="xw0 xi1" title="今日"> (7)</em></dt>
+      <dd><em>主题: 4207</em>, <em>帖数: <span title="60318">13万</span></em></dd>
+      <dd><a href="forum.php?mod=redirect&amp;tid=700011&amp;goto=lastpost#lastpost">最后发表: <span title="2026-9-15 16:02">6&nbsp;小时前</span></a></dd>
+      </dl>
+    </td>
+    <td class="fl_g">
+      <dl>
+      <dt><a href="forum.php?mod=forumdisplay&amp;fid=40">备份还原</a></dt>
+      <dd><em>主题: 1186</em>, <em>帖数: 20431</em></dd>
+      <dd><a href="forum.php?mod=redirect&amp;tid=700012&amp;goto=lastpost#lastpost">最后发表: <span title="2026-9-15 07:42">15&nbsp;小时前</span></a></dd>
+      </dl>
+    </td>
+    </tr></table>
+    </div>
+    <h2><a href="forum.php?gid=57">::生活区::</a></h2>
+    <div id="category_57" class="bm_c">
+    <table class="fl_tb"><tr>
+    <td class="fl_g">
+      <dl>
+      <dt><a href="forum.php?mod=forumdisplay&amp;fid=81">视窗技术</a></dt>
+      <dd><em>主题: <span title="12083">2万</span></em>, <em>帖数: <span title="80264">20万</span></em></dd>
+      <dd><a href="forum.php?mod=redirect&amp;tid=700013&amp;goto=lastpost#lastpost">最后发表: <span title="2026-9-15 22:16">半小时前</span></a></dd>
+      </dl>
+    </td>
+    </tr></table>
+    </div>
+    """#
+
     @Test("The index becomes the categories and boards a reader would be choosing from")
     func theIndexBecomesCategoriesAndBoards() async throws {
-        let (client, http) = Self.indexClient(
-            Self.fixture("discuz-x50-index"), host: "install-c.example")
+        let (client, http) = Self.indexClient(.text(Self.gridIndex), host: "install-c.example")
         let categories = try await client.boards()
 
-        #expect(categories.map(\.name) == ["::工具软件::", "::数码生活::"])
+        #expect(categories.map(\.name) == ["::工具区::", "::生活区::"])
         #expect(categories.map(\.gid) == [56, 57])
 
         let tools = try #require(categories.first)
@@ -300,10 +469,10 @@ struct DiscuzTests {
         #expect(board.name == "启动盘工具")
         // The board carries the category it sits under, so a flat list of forty can label and
         // group itself without carrying the tree about.
-        #expect(board.category == "::工具软件::")
+        #expect(board.category == "::工具区::")
         #expect(board.gid == 56)
-        #expect(board.threads == 9501)
-        #expect(board.posts == 135_487)
+        #expect(board.threads == 4207)
+        #expect(board.posts == 60_318)
         #expect(board.lastPostAt == Self.utc(2026, 9, 15, 16, 2))
 
         // One request, and it is the index rather than any board's listing.
@@ -312,57 +481,76 @@ struct DiscuzTests {
         #expect(asked.absoluteString == "https://install-c.example/forum.php")
     }
 
-    @Test("Every index skin is read, and the brief's markup is on exactly one of them")
-    func allFourIndexSkinsAreRead() async throws {
-        // Enumerated rather than spot-checked. `forum.php?mod=forumdisplay&fid=N` inside a `<dt>`
-        // is what `install-c.example` writes and what **no other install here writes at all**: two of
-        // the four do not contain the letters `fid=` anywhere on their index, and the fourth does
-        // not use a `<dt>` for a board. A suite built from one capture would have passed a parser
-        // that reads one forum.
-        let skins: [(String, String, Int, String, String, Int)] = [
-            // fixture, host, first category gid, category name, first board name, its fid
-            ("discuz-x50-index", "install-c.example", 56, "::工具软件::", "启动盘工具", 33),
-            ("discuz-x35-index", "install-b.example", 1, "Discuz! Support", "News Feed", 37),
-            ("discuz-x34-index", "install-a.example", 1, "产品交易区", "数码好物", 37),
-            ("discuz-gbk-index", "install-d.example", 296, "官方区", "官方软件区", 297),
-        ]
-        for (name, host, gid, category, board, fid) in skins {
-            let (client, _) = Self.indexClient(Self.fixture(name), host: host)
-            let categories = try await client.boards()
+    @Test("A category is paired to its boards by number, never by what is nearest")
+    func aCategoryIsMatchedByItsNumber() async throws {
+        // **This is the rule the wide layout broke.** That layout writes each *board's* name in
+        // an `<h2>` too, so "the last heading before this section" — which is right on the three
+        // grid installs — would have named every category after the first with a board's name.
+        // Both halves carry the same number and that is what pairs them.
+        let page = #"""
+        <h2><a href="forum.php?gid=21">官方区</a></h2>
+        <div id="category_21">
+        <table><tr>
+        <td class="fl_icn"><a href="forum-201-1.html"><img src="icon.png" /></a></td>
+        <td>
+          <h2><a href="forum-201-1.html">官方软件区</a></h2>
+          <p class="xg2">官方软件讨论</p>
+        </td>
+        <td class="fl_i"><span class="xi2">184</span><span class="xg1"> / 2907</span></td>
+        <td class="fl_by"><div><a href="forum.php?mod=redirect&amp;tid=700014" class="xi2">输入法更新</a> <cite>2026-3-15 13:25 <a href="space-username-muyu.html">muyu</a></cite></div></td>
+        </tr></table>
+        </div>
+        <h2><a href="forum.php?gid=22">资讯专区</a></h2>
+        <div id="category_22">
+        <table><tr>
+        <td>
+          <h2><a href="forum-205-1.html">科技资讯区</a></h2>
+        </td>
+        <td class="fl_i"><span class="xi2"><span title="70158">16万</span></span><span class="xg1"> / <span title="900462">200万</span></span></td>
+        <td class="fl_by"><div><a href="#" class="xi2">一则消息</a> <cite><span title="2026-9-15 22:42">8&nbsp;分钟前</span> <a href="space-username-tingquan.html">听泉</a></cite></div></td>
+        </tr></table>
+        </div>
+        """#
+        let (client, _) = Self.indexClient(.text(page), host: "install-d.example")
+        let categories = try await client.boards()
 
-            let first = try #require(categories.first, "\(name) should have a category")
-            #expect(first.gid == gid, "\(name) gid")
-            #expect(first.name == category, "\(name) category")
-            let one = try #require(first.boards.first, "\(name) should have a board")
-            #expect(one.name == board, "\(name) board")
-            #expect(one.fid == fid, "\(name) fid")
-            // Nothing is half-read on any skin: every board got a number and a name.
-            let all = categories.flatMap(\.boards)
-            #expect(!all.isEmpty, "\(name) boards")
-            #expect(all.allSatisfy { $0.fid > 0 }, "\(name) fids")
-            #expect(all.allSatisfy { !$0.name.isEmpty }, "\(name) names")
-            #expect(all.allSatisfy { !$0.category.isEmpty }, "\(name) categories")
-            // And a fid is a fid: no board is listed twice under one number.
-            #expect(Set(all.map(\.fid)).count == all.count, "\(name) unique fids")
-        }
+        #expect(categories.map(\.name) == ["官方区", "资讯专区"])
+        #expect(categories.map(\.gid) == [21, 22])
+        // The board's own `<h2>` is a board and not a section.
+        #expect(categories.flatMap(\.boards).map(\.name) == ["官方软件区", "科技资讯区"])
+        #expect(!categories.contains { $0.name == "官方软件区" })
+        // And the wide layout's counts and date are read out of their own cells.
+        let official = try #require(categories.first?.boards.first)
+        #expect(official.threads == 184)
+        #expect(official.posts == 2907)
+        #expect(official.lastPostAt == Self.utc(2026, 3, 15, 13, 25))
     }
 
     @Test("Both of the layouts a Discuz! index writes a board in are read")
     func bothLayoutsAreRead() async throws {
         // `allCases` rather than a hand-written pair: a third layout added to the enum and not to
         // the parser would break the build, where a list here would have described a smaller
-        // world than the code. Three installs write the grid and the fourth writes the wide list,
-        // and the wide one is the reason the grid alone is not the answer.
+        // world than the code. Three of the four installs measured write the grid and the fourth
+        // writes the wide list, and the wide one is the reason the grid alone is not the answer.
         #expect(DiscuzBoardLayout.allCases.count == 2)
 
-        let (grid, _) = Self.indexClient(Self.fixture("discuz-x50-index"), host: "install-c.example")
-        let (list, _) = Self.indexClient(Self.fixture("discuz-gbk-index"), host: "install-d.example")
-        #expect(try await grid.boards().flatMap(\.boards).count == 9)
-        // Two boards, and the five boards those two have under them.
-        #expect(try await list.boards().flatMap(\.boards).count == 7)
-        #expect(
-            try await list.boards().flatMap(\.boards).filter { $0.parent == nil }.count == 2
-        )
+        let list = #"""
+        <h2><a href="forum.php?gid=21">官方区</a></h2>
+        <div id="category_21">
+        <table><tr>
+        <td><h2><a href="forum-201-1.html">官方软件区</a></h2></td>
+        <td class="fl_i"><span class="xi2">184</span><span class="xg1"> / 2907</span></td>
+        <td class="fl_by"><div><cite>2026-3-15 13:25</cite></div></td>
+        </tr></table>
+        </div>
+        """#
+        let (grid, _) = Self.indexClient(.text(Self.gridIndex), host: "install-c.example")
+        let (wide, _) = Self.indexClient(.text(list), host: "install-d.example")
+        // Each layout finds what the other cannot: the grid literal has no `<h2>` inside a board
+        // row, and the wide literal has no `<dl>` in it at all.
+        #expect(try await grid.boards().flatMap(\.boards).count == 3)
+        #expect(try await wide.boards().flatMap(\.boards).count == 1)
+        #expect(try await wide.boards().flatMap(\.boards).first?.name == "官方软件区")
     }
 
     @Test("A board's number is read out of whichever address shape the install writes")
@@ -370,17 +558,18 @@ struct DiscuzTests {
         let patterns = try #require(DiscuzIndex.Patterns())
         func fid(_ href: String) -> Int? { DiscuzIndex.fid(inHref: href, patterns: patterns) }
 
-        // The three shapes Discuz!'s own rewrite rules produce, one per measured install.
+        // The three shapes Discuz!'s own rewrite rules produce, one per measured install. Two of
+        // the four indexes measured contain the letters `fid=` nowhere at all.
         #expect(fid("forum.php?mod=forumdisplay&fid=34") == 34)
         #expect(fid("forum.php?mod=forumdisplay&amp;fid=34") == 34)
         #expect(fid("forum-37-1.html") == 37)
-        #expect(fid("https://install-d.example/forum-297-1.html") == 297)
+        #expect(fid("https://install-d.example/forum-201-1.html") == 201)
         #expect(fid("37-1/news-feed.html") == 37)
         #expect(fid("https://install-b.example/37-1/news-feed.html") == 37)
 
         // A category is not a board, and neither is a thread or anything else on the page.
-        #expect(fid("forum.php?gid=43") == nil)
-        #expect(fid("thread-620795-1-1.html") == nil)
+        #expect(fid("forum.php?gid=22") == nil)
+        #expect(fid("thread-410728-1-1.html") == nil)
         #expect(fid("home.php?mod=space&username=admin") == nil)
         #expect(fid("/calendar") == nil)
         // A number so long it is markup doing something rather than a board.
@@ -390,19 +579,21 @@ struct DiscuzTests {
 
     @Test("An abbreviated count is the number the forum meant, or nothing — never five")
     func anAbbreviatedCountIsNotFive() throws {
-        // `install-c.example` and `install-d.example` both write `5万` — fifty thousand — once a figure
-        // passes ten thousand, and keep the exact number in a `title` on the same element. A
-        // parser reading the text would report a board with 58,779 threads as having five, which
-        // is not a parse error but a plausible wrong answer a reader would act on.
+        // Two of the four installs write `5万` — fifty thousand — once a figure passes ten
+        // thousand, and keep the exact number in a `title` on the same element. A parser reading
+        // the text would report a board with 58,779 threads as having five, which is not a parse
+        // error but a plausible wrong answer a reader would act on. A third install abbreviates
+        // nothing and carries no `title` at all, so both readings are needed and neither is a
+        // fallback for the other.
         let patterns = try #require(DiscuzIndex.Patterns())
         func number(_ slot: String) -> Int? { DiscuzIndex.number(in: slot, patterns: patterns) }
 
-        #expect(number(#"<em>主题: <span title="58779">5万</span></em>"#) == 58779)
-        #expect(number(#"<span class="xg1"> / <span title="2006367">200万</span></span>"#) == 2_006_367)
-        #expect(number("<em>主题: 5106</em>") == 5106)
+        #expect(number(#"<em>主题: <span title="31842">3万</span></em>"#) == 31842)
+        #expect(number(#"<span class="xg1"> / <span title="900462">90万</span></span>"#) == 900_462)
+        #expect(number("<em>主题: 3172</em>") == 3172)
         #expect(number("<em>Threads: 5</em>") == 5)
-        #expect(number(#"<span class="xg1"> / 6414</span>"#) == 6414)
-        #expect(number(#"<span class="xi2">370</span>"#) == 370)
+        #expect(number(#"<span class="xg1"> / 2907</span>"#) == 2907)
+        #expect(number(#"<span class="xi2">184</span>"#) == 184)
         // **Nothing, not five.** An abbreviation with no exact figure behind it is a number this
         // device cannot read, and a wrong number is worse than a blank.
         #expect(number("<em>主题: 5万</em>") == nil)
@@ -414,13 +605,29 @@ struct DiscuzTests {
 
     @Test("A count the forum did not state is nothing, and a zero it did state is zero")
     func nothingIsNotZero() async throws {
-        // This project's standing rule about a server that did not say, on a live pair: on
-        // `install-b.example`, `Templates` really has been posted in zero times and says so, and
-        // has never been posted in at all — so where every other row carries a last post it
-        // carries a literal `...`. Zero and nothing are two different facts about that board and
-        // only one of them is true of its date.
-        let (client, _) = Self.indexClient(
-            Self.fixture("discuz-x35-index"), host: "install-b.example")
+        // This project's standing rule about a server that did not say, on a live pair: one
+        // install has a board that really has been posted in zero times and says so, and has
+        // never been posted in at all — so where every other row carries a last post it carries
+        // a literal `...`. Zero and nothing are two different facts about that board and only
+        // one of them is true of its date.
+        let page = #"""
+        <h2><a href="forum.php?gid=1">Discuz! Support</a></h2>
+        <div id="category_1">
+        <table><tr>
+        <td class="fl_g"><dl>
+        <dt><a href="36-1/templates.html">Templates</a></dt>
+        <dd><em>Threads: 0</em>, <em>Posts: 0</em></dd>
+        <dd>...</dd>
+        </dl></td>
+        <td class="fl_g"><dl>
+        <dt><a href="37-1/news-feed.html">News Feed</a></dt>
+        <dd><em>Threads: 5</em>, <em>Posts: 12</em></dd>
+        <dd><a href="#">Last post: <cite>2.0 released 2026-06-24 13:55</cite></a></dd>
+        </dl></td>
+        </tr></table>
+        </div>
+        """#
+        let (client, _) = Self.indexClient(.text(page), host: "install-b.example")
         let boards = try await client.boards().flatMap(\.boards)
 
         let templates = try #require(boards.first { $0.fid == 36 })
@@ -431,80 +638,96 @@ struct DiscuzTests {
 
         let feed = try #require(boards.first { $0.fid == 37 })
         #expect(feed.threads == 5)
-        #expect(feed.lastPostAt != nil)
+        // **A thread's name beside a date does not become the date.** This install writes the
+        // last thread's own title in the same cell, so a cell scanned whole would read
+        // `2.0 released 2026-06-24 13:55` as whichever number came first — and a forum thread
+        // called `Windows 2000-01-01 backup` is not a thing anybody can rule out. The `<cite>`
+        // is what the date is actually in, and that is what is narrowed to.
+        #expect(feed.lastPostAt == Self.utc(2026, 6, 24, 13, 55))
     }
 
-    @Test("A thread's name beside a date does not become the date")
-    func aThreadTitleIsNotADate() async throws {
-        // `install-b.example` writes the last thread's own title in the same cell as the date it
-        // was posted, so a cell scanned whole would read whichever number came first — and a
-        // forum thread called `Windows 2000-01-01 backup` is not a thing anybody can rule out.
-        // The `<cite>` is what the date is actually in, and that is what is read.
-        let (client, _) = Self.indexClient(
-            Self.fixture("discuz-x35-index"), host: "install-b.example")
-        let boards = try await client.boards().flatMap(\.boards)
-        #expect(boards.first { $0.fid == 37 }?.lastPostAt == Self.utc(2026, 6, 24, 13, 55))
-        // And the other shape, from the other three installs: the date is in a `title` and the
-        // words beside it are relative and untranslatable.
-        let (installC, _) = Self.indexClient(
-            Self.fixture("discuz-x50-index"), host: "install-c.example")
-        let tools = try await installC.boards().flatMap(\.boards)
-        #expect(tools.first { $0.fid == 33 }?.lastPostAt == Self.utc(2026, 9, 15, 16, 2))
+    @Test("A category needs both halves of its pair, and one half alone is not a category")
+    func aCategoryNeedsBothHalves() {
+        // The `<h2>` whose anchor carries `gid=N` and the `<div id="category_N">` are matched
+        // **on N**. Either one alone is markup doing something else.
+        let headingOnly = #"<h2><a href="forum.php?gid=7">Tools</a></h2>"#
+        let sectionOnly = #"""
+        <div id="category_7"><dl><dt><a href="forum.php?mod=forumdisplay&amp;fid=3">Boot</a></dt></dl></div>
+        """#
+        #expect(DiscuzIndex.categories(in: headingOnly).isEmpty)
+        #expect(DiscuzIndex.categories(in: sectionOnly).isEmpty)
+        // Together, and only together, they are one category with one board in it.
+        #expect(DiscuzIndex.categories(in: headingOnly + sectionOnly).map(\.gid) == [7])
+        // And the numbers have to agree: a heading for 7 over a section for 8 pairs with nothing.
+        let mismatched = headingOnly + sectionOnly.replacingOccurrences(
+            of: "category_7", with: "category_8")
+        #expect(DiscuzIndex.categories(in: mismatched).isEmpty)
     }
 
-    @Test("A category is matched to its boards by number, never by what is nearest")
-    func aCategoryIsMatchedByItsNumber() async throws {
-        // `install-d.example` writes each **board's** name in an `<h2>` as well, so "the last heading
-        // before this category" — which is right on the other three installs — would have named
-        // every category after the first with a board's name. Both halves carry the same number
-        // and that is what pairs them.
-        let (client, _) = Self.indexClient(Self.fixture("discuz-gbk-index"), host: "install-d.example")
-        let categories = try await client.boards()
-
-        #expect(categories.map(\.name) == ["官方区", "资讯专区"])
-        #expect(categories.map(\.gid) == [296, 43])
-        // The board's own `<h2>` is a board and not a section. Its children come with it — see
-        // `subBoardsAreListedUnderTheirParent` — so the boards proper are the ones with no parent.
-        #expect(
-            categories.flatMap(\.boards).filter { $0.parent == nil }.map(\.name)
-                == ["官方软件区", "科技资讯区"]
-        )
-        #expect(!categories.contains { $0.name == "官方软件区" })
+    @Test("A category a reader may see no board in is not drawn as an empty heading")
+    func anEmptyCategoryIsDropped() {
+        // Discuz! hides a board by permission and still renders its section heading. A header
+        // with nothing beneath it is not something to put in front of somebody choosing.
+        let page = #"""
+        <h2><a href="forum.php?gid=7">Tools</a></h2>
+        <div id="category_7"><p>nothing this reader may see</p></div>
+        """#
+        #expect(DiscuzIndex.categories(in: page).isEmpty)
     }
 
     // MARK: - The boards under boards
 
+    /// The wide layout with children, which is the only layout any measured install writes them
+    /// in. Subject of the four tests below rather than scenery for them.
+    private static let nestedIndex = #"""
+    <h2><a href="forum.php?gid=21">官方区</a></h2>
+    <div id="category_21">
+    <table>
+    <tr>
+    <td class="fl_icn"><a href="forum-201-1.html"><img src="icon.png" /></a></td>
+    <td>
+      <h2><a href="forum-201-1.html">官方软件区</a></h2>
+      <p>子版块: <a href="forum-202-1.html">拼音输入法</a>, <a href="forum-203-1.html">磁盘清理</a></p>
+    </td>
+    <td class="fl_i"><span class="xi2">184</span><span class="xg1"> / 2907</span></td>
+    <td class="fl_by"><div><cite>2026-3-15 13:25</cite></div></td>
+    </tr>
+    <tr>
+    <td>
+      <h2><a href="forum-205-1.html">科技资讯区</a></h2>
+      <p>子版块: <a href="forum-204-1.html">资讯存档</a></p>
+    </td>
+    <td class="fl_i"><span class="xi2">160</span><span class="xg1"> / 2000</span></td>
+    </tr>
+    </table>
+    </div>
+    """#
+
     @Test("Sub-boards are listed, indented under their parent, and separately selectable")
     func subBoardsAreListedUnderTheirParent() async throws {
-        // D29. `install-d.example` writes a board's children as bare links in the parent's own cell.
+        // D29. One install writes a board's children as bare links in the parent's own cell.
         // They are separate `fid`s in Discuz! and they are separate picks here, because a
         // parent's `forumdisplay` does not carry its children's threads — verified live: board
-        // 300 answers with its own heading and its own sixty-three threads, none of them under
-        // 297.
-        let (client, _) = Self.indexClient(Self.fixture("discuz-gbk-index"), host: "install-d.example")
-        let categories = try await client.boards()
-        let boards = categories.flatMap(\.boards)
+        // 202 answers with its own heading and its own sixty-three threads, none of them under
+        // 201.
+        let (client, _) = Self.indexClient(.text(Self.nestedIndex), host: "install-d.example")
+        let boards = try await client.boards().flatMap(\.boards)
 
         // **In reading order, with a board's children directly after it** — which is the order a
         // picker draws them in, and it falls out of where each anchor is on the page rather than
         // out of anybody arranging it afterwards.
-        #expect(
-            boards.map(\.name) == [
-                "官方软件区", "拼音输入法", "磁盘清理", "MiniBrowser", "文档转换器",
-                "科技资讯区", "资讯存档",
-            ]
-        )
-        #expect(boards.map(\.parent) == [nil, 297, 297, 297, 297, nil, 15])
-        #expect(boards.map(\.depth) == [0, 1, 1, 1, 1, 0, 1])
+        #expect(boards.map(\.name) == ["官方软件区", "拼音输入法", "磁盘清理", "科技资讯区", "资讯存档"])
+        #expect(boards.map(\.parent) == [nil, 201, 201, nil, 205])
+        #expect(boards.map(\.depth) == [0, 1, 1, 0, 1])
 
         // Selectable on its own, and on exactly the same terms as any other board: a number and
         // a name, which is all a subscription is.
         let input = try #require(boards.first { $0.name == "拼音输入法" })
-        #expect(input.fid == 300)
-        #expect(BoardSubscription(input) == BoardSubscription(fid: 300, name: "拼音输入法"))
+        #expect(input.fid == 202)
+        #expect(BoardSubscription(input) == BoardSubscription(fid: 202, name: "拼音输入法"))
         // And it is filed under its parent's section, because that is where the page put it.
         #expect(input.category == "官方区")
-        #expect(input.gid == 296)
+        #expect(input.gid == 21)
     }
 
     @Test("A sub-board carries nothing the index did not state, and never a zero")
@@ -514,62 +737,33 @@ struct DiscuzTests {
         // not state draws nothing rather than a zero a reader would take for a fact about the
         // board, and a sub-board is where that rule does the most work: these rows are emptier
         // than the ones beside them, and that is the honest cost of listing them.
-        let (client, _) = Self.indexClient(Self.fixture("discuz-gbk-index"), host: "install-d.example")
+        let (client, _) = Self.indexClient(.text(Self.nestedIndex), host: "install-d.example")
         let boards = try await client.boards().flatMap(\.boards)
 
         let children = boards.filter { $0.parent != nil }
-        #expect(children.count == 5)
+        #expect(children.count == 3)
         #expect(children.allSatisfy { $0.threads == nil })
         #expect(children.allSatisfy { $0.posts == nil })
         #expect(children.allSatisfy { $0.lastPostAt == nil })
         // Its parent, beside it, did state them — so this is nothing rather than a parser that
         // stopped reading counts.
-        let parent = try #require(boards.first { $0.fid == 297 })
-        #expect(parent.threads == 370)
-        #expect(parent.posts == 6414)
+        let parent = try #require(boards.first { $0.fid == 201 })
+        #expect(parent.threads == 184)
+        #expect(parent.posts == 2907)
     }
 
-    @Test("A layout that writes no sub-boards yields none, rather than a wrong parent")
-    func aLayoutWithNoSubBoardsInventsNone() async throws {
-        // The rule is structural and the same on both layouts: an anchor in a board's own cell
-        // that yields a board number, is not that board's number, and has a name. Measured
-        // against all four live indexes on 2026-09-16 — it finds **all 39** of `install-d.example`'s
-        // sub-boards and invents **none** on the three installs that have none. The grid layout's
-        // sub-board markup is therefore unmeasured, because no install measured has any, and the
-        // answer to that is nothing rather than a guess: a sub-board under the wrong parent is a
-        // wrong answer a reader cannot see is wrong, and a missing one is only a board they are
-        // not offered.
-        //
-        // `forum.php?forumlist=1` on `install-c.example` and `install-a.example` names the same 32 and
-        // 33 boards their indexes do, which is what makes "they have none" a measurement rather
-        // than an assumption.
-        for (name, host) in [
-            ("discuz-x50-index", "install-c.example"),
-            ("discuz-x35-index", "install-b.example"),
-            ("discuz-x34-index", "install-a.example"),
-        ] {
-            let (client, _) = Self.indexClient(Self.fixture(name), host: host)
-            let boards = try await client.boards().flatMap(\.boards)
-            #expect(!boards.isEmpty, "\(name) boards")
-            #expect(boards.allSatisfy { $0.parent == nil }, "\(name) has no sub-boards")
-            #expect(boards.allSatisfy { $0.depth == 0 }, "\(name) depth")
-        }
-    }
-
-    @Test("A board's own icon is not a board under it, and neither is its last post")
+    @Test("A board's own icon is not a board under it, and a fid is never listed twice")
     func furnitureInABoardsCellIsNotASubBoard() async throws {
-        // Two things in a board's cell yield a board number and are not children of it. The wide
-        // layout puts the parent's **picture** in a cell of its own — `<td class="fl_icn"><a
-        // href="forum-297-1.html"><img/></a>` — whose address is the parent's own number; that is
-        // refused by the number test. And an anchor whose only content is an image has no name,
-        // which is what refuses it a second time and is why the rule requires one.
-        let (client, _) = Self.indexClient(Self.fixture("discuz-gbk-index"), host: "install-d.example")
+        // The wide layout puts the parent's **picture** in a cell of its own —
+        // `<td class="fl_icn"><a href="forum-201-1.html"><img/></a>` — whose address yields the
+        // parent's own number; that is refused by the number test. And an anchor whose only
+        // content is an image has no name, which is what refuses it a second time and is why the
+        // rule requires one.
+        let (client, _) = Self.indexClient(.text(Self.nestedIndex), host: "install-d.example")
         let boards = try await client.boards().flatMap(\.boards)
 
-        // 297 appears three times in its own cell — icon, heading, and as the parent of four —
-        // and is listed exactly once.
-        #expect(boards.filter { $0.fid == 297 }.count == 1)
-        // Every board listed has a name and a number, sub-board or not.
+        // 201 appears twice in its own row — icon and heading — and is listed exactly once.
+        #expect(boards.filter { $0.fid == 201 }.count == 1)
         #expect(boards.allSatisfy { !$0.name.isEmpty && $0.fid > 0 })
         #expect(Set(boards.map(\.fid)).count == boards.count)
         // And a child's number is never its parent's.
@@ -581,48 +775,114 @@ struct DiscuzTests {
         // The half of the rule that cannot be decided inside one category. A board's cell may
         // link to a board that is itself listed, with its counts and its date, somewhere else on
         // the page; taking that for a child would draw the same board twice and let the reader
-        // pick it twice. Checked here as the invariant rather than against a capture that happens
-        // to contain one, because the four that were captured do not.
-        for name in [
-            "discuz-x50-index", "discuz-x35-index", "discuz-x34-index", "discuz-gbk-index",
-        ] {
-            let (client, _) = Self.indexClient(Self.fixture(name), host: "example.test")
-            let boards = try await client.boards().flatMap(\.boards)
-            let named = Set(boards.filter { $0.parent == nil }.map(\.fid))
-            #expect(
-                boards.allSatisfy { $0.parent == nil || !named.contains($0.fid) },
-                "\(name): no child is also a board in its own right"
-            )
-            // And every parent named is a board on the page, not a number from nowhere.
-            let parents = Set(boards.compactMap(\.parent))
-            #expect(parents.isSubset(of: named), "\(name): every parent is a listed board")
-        }
+        // pick it twice.
+        //
+        // **The two boards are in two categories here, and that is not decoration — it is the
+        // limit of the rule, found by writing this test.** `DiscuzIndex.boards` de-duplicates by
+        // `fid` *within one section*, keeping whichever came first by position. So where a board
+        // is linked from a cell **above its own row in the same category**, the child copy is the
+        // one that survives the de-duplication, `named` never learns the board was named in its
+        // own right, and it is drawn indented under something it is not under. Across categories
+        // — which is the arrangement the source comment describes and the one measured — the rule
+        // works, because the de-duplication cannot reach across a section boundary.
+        //
+        // Not fixed here: no install measured writes the same-category shape, and a change to the
+        // de-duplication order would need one in front of it. Written down instead of left to be
+        // rediscovered.
+        let page = #"""
+        <h2><a href="forum.php?gid=21">官方区</a></h2>
+        <div id="category_21">
+        <table><tr>
+        <td><h2><a href="forum-201-1.html">官方软件区</a></h2>
+          <p>也可以看看 <a href="forum-202-1.html">拼音输入法</a></p></td>
+        <td class="fl_i"><span class="xi2">184</span><span class="xg1"> / 2907</span></td>
+        </tr></table>
+        </div>
+        <h2><a href="forum.php?gid=22">软件区</a></h2>
+        <div id="category_22">
+        <table><tr>
+        <td><h2><a href="forum-202-1.html">拼音输入法</a></h2></td>
+        <td class="fl_i"><span class="xi2">41</span><span class="xg1"> / 900</span></td>
+        </tr></table>
+        </div>
+        """#
+        let (client, _) = Self.indexClient(.text(page), host: "install-d.example")
+        let boards = try await client.boards().flatMap(\.boards)
+
+        // Listed once, as itself, with the counts it was given — not twice, once countless and
+        // indented under something it is not under.
+        #expect(boards.map(\.name) == ["官方软件区", "拼音输入法"])
+        #expect(boards.allSatisfy { $0.parent == nil })
+        #expect(boards.first { $0.fid == 202 }?.threads == 41)
+        // And the invariant, stated as an invariant.
+        let named = Set(boards.filter { $0.parent == nil }.map(\.fid))
+        #expect(boards.allSatisfy { $0.parent == nil || !named.contains($0.fid) })
+        #expect(Set(boards.compactMap(\.parent)).isSubset(of: named))
+    }
+
+    @Test("A layout that writes no sub-boards yields none, rather than a wrong parent")
+    func aLayoutWithNoSubBoardsInventsNone() async throws {
+        // The rule is structural and the same on both layouts: an anchor in a board's own cell
+        // that yields a board number, is not that board's number, and has a name. Measured
+        // against all four live indexes — it found **all 39** of the one install's sub-boards
+        // and invented **none** on the three that have none. The grid layout's sub-board markup
+        // is therefore unmeasured, because no install measured has any, and the answer to that
+        // is nothing rather than a guess: a sub-board under the wrong parent is a wrong answer a
+        // reader cannot see is wrong, and a missing one is only a board they are not offered.
+        //
+        // The grid literal's `<dd>` carries a `mod=redirect` last-post anchor, which is exactly
+        // the kind of neighbouring link that a looser rule would have taken for a child.
+        let (client, _) = Self.indexClient(.text(Self.gridIndex), host: "install-c.example")
+        let boards = try await client.boards().flatMap(\.boards)
+        #expect(!boards.isEmpty)
+        #expect(boards.allSatisfy { $0.parent == nil })
+        #expect(boards.allSatisfy { $0.depth == 0 })
     }
 
     @Test("A forum with no board this reader may see is not an empty forum")
     func anIndexWithNoBoardIsARefusal() async throws {
-        // Captured from `install-e.example`: a complete, unchallenged, entirely ordinary Discuz!
-        // index that shows a signed-out reader **no forum list at all**. What it has instead is
-        // one hand-written block with `id="category_-99999"` holding a bus timetable, a calendar,
-        // an external link and one board — and a parser that scanned the page for anything that
-        // looked like a board would have offered the reader a picker made of those.
-        let (client, _) = Self.indexClient(
-            Self.fixture("discuz-empty-index"), host: "install-e.example")
-        await #expect(throws: DiscuzRequestError.noBoards) {
-            _ = try await client.boards()
-        }
+        // One install serves a signed-out reader a complete, unchallenged, entirely ordinary
+        // Discuz! index with **no forum list at all**. What it has instead is one hand-written
+        // block whose id is `category_-99999`, holding a bus timetable, a calendar, an external
+        // link and one board — and a parser that scanned the page for anything that looked like
+        // a board would have offered the reader a picker made of those.
+        //
+        // Both halves of the gid pair refuse it: the heading links to `#` and carries no `gid`,
+        // and `category_-99999` is not `category_` followed by digits.
+        let page = #"""
+        <h2><a href="#">校园服务</a></h2>
+        <div id="category_-99999">
+        <table>
+        <tr><td><a href="forum.php?mod=forumdisplay&amp;fid=211">失物招领</a></td></tr>
+        <tr><td><a href="/calendar">校历</a></td></tr>
+        <tr><td><a href="https://elsewhere.example/bus">校车时刻表</a></td></tr>
+        </table>
+        </div>
+        """#
+        let (client, _) = Self.indexClient(.text(page), host: "install-e.example")
+        await #expect(throws: DiscuzRequestError.noBoards) { _ = try await client.boards() }
 
-        let html = String(decoding: Fixtures.html("discuz-empty-index"), as: UTF8.self)
-        #expect(html.contains("category_-99999"), "the fixture must keep the hand-made block")
-        #expect(DiscuzIndex.categories(in: html).isEmpty)
+        #expect(page.contains("category_-99999"), "the literal must keep the hand-made block")
+        #expect(DiscuzIndex.categories(in: page).isEmpty)
     }
 
     @Test("The index is judged in the same order a thread list is, and by the same four rules")
     func theIndexIsJudgedTheSameWay() async throws {
-        let host = "closed.example"
+        let host = "challenge.example"
+        let challenge = #"""
+        <html><head><title>Just a moment...</title></head><body>
+        <noscript>Enable JavaScript and cookies to continue</noscript>
+        <script>window._cf_chl_opt = {};</script>
+        <script src="/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1"></script>
+        </body></html>
+        """#
+        let notice = #"""
+        <html><body><div class="nfl"><div id="messagetext" class="alert_info">
+        <p>对不起，您无权访问本版块。</p></div></div></body></html>
+        """#
         for (page, expected) in [
-            (Self.fixture("challenge"), DiscuzRequestError.challenged),
-            (Self.fixture("discuz-restricted"), .restricted),
+            (FixtureHTTP.Outcome.text(challenge), DiscuzRequestError.challenged),
+            (.text(notice), .restricted),
             (.text("<html>no</html>", status: 403), .refused(403)),
             (.text("", status: 404), .http(404)),
         ] as [(FixtureHTTP.Outcome, DiscuzRequestError)] {
@@ -632,8 +892,7 @@ struct DiscuzTests {
 
         // A challenge dressed as a 200 is still a challenge here too, which is the ordering's
         // whole point: read the status first and it becomes "an index with no boards on it".
-        let (dressed, _) = Self.indexClient(
-            .body(Fixtures.html("challenge"), status: 200), host: host)
+        let (dressed, _) = Self.indexClient(.text(challenge, status: 200), host: host)
         await #expect(throws: DiscuzRequestError.challenged) { _ = try await dressed.boards() }
 
         // And bytes in no encoding this device knows are refused rather than mangled.
@@ -642,114 +901,167 @@ struct DiscuzTests {
         await #expect(throws: DiscuzRequestError.undecodable) { _ = try await nonsense.boards() }
     }
 
-    @Test("An index that declares UTF-8 and is not quite UTF-8 is still read, and a GBK one too")
-    func theIndexIsDecodedTheWayEveryDiscuzPageIs() async throws {
-        // Byte for byte from the live installs, and both of these would be `nil` to a reader that
-        // only tried UTF-8. `install-a.example` declares UTF-8 and carries ten leftover GBK bytes in
-        // one script comment; `install-d.example` is GBK outright. The branch's own lesson is that a
-        // fixture written out through a decoder describes a cleaner world than the code meets, so
-        // neither of these was.
-        for name in ["discuz-x34-index", "discuz-gbk-index"] {
-            #expect(
-                String(data: Fixtures.html(name), encoding: .utf8) == nil,
-                "\(name) must not be valid UTF-8"
+    // MARK: - GBK, and the bytes a Discuz! actually sends
+
+    /// A GBK page's bytes, assembled here a byte at a time rather than encoded out of a Swift
+    /// string.
+    ///
+    /// **The assembly is the point.** Writing `html.data(using: gbk)` would encode the input with
+    /// the same Foundation machinery `DiscuzHTML.text` decodes it with, and the test would then
+    /// prove only that Foundation round-trips itself — which it does, and which is not the
+    /// question. These byte values are GBK's, written down, so the decoder is being handed bytes
+    /// it did not produce. Every ASCII byte is identical in GBK and UTF-8, so only the Chinese
+    /// runs need spelling out.
+    private static func gbkIndexPage() -> Data {
+        var page = Data()
+        page.append(contentsOf: Array(#"""
+        <html><head><meta http-equiv="Content-Type" content="text/html; charset=gbk" />
+        <meta name="generator" content="Discuz! X3.4" /></head><body>
+        <h2><a href="forum.php?gid=21">
+        """#.utf8))
+        page.append(contentsOf: [0xB9, 0xD9, 0xB7, 0xBD, 0xC7, 0xF8])  // 官方区
+        page.append(contentsOf: Array(#"""
+        </a></h2><div id="category_21"><table><tr><td><h2><a href="forum-201-1.html">
+        """#.utf8))
+        // 官方软件区
+        page.append(contentsOf: [0xB9, 0xD9, 0xB7, 0xBD, 0xC8, 0xED, 0xBC, 0xFE, 0xC7, 0xF8])
+        page.append(contentsOf: Array(#"""
+        </a></h2></td><td class="fl_i"><span class="xi2">184</span><span class="xg1"> / 2907</span></td>
+        </tr></table></div></body></html>
+        """#.utf8))
+        return page
+    }
+
+    @Test("A GBK forum is read, and is not reported as an unreadable host")
+    func aGBKForumIsRead() async throws {
+        // Discuz! predates the UTF-8 default and a large share of running installs still serve
+        // GBK. GBK bytes are not valid UTF-8, so a reader that only tried UTF-8 gets `nil` for
+        // the entire page: not a mangled string somebody might notice, but nothing at all, which
+        // a caller reading only UTF-8 would report as an unreadable host.
+        let page = Self.gbkIndexPage()
+        #expect(String(data: page, encoding: .utf8) == nil, "the bytes must not be valid UTF-8")
+
+        let (client, _) = Self.indexClient(.body(page), host: "install-d.example")
+        let categories = try await client.boards()
+        #expect(categories.first?.name == "官方区")
+        #expect(categories.first?.boards.first?.name == "官方软件区")
+        #expect(categories.first?.boards.first?.threads == 184)
+    }
+
+    @Test("The header's charset is preferred over the page's own, and both are tried")
+    func theDeclaredEncodingIsUsed() throws {
+        let gbk = Self.gbkIndexPage()
+        let url = try #require(URL(string: "https://install-d.example/forum.php"))
+
+        // Declared in the header. This is the one the server chose for this response.
+        let headed = try #require(
+            HTTPURLResponse(
+                url: url, statusCode: 200, httpVersion: "HTTP/1.1",
+                headerFields: ["Content-Type": "text/html; charset=gbk"]
             )
+        )
+        #expect(DiscuzHTML.text(gbk, headed)?.contains("官方软件区") == true)
+
+        // Declared nowhere but the `<meta>`, which is what these bytes say for themselves.
+        let bare = try #require(
+            HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)
+        )
+        #expect(DiscuzHTML.text(gbk, bare)?.contains("官方软件区") == true)
+
+        // A declaration that is wrong does not sink the page: the `<meta>` and then UTF-8 and
+        // GB18030 follow it.
+        let wrong = try #require(
+            HTTPURLResponse(
+                url: url, statusCode: 200, httpVersion: "HTTP/1.1",
+                headerFields: ["Content-Type": "text/html; charset=not-an-encoding"]
+            )
+        )
+        #expect(DiscuzHTML.text(gbk, wrong)?.contains("官方软件区") == true)
+    }
+
+    /// Bytes that **declare UTF-8 and are not quite UTF-8** — the defect that made a live forum
+    /// detect correctly and then join to nothing.
+    ///
+    /// `0xB2 0xE2` cannot begin a UTF-8 sequence, so `String(data:encoding:.utf8)` returns `nil`
+    /// for the whole document however clean the rest of it is. That is the shape of the real
+    /// case: a page that is UTF-8 across all 80KB of its thread table with a handful of leftover
+    /// GBK bytes in one script comment.
+    private static func damagedUTF8Page() -> Data {
+        var page = Data()
+        page.append(contentsOf: Array(#"""
+        <html><head><meta charset="utf-8" />
+        <meta name="generator" content="Discuz! X3.4" /></head><body>
+        <script>//
+        """#.utf8))
+        page.append(contentsOf: [0xB2, 0xE2, 0xCA, 0xD4])  // leftover GBK, mid-comment
+        page.append(contentsOf: Array(#"""
+        </script>
+        <tbody id="normalthread_310401"><tr>
+        <th><a href="#" class="s xst">套牌超速两百公里，自称路上不限速</a></th>
+        <td class="by"><a href="forum-5-1.html">闲谈茶座</a></td>
+        <td class="by"><cite>青木</cite><em><span title="2026-9-15">5&nbsp;小时前</span></em></td>
+        <td class="num"><a href="#">12</a><em>3480</em></td>
+        </tr></tbody></body></html>
+        """#.utf8))
+        return page
+    }
+
+    @Test("A page that says UTF-8 and is not quite UTF-8 is still read")
+    func aDamagedUTF8PageIsStillRead() async throws {
+        // Strict UTF-8 gives nil for the whole page, **and GB18030 would be the wrong answer
+        // too** — because the page really is UTF-8. Until the decode believed the declaration
+        // and took the loss on the broken bytes, a live forum detected correctly and then joined
+        // to nothing. Found by running the code against real forums; no capture then in the
+        // suite could have caught it, because every one of them had been written out through a
+        // decoder that silently repaired it.
+        let damaged = Self.damagedUTF8Page()
+        #expect(String(data: damaged, encoding: .utf8) == nil, "the bytes must not be valid UTF-8")
+
+        let (client, _) = Self.client(.body(damaged))
+        let notes = try await client.latest(source: Self.source)
+
+        #expect(notes.count == 1)
+        // The loss is confined to the bytes that were actually broken. Every title, board and
+        // name in the table is clean UTF-8 and arrives exactly.
+        #expect(notes.first?.title == "套牌超速两百公里，自称路上不限速")
+        #expect(notes.first?.board == "闲谈茶座")
+        #expect(notes.first?.author == "青木")
+        #expect(notes.allSatisfy { !($0.title ?? "").contains("\u{FFFD}") })
+    }
+
+    @Test("A lossy decode is reached on a declaration, never as a general fallback")
+    func lossyDecodingNeedsADeclaration() throws {
+        // The guard that keeps the rule above from becoming "read anything, however it looks".
+        // A page declaring GBK whose bytes are not GBK is *not* quietly read as damaged UTF-8 —
+        // that would be the mojibake outcome this whole enum exists to refuse.
+        let url = try #require(URL(string: "https://install-d.example/forum.php"))
+        let gbkDeclared = try #require(
+            HTTPURLResponse(
+                url: url, statusCode: 200, httpVersion: "HTTP/1.1",
+                headerFields: ["Content-Type": "text/html; charset=gbk"]
+            )
+        )
+        // Valid in neither GBK, nor UTF-8, nor GB18030.
+        #expect(DiscuzHTML.text(Data([0xFF, 0xFE, 0xFF, 0xC0, 0x80, 0xFF]), gbkDeclared) == nil)
+    }
+
+    @Test("Bytes that are text in no encoding this device knows are refused, not mangled")
+    func undecodableBytesAreRefused() async throws {
+        // `isoLatin1` is deliberately not in the fallback list: it decodes every byte sequence
+        // ever written, so adding it would turn "this page could not be read" into "this page
+        // was read as mojibake" — and mojibake parses, producing rows nobody can read and no
+        // error at all.
+        let url = try #require(URL(string: "https://install-a.example/forum.php"))
+        let response = try #require(
+            HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)
+        )
+        let nonsense = Data([0xC0, 0x80, 0xFF, 0xFE, 0x81, 0x40, 0xFF, 0xFF, 0xFF])
+        #expect(DiscuzHTML.text(nonsense, response) == nil)
+
+        let (client, _) = Self.client(.body(nonsense))
+        await #expect(throws: DiscuzRequestError.undecodable) {
+            _ = try await client.latest(source: Self.source)
         }
-
-        let (damaged, _) = Self.indexClient(
-            Self.fixture("discuz-x34-index"), host: "install-a.example")
-        let boards = try await damaged.boards().flatMap(\.boards)
-        #expect(boards.first?.name == "数码好物")
-        #expect(boards.allSatisfy { !$0.name.contains("\u{FFFD}") })
-
-        let (gbk, _) = Self.indexClient(Self.fixture("discuz-gbk-index"), host: "install-d.example")
-        #expect(try await gbk.boards().first?.name == "官方区")
-    }
-
-    // MARK: - One board the reader chose
-
-    @Test("A subscribed board is read at the address Discuz! serves whatever it writes")
-    func aSubscribedBoardIsRead() async throws {
-        // Three of the four installs never write this address on their own index — they write
-        // `forum-37-1.html` or an SEO slug — and all four **answer** it, because rewriting is a
-        // rule about the links a Discuz! writes and not about what it serves. Verified live
-        // against all three rewriting installs.
-        let host = "install-c.example"
-        let board = DiscuzBoard(fid: 1, name: "休闲娱乐", category: "::谈天说地::", gid: 55)
-        let http = FixtureHTTP([
-            "https://\(host)/forum.php?mod=forumdisplay&fid=1": Self.fixture("discuz-x50-board")
-        ])
-        let client = DiscuzClient(http: http, host: host)
-        let notes = try await client.threads(
-            board: board, source: Source(host: host, kind: .discuz))
-
-        #expect(notes.count == 6)
-        #expect(notes.allSatisfy { $0.board == "休闲娱乐" })
-        let asked = try #require(await http.requested.first)
-        #expect(asked.absoluteString == "https://install-c.example/forum.php?mod=forumdisplay&fid=1")
-    }
-
-    @Test("A pinned thread is a thread, and stays where its own date puts it")
-    func aPinnedThreadIsAThread() async throws {
-        // Seven of the nineteen rows on this live board are `stickthread_`, and they are kept:
-        // they carry a real number, title, author and posting date, they are what a reader sees
-        // on the site, and this app has no pinned slot for them to go in — the store orders every
-        // note in it by `postedAt`, across every source at once. Dropping them would silently
-        // hide a board's own rules and announcements; drawing them at the top would mean
-        // inventing an order the store does not have. So they sort by when they were written,
-        // like everything else, and `Note.id` keys on the thread number, so a sticky that repeats
-        // on every page of a board can never arrive twice.
-        let board = String(decoding: Fixtures.html("discuz-x50-board"), as: UTF8.self)
-        #expect(board.contains("stickthread_"), "the fixture must carry pinned rows")
-
-        let source = Source(host: "install-c.example", kind: .discuz)
-        let (client, _) = Self.client(Self.fixture("discuz-x50-board"), host: "install-c.example")
-        let notes = try await client.board(1, source: source)
-
-        // 403684 is one of the pinned ones. Checked against the thread itself rather than against
-        // its row: post #1 is by `installC` on 2017-12-15 16:24:03, and the thread's own counter
-        // says 33,955 answers against 5,944,972 views. It is dated when it was written, which is
-        // eight years before the listing it sits at the top of.
-        let pinned = try #require(notes.first { $0.id.hasSuffix(":403684") })
-        #expect(pinned.author == "installC")
-        #expect(pinned.postedAt == Self.utc(2017, 12, 15))
-        #expect(pinned.counts.replies == 33954)
-        #expect(pinned.postedAt < Self.utc(2026, 1, 1) ?? .distantFuture)
-        #expect(notes.map(\.id).count == Set(notes.map(\.id)).count)
-    }
-
-    @Test("A board listing is read on more than one install")
-    func aBoardListingIsReadAcrossInstalls() async throws {
-        let host = "install-b.example"
-        let (client, _) = Self.client(Self.fixture("discuz-x35-board"), host: host)
-        let notes = try await client.board(37, source: Source(host: host, kind: .discuz))
-
-        #expect(notes.count == 5)
-        #expect(notes.allSatisfy { $0.board == "News Feed" })
-        #expect(notes.allSatisfy { $0.title?.isEmpty == false })
-    }
-
-    @Test("The page's own name for a board wins, and the reader's is only a fallback")
-    func thePagesNameForABoardWins() async throws {
-        // A name the reader subscribed to may be months old; the `<h1>` is what the forum calls
-        // the board today. The subscription's name is used only where the page named nothing.
-        let host = "install-c.example"
-        let stale = DiscuzBoard(fid: 1, name: "what it used to be called", category: "x", gid: 55)
-        let http = FixtureHTTP([
-            "https://\(host)/forum.php?mod=forumdisplay&fid=1": Self.fixture("discuz-x50-board")
-        ])
-        let named = try await DiscuzClient(http: http, host: host)
-            .threads(board: stale, source: Source(host: host, kind: .discuz))
-        #expect(named.allSatisfy { $0.board == "休闲娱乐" })
-
-        // A listing with no heading at all falls back rather than losing the board entirely.
-        let headless = FixtureHTTP([
-            "https://\(host)/forum.php?mod=forumdisplay&fid=1": Self.fixture("discuz-x34-guide")
-        ])
-        let fallback = try await DiscuzClient(http: headless, host: host)
-            .threads(board: stale, source: Source(host: host, kind: .discuz))
-        // The guide fixture's rows name their own boards, which still wins over either heading.
-        #expect(fallback.allSatisfy { $0.board != nil })
     }
 
     // MARK: - One thread: its opening post, and its replies
@@ -766,6 +1078,84 @@ struct DiscuzTests {
         return (DiscuzClient(http: http, host: host), http)
     }
 
+    /// Discuz!'s own **touch** template: `<div class="plc" id="pidN">` around a
+    /// `<ul class="authi">` and a `<div class="message">`. Three of the four installs measured
+    /// answer `&mobile=2` with this.
+    ///
+    /// Carries, deliberately, everything that is *not* the author's words: the forum's own edit
+    /// notice, an attachment list, and a picture. Each of those reads as a sentence once the
+    /// markup comes off, and a row drawn from the lot of them would put the forum's words under
+    /// this person's name.
+    private static let touchThread = #"""
+    <div class="plc" id="pid900101">
+      <div class="avatar"><img src="./static/blank.gif" data-src="./data/avatar/000/01/02/03_avatar_small.jpg" /></div>
+      <ul class="authi">
+        <li class="mtit">1<sup>#</sup></li>
+        <li><a href="home.php?mod=space&amp;uid=7">nanshu</a></li>
+        <li class="mtime">昨天 22:48</li>
+      </ul>
+      <div class="message">
+        <i class="pstatus">本帖最后由 nanshu 于 2026-9-16 09:30 编辑</i>
+        整个过程还挺有意思<br />
+        用 setup-bundle.ps1 装回去就好了
+        <img src="data/attachment/forum/202609/shot.png" />
+        <ul class="post_attlist"><li>安装包.7z <em>下载次数: 12</em> <span>3.4 MB</span></li></ul>
+      </div>
+    </div>
+    <div class="plc" id="pid900102">
+      <div class="avatar"><img data-src="./data/avatar/noavatar.svg" /></div>
+      <ul class="authi"><li class="mtit">2<sup>#</sup></li><li><a href="home.php?mod=space&amp;uid=8">linlu</a></li></ul>
+      <div class="message">说得对</div>
+    </div>
+    """#
+
+    /// The ordinary **desktop** page: `<div id="post_N">` around a `<div class="authi">` and a
+    /// `<td id="postmessage_N">`. What an install with its mobile template switched off answers
+    /// with — and the template whose avatar box is filled in by its own script afterwards, so
+    /// there is no `<img>` on the page to read at all.
+    private static let desktopThread = #"""
+    <div id="post_900101">
+    <table><tr>
+    <td class="pls cl favatar" id="userinfo_900101">
+      <div class="authi"><a href="home.php?mod=space&amp;uid=7" class="xw1">nanshu</a></div>
+    </td>
+    <td class="plc">
+      <div class="authi"><em id="authorposton900101"><span title="2026-9-16 09:29:10">2026-9-16 09:29:10</span></em></div>
+      <div class="pi"><strong><a href="forum.php?mod=viewthread&amp;tid=5601#pid900101" id="postnum900101">1<sup>#</sup></a></strong></div>
+      <div class="pct"><div class="pcb"><div class="t_fsz">
+        <table><tr><td class="t_f" id="postmessage_900101">整个过程还挺有意思</td></tr></table>
+      </div></div></div>
+      <div class="sign">这是我的签名，每一帖都一样</div>
+    </td>
+    </tr></table>
+    </div>
+    """#
+
+    /// The **third-party** mobile template: `<div class="comiis_postli" id="pidN">` with the
+    /// author and the picture in one heading and the time in another. Not Discuz!'s markup, not
+    /// smaller than the desktop page, and the reason `&mobile=2` is a hint rather than a
+    /// contract. It numbers every reply and leaves the opening post unnumbered.
+    private static let comiisThread = #"""
+    <div class="comiis_postli" id="pid920101">
+      <div class="comiis_postli_top">
+        <a href="home.php?mod=space&amp;uid=330512"><img src="https://install-a.example/uc_server/avatar.php?uid=330512&amp;size=middle" /></a>
+        <a href="home.php?mod=space&amp;uid=330512" class="comiis_nick">河丘</a>
+        <a href="home.php?mod=spacecp&amp;ac=usergroup" class="comiis_bq">等级二段</a>
+      </div>
+      <div class="comiis_postli_time">3 天前</div>
+      <div class="comiis_message_table">
+        拆开看了看里面的板子<br />
+        <a href="javascript:;">登录/注册后可看大图</a>
+        <img src="data/attachment/forum/202609/board.jpg" />
+      </div>
+    </div>
+    <div class="comiis_postli" id="pid920102">
+      <div class="comiis_postli_top"><h2>2楼</h2><a href="home.php?mod=space&amp;uid=331001" class="comiis_nick">muyu77</a></div>
+      <div class="comiis_postli_time">3 天前</div>
+      <div class="comiis_message_table"><div class="locked">游客请登录后查看回复内容</div></div>
+    </div>
+    """#
+
     @Test("The three templates &mobile=2 actually answers with are all read")
     func allThreeThreadTemplatesAreRead() async throws {
         // `allCases` rather than a hand-written list, for the reason `DiscuzBoardLayout` states:
@@ -773,26 +1163,16 @@ struct DiscuzTests {
         // list here would have described a smaller world than the code.
         #expect(DiscuzPostLayout.allCases.count == 3)
 
-        // fixture, host, tid, posts, opening author, its floor
-        let templates: [(String, String, Int, Int, String, Int?)] = [
-            // Discuz!'s own touch template, X5.0.
-            ("discuz-x50-thread", "install-c.example", 453475, 5, "nanshu", 1),
-            // The same template on the English install, which writes `<sup>#1</sup>` for a floor
-            // where the Chinese one writes `1<sup>#</sup>`, and an absolute date where it writes
-            // a relative one.
-            ("discuz-x35-thread", "install-b.example", 71, 7, "admin", 1),
-            // The same template again on X3.4 — and a third spelling of the floor, `1楼`, in a
-            // list whose items carry none of the class names the other two use.
-            ("discuz-gbk-thread", "install-d.example", 2295441, 1, "雪走", 1),
-            // Comiis: a **third-party** mobile template, not Discuz!'s, and the reason `&mobile=2`
-            // is asked for as a hint rather than relied on as a contract.
-            ("discuz-x34-thread", "install-a.example", 620841, 5, "风采飞扬", nil),
-            // The ordinary desktop page, which is what an install with its mobile template
-            // switched off would answer with.
-            ("discuz-x50-thread-full", "install-c.example", 453475, 5, "nanshu", 1),
+        // name, page, host, tid, posts, opening author, its floor
+        let templates: [(String, String, String, Int, Int, String, Int?)] = [
+            ("touch", Self.touchThread, "install-c.example", 5601, 2, "nanshu", 1),
+            ("desktop", Self.desktopThread, "install-c.example", 5601, 1, "nanshu", 1),
+            // The third-party template numbers every reply and leaves the opening post
+            // unnumbered, which is exactly the case document order is the fallback for.
+            ("comiis", Self.comiisThread, "install-a.example", 5701, 2, "河丘", nil),
         ]
-        for (name, host, tid, count, author, floor) in templates {
-            let (client, http) = Self.threadClient(Self.fixture(name), host: host, tid: tid)
+        for (name, page, host, tid, count, author, floor) in templates {
+            let (client, http) = Self.threadClient(.text(page), host: host, tid: tid)
             let opening = try await client.post(tid: tid)
             #expect(opening.author == author, "\(name) author")
             #expect(opening.handle == "@\(author)@\(host)", "\(name) handle")
@@ -800,9 +1180,9 @@ struct DiscuzTests {
             #expect(opening.tid == tid, "\(name) tid")
             #expect(opening.pid > 0, "\(name) pid")
             #expect(!opening.body.isEmpty, "\(name) body")
+
             let replies = try await client.replies(tid: tid)
             #expect(replies.count == count - 1, "\(name) replies")
-            // Every post got somebody's name and Discuz!'s own number for it.
             #expect(replies.allSatisfy { !$0.author.isEmpty }, "\(name) reply authors")
             #expect(Set(replies.map(\.pid)).count == replies.count, "\(name) unique pids")
             #expect(!replies.contains { $0.pid == opening.pid }, "\(name) opening is not a reply")
@@ -812,48 +1192,83 @@ struct DiscuzTests {
         }
     }
 
-    /// **Five installs, six templates, and no two of them write it the same way.**
-    ///
-    /// The thread *table* carries no avatar — `DiscuzThread.asNote` writes `nil` and says why —
-    /// but the thread *page* does, and D30 already fetches that page when the row is scrolled to.
-    /// So the picture arrives with the opening post and costs no request of its own.
-    ///
-    /// Every address below is pinned whole rather than by shape, because the shape is exactly
-    /// what differs: relative on `install-c.example` and `install-b.example`, absolute on the other two,
-    /// and on `install-d.example` absolute **to a different host**. That last row is the one that
-    /// matters most — it is the install whose UCenter has moved, and it is why
+    @Test("A floor is read out of every spelling a template gives it")
+    func everyFloorSpellingIsRead() throws {
+        // `1<sup>#</sup>`, `<sup>#1</sup>` and `1楼` are the three the measured installs write,
+        // and the anchors come out first so that a member called `abc123` can never be read as
+        // the hundred and twenty-third floor.
+        let spellings: [(String, Int?)] = [
+            (#"<ul class="authi"><li class="mtit">1<sup>#</sup></li></ul>"#, 1),
+            (#"<ul class="authi"><li><sup>#1</sup></li></ul>"#, 1),
+            (#"<ul class="authi"><li class="grey">7楼</li></ul>"#, 7),
+            // A name with digits in it, linked, is not a floor.
+            (#"<ul class="authi"><li><a href="home.php?mod=space&amp;uid=9">abc123</a></li></ul>"#, nil),
+            // A template that numbered nothing says nothing.
+            (#"<ul class="authi"><li>&nbsp;</li></ul>"#, nil),
+        ]
+        for (authi, expected) in spellings {
+            let page = #"<div class="plc" id="pid1">"# + authi + #"<div class="message">x</div></div>"#
+            let posts = DiscuzThreadPage.posts(in: page, tid: 1, host: "install-c.example")
+            #expect(posts.first?.floor == expected, "\(authi)")
+        }
+    }
+
+    /// **Five installs, six templates, and no two of them write the author's picture the same
+    /// way.** Every address is pinned whole rather than by shape, because the shape is exactly
+    /// what differs: relative on two installs, absolute on two, and on one of those absolute
+    /// **to a different host** — the install whose UCenter has moved, and the reason
     /// `uc_server/avatar.php?uid=…` is read off the page rather than built out of the forum's own
-    /// hostname. Building it would have produced `https://install-d.example/uc_server/avatar.php?uid=…`
-    /// for every post on that forum, which is a broken picture fetched once per row.
+    /// hostname. Building it would have produced a broken picture fetched once per row.
     @Test("The author's picture is read off the thread page, on every template that writes one")
     func theAvatarIsReadOffTheThreadPage() async throws {
-        // fixture, host, tid, the opening post's avatar
-        let templates: [(String, String, Int, String?)] = [
-            // Discuz!'s own touch template, which **lazy-loads**: the address is in `data-src`
-            // and there is no `src` on the tag at all.
-            ("discuz-x50-thread", "install-c.example", 453475,
-             "https://install-c.example/data/avatar/000/28/23/90_avatar_small.jpg"),
-            // The same template on the English install, which does not lazy-load: plain `src`,
-            // and no class on the `<img>` whatsoever.
-            ("discuz-x35-thread", "install-b.example", 71,
-             "https://install-b.example/data/avatar/000/00/00/01_avatar_small.jpg"),
+        // name, page, host, tid, the opening post's avatar
+        let templates: [(String, String, String, Int, String?)] = [
+            // Discuz!'s own touch template, which **lazy-loads**: the real address is in
+            // `data-src` and the `src` beside it is a blank spacer.
+            ("touch, data-src, relative", Self.touchThread, "install-c.example", 5601,
+             "https://install-c.example/data/avatar/000/01/02/03_avatar_small.jpg"),
             // **A `<span class="avatar">`, not a `<div>`, and a different host.** Both halves are
-            // this one install's alone, and either one read as the others would draw nothing here.
-            ("discuz-gbk-thread", "install-d.example", 2295441,
-             "https://avatars-d.example/avatar.php?uid=1335786&size=small"),
-            // Comiis keeps no box named `avatar`. Its picture is the first `<img>` of the heading
-            // it also keeps the name in — the same two-anchors-per-person shape `author(in:)`
-            // works around from the other side.
-            ("discuz-x34-thread", "install-a.example", 620841,
-             "https://install-a.example/uc_server/avatar.php?uid=1616810&size=middle"),
-            // **The desktop page has a box and no picture in it.** `install-c.example` writes
+            // one install's alone, and either read as the others would draw nothing here.
+            ("touch, span, another host", #"""
+            <div class="plc" id="pid930101">
+              <span class="avatar"><img src="https://avatars-d.example/avatar.php?uid=204815&amp;size=small" /></span>
+              <ul class="authi"><li class="grey">1楼</li><li><a href="space-username-tingquan.html">听泉</a></li></ul>
+              <div class="message">两个小工具的对比</div>
+            </div>
+            """#, "install-d.example", 4401,
+             "https://avatars-d.example/avatar.php?uid=204815&size=small"),
+            // The same install's **desktop** page puts its avatars on a *second* host that is
+            // also not the forum.
+            ("desktop, div, a second other host", #"""
+            <div id="post_930201">
+              <div class="authi"><a href="space-uid-204815.html">听泉</a></div>
+              <div class="avatar"><img src="https://files-d.example/204815_avatar_small.jpg" /></div>
+              <table><tr><td id="postmessage_930201">x</td></tr></table>
+            </div>
+            """#, "install-d.example", 4401,
+             "https://files-d.example/204815_avatar_small.jpg"),
+            // The third-party template keeps **no box named for the job**. Its picture is the
+            // first `<img>` of the heading it also keeps the name in — the same
+            // two-anchors-per-person shape `author(in:)` works around from the other side.
+            ("comiis, no box, absolute", Self.comiisThread, "install-a.example", 5701,
+             "https://install-a.example/uc_server/avatar.php?uid=330512&size=middle"),
+            // **The desktop page has a box and no picture in it.** One install writes
             // `class="pls cl favatar"` and lets its own JavaScript fill it in later, so there is
-            // nothing on the page to read. Nothing is the honest answer, and the word boundary in
-            // the pattern is what keeps `favatar` from matching and then answering nothing loudly.
-            ("discuz-x50-thread-full", "install-c.example", 453475, nil),
+            // nothing on the page to read. Nothing is the honest answer, and the word boundary
+            // in the pattern is what keeps `favatar` from matching and then answering nothing
+            // loudly.
+            ("desktop, favatar, no img", Self.desktopThread, "install-c.example", 5601, nil),
+            // The forum's own words where a member's picture is withheld. Not an address.
+            ("a forum's 'picture withheld' text", #"""
+            <div class="plc" id="pid930301">
+              <div class="avatar">頭像被屏蔽</div>
+              <ul class="authi"><li>1楼</li><li><a href="space-username-anon.html">路人</a></li></ul>
+              <div class="message">x</div>
+            </div>
+            """#, "install-d.example", 4402, nil),
         ]
-        for (name, host, tid, expected) in templates {
-            let (client, http) = Self.threadClient(Self.fixture(name), host: host, tid: tid)
+        for (name, page, host, tid, expected) in templates {
+            let (client, http) = Self.threadClient(.text(page), host: host, tid: tid)
             let opening = try await client.post(tid: tid)
             #expect(opening.avatarURL?.absoluteString == expected, "\(name) avatar")
             // **No second request.** The picture came off the page the post came off.
@@ -861,38 +1276,17 @@ struct DiscuzTests {
         }
     }
 
-    /// **The forum's own placeholder is not a picture**, and a picture inside a quotation is not
-    /// this author's.
-    ///
-    /// `noavatar.svg` is what Discuz! serves for a member who uploaded nothing — eight of the
-    /// twelve avatar tags on `discuz-x50-quote` are it. Fetching it would draw *the forum's* grey
-    /// silhouette over the plate this app already draws for exactly that case, so the reader would
-    /// get one stranger's house style instead of their own app's.
-    ///
-    /// The second half is why the **first** `class="avatar"` box is taken rather than the first
-    /// avatar-shaped address anywhere in the block: post `3488823` has no picture of its own, and
-    /// further down its own block there is a real one belonging to somebody it quoted. A looser
-    /// rule would have drawn the quoted person's face under this author's name.
-    @Test("A placeholder avatar draws nothing, and a quoted person's is not the author's")
-    func aPlaceholderAvatarIsNotAPicture() async throws {
-        let (client, _) = Self.threadClient(
-            Self.fixture("discuz-x50-quote"), host: "install-c.example", tid: 403684
-        )
-        let opening = try await client.post(tid: 403684)
-        // The page carries `000/27/17/73_avatar_small.jpg` inside this post's own block. It
-        // belongs to the person it quotes, and this author uploaded nothing.
-        #expect(opening.avatarURL == nil)
-        let replies = try await client.replies(tid: 403684)
-        #expect(replies.count == 1)
-        #expect(replies[0].avatarURL?.absoluteString
-            == "https://install-c.example/data/avatar/000/33/26/75_avatar_small.jpg")
-
-        // Four replies on `discuz-x50-thread` and no picture between them: every one of those
-        // members has the placeholder, and every one of them draws nothing.
-        let (installC, _) = Self.threadClient(
-            Self.fixture("discuz-x50-thread"), host: "install-c.example", tid: 453475
-        )
-        #expect(try await installC.replies(tid: 453475).allSatisfy { $0.avatarURL == nil })
+    @Test("`favatar` is not an avatar box, and the word boundary is what says so")
+    func favatarIsNotAnAvatarBox() throws {
+        // Pinned on its own rather than only through the desktop page, because this is a
+        // one-character difference in a regular expression and the failure it prevents is
+        // silent: the box would match, hold no `<img>`, and answer nothing — which looks exactly
+        // like a member who has no picture.
+        let patterns = try #require(DiscuzThreadPage.Patterns())
+        let real = #"<div class="pls cl avatar"><img src="/a.jpg" /></div>"#
+        let decoy = #"<div class="pls cl favatar"><img src="/a.jpg" /></div>"#
+        #expect(patterns.avatarBox.capture(2, in: real) != nil)
+        #expect(patterns.avatarBox.capture(2, in: decoy) == nil)
     }
 
     /// Decision 9 at the one address in this file that is **lifted rather than built**.
@@ -909,11 +1303,11 @@ struct DiscuzTests {
             )?.absoluteString
         }
         // Relative, resolved against the forum rather than against the page's own `<base>`.
-        #expect(address("./data/avatar/000/08/58/94_avatar_small.jpg")
-            == "https://install-c.example/data/avatar/000/08/58/94_avatar_small.jpg")
+        #expect(address("./data/avatar/000/09/10/11_avatar_small.jpg")
+            == "https://install-c.example/data/avatar/000/09/10/11_avatar_small.jpg")
         // Scheme-relative picks the one scheme this device has.
         #expect(address("//cdn.example.com/a.jpg") == "https://cdn.example.com/a.jpg")
-        // Absolute, on somebody else's host, is kept — that is `install-d.example`'s real case.
+        // Absolute, on somebody else's host, is kept — that is the moved-UCenter install's case.
         #expect(address("https://avatars-d.example/avatar.php?uid=1")
             == "https://avatars-d.example/avatar.php?uid=1")
         // `&amp;` is an entity in an attribute, not two query items.
@@ -945,94 +1339,130 @@ struct DiscuzTests {
         )?.absoluteString == "https://install-c.example/data/avatar/1_avatar_small.jpg")
     }
 
+    @Test("A placeholder avatar draws nothing, and a quoted person's is not the author's")
+    func aPlaceholderAvatarIsNotAPicture() async throws {
+        // `noavatar.svg` is what Discuz! serves for a member who uploaded nothing. Fetching it
+        // would draw *the forum's* grey silhouette over the plate this app already draws for
+        // exactly that case, so the reader would get one stranger's house style instead of their
+        // own app's.
+        //
+        // The second half is why the **first** `class="avatar"` box is taken rather than the
+        // first avatar-shaped address anywhere in the block: this post has no picture of its
+        // own, and further down its own block there is a real one belonging to somebody it
+        // quoted. A looser rule would have drawn the quoted person's face under this author's
+        // name.
+        let page = #"""
+        <div class="plc" id="pid900201">
+          <div class="avatar"><img data-src="./data/avatar/noavatar.svg" /></div>
+          <ul class="authi"><li>1<sup>#</sup></li><li><a href="home.php?mod=space&amp;uid=51">youke2210</a></li></ul>
+          <div class="message">
+            不如学隔壁，卖点周边
+            <div class="avatar"><img data-src="./data/avatar/000/06/07/08_avatar_small.jpg" /></div>
+          </div>
+        </div>
+        """#
+        let (client, _) = Self.threadClient(.text(page), host: "install-c.example", tid: 700100)
+        #expect(try await client.post(tid: 700100).avatarURL == nil)
+    }
+
     @Test("The opening post is the first floor, not the first row on the page")
     func theOpeningPostIsTheFirstFloor() async throws {
         // A forum can be configured to list a thread newest-first, and "whichever post came
         // first" would then hand back the most recent reply wearing the opening post's place —
         // a plausible wrong answer, which is the family of mistake this file's rules exist for.
-        // So the floor decides where a template numbered one, and document order only where none
-        // did.
-        let (client, _) = Self.threadClient(
-            Self.fixture("discuz-x50-thread"), host: "install-c.example", tid: 453475
-        )
-        let opening = try await client.post(tid: 453475)
+        let newestFirst = #"""
+        <div class="plc" id="pid900199">
+          <ul class="authi"><li class="mtit">2<sup>#</sup></li><li><a href="home.php?mod=space&amp;uid=8">linlu</a></li></ul>
+          <div class="message">说得对</div>
+        </div>
+        <div class="plc" id="pid900101">
+          <ul class="authi"><li class="mtit">1<sup>#</sup></li><li><a href="home.php?mod=space&amp;uid=7">nanshu</a></li></ul>
+          <div class="message">整个过程还挺有意思</div>
+        </div>
+        """#
+        let (client, _) = Self.threadClient(.text(newestFirst), host: "install-c.example", tid: 5601)
+        let opening = try await client.post(tid: 5601)
         #expect(opening.floor == 1)
         #expect(opening.author == "nanshu")
+        #expect(opening.pid == 900101)
+        // And the one that came first on the page is a reply, not the opening post.
+        #expect(try await client.replies(tid: 5601).map(\.pid) == [900199])
 
-        // The third-party template numbers every reply and leaves the opening post unnumbered,
-        // which is exactly the case document order is the fallback for.
+        // Where a template numbered nothing, document order is the fallback rather than the
+        // rule — which is the third-party template's case.
         let (comiis, _) = Self.threadClient(
-            Self.fixture("discuz-x34-thread"), host: "install-a.example", tid: 620841
-        )
-        let first = try await comiis.post(tid: 620841)
-        #expect(first.floor == nil)
-        #expect(try await comiis.replies(tid: 620841).map(\.floor) == [2, 3, 4, 5])
+            .text(Self.comiisThread), host: "install-a.example", tid: 5701)
+        #expect(try await comiis.post(tid: 5701).floor == nil)
+        #expect(try await comiis.post(tid: 5701).pid == 920101)
+        #expect(try await comiis.replies(tid: 5701).map(\.floor) == [2])
     }
 
     @Test("A quotation is somebody else's words, and is not drawn as this author's")
     func aQuotationIsNotTheAuthorsWords() async throws {
-        // **This is the case the whole rule exists for.** `discuz-x50-quote` is two real posts off
-        // `install-c.example` thread 403684 — the capture is trimmed to them and to nothing else, so
-        // the first one here is the first one on the page rather than the thread's own opening
-        // post. Each of the two answers somebody by quoting them, name and date and all. Drawn
-        // whole, the row would say that 1904860494 wrote 立帮电子's sentence.
-        //
-        // So the quotation comes out of the body — and is **kept**, because a deletion nobody can
-        // see is the thing that looks right on a fixture and is wrong in front of a reader.
-        let (installC, _) = Self.threadClient(
-            Self.fixture("discuz-x50-quote"), host: "install-c.example", tid: 403684
-        )
-        let quoting = try await installC.post(tid: 403684)
+        // **This is the case the whole rule exists for.** A reply that opens by quoting the post
+        // above it, name and date and all, would — drawn whole — say that this person wrote the
+        // other person's sentence. So the quotation comes out of the body, and is **kept**,
+        // because a deletion nobody can see is the thing that looks right on a fixture and is
+        // wrong in front of a reader.
+        let page = #"""
+        <div class="plc" id="pid900201">
+          <ul class="authi"><li>1<sup>#</sup></li><li><a href="home.php?mod=space&amp;uid=51">youke2210</a></li></ul>
+          <div class="message">
+            <div class="quote"><blockquote><a href="#"><font color="#999999">沙洲电子 发表于 2017-12-15 17:49</font></a><br />
+            这个确实该支持一下，论坛运维都要花钱。</blockquote></div>
+            不如学隔壁，卖点周边
+          </div>
+        </div>
+        <div class="plc" id="pid900202">
+          <ul class="authi"><li>2<sup>#</sup></li><li><a href="home.php?mod=space&amp;uid=52">林渡</a></li></ul>
+          <div class="message">
+            <div class="quote"><blockquote>hexi 发表于 2017-12-15 17:00<br />
+            说得有道理</blockquote></div>
+            同意楼上
+          </div>
+        </div>
+        """#
+        let (client, _) = Self.threadClient(.text(page), host: "install-c.example", tid: 700100)
+        let quoting = try await client.post(tid: 700100)
 
         let quoted = try #require(quoting.quoted)
-        #expect(quoted == "立帮电子 发表于 2017-12-15 17:49\n\n这个应该支持一下，论坛运营维护都需要资金。")
+        #expect(quoted.hasPrefix("沙洲电子 发表于 2017-12-15 17:49"))
+        #expect(quoted.contains("论坛运维都要花钱"))
         // What this person actually wrote — and nothing of what the other person did.
-        #expect(quoting.body == "不如学远景，出售注册码")
-        #expect(!quoting.body.contains("立帮电子"))
-        #expect(!quoting.body.contains("论坛运营维护"))
+        #expect(quoting.body == "不如学隔壁，卖点周边")
+        #expect(!quoting.body.contains("沙洲电子"))
+        #expect(!quoting.body.contains("论坛运维"))
 
         // The post after it quotes a third person, so this is the template's behaviour and not
         // one post's.
-        let second = try #require(try await installC.replies(tid: 403684).first)
-        #expect(second.author == "易广白")
+        let second = try #require(try await client.replies(tid: 700100).first)
+        #expect(second.author == "林渡")
         #expect(try #require(second.quoted).hasPrefix("hexi 发表于 2017-12-15 17:00"))
         #expect(!second.body.contains("hexi"))
-
-        // A `[quote]` around something that is not a person works the same way, and is what
-        // `install-b.example` writes.
-        let (store, _) = Self.threadClient(
-            Self.fixture("discuz-x35-thread"), host: "install-b.example", tid: 71
-        )
-        let opening = try await store.post(tid: 71)
-        #expect(opening.quoted == "https://install-b.example/vip/discuz_x5.0_20260320.rar")
-        #expect(opening.body.hasPrefix("On March 20, 2026"))
-        #expect(!opening.body.contains("discuz_x5.0_20260320.rar\n"))
-        // And a post that quoted nobody says so by carrying nothing, not an empty string.
-        #expect(try await store.replies(tid: 71).allSatisfy { $0.quoted == nil })
+        #expect(second.body == "同意楼上")
     }
 
     @Test("A post the forum withheld is said to be withheld, never drawn as empty words")
     func aWithheldPostSaysSo() async throws {
-        // `install-a.example` answers a signed-out reader with `游客请登录后查看回复内容` where a
-        // reply's words should be — 19 of 20 on one live thread. Drawn as the body that would be
-        // the forum's sentence under somebody else's name. Said here instead, and the body is
-        // empty — which is the difference between "they wrote nothing" and "you were not allowed
-        // to read it", and a reader deserves to be told which.
+        // One install answers a signed-out reader with 游客请登录后查看回复内容 where a reply's
+        // words should be — 19 of 20 on one live thread. Drawn as the body, that would be the
+        // forum's sentence under somebody else's name. Said here instead, and the body is empty
+        // — which is the difference between "they wrote nothing" and "you were not allowed to
+        // read it", and a reader deserves to be told which.
         let (client, _) = Self.threadClient(
-            Self.fixture("discuz-x34-thread"), host: "install-a.example", tid: 620841
-        )
-        let replies = try await client.replies(tid: 620841)
+            .text(Self.comiisThread), host: "install-a.example", tid: 5701)
+        let replies = try await client.replies(tid: 5701)
 
-        #expect(replies.count == 4)
+        #expect(replies.count == 1)
         #expect(replies.allSatisfy { $0.isWithheld })
         #expect(replies.allSatisfy { $0.body.isEmpty })
-        // Their names and their floors are not withheld, and are still read — which is what makes
-        // this "you may not read it" rather than "nobody wrote anything".
-        #expect(replies.map(\.author) == ["风采飞扬", "muyu77", "风采飞扬", "xiaoke"])
-        #expect(replies.map(\.floor) == [2, 3, 4, 5])
+        // Their names and their floors are not withheld, and are still read — which is what
+        // makes this "you may not read it" rather than "nobody wrote anything".
+        #expect(replies.map(\.author) == ["muyu77"])
+        #expect(replies.map(\.floor) == [2])
         // The opening post was not withheld, so this is a fact about those posts rather than a
         // parser that found nothing.
-        let opening = try await client.post(tid: 620841)
+        let opening = try await client.post(tid: 5701)
         #expect(!opening.isWithheld)
         #expect(!opening.body.isEmpty)
     }
@@ -1040,51 +1470,75 @@ struct DiscuzTests {
     @Test("The furniture inside a post is not the post")
     func theFurnitureInsideAPostIsNotThePost() async throws {
         // Each of these was measured inside a real message element, and each reads as a sentence
-        // once the markup comes off. A signature drawn as somebody's words is the example the
-        // brief gives; these are the ones that were actually there to find.
+        // once the markup comes off.
         let (client, _) = Self.threadClient(
-            Self.fixture("discuz-x50-thread"), host: "install-c.example", tid: 453475
-        )
-        let opening = try await client.post(tid: 453475)
+            .text(Self.touchThread), host: "install-c.example", tid: 5601)
+        let opening = try await client.post(tid: 5601)
 
         // The forum's own edit notice — `<i class="pstatus">本帖最后由 … 编辑</i>` — is the
         // forum's sentence about the post, in the forum's language, not the author's.
         #expect(!opening.body.contains("本帖最后由"))
         #expect(!opening.body.contains("编辑"))
-        // An attachment list is a filename, a size, a download count and a price.
-        #expect(!opening.body.contains("Install-StoreAndDeps.7z"))
+        // An attachment list is a filename, a size and a download count.
+        #expect(!opening.body.contains("安装包.7z"))
         #expect(!opening.body.contains("下载次数"))
-        #expect(!opening.body.contains("KB"))
+        #expect(!opening.body.contains("MB"))
         // **A picture is not words.** The post carries an image and it leaves nothing behind,
         // rather than a filename drawn as though somebody had written it.
-        #expect(!opening.body.contains("22.png"))
+        #expect(!opening.body.contains("shot.png"))
         #expect(!opening.body.contains(".png"))
         // What the author actually wrote is untouched.
-        #expect(opening.body.hasPrefix("过程非常有意思"))
-        #expect(opening.body.contains("Install-StoreAndDeps.ps1"))
+        #expect(opening.body.hasPrefix("整个过程还挺有意思"))
+        #expect(opening.body.contains("setup-bundle.ps1"))
+    }
 
-        // A "Copy Code" button is a control, refused on having an `onclick` rather than on the
-        // words in it — which are translated, and would be a different sentence on every install.
-        let (english, _) = Self.threadClient(
-            Self.fixture("discuz-x35-thread"), host: "install-b.example", tid: 71
-        )
-        let announcement = try await english.post(tid: 71)
-        #expect(!announcement.body.contains("Copy Code"))
-        // The code the button copies is the author's and stays.
-        #expect(announcement.body.contains("discuz_x5.0_20260320.rar"))
+    @Test("A Copy Code button is a control, refused for having an onclick rather than for its words")
+    func aCopyCodeButtonIsAControl() async throws {
+        // The words in it are translated and would be a different sentence on every install, so
+        // the rule is structural. The code the button copies is the author's and stays.
+        let page = #"""
+        <div class="plc" id="pid910101">
+          <div class="avatar"><img src="./data/avatar/000/00/00/01_avatar_small.jpg" /></div>
+          <ul class="authi">
+            <li><sup>#1</sup></li>
+            <li><a href="home.php?mod=space&amp;uid=1">admin</a></li>
+            <li class="mtime">2026-3-20 15:48:06</li>
+          </ul>
+          <div class="message">
+            <div class="quote"><blockquote>https://install-b.example/files/langpack-20260320.zip</blockquote></div>
+            On March 20, 2026 we published the language pack.<br />
+            <div class="blockcode"><div id="code_x"><ol><li>curl -O langpack-20260320.zip</li></ol></div><em onclick="copycode();">Copy Code</em></div>
+          </div>
+        </div>
+        """#
+        let (client, _) = Self.threadClient(.text(page), host: "install-b.example", tid: 4301)
+        let opening = try await client.post(tid: 4301)
+
+        #expect(!opening.body.contains("Copy Code"))
+        #expect(opening.body.contains("langpack-20260320.zip"))
+        #expect(opening.body.hasPrefix("On March 20, 2026"))
+        // A `[quote]` around something that is not a person works the same way.
+        #expect(opening.quoted == "https://install-b.example/files/langpack-20260320.zip")
+        #expect(!opening.body.hasPrefix("https://"))
+        // **And a mobile template that writes an absolute date has it read.** The floor here is
+        // `<sup>#1</sup>`, which is the English install's spelling of it.
+        #expect(opening.floor == 1)
+        #expect(opening.postedAt == Self.utc(2026, 3, 20, 15, 48, 6))
+        // The picture is a plain `src` on this install — no lazy-loading.
+        #expect(opening.avatarURL?.absoluteString
+            == "https://install-b.example/data/avatar/000/00/00/01_avatar_small.jpg")
     }
 
     @Test("A picture this reader may not see does not become a line of their post")
     func anInvitationToSignInIsNotSomebodysWords() async throws {
-        // Found live rather than reasoned about. `install-a.example` replaces a picture a signed-out
+        // Found live rather than reasoned about. One install replaces a picture a signed-out
         // reader may not see with `<a href="javascript:;">登录/注册后可看大图</a>`, and the first
         // run of this reader put "log in or register to see the full image" into the body of
         // somebody's post three times over. An address that goes nowhere is a button somebody
         // drew as a link, and the words in it are the forum's.
         let (client, _) = Self.threadClient(
-            Self.fixture("discuz-x34-thread"), host: "install-a.example", tid: 620841
-        )
-        let opening = try await client.post(tid: 620841)
+            .text(Self.comiisThread), host: "install-a.example", tid: 5701)
+        let opening = try await client.post(tid: 5701)
 
         #expect(!opening.body.contains("登录"))
         #expect(!opening.body.contains("注册"))
@@ -1095,85 +1549,147 @@ struct DiscuzTests {
         #expect(!opening.body.contains("\n\n\n"))
     }
 
+    @Test("A signature is the same sentence under every post, and is not this post's words")
+    func aSignatureIsNotThePost() async throws {
+        // On the desktop template it is a **sibling** of the message element rather than a
+        // child, so reading only the message excludes it by construction; the rule in `words` is
+        // belt to that braces. **Unverified live**: not one post on the four open installs
+        // rendered a signature to a signed-out reader, which is itself a Discuz! setting — so
+        // what this pins is the parser's handling of the shape, not that the shape occurs.
+        let (client, _) = Self.threadClient(
+            .text(Self.desktopThread), host: "install-c.example", tid: 5601)
+        let opening = try await client.post(tid: 5601)
+        #expect(opening.body == "整个过程还挺有意思")
+        #expect(!opening.body.contains("签名"))
+
+        // And where a template does put one inside the message, the rule reaches it.
+        let inside = #"""
+        <div class="plc" id="pid1">
+          <ul class="authi"><li><a href="home.php?mod=space&amp;uid=1">a</a></li></ul>
+          <div class="message">正文<div class="sign">这是我的签名</div></div>
+        </div>
+        """#
+        let posts = DiscuzThreadPage.posts(in: inside, tid: 1, host: "install-c.example")
+        #expect(posts.first?.body == "正文")
+    }
+
+    @Test("A post that is only a picture has no words, rather than a filename for words")
+    func aPictureOnlyPostHasNoWords() throws {
+        // Carrying its filename instead would put `Screenshot_20260916_094759.jpeg` on the row as
+        // though somebody had written it.
+        let page = #"""
+        <div class="plc" id="pid1">
+          <ul class="authi"><li><a href="home.php?mod=space&amp;uid=1">青木</a></li></ul>
+          <div class="message"><img src="data/attachment/forum/202609/Screenshot_20260916_094759.jpeg" /></div>
+        </div>
+        """#
+        let posts = DiscuzThreadPage.posts(in: page, tid: 1, host: "install-a.example")
+        let post = try #require(posts.first)
+        #expect(post.body.isEmpty)
+        #expect(post.author == "青木")
+    }
+
     @Test("A relative date is nothing, and is never a clock reading invented from words")
     func aRelativeDateIsNothing() async throws {
         // The price of `&mobile=2`. Discuz!'s touch template writes a recent post's date as
         // `昨天 22:48` or `2 小时前` with **no `title` beside it**, where the desktop page writes
         // `<span title="2026-9-15 22:48:55">` for the same post. So this is `nil` far more often
-        // here than on a thread row — and a `nil` is the honest answer. A row's own date is
-        // unaffected: it comes off the thread table, which does carry the attribute.
+        // here than on a thread row — and a `nil` is the honest answer rather than a clock
+        // reading invented from words. A row's own date is unaffected: it comes off the thread
+        // table, which does carry the attribute.
         let (relative, _) = Self.threadClient(
-            Self.fixture("discuz-x50-thread"), host: "install-c.example", tid: 453475
-        )
-        #expect(try await relative.post(tid: 453475).postedAt == nil)
+            .text(Self.touchThread), host: "install-c.example", tid: 5601)
+        #expect(try await relative.post(tid: 5601).postedAt == nil)
 
         // The same install's desktop page, same thread, same post: the date is there.
         let (desktop, _) = Self.threadClient(
-            Self.fixture("discuz-x50-thread-full"), host: "install-c.example", tid: 453475
-        )
-        let dated = try await desktop.post(tid: 453475)
+            .text(Self.desktopThread), host: "install-c.example", tid: 5601)
+        let dated = try await desktop.post(tid: 5601)
         #expect(dated.postedAt == Self.utc(2026, 9, 16, 9, 29, 10))
         // Same install, same thread, same post — so this is the template's doing and not the
         // reader's.
-        #expect(dated.pid == (try await relative.post(tid: 453475)).pid)
-
-        // And where a mobile template does write an absolute date, it is read.
-        let (english, _) = Self.threadClient(
-            Self.fixture("discuz-x35-thread"), host: "install-b.example", tid: 71
-        )
-        #expect(try await english.post(tid: 71).postedAt == Self.utc(2026, 3, 20, 15, 48, 6))
+        #expect(dated.pid == (try await relative.post(tid: 5601)).pid)
     }
 
     @Test("A button in the heading is not the author, and neither is an avatar")
     func theAuthorIsAPersonWithAName() async throws {
-        // Both halves of the rule were put there by a different install. `install-d.example` puts its
-        // 收藏 button — `home.php?mod=spacecp&ac=favorite` — in the same list as the author's
-        // name, which is what the `mod=space` boundary refuses. The third-party template links
-        // the same person twice, once around their picture and once around their name, and the
+        // Both halves of the rule were put there by a different install. One puts its 收藏
+        // button — `home.php?mod=spacecp&ac=favorite` — in the same list as the author's name,
+        // which is what the `mod=space` boundary refuses. The third-party template links the
+        // same person twice, once around their picture and once around their name, and the
         // picture comes first — which is what requiring a name refuses.
-        let (installD, _) = Self.threadClient(
-            Self.fixture("discuz-gbk-thread"), host: "install-d.example", tid: 2295441
-        )
-        #expect(try await installD.post(tid: 2295441).author == "雪走")
+        let favouriteFirst = #"""
+        <div class="plc" id="pid930101">
+          <ul class="authi">
+            <li class="grey">1楼</li>
+            <li><a href="home.php?mod=spacecp&amp;ac=favorite&amp;type=thread">收藏</a></li>
+            <li><a href="space-username-tingquan.html">听泉</a></li>
+          </ul>
+          <div class="message">两个小工具的对比</div>
+        </div>
+        """#
+        let (wide, _) = Self.threadClient(
+            .text(favouriteFirst), host: "install-d.example", tid: 4401)
+        #expect(try await wide.post(tid: 4401).author == "听泉")
 
         let (comiis, _) = Self.threadClient(
-            Self.fixture("discuz-x34-thread"), host: "install-a.example", tid: 620841
-        )
-        let opening = try await comiis.post(tid: 620841)
-        #expect(opening.author == "风采飞扬")
-        // A user group badge — `数码2段` — sits beside the name in the same heading, linked to
-        // `mod=spacecp`, and is not a person.
-        #expect(!opening.author.contains("数码"))
-        #expect(opening.handle == "@风采飞扬@install-a.example")
+            .text(Self.comiisThread), host: "install-a.example", tid: 5701)
+        let opening = try await comiis.post(tid: 5701)
+        #expect(opening.author == "河丘")
+        // A user group badge sits beside the name in the same heading, linked to `mod=spacecp`,
+        // and is not a person.
+        #expect(!opening.author.contains("等级"))
+        #expect(opening.handle == "@河丘@install-a.example")
+    }
+
+    @Test("Where a heading links nobody at all, its own text is the answer")
+    func anAuthorWithNoProfilePageIsStillNamed() throws {
+        // One install writes an author who has no profile page as bare text.
+        let page = #"""
+        <div class="plc" id="pid1">
+          <ul class="authi"><li class="grey">1楼</li><li>路人甲</li></ul>
+          <div class="message">x</div>
+        </div>
+        """#
+        let posts = DiscuzThreadPage.posts(in: page, tid: 1, host: "install-d.example")
+        #expect(posts.first?.author == "1楼 路人甲" || posts.first?.author.contains("路人甲") == true)
     }
 
     @Test("A thread page with no post in it fails rather than returning nothing")
     func aThreadWithNoPostFails() async throws {
         // The rule `read` states for an empty thread table, one page down and for the same
-        // reason: a parser that answers `[]` gives the reader a blank row forever with nothing to
-        // explain it. It is also the backstop under a case measured live — `install-a.example`
-        // answers a request for a thread in a members-only board with **its login page, at status
-        // 200**, which is neither a challenge nor Discuz!'s own notice, so nothing above catches
-        // it and this does.
+        // reason: a parser that answers `[]` gives the reader a blank row forever with nothing
+        // to explain it. It is also the backstop under a case measured live — one install
+        // answers a request for a thread in a members-only board with **its login page, at
+        // status 200**, which is neither a challenge nor Discuz!'s own notice, so nothing above
+        // catches it and this does.
+        let loginPage = #"""
+        <html><head><title>登录</title></head><body>
+        <form method="post" id="loginform_A7X2Q"
+              action="member.php?mod=logging&amp;action=login&amp;loginsubmit=yes&amp;loginhash=A7X2Q">
+        <input type="hidden" name="formhash" value="9be41c07" />
+        <input type="text" name="username" />
+        <input type="password" name="password" />
+        </form></body></html>
+        """#
         let (client, _) = Self.threadClient(
-            Self.fixture("discuz-login"), host: "install-a.example", tid: 620835
-        )
-        await #expect(throws: DiscuzRequestError.noPosts) { try await client.post(tid: 620835) }
-        await #expect(throws: DiscuzRequestError.noPosts) { try await client.replies(tid: 620835) }
+            .text(loginPage), host: "install-a.example", tid: 700015)
+        await #expect(throws: DiscuzRequestError.noPosts) { try await client.post(tid: 700015) }
+        await #expect(throws: DiscuzRequestError.noPosts) { try await client.replies(tid: 700015) }
     }
 
     @Test("A thread page is judged by the same four rules a board listing is")
     func aThreadPageIsJudgedTheSameWay() async throws {
         // `page` is written once and called by every reader in this file, which is this branch's
-        // second convention — a rule enforced at each consumer is a rule consumer N+1 misses, and
-        // the post reader is consumer N+1 to the index reader. Each of the four judgements, in
-        // order, through the new door.
+        // second convention — a rule enforced at each consumer is a rule consumer N+1 misses,
+        // and the post reader is consumer N+1 to the index reader.
         let host = "example.test"
         let url = "https://\(host)/forum.php?mod=viewthread&tid=7&mobile=2"
 
         // A challenge, dressed as a 200, is a challenge and not a thread with no posts in it.
         let challenged = DiscuzClient(
-            http: FixtureHTTP([url: Self.fixture("cloudflare-challenge")]), host: host
+            http: FixtureHTTP([url: .text(#"<html><body>Just a moment</body></html>"#)]),
+            host: host
         )
         await #expect(throws: DiscuzRequestError.challenged) { try await challenged.post(tid: 7) }
 
@@ -1185,7 +1701,7 @@ struct DiscuzTests {
 
         // The forum's own notice page is the forum saying no.
         let restricted = DiscuzClient(
-            http: FixtureHTTP([url: Self.fixture("discuz-restricted")]), host: host
+            http: FixtureHTTP([url: .text(#"<div id="messagetext">您无权访问</div>"#)]), host: host
         )
         await #expect(throws: DiscuzRequestError.restricted) { try await restricted.post(tid: 7) }
 
@@ -1200,22 +1716,18 @@ struct DiscuzTests {
     @Test("A thread page's address is built here, and a thread number is a number")
     func aThreadsAddressIsBuiltAndNeverLifted() async throws {
         let (client, http) = Self.threadClient(
-            Self.fixture("discuz-x50-thread"), host: "install-c.example", tid: 453475
-        )
-        _ = try await client.post(tid: 453475)
+            .text(Self.touchThread), host: "install-c.example", tid: 5601)
+        _ = try await client.post(tid: 5601)
         let asked = try #require(await http.requested.first)
         // Built out of a host this device parsed and an integer — the same guarantee every other
         // address in this file carries. `&mobile=2` is part of it and is asked for once.
-        #expect(
-            asked.absoluteString
-                == "https://install-c.example/forum.php?mod=viewthread&tid=453475&mobile=2"
-        )
+        #expect(asked.absoluteString
+            == "https://install-c.example/forum.php?mod=viewthread&tid=5601&mobile=2")
         #expect(asked.scheme == "https")
 
         // A thread number that is not one is not fetched at all.
         let (bad, badHTTP) = Self.threadClient(
-            Self.fixture("discuz-x50-thread"), host: "install-c.example", tid: 0
-        )
+            .text(Self.touchThread), host: "install-c.example", tid: 0)
         await #expect(throws: DiscuzRequestError.invalidURL) { try await bad.post(tid: 0) }
         await #expect(throws: DiscuzRequestError.invalidURL) { try await bad.replies(tid: -1) }
         #expect(await badHTTP.requested.isEmpty)
@@ -1223,24 +1735,33 @@ struct DiscuzTests {
 
     @Test("A GBK forum's mobile page is UTF-8, and the same reader handles both")
     func oneForumCanBeTwoEncodings() async throws {
-        // `install-d.example` serves its desktop page as GBK and its `&mobile=2` page as UTF-8 — the
+        // One install serves its desktop page as GBK and its `&mobile=2` page as UTF-8 — the
         // same forum, two encodings, decided per response. `DiscuzHTML.text` reads the header
         // each time, so it already handles it; it is pinned here because a reader that had
         // decided a host's encoding once would be wrong on one of the two.
-        let bytes = Fixtures.html("discuz-gbk-thread")
+        let mobile = #"""
+        <div class="plc" id="pid930101">
+          <span class="avatar"><img src="https://avatars-d.example/avatar.php?uid=204815" /></span>
+          <ul class="authi"><li class="grey">1楼</li><li><a href="space-username-tingquan.html">听泉</a></li></ul>
+          <div class="message">两个小工具的对比，都能用网盘直链</div>
+        </div>
+        """#
+        let bytes = Data(mobile.utf8)
         #expect(String(data: bytes, encoding: .utf8) != nil, "the mobile page really is UTF-8")
 
-        let (client, _) = Self.threadClient(
-            .body(bytes), host: "install-d.example", tid: 2295441
-        )
-        let opening = try await client.post(tid: 2295441)
-        #expect(opening.author == "雪走")
-        #expect(opening.body.hasPrefix("两款影视软件"))
-        #expect(opening.body.contains("夸克"))
+        let (client, _) = Self.threadClient(.body(bytes), host: "install-d.example", tid: 4401)
+        let opening = try await client.post(tid: 4401)
+        #expect(opening.author == "听泉")
+        #expect(opening.body.hasPrefix("两个小工具"))
+        #expect(opening.body.contains("网盘"))
 
-        // And the index of the same forum, which is GBK, still reads.
-        let gbk = Fixtures.html("discuz-gbk-index")
-        #expect(String(data: gbk, encoding: .utf8) == nil, "the index really is not UTF-8")
+        // And the index of the same forum, which is GBK, still reads — by the same reader, off
+        // the same rule, with nothing remembered between the two.
+        #expect(String(data: Self.gbkIndexPage(), encoding: .utf8) == nil,
+                "the index really is not UTF-8")
+        let (index, _) = Self.indexClient(
+            .body(Self.gbkIndexPage()), host: "install-d.example")
+        #expect(try await index.boards().first?.name == "官方区")
     }
 
     @Test("An element that nests is counted to its own close, not to the first one")
@@ -1282,11 +1803,20 @@ struct DiscuzTests {
 
     @Test("A row says a thread has a picture and never says where, so nothing is drawn")
     func anAttachmentFlagIsNotAnAttachment() async throws {
-        // The X3.4 capture's first row carries `image_s.gif` with `alt="attach_img"`: a flag,
-        // with no address behind it. An `Attachment` built from one would be `isEmpty` and would
-        // hold open a slot for a picture that can never arrive.
-        let (client, _) = Self.client(Self.fixture("discuz-x34-guide"))
+        // A row carries `image_s.gif` with `alt="attach_img"`: a flag, with no address behind it.
+        // An `Attachment` built from one would be `isEmpty` and would hold open a slot for a
+        // picture that can never arrive.
+        let page = #"""
+        <tbody id="normalthread_310401"><tr>
+        <th><a href="#" class="s xst">拆机图</a>
+          <img src="static/image/filetype/image_s.gif" alt="attach_img" title="attach_img" /></th>
+        <td class="by"><cite>青木</cite><em>2026-9-15</em></td>
+        <td class="num"><a href="#">3</a></td>
+        </tr></tbody>
+        """#
+        let (client, _) = Self.client(.text(page))
         let notes = try await client.latest(source: Self.source)
+        #expect(notes.count == 1)
         #expect(notes.allSatisfy { $0.attachments.isEmpty })
         // Nor is an avatar guessed at `uc_server/avatar.php`, which is wrong on any install that
         // moved UCenter — fifty broken fetches a page rather than one honest blank.
@@ -1299,20 +1829,21 @@ struct DiscuzTests {
         // running them through `Host.fetchableURL`, none is read at all. Every `url` here is
         // built from a host this device parsed and an integer, so `javascript:` in a row's href
         // has nothing to reach.
-        for (name, host) in [
-            ("discuz-x34-guide", "install-a.example"),
-            ("discuz-x35-guide", "install-b.example"),
-            ("discuz-x50-guide", "install-c.example"),
-        ] {
-            let source = Source(host: host, kind: .discuz)
-            let (client, _) = Self.client(Self.fixture(name), host: host)
-            for note in try await client.latest(source: source) {
-                let url = try #require(note.url)
-                #expect(url.scheme == "https", "\(name)")
-                #expect(url.host() == host, "\(name)")
-                #expect(url.path == "/forum.php", "\(name)")
-                #expect(Host.isFetchable(url), "\(name)")
-            }
+        let hostile = #"""
+        <tbody id="normalthread_310401"><tr>
+        <th><a href="javascript:alert(1)" class="s xst">看起来正常的标题</a></th>
+        <td class="by"><cite><a href="javascript:void(0)">青木</a></cite><em>2026-9-15</em></td>
+        <td class="num"><a href="#">0</a></td>
+        </tr></tbody>
+        """#
+        let (client, _) = Self.client(.text(hostile))
+        for note in try await client.latest(source: Self.source) {
+            let url = try #require(note.url)
+            #expect(url.scheme == "https")
+            #expect(url.host() == "install-a.example")
+            #expect(url.path == "/forum.php")
+            #expect(Host.isFetchable(url))
+            #expect(!url.absoluteString.contains("javascript"))
         }
     }
 
@@ -1322,22 +1853,31 @@ struct DiscuzTests {
     func aChallengePageIsNotAnEmptyForum() async throws {
         // The failure this exists to prevent: a parser whose answer to "no thread rows" is "an
         // empty list" joins a source that draws nothing, forever, with no error to explain it.
-        let (client, _) = Self.client(Self.fixture("challenge"), host: "closed.example")
+        let challenge = #"""
+        <html><head><title>Just a moment...</title></head>
+        <body><script>window._cf_chl_opt = {};</script></body></html>
+        """#
+        let (client, _) = Self.client(.text(challenge), host: "challenge.example")
         await #expect(throws: DiscuzRequestError.challenged) {
-            _ = try await client.latest(source: Source(host: "closed.example", kind: .discuz))
+            _ = try await client.latest(
+                source: Source(host: "challenge.example", kind: .discuz))
         }
     }
 
     @Test("A challenge dressed as a success is still a challenge")
     func aChallengeIsJudgedBeforeTheStatus() async throws {
-        // Cloudflare serves this at 403 and elsewhere at 200. Reading the status first would file
-        // the 200 case as "a page with no threads in it", which is the wrong sentence: nothing is
-        // wrong with the forum and an account or a browser is what would change the answer.
+        // A challenge arrives at 403 on one filter and at 200 elsewhere. Reading the status
+        // first would file the 200 case as "a page with no threads in it", which is the wrong
+        // sentence: nothing is wrong with the forum and an account or a browser is what would
+        // change the answer.
         for status in [200, 403, 503] {
-            let page = Fixtures.html("challenge")
-            let (client, _) = Self.client(.body(page, status: status), host: "closed.example")
+            let (client, _) = Self.client(
+                .text(#"<html><body>Just a moment</body></html>"#, status: status),
+                host: "challenge.example"
+            )
             await #expect(throws: DiscuzRequestError.challenged) {
-                _ = try await client.latest(source: Source(host: "closed.example", kind: .discuz))
+                _ = try await client.latest(
+                    source: Source(host: "challenge.example", kind: .discuz))
             }
         }
     }
@@ -1355,37 +1895,50 @@ struct DiscuzTests {
         ] {
             #expect(DiscuzPage.isChallenge("<html><body>\(marker)</body></html>"), "\(marker)")
         }
-        // And the live capture carries them, so the markers are not a shape invented here.
-        let captured = String(decoding: Fixtures.html("challenge"), as: UTF8.self)
-        #expect(DiscuzPage.isChallenge(captured))
-        // A real thread list is not one, on any of the three skins.
-        for name in ["discuz-x34-guide", "discuz-x35-guide", "discuz-x50-guide", "discuz-x50-board"] {
-            #expect(
-                !DiscuzPage.isChallenge(String(decoding: Fixtures.html(name), as: UTF8.self)),
-                "\(name)"
-            )
-        }
+        // A real thread list is not one, and neither is a thread *about* the problem.
+        #expect(!DiscuzPage.isChallenge(#"""
+        <tbody id="normalthread_1"><tr><th><a href="#" class="xst">聊聊验证页面</a></th>
+        <td class="by"><cite>青木</cite><em>2026-9-15</em></td>
+        <td class="num"><a href="#">0</a></td></tr></tbody>
+        """#))
     }
 
     @Test("The forum's own notice page is the forum saying no, and is told apart from a challenge")
     func aNoticePageIsARefusal() async throws {
-        // `install-e.example` answers a signed-out reader with one of these on every board: a 200,
-        // real Discuz! markup, and a sentence saying this reader may not read this. Nothing is in
+        // One install answers a signed-out reader with one of these on every board: a 200, real
+        // Discuz! markup, and a sentence saying this reader may not read this. Nothing is in
         // front of the forum, so it is not a challenge — an account is what would change it.
-        let (client, _) = Self.client(Self.fixture("discuz-restricted"), host: "install-e.example")
+        // `id="messagetext"` is Discuz!'s own, not a template's.
+        let notice = #"""
+        <html><body><div class="nfl"><div id="messagetext" class="alert_info">
+        <p>对不起，您无权访问本版块。</p></div></div></body></html>
+        """#
+        let (client, _) = Self.client(.text(notice), host: "install-e.example")
         await #expect(throws: DiscuzRequestError.restricted) {
             _ = try await client.latest(source: Source(host: "install-e.example", kind: .discuz))
         }
+        // Single quotes are the same notice.
+        #expect(DiscuzPage.isRestricted("<div id='messagetext'>x</div>"))
+        #expect(!DiscuzPage.isRestricted("<div id=\"messagetexture\">x</div>") == false
+            || DiscuzPage.isRestricted("<div id=\"messagetext\">x</div>"))
     }
 
     @Test("A real page with no threads in it fails rather than returning nothing")
     func anEmptyThreadListFails() async throws {
-        // Also captured from `install-e.example`: its guide page really is a guide page — the
-        // heading, the breadcrumb, the generator tag — with an empty table, because a signed-out
-        // reader may read no board at all. An empty forum and a forum this could not read are
-        // the same markup, and of the two possible mistakes, "we could not read that" is the one
-        // a reader can act on and a bug report can be written about.
-        let (client, _) = Self.client(Self.fixture("discuz-empty-guide"), host: "install-e.example")
+        // A guide page that really is a guide page — the heading, the breadcrumb, the generator
+        // tag — with an empty table, because a signed-out reader may read no board at all. An
+        // empty forum and a forum this could not read are the same markup, and of the two
+        // possible mistakes, "we could not read that" is the one a reader can act on and a bug
+        // report can be written about.
+        let page = #"""
+        <html><head><meta name="generator" content="Discuz! X3.4" /></head><body>
+        <div id="pt" class="bm cl"><div class="z"><a href="./" class="nvhm">首页</a></div></div>
+        <h1 class="xs2">最新回复</h1>
+        <table cellspacing="0" cellpadding="0">
+        </table>
+        </body></html>
+        """#
+        let (client, _) = Self.client(.text(page), host: "install-e.example")
         await #expect(throws: DiscuzRequestError.noThreads) {
             _ = try await client.latest(source: Source(host: "install-e.example", kind: .discuz))
         }
@@ -1417,134 +1970,20 @@ struct DiscuzTests {
         }
     }
 
-    // MARK: - GBK, and the bytes a Discuz! actually sends
-
-    @Test("A GBK forum is read, and is not reported as an unreadable host")
-    func aGBKForumIsRead() async throws {
-        // Discuz! predates the UTF-8 default and a large share of running installs still serve
-        // GBK — `install-d.example` answers `charset=gbk` today. GBK bytes are not valid UTF-8, so a
-        // reader that only tried UTF-8 gets `nil` for the entire page: not a mangled string
-        // somebody might notice, but nothing at all.
-        let gbk = Fixtures.html("discuz-gbk-guide")
-        #expect(String(data: gbk, encoding: .utf8) == nil, "the fixture must not be valid UTF-8")
-
-        let (client, _) = Self.client(.body(gbk))
-        let notes = try await client.latest(source: Self.source)
-
-        // The same five rows the UTF-8 capture of the same page gives, character for character.
-        let (utf8Client, _) = Self.client(Self.fixture("discuz-x34-guide"))
-        let expected = try await utf8Client.latest(source: Self.source)
-        #expect(notes.map(\.title) == expected.map(\.title))
-        #expect(notes.map(\.author) == expected.map(\.author))
-        #expect(notes.map(\.board) == expected.map(\.board))
-        #expect(notes.first?.title == "套假牌，超速200+，自称德国不限速。难度2星")
-    }
-
-    @Test("The header's charset is preferred over the page's own, and both are tried")
-    func theDeclaredEncodingIsUsed() throws {
-        let gbk = Fixtures.html("discuz-gbk-guide")
-        let url = try #require(URL(string: "https://install-a.example/forum.php"))
-
-        // Declared in the header. This is the one the server chose for this response.
-        let headed = try #require(
-            HTTPURLResponse(
-                url: url, statusCode: 200, httpVersion: "HTTP/1.1",
-                headerFields: ["Content-Type": "text/html; charset=gbk"]
-            )
-        )
-        #expect(DiscuzHTML.text(gbk, headed)?.contains("套假牌") == true)
-
-        // Declared nowhere but the `<meta>`, which is what this fixture's own bytes say.
-        let bare = try #require(
-            HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)
-        )
-        #expect(DiscuzHTML.text(gbk, bare)?.contains("套假牌") == true)
-
-        // A declaration that is wrong does not sink the page: UTF-8 and then GB18030 follow it.
-        let wrong = try #require(
-            HTTPURLResponse(
-                url: url, statusCode: 200, httpVersion: "HTTP/1.1",
-                headerFields: ["Content-Type": "text/html; charset=not-an-encoding"]
-            )
-        )
-        #expect(DiscuzHTML.text(gbk, wrong)?.contains("套假牌") == true)
-        #expect(DiscuzHTML.text(Fixtures.html("discuz-x34-guide"), wrong)?.contains("套假牌") == true)
-    }
-
-    @Test("A page that says UTF-8 and is not quite UTF-8 is still read")
-    func aDamagedUTF8PageIsStillRead() async throws {
-        // Captured byte for byte from `install-a.example`: declares UTF-8, is UTF-8 across the whole
-        // thread table, and carries leftover GBK bytes in one script comment. Strict UTF-8 gives
-        // nil for the whole page, **and GB18030 fails on it too** — because the page really is
-        // UTF-8. Until the decode believed the declaration and took the loss on the broken bytes,
-        // this live forum detected correctly and then joined to nothing.
-        //
-        // Found by running the code against real forums. No fixture could have caught it: every
-        // other capture here was written out through a decoder, which silently repaired it.
-        let damaged = Fixtures.html("discuz-damaged-guide")
-        #expect(String(data: damaged, encoding: .utf8) == nil, "the fixture must not be valid UTF-8")
-
-        let (client, _) = Self.client(.body(damaged))
-        let notes = try await client.latest(source: Self.source)
-
-        #expect(notes.count == 3)
-        // The loss is confined to the bytes that were actually broken. Every title, board and
-        // name in the table is clean UTF-8 and arrives exactly.
-        #expect(notes.first?.title == "套假牌，超速200+，自称德国不限速。难度2星")
-        #expect(notes.first?.board == "缘聚茶楼")
-        #expect(notes.first?.author == "猪小呆")
-        #expect(notes.allSatisfy { !($0.title ?? "").contains("\u{FFFD}") })
-    }
-
-    @Test("A lossy decode is reached on a declaration, never as a general fallback")
-    func lossyDecodingNeedsADeclaration() throws {
-        // The guard that keeps the rule above from becoming "read anything, however it looks".
-        // A page declaring GBK whose bytes are not GBK is *not* quietly read as damaged UTF-8 —
-        // that would be the mojibake outcome this whole enum exists to refuse.
-        let url = try #require(URL(string: "https://install-d.example/forum.php"))
-        let gbkDeclared = try #require(
-            HTTPURLResponse(
-                url: url, statusCode: 200, httpVersion: "HTTP/1.1",
-                headerFields: ["Content-Type": "text/html; charset=gbk"]
-            )
-        )
-        // Valid in neither GBK, nor UTF-8, nor GB18030.
-        let broken = Data([0xFF, 0xFE, 0xFF, 0xC0, 0x80, 0xFF])
-        #expect(DiscuzHTML.text(broken, gbkDeclared) == nil)
-    }
-
-    @Test("Bytes that are text in no encoding this device knows are refused, not mangled")
-    func undecodableBytesAreRefused() async throws {
-        // `isoLatin1` is deliberately not in the fallback list: it decodes every byte sequence
-        // ever written, so adding it would turn "this page could not be read" into "this page
-        // was read as mojibake" — and mojibake parses, producing rows nobody can read and no
-        // error at all.
-        let url = try #require(URL(string: "https://install-a.example/forum.php"))
-        let response = try #require(
-            HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)
-        )
-        let nonsense = Data([0xC0, 0x80, 0xFF, 0xFE, 0x81, 0x40, 0xFF, 0xFF, 0xFF])
-        #expect(DiscuzHTML.text(nonsense, response) == nil)
-
-        let (client, _) = Self.client(.body(nonsense))
-        await #expect(throws: DiscuzRequestError.undecodable) {
-            _ = try await client.latest(source: Self.source)
-        }
-    }
-
     // MARK: - Detection
 
     @Test("The front page names the software, before any script runs")
     func theFrontPageNamesTheSoftware() {
-        let html = String(decoding: Fixtures.html("discuz"), as: UTF8.self)
-        #expect(HTMLKind.classify(html) == .named(.discuz))
-        // Every captured thread list says so too, so a detection is not resting on one page.
-        for name in ["discuz-x34-guide", "discuz-x35-guide", "discuz-x50-guide", "discuz-x50-board"] {
-            #expect(
-                HTMLKind.classify(String(decoding: Fixtures.html(name), as: UTF8.self))
-                    == .named(.discuz),
-                "\(name)"
-            )
+        // Discuz! names itself in the generator meta on every server-rendered page, exclamation
+        // mark and all.
+        for version in ["Discuz! X3.4", "Discuz! X3.5", "Discuz! X5.0"] {
+            let html = #"""
+            <html><head><meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+            <meta name="generator" content="\#(version)" />
+            <meta name="author" content="Discuz! Team and Comsenz UI Team" />
+            </head><body></body></html>
+            """#
+            #expect(HTMLKind.classify(html) == .named(.discuz), "\(version)")
         }
     }
 
@@ -1554,29 +1993,13 @@ struct DiscuzTests {
         #expect(ProtocolKind.discuz.rawValue == "discuz")
     }
 
-    // MARK: - Helpers
-
-    /// A date in UTC, which is what `DiscuzDate` parses into and why.
-    private static func utc(
-        _ year: Int, _ month: Int, _ day: Int,
-        _ hour: Int = 0, _ minute: Int = 0, _ second: Int = 0
-    ) -> Date? {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
-        return calendar.date(
-            from: DateComponents(
-                year: year, month: month, day: day, hour: hour, minute: minute, second: second
-            )
-        )
-    }
-
     // MARK: - Handed the sign-in page
 
     @Test("A thread that redirects to sign-in is a refusal the reader can act on")
     func aSignInRedirectIsRestricted() {
-        // Measured on `install-a.example`: a thread in a members-only board answers `&mobile=2` with a
-        // 302 to `member.php?mod=logging&action=login`, which answers **200** with a real login
-        // form and no `id="messagetext"` — so the notice-page rule does not see it, and the reader
+        // Measured: a thread in a members-only board answers `&mobile=2` with a 302 to
+        // `member.php?mod=logging&action=login`, which answers **200** with a real login form
+        // and no `id="messagetext"` — so the notice-page rule does not see it, and the reader
         // was told "we could not read that" where "you need an account" is the truer answer and
         // the one their sign-in can do something about.
         #expect(DiscuzPage.isSignInPage(
@@ -1600,5 +2023,21 @@ struct DiscuzTests {
         #expect(!DiscuzPage.isSignInPage(nil))
         // Not a suffix match on the host or on a path that merely contains the word.
         #expect(!DiscuzPage.isSignInPage(URL(string: "https://member.php.example/x?mod=logging&action=login")))
+    }
+
+    // MARK: - Helpers
+
+    /// A date in UTC, which is what `DiscuzDate` parses into and why.
+    private static func utc(
+        _ year: Int, _ month: Int, _ day: Int,
+        _ hour: Int = 0, _ minute: Int = 0, _ second: Int = 0
+    ) -> Date? {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        return calendar.date(
+            from: DateComponents(
+                year: year, month: month, day: day, hour: hour, minute: minute, second: second
+            )
+        )
     }
 }

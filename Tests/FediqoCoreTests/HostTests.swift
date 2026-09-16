@@ -7,9 +7,9 @@ struct HostTests {
     @Test("A host or https URL is the lowercase host, path stripped")
     func parseHostAndHTTPSURL() throws {
         #expect(try Host.parse("first.example") == "first.example")
-        #expect(try Host.parse("  first.example  ") == "first.example")
+        #expect(try Host.parse("  First.Example  ") == "first.example")
         #expect(try Host.parse("https://first.example/about?foo=1#bar") == "first.example")
-        #expect(try Host.parse("HTTPS://first.example/") == "first.example")
+        #expect(try Host.parse("HTTPS://FIRST.EXAMPLE/") == "first.example")
         #expect(try Host.parse("https://[::1]/about") == "[::1]")
         #expect(try Host.parse("https://[2001:DB8::1]/") == "[2001:db8::1]")
         #expect(try Host.parse("[::1]") == "[::1]")

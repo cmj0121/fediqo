@@ -163,7 +163,22 @@ struct EmojiEverywhereTests {
     // call site with no test, and "the timeline asks at all" is the fact that was missing.
     @Test("A timeline load asks for a catalogue nobody is holding")
     func aTimelineLoadAsksForAMissingCatalogue() async {
-        let http = FixtureHTTP(["/api/v1/custom_emojis": .body(Fixtures.json("custom-emojis"))])
+        // Seven registrations in, three out — and the four that fall are the four kinds of
+        // rubbish a registration comes in: the same shortcode twice, a nameless one, an address
+        // that is not on the wire at all, and one this device will not fetch over. The count is
+        // the assertion, so what makes the count what it is is written out here beside it.
+        let http = FixtureHTTP(["/api/v1/custom_emojis": .text(#"""
+        [
+          {"shortcode": "blobcat", "url": "https://first.example/emoji/blobcat.png"},
+          {"shortcode": "wave", "url": "https://first.example/emoji/wave.png",
+           "static_url": "http://first.example/emoji/wave-still.png"},
+          {"shortcode": "blob-cat", "url": "https://first.example/emoji/blob-cat.png"},
+          {"shortcode": "blobcat", "url": "https://first.example/emoji/blobcat-second.png"},
+          {"shortcode": "", "url": "https://first.example/emoji/nameless.png"},
+          {"shortcode": "nowhere", "url": "file:///etc/passwd"},
+          {"shortcode": "plain", "url": "http://first.example/emoji/plain.png"}
+        ]
+        """#)])
         let store = EmojiCatalogueStore()
         #expect(await store.catalogue(host: Self.reading) == nil)
 
@@ -175,7 +190,9 @@ struct EmojiEverywhereTests {
 
     @Test("A catalogue the reader cleared comes back on the next timeline load")
     func aClearedCatalogueComesBack() async {
-        let http = FixtureHTTP(["/api/v1/custom_emojis": .body(Fixtures.json("custom-emojis"))])
+        let http = FixtureHTTP(["/api/v1/custom_emojis": .text(#"""
+        [{"shortcode": "blobcat", "url": "https://first.example/emoji/blobcat.png"}]
+        """#)])
         let store = EmojiCatalogueStore()
         await TimelinePane.catalogue(Self.reading, in: store, over: http)
         #expect(await store.alphabet(own: [], host: Self.reading).lookup("blobcat") != nil)
@@ -197,7 +214,9 @@ struct EmojiEverywhereTests {
     // saved rather than a race closed.
     @Test("A catalogue already in hand is not asked for again, however often a timeline loads")
     func aHeldCatalogueIsNotAskedForAgain() async {
-        let http = FixtureHTTP(["/api/v1/custom_emojis": .body(Fixtures.json("custom-emojis"))])
+        let http = FixtureHTTP(["/api/v1/custom_emojis": .text(#"""
+        [{"shortcode": "blobcat", "url": "https://first.example/emoji/blobcat.png"}]
+        """#)])
         let store = EmojiCatalogueStore()
         for _ in 0..<4 { await TimelinePane.catalogue(Self.reading, in: store, over: http) }
         #expect(await http.paths == ["/api/v1/custom_emojis"])
