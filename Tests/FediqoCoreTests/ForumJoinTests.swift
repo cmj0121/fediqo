@@ -249,6 +249,36 @@ struct ForumJoinTests {
         #expect(await store.all().isEmpty)
     }
 
+    @Test("The offer hands the picker sub-boards in order, with a depth to indent by")
+    func theOfferCarriesSubBoardsInOrder() async throws {
+        // D29, at the door the picker actually reads. `JoinOffer.boards` is the flat list a sheet
+        // draws one row at a time, so the nesting has to survive the flattening: a child directly
+        // after its parent, and a `depth` to indent it by. It does, because each board is placed
+        // by where its own anchor is on the page rather than by which container it sat in.
+        let store = ItemStore()
+        let http = Self.boardHTTP(
+            host: "install-d.example", index: .body(Fixtures.html("discuz-gbk-index"))
+        )
+        guard case .chooseBoards(let offer) = try await Self.joiner(http, store)
+            .begin(host: "install-d.example")
+        else {
+            Issue.record("a Discuz! should pause for the reader to choose")
+            return
+        }
+
+        #expect(
+            offer.boards.map { String(repeating: "  ", count: $0.depth) + $0.name } == [
+                "官方软件区",
+                "  拼音输入法", "  磁盘清理", "  MiniBrowser", "  文档转换器",
+                "科技资讯区",
+                "  资讯存档",
+            ]
+        )
+        // And each of them is a pick in its own right, because each is its own `fid`.
+        #expect(Set(offer.boards.map(\.fid)).count == offer.boards.count)
+        #expect(await store.sources().isEmpty)
+    }
+
     @Test("The reader picks, and one source carries every board they chose")
     func theReaderPicksAndOneSourceCarriesThem() async throws {
         // D26: one `Source` per host with a set of subscribed boards, never one source per board.

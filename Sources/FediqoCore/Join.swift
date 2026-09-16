@@ -229,7 +229,14 @@ public struct DiscuzJoin: Sendable {
         // this device knows, or a page whose thread table nobody could find. A reader sent to
         // check their spelling by one of these is being sent to look for a fault that might
         // well be theirs — which is the distinction `refused` above is protecting.
-        case .noThreads, .http, .invalidURL, .undecodable:
+        //
+        // `.noPosts` is here to be answered for rather than because it can arrive: joining a
+        // forum reads its index and its boards and never opens a thread, so nothing on this
+        // path can raise it. It is filed with `.noThreads` because it is the same sentence one
+        // page further down — it answered, and there was nothing in it this device could read.
+        // Left out of the list it would have been a `default:`, which this branch has twice
+        // recorded as a silent wrong answer rather than a safe one.
+        case .noThreads, .noPosts, .http, .invalidURL, .undecodable:
             return JoinError.publicTimelineFailed
         }
     }

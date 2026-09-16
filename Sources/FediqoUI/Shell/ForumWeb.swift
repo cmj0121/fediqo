@@ -420,9 +420,18 @@ extension ForumWebEngine {
     /// finished a navigation without handing one over (a document restored from the back/forward
     /// cache does that). Synthesised rather than thrown, because the bytes are real either way
     /// and a caller asking for a page should not be failed over bookkeeping.
+    ///
+    /// **The synthesised one carries where the view actually ended up, not where it was sent.**
+    /// A caller reads the response's address to tell "here is your thread" from "here is the
+    /// sign-in page instead" — `DiscuzPage.isSignInPage` does exactly that, and it is how a
+    /// members-only board is reported as needing an account rather than as unreadable. Handing
+    /// back the requested address would make every redirect invisible to that check, and it would
+    /// be invisible **only** on the path that matters most: a forum read through the engine is a
+    /// forum the reader signed in to, which is where a session lapsing mid-read sends them.
     func response(for url: URL) -> HTTPURLResponse {
-        mainResponse ?? HTTPURLResponse(
-            url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil
+        if let mainResponse { return mainResponse }
+        return HTTPURLResponse(
+            url: view.url ?? url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil
         )!
     }
 }
