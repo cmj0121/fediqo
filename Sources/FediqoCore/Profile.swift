@@ -179,8 +179,15 @@ public enum ProfileError: Error, Hashable, Sendable {
 /// compares the bare `NSError` code with no domain beside it. This one checks the domain, for the
 /// reason given at the comparison below — so where the two differ this is the stricter, and that
 /// is a difference on purpose rather than a precedent being followed.
-enum Cancellation {
-    static func happened(_ error: any Error) -> Bool {
+///
+/// **`public` rather than a twin in FediqoUI**, which was the fork this unit had to settle. The
+/// UI has a caller that needs it — `ShellSession.loadCatalog`, whose `ServerDirectory` has no
+/// error vocabulary of its own and hands the transport's failures up exactly as they arrive — and
+/// a second copy of a predicate this subtle is how two copies drift. `ForumWeb.translate` above is
+/// the evidence for that rather than the worry about it: it is already a divergent second copy,
+/// written without the domain check, and it is one because there was nothing to share.
+public enum Cancellation {
+    public static func happened(_ error: any Error) -> Bool {
         if error is CancellationError { return true }
         // The domain as well as the number. `NSURLErrorCancelled` is -999, and a Swift error
         // bridged to `NSError` takes its code from its own case number, so a bare code comparison

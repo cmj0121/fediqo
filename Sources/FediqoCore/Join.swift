@@ -40,7 +40,7 @@ public struct MastodonJoin: Sendable {
         let kind: ProtocolKind
         do {
             kind = try await Detector(http: http).detect(raw)
-        } catch is CancellationError {
+        } catch let error where Cancellation.happened(error) {
             throw CancellationError()
         } catch let error as DetectError {
             switch error {
@@ -69,7 +69,14 @@ public struct MastodonJoin: Sendable {
         async let trend: [Note] = {
             do {
                 return try await client.trending(source: source)
-            } catch is CancellationError {
+            }
+            // **Ahead of the swallow, and the swallow is why it has to be.** Trends are allowed
+            // to fail — a server without them still has a timeline — so every way they can fail
+            // is turned into `[]`, and a reader closing the app is one of those ways. Written
+            // `catch is CancellationError` this never fired, and the join carried on to
+            // `store.add` and `store.ingest` for somebody who was no longer there, leaving a
+            // server in their list that they never finished adding.
+            catch let error where Cancellation.happened(error) {
                 throw CancellationError()
             } catch {
                 return []
@@ -79,7 +86,7 @@ public struct MastodonJoin: Sendable {
         let publicNotes: [Note]
         do {
             publicNotes = try await pub
-        } catch is CancellationError {
+        } catch let error where Cancellation.happened(error) {
             throw CancellationError()
         } catch let error as MastodonRequestError where Self.isRefusal(error) {
             throw JoinError.publicTimelineFailed
@@ -131,7 +138,7 @@ public struct DiscourseJoin: Sendable {
         let topics: [Note]
         do {
             topics = try await client.latest(source: source)
-        } catch is CancellationError {
+        } catch let error where Cancellation.happened(error) {
             throw CancellationError()
         } catch let error as DiscourseRequestError {
             switch error {
@@ -185,7 +192,7 @@ public struct DiscuzJoin: Sendable {
         let threads: [Note]
         do {
             threads = try await client.latest(source: source)
-        } catch is CancellationError {
+        } catch let error where Cancellation.happened(error) {
             throw CancellationError()
         } catch let error as DiscuzRequestError {
             throw Self.refusal(error)
@@ -326,7 +333,7 @@ public struct DiscuzBoardJoin: Sendable {
     func index(host: String) async throws -> [DiscuzCategory] {
         do {
             return try await DiscuzClient(http: http, host: host).boards()
-        } catch is CancellationError {
+        } catch let error where Cancellation.happened(error) {
             throw CancellationError()
         } catch let error as DiscuzRequestError {
             throw DiscuzJoin.refusal(error)
@@ -348,6 +355,14 @@ public struct DiscuzBoardJoin: Sendable {
     /// nothing, nothing is what happens: an empty pick is not a failure, it is a reader who
     /// changed their mind, and there is no error for that because there is nothing wrong.
     ///
+    /// **A reader who leaves part-way through is that same nothing, and the loop stops.** This is
+    /// the paragraph above carried one step further rather than an exception to it: a pick where
+    /// some boards read and the reader then walked away is still a pick they never finished, so
+    /// `CancellationError` leaves and the store is untouched — no source, no subscription, no
+    /// threads. The alternative is the one this method must not do, and did: file the leaving as
+    /// an unreadable board, keep asking the forum for the rest, and then write down a partial
+    /// answer to a question nobody is waiting for.
+    ///
     /// **One board at a time, on purpose.** Eight parallel requests into a stranger's forum for
     /// one button press is the traffic this package already refuses to spend elsewhere — see
     /// `SourceJoin`, "one detection, not one per protocol". A forum's page is not a resource
@@ -367,7 +382,15 @@ public struct DiscuzBoardJoin: Sendable {
             do {
                 threads += try await client.threads(board: board, source: stamp)
                 subscribed.append(BoardSubscription(board))
-            } catch is CancellationError {
+            }
+            // **Thrown out of the loop, which is the whole of the fix here.** A reader who walks
+            // away mid-pick is not a board that could not be read: filing them under `unread`
+            // records somebody's working board as broken, and — because this ran on past it —
+            // spent one more request per remaining pick on a reader who had gone, and then wrote
+            // all three of `add`, `subscribe` and `ingest` behind them. Leaving stops the loop
+            // and reaches none of that, which is the same nothing the paragraph above promises
+            // for a pick where nothing read.
+            catch let error where Cancellation.happened(error) {
                 throw CancellationError()
             } catch let error as DiscuzRequestError {
                 unread.append(UnreadBoard(board: board, error: DiscuzJoin.refusal(error)))
@@ -501,7 +524,7 @@ public struct SourceJoin: Sendable {
 
         do {
             return (host, try await Detector(http: http).detect(raw))
-        } catch is CancellationError {
+        } catch let error where Cancellation.happened(error) {
             throw CancellationError()
         } catch let error as DetectError {
             switch error {

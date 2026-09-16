@@ -33,9 +33,11 @@ public struct DiscourseClient: Sendable {
         async let sections: [Int: String] = {
             do {
                 return try await categories()
-            } catch is CancellationError {
-                throw CancellationError()
             } catch {
+                // Lifted out ahead of the swallow, and through `Cancellation.happened`: a reader
+                // who walked away arrives here looking exactly like a forum with no `/site.json`,
+                // and the difference is that one of them is still waiting for a timeline.
+                if Cancellation.happened(error) { throw CancellationError() }
                 return [:]
             }
         }()
@@ -96,11 +98,12 @@ public struct DiscourseClient: Sendable {
                 return try await about()
             } catch {
                 // **Through `Cancellation.happened` rather than `catch is CancellationError`.**
-                // The second is what `latest` above writes, and against a real `URLSession` it
-                // never fires: a cancelled transfer arrives as `URLError(.cancelled)`, falls into
-                // the swallow below, and the preview then returns a profile — for a reader who is
-                // no longer there — instead of the `CancellationError` `SourceProfiles.answer`
-                // promises in its signature.
+                // The second was what `latest` above wrote until unit 1b, and against a real
+                // `URLSession` it never fires: a cancelled transfer arrives as
+                // `URLError(.cancelled)`, falls into the swallow below, and the preview then
+                // returns a profile — for a reader who is no longer there — instead of the
+                // `CancellationError` `SourceProfiles.answer` promises in its signature. The
+                // twin above now reads the same way; the two are deliberately identical.
                 if Cancellation.happened(error) { throw CancellationError() }
                 return nil
             }

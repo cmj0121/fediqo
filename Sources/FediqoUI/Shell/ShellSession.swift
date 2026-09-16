@@ -180,7 +180,14 @@ final class ShellSession {
         do {
             let servers = try await ServerDirectory(http: http).servers()
             catalog = servers.isEmpty ? .empty : .ready(servers)
-        } catch is CancellationError {
+        }
+        // **The one site in this file a raw `URLError(.cancelled)` still reaches.** Everything
+        // else here calls Core, which now reports a cancelled transfer as `CancellationError`;
+        // `ServerDirectory` has no error vocabulary of its own and hands the transport's failures
+        // up exactly as they arrive. Written `catch is CancellationError` this never fired, and
+        // the sheet told the reader the directory could not be reached — about a third party that
+        // was answering perfectly well, and on the strength of them closing it.
+        catch let error where Cancellation.happened(error) {
             return
         } catch {
             catalog = .failed
@@ -225,7 +232,13 @@ final class ShellSession {
                 // D28's pause. Nothing has been added and nothing will be until they pick.
                 choosing = BoardChoice(offer: offer)
             }
-        } catch is CancellationError {
+        }
+        // `Cancellation.happened` and not `is CancellationError`, though after unit 1b Core does
+        // report a leaving as `CancellationError` and the tidy spelling would work today. It
+        // works only because of a guarantee three files away that `SourceJoin`'s signature does
+        // not state — and a site that is correct for a reason nobody can read at it is how this
+        // whole class of bug got to fourteen places. The predicate accepts both spellings.
+        catch let error where Cancellation.happened(error) {
             return
         } catch let error as JoinError {
             report(error, raw: raw, host: parsed)
@@ -264,7 +277,7 @@ final class ShellSession {
             // Where a board that failed was the only thing the reader was after, the rail is
             // still worth landing them on the one that worked — `adopt` does that — but the
             // sentence about the rest is `unread`, and it is read on Account.
-        } catch is CancellationError {
+        } catch let error where Cancellation.happened(error) {
             return
         } catch let error as JoinError {
             // Every board failed, so nothing was added. Core threw the first board's reason and

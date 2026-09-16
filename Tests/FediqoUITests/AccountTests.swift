@@ -272,4 +272,74 @@ struct AccountAddTests {
         #expect(L10n.t("account.catalog.added", language: .taiwanese) == "已新增")
         #expect(L10n.t("account.refuse.network", language: .taiwanese) != "account.refuse.network")
     }
+
+    // MARK: - The reader who walked away
+
+    @Test("A directory the reader walked away from is not a directory that could not be reached")
+    func cancelledCatalogIsNotAFailure() async {
+        // The only one of this view-model's three sites a raw `URLError(.cancelled)` can still
+        // reach: `ServerDirectory.servers()` has no error vocabulary of its own and hands the
+        // transport's failures up as they are. Without the fix the sheet says "The directory
+        // could not be reached. Type a hostname." about a third party that answered fine.
+        let session = ShellSession(http: FixtureHTTP(["/servers": .cancelled]))
+        await session.loadCatalog()
+        #expect(session.catalog == .loading)
+        #expect(session.catalog != .failed)
+    }
+
+    @Test("A join the reader walked away from says nothing and adds nothing")
+    func cancelledAddSaysNothing() async {
+        // End-to-end rather than at the catch: Core now reports a cancelled transfer as
+        // `CancellationError`, so what this pins is the whole chain — revert any of the Core
+        // sites and the reader is told their own leaving was the server's fault.
+        let session = ShellSession(http: FixtureHTTP([
+            "/": .text(#"""
+            <html><head><meta name="application-name" content="Mastodon"></head>
+            <body><div id="mastodon"></div></body></html>
+            """#),
+            "/api/v2/instance": .text(#"""
+            {"domain": "first.example", "title": "First", "version": "4.3.0"}
+            """#),
+            "/api/v1/timelines/public": .cancelled,
+            "/api/v1/trends/statuses": .text("[]"),
+        ]))
+        session.hostname = "first.example"
+        await session.add()
+        #expect(session.refuse == nil)
+        #expect(session.sources.isEmpty)
+        #expect(!session.checking)
+    }
+
+    @Test("A pick the reader walked away from names no board and blames no forum")
+    func cancelledSubscribeSaysNothing() async {
+        let front = #"""
+        <html><head><meta name="generator" content="Discuz! X5.0" /></head><body></body></html>
+        """#
+        let index = #"""
+        <h2><a href="forum.php?gid=56">Tools and software</a></h2>
+        <div id="category_56">
+        <table class="fl_tb"><tr>
+        <td class="fl_g"><dl><dt><a href="forum.php?mod=forumdisplay&fid=33">Boot disks</a></dt></dl></td>
+        </tr></table>
+        </div>
+        """#
+        let session = ShellSession(http: FixtureHTTP([
+            "/": .text(front),
+            "https://install-a.example/forum.php": .text(index),
+            "https://install-a.example/forum.php?mod=forumdisplay&fid=33": .cancelled,
+        ]))
+        session.hostname = "install-a.example"
+        await session.add()
+        guard let choice = session.choosing else {
+            Issue.record("a Discuz! should pause on the picker")
+            return
+        }
+        await session.subscribe(choice.offer.boards)
+        // No sentence about the forum, and no count standing in for one. `unreadAll` is what the
+        // "every board failed" message is written from, and a reader who left failed at nothing.
+        #expect(session.refuse == nil)
+        #expect(session.unreadAll == 0)
+        #expect(session.unread.isEmpty)
+        #expect(session.sources.isEmpty)
+    }
 }

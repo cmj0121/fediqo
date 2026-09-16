@@ -249,7 +249,13 @@ public struct Detector: Sendable {
             // challenge page does.
             if DiscuzPage.isChallenge(html) { throw DetectError.challenged }
         } catch {
-            if error is CancellationError { throw error }
+            // **Through `Cancellation.happened`, and it is this line the rest of the block was
+            // always about.** It used to read `if error is CancellationError`, which against a
+            // real `URLSession` never fires: a cancelled transfer arrives as
+            // `URLError(.cancelled)`, falls through this swallow to the probe, and the detector
+            // then answers a question nobody is waiting for — with a fact about somebody's
+            // server, read off a reader's leaving.
+            if Cancellation.happened(error) { throw CancellationError() }
             // **Rethrown, where every other failure here is swallowed on purpose.** This block
             // treats a failed front page as "no answer yet" and falls through to the probe,
             // which is right for a timeout or a 404. A challenge is the opposite: the host
@@ -265,7 +271,13 @@ public struct Detector: Sendable {
             probeTalked = true
             return Probe.kind(from: data)
         } catch {
-            if error is CancellationError { throw error }
+            // **The guard the comment above the fall-through has always relied on, finally
+            // firing.** Written `if error is CancellationError` it never did, so a reader who
+            // closed the app mid-probe fell to `return .unknown` below — which `SourceJoin` turns
+            // into `unsupportedKind(.unknown)`, which is the sentence telling them to check an
+            // address that is perfectly fine. That is the exact outcome the block above says it
+            // is here to prevent, and the code did not honour it.
+            if Cancellation.happened(error) { throw CancellationError() }
         }
 
         if !htmlTalked && !probeTalked { throw DetectError.unreachable }
