@@ -658,12 +658,9 @@ struct ForumPostsTests {
         ])
         let categories = try await DiscuzClient(http: http, host: "install-d.example").boards()
         let boards = categories.flatMap(\.boards)
-        let sheet = BoardPickerSheet(
-            choice: BoardChoice(offer: JoinOffer(
-                host: "install-d.example", kind: .discuz, categories: categories
-            )),
-            subscribe: { _ in },
-            cancel: {}
+        let sheet = BoardPickerList(
+            offer: JoinOffer(host: "install-d.example", kind: .discuz, categories: categories),
+            picked: .constant([])
         )
 
         let child = try #require(boards.first { $0.name == "输入法工具" })
@@ -717,6 +714,7 @@ struct ForumPostsTests {
         let session = ShellSession(http: http, store: ItemStore())
         session.hostname = "install-d.example"
         await session.add()
+        await session.confirm()
 
         let offer = try #require(session.choosing?.offer)
         let child = try #require(offer.boards.first { $0.fid == 300 })

@@ -7,7 +7,6 @@ struct AccountPane: View {
     @Bindable var session: ShellSession
     @FocusState private var searchFocused: Bool
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.locale) private var locale
 
     private enum Metrics {
         /// The mark, at the size the mark is drawn rather than the size of an icon.
@@ -24,10 +23,6 @@ struct AccountPane: View {
         VStack(alignment: .leading, spacing: ShellSpace.room) {
             masthead
             adding
-            Rectangle()
-                .fill(ShellChrome.hairline(colorScheme))
-                .frame(height: ShellSpace.hair)
-            catalogRegion
         }
         .padding(ShellSpace.pad)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -35,7 +30,6 @@ struct AccountPane: View {
             session.searchFocused = on
         }
         .onDisappear { session.searchFocused = false }
-        .task { await session.loadCatalog() }
     }
 
     @ViewBuilder
@@ -83,9 +77,35 @@ struct AccountPane: View {
                     .font(ShellType.meta)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
             }
-            searchField
+            fieldRow
             if statusVisible { status }
         }
+    }
+
+    /// The field, and the way in for a reader who does not have a hostname to type.
+    ///
+    /// **`layoutPriority` on the field, and the button allowed to wrap.** At 320pt with a long
+    /// translation the right failure is a Browse that takes two lines, not a field that collapses.
+    private var fieldRow: some View {
+        HStack(alignment: .center, spacing: ShellSpace.snug) {
+            searchField
+                .layoutPriority(1)
+            Button(L10n.t("account.browse")) { session.browse() }
+                .font(ShellType.body)
+                .disabled(busy)
+                .help(L10n.t("account.browse.label"))
+                .accessibilityLabel(L10n.t("account.browse.label"))
+        }
+    }
+
+    /// Whether the top half is out of the reader's hands: something on the wire, or the sheet up.
+    ///
+    /// **The sheet counts, which is PLAN risk 8.** `checking` is false the whole time a preview
+    /// is on screen, so a gate asking only about it would leave the field and both buttons live
+    /// behind an open sheet — and a second look would overwrite the stage under a reader who is
+    /// reading the first one.
+    private var busy: Bool {
+        session.checking || session.stage != nil
     }
 
     private var searchField: some View {
@@ -94,7 +114,7 @@ struct AccountPane: View {
                 .font(ShellType.body)
                 .textFieldStyle(.plain)
                 .focused($searchFocused)
-                .disabled(session.checking)
+                .disabled(busy)
                 .onSubmit { session.search() }
                 #if os(iOS)
                 .textInputAutocapitalization(.never)
@@ -111,7 +131,7 @@ struct AccountPane: View {
                     .foregroundStyle(ShellChrome.ink(colorScheme))
             }
             .buttonStyle(.plain)
-            .disabled(session.checking)
+            .disabled(busy)
             .accessibilityLabel(L10n.t("account.search"))
             .help(L10n.t("account.search"))
         }
@@ -209,144 +229,6 @@ struct AccountPane: View {
             .font(ShellType.meta)
             .accessibilityLabel(Text(String(format: L10n.t("account.refuse.signin.label"), host)))
         }
-    }
-
-    @ViewBuilder
-    private var catalogRegion: some View {
-        switch session.catalog {
-        case .loading:
-            note {
-                HStack(spacing: ShellSpace.snug) {
-                    ProgressView()
-                    Text(L10n.t("account.catalog.loading"))
-                        .font(ShellType.body)
-                        .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                }
-            }
-        case .failed:
-            note {
-                Text(L10n.t("account.catalog.failed"))
-                    .font(ShellType.body)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
-            }
-        case .empty:
-            note {
-                Text(L10n.t("account.catalog.empty"))
-                    .font(ShellType.body)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
-            }
-        case .ready:
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    if let host = session.extraJoinHost {
-                        extraJoinRow(host)
-                        Rectangle()
-                            .fill(ShellChrome.hairline(colorScheme))
-                            .frame(height: ShellSpace.hair)
-                    }
-                    ForEach(session.visibleServers) { server in
-                        catalogRow(server)
-                        Rectangle()
-                            .fill(ShellChrome.hairline(colorScheme))
-                            .frame(height: ShellSpace.hair)
-                    }
-                }
-            }
-            .scrollIndicators(.never)
-        }
-    }
-
-    private func note<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        content()
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-
-    private func extraJoinRow(_ host: String) -> some View {
-        let added = session.isAdded(host)
-        return Button {
-            session.hostname = host
-            Task { await session.add() }
-        } label: {
-            VStack(alignment: .leading, spacing: ShellSpace.tight) {
-                Text(String(format: L10n.t("account.catalog.addHost"), host))
-                    .font(ShellType.name)
-                    .foregroundStyle(ShellChrome.ink(colorScheme))
-                Text(added ? L10n.t("account.catalog.added") : L10n.t("account.catalog.addHost.detail"))
-                    .font(ShellType.meta)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                    .lineLimit(2)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, ShellSpace.step)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(session.checking || added)
-        .accessibilityLabel(String(format: L10n.t("account.catalog.addHost"), host))
-    }
-
-    private func catalogRow(_ server: CatalogServer) -> some View {
-        let added = session.isAdded(server.domain)
-        let disabled = session.checking || added
-        return Button {
-            Task { await session.pick(server) }
-        } label: {
-            VStack(alignment: .leading, spacing: ShellSpace.tight) {
-                Text(server.domain)
-                    .font(ShellType.name)
-                    .foregroundStyle(ShellChrome.ink(colorScheme))
-                Text(added ? L10n.t("account.catalog.added") : server.summary)
-                    .font(ShellType.meta)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                    .lineLimit(2)
-                if !added {
-                    metaRow(server)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, ShellSpace.step)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(disabled)
-        .accessibilityLabel(server.domain)
-        .accessibilityValue(added ? L10n.t("account.catalog.added") : "\(server.summary), \(metaLine(server))")
-    }
-
-    /// Three readings about a server, each one saying what it is. They used to be a
-    /// single string joined with middle dots, where one of the numbers was labelled
-    /// with an initialism and the other was not labelled at all.
-    private func metaRow(_ server: CatalogServer) -> some View {
-        HStack(spacing: ShellSpace.pad) {
-            ForEach(readings(server), id: \.self) { reading in
-                Text(reading)
-            }
-        }
-        .font(ShellType.mark)
-        .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-        .lineLimit(1)
-    }
-
-    private func readings(_ server: CatalogServer) -> [String] {
-        [
-            languageName(server.language),
-            String(format: L10n.t("account.catalog.weekly"), Self.compact(server.weekUsers)),
-            String(format: L10n.t("account.catalog.people"), Self.compact(server.users)),
-        ]
-    }
-
-    private func metaLine(_ server: CatalogServer) -> String {
-        readings(server).joined(separator: ", ")
-    }
-
-    private func languageName(_ code: String) -> String {
-        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return L10n.t("account.catalog.langUnknown") }
-        return locale.localizedString(forLanguageCode: trimmed) ?? trimmed
-    }
-
-    private static func compact(_ value: Int) -> String {
-        value.formatted(.number.notation(.compactName))
     }
 
     /// The mark a joined source is drawn with. Internal rather than private only so that

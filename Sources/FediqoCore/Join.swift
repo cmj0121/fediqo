@@ -281,11 +281,64 @@ public struct JoinOffer: Sendable, Hashable {
 /// Two cases and no third, because there are exactly two answers a host can give to "add this":
 /// either it is a thing this app can read straight off — and it has been — or it is a forum, and
 /// the reader has a choice to make first.
+///
+/// **The preview is not a third case, and this is where that was decided.** A reader now looks at
+/// a source before subscribing to it, and the pause that puts in front of the journey is
+/// `SourcePreview` — a separate type, returned by a separate call. Filed here it would make
+/// `.joined` unreachable on a first call for every protocol, and it would put a pause *before* a
+/// journey inside an enum whose whole subject is a pause *inside* one.
 public enum JoinStep: Sendable, Equatable {
     /// The source is added and its timeline is in the store. Nothing more to ask.
     case joined
     /// **Nothing has been added.** These are the boards; call `subscribe` with the reader's pick.
     case chooseBoards(JoinOffer)
+}
+
+/// A source looked at and **nothing added** — the preview stage, as a value.
+///
+/// **This is not a `JoinStep` and must never become one.** `JoinStep` answers *how far adding
+/// got*, and both its cases are answers to that question; this is the stage before adding begins,
+/// and it adds nothing. See the note on `JoinStep` for why a third case there would be wrong.
+///
+/// **It carries no client and no `SourceJoin`, on purpose.** An engine can come into existence
+/// between the look and the press — the reader is offered a sign-in on a refusal and takes it — so
+/// the transport has to be chosen again at `begin`, against what this run holds *then*. A preview
+/// holding the client it was read through would hand the press a client that was never there, and
+/// the reader would watch a sheet clear a challenge and then get the same refusal back.
+///
+/// Identified by host, so one host is one preview: the same rule as `Source` (D26).
+public struct SourcePreview: Identifiable, Sendable, Hashable {
+    public var id: String { host }
+    public let host: String
+    public let kind: ProtocolKind
+    public let profile: ProfileAnswer
+    /// The forum's index, where looking at this host meant reading one — and **empty where it did
+    /// not**, which is every protocol that publishes a document instead, and a forum whose index
+    /// could not be read.
+    ///
+    /// **Carried so the press does not ask a second time.** A Discuz! has no document to describe
+    /// itself, so the look asks its index instead (see `look`) — and `DiscuzClient.boards()`
+    /// throws rather than returning nothing, so a non-empty list here means exactly "the look got
+    /// an index" and an empty one means exactly "it did not". `begin(_:)` reads this and reaches
+    /// for the wire only where it is empty; asking a stranger's forum for the same page twice in
+    /// one errand is the spend `SourceJoin` refuses in as many words.
+    ///
+    /// **This does not contradict the no-client rule above.** That rule is about *transports*,
+    /// which can change between the look and the press when a reader signs in. Parsed categories
+    /// cannot: they are what the forum said, and it does not unsay it.
+    public let boards: [DiscuzCategory]
+
+    public init(
+        host: String,
+        kind: ProtocolKind,
+        profile: ProfileAnswer,
+        boards: [DiscuzCategory] = []
+    ) {
+        self.host = host
+        self.kind = kind
+        self.profile = profile
+        self.boards = boards
+    }
 }
 
 /// A board that was picked and could not be read, and why.
@@ -439,23 +492,127 @@ public struct SourceJoin: Sendable {
     /// reader who wants the whole forum is still entitled to it.
     public func join(host raw: String) async throws {
         let (host, kind) = try await self.kind(of: raw)
+        _ = try await begin(host: host, kind: kind, askingBoards: false)
+    }
 
-        // **No `default:`.** A protocol falling through a switch here is a silent wrong answer,
-        // not a safe one — the same shape that once had a Discuz! source drawing every thread as
-        // a microblog post with its title nowhere, and the compiler saying nothing. Every case is
-        // named, so the next protocol added breaks the build here instead.
+    /// Looks, and **adds nothing**. One detection and, where the protocol publishes one, one
+    /// profile request.
+    ///
+    /// This is the first half of what "subscribe" became: the reader sees what the server says
+    /// about itself, and only then presses. Hand the `SourcePreview` it gives back to
+    /// `begin(_:)` — and to a `SourceJoin` built then, not this one; see `SourcePreview` for why
+    /// the preview carries no client.
+    ///
+    /// Throws exactly what `begin(host:)` throws for the same host: `.invalidHost` for a host that
+    /// is not one, `.unreachable` for one that did not answer, `.unsupportedKind` for one that
+    /// speaks something this app does not read, `.refused` where something in front of it turned
+    /// this app away.
+    ///
+    /// **A profile that could not be read is not one of them.** It arrives as
+    /// `ProfileAnswer.unread` and the reader may still subscribe — a Mastodon older than 4.0
+    /// serves no `/api/v2/instance` at all and reads its timeline perfectly. Reporting that as a
+    /// failed look would talk a reader out of a server that works.
+    ///
+    /// **A forum with no document is asked a different question, not left unasked.** Discuz!
+    /// publishes nothing about itself, so what this asks it is not what it *says* but whether it
+    /// will show a signed-out reader anything at all — which is the one fact about it the reader
+    /// needs and the only one it can give. That answer is `readsWithoutAccount`, the field
+    /// Discourse's `login_required` already means, rather than a second field meaning the same
+    /// thing for one protocol.
+    ///
+    /// **No `default:`.** The two groups below are a decision about how a protocol can be asked
+    /// about itself, so the next one added breaks the build here and has to answer it.
+    public func look(host raw: String) async throws -> SourcePreview {
+        let (host, kind) = try await self.kind(of: raw)
+        guard Self.reads(kind) else { throw JoinError.unsupportedKind(kind) }
         switch kind {
-        case .mastodon:
-            try await MastodonJoin(http: http, store: store, catalogues: catalogues)
-                .ingest(host: host)
-        case .discourse:
-            try await DiscourseJoin(http: http, store: store).ingest(host: host)
         case .discuz:
-            try await DiscuzJoin(http: http, store: store).ingest(host: host)
-        case .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial,
-            .unknown:
-            throw JoinError.unsupportedKind(kind)
+            let (profile, categories) = try await lookAtForum(host: host, kind: kind)
+            return SourcePreview(host: host, kind: kind, profile: profile, boards: categories)
+        case .mastodon, .discourse, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube,
+             .friendica, .gotosocial, .unknown:
+            let profile = try await SourceProfiles(http: http).answer(host: host, kind: kind)
+            return SourcePreview(host: host, kind: kind, profile: profile)
         }
+    }
+
+    /// A forum's index, read once, and what it says about the forum.
+    ///
+    /// **The index is the self-description, for a protocol that has no other.** A signed-out
+    /// reader who is shown boards can read this forum; one who is turned away cannot, and that is
+    /// a stated fact rather than a failed request — so it is `.stated` with the one field it can
+    /// fill, and the reader sees the warning *before* the press instead of the refusal after it.
+    ///
+    /// **A refusal here does not throw, and that is the whole point of the ruling.** `look`
+    /// throwing would put the reader back where they were: told no, after a press. The press is
+    /// still allowed to fail, and it still offers the sign-in that can fix it.
+    ///
+    /// **Who said no decides which sentence it is, and the two are not folded.** `.stated` is a
+    /// claim *by the forum about itself*, and `SourceProfile`'s own invariant is that nothing in
+    /// it is there because a request failed. So:
+    ///
+    /// - **The forum answered, about itself** — its notice page, or an index with no board this
+    ///   reader may see. That is its policy, it is what an account would change, and it is
+    ///   `readsWithoutAccount: false`.
+    /// - **Something in front of the forum answered, and the forum said nothing** — a filter's
+    ///   challenge page, or a status that says no the way a filter says it (`DiscuzRequestError`
+    ///   calls that one "in the way a filter says it" in as many words). Recording a doorman as
+    ///   the forum's policy would assert "reading this needs an account" about a forum that may
+    ///   well read perfectly to a signed-out human — and unit 5 caches and draws that claim. It
+    ///   is `.unread(.refused)`, which the preview warns about in its own words.
+    ///
+    /// **Read through `DiscuzClient` rather than `DiscuzBoardJoin.index`**, because `index` maps
+    /// all of these onto `JoinError.refused(403)` — the right answer for *joining*, where the
+    /// reader only needs the sentence and the sign-in, and the wrong one here, where which of
+    /// them it was is the whole question.
+    ///
+    /// The two that are neither: a forum that did not answer at all, and one that answered with
+    /// something that was not an index. Neither is a fact about who may read it.
+    private func lookAtForum(
+        host: String,
+        kind: ProtocolKind
+    ) async throws -> (ProfileAnswer, [DiscuzCategory]) {
+        func stated(_ reads: Bool) -> ProfileAnswer {
+            .stated(SourceProfile(host: host, kind: kind, readsWithoutAccount: reads))
+        }
+        do {
+            return (stated(true), try await DiscuzClient(http: http, host: host).boards())
+        } catch let error where Cancellation.happened(error) {
+            throw CancellationError()
+        } catch let error as DiscuzRequestError {
+            // **No `default:`.** Which of these arrived decides what the reader is told about a
+            // server they have not joined, and a case swept into somebody else's sentence here is
+            // a policy invented for a forum that never stated one.
+            switch error {
+            case .restricted, .noBoards:
+                return (stated(false), [])
+            // 403 because a challenge page is routinely dressed as a 200, and 403 is the number
+            // refusal means in this app — `SourceJoin.kind(of:)` states the same rule.
+            case .challenged:
+                return (.unread(host: host, kind: kind, .refused(403)), [])
+            // Its own number, kept: this one arrived with a status that meant it.
+            case .refused(let status):
+                return (.unread(host: host, kind: kind, .refused(status)), [])
+            case .noThreads, .noPosts, .http, .invalidURL, .undecodable:
+                return (.unread(host: host, kind: kind, .unreadable), [])
+            }
+        } catch {
+            return (.unread(host: host, kind: kind, .unreachable), [])
+        }
+    }
+
+    /// The reader looked and said yes. The second half of the two-stage subscribe.
+    ///
+    /// **Nothing is detected again.** The preview carries what the host turned out to speak, which
+    /// is the same reason `subscribe(_:to:)` reads it off the offer: asking a stranger's server
+    /// what it is twice for one errand is traffic nobody owes this app.
+    public func begin(_ preview: SourcePreview) async throws -> JoinStep {
+        try await begin(
+            host: preview.host,
+            kind: preview.kind,
+            askingBoards: true,
+            index: preview.boards
+        )
     }
 
     /// The paused door — D28, and the first half of what a forum join actually is.
@@ -472,7 +629,27 @@ public struct SourceJoin: Sendable {
     /// it answered with something that was not a forum index.
     public func begin(host raw: String) async throws -> JoinStep {
         let (host, kind) = try await self.kind(of: raw)
+        return try await begin(host: host, kind: kind, askingBoards: true)
+    }
 
+    /// Every door's dispatch, in one place.
+    ///
+    /// **No `default:`.** A protocol falling through a switch here is a silent wrong answer, not a
+    /// safe one — the same shape that once had a Discuz! source drawing every thread as a
+    /// microblog post with its title nowhere, and the compiler saying nothing. Every case is
+    /// named, so the next protocol added breaks the build here instead — and here is now the only
+    /// place it has to, which is what folding three doors into one switch bought.
+    ///
+    /// `askingBoards` is the single difference between the doors, and it is about a forum only:
+    /// `true` is D28's pause, where the index is read and the reader picks; `false` is the one-shot
+    /// `join(host:)`, which takes the whole guide page at once. Everything else answers `.joined`
+    /// either way, because for everything else there is nothing to pause for.
+    private func begin(
+        host: String,
+        kind: ProtocolKind,
+        askingBoards: Bool,
+        index: [DiscuzCategory] = []
+    ) async throws -> JoinStep {
         switch kind {
         case .mastodon:
             try await MastodonJoin(http: http, store: store, catalogues: catalogues)
@@ -482,11 +659,45 @@ public struct SourceJoin: Sendable {
             try await DiscourseJoin(http: http, store: store).ingest(host: host)
             return .joined
         case .discuz:
-            let categories = try await DiscuzBoardJoin(http: http, store: store).index(host: host)
+            guard askingBoards else {
+                try await DiscuzJoin(http: http, store: store).ingest(host: host)
+                return .joined
+            }
+            // **Read at the look and carried here, so the forum is asked once per errand.** Empty
+            // means the look never got an index — it was refused, or it was not one — and then
+            // there is nothing to reuse and the wire is the only place the answer is. That read
+            // is also what produces the reader's sentence and the sign-in it offers.
+            let categories = try index.isEmpty
+                ? await DiscuzBoardJoin(http: http, store: store).index(host: host)
+                : index
             return .chooseBoards(JoinOffer(host: host, kind: kind, categories: categories))
         case .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial,
             .unknown:
             throw JoinError.unsupportedKind(kind)
+        }
+    }
+
+    /// Whether this app can read a source of this kind at all.
+    ///
+    /// **A second exhaustive switch, and what it does and does not guarantee.** The dispatcher
+    /// above answers *who reads this*; this answers *can it be read*, one step earlier and with
+    /// nothing added, so that `look` refuses a protocol at the field rather than showing a reader
+    /// a preview whose Subscribe could only ever fail.
+    ///
+    /// Neither has a `default:`, so a protocol **added** to `ProtocolKind` breaks the build in
+    /// both. That is the whole of the compiler's help, and it is not enough: a protocol **moved
+    /// between the groups here** while the dispatcher still refuses it compiles clean and ships
+    /// the screen this comment used to claim it prevented — a rendered preview whose Subscribe
+    /// can only throw. Moving cases between groups is exactly what unlocking the Mastodon family
+    /// is, five times over. What actually holds the two together is
+    /// `everyProtocolAgreesAboutWhetherItCanBeRead`, which walks `allCases` and asks both.
+    static func reads(_ kind: ProtocolKind) -> Bool {
+        switch kind {
+        case .mastodon, .discourse, .discuz:
+            true
+        case .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial,
+            .unknown:
+            false
         }
     }
 

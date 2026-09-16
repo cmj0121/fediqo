@@ -36,6 +36,7 @@ struct AccountAddTests {
         ]))
         session.hostname = "first.example"
         await session.add()
+        await session.confirm()
         #expect(session.sources.map(\.host) == ["first.example"])
         #expect(session.queries.map(\.id) == ["all", "trends"])
         #expect(session.timelineID == "all")
@@ -88,9 +89,13 @@ struct AccountAddTests {
         ]))
         session.hostname = "https://First.Example/about"
         await session.add()
+        await session.confirm()
         #expect(session.sources.count == 1)
         session.hostname = "first.example"
+        // **The duplicate is caught before the look**, which is what keeps it free: a host this
+        // device already reads costs no detection and no profile request, only the sentence.
         await session.add()
+        #expect(session.stage == nil, "a duplicate opened a preview of a server already added")
         #expect(session.refuse == L10n.t("account.refuse.duplicate", language: .english))
         #expect(session.sources.count == 1)
         #expect(session.availability.timelineEnabled)
@@ -131,8 +136,12 @@ struct AccountAddTests {
         }
         #expect(servers.map(\.domain) == ["first.example", "second.example"])
         #expect(servers[0].summary == "The flagship server")
+        // A catalog row is a *look*, like every other way in — pressing one opens the preview
+        // and adds nothing. It is the press after it that joins.
         await session.pick(servers[0])
         #expect(session.hostname == "first.example")
+        #expect(session.sources.isEmpty, "a catalog row joined a server the reader only looked at")
+        await session.confirm()
         #expect(session.sources.map(\.host) == ["first.example"])
         #expect(session.availability.timelineEnabled)
     }
@@ -234,7 +243,14 @@ struct AccountAddTests {
         #expect(L10n.t("account.add.host", language: .english) == "Hostname")
         #expect(L10n.t("account.search", language: .english) == "Search")
         #expect(L10n.t("account.search.placeholder", language: .english) == "Host or keyword")
-        #expect(L10n.t("account.catalog.addHost", language: .english) == "Add %@")
+        // **`account.catalog.addHost` is retired, not renamed.** It read "Add %@" and the row no
+        // longer adds anything — it opens a preview — so the verb was a lie about what the press
+        // does. The two keys below replace it and say what actually happens.
+        #expect(L10n.t("join.browse.look", language: .english) == "Look at %@")
+        #expect(
+            L10n.t("join.browse.look.detail", language: .english)
+                == "Not in the directory. See what it is before you add it."
+        )
         #expect(L10n.t("account.catalog.weekly", language: .english) == "%@ active this week")
         #expect(L10n.t("account.catalog.people", language: .english) == "%@ people")
         #expect(
@@ -305,9 +321,18 @@ struct AccountAddTests {
         ]))
         session.hostname = "first.example"
         await session.add()
+        // The premise, pinned. Every assertion below is about an *absence*, so without this the
+        // test is satisfied by a look that never reached the press — and its own claim to pin
+        // the whole chain end to end would be false.
+        guard case .previewing = session.stage else {
+            Issue.record("the look should have opened a preview to press from")
+            return
+        }
+        await session.confirm()
         #expect(session.refuse == nil)
         #expect(session.sources.isEmpty)
         #expect(!session.checking)
+        #expect(session.progressHost == "")
     }
 
     @Test("A pick the reader walked away from names no board and blames no forum")
@@ -330,6 +355,7 @@ struct AccountAddTests {
         ]))
         session.hostname = "install-a.example"
         await session.add()
+        await session.confirm()
         guard let choice = session.choosing else {
             Issue.record("a Discuz! should pause on the picker")
             return

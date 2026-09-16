@@ -254,12 +254,26 @@ public struct SourceProfiles: Sendable {
             return try await read(host: host, kind: kind) {
                 try await DiscourseClient(http: http, host: host).profile()
             }
-        // **Discuz! is silent, and no request is made.** It is a page, not an endpoint: there is
-        // no public, documented, machine-readable self-description in X3.4, X3.5 or X5. The
-        // statistics block a theme draws on `/forum.php` is not one — it is theme-dependent, it
-        // is not on the front page, and its labels are localised. Reading numbers out of a
-        // template's markup and presenting them as what the forum said is the true-looking lie
-        // this package is written against.
+        // **Discuz! is silent *to this question*, and no request is made.** It is a page, not an
+        // endpoint: there is no public, documented, machine-readable self-description in X3.4,
+        // X3.5 or X5. The statistics block a theme draws on `/forum.php` is not one — it is
+        // theme-dependent, it is not on the front page, and its labels are localised. Reading
+        // numbers out of a template's markup and presenting them as what the forum said is the
+        // true-looking lie this package is written against. None of that has changed.
+        //
+        // **What has changed is that the preview no longer asks this question of a Discuz!.**
+        // `SourceJoin.look` asks it a different and answerable one — whether it will show a
+        // signed-out reader any board at all — and gets back a `.stated` profile carrying
+        // `readsWithoutAccount` and the index it read. So a reader previewing a Discuz! sees that
+        // answer and not this one, and the two are **not** two opinions about the same question:
+        // this is "what do you publish about yourself", which is still nothing, and that is "will
+        // you let me in", which the index answers by existing.
+        //
+        // The honest consequence, said out loud because it is the kind of thing that gets
+        // rediscovered as a bug: **a caller who reaches for this function with `.discuz` gets a
+        // thinner answer than the preview shows.** There is no such caller today — `look` is the
+        // only one in the package — and `aDiscuzAnsweredInIsolationIsStillSilent` pins the
+        // difference so it is a recorded fact rather than a surprise.
         case .discuz:
             return .silent(host: host, kind: kind)
         // Silent because nothing can ask: none of these can be joined yet, so there is no preview

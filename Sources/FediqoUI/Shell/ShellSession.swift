@@ -68,12 +68,45 @@ final class ShellSession {
     /// held here would be a copy that goes stale the moment the reader changes their boards.
     var removing: String?
 
-    /// The forum whose boards the reader is being shown, or nothing.
+    /// Which stage of adding a source the reader is being shown, or nothing.
     ///
-    /// **This is D28's pause, held.** While it is set the host has been detected and its index
-    /// read, and **nothing has been added** — the source, its boards and its threads all wait on
-    /// the reader. Clearing it is therefore a complete undo: there is nothing to take back.
-    var choosing: BoardChoice?
+    /// **Nothing has been added at any of the three.** Browsing is a list, previewing is what a
+    /// server says about itself, and choosing boards is D28's pause — the source, its boards and
+    /// its threads all wait on the reader through every one of them. Clearing this is therefore a
+    /// complete undo at any stage: there is nothing to take back.
+    ///
+    /// **One presenter and one piece of state for all three**, which is what buys the Back button
+    /// on the boards stage: the reader returns to the preview they already have instead of the
+    /// app asking the forum for its index again. See `JoinStage`.
+    var stage: JoinStage?
+
+    /// D28's pause, read off the stage.
+    ///
+    /// **Get-only, and that is the point of it rather than a caution.** It used to be the stored
+    /// state a sheet was presented from, and a second `.sheet` modifier that can be active at the
+    /// same time as another is silently ignored on iOS. Now the stage is the one presenter and
+    /// this is a reading of it, so nothing can bind it and the two cannot disagree.
+    var choosing: BoardChoice? {
+        guard case .choosingBoards(let offer, _) = stage else { return nil }
+        return BoardChoice(offer: offer)
+    }
+
+    /// What each host said about itself when it was looked at.
+    ///
+    /// **Filled by the look the reader already waited for, so the source row costs no request.**
+    /// Written under the parsed host, which is what `SourceProfiles.answer` normalises to — a map
+    /// keyed by what somebody typed would hold two rows for one server.
+    private(set) var profiles: [String: ProfileAnswer] = [:]
+
+    /// Which errand the sheet is showing, counted up.
+    ///
+    /// **`checking` stopped covering the flow when adding split in two.** The preview sheet is up
+    /// while nothing is on the wire, so a returning `.chooseBoards` from a press the reader
+    /// swiped away would spring the sheet back over a reader who had left. Every entry point
+    /// takes a number at the top and compares it before writing `stage`; every dismissal bumps
+    /// it. This is `ForumPosts.forget(host:)`'s guard in the shape this object needs — the answer
+    /// is refused after the suspension rather than the work cancelled before it.
+    @ObservationIgnored private var errand = 0
 
     /// Boards the reader picked that could not be read, from the last pick that read some.
     ///
@@ -211,10 +244,48 @@ final class ShellSession {
         await add()
     }
 
+    /// Add pressed. **Looks, and adds nothing** — the reader sees what the server says about
+    /// itself and then decides, which is what `confirm` is for.
+    ///
+    /// **Guarded on the stage as well as on `checking`.** `checking` is false the whole time the
+    /// preview sheet is up, so the field and the Add button are live again and a second look
+    /// would overwrite the stage under a reader who is reading the first one. The sheet being up
+    /// *is* the errand being in progress, and it is the stage that says so.
+    ///
+    /// **`stage?.host` and not `stage`, because browsing is where a look is started from.** A row
+    /// pressed in the directory is this call, so refusing it whenever any stage is up would make
+    /// the whole list dead to the touch. What has to stop a second look is a stage that is
+    /// already *about a server* — a preview, or its boards — and `host` is the question that
+    /// separates those from the list.
     func add() async {
-        guard !checking else { return }
+        guard let preview = await look() else { return }
+        stage = .previewing(preview)
+    }
+
+    /// The reader was turned away, went and signed in, and came back — **and does not see the
+    /// preview again.**
+    ///
+    /// They have already read what this server says about itself, already pressed Subscribe, and
+    /// already gone and done the one thing that could change the answer. Showing them the same
+    /// screen a second time asks a question they have answered. So this looks and *takes*,
+    /// landing them where the first press was heading.
+    ///
+    /// **The look is not skipped, only the stopping.** A signed-in reader's forum index is
+    /// genuinely a different document from the signed-out one — it is the index that says which
+    /// boards they may see — so the answer this carries forward has to be the one read through
+    /// the engine they just signed in to, not the one they were refused with.
+    func resumeAfterSignIn() async {
+        guard let preview = await look() else { return }
+        await take(preview)
+    }
+
+    /// One look: the duplicate guard, the parse, the request, and every way it can go wrong said
+    /// as a sentence. **Sets no stage** — what to do with the answer is the caller's, which is
+    /// the whole of the difference between `add` and `resumeAfterSignIn`.
+    private func look() async -> SourcePreview? {
+        guard !checking, stage?.host == nil else { return nil }
         let raw = hostname.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !raw.isEmpty else { return }
+        guard !raw.isEmpty else { return nil }
         refuse = nil
         offerSignIn = nil
         unread = []
@@ -224,26 +295,22 @@ final class ShellSession {
             parsed = try Host.parse(raw)
         } catch {
             refuse = String(format: L10n.t("account.refuse.unknown"), raw)
-            return
+            return nil
         }
         progressHost = parsed
         if isAdded(parsed) {
             refuse = L10n.t("account.refuse.duplicate")
-            return
+            return nil
         }
+        errand += 1
+        let mine = errand
         checking = true
         defer { checking = false }
         do {
-            // **No `default:`.** A join step falling through a switch is a silent wrong answer:
-            // a forum reported as joined, with no source and no boards behind it, and the
-            // compiler saying nothing. Both cases are named, so a third breaks the build here.
-            switch try await joiner(for: parsed).begin(host: raw) {
-            case .joined:
-                await adopt()
-            case .chooseBoards(let offer):
-                // D28's pause. Nothing has been added and nothing will be until they pick.
-                choosing = BoardChoice(offer: offer)
-            }
+            let preview = try await joiner(for: parsed).look(host: raw)
+            guard mine == errand else { return nil }
+            profiles[preview.host] = preview.profile
+            return preview
         }
         // `Cancellation.happened` and not `is CancellationError`, though after unit 1b Core does
         // report a leaving as `CancellationError` and the tidy spelling would work today. It
@@ -251,12 +318,117 @@ final class ShellSession {
         // not state — and a site that is correct for a reason nobody can read at it is how this
         // whole class of bug got to fourteen places. The predicate accepts both spellings.
         catch let error where Cancellation.happened(error) {
-            return
+            // The errand went with the reader, so the host it was about goes too — left behind it
+            // is the name of a server in a progress line nobody is waiting on.
+            progressHost = ""
+            return nil
         } catch let error as JoinError {
             report(error, raw: raw, host: parsed)
+            return nil
         } catch {
             refuse = L10n.t("account.refuse.network")
+            return nil
         }
+    }
+
+    /// Subscribe pressed in the preview. The reader looked and said yes.
+    ///
+    /// **A fresh `joiner`, never one carried in the preview.** An engine can come into existence
+    /// between the look and the press — the reader was offered a sign-in on a refusal and took it
+    /// — so the transport is chosen again here, against what this run holds now. `SourcePreview`
+    /// states the same rule from the other side.
+    func confirm() async {
+        guard !checking, case .previewing(let preview) = stage else { return }
+        await take(preview)
+    }
+
+    /// The press itself, wherever it was pressed from.
+    private func take(_ preview: SourcePreview) async {
+        refuse = nil
+        offerSignIn = nil
+        unread = []
+        unreadAll = 0
+        progressHost = preview.host
+        errand += 1
+        let mine = errand
+        checking = true
+        defer { checking = false }
+        do {
+            // **No `default:`.** A join step falling through a switch is a silent wrong answer:
+            // a forum reported as joined, with no source and no boards behind it, and the
+            // compiler saying nothing. Both cases are named, so a third breaks the build here.
+            switch try await joiner(for: preview.host).begin(preview) {
+            case .joined:
+                // **`adopt` is not behind the token and the stage write is.** The store has
+                // already been written by the time this line runs, so a reader who dismissed the
+                // sheet mid-press has still joined this server — skipping `adopt` would leave it
+                // added and invisible, with the list disagreeing with the store until something
+                // else happened to refresh it. What the token protects is only the sheet.
+                closeIfStillMine(mine)
+                await adopt()
+            case .chooseBoards(let offer):
+                // D28's pause, and the third stage. **Nothing has been added**, so a reader who
+                // left takes the whole errand with them — which is why this one *is* entirely
+                // behind the token: writing it would spring the sheet back open behind them.
+                guard mine == errand else { return }
+                stage = .choosingBoards(offer, from: preview)
+            }
+        }
+        // **The one branch that does not touch the sheet, and the asymmetry is deliberate.** The
+        // other two end the errand with something to say, so the sheet has to come down for the
+        // sentence under the field to be reachable. A cancellation has nothing to say — the
+        // reader either dismissed the sheet themselves, in which case it is already down and
+        // `errand` has moved, or the app is going away. Closing it here would be this function
+        // taking a decision on behalf of a reader who has already taken it.
+        catch let error where Cancellation.happened(error) {
+            progressHost = ""
+            return
+        } catch let error as JoinError {
+            // Said whatever they did with the sheet: they pressed Subscribe and it was refused,
+            // and the sentence — with the sign-in it may offer — belongs under the field.
+            closeIfStillMine(mine)
+            report(error, raw: preview.host, host: preview.host)
+        } catch {
+            closeIfStillMine(mine)
+            refuse = L10n.t("account.refuse.network")
+        }
+    }
+
+    /// Takes the sheet down, but only if it is still showing the errand that just finished.
+    ///
+    /// A reader who dismissed and moved on has a stage of their own by now, and closing *that* is
+    /// the same fault as reopening one they left — a sheet changing under somebody either way.
+    private func closeIfStillMine(_ mine: Int) {
+        guard mine == errand else { return }
+        stage = nil
+    }
+
+    /// Browse pressed. **The catalog is fetched here and not on the page appearing** — decision
+    /// 10 — so a reader who never browses never has this app contact a third party for them.
+    func browse() {
+        guard !checking, stage == nil else { return }
+        refuse = nil
+        stage = .browsing
+        Task { await loadCatalog() }
+    }
+
+    /// The sheet closed, by whatever route — a button, a swipe, Escape.
+    ///
+    /// **Nothing was added at any stage, so there is nothing to undo**, and what the reader typed
+    /// stays in the field so pressing Add again gets them back to where they were. What the bump
+    /// buys is the other half: a press whose answer is still on the wire has just been abandoned,
+    /// and its `.chooseBoards` must not spring this sheet back open behind them.
+    ///
+    /// **A preview backed out of forgets the picture it pulled.** `ShellPictures` tags an entry
+    /// by host, and `PreferencesPane` lists the hosts in `sources` — so a thumbnail fetched for a
+    /// server the reader looked at and did not take would be held for the run and appear in no
+    /// inventory. Only where it is not a source: a host they did join keeps its pictures.
+    func dismissStage() {
+        let looked = stage?.host
+        errand += 1
+        stage = nil
+        guard let looked, !isAdded(looked) else { return }
+        pictures.forget(host: looked)
     }
 
     /// The reader picked, and pressed Subscribe. The second half of D28's conversation.
@@ -267,50 +439,63 @@ final class ShellSession {
     /// to the wire because a spinner over a request that cannot do anything is a worse account of
     /// the same nothing.
     func subscribe(_ picks: [DiscuzBoard]) async {
-        guard let choice = choosing, !checking else { return }
+        guard case .choosingBoards(let offer, _) = stage, !checking else { return }
         // Taken down once this call is certain to handle it, so the sheet is gone while the
         // boards are read one at a time and a second press cannot start a second pick against
         // the same offer — and so a call that declines to act does not close the sheet on a
         // reader whose pick then went nowhere.
-        choosing = nil
+        errand += 1
+        stage = nil
         guard !picks.isEmpty else { return }
         refuse = nil
         offerSignIn = nil
         unread = []
         unreadAll = 0
-        progressHost = choice.offer.host
+        progressHost = offer.host
         checking = true
         defer { checking = false }
         do {
-            let outcome = try await joiner(for: choice.offer.host)
-                .subscribe(choice.offer, to: picks)
+            let outcome = try await joiner(for: offer.host).subscribe(offer, to: picks)
             unread = outcome.unread
             await adopt()
             // Where a board that failed was the only thing the reader was after, the rail is
             // still worth landing them on the one that worked — `adopt` does that — but the
             // sentence about the rest is `unread`, and it is read on Account.
         } catch let error where Cancellation.happened(error) {
+            progressHost = ""
             return
         } catch let error as JoinError {
             // Every board failed, so nothing was added. Core threw the first board's reason and
             // kept no list; the count is what lets the sentence say how much it is about.
             unreadAll = picks.count
-            report(error, raw: choice.offer.host, host: choice.offer.host)
+            report(error, raw: offer.host, host: offer.host)
         } catch {
             unreadAll = picks.count
             refuse = L10n.t("account.refuse.network")
         }
     }
 
-    /// The reader closed the picker. **Nothing was added, so there is nothing to undo** — and
-    /// what they typed stays in the field, so pressing Add again gets them the picker back.
+    /// The reader stepped back from a preview to the list they picked it off.
     ///
-    /// The index is read again rather than held from the first pass. It is one request, it is
-    /// the one the reader's press just asked for, and a held copy is a copy that goes stale
-    /// exactly where it matters most: a reader who cancels, signs in, and comes back would
-    /// otherwise be handed the signed-out index they had already seen.
-    func cancelChoosing() {
-        choosing = nil
+    /// **Not `browse()`, and the difference is which press it is.** `browse` is the page's button
+    /// and is refused while a sheet is up, because a reader reading a preview did not ask for it
+    /// to be replaced. This is the sheet's own Back, where being at a preview is the *premise*.
+    /// The catalog is already loaded by the time this can be pressed, so nothing is refetched.
+    func backToBrowsing() {
+        guard case .previewing = stage else { return }
+        errand += 1
+        stage = .browsing
+    }
+
+    /// The reader stepped back from the boards to the preview they arrived through.
+    ///
+    /// **No second request, which is the whole gain of one sheet over three.** The preview
+    /// travelled in the stage precisely so that this is a value being read and not a forum being
+    /// asked for its index again — decision 12.
+    func backToPreview() {
+        guard case .choosingBoards(_, let preview) = stage else { return }
+        errand += 1
+        stage = .previewing(preview)
     }
 
     /// What the store now holds, and the queries that draw it.
@@ -515,10 +700,11 @@ final class ShellSession {
         // unit 5 draws the Sign in / Sign out toggle on the row. A sheet left up over a server
         // that is gone would be asking the reader to sign in to nothing.
         if signingIn?.host.lowercased() == host { signingIn = nil }
-        // Unit 4 replaces `choosing` with a `stage` presenter. This line goes with it, and is
-        // written as the plainest possible spelling of "the pause was about this server" so that
-        // it is obvious what has to move.
-        if choosing?.offer.host.lowercased() == host { choosing = nil }
+        // The sheet standing open over a server that is gone. It covers all three stages now
+        // rather than the pause alone: a preview of a removed host is as stale as a board list of
+        // one, and `.browsing` names no host so it is left where it is — a reader looking for
+        // something else has not asked for their list to be taken away.
+        if stage?.host?.lowercased() == host { dismissStage() }
         if progressHost.lowercased() == host {
             refuse = nil
             unread = []

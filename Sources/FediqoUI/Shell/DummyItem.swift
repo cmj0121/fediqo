@@ -262,6 +262,25 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         }
     }
 
+    /// The shape, said in the one word a reader is shown.
+    ///
+    /// **One function, so the same server is described in the same words before and after the
+    /// press.** The preview says "Mastodon · microblog" and the source row says it again; two
+    /// spellings of that is two translations that drift.
+    ///
+    /// **No `default:`**, the rule `shape(of:)` above states. `.board` is unreachable — that
+    /// function never returns it — and is still named rather than swept in, because a case swept
+    /// into somebody else's answer is how this file shipped a forum drawn as microblog posts.
+    /// `.video`'s string ships in M1 although nothing draws it, so unit 8 is not a build break
+    /// waiting on a translator.
+    static func shapeWord(_ shape: DummySourceKind) -> String {
+        switch shape {
+        case .microblog: L10n.t("source.shape.microblog")
+        case .forum, .board: L10n.t("source.shape.forum")
+        case .video: L10n.t("source.shape.video")
+        }
+    }
+
     private static func answering(_ reply: Reply?) -> DummyAnswering {
         guard let reply else { return .nothing }
         if let handle = reply.handle { return .handle(handle) }

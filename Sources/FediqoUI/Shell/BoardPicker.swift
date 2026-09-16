@@ -11,7 +11,12 @@ struct BoardChoice: Identifiable, Equatable {
     var id: String { offer.host }
 }
 
-/// The screen the reader actually asked for: *list the boards, select one or more to subscribe*.
+/// The boards themselves: *list them, select one or more to subscribe*.
+///
+/// **The list and not the sheet.** The header, the footer and the sheet's own sizing moved to
+/// `JoinSheet` when the picker became a stage rather than a presentation of its own — two frames
+/// on macOS is a window that resizes as the reader steps between stages. Everything below the
+/// hairline is unchanged, and deliberately so.
 ///
 /// **The chassis, one level in.** Nothing here invents a look — the shell is a milled instrument
 /// and a board is another plate on it, so the tick is a square well with a radius of 3 like the
@@ -30,58 +35,16 @@ struct BoardChoice: Identifiable, Equatable {
 /// `install-b.example` has a board with a true, stated `0 threads` and another with `...` where the
 /// figure goes, and a row that drew both as "0" would be telling the reader something the forum
 /// never said. A board that stated nothing at all says so in words instead.
-struct BoardPickerSheet: View {
-    let choice: BoardChoice
-    /// The reader pressed Subscribe, with what they ticked, in the order the forum listed it.
-    let subscribe: ([DiscuzBoard]) -> Void
-    /// The reader left. Nothing has been added and nothing is taken back.
-    let cancel: () -> Void
+struct BoardPickerList: View {
+    let offer: JoinOffer
+    /// What the reader has ticked, held by the sheet — the footer's count and its Subscribe both
+    /// read it, and the footer belongs to the frame rather than to this list.
+    @Binding var picked: Set<Int>
 
     @Environment(\.colorScheme) private var colorScheme
-    @State private var picked: Set<Int> = []
-
-    private var offer: JoinOffer { choice.offer }
-
-    /// What they ticked, in the index's order rather than in the order they tapped — the rail
-    /// reads this straight through, and a forum's own ordering is a better rail than a record of
-    /// which board somebody happened to notice first.
-    private var picks: [DiscuzBoard] {
-        offer.boards.filter { picked.contains($0.fid) }
-    }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Rectangle()
-                .fill(ShellChrome.hairline(colorScheme))
-                .frame(height: ShellSpace.hair)
-            list
-            Rectangle()
-                .fill(ShellChrome.hairline(colorScheme))
-                .frame(height: ShellSpace.hair)
-            footer
-        }
-        .background(ShellChrome.page(colorScheme))
-        #if os(macOS)
-        .frame(minWidth: 460, minHeight: 520)
-        #else
-        .presentationDetents([.large])
-        #endif
-    }
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: ShellSpace.tight) {
-            Text(String(format: L10n.t("board.choose.title"), offer.host))
-                .font(ShellType.pane)
-                .foregroundStyle(ShellChrome.ink(colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
-            Text(L10n.t("board.choose.detail"))
-                .font(ShellType.meta)
-                .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(ShellSpace.pad)
+        list
     }
 
     private var list: some View {
@@ -262,19 +225,5 @@ struct BoardPickerSheet: View {
             add(Text(last, format: .relative(presentation: .named)))
         }
         return line
-    }
-
-    private var footer: some View {
-        HStack(spacing: ShellSpace.step) {
-            Text(String(format: L10n.t("board.choose.count"), picked.count, offer.boards.count))
-                .font(ShellType.reading)
-                .foregroundStyle(ShellChrome.inkDim(colorScheme))
-            Spacer(minLength: ShellSpace.snug)
-            Button(L10n.t("board.choose.cancel")) { cancel() }
-            Button(L10n.t("board.choose.subscribe")) { subscribe(picks) }
-                .keyboardShortcut(.defaultAction)
-                .disabled(picked.isEmpty)
-        }
-        .padding(ShellSpace.pad)
     }
 }

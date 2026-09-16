@@ -29,8 +29,6 @@
 "account.catalog.failed" = "連不上目錄。請改輸入主機名稱。";
 "account.catalog.empty" = "目錄沒有列出任何主機。請改輸入主機名稱。";
 "account.catalog.added" = "已新增";
-"account.catalog.addHost" = "新增 %@";
-"account.catalog.addHost.detail" = "不在目錄裡。偵測並在這個工作階段加入。";
 "account.catalog.weekly" = "本週活躍 %@";
 "account.catalog.people" = "%@ 人";
 "account.refuse.closed" = "%@ 有回應，但不肯交出它的公開時間軸。";
@@ -250,3 +248,45 @@
 "account.remove.detail" = "它的文章，還有這個裝置為它留的東西，都會跟著一起不見。";
 "account.remove.detail.boards" = "它的文章、這個裝置為它留的東西，還有你挑的 %d 個版塊，都會跟著一起不見。版塊不會自己回來。";
 "account.remove.confirm" = "移除";
+
+/* Unit 4 — the join sheet, and what a server says before you take it. */
+"join.close" = "關閉";
+"join.back" = "返回";
+
+"join.browse.title" = "可以讀的主機";
+"join.browse.detail" = "挑一台看看它是什麼。你沒開口之前不會加入任何東西。";
+"join.browse.filter" = "用主機名稱或關鍵字篩選";
+"join.browse.look" = "看看 %@";
+"join.browse.look.detail" = "不在目錄裡。加入之前先看看它是什麼。";
+"account.browse" = "瀏覽";
+"account.browse.label" = "瀏覽可以讀的主機";
+
+"source.shape.microblog" = "微網誌";
+"source.shape.forum" = "論壇";
+"source.shape.video" = "影片";
+"source.spoken" = "%1$@，%2$@，%3$@";
+
+"join.preview.detail" = "這台主機自己說它是什麼。你按下訂閱之前不會加入任何東西。";
+"join.preview.thumbnail" = "%@ 自己放的圖";
+"join.preview.activeMonth" = "本月活躍 %@";
+"join.preview.posts" = "%@ 篇文章";
+"join.preview.reg.open" = "任何人都可以註冊";
+"join.preview.reg.approval" = "註冊需要審核";
+"join.preview.reg.closed" = "已關閉註冊";
+"join.preview.rules" = "這台主機要求讀的人遵守什麼";
+"join.preview.rules.spoken" = "第 %1$d 條，共 %2$d 條：%3$@";
+
+"join.preview.silent" = "%@ 不對外公布任何關於自己的事。這個 app 沒有問過它，也沒有什麼好等的。";
+"join.preview.unread" = "這個 app 請 %@ 自我介紹，但讀不懂它的回答。這跟它能不能讀無關——很多主機給得出文章，卻沒有說明。";
+"join.preview.unread.network" = "那台主機沒有回應。";
+"join.preview.unread.refused" = "那台主機拒絕了這個請求（HTTP %d）。";
+"join.preview.unread.unreadable" = "那個回答不是這個 app 讀得懂的形狀。";
+"join.preview.unasked" = "這個 app 還沒問過 %@ 它是什麼。";
+
+"join.preview.next.microblog" = "訂閱之後，這台主機的公開時間軸會併進你的時間軸。";
+"join.preview.next.forum" = "訂閱之後，這個論壇最新的主題會併進你的時間軸。";
+"join.preview.next.boards" = "接下來你要挑讀哪幾個版塊。挑完之前不會加入任何東西。";
+
+"join.preview.closed" = "要讀這個論壇得先有帳號，所以訂閱多半會被拒絕。";
+"join.preview.closed.hint" = "訂閱這台主機多半會被拒絕。";
+"join.preview.turnedAway" = "這台主機前面有東西把 Fediqo 擋掉了，所以訂閱多半會被拒絕。登入通常就能解決。";

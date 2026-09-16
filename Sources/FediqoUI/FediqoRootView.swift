@@ -51,6 +51,17 @@ public struct FediqoRootView: View {
 
     private var availability: ShellAvailability { session.availability }
 
+    /// Whether the join sheet is up, derived from the stage rather than stored beside it.
+    ///
+    /// Written out here rather than inline, because a `Binding` built inside the modifier chain
+    /// pushes `body` past what the type-checker will solve in reasonable time.
+    private var stagePresented: Binding<Bool> {
+        Binding(
+            get: { session.stage != nil },
+            set: { shown in if !shown { session.dismissStage() } }
+        )
+    }
+
     public var body: some View {
         layout
             .onChange(of: place) { old, new in
@@ -92,17 +103,22 @@ public struct FediqoRootView: View {
                 if let request {
                     signInWindows.show(request, sessions: session.forums) { reached in
                         // **The same two lines as the sheet below, and they have to be.** A
-                        // sign-in that was reached goes straight back to `begin`: the reader
+                        // sign-in that was reached goes straight back to the join: the reader
                         // typed a host, was turned away, went and signed in, and the errand was
                         // always "add this forum". Without the retry the window closes onto the
                         // refusal it was opened from, which reads as a sign-in that did nothing.
+                        //
+                        // **`resumeAfterSignIn` and not `add`**, because `add` stops at the
+                        // preview — a screen this reader has already read and already answered.
+                        // They pressed Subscribe before they were turned away; this finishes that
+                        // press rather than asking for it again.
                         //
                         // This branch lost both the retry and the host when the page moved out of
                         // the sheet — the window was given the body the sheet had at the time,
                         // and the sheet grew them afterwards. Whatever is done to one of these
                         // two callbacks belongs in the other on the same day.
                         if session.signInFinished(reached: reached, host: request.host) {
-                            Task { await session.add() }
+                            Task { await session.resumeAfterSignIn() }
                         }
                     }
                 } else {
@@ -112,28 +128,35 @@ public struct FediqoRootView: View {
             #else
             .sheet(item: $session.signingIn) { request in
                 ForumSignInSheet(request: request, sessions: session.forums) { reached in
-                    // **A sign-in that was reached goes straight back to `begin`.** The reader
+                    // **A sign-in that was reached goes straight back to the join.** The reader
                     // typed a host, was turned away, and went and signed in; the errand was
                     // always "add this forum", and landing them at an empty field having lost
                     // what they typed would make them start it again. This second pass goes
                     // through the browser that now holds the session — see `ShellSession.joiner`.
+                    //
+                    // **`resumeAfterSignIn` and not `add`**: the preview is a question this
+                    // reader has already answered, so the retry finishes the press instead of
+                    // asking for it a second time.
                     if session.signInFinished(reached: reached, host: request.host) {
-                        Task { await session.add() }
+                        Task { await session.resumeAfterSignIn() }
                     }
                 }
             }
             #endif
-            // **The pause, on the root beside the other two.** A forum join stops to ask which
-            // boards, and until it is answered nothing has been added — so dismissing this by
-            // any route at all, the button or a swipe, is a complete cancel with nothing to undo.
-            // Attached here rather than to Account for the reason the sign-in sheet is: one
-            // presenter, driven by one piece of session state, survives a second call site.
-            .sheet(item: $session.choosing) { choice in
-                BoardPickerSheet(
-                    choice: choice,
-                    subscribe: { picks in Task { await session.subscribe(picks) } },
-                    cancel: { session.cancelChoosing() }
-                )
+            // **Adding a source, all three stages of it, on the root beside the other two.**
+            // Nothing has been added at any of them, so dismissing this by any route at all — the
+            // button, a swipe, Escape — is a complete cancel with nothing to undo. Attached here
+            // rather than to Account for the reason the sign-in sheet is: one presenter, driven by
+            // one piece of session state, survives a second call site.
+            //
+            // **`isPresented` and not `item:`, which is the correction and not the shortcut.** A
+            // stable `id` is precisely what stops SwiftUI re-presenting a sheet, so with `item:`
+            // whether the content builder re-runs when the stage changes under the same host is
+            // version-dependent behaviour rather than contract — and the likely outcome on a
+            // device is the preview sitting on screen while the session says boards. `JoinSheet`
+            // reads `session.stage` inside its own body and switches there, which is a redraw.
+            .sheet(isPresented: stagePresented) {
+                JoinSheet(session: session)
             }
             // **The Remove question, on the root beside the other three presenters**, and for the
             // same documented reason: one presenter driven by one piece of session state survives

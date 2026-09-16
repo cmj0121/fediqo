@@ -29,8 +29,6 @@
 "account.catalog.failed" = "The directory could not be reached. Type a hostname.";
 "account.catalog.empty" = "The directory listed none. Type a hostname.";
 "account.catalog.added" = "Added";
-"account.catalog.addHost" = "Add %@";
-"account.catalog.addHost.detail" = "Not in the directory. Detect and add it this session.";
 "account.catalog.weekly" = "%@ active this week";
 "account.catalog.people" = "%@ people";
 "account.refuse.closed" = "%@ answered, but would not hand over its public timeline.";
@@ -252,3 +250,45 @@
 "account.remove.detail" = "Its posts and everything this device holds for it go with it.";
 "account.remove.detail.boards" = "Its posts, everything this device holds for it, and the %d boards you picked go with it. The boards do not come back.";
 "account.remove.confirm" = "Remove";
+
+/* Unit 4 — the join sheet, and what a server says before you take it. */
+"join.close" = "Close";
+"join.back" = "Back";
+
+"join.browse.title" = "Servers to read";
+"join.browse.detail" = "Pick one to see what it is. Nothing is added until you say so.";
+"join.browse.filter" = "Filter by hostname or keyword";
+"join.browse.look" = "Look at %@";
+"join.browse.look.detail" = "Not in the directory. See what it is before you add it.";
+"account.browse" = "Browse";
+"account.browse.label" = "Browse servers to read";
+
+"source.shape.microblog" = "microblog";
+"source.shape.forum" = "forum";
+"source.shape.video" = "video";
+"source.spoken" = "%1$@, %2$@, %3$@";
+
+"join.preview.detail" = "What this server says about itself. Nothing is added until you subscribe.";
+"join.preview.thumbnail" = "%@'s own picture of itself";
+"join.preview.activeMonth" = "%@ active this month";
+"join.preview.posts" = "%@ posts";
+"join.preview.reg.open" = "Anyone can sign up";
+"join.preview.reg.approval" = "Sign-ups need approval";
+"join.preview.reg.closed" = "Sign-ups are closed";
+"join.preview.rules" = "What this server asks of readers";
+"join.preview.rules.spoken" = "Rule %1$d of %2$d: %3$@";
+
+"join.preview.silent" = "%@ publishes nothing about itself. Fediqo asked this host nothing, and there is nothing to wait for.";
+"join.preview.unread" = "Fediqo asked %@ to describe itself and could not read the answer. That says nothing about whether it reads — plenty of servers serve posts and no description.";
+"join.preview.unread.network" = "The host did not answer.";
+"join.preview.unread.refused" = "The host turned the request away (HTTP %d).";
+"join.preview.unread.unreadable" = "The answer was not in a shape Fediqo could read.";
+"join.preview.unasked" = "Fediqo has not asked %@ what it is.";
+
+"join.preview.next.microblog" = "Subscribing adds this server's public timeline to your timeline.";
+"join.preview.next.forum" = "Subscribing adds this forum's latest threads to your timeline.";
+"join.preview.next.boards" = "Next you pick which boards to read. Nothing is added until you do.";
+
+"join.preview.closed" = "Reading this forum needs an account, so subscribing will most likely be refused.";
+"join.preview.closed.hint" = "Subscribing to this server will most likely be refused.";
+"join.preview.turnedAway" = "Something in front of this server turned Fediqo away, so subscribing will most likely be refused. Signing in usually clears it.";

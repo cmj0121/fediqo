@@ -52,7 +52,11 @@ struct BoardChoiceTests {
 
     // MARK: - The pause
 
-    @Test("Adding a forum stops at the picker, and adds nothing")
+    /// **Two presses now, and the first of them is the new stage.** Add looks; a Discuz! has no
+    /// document about itself, so what the look asks is whether it will show a signed-out reader
+    /// any board at all, and the preview says that. Subscribe is what reaches D28's pause. Both
+    /// are asserted, because "adds nothing" has to hold at *both* of them.
+    @Test("Adding a forum shows it first, and subscribing stops at the picker with nothing added")
     func addingAForumPauses() async {
         // A grid index with two boards under one category — enough that "the picker was offered
         // boards" is a claim with something behind it.
@@ -68,6 +72,23 @@ struct BoardChoiceTests {
         """#)))
         session.hostname = Self.host
         await session.add()
+
+        // Stage one, and what a Discuz! can say about itself: its index answered a signed-out
+        // reader, so it reads without an account — and the index it answered with is carried, so
+        // the press has nothing left to ask.
+        guard case .previewing(let preview) = session.stage else {
+            Issue.record("a look should open a preview")
+            return
+        }
+        #expect(preview.host == Self.host)
+        #expect(preview.profile == .stated(SourceProfile(
+            host: Self.host, kind: .discuz, readsWithoutAccount: true
+        )))
+        #expect(preview.boards.flatMap(\.boards).map(\.fid) == [33, 41])
+        #expect(session.choosing == nil, "the boards were reached before the reader agreed")
+        #expect(session.sources.isEmpty)
+
+        await session.confirm()
 
         // D28: the reader has to choose before there is a timeline to fetch at all.
         #expect(session.choosing?.offer.host == Self.host)
@@ -85,8 +106,14 @@ struct BoardChoiceTests {
         #expect(!session.isAdded(Self.host))
     }
 
-    @Test("A microblog does not stop to ask, and still gets All and Trends")
-    func aMicroblogDoesNotPause() async {
+    /// **A microblog is previewed too, and that is the point rather than a cost.** The old claim
+    /// this test made — that a microblog does not stop — is no longer true and should not be
+    /// patched into looking true: *every* protocol stops at the preview now, because a stage that
+    /// appeared only for the one protocol with nothing to show would be the frame failing at its
+    /// one job. What is still true, and is what the rest of the assertions are about, is that a
+    /// microblog is never asked which boards: one press to look, one to take, and no third.
+    @Test("A microblog is previewed, taken in one press after that, and never asked about boards")
+    func aMicroblogIsPreviewedThenTaken() async {
         let session = Self.session(FixtureHTTP([
             "/": .text(#"""
             <html><head><meta name="application-name" content="Mastodon"></head><body></body></html>
@@ -103,6 +130,21 @@ struct BoardChoiceTests {
         session.hostname = "first.example"
         await session.add()
 
+        // Stage one, and the server had something to say — so the preview is the rich one and
+        // nothing has been joined yet.
+        guard case .previewing(let preview) = session.stage else {
+            Issue.record("a Mastodon should be looked at before it is taken")
+            return
+        }
+        #expect(preview.host == "first.example")
+        #expect(preview.profile == .stated(SourceProfile(
+            host: "first.example", kind: .mastodon, title: "First"
+        )))
+        #expect(session.sources.isEmpty)
+
+        await session.confirm()
+
+        #expect(session.stage == nil, "the sheet stayed up over a server that is now joined")
         #expect(session.choosing == nil)
         #expect(session.queries.map(\.id) == ["all", "trends"])
         #expect(session.availability.allows(.timeline))
@@ -124,11 +166,15 @@ struct BoardChoiceTests {
         let session = Self.session(http)
         session.hostname = Self.host
         await session.add()
+        await session.confirm()
         #expect(session.choosing != nil)
 
-        session.cancelChoosing()
+        // **One dismissal for all three stages now.** `cancelChoosing` was the picker's own way
+        // out; the sheet is one presenter, so closing it is one call whichever stage is showing.
+        session.dismissStage()
 
         // Nothing was added, so there is nothing to take back — and nothing to apologise for.
+        #expect(session.stage == nil)
         #expect(session.choosing == nil)
         #expect(session.sources.isEmpty)
         #expect(session.notes.isEmpty)
@@ -141,6 +187,7 @@ struct BoardChoiceTests {
         #expect(session.hostname == Self.host)
         #expect(!session.isAdded(Self.host))
         await session.add()
+        await session.confirm()
         #expect(session.choosing?.offer.host == Self.host)
     }
 
@@ -158,6 +205,13 @@ struct BoardChoiceTests {
         """#)))
         session.hostname = Self.host
         await session.add()
+        await session.confirm()
+        // The premise, pinned: without it every assertion below is satisfied by a join that
+        // never happened, and the test passes with `confirm()` deleted.
+        guard session.choosing != nil else {
+            Issue.record("a Discuz! should have paused on the picker")
+            return
+        }
 
         await session.subscribe([])
 
@@ -218,6 +272,7 @@ struct BoardChoiceTests {
         ))
         session.hostname = Self.host
         await session.add()
+        await session.confirm()
         guard let offer = session.choosing?.offer else {
             Issue.record("a Discuz! should have paused for the reader to choose")
             return
@@ -266,6 +321,7 @@ struct BoardChoiceTests {
         ))
         session.hostname = Self.host
         await session.add()
+        await session.confirm()
         guard let offer = session.choosing?.offer else {
             Issue.record("a Discuz! should have paused")
             return
@@ -339,6 +395,7 @@ struct BoardChoiceTests {
         ))
         session.hostname = Self.host
         await session.add()
+        await session.confirm()
         guard let offer = session.choosing?.offer else {
             Issue.record("a Discuz! should have paused")
             return
@@ -393,6 +450,7 @@ struct BoardChoiceTests {
         ))
         session.hostname = Self.host
         await session.add()
+        await session.confirm()
         guard let offer = session.choosing?.offer else {
             Issue.record("a Discuz! should have paused")
             return
@@ -437,6 +495,7 @@ struct BoardChoiceTests {
         ))
         session.hostname = Self.host
         await session.add()
+        await session.confirm()
         guard let offer = session.choosing?.offer else {
             Issue.record("a Discuz! should have paused")
             return
@@ -469,6 +528,12 @@ struct BoardChoiceTests {
 
     // MARK: - Refused, and the way back
 
+    /// **The refusal arrives at the press, not at the look, and that is a real change.** A
+    /// Discuz! publishes nothing about itself, so the look never fetches the index — which is
+    /// where the notice page is. The reader is therefore shown a preview of a forum that is going
+    /// to turn them away, and finds out when they press Subscribe. That is the honest ordering:
+    /// this app cannot know the answer without spending the request, and spending it on a reader
+    /// who has not agreed to anything is what the whole stage exists to stop.
     @Test("A forum that refuses offers a sign-in, and keeps what the reader typed")
     func aRefusedForumOffersSignIn() async {
         // Discuz!'s own notice page, and the one thing that identifies it: `id="messagetext"`.
@@ -489,17 +554,24 @@ struct BoardChoiceTests {
         ]))
         session.hostname = Self.host
         await session.add()
+        await session.confirm()
 
         // The forum's own notice page is a refusal — the host is fine, the spelling is fine, and
         // somebody said no on purpose. That is the one failure a sign-in can change.
         #expect(session.offerSignIn == Self.host)
         #expect(session.refuse != nil)
         #expect(session.choosing == nil)
+        // **And the sheet is gone.** A refusal is reported on the page, under the field, where
+        // the offer of a sign-in is — leaving the preview up over it would put the one thing the
+        // reader can do about it behind a sheet.
+        #expect(session.stage == nil)
         #expect(session.sources.isEmpty)
         // What they typed is still there, so the way back is one press and not a retype.
         #expect(session.hostname == Self.host)
     }
 
+    /// Refused at the press for the reason the notice-page test above states: the index is what
+    /// carries the answer and the look does not fetch it.
     @Test("A forum with no board this reader may see is refused, not mis-spelled")
     func aForumWithNoBoardsIsRefused() async {
         // A complete, ordinary Discuz! index with **no forum list on it** — what a signed-out
@@ -523,11 +595,13 @@ struct BoardChoiceTests {
         ]))
         session.hostname = Self.host
         await session.add()
+        await session.confirm()
 
         // An index with no board is an account question, not an address question — sending the
         // reader to check their spelling would send them after a fault of theirs that is not one.
         #expect(session.offerSignIn == Self.host)
         #expect(session.choosing == nil)
+        #expect(session.stage == nil)
     }
 
     /// **Reaching a sign-in goes back to `begin`, and says so as a value.** The reader typed a
@@ -551,7 +625,24 @@ struct BoardChoiceTests {
         #expect(session.hostname == Self.host)
     }
 
-    @Test("A sign-in reached, and the join runs again to the picker")
+    /// **The retry skips the preview and lands on the boards.** The reader has already read what
+    /// this server says about itself, already pressed Subscribe, and already gone and done the
+    /// one thing that could change the answer; showing them that screen again asks a question
+    /// they have answered.
+    ///
+    /// **It is still a fresh look, and under the index probe that matters.** A signed-in reader's
+    /// forum index is a different document — it is the index that says which boards they may see
+    /// — so the retry reads one rather than reusing whatever the refused look left behind.
+    ///
+    /// **What this test does not show, said so rather than implied:** that the second read goes
+    /// through the engine the sign-in built. This session holds no real engine, so `joiner(for:)`
+    /// falls back to the plain client and the two transports are indistinguishable from here.
+    /// That half is pinned Core-side by `PreviewTests.aPreviewSurvivesItsJoiner`, which runs the
+    /// press on a second `FixtureHTTP` and asserts the second one did the reading.
+    ///
+    /// Pinned so it can fail: this calls `resumeAfterSignIn()` **once** and expects the boards.
+    /// Wired to `add()`, as it was, the reader is left sitting on a preview and this goes red.
+    @Test("A sign-in reached, and the retry lands on the boards without asking again")
     func theJoinRunsAgainAfterASignIn() async {
         let session = Self.session(Self.forumHTTP(index: .text(#"""
         <html><head><meta name="generator" content="Discuz! X5.0" /></head><body>
@@ -562,9 +653,16 @@ struct BoardChoiceTests {
         </div></body></html>
         """#)))
         session.hostname = Self.host
-        _ = session.signInFinished(reached: true, host: Self.host)
-        await session.add()
-        #expect(session.choosing?.offer.host == Self.host)
+        #expect(session.signInFinished(reached: true, host: Self.host), "the premise: a sign-in")
+
+        await session.resumeAfterSignIn()
+
+        #expect(session.choosing?.offer.host == Self.host, """
+            The retry left the reader on a preview they had already answered. \
+            `resumeAfterSignIn` looks and takes; `add` stops.
+            """)
+        #expect(session.choosing?.offer.boards.map(\.fid) == [33])
+        #expect(session.sources.isEmpty, "the boards stage adds nothing until they pick")
     }
 
     // MARK: - Clear
@@ -600,6 +698,7 @@ struct BoardChoiceTests {
         ))
         session.hostname = Self.host
         await session.add()
+        await session.confirm()
         guard let offer = session.choosing?.offer else {
             Issue.record("a Discuz! should have paused")
             return

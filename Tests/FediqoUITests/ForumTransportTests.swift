@@ -202,6 +202,7 @@ struct ForumTransportTests {
         ]), forums: ForumSessions(credentials: MemoryCredentials()))
         session.hostname = "forum.example"
         await session.add()
+        await session.confirm()
         #expect(session.refuse != nil, "the premise did not hold: nothing was refused")
         #expect(session.offerSignIn == "forum.example", "a refusal offered the reader nothing")
     }

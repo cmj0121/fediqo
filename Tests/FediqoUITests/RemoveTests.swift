@@ -248,7 +248,10 @@ struct RemoveTests {
         session.offerSignIn = alpha
         session.unread = [UnreadBoard(board: DiscuzBoard(fid: 3, name: "a", category: "c", gid: 1), error: .unreachable)]
         session.unreadAll = 4
-        session.choosing = BoardChoice(offer: JoinOffer(host: alpha, kind: .discuz, categories: []))
+        session.stage = .choosingBoards(
+            JoinOffer(host: alpha, kind: .discuz, categories: []),
+            from: SourcePreview(host: alpha, kind: .discuz, profile: .silent(host: alpha, kind: .discuz))
+        )
         session.signingIn = ForumSignInRequest(host: alpha, stop: .noCredential)
 
         await session.remove(host: alpha)
@@ -277,7 +280,10 @@ struct RemoveTests {
         session.refuse = "something about beta"
         session.offerSignIn = beta
         session.unreadAll = 4
-        session.choosing = BoardChoice(offer: JoinOffer(host: beta, kind: .discuz, categories: []))
+        session.stage = .choosingBoards(
+            JoinOffer(host: beta, kind: .discuz, categories: []),
+            from: SourcePreview(host: beta, kind: .discuz, profile: .silent(host: beta, kind: .discuz))
+        )
         session.signingIn = ForumSignInRequest(host: beta, stop: .noCredential)
 
         await session.remove(host: alpha)
