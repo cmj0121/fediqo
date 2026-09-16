@@ -1028,6 +1028,14 @@ struct DiscuzThread: Equatable, Sendable {
             // `uc_server/avatar.php?uid=…`, and that guess is wrong on any install that moved or
             // renamed UCenter — so nothing is drawn rather than a broken address fetched fifty
             // times per page.
+            //
+            // **Still nothing here, and the row now fills it in from somewhere else.** The thread
+            // *page* does carry the author's picture, and D30 already fetches that page when the
+            // row is scrolled to — so the avatar arrives with the opening post rather than
+            // costing a request of its own. `DiscuzPost.avatarURL` is where it comes from and
+            // `DummyItemRow.avatar` is where the two are put together. Reading it here instead
+            // would mean forty thread pages for one board listing, which is the traffic D30
+            // exists to refuse.
             avatarURL: nil,
             // The row says a thread *has* an attachment — `<i class="fico-image">`, or an
             // `image_s.gif` on the older skins — and never says where it is. A flag with no file
@@ -1333,6 +1341,22 @@ public struct DiscuzPost: Identifiable, Hashable, Sendable {
     /// act on, and `body` is empty — which is the difference between "they wrote nothing" and
     /// "you were not allowed to read it", and a reader deserves to be told which.
     public let isWithheld: Bool
+    /// The author's picture, where the thread **page** carried one.
+    ///
+    /// **The page has them and the thread table does not**, which is the whole of why this field
+    /// is here and `DiscuzThread` has no equivalent. `asNote` says it: a Discuz! thread table
+    /// carries no avatar, it can be *guessed* at `uc_server/avatar.php?uid=…`, and that guess is
+    /// wrong on any install that moved UCenter. `install-d.example` is that install — it serves its
+    /// avatars from `avatars-d.example` on the touch template and `files-d.example` on the desktop one, so
+    /// the guess would have been wrong twice on one forum. This is read off the page instead, and
+    /// therefore read rather than built. See `DiscuzPostLayout.avatarURL`.
+    ///
+    /// **Lifted, and so checked.** `Note.url` is built out of a parsed host and an integer and
+    /// needs no check; this is an address a stranger wrote, so it goes through `Host.fetchableURL`
+    /// — `https` only, and a host to reach — at the point it stops being ours. Nothing where the
+    /// template drew no picture, where it drew the forum's own `noavatar` placeholder, or where
+    /// the address is one this device will not fetch.
+    public let avatarURL: URL?
 
     public init(
         pid: Int,
@@ -1343,7 +1367,8 @@ public struct DiscuzPost: Identifiable, Hashable, Sendable {
         postedAt: Date? = nil,
         body: String,
         quoted: String? = nil,
-        isWithheld: Bool = false
+        isWithheld: Bool = false,
+        avatarURL: URL? = nil
     ) {
         self.pid = pid
         self.tid = tid
@@ -1354,6 +1379,7 @@ public struct DiscuzPost: Identifiable, Hashable, Sendable {
         self.body = body
         self.quoted = quoted
         self.isWithheld = isWithheld
+        self.avatarURL = avatarURL
     }
 }
 
@@ -1404,6 +1430,24 @@ enum DiscuzThreadPage {
         let subheading: NSRegularExpression
         /// An anchor, with its address and its label.
         let anchor: NSRegularExpression
+        /// The box a template puts the author's picture in — `<div class="avatar">` on
+        /// `install-c.example` and `install-b.example`, `<span class="avatar">` on `install-d.example`. The
+        /// tag is captured and back-referenced because it is **not** the same tag on the four
+        /// installs measured, and a rule written for `div` alone would have silently drawn no
+        /// avatar on one whole forum.
+        ///
+        /// `\bavatar\b` and not a substring: `install-c.example`'s desktop page writes
+        /// `class="pls cl favatar"` round a box its own JavaScript fills in later
+        /// (`fixed_avatar([…])`), and there is no `<img>` in it to read. The word boundary is
+        /// what keeps that box from being matched and then quietly answering nothing.
+        let avatarBox: NSRegularExpression
+        /// One `<img>` tag, whole.
+        let image: NSRegularExpression
+        /// Where the address is: `data-src` where the template lazy-loads, `src` otherwise.
+        /// Both, and in that order, because the four installs do not agree — see
+        /// `DiscuzPostLayout.address`.
+        let imageDeferred: NSRegularExpression
+        let imageSource: NSRegularExpression
         /// Whether that address is a person's page rather than a button. `mod=spacecp` is a
         /// *control* — Discuz!'s own favourite button sits in the same list as the author's name
         /// on `install-d.example` — so the boundary after `space` is load-bearing.
@@ -1468,6 +1512,16 @@ enum DiscuzThreadPage {
                 let anchor = compile(
                     "<a[^>]*href\\s*=\\s*[\"']([^\"']*)[\"'][^>]*>(.*?)</a>"
                 ),
+                let avatarBox = compile(
+                    "<(div|span)[^>]*\(attribute("class", "avatar"))[^>]*>(.*?)</\\1\\s*>"
+                ),
+                let image = compile("<img\\b[^>]*>"),
+                let imageDeferred = compile(
+                    "\\bdata-src\\s*=\\s*[\"']([^\"']*)[\"']"
+                ),
+                let imageSource = compile(
+                    "(?<![-\\w])src\\s*=\\s*[\"']([^\"']*)[\"']"
+                ),
                 let person = compile(
                     "[?&;]mod=space(?:[&;]|$)|(?:^|/)space-(?:uid|username)-"
                 ),
@@ -1506,6 +1560,10 @@ enum DiscuzThreadPage {
             self.item = item
             self.subheading = subheading
             self.anchor = anchor
+            self.avatarBox = avatarBox
+            self.image = image
+            self.imageDeferred = imageDeferred
+            self.imageSource = imageSource
             self.person = person
             self.quote = quote
             self.locked = locked
@@ -1631,6 +1689,7 @@ enum DiscuzPostLayout: CaseIterable, Sendable {
             in: DiscuzMarkup.content(self.message(patterns), nesting: self.nesting(patterns), in: body) ?? "",
             patterns: patterns
         )
+        let avatar = avatarURL(in: body, heading: who, host: host, patterns: patterns)
         return DiscuzPost(
             pid: pid,
             tid: tid,
@@ -1644,8 +1703,99 @@ enum DiscuzPostLayout: CaseIterable, Sendable {
                 .flatMap { DiscuzDate.parse($0, date: patterns.date) },
             body: words.body,
             quoted: words.quoted,
-            isWithheld: words.isWithheld
+            isWithheld: words.isWithheld,
+            avatarURL: avatar
         )
+    }
+
+    /// The author's picture, where this layout's template put one on the page.
+    ///
+    /// **Measured on all four installs, on 2026-09-16, and no two of them agree.** The table is
+    /// the reason this is a per-layout question rather than one pattern:
+    ///
+    /// | install | layout | box | attribute | address |
+    /// | --- | --- | --- | --- | --- |
+    /// | `install-c.example` | touch | `<div class="avatar">` | `data-src` | `./data/avatar/…` |
+    /// | `install-b.example` | touch | `<div class="avatar">` | `src` | `./data/avatar/…` |
+    /// | `install-b.example` | desktop | `<div class="avatar">` | `src` | `./data/avatar/…` |
+    /// | `install-d.example` | touch | `<span class="avatar">` | `src` | `https://avatars-d.example/avatar.php?uid=…` |
+    /// | `install-d.example` | desktop | `<div class="avatar">` | `src` | `https://files-d.example/…_avatar_small.jpg` |
+    /// | `install-a.example` | comiis | *none* | `src` | `https://…/uc_server/avatar.php?uid=…` |
+    /// | `install-c.example` | desktop | `class="…favatar"` | *none* | written in by JavaScript |
+    ///
+    /// Three things follow from it, and each one is a rule a single-install reading would have got
+    /// wrong. The attribute is `data-src` where the template lazy-loads and `src` where it does
+    /// not, so both are read and the deferred one wins. The box is a `div` on three installs and a
+    /// `span` on the fourth, so the tag is captured rather than assumed. And the address is
+    /// relative on two installs and absolute on two — pointing at a **different host** on
+    /// `install-d.example`, which is precisely the install whose UCenter has moved and precisely why
+    /// `uc_server/avatar.php?uid=…` is not constructed here.
+    ///
+    /// The two answers of nothing are both correct and both measured. `install-c.example`'s desktop
+    /// page has no `<img>` to read at all — its own script fills the box in afterwards — and
+    /// `install-d.example` writes `<div class="avatar">頭像被屏蔽</div>` for three posts in ten, which is
+    /// the forum saying there is no picture. Nothing is drawn rather than an address guessed.
+    ///
+    /// **No `default:`.** A fourth template has to say where its avatar lives, and the build is
+    /// where that should be noticed.
+    private func avatarURL(
+        in body: String,
+        heading: String?,
+        host: String,
+        patterns: DiscuzThreadPage.Patterns
+    ) -> URL? {
+        let box: String?
+        switch self {
+        case .touch, .desktop:
+            box = patterns.avatarBox.capture(2, in: body)
+        case .comiis:
+            // Comiis has no box named for the job. It keeps the picture in the heading it also
+            // keeps the name in — `<div class="comiis_postli_top">`, which `who` above already
+            // isolated — inside the first of the two anchors it links the author by. That is the
+            // same fact `author(in:)` works around from the other side: the template links one
+            // person twice, the picture first and the name second.
+            box = heading
+        }
+        guard let box, let tag = patterns.image.capture(0, in: box) else { return nil }
+        return DiscuzPostLayout.address(in: tag, host: host, patterns: patterns)
+    }
+
+    /// One `<img>` tag's address, resolved against the forum and admitted under decision 9's rule.
+    ///
+    /// `data-src` before `src`, because a template that lazy-loads keeps the real picture in the
+    /// first and a blank or a spinner in the second; where there is no `data-src` the `src` *is*
+    /// the picture. `(?<![-\w])src` rather than `\bsrc`, so reading `src` cannot accidentally read
+    /// the tail of `data-src`.
+    ///
+    /// **`noavatar` is not a picture.** `./data/avatar/noavatar.svg` is Discuz!'s own placeholder
+    /// for somebody who uploaded nothing — measured three times on one `install-c.example` page — and
+    /// fetching it would draw *the forum's* grey silhouette over the plate this app already draws
+    /// for an author with no picture. The whole last path component is tested by prefix, which
+    /// also covers the `noavatar_small.gif` and `noavatar_middle.gif` older skins ship.
+    ///
+    /// Resolution is against `https://<host>/` rather than against the page's own `<base href>`:
+    /// the base is a value the same stranger writes, and the host is one this device parsed. An
+    /// absolute address survives resolution unchanged, which is how `install-d.example`'s separate
+    /// avatar host keeps working, and `Host.isFetchable` is what stops `javascript:`, `data:` and
+    /// plain `http:` surviving it.
+    static func address(
+        in tag: String,
+        host: String,
+        patterns: DiscuzThreadPage.Patterns
+    ) -> URL? {
+        let raw = patterns.imageDeferred.capture(1, in: tag)
+            ?? patterns.imageSource.capture(1, in: tag)
+        guard let raw else { return nil }
+        let cleaned = raw
+            .replacingOccurrences(of: "&amp;", with: "&", options: .caseInsensitive)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return nil }
+        guard let base = Host.httpsURL(host: host, path: "/"),
+              let resolved = URL(string: cleaned, relativeTo: base)?.absoluteURL,
+              Host.isFetchable(resolved)
+        else { return nil }
+        guard !resolved.lastPathComponent.lowercased().hasPrefix("noavatar") else { return nil }
+        return resolved
     }
 
     /// Where this layout keeps the words, and what has to be counted to find the end of them.

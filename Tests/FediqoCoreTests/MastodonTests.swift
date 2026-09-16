@@ -182,6 +182,32 @@ struct MastodonTests {
         #expect(note.attachments[0].previewURL == URL(string: "https://first.example/ok.jpg"))
     }
 
+    /// **Decision 9 at the field it had been missed at.**
+    ///
+    /// Every other address on a status went through `Host.fetchableURL`; `url` went through a bare
+    /// `URL(string:)`, so a hostile instance could put `javascript:` where the canonical address
+    /// goes and have it kept. It had been harmless for exactly one reason — nothing in the app
+    /// opened it — and unit F7 gives the reader a button that does.
+    ///
+    /// The check belongs here rather than only at that button, which is this branch's second
+    /// convention: a rule enforced at each consumer's door is a rule consumer N+1 misses. The
+    /// button checks as well, but as a second reading of the same function, not as the rule.
+    @Test("A status's own address is admitted under the same rule as everything else on it")
+    func theCanonicalAddressIsAdmittedToo() throws {
+        #expect(try Self.note(Self.status(extra: #""url": "https://first.example/@ada/1""#)).url
+            == URL(string: "https://first.example/@ada/1"))
+        // Each one of these `URL(string:)` builds happily, and each one would have been handed
+        // straight to the system browser.
+        for hostile in ["javascript:alert(1)", "file:///etc/passwd",
+                        "data:text/html;base64,PHNjcmlwdD4=",
+                        "http://first.example/@ada/1", "https://"] {
+            let note = try Self.note(Self.status(extra: "\"url\": \"\(hostile)\""))
+            #expect(note.url == nil, "\(hostile) survived into a Note")
+        }
+        // Nothing said is still nothing, rather than an address invented for it.
+        #expect(try Self.note(Self.status()).url == nil)
+    }
+
     @Test("Every type a server sends, and one nobody has heard of — and a gifv is a video")
     func everyKindDecodes() throws {
         let note = try Self.note(fixture: "status-media")

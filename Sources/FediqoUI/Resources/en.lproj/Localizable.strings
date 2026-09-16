@@ -62,7 +62,7 @@
 "shortcut.view" = "Open what is attached, at the size of the app";
 "shortcut.play" = "Play what is attached, or stop it";
 "shortcut.turn" = "Turn to the next attachment";
-"shortcut.cover" = "Lift the cover the author put over this post, or put it back";
+"shortcut.reveal" = "Lift the author's cover — or, where there is none, load the rest of this topic";
 "shortcut.compose" = "New post";
 "shortcut.list" = "This list";
 "shortcut.back" = "Back to the list";
@@ -241,3 +241,8 @@
 "thread.replies.count" = "%d replies";
 "thread.reply.floor" = "#%d";
 "thread.reply.quoted" = "Quoted: %@";
+
+/* Unit F7 — reading a thread properly. */
+"thread.open" = "Open on %@";
+"thread.open.hint" = "Opens %@ in your browser";
+"thread.open.leaves" = "Leaves this app and opens your browser";

@@ -236,15 +236,8 @@ public struct FediqoRootView: View {
                 if inViewer { ShellPictures.shared.releaseViewerTier() }
                 return true
             }
-        case .liftCover:
-            // **Blurs in place and never navigates.** Not "toggle, and also close the viewer if
-            // that leaves nothing to show" — a conditional rule inside the layer order is the
-            // named risk, and the blur at size is what confirms the press took. Two intents, two
-            // keys: `Escape` is still how a reader leaves.
-            return onActedItem { item in
-                guard item.covered else { return false }
-                return decks.toggleCover(item.id)
-            }
+        case .reveal:
+            return revealFocused()
         case .viewAttachment:
             return openViewer()
         case .playAttachment:
@@ -253,10 +246,18 @@ public struct FediqoRootView: View {
             // `q` leaves what is in front of it and reaches past nothing — the same one
             // expression of the order `Escape` reads. It used to intersect a local subset of the
             // layers, which was the order written down a second time.
+            //
+            // **No `default:`, and this one was found still here.** The plan records a `default:`
+            // over a protocol kind shipping a silent wrong answer once already and says the shape
+            // is gone; it was not — it was in this switch, over `DummyLayer?`, six commits later.
+            // `.dismiss` below has always enumerated all four and `nil` besides, which is what
+            // made the difference invisible: the two halves of one rule, written two ways, one of
+            // them free to fall through. A fifth layer added to `DummyLayer` now has to say what
+            // `q` does about it.
             switch DummyCommand.outermost(of: openLayers) {
             case .viewer: return closeViewer()
             case .thread: return popThread()
-            default: return false
+            case .shortcuts, .selection, nil: return false
             }
         case .showShortcuts:
             // Closing is always allowed; opening obeys the entry rule, so `?` under an open
@@ -427,7 +428,7 @@ public struct FediqoRootView: View {
                     of: item.id,
                     on: .viewer
                 ),
-                onToggleCover: { _ = apply(.liftCover) },
+                onToggleCover: { _ = apply(.reveal) },
                 onPlay: { _ = apply(.playAttachment) },
                 onGone: { playback.stop() },
                 onClose: { _ = closeViewer() }
@@ -560,6 +561,65 @@ public struct FediqoRootView: View {
         }
         jumpToTop += 1
         return true
+    }
+
+    /// `s` — the author's cover where there is one, the rest of the topic where there is not.
+    ///
+    /// **The acting half only.** Which of the two this press means is
+    /// `DummyCommand.reveal(hasCover:repliesWanted:)` and is decided nowhere else; what is here is
+    /// the three things to do about the answer, and the two facts the rule needs. Written this way
+    /// so that the pane's mark and this key read one function rather than two agreeing `if`s —
+    /// this branch's own arrangement for `a` and the card's play mark, stated in `playRow`.
+    ///
+    /// Everything about the cover is exactly as it was, including that it lands on the viewed post
+    /// where the viewer is open: `onActedItem` is what makes `m`, `a` and `s` mean the same thing
+    /// with the viewer up, and none of that moved. **No `default:`** — a fourth thing `s` could
+    /// mean has to be given a line here.
+    private func revealFocused() -> Bool {
+        onActedItem { item in
+            switch DummyCommand.reveal(
+                hasCover: item.covered,
+                repliesWanted: repliesWanted(of: item)
+            ) {
+            case .cover:
+                // **Blurs in place and never navigates.** Not "toggle, and also close the viewer
+                // if that leaves nothing to show" — a conditional rule inside the layer order is
+                // the named risk, and the blur at size is what confirms the press took. Two
+                // intents, two keys: `Escape` is still how a reader leaves.
+                return decks.toggleCover(item.id)
+            case .replies:
+                guard let thread = ForumThreadRef(item) else { return false }
+                Task { await session.posts.fetchReplies(thread) }
+                return true
+            case .nothing:
+                return false
+            }
+        }
+    }
+
+    /// Whether pressing for this post's replies could do anything at all.
+    ///
+    /// Three conditions, and each one is a real state rather than a guard written defensively.
+    ///
+    /// 1. **The pane is open on this very post.** The replies are drawn in `DummyThreadPane` and
+    ///    nowhere else, so from the timeline `s` would put a page on the wire for something the
+    ///    reader cannot see — work with no visible result, which is the fault the whole unit is
+    ///    about. A reader reaches the replies the way they always have: `Return`, then `s`.
+    /// 2. **With no viewer over it.** `onActedItem` hands `s` the viewed post while the viewer is
+    ///    up, and a fetch landing behind an opaque picture is the same invisible work one layer
+    ///    further out. With the viewer open `s` keeps its one old meaning and nothing else.
+    /// 3. **It is a Discuz! thread whose replies want asking for.** A Discourse topic and a
+    ///    microblog post are both `nil` at `ForumThreadRef`, for the reason that type gives, and
+    ///    `wantsPressing` is where "asking again could change the answer" already lives.
+    ///
+    /// **`standing(of:)` stamps interest, and that is fine here.** It is the same read the pane's
+    /// body makes on every pass; stamping more often can only make an entry look *less* stale to
+    /// the eviction predicate. What I8 forbids is a band that stops reading, not one read twice.
+    private func repliesWanted(of item: DummyItem) -> Bool {
+        guard place == .timeline, viewedItem == nil, threadStack.last == item.id,
+              let thread = ForumThreadRef(item)
+        else { return false }
+        return session.posts.standing(of: thread).wantsPressing
     }
 
     private func openThread() -> Bool {

@@ -45,11 +45,22 @@ struct PressTests {
     /// The view's own switch, so that what is asserted below is the behaviour a reader gets
     /// rather than a rearrangement of it. `m` and `s` differ only in what they do once they have
     /// a post; everything before that is shared, which is why it is one function there and here.
+    ///
+    /// **`s` reads `DummyCommand.reveal` rather than re-deciding**, which is the whole point of
+    /// that function existing. This harness used to spell the cover rule out for itself — `guard
+    /// item.covered` — and the moment `s` grew a second job that copy would have been a test
+    /// asserting the old behaviour while the app did something else. Convention one: a test must
+    /// not be free to describe a smaller world than the code.
+    ///
+    /// `repliesWanted` is a parameter because the replies are a fact about the forum cache and an
+    /// open pane, neither of which this suite has. `FediqoRootView.repliesWanted(of:)` is what
+    /// answers it in the app, and `ThreadReadingTests` is where the answer is pinned.
     private func press(
         _ command: DummyCommand,
         items: [DummyItem],
         selected: inout String?,
-        decks: inout ShellDecks
+        decks: inout ShellDecks,
+        repliesWanted: Bool = false
     ) -> Bool {
         switch DummyCommand.focused(in: items, selected: selected) {
         case .nothing:
@@ -61,9 +72,16 @@ struct PressTests {
             switch command {
             case .nextAttachment:
                 return decks.turn(item.id, of: item.attachments.count)
-            case .liftCover:
-                guard item.covered else { return false }
-                return decks.toggleCover(item.id)
+            case .reveal:
+                switch DummyCommand.reveal(
+                    hasCover: item.covered, repliesWanted: repliesWanted
+                ) {
+                case .cover: return decks.toggleCover(item.id)
+                // Standing in for the fetch the app starts. What is asserted here is which of the
+                // three this press chose, not what the cache did with it.
+                case .replies: return true
+                case .nothing: return false
+                }
             default:
                 return false
             }
@@ -92,25 +110,69 @@ struct PressTests {
     func coveringTheFocusedRow() {
         var selected: String? = "b"
         var decks = ShellDecks()
-        #expect(press(.liftCover, items: Self.list, selected: &selected, decks: &decks))
+        #expect(press(.reveal, items: Self.list, selected: &selected, decks: &decks))
         #expect(decks.isLifted("b"))
-        #expect(press(.liftCover, items: Self.list, selected: &selected, decks: &decks))
+        #expect(press(.reveal, items: Self.list, selected: &selected, decks: &decks))
         #expect(!decks.isLifted("b"))
     }
 
-    @Test("s on a row nobody covered does nothing")
+    @Test("s on a row nobody covered, with nothing to load, does nothing")
     func coveringWhatIsNotCovered() {
         var selected: String? = "c"
         var decks = ShellDecks()
-        #expect(!press(.liftCover, items: Self.list, selected: &selected, decks: &decks))
+        #expect(!press(.reveal, items: Self.list, selected: &selected, decks: &decks))
         #expect(!decks.isLifted("c"))
+    }
+
+    /// **Both directions of `s`'s one rule, and the order between them.**
+    ///
+    /// The reader asked for `s` to load the replies. It already meant "lift the author's cover",
+    /// so the whole of the risk is that the second job eats the first — and the whole of the
+    /// answer is that the cover wins where there is one. Row `b` is covered and row `c` is not;
+    /// the same press on the two of them does two different things, and neither of them is new
+    /// behaviour for the row it lands on.
+    @Test("The cover wins where there is one, and the replies where there is not")
+    func theCoverWinsAndThenTheRepliesDo() {
+        // Uncovered, with a topic behind it: the press acts, and takes nothing off any cover.
+        var selected: String? = "c"
+        var decks = ShellDecks()
+        #expect(press(.reveal, items: Self.list, selected: &selected,
+                      decks: &decks, repliesWanted: true))
+        #expect(!decks.isLifted("c"))
+
+        // Covered, with a topic behind it: the cover, and **not** a page fetched behind a blur
+        // the reader has not lifted.
+        selected = "b"
+        decks = ShellDecks()
+        #expect(press(.reveal, items: Self.list, selected: &selected,
+                      decks: &decks, repliesWanted: true))
+        #expect(decks.isLifted("b"), "the replies took a press that belonged to the cover")
+
+        // And it degrades honestly: lifted, `s` is still the cover — because a lifted cover is
+        // still a cover, and `s` is how it goes back.
+        #expect(press(.reveal, items: Self.list, selected: &selected,
+                      decks: &decks, repliesWanted: true))
+        #expect(!decks.isLifted("b"))
+    }
+
+    /// The rule itself, over all four combinations of the two facts it reads. No case is left to
+    /// be inferred from the three above.
+    @Test("What one press of s means, in all four cases")
+    func whatAPressOfSMeans() {
+        #expect(DummyCommand.reveal(hasCover: true, repliesWanted: false) == .cover)
+        #expect(DummyCommand.reveal(hasCover: true, repliesWanted: true) == .cover)
+        #expect(DummyCommand.reveal(hasCover: false, repliesWanted: true) == .replies)
+        #expect(DummyCommand.reveal(hasCover: false, repliesWanted: false) == .nothing)
+        // Three answers and no fourth, enumerated rather than listed by hand — so a fourth thing
+        // `s` could mean breaks this test as well as the build.
+        #expect(Set(DummyReveal.allCases) == [.cover, .replies, .nothing])
     }
 
     // The first press of either key on a list nobody is on puts the reader on a row and stops.
     // Without it a reader's first press would do nothing and say nothing, which reads as broken.
     @Test("Either key with nothing focused focuses the first row instead")
     func aPressWithNothingFocused() {
-        for command in [DummyCommand.nextAttachment, .liftCover] {
+        for command in [DummyCommand.nextAttachment, .reveal] {
             var selected: String?
             var decks = ShellDecks()
             #expect(press(command, items: Self.list, selected: &selected, decks: &decks))
@@ -123,7 +185,7 @@ struct PressTests {
 
     @Test("Either key on an empty timeline does nothing at all")
     func aPressOnAnEmptyList() {
-        for command in [DummyCommand.nextAttachment, .liftCover] {
+        for command in [DummyCommand.nextAttachment, .reveal] {
             var selected: String?
             var decks = ShellDecks()
             #expect(!press(command, items: [], selected: &selected, decks: &decks))

@@ -812,6 +812,139 @@ struct DiscuzTests {
         }
     }
 
+    /// **Five installs, six templates, and no two of them write it the same way.**
+    ///
+    /// The thread *table* carries no avatar — `DiscuzThread.asNote` writes `nil` and says why —
+    /// but the thread *page* does, and D30 already fetches that page when the row is scrolled to.
+    /// So the picture arrives with the opening post and costs no request of its own.
+    ///
+    /// Every address below is pinned whole rather than by shape, because the shape is exactly
+    /// what differs: relative on `install-c.example` and `install-b.example`, absolute on the other two,
+    /// and on `install-d.example` absolute **to a different host**. That last row is the one that
+    /// matters most — it is the install whose UCenter has moved, and it is why
+    /// `uc_server/avatar.php?uid=…` is read off the page rather than built out of the forum's own
+    /// hostname. Building it would have produced `https://install-d.example/uc_server/avatar.php?uid=…`
+    /// for every post on that forum, which is a broken picture fetched once per row.
+    @Test("The author's picture is read off the thread page, on every template that writes one")
+    func theAvatarIsReadOffTheThreadPage() async throws {
+        // fixture, host, tid, the opening post's avatar
+        let templates: [(String, String, Int, String?)] = [
+            // Discuz!'s own touch template, which **lazy-loads**: the address is in `data-src`
+            // and there is no `src` on the tag at all.
+            ("discuz-x50-thread", "install-c.example", 453475,
+             "https://install-c.example/data/avatar/000/28/23/90_avatar_small.jpg"),
+            // The same template on the English install, which does not lazy-load: plain `src`,
+            // and no class on the `<img>` whatsoever.
+            ("discuz-x35-thread", "install-b.example", 71,
+             "https://install-b.example/data/avatar/000/00/00/01_avatar_small.jpg"),
+            // **A `<span class="avatar">`, not a `<div>`, and a different host.** Both halves are
+            // this one install's alone, and either one read as the others would draw nothing here.
+            ("discuz-gbk-thread", "install-d.example", 2295441,
+             "https://avatars-d.example/avatar.php?uid=1335786&size=small"),
+            // Comiis keeps no box named `avatar`. Its picture is the first `<img>` of the heading
+            // it also keeps the name in — the same two-anchors-per-person shape `author(in:)`
+            // works around from the other side.
+            ("discuz-x34-thread", "install-a.example", 620841,
+             "https://install-a.example/uc_server/avatar.php?uid=1616810&size=middle"),
+            // **The desktop page has a box and no picture in it.** `install-c.example` writes
+            // `class="pls cl favatar"` and lets its own JavaScript fill it in later, so there is
+            // nothing on the page to read. Nothing is the honest answer, and the word boundary in
+            // the pattern is what keeps `favatar` from matching and then answering nothing loudly.
+            ("discuz-x50-thread-full", "install-c.example", 453475, nil),
+        ]
+        for (name, host, tid, expected) in templates {
+            let (client, http) = Self.threadClient(Self.fixture(name), host: host, tid: tid)
+            let opening = try await client.post(tid: tid)
+            #expect(opening.avatarURL?.absoluteString == expected, "\(name) avatar")
+            // **No second request.** The picture came off the page the post came off.
+            #expect(await http.requested.count == 1, "\(name) one request")
+        }
+    }
+
+    /// **The forum's own placeholder is not a picture**, and a picture inside a quotation is not
+    /// this author's.
+    ///
+    /// `noavatar.svg` is what Discuz! serves for a member who uploaded nothing — eight of the
+    /// twelve avatar tags on `discuz-x50-quote` are it. Fetching it would draw *the forum's* grey
+    /// silhouette over the plate this app already draws for exactly that case, so the reader would
+    /// get one stranger's house style instead of their own app's.
+    ///
+    /// The second half is why the **first** `class="avatar"` box is taken rather than the first
+    /// avatar-shaped address anywhere in the block: post `3488823` has no picture of its own, and
+    /// further down its own block there is a real one belonging to somebody it quoted. A looser
+    /// rule would have drawn the quoted person's face under this author's name.
+    @Test("A placeholder avatar draws nothing, and a quoted person's is not the author's")
+    func aPlaceholderAvatarIsNotAPicture() async throws {
+        let (client, _) = Self.threadClient(
+            Self.fixture("discuz-x50-quote"), host: "install-c.example", tid: 403684
+        )
+        let opening = try await client.post(tid: 403684)
+        // The page carries `000/27/17/73_avatar_small.jpg` inside this post's own block. It
+        // belongs to the person it quotes, and this author uploaded nothing.
+        #expect(opening.avatarURL == nil)
+        let replies = try await client.replies(tid: 403684)
+        #expect(replies.count == 1)
+        #expect(replies[0].avatarURL?.absoluteString
+            == "https://install-c.example/data/avatar/000/33/26/75_avatar_small.jpg")
+
+        // Four replies on `discuz-x50-thread` and no picture between them: every one of those
+        // members has the placeholder, and every one of them draws nothing.
+        let (installC, _) = Self.threadClient(
+            Self.fixture("discuz-x50-thread"), host: "install-c.example", tid: 453475
+        )
+        #expect(try await installC.replies(tid: 453475).allSatisfy { $0.avatarURL == nil })
+    }
+
+    /// Decision 9 at the one address in this file that is **lifted rather than built**.
+    ///
+    /// `Note.url` is assembled out of a parsed host and an integer and needs no check. An avatar
+    /// is a string a stranger put in an attribute, so it gets the rule this package fetches
+    /// under: `https`, and a host to reach. `URL(string:)` will build every one of these.
+    @Test("An avatar address this device will not fetch is not kept")
+    func anUnfetchableAvatarIsRefused() throws {
+        let patterns = try #require(DiscuzThreadPage.Patterns())
+        func address(_ raw: String) -> String? {
+            DiscuzPostLayout.address(
+                in: "<img src=\"\(raw)\">", host: "install-c.example", patterns: patterns
+            )?.absoluteString
+        }
+        // Relative, resolved against the forum rather than against the page's own `<base>`.
+        #expect(address("./data/avatar/000/08/58/94_avatar_small.jpg")
+            == "https://install-c.example/data/avatar/000/08/58/94_avatar_small.jpg")
+        // Scheme-relative picks the one scheme this device has.
+        #expect(address("//cdn.example.com/a.jpg") == "https://cdn.example.com/a.jpg")
+        // Absolute, on somebody else's host, is kept — that is `install-d.example`'s real case.
+        #expect(address("https://avatars-d.example/avatar.php?uid=1")
+            == "https://avatars-d.example/avatar.php?uid=1")
+        // `&amp;` is an entity in an attribute, not two query items.
+        #expect(address("https://avatars-d.example/avatar.php?uid=1&amp;size=small")
+            == "https://avatars-d.example/avatar.php?uid=1&size=small")
+        // The four this rule exists for. Each one `URL(string:)` builds happily.
+        #expect(address("javascript:alert(1)") == nil)
+        #expect(address("data:image/svg+xml;base64,AAAA") == nil)
+        #expect(address("file:///etc/passwd") == nil)
+        #expect(address("http://install-c.example/a.jpg") == nil)
+        // The placeholder, in each spelling Discuz! has shipped.
+        #expect(address("./data/avatar/noavatar.svg") == nil)
+        #expect(address("./data/avatar/noavatar_small.gif") == nil)
+        #expect(address("./data/avatar/noavatar_middle.gif") == nil)
+        // Nothing at all, and an empty attribute.
+        #expect(address("") == nil)
+        #expect(DiscuzPostLayout.address(
+            in: "<img>", host: "install-c.example", patterns: patterns
+        ) == nil)
+        // `data-src` wins where a template lazy-loads and writes both.
+        #expect(DiscuzPostLayout.address(
+            in: "<img src=\"./static/blank.gif\" data-src=\"./data/avatar/1_avatar_small.jpg\">",
+            host: "install-c.example", patterns: patterns
+        )?.absoluteString == "https://install-c.example/data/avatar/1_avatar_small.jpg")
+        // And reading `src` never reads the tail of `data-src`.
+        #expect(DiscuzPostLayout.address(
+            in: "<img data-src=\"./data/avatar/1_avatar_small.jpg\">",
+            host: "install-c.example", patterns: patterns
+        )?.absoluteString == "https://install-c.example/data/avatar/1_avatar_small.jpg")
+    }
+
     @Test("The opening post is the first floor, not the first row on the page")
     func theOpeningPostIsTheFirstFloor() async throws {
         // A forum can be configured to list a thread newest-first, and "whichever post came

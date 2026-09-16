@@ -62,7 +62,7 @@
 "shortcut.view" = "用整個畫面打開附件";
 "shortcut.play" = "播放附件，或讓它停下來";
 "shortcut.turn" = "換到下一個附件";
-"shortcut.cover" = "掀開作者蓋在這篇上的內容，或再蓋回去";
+"shortcut.reveal" = "掀開作者蓋在這篇上的內容；沒有東西蓋著時，讀這個主題其餘的回覆";
 "shortcut.compose" = "新貼文";
 "shortcut.list" = "這份清單";
 "shortcut.back" = "回到清單";
@@ -239,3 +239,8 @@
 "thread.replies.count" = "%d 則回覆";
 "thread.reply.floor" = "#%d";
 "thread.reply.quoted" = "引用：%@";
+
+/* Unit F7 — reading a thread properly. */
+"thread.open" = "在 %@ 開啟";
+"thread.open.hint" = "用瀏覽器開啟 %@";
+"thread.open.leaves" = "會離開這個 App，改用瀏覽器開啟";

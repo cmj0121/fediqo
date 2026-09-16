@@ -8,7 +8,7 @@ struct AttachmentKeysTests {
         ("v", .viewAttachment),
         ("a", .playAttachment),
         ("m", .nextAttachment),
-        ("s", .liftCover),
+        ("s", .reveal),
     ]
 
     @Test("v, a, m and s each name one command")

@@ -89,6 +89,16 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     public let audience: DummyAudience?
     /// The author's picture, where the source sent an address for one.
     public let avatarURL: URL?
+    /// Where this post lives on the web it came from — the canonical address, as its own server
+    /// spells it, for the reader who wants to go and read it there.
+    ///
+    /// **Carried, not rebuilt.** A Discuz! thread's is assembled in Core out of a parsed host and
+    /// an integer; a Discourse topic's is assembled the same way; a Mastodon status's comes out of
+    /// that instance's JSON and is admitted by `Host.fetchableURL` at the wire boundary. Which of
+    /// the three it is stops mattering by the time it is here, which is the point of a `Note`
+    /// carrying it. Nothing where the source named no address, or named one this device will not
+    /// go to.
+    public let url: URL?
     public let attachments: [Attachment]
     /// Whether the author covered it, or nothing where the source never said. Carried as the
     /// three answers it has, not folded down to two — see `covered`.
@@ -179,6 +189,7 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         boostedBy = note.boostedBy
         audience = note.audience.map(DummyAudience.init)
         avatarURL = note.avatarURL
+        url = note.url
         attachments = note.attachments
         sensitive = note.sensitive
         spoiler = note.spoiler

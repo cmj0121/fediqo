@@ -328,6 +328,33 @@ final class ForumPosts {
         return .coming
     }
 
+    /// The author's picture, where the opening post brought one — **and a stamp, like `reading`**.
+    ///
+    /// **Free, and that is why it is here rather than in a fetch of its own.** A Discuz! thread
+    /// table carries no avatar and the guess at `uc_server/avatar.php?uid=…` is wrong on any
+    /// install that moved UCenter — `install-d.example` is that install, twice over. The thread *page*
+    /// does carry it, and D30 already fetches that page when the row is scrolled to. So the
+    /// picture arrives with the words, in the answer to a request the row was making anyway, and
+    /// a forum row's avatar costs exactly nothing beyond what D30 already spends.
+    ///
+    /// **Which is also the whole argument for doing it this way rather than eagerly.** An avatar
+    /// fetched per row on load is forty thread pages for one board listing — the traffic D30
+    /// exists to refuse — and the reader would be paying it for a 36pt square rather than for the
+    /// words. Lazily, a row the reader never reached never asks, and one they did read shows a
+    /// face at the same moment it shows the post. The cost, stated: the plate is drawn for a beat
+    /// first, exactly as the words band draws its plates, so the two arrive together and the row
+    /// does not fill in twice.
+    ///
+    /// Separate from `reading` rather than folded into it, because they are facts about different
+    /// things: a **withheld** post has no words and still has an author with a face, and a state
+    /// that carried both would have to say so in every case. Stamps interest for the same reason
+    /// `reading` does — this is read from a body. See I8.
+    func avatar(of ref: ForumThreadRef) -> URL? {
+        let key = Key(ref, .opening)
+        wanted(key)
+        return entries[key]?.posts.first?.avatarURL
+    }
+
     /// The rest of the topic, and how it got there — D31.
     ///
     /// One reader rather than a `replies()` beside a `hasReplies`, so the pane cannot draw a
@@ -670,6 +697,29 @@ enum ForumRepliesStanding: Equatable, Sendable {
     case loaded([DiscuzPost])
     /// It could not be had, and why.
     case absent(ForumPosts.Absence)
+
+    /// Whether pressing for the replies could do anything from here — **the one answer the
+    /// button and the key both read**.
+    ///
+    /// This branch's own rule, stated in `FediqoRootView.playRow`: "the rule lives here and not
+    /// in the pane, so that a mark and the key cannot come to mean two different things." The
+    /// pane draws its way in exactly where this is true and `l` acts exactly where this is true,
+    /// so a reader cannot find a button that the key will not press or press a key on a state the
+    /// button does not offer. `DummyThreadPaneTests` pins the two against this one function.
+    ///
+    /// **`absent` is included only where asking again could help.** `unreachable` is the network
+    /// having been dark, and `ForumPosts.Absence.asksAgain` is where that judgement already
+    /// lives; the other three are settled facts about the forum, and offering to retry them would
+    /// be a control that is guaranteed to change nothing.
+    ///
+    /// **No `default:`.** A sixth standing has to say whether it can be pressed.
+    var wantsPressing: Bool {
+        switch self {
+        case .unasked: true
+        case .absent(let absence): absence.asksAgain
+        case .coming, .none, .loaded: false
+        }
+    }
 }
 
 /// The words band of a forum row, filled when the row is scrolled to — **D30, on screen**.
@@ -706,7 +756,12 @@ struct ForumPostBand: View {
     let thread: ForumThreadRef
     let posts: ForumPosts
     /// How many lines the words may have — the row's own `bodyLines`, so the two cannot drift.
-    let lines: Int
+    ///
+    /// **`nil` means all of them**, which is the thread pane and nowhere else. A timeline row is
+    /// one of forty in a list somebody is scrolling and its one height is a defence; the pane is
+    /// the one post the reader opened *in order to read*, and truncating it there was the
+    /// complaint this unit exists to answer. See `DummyItemRow.inFull`.
+    let lines: Int?
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.shellPlaceIsActive) private var placeIsActive
@@ -809,12 +864,7 @@ struct ForumPostBand: View {
     }
 
     private func plate(_ fraction: CGFloat) -> some View {
-        GeometryReader { space in
-            RoundedRectangle(cornerRadius: ShellSpace.tight, style: .continuous)
-                .fill(ShellChrome.well(colorScheme))
-                .frame(width: space.size.width * fraction, alignment: .leading)
-        }
-        .frame(height: ShellSpace.snug)
+        Self.plate(ShellChrome.well(colorScheme), fraction: fraction)
     }
 
     /// One of this app's own sentences about the post, drawn so it cannot be mistaken for the
@@ -825,7 +875,10 @@ struct ForumPostBand: View {
         HStack(alignment: .firstTextBaseline, spacing: ShellSpace.tight) {
             Image(systemName: symbol)
             Text(text)
-                .lineLimit(max(1, lines - 1))
+                // One line fewer than the words get, so a long sentence of this app's own cannot
+                // fill a band meant for somebody's post — and no limit at all where the words
+                // have none, because there is no band to overflow.
+                .lineLimit(lines.map { max(1, $0 - 1) })
                 .multilineTextAlignment(.leading)
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -847,6 +900,17 @@ struct ForumPostBand: View {
         }
     }
 
+    /// What this app's own waiting states are made of, so the pane and the band cannot draw two
+    /// different vocabularies for one idea. See `ForumWaiting`.
+    static func plate(_ colour: Color, fraction: CGFloat = 1) -> some View {
+        GeometryReader { space in
+            RoundedRectangle(cornerRadius: ShellSpace.tight, style: .continuous)
+                .fill(colour)
+                .frame(width: space.size.width * fraction, alignment: .leading)
+        }
+        .frame(height: ShellSpace.snug)
+    }
+
     /// What the band says out loud. A screen reader is given every character of the post, never
     /// the line-limited string: a visual limit is a fact about this band's height and about
     /// nothing else.
@@ -858,5 +922,129 @@ struct ForumPostBand: View {
         case .silent: L10n.t("item.forum.silent")
         case .absent(let absence): sentence(for: absence)
         }
+    }
+}
+
+/// **Work in progress, drawn as motion** — what the reader asked for first: "the load more thread
+/// should give the animation for loading".
+///
+/// ## Why this is plates and not a spinner
+///
+/// This shell already has a word for "asked for, not here yet", and it is a plate: `RemoteImage`
+/// draws a bare `ShellChrome.well` while a picture is on its way, and `ForumPostBand` draws two of
+/// them where a post is. A reader who has scrolled one timeline has already learned what a waiting
+/// slot looks like here, and a `ProgressView` would be a second, unrelated vocabulary for the same
+/// fact — borrowed from the platform rather than from the app the reader is in. So this is the
+/// same plate, three of them, with the one thing the static version could not say: that something
+/// is happening *now*.
+///
+/// It stands beside a sentence rather than replacing one. The pane's `.coming` case said
+/// "Loading the replies…" and said it perfectly well to a screen reader; what it did not do was
+/// look any different from a sentence that had been there for a minute. The words are what the
+/// state *is* and the motion is what says it is still going, so this draws both and hands the
+/// screen reader only the words — a moving plate is not a fact anybody needs read out.
+///
+/// ## The reader who asked for less movement
+///
+/// `accessibilityReduceMotion` stops the clock outright, exactly as `EmojiText.clock` does, and
+/// for the same reason: a reader who has turned motion off has said so about every moving thing in
+/// the app, not about emoji in particular. What they get is `glow(_:at: 0)` — the first plate lit
+/// and the others banked, a still frame that still reads as three plates and a sentence, and
+/// **no second frame is ever drawn**. There is no `TimelineView` in that branch at all, so the
+/// stillness is structural rather than a zero-speed animation that SwiftUI might still tick.
+///
+/// ## Why a clock and not `.repeatForever`
+///
+/// `withAnimation(.repeatForever)` would be fewer lines and would put the whole behaviour out of
+/// reach of a test: whether it is running, and what it draws at a given instant, are both inside
+/// SwiftUI. Split this way — a pure `clock(reduceMotion:)` and a pure `glow(_:at:)` — the two
+/// claims this view actually makes are assertable without a screen, which is the shape unit 5
+/// established for `EmojiText` and the shape the suite's existing reduce-motion test is written
+/// against.
+struct ForumWaiting: View {
+    /// What this app says is happening. The accessible fact; the plates are decoration over it.
+    let line: String
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// How many plates. Three reads as a run rather than as a pair, and is few enough that the lit
+    /// one is always obvious — it is a mark, not a progress bar, and this device does not know how
+    /// much is coming.
+    static let plates = 3
+
+    /// How long one pass takes. Slow enough not to read as an alarm, quick enough that a reader
+    /// who glances at it sees it move.
+    static let period: TimeInterval = 1.2
+
+    /// How often the clock ticks. `EmojiClock.fastestTick` is the ceiling this app already set for
+    /// how fast anything here is allowed to ask for a redraw, and three plates fading need nothing
+    /// near it.
+    static let tick: TimeInterval = 1.0 / 20
+
+    /// How bright one plate is at one instant, between banked and lit.
+    static let banked: Double = 0.3
+    static let lit: Double = 1.0
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
+            Text(line)
+                .font(ShellType.meta)
+                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+            Group {
+                if let tick = Self.clock(reduceMotion: reduceMotion) {
+                    TimelineView(.periodic(from: .now, by: tick)) { instant in
+                        run(at: instant.date.timeIntervalSinceReferenceDate)
+                    }
+                } else {
+                    run(at: 0)
+                }
+            }
+            .frame(width: Self.width)
+            Spacer(minLength: 0)
+        }
+        // One element carrying the sentence. Without `.ignore` a screen reader would be free to
+        // walk into the `TimelineView` and read whatever the plates happen to name — the same
+        // trap `EmojiText` documents one file over, and for the same reason it is closed here.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(line))
+        .accessibilityAddTraits(.updatesFrequently)
+    }
+
+    /// Three plates as wide as they are tall, with the gaps between them.
+    private static let width =
+        CGFloat(plates) * ShellSpace.snug + CGFloat(plates - 1) * ShellSpace.tight
+
+    private func run(at instant: TimeInterval) -> some View {
+        HStack(spacing: ShellSpace.tight) {
+            ForEach(0..<Self.plates, id: \.self) { index in
+                ForumPostBand.plate(ShellChrome.inkFaint(colorScheme))
+                    .frame(width: ShellSpace.snug)
+                    .opacity(Self.glow(index, at: instant))
+            }
+        }
+    }
+
+    /// A clock only where one is wanted — nothing for a reader who asked for less movement.
+    ///
+    /// The same shape and the same answer as `EmojiText.clock(for:reduceMotion:)`, deliberately:
+    /// a `nil` here is what makes the still branch above structural rather than a matter of the
+    /// animation running at zero speed.
+    static func clock(reduceMotion: Bool) -> TimeInterval? {
+        reduceMotion ? nil : tick
+    }
+
+    /// How lit one plate is at one instant, in `banked...lit`.
+    ///
+    /// A cosine rather than a step, so the three never all sit at one brightness and the run never
+    /// reads as a stutter. `instant` is a wall clock — the same one `EmojiClock.frame` folds — so
+    /// it is taken modulo the period, and the result is finite for every input a `TimelineView`
+    /// can hand it.
+    static func glow(_ index: Int, at instant: TimeInterval) -> Double {
+        let phase = (instant / period - Double(index) / Double(plates))
+            .truncatingRemainder(dividingBy: 1)
+        let wave = (1 + cos(2 * .pi * phase)) / 2
+        return banked + (lit - banked) * wave
     }
 }
