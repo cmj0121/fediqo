@@ -246,3 +246,9 @@
 "thread.open" = "Open on %@";
 "thread.open.hint" = "Opens %@ in your browser";
 "thread.open.leaves" = "Leaves this app and opens your browser";
+
+/* Unit 3 — a source can be let go of, and what it asks before it does. */
+"account.remove.title" = "Remove %@?";
+"account.remove.detail" = "Its posts and everything this device holds for it go with it.";
+"account.remove.detail.boards" = "Its posts, everything this device holds for it, and the %d boards you picked go with it. The boards do not come back.";
+"account.remove.confirm" = "Remove";

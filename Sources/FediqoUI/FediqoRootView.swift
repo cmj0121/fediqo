@@ -135,6 +135,34 @@ public struct FediqoRootView: View {
                     cancel: { session.cancelChoosing() }
                 )
             }
+            // **The Remove question, on the root beside the other three presenters**, and for the
+            // same documented reason: one presenter driven by one piece of session state survives
+            // a second call site. Remove is asked from a source row today and will be asked from
+            // the source page's own header the day that grows one.
+            //
+            // It is asked at all because Remove takes the board picks the reader made, and
+            // `ShellSession.clear`'s comment is the argument: pictures come back by themselves, a
+            // pick of eight boards out of forty does not.
+            .confirmationDialog(
+                Text(session.removing.map { String(format: L10n.t("account.remove.title"), $0) } ?? ""),
+                isPresented: Binding(
+                    get: { session.removing != nil },
+                    set: { if !$0 { session.removing = nil } }
+                ),
+                // Explicit, because macOS draws no title at all on `.automatic` — and the title is
+                // the only line that names which server this is about.
+                titleVisibility: .visible,
+                presenting: session.removing
+            ) { host in
+                Button(L10n.t("account.remove.confirm"), role: .destructive) {
+                    Task { await session.remove(host: host) }
+                }
+                // **Cancel stays the default action.** No `.keyboardShortcut(.defaultAction)` on
+                // the destructive button: Return dismisses this question, it never answers it.
+                Button(L10n.t("board.choose.cancel"), role: .cancel) { session.removing = nil }
+            } message: { host in
+                Text(Self.removeDetail(for: host, in: session.sources))
+            }
             .overlay {
                 if showingShortcuts {
                     ShortcutGuide { showingShortcuts = false }
@@ -183,6 +211,22 @@ public struct FediqoRootView: View {
             .preferredColorScheme(prefs.theme.colorScheme)
             .dynamicTypeSize(prefs.fontSize.dynamicType)
             .id(prefs.language)
+    }
+
+    /// What the Remove question says goes, which depends on whether there are boards to lose.
+    ///
+    /// **Two whole sentences and two keys, not one sentence with a clause appended.** "the 3 boards
+    /// you picked" must never appear over a microblog, and a second half joined on with `+` is a
+    /// half no translator can put first. `ShellSession.clear` argues why the boards are the part
+    /// worth naming: pictures come back by themselves and a pick of eight boards out of forty does
+    /// not, so Remove — the act that takes them — is the act that has to say so before the press.
+    ///
+    /// Static and given the list, so the sentence is a function of its inputs that a test can read
+    /// without standing a view up.
+    static func removeDetail(for host: String, in sources: [Source]) -> String {
+        let boards = sources.first { $0.host == host }?.boards.count ?? 0
+        guard boards > 0 else { return L10n.t("account.remove.detail") }
+        return String(format: L10n.t("account.remove.detail.boards"), boards)
     }
 
     private func performDummyKey(_ character: Character, shift: Bool, control: Bool) -> Bool {

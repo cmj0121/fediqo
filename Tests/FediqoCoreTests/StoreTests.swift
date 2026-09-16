@@ -130,6 +130,118 @@ struct StoreTests {
         #expect(await store.all().map(\.id) == ["new-trend", "public-only", "old-trend"])
     }
 
+    // MARK: - Letting go of a server
+
+    /// Remove takes the three things Clear deliberately keeps apart: the source, the boards the
+    /// reader picked on it, and the notes it served. `ShellSession.clear`'s comment argues for
+    /// keeping the boards under *that* button; this is the act it named as the one that takes
+    /// them, so a Remove that left a subscription behind would leave the rail drawing a tab for a
+    /// server nobody reads.
+    @Test("Remove takes the source, the boards picked on it, and the notes it carried")
+    func removeTakesTheSourceItsBoardsAndItsNotes() async {
+        let store = ItemStore()
+        let forum = Source(host: "third.example", kind: .discuz)
+        await store.add(source)
+        await store.add(forum)
+        await store.subscribe(host: forum.host, to: [BoardSubscription(fid: 33, name: "a")])
+        await store.ingest([
+            note(id: "mine", postedAt: origin, origins: [.publicTimeline]),
+            note(id: "theirs", postedAt: origin, origins: [.publicTimeline], from: forum),
+        ])
+        #expect(await store.sources().last?.boards.count == 1)
+
+        await store.remove(host: forum.host)
+
+        #expect(await store.sources().map(\.host) == ["first.example"])
+        #expect(await store.all().map(\.id) == ["mine"])
+    }
+
+    /// The host is folded on the way in, as it is everywhere else this app keys by server.
+    @Test("Remove finds the server whatever case it is asked for in")
+    func removeFoldsTheHost() async {
+        let store = ItemStore()
+        await store.add(source)
+        await store.ingest([note(id: "mine", postedAt: origin, origins: [.publicTimeline])])
+
+        await store.remove(host: "First.EXAMPLE")
+
+        #expect(await store.sources().isEmpty)
+        #expect(await store.all().isEmpty)
+    }
+
+    /// Silent for a host nobody joined, for the reason `subscribe(host:to:)` is: nothing here
+    /// takes a source out of the list by a side door, and a sweep that ran anyway would be a
+    /// sweep nobody asked for.
+    @Test("Removing a server that was never joined changes nothing")
+    func removingAStrangerChangesNothing() async {
+        let store = ItemStore()
+        await store.add(source)
+        await store.ingest([note(id: "mine", postedAt: origin, origins: [.publicTimeline])])
+
+        await store.remove(host: "elsewhere.example")
+
+        #expect(await store.sources().map(\.host) == ["first.example"])
+        #expect(await store.all().map(\.id) == ["mine"])
+    }
+
+    /// **Decision 9, which is the whole reason a note carries a set of hosts.**
+    ///
+    /// A Mastodon status's id is its canonical URI and is host-independent, so two joined
+    /// instances that both carry one status are one stored row — stamped, by `ingest`'s
+    /// first-wins rule, with whichever of them joined first. Removing by that stamp does two
+    /// wrong things at once, and this pins both: the row the remaining instance is still showing
+    /// would vanish, and the rows the removed instance was the only route to would stay.
+    @Test("A note two servers carry survives the first Remove and goes with the second")
+    func aSharedNoteGoesOnlyWhenItsLastHostDoes() async {
+        let store = ItemStore()
+        let uri = "https://origin.example/users/ada/statuses/1"
+        await store.add(source)
+        await store.add(other)
+        // The same status, read through two instances. The stamp is `first.example` because it
+        // ingested first — which is an accident of join order and not a route to anything.
+        await store.ingest([note(id: uri, postedAt: origin, origins: [.publicTimeline])])
+        await store.ingest([
+            note(id: uri, postedAt: origin, origins: [.trending], from: other),
+            note(id: "only-second", postedAt: origin, origins: [.publicTimeline], from: other),
+        ])
+        let both = await store.all()
+        #expect(both.first { $0.id == uri }?.hosts == ["first.example", "second.example"])
+
+        await store.remove(host: source.host)
+
+        let left = await store.all()
+        #expect(
+            Set(left.map(\.id)) == [uri, "only-second"],
+            "the shared row went with the stamp, and second.example is still showing it"
+        )
+        let shared = left.first { $0.id == uri }
+        #expect(shared?.hosts == ["second.example"], "the removed host is still named as a route")
+        // The stamp stays where it was. It is a record of how this copy was parsed — the handle,
+        // the reply and the emoji were all resolved against `first.example` — and rewriting it to
+        // the surviving host would be inventing a reading nobody made.
+        #expect(shared?.source.host == "first.example")
+        #expect(shared?.origins == [.publicTimeline, .trending])
+
+        await store.remove(host: other.host)
+
+        #expect(await store.all().isEmpty, "nobody is left reading it and it stayed")
+        #expect(await store.sources().isEmpty)
+    }
+
+    /// The set is seeded from the stamp at the wire boundary and is never empty, which is what
+    /// makes "gone when the set empties" a decidable rule rather than a race with construction.
+    @Test("A note names the server it arrived through from the moment it is built")
+    func aNoteAlwaysNamesAtLeastOneHost() async {
+        #expect(note(id: "mine", postedAt: origin, origins: [.publicTimeline]).hosts == ["first.example"])
+        // Folded by `Source`, so the set is comparable to a removal argument by == alone.
+        #expect(
+            note(
+                id: "mine", postedAt: origin, origins: [.publicTimeline],
+                from: Source(host: "SECOND.Example", kind: .mastodon)
+            ).hosts == ["second.example"]
+        )
+    }
+
     private func note(
         id: String,
         postedAt: Date,
@@ -138,11 +250,12 @@ struct StoreTests {
         body: String = "hello",
         reply: Reply? = nil,
         boostedBy: String? = nil,
-        audience: Audience? = .everyone
+        audience: Audience? = .everyone,
+        from: Source? = nil
     ) -> Note {
         Note(
             id: id,
-            source: source,
+            source: from ?? source,
             author: author,
             handle: "@ada@first.example",
             body: body,

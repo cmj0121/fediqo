@@ -244,3 +244,9 @@
 "thread.open" = "在 %@ 開啟";
 "thread.open.hint" = "用瀏覽器開啟 %@";
 "thread.open.leaves" = "會離開這個 App，改用瀏覽器開啟";
+
+/* Unit 3 — a source can be let go of, and what it asks before it does. */
+"account.remove.title" = "移除 %@？";
+"account.remove.detail" = "它的文章，還有這個裝置為它留的東西，都會跟著一起不見。";
+"account.remove.detail.boards" = "它的文章、這個裝置為它留的東西，還有你挑的 %d 個版塊，都會跟著一起不見。版塊不會自己回來。";
+"account.remove.confirm" = "移除";

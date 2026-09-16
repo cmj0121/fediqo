@@ -56,6 +56,18 @@ final class ShellSession {
     /// message "tells the reader what happened and offers them nothing to do about it".
     var offerSignIn: String?
 
+    /// The server the reader has pressed Remove on and not yet answered for, or nothing.
+    ///
+    /// **Nothing is destroyed while this is set.** Remove takes the boards the reader picked, and
+    /// `clear`'s own comment is the argument for why that is worth a question first: pictures come
+    /// back by themselves and a pick of eight boards out of forty does not. So the press sets this,
+    /// the dialog says what goes, and only the confirm reaches `remove(host:)`.
+    ///
+    /// A host and not a `Source`, because the dialog needs the host to name it and the count of
+    /// boards to pick its sentence, and both are readable off `sources` — a second copy of a source
+    /// held here would be a copy that goes stale the moment the reader changes their boards.
+    var removing: String?
+
     /// The forum whose boards the reader is being shown, or nothing.
     ///
     /// **This is D28's pause, held.** While it is set the host has been detected and its index
@@ -460,6 +472,59 @@ final class ShellSession {
         posts.forget(host: host)
         await forums.forget(host: host)
         cleared += 1
+    }
+
+    /// The reader has stopped reading a server: it goes, and everything it left here goes with it.
+    ///
+    /// **Remove subsumes Clear rather than sitting beside it.** Clear's promise is that what goes
+    /// comes back, because the reader is still reading the server — see `clear`, "The server stays
+    /// added". Remove withdraws exactly that premise, so a Remove that emptied the store and left
+    /// the pictures, the emoji, the first posts and the forum's cookies behind would be promising
+    /// less than it said: this device would still be holding a cache, and a session, for a server
+    /// the reader said to let go of.
+    ///
+    /// **The store first and the caches second, and the order is load-bearing.** `clear` bumps
+    /// `ShellPictures`' generation, and that bump's documented contract is that a row still on
+    /// screen asks again immediately — which is right for Clear and would be a burst of avatar and
+    /// emoji requests aimed at the host the reader has just deleted. `adopt()` in between is what
+    /// takes those rows out of the list before the bump lands, so the re-fetch has nothing to
+    /// re-fetch. Nothing in the code says this; it is why the two awaits are in this order and not
+    /// the other.
+    ///
+    /// Then what is left over of the reader's last errand, where that errand was about this host.
+    /// `progressHost` is the one field that records which host `add` and `subscribe` were about, so
+    /// it is what the refusal sentence, the unread boards and their count are gated on — clearing
+    /// them unconditionally would take away a sentence owed about a different server.
+    func remove(host raw: String) async {
+        let host = raw.lowercased()
+        // The question has been answered, so nothing is pending any more — set before the awaits,
+        // so no dialog state outlives the decision it was asking about.
+        removing = nil
+        await store.remove(host: host)
+        await adopt()
+        await clear(host: host)
+
+        // Folded on both sides rather than on one. `Host.parse` lowercases everything it returns,
+        // so all three of these are already folded today — and that is a guarantee three files
+        // away that nothing at this site states, which is the shape `add`'s own comment names as
+        // how a class of bug reached fourteen places.
+        if offerSignIn?.lowercased() == host { offerSignIn = nil }
+        // The sheet holding somebody else's login page, where it is that server's. A race rather
+        // than a click today, because `signIn` sets this *after* `await forums.signIn(host:)` and
+        // that await is exactly the window a Remove is pressable in — and properly reachable once
+        // unit 5 draws the Sign in / Sign out toggle on the row. A sheet left up over a server
+        // that is gone would be asking the reader to sign in to nothing.
+        if signingIn?.host.lowercased() == host { signingIn = nil }
+        // Unit 4 replaces `choosing` with a `stage` presenter. This line goes with it, and is
+        // written as the plainest possible spelling of "the pause was about this server" so that
+        // it is obvious what has to move.
+        if choosing?.offer.host.lowercased() == host { choosing = nil }
+        if progressHost.lowercased() == host {
+            refuse = nil
+            unread = []
+            unreadAll = 0
+            progressHost = ""
+        }
     }
 
     /// Shows the reader the forum's own page, after asking the saved credential first.

@@ -31,14 +31,55 @@ public actor ItemStore {
         sourceList[index] = Source(host: existing.host, kind: existing.kind, boards: boards)
     }
 
+    /// Takes notes in, keeping the first of any id and unioning what the later arrivals know.
+    ///
+    /// **The first copy wins and only the sets grow.** Two servers that both carry one Mastodon
+    /// status send two readings of it, minutes or hours apart, and neither is more true than the
+    /// other; picking the first is the one rule that does not make the timeline flicker as the
+    /// joins land. What the later copy does carry that the first cannot is *how it arrived* — the
+    /// origin, and since decision 9 the host — and those are unioned rather than dropped, because
+    /// they are facts about the reading and not about the post.
+    ///
+    /// `hosts` is the half that makes `remove(host:)` answerable; see `Note.hosts` for why the
+    /// stamp cannot do that job.
     public func ingest(_ incoming: [Note]) {
         for note in incoming {
             if var existing = notes[note.id] {
                 existing.origins.formUnion(note.origins)
+                existing.hosts.formUnion(note.hosts)
                 notes[note.id] = existing
             } else {
                 notes[note.id] = note
             }
+        }
+    }
+
+    /// Lets go of one server: the source, the boards the reader picked on it, and the notes it
+    /// carried here.
+    ///
+    /// **This is the other half of `ShellSession.clear`'s argument, and the half that takes the
+    /// boards.** Clear keeps them on purpose — they are the reader's choice rather than anything
+    /// the server left behind, and a button promising "what goes comes back" must not take a pick
+    /// of eight boards out of forty that does not come back by itself. Remove makes no such
+    /// promise: it is the reader saying they have stopped reading this server, so the source, the
+    /// picks made on it and the threads it served all go together, because that is one decision.
+    ///
+    /// **A note goes when its last host does, never when its stamp does.** `Note.source` names
+    /// whichever server handed the note over first, and for a Mastodon status that is an accident
+    /// of join order rather than a route — see `Note.hosts`. Removing by the stamp would take rows
+    /// away from an instance still showing them and strand rows the removed instance was the only
+    /// way to. So each note is struck off for this host, and only a note nobody is left reading is
+    /// dropped.
+    ///
+    /// Silent where the host is not here, for the reason `subscribe(host:to:)` is: nothing in this
+    /// package puts a source in the list, or takes one out of it, by a side door.
+    public func remove(host raw: String) {
+        let host = raw.lowercased()
+        sourceList.removeAll { $0.host == host }
+        notes = notes.compactMapValues { note in
+            var note = note
+            guard note.hosts.remove(host) != nil else { return note }
+            return note.hosts.isEmpty ? nil : note
         }
     }
 
