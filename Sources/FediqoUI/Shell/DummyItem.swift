@@ -189,6 +189,62 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     public var title: String? { titleKey.map { L10n.t($0) } ?? titleText }
     public var board: String? { boardKey.map { L10n.t($0) } ?? boardText }
 
+    /// Where this row's way out goes, or nothing where there is nowhere to go.
+    ///
+    /// **Both halves of the control are named here, and that is the point of the property.**
+    /// Three times in M1 a control shipped wired to something that did not do what its name said
+    /// and every test stayed green, because what decided it sat in a `View` body no test could
+    /// reach — once a dead `Back` button under 405 of them. *Whether* a row offers the way out
+    /// and *what address* it opens are one question with one answer, and it is answered where
+    /// `DummyItemTests` can ask it.
+    ///
+    /// **`Host.allowsFetch`, at a boundary that is not a fetch.** `DummyThreadPane.outward` wrote
+    /// down why and this is the same reading of the same one function rather than a second rule:
+    /// `URL(string:)` will build `javascript:`, `data:` and `file:///` out of a stranger's JSON,
+    /// and `openURL` would do as it was told with any of them. Core admits `url` at ingestion and
+    /// this admits it again at the door — one function read twice, not one rule written twice,
+    /// which is the difference between belt and braces and the drift this branch warns about.
+    ///
+    /// It applies to all three protocols and not only the lifted one. Discuz! *builds* its
+    /// `viewthread` address in Core out of a parsed host and an integer rather than lifting one
+    /// from the page, and says there why it still does not trust it; a built address reaching
+    /// this property is checked exactly like a lifted one, because the check is about what will
+    /// be handed to the system browser and not about who wrote it.
+    ///
+    /// **Nothing, rather than an address that will not open** — decision 4 on this repo's
+    /// controls. A row whose note named nowhere offers no way out at all, not a greyed one: a
+    /// control the reader cannot press is a question about this app, and nothing is the honest
+    /// answer to "this post named nowhere to go".
+    public var outwardURL: URL? {
+        guard let url, Host.allowsFetch(url) else { return nil }
+        return url
+    }
+
+    /// What the way out is called, wherever it is drawn: the act, and the host it leads to.
+    ///
+    /// **`thread.open` reused, not twinned.** The key is named for the pane that first needed it
+    /// and the sentence it holds — "Open on %@" — is exactly as true of a row. A second key
+    /// saying the same thing in three bundles is one more pair to keep in step and one more
+    /// chance for two surfaces to word one act differently.
+    ///
+    /// **It names the host and not "the browser".** `source.host` is parsed by `Host.parse` and
+    /// never lifted from anybody's markup, so it is the one thing this app knows for certain
+    /// about where an outward link ends up — and where it ends up is the fact a reader checks
+    /// before following one.
+    public var outwardName: String { Self.wayOutName(host: source.host) }
+
+    /// The same sentence, for a surface that has a host but no `DummyItem` — a Discuz! reply,
+    /// which is a `DiscuzPost` and not a `Note`. Shared rather than spelled twice for the reason
+    /// the key is shared: two surfaces wording one act differently is how a reader comes to think
+    /// they are two acts.
+    ///
+    /// `language` resolves the way `shapeWord` above resolves, and is here for the same reason —
+    /// so a test can *ask* for a language rather than assign `L10n.language`, which suites running
+    /// in parallel share.
+    static func wayOutName(host: String, language: DummyLanguage? = nil) -> String {
+        String(format: L10n.t("thread.open", language: language), host)
+    }
+
     /// Not the live stream. Named queries do not read this.
     public static let stored: [DummyItem] = []
 

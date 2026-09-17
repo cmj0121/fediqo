@@ -2040,4 +2040,66 @@ struct DiscuzTests {
             )
         )
     }
+
+    // MARK: - The way out, on a reply
+
+    /// **A reply's address is Discuz!'s own floor permalink, and it is built rather than lifted.**
+    ///
+    /// The desktop template writes `forum.php?mod=viewthread&tid=<tid>#pid<pid>` beside every
+    /// floor number — the fixture in this file carries one — so this is the spelling the forum
+    /// uses itself, not one of the several others it also answers. What is built here is that
+    /// spelling, out of a host this device parsed and two integers this device parsed.
+    @Test("A reply's address is the thread's, anchored at the reply's own post")
+    func aReplyIsAddressedByItsOwnAnchor() throws {
+        let opening = DiscuzPost(pid: 900_101, tid: 5601, floor: 1, author: "青木", handle: "", body: "")
+        let reply = DiscuzPost(pid: 900_102, tid: 5601, floor: 2, author: "muyu", handle: "", body: "")
+
+        let first = try #require(opening.url(onHost: "install-a.example"))
+        #expect(first.absoluteString
+            == "https://install-a.example/forum.php?mod=viewthread&tid=5601#pid900101")
+
+        // Two posts of one thread share a page and differ only in the anchor. A reply addressed
+        // by `tid` alone would be every reply pointing at the same place, which is a way out that
+        // silently goes somewhere else — the failure this anchor exists to avoid.
+        let second = try #require(reply.url(onHost: "install-a.example"))
+        #expect(second.fragment() == "pid900102")
+        #expect(first != second)
+        #expect(second.query() == first.query())
+    }
+
+    /// The same rule every address in this package is held to, at the one boundary that matters:
+    /// what will be handed to the system browser.
+    @Test("A reply's address is one this device will go to, or it is nothing")
+    func aReplyAddressIsFetchableOrNothing() throws {
+        let post = DiscuzPost(pid: 900_101, tid: 5601, floor: 1, author: "青木", handle: "", body: "")
+        let url = try #require(post.url(onHost: "install-a.example"))
+        #expect(url.scheme == "https")
+        #expect(url.host() == "install-a.example")
+        #expect(url.path == "/forum.php")
+        #expect(Host.isFetchable(url))
+
+        // A host with nothing in it builds `https:///forum.php`, which parses and has nowhere to
+        // reach. The same clause `Host.isFetchable` states for an attachment, for the same reason:
+        // a kept address that can only fail is worse than no address.
+        #expect(post.url(onHost: "") == nil)
+    }
+
+    /// **Nothing a stranger wrote reaches this address.** The strongest form of the rule, as
+    /// `noAddressIsLifted` states it for a thread: rather than running the page's own `href`
+    /// through `Host.fetchableURL`, none is read at all. A post carries two integers, and an
+    /// integer cannot spell `javascript:`.
+    @Test("No part of a reply's address came off the page")
+    func aReplyAddressIsNotLifted() async throws {
+        let (client, _) = Self.threadClient(
+            .text(Self.touchThread), host: "install-c.example", tid: 5601)
+        let posts = try await client.replies(tid: 5601)
+        #expect(!posts.isEmpty)
+        for post in posts {
+            let url = try #require(post.url(onHost: "install-c.example"))
+            #expect(url.scheme == "https")
+            #expect(url.host() == "install-c.example")
+            #expect(url.query()?.contains("tid=5601") == true)
+            #expect(url.fragment() == "pid\(post.pid)")
+        }
+    }
 }

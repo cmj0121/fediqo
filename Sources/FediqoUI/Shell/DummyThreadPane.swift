@@ -130,21 +130,23 @@ struct DummyThreadPane: View {
     /// data* — `Mastodon` and `Discuz` both build `Note.url` through it — and this is a second
     /// reading of the same one function, not a second expression of the rule.
     ///
+    /// **The reading itself now lives at `DummyItem.outwardURL`**, because the row grew the same
+    /// way out and two surfaces spelling the check separately is how one of them comes to be
+    /// spelled differently. The sentence on the button comes from `outwardName` for the same
+    /// reason. Everything this comment says is still true; it is true in one place.
+    ///
     /// **No button at all where the address does not pass**, rather than a disabled one. A
     /// control the reader cannot press is a question about this app; nothing is the honest answer
     /// to "this post named nowhere to go".
     @ViewBuilder
     private var outward: some View {
-        if let url = root.url, Host.allowsFetch(url) {
+        if let url = root.outwardURL {
             Button {
                 openURL(url)
             } label: {
-                Label(
-                    String(format: L10n.t("thread.open"), root.source.host),
-                    systemImage: "arrow.up.forward.app"
-                )
-                .font(ShellType.meta.weight(.medium))
-                .lineLimit(1)
+                Label(root.outwardName, systemImage: "arrow.up.forward.app")
+                    .font(ShellType.meta.weight(.medium))
+                    .lineLimit(1)
             }
             .buttonStyle(.plain)
             .foregroundStyle(ShellChrome.selectInk(colorScheme))
@@ -344,6 +346,7 @@ struct ForumReplyRow: View {
     /// because an avatar address is often on a different machine entirely.
     let host: String
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.openURL) private var openURL
 
     /// How big a reply's picture is drawn.
     ///
@@ -364,7 +367,45 @@ struct ForumReplyRow: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, ShellSpace.tight)
+        .wayOut(named: DummyItem.wayOutName(host: host), to: outwardURL)
+        // **On the row itself, and that is safe here where it would not be on a timeline row.**
+        // This reply is `.combine`d into one element rather than being a container, so a custom
+        // action put here is offered to the element a reader actually lands on. `DummyItemRow`
+        // has to hang its action on the headline for exactly the opposite reason.
         .accessibilityElement(children: .combine)
+        .accessibilityActions { outwardAction }
+    }
+
+    // MARK: - The way out
+
+    /// Where this reply lives on the forum, or nothing where it cannot be addressed honestly.
+    ///
+    /// **Built in Core out of two integers and a parsed host** — `DiscuzPost.url(onHost:)`, which
+    /// is where the reasoning lives, including why the post's own `#pid` anchor resolves and the
+    /// one change that would stop it resolving. Nothing is read out of the page: a Discuz! reply
+    /// has no address in this app that a stranger's markup contributed to.
+    ///
+    /// **Why a reply gets this at all.** The reader asked for a way to open a thread or post on
+    /// the web, and a reply is a post they are reading. Without it, a reader inside a forum thread
+    /// sees the opening post offering a way out and twenty replies beneath it offering nothing,
+    /// which reads as an oversight rather than as a decision — and it would be one.
+    private var outwardURL: URL? { post.url(onHost: host) }
+
+    /// The way out, as a reader using VoiceOver reaches it. A context menu is a gesture; this is
+    /// for the reader who makes neither of the two gestures that open one.
+    @ViewBuilder
+    private var outwardAction: some View {
+        if outwardURL != nil {
+            Button(DummyItem.wayOutName(host: host)) { openOutward() }
+        }
+    }
+
+    /// Leaves the app for the forum this reply was read from. Named, not a closure, for the
+    /// reason `DummyItemRow.openOutward` is: this milestone's three wiring defects all lived
+    /// where no test could call them.
+    private func openOutward() {
+        guard let url = outwardURL else { return }
+        openURL(url)
     }
 
     /// Whoever wrote this reply, drawn.
