@@ -389,7 +389,16 @@ struct ForumReplyRow: View {
     /// the web, and a reply is a post they are reading. Without it, a reader inside a forum thread
     /// sees the opening post offering a way out and twenty replies beneath it offering nothing,
     /// which reads as an oversight rather than as a decision — and it would be one.
-    private var outwardURL: URL? { post.url(onHost: host) }
+    ///
+    /// **Checked here as well as in `WayOut`, because this property has a second reader.**
+    /// `outwardAction` and `openOutward` are the VoiceOver path and never pass through the
+    /// modifier, so a check that lived only there would cover the context menu and not the rotor.
+    /// `DiscuzPost.url(onHost:)` applies `Host.isFetchable` of its own accord — a guarantee two
+    /// files away that nothing at this site stated.
+    private var outwardURL: URL? {
+        guard let url = post.url(onHost: host), Host.allowsFetch(url) else { return nil }
+        return url
+    }
 
     /// The way out, as a reader using VoiceOver reaches it. A context menu is a gesture; this is
     /// for the reader who makes neither of the two gestures that open one.

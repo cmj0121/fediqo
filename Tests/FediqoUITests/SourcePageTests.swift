@@ -24,6 +24,33 @@ struct SourcePageTests {
         ShellSession(http: FixtureHTTP(), store: ItemStore())
     }
 
+    /// A session whose every request parks until the test opens the gate, so a press can be
+    /// caught genuinely mid-flight.
+    ///
+    /// **Not `session.checking = true`.** `checking` is `progress != nil`, so busy-with-no-
+    /// sentence is a state no press can produce and a test can no longer spell. Two tests here
+    /// used to hand-set it, and what both of them actually wanted was this.
+    private func gatedSession() -> (ShellSession, GatedHTTP) {
+        let http = GatedHTTP(["/": .text("<html><body></body></html>")], holding: "/")
+        return (ShellSession(http: http, store: ItemStore()), http)
+    }
+
+    /// Starts a look and returns once it is **provably** parked on the wire, with the task to
+    /// await after the gate opens. The 5s watchdog is the standing pattern: `.timeLimit` does not
+    /// rescue a task parked on a continuation.
+    private func heldLook(
+        _ session: ShellSession, _ http: GatedHTTP, host: String
+    ) async -> (Task<Void, Never>, Task<Void, Never>) {
+        let watchdog = Task {
+            try? await Task.sleep(for: .seconds(5))
+            await http.gate.open()
+        }
+        session.hostname = host
+        let look = Task { await session.add() }
+        #expect(await spun { session.checking }, "the look never reached the wire")
+        return (look, watchdog)
+    }
+
     /// Somewhere a `@Sendable` observation callback can leave a mark. The shape `ClearTests`
     /// established, for the same reason: `withObservationTracking` cannot write to a local.
     private final class Woken: @unchecked Sendable {
@@ -461,9 +488,12 @@ struct SourcePageTests {
     /// The other side of the same term, and the reason it still exists. A preview in the sheet
     /// covers the page, so a second look started behind it would replace a stage the reader cannot
     /// see — PLAN risk 8, which this split must not undo.
-    @Test("The field is out of the reader's hands behind a sheet, and only behind a sheet")
+    @Test(
+        "The field is out of the reader's hands behind a sheet, and only behind a sheet",
+        .timeLimit(.minutes(1))
+    )
     func theFieldIsDisabledOnlyWhereTheReaderCannotSeePastTheStage() async {
-        let session = ShellSession(http: FixtureHTTP())
+        let (session, http) = gatedSession()
         let pane = AccountPane(session: session)
         let preview = SourcePreview(
             host: Self.micro, kind: .mastodon, profile: .unasked(host: Self.micro, kind: .mastodon)
@@ -486,8 +516,12 @@ struct SourcePageTests {
         #expect(!pane.busy)
 
         session.stage = nil
-        session.checking = true
+        let (look, watchdog) = await heldLook(session, http, host: Self.micro)
         #expect(pane.busy, "something on the wire still takes the top half out of the reader's hands")
+
+        await http.gate.open()
+        await look.value
+        watchdog.cancel()
     }
 
     /// The same control, refusing the same way `add` refuses, so nothing had to be re-guarded when
@@ -1426,19 +1460,19 @@ struct SourcePageTests {
             ),
         ])
         let pane = AccountPane(session: session)
-        #expect(pane.widest == Self.discuzControls, """
+        #expect(pane.widest(session.rows) == Self.discuzControls, """
             The pane did not read the forum in its own list, so the Mastodon row above it would \
             have been drawn trailing while the forum below it stacked.
             """)
         // **From `session.rows` and not `session.sources`**, so the list the threshold is computed
         // from is the list that is drawn.
-        #expect(pane.widest == SourceRow.widest(session.rows))
+        #expect(pane.widest(session.rows) == SourceRow.widest(session.rows))
 
         // A list with no forum in it is narrower, and that is the whole gain: every phone draws
         // the one-line row for a list of microblogs.
         let micro = self.session()
         await seed(micro, [Source(host: Self.micro, kind: .mastodon)])
-        #expect(AccountPane(session: micro).widest == Self.microControls)
+        #expect(AccountPane(session: micro).widest(micro.rows) == Self.microControls)
     }
 
     /// **Two looks, two meanings, and the third is gone.** Decision 33 withdraws decision 28: a
@@ -1560,9 +1594,12 @@ struct SourcePageTests {
     /// row pressed while an inline preview is open would delete a screen the reader is part-way
     /// through — which is exactly the boards control's argument, and it must be the same predicate
     /// rather than a second one.
-    @Test("A row's press is refused exactly when its controls are, and by the same rule")
+    @Test(
+        "A row's press is refused exactly when its controls are, and by the same rule",
+        .timeLimit(.minutes(1))
+    )
     func theRowsPressObeysTheSameRuleItsControlsDo() async {
-        let session = ShellSession(http: FixtureHTTP(), store: ItemStore())
+        let (session, http) = gatedSession()
         let source = Source(host: Self.micro, kind: .mastodon)
         await seed(session, [source])
 
@@ -1575,11 +1612,19 @@ struct SourcePageTests {
         #expect(session.stage == .browsingServers(.mastodon))
 
         session.stage = nil
-        session.checking = true
+        // A host the list does not already hold, so the look actually starts: `add` refuses a
+        // duplicate, and a refused press puts nothing on the wire to be caught mid-flight.
+        let (look, watchdog) = await heldLook(session, http, host: "elsewhere.example")
         session.openSource(host: Self.micro)
         #expect(session.stage == nil, "a row pressed mid-errand opened a sheet over it")
 
-        session.checking = false
+        await http.gate.open()
+        await look.value
+        watchdog.cancel()
+        // The look's own outcome is not what this test is about — only that the errand has ended.
+        session.stage = nil
+        session.refuse = nil
+
         session.openSource(host: "not.a.source.example")
         #expect(session.stage == nil, "a host that is not a source opened a detail of nothing")
 

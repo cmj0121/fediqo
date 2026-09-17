@@ -1019,38 +1019,6 @@ struct BoardChoiceTests {
 
     /// Opens only when a test lets it, so a press can be caught mid-flight. `JoinStageTests`'
     /// shape, for the same reason: the flag is set before the waiters are resumed.
-    private actor Gate {
-        private var waiting: [CheckedContinuation<Void, Never>] = []
-        private var opened = false
-
-        func wait() async {
-            guard !opened else { return }
-            await withCheckedContinuation { waiting.append($0) }
-        }
-
-        func open() {
-            opened = true
-            for continuation in waiting { continuation.resume() }
-            waiting.removeAll()
-        }
-    }
-
-    private actor GatedHTTP: HTTPClient {
-        private let inner: FixtureHTTP
-        private let held: String
-        let gate = Gate()
-
-        init(_ routes: [String: FixtureHTTP.Outcome], holding held: String) {
-            self.inner = FixtureHTTP(routes)
-            self.held = held
-        }
-
-        func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
-            if url.absoluteString == held || url.path == held { await gate.wait() }
-            return try await inner.data(from: url)
-        }
-    }
-
     /// **One press, one progress report.** `AccountPane`'s line fired on bare `checking`, so a
     /// restate drew the row's own line *and* a second spinner under the field — and the word under
     /// the field was "Checking …", the detection vocabulary, for the one errand whose whole
@@ -1072,16 +1040,16 @@ struct BoardChoiceTests {
             )),
             from: .field, ticked: []
         )
-        #expect(ShellSession.pageProgress(
+        #expect(ShellSession.reporting(
             ProgressReport(owner: .page, key: "account.detect.progress"), drawnAs: nil
-        ))
-        #expect(!ShellSession.pageProgress(nil, drawnAs: nil))
-        #expect(!ShellSession.pageProgress(block, drawnAs: drawn),
+        ) == .page)
+        #expect(ShellSession.reporting(nil, drawnAs: nil) != .page)
+        #expect(ShellSession.reporting(block, drawnAs: drawn) != .page,
                 "the page drew a line for a press made in the block, 300pt below it")
-        #expect(!ShellSession.pageProgress(
+        #expect(ShellSession.reporting(
             ProgressReport(owner: .row(host: Self.host), key: "account.source.boards.progress"),
             drawnAs: nil
-        ), """
+        ) != .page, """
             The page drew its own progress line for an errand a row had already claimed, so one \
             press produced two spinners and two sentences.
             """)
@@ -1095,7 +1063,6 @@ struct BoardChoiceTests {
             A reader who cancelled the block mid-press was left waiting on a request with every \
             control refused and nothing on screen saying why.
             """)
-        #expect(ShellSession.pageProgress(block, drawnAs: nil))
         // A row's errand is never taken back: a row outlives its own press.
         let row = ProgressReport(owner: .row(host: Self.host), key: "account.detect.progress")
         #expect(ShellSession.reporting(row, drawnAs: nil) == .row(host: Self.host))
@@ -1123,7 +1090,9 @@ struct BoardChoiceTests {
         let pane = AccountPane(session: session)
 
         let press = Task { await session.changeBoards(host: Self.host) }
-        while !session.checking { await Task.yield() }
+        #expect(await spun { session.checking }, """
+            the index read never claimed the errand, so there was nothing to ask who owned it
+            """)
 
         #expect(session.progress?.owner == .row(host: Self.host), """
             the row did not claim its own errand
@@ -1533,7 +1502,9 @@ struct BoardChoiceTests {
         }
 
         let press = Task { await session.subscribe(offer.boards.filter { $0.fid == 33 }) }
-        while !session.checking { await Task.yield() }
+        #expect(await spun { session.checking }, """
+            the boards never went on the wire, so there was nothing to ask who owned it
+            """)
 
         // A join: the boards sheet is down and the block went with the stage, so the page owns it.
         #expect(session.progress?.owner == .page)
@@ -1582,7 +1553,9 @@ struct BoardChoiceTests {
         session.stage = .choosingBoards(offer, from: .joined(subscribed: [], ticked: [40]))
 
         let press = Task { await session.subscribe(offer.boards) }
-        while !session.checking { await Task.yield() }
+        #expect(await spun { session.checking }, """
+            the restate never claimed the errand, so there was nothing to ask who owned it
+            """)
 
         #expect(session.progress?.owner == .row(host: Self.host), """
             A restate reported itself under the field, a screen away from the row that asked.

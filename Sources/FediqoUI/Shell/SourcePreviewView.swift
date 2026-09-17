@@ -140,13 +140,6 @@ struct SourcePreviewView: View {
         }
     }
 
-    private var hairline: some View {
-        Rectangle()
-            .fill(ShellChrome.hairline(colorScheme))
-            .frame(height: ShellSpace.hair)
-            .accessibilityHidden(true)
-    }
-
     /// Identity, whatever evidence there is, and what the press will do — one block, no internal
     /// hairlines, because there is not enough here to separate.
     private func spine<Evidence: View>(@ViewBuilder _ evidence: () -> Evidence) -> some View {
@@ -187,10 +180,10 @@ struct SourcePreviewView: View {
             .padding(.horizontal, inset)
 
             if !profile.rules.isEmpty {
-                hairline
+                ShellRule()
                 rules(profile.rules)
             }
-            hairline
+            ShellRule()
             VStack(alignment: .leading, spacing: ShellSpace.pad) {
                 outcome()
             }

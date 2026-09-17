@@ -1000,7 +1000,19 @@ extension View {
 
 private struct WayOut: ViewModifier {
     let name: String
+
+    /// **Filtered here, whoever built it.** This modifier is the one door to `openURL` in the
+    /// package, and the check is about what will be handed to the system browser rather than
+    /// about who wrote the address — which is the argument `DummyItem.outwardURL` already makes
+    /// about itself. `ForumReplyRow` handed over a built address that was checked only by
+    /// `DiscuzPost.url(onHost:)` two files away, which is the shape `ShellSession.remove`'s own
+    /// comment names as how a class of bug reached fourteen places. A third way-out surface
+    /// inherits the check rather than having to remember it.
     let url: URL?
+    private var checked: URL? {
+        guard let url, Host.allowsFetch(url) else { return nil }
+        return url
+    }
 
     /// Read here rather than taken from the caller. The environment is the one way out of the
     /// app this package uses, and a modifier that held a caller's closure instead is the
@@ -1009,7 +1021,7 @@ private struct WayOut: ViewModifier {
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        if let url {
+        if let url = checked {
             content.contextMenu {
                 Button {
                     openURL(url)

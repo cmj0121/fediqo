@@ -186,7 +186,21 @@ final class ShellSession {
 
     var hostname = ""
     var catalog: Catalog = .loading
-    var checking = false
+    /// Whether anything this session started is on the wire.
+    ///
+    /// **Derived, because it is `progress != nil` and never anything else.** It was stored, and
+    /// all four errand sites wrote `checking = true` on the line before they wrote `progress` and
+    /// cleared both in one `defer` — so the two were one fact in two properties, which is the
+    /// arrangement `ProgressReport`'s own doc argues against twenty lines below: *"One value and
+    /// not two properties … two properties is two things to forget at each of them."* That
+    /// argument was about the surface and the sentence; it applies verbatim here.
+    ///
+    /// **The drift had already reached the suite.** Three tests set `checking = true` with no
+    /// `progress` — busy, with no sentence anywhere — which is a state no press can produce and
+    /// which `AccountPane.pageWaiting` and `SourceRow.waitingLine` both read as *nobody is
+    /// waiting*. Derived, it is unspellable.
+    var checking: Bool { progress != nil }
+
     var progressHost = ""
     var refuse: String?
     /// The Account search field is first responder; dummy keys must not steal its typing.
@@ -358,7 +372,7 @@ final class ShellSession {
     /// make Return and the magnifier controls that do nothing — unit 5b's defect exactly, and
     /// risk 12's class.
     private func look() async -> SourcePreview? {
-        guard !checking, stage?.admitsASecondLook ?? true else { return nil }
+        guard Self.pageActsLive(at: stage, checking: checking) else { return nil }
         let raw = hostname.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else { return nil }
         refuse = nil
@@ -379,12 +393,11 @@ final class ShellSession {
         }
         errand += 1
         let mine = errand
-        checking = true
         // **The page owns a look, even beside an open block.** The reader typed into the field, so
         // that is where the sentence belongs — which is the one place `owner(drawing:)` would give
         // the wrong answer, and the reason this is stated rather than derived.
         progress = ProgressReport(owner: .page, key: "account.detect.progress")
-        defer { checking = false; progress = nil }
+        defer { progress = nil }
         do {
             let preview = try await joiner(for: parsed).look(host: raw)
             guard mine == errand else { return nil }
@@ -489,10 +502,9 @@ final class ShellSession {
         progressHost = preview.host
         errand += 1
         let mine = errand
-        checking = true
         // Where the press was — **the caller's answer, not this function reading the screen**.
         progress = ProgressReport(owner: owner, key: "account.detect.progress")
-        defer { checking = false; progress = nil }
+        defer { progress = nil }
         do {
             // **No `default:`.** A join step falling through a switch is a silent wrong answer:
             // a forum reported as joined, with no source and no boards behind it, and the
@@ -561,7 +573,7 @@ final class ShellSession {
     /// the picture it pulled for a host nobody joined. Harmless where there is no stage: it bumps
     /// the errand token, which a press about to open the browser wants bumped anyway.
     func browse() {
-        guard !checking, stage?.admitsASecondLook ?? true else { return }
+        guard Self.pageActsLive(at: stage, checking: checking) else { return }
         dismissStage()
         refuse = nil
         stage = .browsing
@@ -683,7 +695,6 @@ final class ShellSession {
         unread = []
         unreadAll = 0
         progressHost = offer.host
-        checking = true
         // A restate was pressed inside a row, so the row reports it — this is the second half of
         // the same errand `changeBoards` began, and it must not change surfaces half way through.
         //
@@ -692,15 +703,21 @@ final class ShellSession {
         // nothing. The restate's half was routed into the row by unit C and the join's half was
         // still drawing "Checking %@…" under the field, which is the detection vocabulary over a
         // phase that does not detect. One key, both owners.
-        progress = ProgressReport(
-            // **Folded here.** `changeBoards` folds what it is handed and this did not, staying
-            // correct only because `DiscuzBoardJoin` builds its offer from `source.host` — a
-            // guarantee three files away that nothing at this site stated. An unfolded host here
-            // matches no row, and the app's longest phase draws no line at all.
-            owner: origin.isRestate ? .row(host: offer.host.lowercased()) : .page,
-            key: "account.join.boards.progress"
-        )
-        defer { checking = false; progress = nil }
+        // **Computed once and handed on.** `failed(_:offer:picked:)` used to re-derive this by
+        // reading `progress?.owner` back — the screen, four lines after its caller had already
+        // decided the answer, and out of a property the `defer` below is about to nil. `take`
+        // carries the ruling this now follows: the reporter is the caller's answer and never a
+        // function reading the screen.
+        //
+        // **Folded here.** `changeBoards` folds what it is handed and this did not, staying
+        // correct only because `DiscuzBoardJoin` builds its offer from `source.host` — a
+        // guarantee three files away that nothing at this site stated. An unfolded host here
+        // matches no row, and the app's longest phase draws no line at all.
+        let reporter: ProgressOwner = origin.isRestate
+            ? .row(host: offer.host.lowercased())
+            : .page
+        progress = ProgressReport(owner: reporter, key: "account.join.boards.progress")
+        defer { progress = nil }
         do {
             // **`keeping` is what this host is subscribed to now, and it is correctness before it
             // is traffic.** A restate re-reading the eight boards the reader already had would
@@ -744,9 +761,9 @@ final class ShellSession {
         } catch let error as JoinError {
             // Every board failed, so nothing was added. Core threw the first board's reason and
             // kept no list; the count is what lets the sentence say how much it is about.
-            failed(error, offer: offer, picked: picks.count)
+            failed(error, offer: offer, picked: picks.count, reportedBy: reporter)
         } catch {
-            failed(nil, offer: offer, picked: picks.count)
+            failed(nil, offer: offer, picked: picks.count, reportedBy: reporter)
         }
     }
 
@@ -763,19 +780,27 @@ final class ShellSession {
     /// So a restate answers where it was pressed, in `inkDim`, exactly as its index failure does.
     /// No `offerSignIn` either: that offer exists to give a refused *join* somewhere to go, and a
     /// joined forum's row already carries its own Sign in control (decision 13).
-    private func failed(_ error: JoinError?, offer: JoinOffer, picked: Int) {
+    ///
+    /// **`reportedBy` is the caller's answer and never this function reading the screen.** It read
+    /// `progress?.owner` — re-deriving, four lines after `subscribe` had computed the identical
+    /// answer from `origin.isRestate` and stored it, and out of a property `subscribe`'s own
+    /// `defer` is about to nil. `take(_:ticked:reportedBy:)` states the rule; this is the site
+    /// that was still breaking it, and a second caller is exactly where re-derivation goes wrong.
+    private func failed(
+        _ error: JoinError?, offer: JoinOffer, picked: Int, reportedBy owner: ProgressOwner
+    ) {
         // **A `switch` and not `if case .row`, which is the rule `backToBrowsing` was sent back
         // for, applied to the one site left holding the old shape — and it is in the type this
         // unit introduced.** `if case` compiles clean against a fourth owner and silently gives
         // it the page's alarm-coloured sentence under a field the reader never touched. It is
         // unreachable today only because `subscribe` sets two of the four; "unreachable today"
         // is exactly the argument that did not save the other site.
-        switch progress?.owner {
+        switch owner {
         case .row:
             boardsRefusal = (host: offer.host, key: "account.source.boards.unread")
             return
         // A join, pressed at the field or in the block, and reported under the field either way.
-        case .page, .block, nil:
+        case .page, .block:
             break
         }
         unreadAll = picked
@@ -849,17 +874,6 @@ final class ShellSession {
         }
     }
 
-    /// Whether the **page's** progress line under the field is the one to draw.
-    ///
-    /// **A named rule for the same reason `rowActsLive` is one.** Three surfaces report progress
-    /// now, and an expression in a `View` body deciding which is the shape this branch has shipped
-    /// a defect in four times. The row draws its own status line, the block draws its own, and
-    /// this is the third: no two of them can fire, and none of them can stay silent, because they
-    /// are readings of one value.
-    static func pageProgress(_ progress: ProgressReport?, drawnAs stage: JoinStage?) -> Bool {
-        reporting(progress, drawnAs: stage) == .page
-    }
-
     /// Whether a row's controls are live, as one rule both the drawing and every press read.
     ///
     /// **One function, because the alternative is the defect risk 12 counts.** A control that is
@@ -891,6 +905,30 @@ final class ShellSession {
     ///   run with no stage, so no sheet can be covering the row that is speaking.
     static func rowActsLive(at stage: JoinStage?, checking: Bool) -> Bool {
         stage == nil && !checking
+    }
+
+    /// Whether the **page's** three add controls may be acted on: the hostname field, the
+    /// magnifier and Browse.
+    ///
+    /// **`rowActsLive`'s twin, and it exists for the same reason.** The row's four controls were
+    /// drawn on one question and pressed on another until `RowActionState` made the pair
+    /// unspellable. The page's three had the same split and kept it: `AccountPane.busy` asked
+    /// `stage?.surface == .sheet` while `look()` and `browse()` asked
+    /// `stage?.admitsASecondLook`. Two exhaustive switches over the same five shapes, agreeing
+    /// **by coincidence** — `surface == .pane` and `admitsASecondLook` happen to answer alike for
+    /// every case that exists today, and nothing anywhere says they must.
+    ///
+    /// **What that coincidence costs when it breaks.** A stage whose two answers part company
+    /// ships either a live-looking field whose Return does nothing, or a grey field that would
+    /// have worked. That is risk 12's class — a control correct where it is tested and wrong
+    /// where it is pressed — and M2 adds `JoinStage` cases, so the coincidence is due to break
+    /// rather than merely able to.
+    ///
+    /// **`admitsASecondLook` and not `surface`**, because the question is whether a second look
+    /// may start, not where the reader is looking. Those are the same thing only while the
+    /// browser is the only stage that admits one.
+    static func pageActsLive(at stage: JoinStage?, checking: Bool) -> Bool {
+        !checking && (stage?.admitsASecondLook ?? true)
     }
 
     /// A row's boards control was pressed and the forum's index could not be read.
@@ -944,7 +982,6 @@ final class ShellSession {
         progressHost = host
         errand += 1
         let mine = errand
-        checking = true
         // This row's press, so this row reports it — the page's line stays down. Cleared with
         // `checking`, because the two are the same errand seen from two surfaces.
         //
@@ -953,7 +990,7 @@ final class ShellSession {
         progress = ProgressReport(
             owner: .row(host: host), key: "account.source.boards.progress"
         )
-        defer { checking = false; progress = nil }
+        defer { progress = nil }
         do {
             let offer = try await joiner(for: host).boards(of: source)
             guard mine == errand else { return }

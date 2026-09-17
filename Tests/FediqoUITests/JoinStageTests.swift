@@ -21,79 +21,6 @@ struct JoinStageTests {
         L10n.language = .english
     }
 
-    /// Opens only when a test lets it, so a press can be caught mid-flight.
-    ///
-    /// `ClearTests.Gate`'s shape, and the same reason for it: the flag is set before the waiters
-    /// are resumed, so a caller arriving after the gate is open does not park on a continuation
-    /// nobody will resume.
-    private actor Gate {
-        private var waiting: [CheckedContinuation<Void, Never>] = []
-        private var opened = false
-
-        func wait() async {
-            guard !opened else { return }
-            await withCheckedContinuation { waiting.append($0) }
-        }
-
-        func open() {
-            opened = true
-            for continuation in waiting { continuation.resume() }
-            waiting.removeAll()
-        }
-    }
-
-    /// A fixture that holds one address until the test says otherwise.
-    private actor GatedHTTP: HTTPClient {
-        private let inner: FixtureHTTP
-        private let held: String
-        let gate = Gate()
-
-        init(_ routes: [String: FixtureHTTP.Outcome], holding held: String) {
-            self.inner = FixtureHTTP(routes)
-            self.held = held
-        }
-
-        /// Whether the held address has actually been asked for.
-        ///
-        /// **`checking` is not a discriminator between two phases of one press.** A look and the
-        /// take after it both set it, so a test that spins on `checking` alone asserts against
-        /// whichever phase it happened to catch — and a resumed sign-in runs both, back to back,
-        /// with no await between the look returning and the take claiming the errand. This says
-        /// *the take is parked on the wire*, which is the state those tests are about.
-        private(set) var reached = false
-
-        /// How many times the held address has been **asked for**, counted where the request
-        /// starts rather than where it lands.
-        ///
-        /// **A request that is refused before it is made never reaches `FixtureHTTP.paths`**, and
-        /// neither does one still parked on the gate — so a test asking "did a second fetch
-        /// start?" cannot ask `paths`. It has to ask here, in front of the gate.
-        private(set) var asks = 0
-
-        /// Matched on the path as well as the whole address, because a Mastodon's timeline
-        /// carries a query this test has no business knowing the value of.
-        func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
-            if url.absoluteString == held || url.path == held {
-                reached = true
-                asks += 1
-                await gate.wait()
-            }
-            return try await inner.data(from: url)
-        }
-    }
-
-    /// Waits for a condition, and **gives up rather than spinning for ever**. A bare
-    /// `while !x { await Task.yield() }` survives `.timeLimit` — yielding does not throw on
-    /// cancellation — so a press that stopped setting `checking` would hang the suite instead of
-    /// failing it.
-    private static func spun(until condition: @MainActor () -> Bool) async -> Bool {
-        for _ in 0..<100_000 {
-            if condition() { return true }
-            await Task.yield()
-        }
-        return false
-    }
-
     private static let discuzFront = #"""
     <html><head><meta name="generator" content="Discuz! X5.0" /></head><body></body></html>
     """#
@@ -183,18 +110,40 @@ struct JoinStageTests {
     }
 
     /// The same guard from the other side: a press cannot start while one is on the wire.
-    @Test("Subscribe does nothing while a press is already in flight")
+    ///
+    /// **Held on the gate rather than hand-set.** This used to write `session.checking = true`
+    /// with no `progress` — busy with no sentence anywhere, a state no press can produce and one
+    /// that `pageWaiting` reads as *nobody is waiting*. `checking` is now `progress != nil` and
+    /// there is no such state to spell, so the errand here is a real one: a look parked on the
+    /// forum's front page while Subscribe is pressed underneath it.
+    @Test("Subscribe does nothing while a press is already in flight", .timeLimit(.minutes(1)))
     func confirmIsRefusedWhileChecking() async {
-        let (session, http) = Self.forumSession()
+        // The front page is held, which is a Discuz! look's **first** request — so the look parks
+        // before it has a preview to hand back, and Subscribe is pressed with an errand genuinely
+        // on the wire. (Holding the index instead parks the same look one request later: a look
+        // reads the front page and the index, so both are inside it.)
+        let http = GatedHTTP(Self.forumRoutes(), holding: "/")
+        let watchdog = Task {
+            try? await Task.sleep(for: .seconds(5))
+            await http.gate.open()
+        }
+        defer { watchdog.cancel() }
+        let session = ShellSession(http: http, store: ItemStore())
         session.hostname = Self.forum
-        await session.add()
-        let asked = await http.paths.count
 
-        session.checking = true
+        // **Spun on the request count and not on `checking`.** A press writes its progress report
+        // before it calls out, so `checking` goes true one hop before anything reaches the wire,
+        // and a count read at that moment is read too early — which is how the first cut of this
+        // rewrite compared 1 against a 0 it had captured a hop too soon.
+        let look = Task { await session.add() }
+        #expect(await spun { await http.asks == 1 }, "the look never reached the wire")
+
         await session.confirm()
-
-        #expect(await http.paths.count == asked, "a second press reached the forum")
+        #expect(await http.asks == 1, "a second press reached the forum")
         #expect(session.choosing == nil)
+
+        await http.gate.open()
+        await look.value
     }
 
     /// **The hazard this unit had to be built against.** The reader presses Subscribe on a forum,
@@ -240,7 +189,7 @@ struct JoinStageTests {
 
         let press = Task { await session.confirm() }
         // The press is parked on the index. The reader leaves.
-        #expect(await Self.spun { session.checking }, "the press never reached the wire")
+        #expect(await spun { session.checking }, "the press never reached the wire")
         session.dismissStage()
         await http.gate.open()
         await press.value
@@ -294,7 +243,7 @@ struct JoinStageTests {
         await session.add()
 
         let press = Task { await session.confirm() }
-        #expect(await Self.spun { session.checking }, "the press never reached the wire")
+        #expect(await spun { session.checking }, "the press never reached the wire")
         session.dismissStage()
         await http.gate.open()
         await press.value
@@ -603,7 +552,7 @@ struct JoinStageTests {
         // And the one fetch that was made still lands, so the reader's second press leaves them
         // looking at the directory rather than at a `.loading` that nothing will ever finish.
         await http.gate.open()
-        #expect(await Self.spun { if case .ready = session.catalog { true } else { false } },
+        #expect(await spun { if case .ready = session.catalog { true } else { false } },
                 "the one fetch was refused as well as the second, and nothing answered")
         #expect(await http.asks == 1, "a third request arrived once the gate opened")
     }
@@ -887,6 +836,59 @@ struct JoinStageTests {
             "the block went down the moment the boards sheet opened over it"
         )
         #expect(JoinStage.choosingBoards(offer, from: .joined(subscribed: [], ticked: [])).inlinePreview == nil)
+    }
+
+    /// **The field's ink and the field's press answer to one rule, at every stage there is.**
+    ///
+    /// They did not. `AccountPane.busy` read `stage?.surface == .sheet`; `look()` and `browse()`
+    /// read `stage?.admitsASecondLook`. Two exhaustive switches over the same five shapes, and
+    /// they agreed **by coincidence** — `surface == .pane` and `admitsASecondLook` happen to
+    /// answer alike for every case that exists today, with nothing anywhere saying they must.
+    /// A stage whose two answers part company ships a live-looking field whose Return does
+    /// nothing, or a grey field that would have worked: risk 12's class, on the three controls
+    /// this page did not close it on.
+    ///
+    /// **Asserted on the wire and not on the property**, because `busy == !pageActsLive` is a
+    /// tautology now that both call it. What is not a tautology is that **a grey field makes no
+    /// request and a live one does** — so this drives the real press at every shape and reads the
+    /// fixture, which is the thing the reader would have seen.
+    ///
+    /// **Including `.previewing(_, .joined, _)`, which neither table above covers.** The source
+    /// detail is the one stage whose two answers are most nearly independent: it is drawn in the
+    /// sheet *and* it refuses a second look, for two different reasons. It is exactly where the
+    /// coincidence would break first.
+    @Test("The field is grey at exactly the stages where its press is refused")
+    func theFieldIsGreyExactlyWhenItsPressIsRefused() async {
+        let preview = Self.previewOf(Self.forum)
+        let offer = JoinOffer(host: Self.forum, kind: .discuz, categories: [])
+        let shapes: [(JoinStage?, String)] = [
+            (nil, "no stage at all"),
+            (.browsing, "the protocol list"),
+            (.browsingServers(.mastodon), "the server list"),
+            (.previewing(preview, from: .field, ticked: []), "a block in the page"),
+            (.previewing(preview, from: .joined(Source(host: Self.forum, kind: .discuz)), ticked: []),
+             "the detail of a source already held"),
+            (.choosingBoards(offer, from: .preview(preview, ticked: [])), "the boards, from a preview"),
+            (.choosingBoards(offer, from: .joined(subscribed: [], ticked: [])), "the boards, restated"),
+        ]
+
+        for (stage, what) in shapes {
+            let (session, http) = Self.forumSession()
+            session.stage = stage
+            session.hostname = Self.forum
+            let pane = AccountPane(session: session)
+            let greyed = pane.busy
+
+            await session.add()
+            let asked = !(await http.paths).isEmpty
+
+            #expect(asked == !greyed, """
+                At \(what) the field was drawn \(greyed ? "grey" : "live") and the press \
+                \(asked ? "went to the server" : "did nothing"). One of the two is lying to the \
+                reader, and which one it is depends on which of `surface` and \
+                `admitsASecondLook` that stage answered.
+                """)
+        }
     }
 
     /// The rule the field and Browse are both gated on. Pinned as a value, because the two
@@ -1383,7 +1385,7 @@ struct JoinStageTests {
         }
 
         let press = Task { await session.subscribe(offer.boards.filter { $0.fid == 33 }) }
-        #expect(await Self.spun { session.checking }, "the pick never reached the wire")
+        #expect(await spun { session.checking }, "the pick never reached the wire")
 
         // The reader presses Remove while the boards are being read one at a time.
         await session.remove(host: Self.forum)
@@ -1438,7 +1440,7 @@ struct JoinStageTests {
         }
 
         let press = Task { await session.subscribe(offer.boards.filter { $0.fid == 33 }) }
-        #expect(await Self.spun { session.checking }, "the pick never reached the wire")
+        #expect(await spun { session.checking }, "the pick never reached the wire")
 
         // Somebody else's server goes, while this errand is about the forum and parked on a board.
         await session.remove(host: "elsewhere.example")
@@ -1570,7 +1572,7 @@ struct JoinStageTests {
         await session.add()
 
         let press = Task { await session.confirm() }
-        #expect(await Self.spun { session.checking }, "the press never reached the wire")
+        #expect(await spun { session.checking }, "the press never reached the wire")
         // The block owns it while the block is there.
         #expect(pane.blockWaiting != nil)
         #expect(pane.pageWaiting == nil)
@@ -1643,7 +1645,7 @@ struct JoinStageTests {
             """)
 
         let press = Task { await session.confirm() }
-        #expect(await Self.spun { session.checking }, "the press never reached the wire")
+        #expect(await spun { session.checking }, "the press never reached the wire")
 
         #expect(session.stage?.surface == .pane, "a sheet came up over the press mid-flight")
         #expect(session.progress?.owner == .block, """

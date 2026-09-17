@@ -305,7 +305,11 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// would take to draw one is a protocol name for a server this device is not reading, which is
     /// a shape nothing here has.
     private static func others(_ note: Note, among sources: [Source]) -> [DummySource] {
-        note.hosts
+        // The overwhelmingly common note arrived through one server, and the work below is three
+        // collections and a linear scan per survivor to say so. This whole function is rebuilt
+        // once per timeline build, which is itself per visible row.
+        guard note.hosts.count > 1 else { return [] }
+        return note.hosts
             .subtracting([note.source.host])
             .sorted()
             .compactMap { host in

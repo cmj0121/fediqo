@@ -86,8 +86,12 @@ public actor ItemStore {
         let host = raw.lowercased()
         sourceList.removeAll { $0.host == host }
         notes = notes.compactMapValues { note in
+            // **Asked before it is copied.** `hosts.remove` mutates, so writing it against `var
+            // note` first triggers copy-on-write for *every* note in the store and throws the copy
+            // away again for the ones that did not match. A Remove press walks the whole store.
+            guard note.hosts.contains(host) else { return note }
             var note = note
-            guard note.hosts.remove(host) != nil else { return note }
+            note.hosts.remove(host)
             guard !note.hosts.isEmpty else { return nil }
             // Only a note that was stamped with the host going away needs a new stamp, and the
             // new one is a source still in the list that this note actually arrived through —

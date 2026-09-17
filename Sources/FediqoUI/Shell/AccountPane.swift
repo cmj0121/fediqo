@@ -57,7 +57,7 @@ struct AccountPane: View {
                 // `PreferencesPane` draws its empty state and is right to, because it has no
                 // hero to be contradicted by.
                 if !session.sources.isEmpty {
-                    hairline
+                    ShellRule()
                     sources
                 }
                 }
@@ -105,7 +105,7 @@ struct AccountPane: View {
     /// exist the page's own hairline closes the block; where they do not, the block simply ends.
     private func inlinePreview(_ preview: SourcePreview) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            hairline
+            ShellRule()
             // **`.field` and not the stage's own origin, because the block is drawn for exactly
             // one of them.** `JoinStage.inlinePreview` answers non-nil only where the origin is
             // the field — including under the boards sheet, where the origin has not changed —
@@ -114,9 +114,9 @@ struct AccountPane: View {
             SourcePreviewView.Header(preview: preview, surface: .pane, origin: .field)
                 .padding(.vertical, ShellSpace.pad)
                 .accessibilityFocused($previewFocused)
-            hairline
+            ShellRule()
             SourcePreviewView(preview: preview, surface: .pane, origin: .field)
-            hairline
+            ShellRule()
             previewActions(preview)
                 .padding(.vertical, ShellSpace.pad)
         }
@@ -289,8 +289,14 @@ struct AccountPane: View {
     /// below: this term decides whether three controls are grey, it has just been narrowed, and
     /// a view's private property is reachable from nothing. The four defects risk 12 lists were
     /// all correct rules attached where no test could see them.
+    ///
+    /// **It now negates the press's own rule rather than restating it.** This read
+    /// `session.checking || session.stage?.surface == .sheet` — a second exhaustive switch over
+    /// the same five shapes, agreeing with `look()`'s guard by coincidence and held by no test.
+    /// `ShellSession.pageActsLive` is the one rule both ends ask, so a stage that changes its
+    /// answer changes it for the ink and the press together.
     var busy: Bool {
-        session.checking || session.stage?.surface == .sheet
+        !ShellSession.pageActsLive(at: session.stage, checking: session.checking)
     }
 
     /// The magnifier's ink, and **the whole of what `.disabled` is visible as on this control**.
@@ -358,7 +364,8 @@ struct AccountPane: View {
 
     /// The sentence under the field while the **page** is the one waiting, or nothing.
     ///
-    /// **Through `ShellSession.pageProgress` and never through `checking` alone.** A restate is
+    /// **Through `ShellSession.reporting(_:drawnAs:)` and never through `checking` alone.** A
+    /// restate is
     /// pressed inside a row and draws its own status line there; a gate asking only whether
     /// something is on the wire drew both, so one press produced two spinners and two sentences —
     /// and the one under the field said "Checking …", the detection vocabulary, about the one
@@ -467,13 +474,6 @@ struct AccountPane: View {
         }
     }
 
-    private var hairline: some View {
-        Rectangle()
-            .fill(ShellChrome.hairline(colorScheme))
-            .frame(height: ShellSpace.hair)
-            .accessibilityHidden(true)
-    }
-
     /// The sources this device reads, one row each.
     ///
     /// **This list and `PreferencesPane`'s answer different questions and are kept visibly apart.**
@@ -519,11 +519,15 @@ struct AccountPane: View {
             // launch screen, and the sentence below would have read as though it were true while
             // being false.
             let rows = session.rows
-            // **The property, not a second call to the same function.** They agreed by being the
+            // **The method, not a second call to the same function.** They agreed by being the
             // same expression, so changing the body alone would have left
             // `thePaneHandsOneWidestToEveryRow` green while every row was drawn to a threshold
             // nothing had pinned — the risk-12 shape with the test on the wrong side of it.
-            let widest = widest
+            //
+            // **Handed the rows the list is drawn from.** It used to read `session.rows` itself,
+            // so the comment above — which says the list is built once — was false the line after
+            // it was written: the fold ran over a second, freshly allocated array.
+            let widest = widest(rows)
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(rows) { row in
                     SourceRowView(
@@ -557,7 +561,7 @@ struct AccountPane: View {
                     // **Between rows and not after every one.** A rule under the last row is a
                     // list that looks cut off rather than finished, with the footnote below it
                     // hanging off the end of a table.
-                    if row.id != rows.last?.id { hairline }
+                    if row.id != rows.last?.id { ShellRule() }
                 }
             }
             // **One reader for the whole list, not one per row.** Every row in it is the same
@@ -603,10 +607,15 @@ struct AccountPane: View {
     /// computed inside a `View` body is reachable from nothing — which is precisely how the four
     /// defects risk 12 counts all survived a green suite.
     ///
-    /// **From `session.rows` and not `session.sources`**, so the list the threshold is computed
-    /// from is the list that is drawn.
-    var widest: [SourceRow.Control] {
-        SourceRow.widest(session.rows)
+    /// **Handed the rows rather than reading them**, so the threshold is folded over the very
+    /// array the `ForEach` draws — not a second one built from the same source. As a property it
+    /// allocated a fresh `[SourceRow]` on every body evaluation, beside the one the list already
+    /// held, under a comment saying the list was read once.
+    ///
+    /// **Still `session.rows` at the call site and not `session.sources`**, so the list the
+    /// threshold is computed from is the list that is drawn.
+    func widest(_ rows: [SourceRow]) -> [SourceRow.Control] {
+        SourceRow.widest(rows)
     }
 
     // MARK: - What every control on this page actually does

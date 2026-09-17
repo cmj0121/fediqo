@@ -251,8 +251,10 @@ enum JoinStage: Identifiable, Equatable {
     /// `nil`.
     func ticking(_ picked: Set<Int>) -> JoinStage {
         switch self {
-        case .browsing: .browsing
-        case .browsingServers(let kind): .browsingServers(kind)
+        // Neither browsing step holds ticks, so both hand themselves back rather than rebuilding
+        // a value equal to the one matched. Still exhaustive: a fifth stage breaks the build here
+        // exactly as it did before.
+        case .browsing, .browsingServers: self
         case .previewing(let preview, let origin, _):
             .previewing(preview, from: origin, ticked: picked)
         case .choosingBoards(let offer, let origin):
@@ -393,10 +395,10 @@ struct JoinSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            hairline
+            ShellRule()
             body(for: session.stage)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            hairline
+            ShellRule()
             footer
         }
         .background(ShellChrome.page(colorScheme))
@@ -422,13 +424,6 @@ struct JoinSheet: View {
         #else
         .presentationDetents([.large])
         #endif
-    }
-
-    private var hairline: some View {
-        Rectangle()
-            .fill(ShellChrome.hairline(colorScheme))
-            .frame(height: ShellSpace.hair)
-            .accessibilityHidden(true)
     }
 
     // MARK: - The frame
@@ -714,7 +709,7 @@ struct JoinSheet: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(Self.protocols, id: \.self) { kind in
                     protocolRow(kind)
-                    hairline
+                    ShellRule()
                 }
             }
         }
@@ -806,7 +801,7 @@ struct JoinSheet: View {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(servers) { server in
                             catalogRow(server, added: added.contains(server.domain.lowercased()))
-                            hairline
+                            ShellRule()
                         }
                     }
                 }
