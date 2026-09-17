@@ -19,6 +19,54 @@ public struct MastodonJoin: Sendable {
         return false
     }
 
+    /// One read of a stranger's server, with its failure kept as a value rather than thrown.
+    ///
+    /// The ladder is the one the public timeline has always climbed, moved here so that both
+    /// reads climb it and the decision can be made on the pair. The `JoinError` it hands back is
+    /// the sentence **this read alone** would earn a reader; which sentence the join actually
+    /// throws is `refusal(_:_:)`'s, and that is asked only when both reads failed.
+    ///
+    /// Cancellation is the one failure that is not a value. A reader who walked away is not a
+    /// server that would not answer, and must leave no source behind, so it is rethrown for the
+    /// caller to abandon the join on before anything is added. `Cancellation.happened` and not
+    /// `catch is CancellationError`, because `URLSession` hands a cancelled transfer back as
+    /// `URLError(.cancelled)`, which the tidy spelling never sees.
+    private static func read(
+        _ fetch: @Sendable () async throws -> [Note]
+    ) async throws -> Result<[Note], JoinError> {
+        do {
+            return .success(try await fetch())
+        } catch let error where Cancellation.happened(error) {
+            throw CancellationError()
+        } catch let error as MastodonRequestError where Self.isRefusal(error) {
+            return .failure(.publicTimelineFailed)
+        } catch is DecodingError {
+            // It answered; the answer was not a timeline. A proxy page, a fork with a
+            // schema of its own, a date nobody can parse — the host is reachable and
+            // the reader would waste their time looking at the network.
+            return .failure(.publicTimelineFailed)
+        } catch {
+            // No answer at all: a dropped connection, a TLS failure, a name that does
+            // not resolve. That one is worth checking a network over.
+            return .failure(.unreachable)
+        }
+    }
+
+    /// Neither read came back with anything. Which sentence the reader gets for that.
+    ///
+    /// **The distinction between the two errors is unchanged**, and both are still worth having:
+    /// `publicTimelineFailed` is "it answered, and the answer was not a timeline", and
+    /// `unreachable` is "no answer at all" — the only one worth sending somebody to look at a
+    /// network over. All that a second read changes is where the answer is allowed to come from.
+    /// A server that answered **either** endpoint, with a status or with a body no decoder could
+    /// read, is a server that answered; `unreachable` is kept for a host that said nothing to
+    /// both, which is what a host that is simply not there does.
+    private static func refusal(_ publicRead: JoinError, _ trendingRead: JoinError) -> JoinError {
+        publicRead == .unreachable && trendingRead == .unreachable
+            ? .unreachable
+            : .publicTimelineFailed
+    }
+
     private let http: any HTTPClient
     private let store: ItemStore
     private let catalogues: EmojiCatalogueStore
@@ -61,46 +109,37 @@ public struct MastodonJoin: Sendable {
 
     /// Everything after the host is known to speak Mastodon. Separate so that a dispatcher that
     /// has already asked what a host speaks does not ask a stranger's server twice.
+    ///
+    /// **Asked before it is added**, the same ordering `DiscourseJoin` and `DiscuzJoin` carry:
+    /// nothing reaches `store.add` until both reads are in and the decision is made, so a server
+    /// that answers the detector and then shows this reader nothing leaves no source behind.
     func ingest(host: String) async throws {
         let source = Source(host: host, kind: .mastodon)
         let client = MastodonClient(http: http, host: host)
 
-        async let pub = client.publicTimeline(source: source)
-        async let trend: [Note] = {
-            do {
-                return try await client.trending(source: source)
-            }
-            // **Ahead of the swallow, and the swallow is why it has to be.** Trends are allowed
-            // to fail — a server without them still has a timeline — so every way they can fail
-            // is turned into `[]`, and a reader closing the app is one of those ways. Written
-            // `catch is CancellationError` this never fired, and the join carried on to
-            // `store.add` and `store.ingest` for somebody who was no longer there, leaving a
-            // server in their list that they never finished adding.
-            catch let error where Cancellation.happened(error) {
-                throw CancellationError()
-            } catch {
-                return []
-            }
-        }()
+        // Both started together and **both awaited before anything is decided**. Awaiting one
+        // and throwing on it discarded a read that had already succeeded, unread.
+        async let pub = Self.read { try await client.publicTimeline(source: source) }
+        async let trend = Self.read { try await client.trending(source: source) }
+        let publicRead = try await pub
+        let trendingRead = try await trend
 
-        let publicNotes: [Note]
-        do {
-            publicNotes = try await pub
-        } catch let error where Cancellation.happened(error) {
-            throw CancellationError()
-        } catch let error as MastodonRequestError where Self.isRefusal(error) {
-            throw JoinError.publicTimelineFailed
-        } catch is DecodingError {
-            // It answered; the answer was not a timeline. A proxy page, a fork with a
-            // schema of its own, a date nobody can parse — the host is reachable and
-            // the reader would waste their time looking at the network.
-            throw JoinError.publicTimelineFailed
-        } catch {
-            // No answer at all: a dropped connection, a TLS failure, a name that does
-            // not resolve. That one is worth checking a network over.
-            throw JoinError.unreachable
+        // **The rule did not change; the reading of it was wrong.** `read before added` says
+        // that something arrived, not that the *public timeline* arrived — and a server that
+        // closes its timeline to a signed-out reader while still answering trends has content to
+        // show, which `ShellSession.hasTrends` gives a tab of its own. Refusing it here was too
+        // strict an implementation of a rule that is not too strict. So the join is refused only
+        // where **both** reads came back with nothing; restoring a throw on the public timeline
+        // alone is not a fix for anything (decision 18).
+        if case .failure(let publicError) = publicRead,
+           case .failure(let trendingError) = trendingRead {
+            throw Self.refusal(publicError, trendingError)
         }
-        let trendingNotes = try await trend
+
+        // Trends are still allowed to fail on their own — a server without them has a timeline —
+        // and now so is the timeline, on a server that has trends.
+        let publicNotes = (try? publicRead.get()) ?? []
+        let trendingNotes = (try? trendingRead.get()) ?? []
 
         await store.add(source)
         await store.ingest(publicNotes + trendingNotes)
