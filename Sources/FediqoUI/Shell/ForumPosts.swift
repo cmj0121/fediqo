@@ -930,6 +930,19 @@ struct ForumPostBand: View {
 ///
 /// ## Why this is plates and not a spinner
 ///
+/// **This argument is the app's general rule now, and not this pane's exception.** It was written
+/// for one reader's request about one list; the measurement behind it held for every other place
+/// this app waits, and there were six of them in three vocabularies — a platform spinner at five,
+/// these plates at one, and `RemoteImage`'s bare plate at the sixth — with three type roles and two
+/// inks between them. They are one vocabulary now: this view, at every site that has a sentence,
+/// in `ShellType.meta` and `ShellChrome.inkDim`, with the words first and the motion trailing them.
+/// `RemoteImage` keeps its bare plate and is not a fourth: a picture-shaped hole where a picture
+/// will be is a different statement from a sentence about an errand, and it has no words.
+///
+/// **The plates are the ellipsis, moving.** Every one of those sentences already ends in `…`, so
+/// words-then-motion is the reading order the sentence has; a `ProgressView` in front of the words
+/// puts a platform control where the reader's eye starts.
+///
 /// This shell already has a word for "asked for, not here yet", and it is a plate: `RemoteImage`
 /// draws a bare `ShellChrome.well` while a picture is on its way, and `ForumPostBand` draws two of
 /// them where a post is. A reader who has scrolled one timeline has already learned what a waiting
@@ -990,7 +1003,12 @@ struct ForumWaiting: View {
         HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
             Text(line)
                 .font(ShellType.meta)
-                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                // **`inkDim` and not `inkFaint`, which is a small declared change.** Six sites
+                // said this fact in two inks; `inkDim` is the token for *present, read second*,
+                // which is what a sentence about an errand in progress is — and `inkFaint` is the
+                // faintest engraving, for counts nobody is looking for. A reader waiting is
+                // looking.
+                .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
             Group {
                 if let tick = Self.clock(reduceMotion: reduceMotion) {
@@ -1019,7 +1037,10 @@ struct ForumWaiting: View {
     private func run(at instant: TimeInterval) -> some View {
         HStack(spacing: ShellSpace.tight) {
             ForEach(0..<Self.plates, id: \.self) { index in
-                ForumPostBand.plate(ShellChrome.inkFaint(colorScheme))
+                // The same ink as the sentence they trail: one ink for the whole statement, so a
+                // reader meets one way of waiting rather than a sentence in one weight and a run
+                // of plates in another.
+                ForumPostBand.plate(ShellChrome.inkDim(colorScheme))
                     .frame(width: ShellSpace.snug)
                     .opacity(Self.glow(index, at: instant))
             }

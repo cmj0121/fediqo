@@ -617,7 +617,7 @@ struct ForumJoinTests {
             return
         }
         let picks = offer.boards.filter { [33, 41].contains($0.fid) }
-        let outcome = try await join.subscribe(offer, to: picks)
+        let outcome = try await join.subscribe(offer, to: picks, keeping: [])
 
         #expect(outcome.subscribed.map(\.fid) == [33, 41])
         #expect(outcome.unread.isEmpty)
@@ -670,7 +670,7 @@ struct ForumJoinTests {
             Issue.record("a Discuz! should pause")
             return
         }
-        try await join.subscribe(offer, to: offer.boards.filter { $0.fid == 33 })
+        try await join.subscribe(offer, to: offer.boards.filter { $0.fid == 33 }, keeping: [])
 
         // The detection travelled in the offer. A second half that asked again would double
         // every join's traffic against a server that did nothing to deserve it.
@@ -738,7 +738,7 @@ struct ForumJoinTests {
             return
         }
         let outcome = try await join.subscribe(
-            offer, to: offer.boards.filter { [33, 40, 37].contains($0.fid) })
+            offer, to: offer.boards.filter { [33, 40, 37].contains($0.fid) }, keeping: [])
 
         #expect(outcome.subscribed.map(\.fid) == [33])
         #expect(outcome.unread.map(\.board.fid) == [40, 37])
@@ -778,7 +778,7 @@ struct ForumJoinTests {
             return
         }
         await #expect(throws: JoinError.refused(403)) {
-            try await join.subscribe(offer, to: offer.boards.filter { $0.fid == 33 })
+            try await join.subscribe(offer, to: offer.boards.filter { $0.fid == 33 }, keeping: [])
         }
         #expect(await store.sources().isEmpty)
         #expect(await store.all().isEmpty)
@@ -806,7 +806,7 @@ struct ForumJoinTests {
             Issue.record("a Discuz! should pause")
             return
         }
-        let outcome = try await join.subscribe(offer, to: [])
+        let outcome = try await join.subscribe(offer, to: [], keeping: [])
         #expect(outcome.subscribed.isEmpty)
         #expect(outcome.unread.isEmpty)
         #expect(await store.sources().isEmpty)
@@ -850,8 +850,8 @@ struct ForumJoinTests {
             Issue.record("a Discuz! should pause")
             return
         }
-        try await join.subscribe(offer, to: offer.boards.filter { $0.fid == 33 })
-        try await join.subscribe(offer, to: offer.boards.filter { [33, 41].contains($0.fid) })
+        try await join.subscribe(offer, to: offer.boards.filter { $0.fid == 33 }, keeping: [])
+        try await join.subscribe(offer, to: offer.boards.filter { [33, 41].contains($0.fid) }, keeping: [])
 
         // One host, one source — and the newest statement of what the reader subscribed to.
         #expect(await store.sources().count == 1)
@@ -974,7 +974,7 @@ struct ForumJoinTests {
         let http = FixtureHTTP([:])
         let offer = JoinOffer(host: "install-f.example", kind: .discourse, categories: [])
         await #expect(throws: JoinError.unsupportedKind(.discourse)) {
-            try await Self.joiner(http, store).subscribe(offer, to: [])
+            try await Self.joiner(http, store).subscribe(offer, to: [], keeping: [])
         }
         #expect(await store.sources().isEmpty)
         #expect(await http.paths.isEmpty)
@@ -1091,5 +1091,227 @@ struct ForumJoinTests {
         """#
         let http = FixtureHTTP(["/": .text(page)])
         #expect(try await Detector(http: http).detect("install-a.example") == .discuz)
+    }
+
+    // MARK: - A forum the reader already reads, restated
+
+    /// The front page and the index of a forum with four boards on it, and one board's threads.
+    /// Shared by the restate tests, which are about *which* boards are asked for rather than
+    /// about markup.
+    private enum Restate {
+        static let host = "install-c.example"
+
+        static let front = #"""
+        <html><head><meta name="generator" content="Discuz! X5.0" /></head><body></body></html>
+        """#
+
+        static let index = #"""
+        <h2><a href="forum.php?gid=56">Tools and software</a></h2>
+        <div id="category_56">
+        <table class="fl_tb"><tr>
+        <td class="fl_g"><dl><dt><a href="forum.php?mod=forumdisplay&fid=33">Boot disks</a></dt></dl></td>
+        <td class="fl_g"><dl><dt><a href="forum.php?mod=forumdisplay&fid=40">Imaging tools</a></dt></dl></td>
+        <td class="fl_g"><dl><dt><a href="forum.php?mod=forumdisplay&fid=37">Virtual machines</a></dt></dl></td>
+        <td class="fl_g"><dl><dt><a href="forum.php?mod=forumdisplay&fid=41">Rescue disks</a></dt></dl></td>
+        </tr></table>
+        </div>
+        """#
+
+        /// One board's thread list, under whichever `fid` it is routed at — the parser reads the
+        /// board from the address it was fetched from, not from this heading.
+        static func threads(_ fid: Int, _ name: String) -> String {
+            #"""
+            <h1 class="xs2"><a href="forum.php?mod=forumdisplay&fid=\#(fid)">\#(name)</a></h1>
+            <table>
+            <tbody id="normalthread_45103\#(fid)">
+            <tr>
+            <th class="new"><a href="thread-45103\#(fid)-1-1.html" class="s xst">Something in \#(name)</a></th>
+            <td class="by"><cite><a href="space-uid-1.html">程小雨</a></cite><em><span title="2026-9-15 08:12">7&nbsp;小时前</span></em></td>
+            <td class="num"><a href="thread-45103\#(fid)-1-1.html" class="xi2">29</a><em>3480</em></td>
+            </tr>
+            </tbody>
+            </table>
+            """#
+        }
+
+        static func http(boards: [Int: String]) -> FixtureHTTP {
+            var routes: [String: FixtureHTTP.Outcome] = [
+                "/": .text(front),
+                "https://\(host)/forum.php": .text(index),
+            ]
+            for (fid, name) in boards {
+                routes["https://\(host)/forum.php?mod=forumdisplay&fid=\(fid)"]
+                    = .text(threads(fid, name))
+            }
+            return FixtureHTTP(routes)
+        }
+
+        /// A forum already joined with boards 33, 40 and 37, the way the reader would have.
+        static func joined(_ store: ItemStore) async throws -> JoinOffer {
+            let http = http(boards: [33: "Boot disks", 40: "Imaging tools", 37: "Virtual machines"])
+            let join = SourceJoin(http: http, store: store, catalogues: EmojiCatalogueStore())
+            guard case .chooseBoards(let offer) = try await join.begin(host: host) else {
+                throw JoinError.unsupportedKind(.unknown)
+            }
+            try await join.subscribe(
+                offer, to: offer.boards.filter { [33, 40, 37].contains($0.fid) }, keeping: []
+            )
+            return offer
+        }
+    }
+
+    /// **The case this whole path exists to not be.** A reader subscribed to three boards opens
+    /// the picker again and ticks a fourth. `ItemStore.subscribe(host:to:)` replaces the set, so
+    /// what `subscribe` hands it *is* the reader's subscription — and every board it fails to read
+    /// falls out of it.
+    ///
+    /// **The mutation check is the transport, not a counter.** This restate is run through an
+    /// `HTTPClient` that routes the index and board 41 and **nothing else**, so an implementation
+    /// that re-read 33, 40 or 37 does not merely spend three requests: each throws `unmapped`,
+    /// lands in `unread`, and drops out of `subscribed`. The reader ends up subscribed to one
+    /// board having asked to be subscribed to four. That is the bug, and it is what fails here.
+    @Test("Adding a fourth board keeps the three already read, and does not ask for them again")
+    func aRestateKeepsWhatIsAlreadySubscribed() async throws {
+        let store = ItemStore()
+        let offer = try await Restate.joined(store)
+        #expect(await store.sources().first?.boards.map(\.fid) == [33, 40, 37])
+        let held = try #require(await store.sources().first).boards
+
+        // The restate. Only the index and the *new* board answer at all.
+        let http = Restate.http(boards: [41: "Rescue disks"])
+        let outcome = try await SourceJoin(http: http, store: store, catalogues: EmojiCatalogueStore())
+            .subscribe(offer, to: offer.boards.filter { [33, 40, 37, 41].contains($0.fid) },
+                       keeping: held)
+
+        #expect(outcome.unread.isEmpty, """
+            A board the reader was already subscribed to was re-read, could not be, and was \
+            therefore unsubscribed from — silently, and without the reader touching it.
+            """)
+        // In the forum's own index order, because that is what the final list walks.
+        #expect(outcome.subscribed.map(\.fid) == [33, 40, 37, 41])
+        #expect(await store.sources().first?.boards.map(\.fid) == [33, 40, 37, 41])
+        // And the three kept boards were never on the wire. One request per board runs for
+        // seconds; three of them to confirm what the store already says is the spend this
+        // package refuses, and the risk it must not take.
+        #expect(await http.requested.map(\.absoluteString) == [
+            "https://\(Restate.host)/forum.php?mod=forumdisplay&fid=41",
+        ])
+    }
+
+    /// The other direction, and the one that makes a restate a restate: a board in `keeping` that
+    /// is no longer picked is **dropped**. The final list walks the picks, so unticking is simply
+    /// not being in them.
+    ///
+    /// This is also decision 26 from the data's side: a board the forum no longer lists falls out
+    /// of what the picker could offer, so it arrives here as an untick and goes the same way.
+    @Test("A board that is kept but no longer picked is dropped, and nothing is asked for")
+    func aRestateDropsWhatIsNoLongerPicked() async throws {
+        let store = ItemStore()
+        let offer = try await Restate.joined(store)
+        let held = try #require(await store.sources().first).boards
+
+        let http = Restate.http(boards: [:])
+        let outcome = try await SourceJoin(http: http, store: store, catalogues: EmojiCatalogueStore())
+            .subscribe(offer, to: offer.boards.filter { [33, 37].contains($0.fid) }, keeping: held)
+
+        #expect(outcome.subscribed.map(\.fid) == [33, 37])
+        #expect(await store.sources().first?.boards.map(\.fid) == [33, 37])
+        // Nothing was read: two boards carried through and one let go of is no traffic at all.
+        #expect(await http.requested.isEmpty)
+        // And the source is still one source. A restate changes a server, it does not join one.
+        #expect(await store.sources().count == 1)
+    }
+
+    /// **A kept board takes the forum's current name.** The board is not re-*fetched* — that is
+    /// what `keeping` buys — but the index it is listed in was read on this very press, so the
+    /// fresh name is already in hand at no cost and taking the stored one would be storing
+    /// something known to be out of date.
+    ///
+    /// **The mixed row is the case that decides it.** Appending the stored subscription would
+    /// give a newly ticked board the fresh name and a kept board the old one, so one press could
+    /// leave a row listing the same forum's boards under two generations of naming — and the
+    /// picker, drawn from the index, would disagree with the row, drawn from the store.
+    @Test("A board renamed on the forum is stored under its new name, without being re-read")
+    func aKeptBoardTakesTheFreshName() async throws {
+        let store = ItemStore()
+        _ = try await Restate.joined(store)
+        let held = try #require(await store.sources().first).boards
+        #expect(held.map(\.name) == ["Boot disks", "Imaging tools", "Virtual machines"])
+
+        // The same forum, one board renamed by a moderator between the two reads. Its `fid` is
+        // unchanged, because a rename does not change the address a board is served at.
+        let renamed = #"""
+        <h2><a href="forum.php?gid=56">Tools and software</a></h2>
+        <div id="category_56">
+        <table class="fl_tb"><tr>
+        <td class="fl_g"><dl><dt><a href="forum.php?mod=forumdisplay&fid=33">Boot media</a></dt></dl></td>
+        <td class="fl_g"><dl><dt><a href="forum.php?mod=forumdisplay&fid=40">Imaging tools</a></dt></dl></td>
+        <td class="fl_g"><dl><dt><a href="forum.php?mod=forumdisplay&fid=37">Virtual machines</a></dt></dl></td>
+        </tr></table>
+        </div>
+        """#
+        let http = FixtureHTTP([
+            "/": .text(Restate.front),
+            "https://\(Restate.host)/forum.php": .text(renamed),
+        ])
+        let join = SourceJoin(http: http, store: store, catalogues: EmojiCatalogueStore())
+        let source = try #require(await store.sources().first)
+        let offer = try await join.boards(of: source)
+
+        try await join.subscribe(offer, to: offer.boards, keeping: held)
+
+        #expect(await store.sources().first?.boards.map(\.name)
+            == ["Boot media", "Imaging tools", "Virtual machines"], """
+            A kept board was stored under the name it was subscribed under, though the index read \
+            on this press gave its current one. A row would then list one forum's boards under \
+            two generations of naming.
+            """)
+        // And it still was not fetched: the index, and not one board page.
+        #expect(await http.paths == ["/forum.php"])
+        // The number is the subscription and the name is only the label — the `fid`s are what did
+        // not move.
+        #expect(await store.sources().first?.boards.map(\.fid) == [33, 40, 37])
+    }
+
+    /// The index of a source the reader already has — **and no detection**.
+    ///
+    /// The kind travelled in the `Source`, so nothing here asks a stranger's forum what it is a
+    /// second time: `/` is never fetched, which is the one fact that distinguishes this from
+    /// `begin(host:)` and the reason it exists rather than being a reuse.
+    @Test("A joined forum's boards are read without asking it what it is again")
+    func boardsOfAJoinedSourceDetectNothing() async throws {
+        let store = ItemStore()
+        _ = try await Restate.joined(store)
+        let source = try #require(await store.sources().first)
+
+        let http = Restate.http(boards: [:])
+        let offer = try await SourceJoin(http: http, store: store, catalogues: EmojiCatalogueStore())
+            .boards(of: source)
+
+        #expect(offer.host == Restate.host)
+        #expect(offer.kind == .discuz)
+        #expect(offer.boards.map(\.fid) == [33, 40, 37, 41])
+        #expect(await http.paths == ["/forum.php"], """
+            The index of a host that is already in the reader's list was preceded by a detection. \
+            It is in the list because it was detected once already.
+            """)
+        // And nothing was added or changed by looking: this is the index, as a value.
+        #expect(await store.sources().first?.boards.map(\.fid) == [33, 40, 37])
+    }
+
+    /// **No `default:`, and the switch is asked about every kind rather than about one.** A
+    /// protocol with no board picker has no answer to "which of your boards do you read", and
+    /// says so — it does not inherit Discuz!'s. Decision 6 leaves open whether Lemmy needs a
+    /// picker at all, and this is where unit 7 has to answer it.
+    @Test("Only a protocol with a board picker answers for its boards")
+    func onlyAForumAnswersForItsBoards() async throws {
+        for kind in ProtocolKind.allCases where kind != .discuz {
+            let http = FixtureHTTP([:])
+            await #expect(throws: JoinError.unsupportedKind(kind), "\(kind) answered for boards") {
+                try await SourceJoin(http: http, store: ItemStore(), catalogues: EmojiCatalogueStore())
+                    .boards(of: Source(host: "install-c.example", kind: kind))
+            }
+            #expect(await http.requested.isEmpty, "\(kind) was asked something before being refused")
+        }
     }
 }

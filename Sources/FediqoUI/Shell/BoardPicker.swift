@@ -42,6 +42,14 @@ struct BoardPickerList: View {
     @Binding var picked: Set<Int>
 
     @Environment(\.colorScheme) private var colorScheme
+    /// The tick's own size, **scaling with the name beside it**. It was a fixed `18` against a
+    /// `ShellType.name` that reaches `.accessibility1`, where the box read as a bullet rather than
+    /// as a control. 20 at the default rung, one point over the name's cap height, so the box is
+    /// the loudest thing on the row at every rung rather than only at the smallest.
+    @ScaledMetric(relativeTo: .callout) private var tickSize: CGFloat = 20
+    /// Half a callout's cap height, scaling with it — `SourceRowView.capHalf`'s value and its
+    /// reason, one file over. See `row(_:)`.
+    @ScaledMetric(relativeTo: .callout) private var capHalf: CGFloat = 6
 
     var body: some View {
         list
@@ -107,9 +115,18 @@ struct BoardPickerList: View {
     /// with 39 under them — so on three of four forums nothing on this screen changes.
     private func row(_ board: DiscuzBoard) -> some View {
         let on = picked.contains(board.fid)
+        // Read out before the `alignmentGuide` closure: that closure is `@Sendable` and a
+        // `@ScaledMetric` is main-actor isolated, so the number crosses rather than the property.
+        // `SourceRowView.actionsTrailing` states the same rule one file over.
+        let anchor = capHalf
         return Button {
             if on { picked.remove(board.fid) } else { picked.insert(board.fid) }
         } label: {
+            // **Two stacks, because the rule and the tick want different alignments.** The tick
+            // belongs on the board name's first line, which is the only line it is about — it sat
+            // ~3pt above the name's cap top on every row under `.top`. The set-in rule belongs to
+            // the whole row and has no text baseline of its own, so leaving it in a
+            // `firstTextBaseline` stack would ask SwiftUI to baseline-align a flexible rectangle.
             HStack(alignment: .top, spacing: ShellSpace.step) {
                 // The set-in is a leading pad on the row's own content rather than on the button,
                 // so the whole width of the row stays pressable: a child board whose hit area
@@ -122,18 +139,28 @@ struct BoardPickerList: View {
                         .padding(.leading, Self.rung - ShellSpace.snug)
                         .accessibilityHidden(true)
                 }
-                tick(on)
-                VStack(alignment: .leading, spacing: ShellSpace.tight) {
-                    Text(board.name)
-                        .font(ShellType.name)
-                        .foregroundStyle(
-                            on ? ShellChrome.selectInk(colorScheme) : ShellChrome.ink(colorScheme)
-                        )
-                        .fixedSize(horizontal: false, vertical: true)
-                        .multilineTextAlignment(.leading)
-                    figures(board)
+                HStack(alignment: .firstTextBaseline, spacing: ShellSpace.step) {
+                    tick(on)
+                        // The tick has no baseline of its own, so its own centre is mapped onto
+                        // the name's — the guide `SourceRowView` uses for the row's trailing
+                        // group, and for the same reason.
+                        .alignmentGuide(.firstTextBaseline) {
+                            $0[VerticalAlignment.center] + anchor
+                        }
+                    VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                        Text(board.name)
+                            .font(ShellType.name)
+                            .foregroundStyle(
+                                on
+                                    ? ShellChrome.selectInk(colorScheme)
+                                    : ShellChrome.ink(colorScheme)
+                            )
+                            .fixedSize(horizontal: false, vertical: true)
+                            .multilineTextAlignment(.leading)
+                        figures(board)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal, ShellSpace.pad)
             .padding(.vertical, ShellSpace.snug)
@@ -165,23 +192,49 @@ struct BoardPickerList: View {
         return String(format: L10n.t("board.choose.under"), board.name, above.name)
     }
 
+    /// What the tick is drawn in, for the state it is in. **The one place either state's three
+    /// colours are decided**, and the reason it is a `static func` rather than three ternaries in
+    /// a `View` body is that a `View` body is reachable from no test — which is precisely how a
+    /// checkbox with no tick in it survived a green suite (risk 12).
+    static func tick(_ on: Bool, _ scheme: ColorScheme) -> BoardTick {
+        on
+            ? .on(
+                plate: ShellChrome.selectInk(scheme),
+                border: ShellChrome.selectInk(scheme),
+                mark: ShellChrome.page(scheme)
+            )
+            : .off(
+                plate: ShellChrome.well(scheme),
+                // **`inkFaint` and not `hairline`, which is the one substitution worth
+                // defending.** `hairline` is the token for a *rule between rows* and measures
+                // 1.30:1 on the page in light — a control whose own boundary a reader cannot
+                // find. A control's boundary is a different job, and `inkFaint`'s own doc
+                // already states the principle: the faintest step is still text, and text has a
+                // floor. Measured after: **4.78:1** light, 6.69:1 dark.
+                border: ShellChrome.inkFaint(scheme)
+            )
+    }
+
     /// The tick: a milled plate, filled when it is on. A square well and not a round checkmark,
     /// because every other pressable plate in this shell is one.
     private func tick(_ on: Bool) -> some View {
-        RoundedRectangle(cornerRadius: 3, style: .continuous)
-            .fill(on ? ShellChrome.selectInk(colorScheme) : ShellChrome.well(colorScheme))
+        let drawn = Self.tick(on, colorScheme)
+        return RoundedRectangle(cornerRadius: 3, style: .continuous)
+            .fill(drawn.plate)
             .overlay {
                 RoundedRectangle(cornerRadius: 3, style: .continuous)
-                    .stroke(ShellChrome.hairline(colorScheme), lineWidth: ShellSpace.hair)
+                    .stroke(drawn.border, lineWidth: ShellSpace.hair)
             }
             .overlay {
-                if on {
+                if let mark = drawn.mark {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(ShellChrome.selectFill(colorScheme))
+                        // Sized from the plate rather than fixed at 11, so the mark and the box
+                        // it is cut out of grow together.
+                        .font(.system(size: tickSize * 0.55, weight: .bold))
+                        .foregroundStyle(mark)
                 }
             }
-            .frame(width: 18, height: 18)
+            .frame(width: tickSize, height: tickSize)
             .accessibilityHidden(true)
     }
 
@@ -225,5 +278,65 @@ struct BoardPickerList: View {
             add(Text(last, format: .relative(presentation: .named)))
         }
         return line
+    }
+}
+
+/// How the board picker's tick is drawn, in whichever of its two states it is in.
+///
+/// **`RowActionState`'s shape, applied to the other control this branch shipped invisible.** The
+/// mark's ink exists only in `.on`, so **a mark on an unticked box cannot be spelled**.
+///
+/// **What the type does not prevent, said plainly rather than claimed away**: `.on(plate: p,
+/// border: b, mark: p)` compiles, so a mark in the plate's own hue — the defect this closes — is
+/// caught by the *contrast test* and not by this enum. They are two guarantees and not one, and
+/// this unit argues the structural-versus-guarded distinction everywhere else, so it must not
+/// overstate it here. Closing the second half in the type would mean carrying the `ColorScheme`
+/// in the case so the mark could be derived from the ground — a second spelling of `tick(_:_:)`,
+/// bought to retire a test that measures the real thing.
+///
+/// **What was there, measured rather than judged.** The plate was filled `ShellChrome.selectInk`,
+/// which is `phosphor`, and the checkmark was drawn in `ShellChrome.selectFill`, which is *that
+/// same phosphor at 10% (light) / 22% (dark)*. A translucent colour composited over itself at full
+/// strength is that colour: **1.00:1, in both schemes**. There was no tick in the checkbox, and in
+/// light mode the only visible effect of ticking a board was the name turning teal — a change of
+/// hue, which a reader with a colour deficiency or a glary screen does not get at all.
+///
+/// The mark is `ShellChrome.page` and deliberately not white: the tick is the plate **not being
+/// there**, cut out of it, which is what a milled instrument does. `ShellChrome.overPicture` is the
+/// white one and is for a stranger's photograph, where the ground is unknown; here the ground is
+/// this app's own.
+enum BoardTick: Equatable {
+    /// Not picked. A milled well with a boundary of its own, and nothing in it.
+    case off(plate: Color, border: Color)
+    /// Picked. The plate filled, and the mark cut out of it. `page` on `selectInk` measures
+    /// **5.37:1** light and **9.60:1** dark, against the 1.00:1 it replaces.
+    case on(plate: Color, border: Color, mark: Color)
+
+    var plate: Color {
+        switch self {
+        case .off(let plate, _), .on(let plate, _, _): plate
+        }
+    }
+
+    var border: Color {
+        switch self {
+        case .off(_, let border), .on(_, let border, _): border
+        }
+    }
+
+    /// The mark, where there is one. **Nothing is the only answer `.off` can give**, which is what
+    /// makes "ticked" and "not ticked" differ by a *shape* rather than by a hue — so the column
+    /// reads at a glance in 中文 at `.accessibility1` exactly as it does in English at `.medium`.
+    ///
+    /// **Do not flatten this type into a struct with a `mark: Color?` field.** That is the tidier
+    /// spelling and it gives back the one thing this type does prevent: a struct can be built with
+    /// a mark and no fill, or a fill and no mark, and this app shipped a checkbox whose mark
+    /// nobody could see. The `Optional` here is a *reading* of two closed cases, not a field
+    /// anybody can set.
+    var mark: Color? {
+        switch self {
+        case .off: nil
+        case .on(_, _, let mark): mark
+        }
     }
 }

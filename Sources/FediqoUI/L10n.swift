@@ -28,6 +28,31 @@ enum L10n {
         (language ?? Self.language).locale
     }
 
+    /// A count, shortened, **in the shell's language rather than the device's**.
+    ///
+    /// `.formatted` with no locale follows the system, and this app lets the reader pick a language
+    /// the device is not set to — so on a `zh-TW` machine with the shell in English this returned
+    /// "9.1萬" and the line read "9.1萬 posts". One sentence in two languages, on all three surfaces
+    /// that draw a figure: the directory's rows, the preview, and the source row. They share this
+    /// one function, which is why there is one fix and not three.
+    ///
+    /// `language` is threaded rather than read off a global at the point of use, and resolves the
+    /// same way `t(_:language:)` does — nothing means the shell's current language. A `static func`
+    /// has no environment to ask, and the answer must not be allowed to differ from the one the
+    /// surrounding string came back in.
+    ///
+    /// **Here rather than on `JoinSheet`, where it was written, or on `SourcePreviewView`, where
+    /// it was nearly moved.** It is a pure locale-bound formatter with no relationship to a
+    /// preview, a sheet or a row — hanging it off *any* view is what made the first placement
+    /// wrong, and moving it to a second view would have repeated the mistake with a shorter reach.
+    /// It is the number half of what `locale(_:)` above is the rule for, and it belongs beside it.
+    /// Its three callers are three different surfaces — the directory's rows inside the sheet,
+    /// `SourcePreviewView.figurePieces`, and through that the source row — which is why no one of
+    /// them is its home.
+    static func compact(_ value: Int, language: DummyLanguage? = nil) -> String {
+        value.formatted(.number.notation(.compactName).locale(locale(language)))
+    }
+
     static func bundle(for language: DummyLanguage) -> Bundle {
         guard let name = language.lprojName else { return .module }
         let candidates = [name, name.lowercased(), "zh-Hant", "zh-hant"]

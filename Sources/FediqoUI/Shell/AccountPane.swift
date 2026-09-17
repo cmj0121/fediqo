@@ -10,6 +10,9 @@ struct AccountPane: View {
     /// who pressed Return in the field is left with focus on a field while a screenful of new
     /// content has appeared below it.
     @AccessibilityFocusState private var previewFocused: Bool
+    /// What the source list measured itself to be. **Zero until the first measurement lands**, and
+    /// `SourceRow.regime` reads that zero as "not measured yet" rather than as a narrow row.
+    @State private var rowWidth: CGFloat = 0
     @Environment(\.colorScheme) private var colorScheme
 
     private enum Metrics {
@@ -102,11 +105,16 @@ struct AccountPane: View {
     private func inlinePreview(_ preview: SourcePreview) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             hairline
-            SourcePreviewView.Header(preview: preview, surface: .pane)
+            // **`.field` and not the stage's own origin, because the block is drawn for exactly
+            // one of them.** `JoinStage.inlinePreview` answers non-nil only where the origin is
+            // the field — including under the boards sheet, where the origin has not changed —
+            // and that switch is exhaustive and pinned. Reading it back out of the stage here
+            // would be a second derivation of a fact one function already decides.
+            SourcePreviewView.Header(preview: preview, surface: .pane, origin: .field)
                 .padding(.vertical, ShellSpace.pad)
                 .accessibilityFocused($previewFocused)
             hairline
-            SourcePreviewView(preview: preview, surface: .pane)
+            SourcePreviewView(preview: preview, surface: .pane, origin: .field)
             hairline
             previewActions(preview)
                 .padding(.vertical, ShellSpace.pad)
@@ -142,8 +150,13 @@ struct AccountPane: View {
                 .accessibilityHint(warned ? Text(L10n.t("join.preview.closed.hint")) : Text(""))
             // After Subscribe rather than replacing it, so the button does not move under a
             // finger mid-press.
-            if session.checking, session.progressHost == preview.host {
-                ProgressView().controlSize(.small)
+            //
+            // **The words are here now, where the press was.** This was a bare spinner with no
+            // sentence at all while the page drew a sentence about the same errand 300pt above
+            // it — two indicators for one press. `ProgressOwner` is what tells them apart, and
+            // `blockWaiting` is this surface's half of the one answer.
+            if let waiting = blockWaiting {
+                ForumWaiting(line: waiting)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -194,12 +207,37 @@ struct AccountPane: View {
     }
 
     /// Something is joined. The page says which, and stops selling itself.
+    ///
+    /// **The glance under the title is drawn only at two or more sources**, which is
+    /// `SourceMarkRow.drawn(sources:)`'s rule and not this body's. At one source the pane title
+    /// already says everything the glance would, and the cap disposes of the plural problem
+    /// outright: this repo ships no `.stringsdict`, and "1 sources" is the one bad case, which now
+    /// cannot occur.
     private var standing: some View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
             Text(L10n.t("shell.account.title"))
                 .font(ShellType.pane)
                 .foregroundStyle(ShellChrome.ink(colorScheme))
-            SourceMarkRow(sources: session.sources.map(Self.mark))
+            if let glance { SourceMarkRow(marks: glance) }
+        }
+    }
+
+    /// What the glance is drawn from, or nothing where it is not drawn at all.
+    ///
+    /// **Internal, and a value rather than a view, so the wiring is pinned and not only the
+    /// rules.** `drawn(sources:)`, `countKey`, `count` and `mark` were each named and driven while
+    /// nothing proved this body called any of them: not that the gate is asked with the *source
+    /// count*, not that the marks come from `session.rows` rather than from a second derivation.
+    /// That is the shape of all four defects risk 12 counts, and the row was given exactly this
+    /// treatment on purpose.
+    ///
+    /// **`session.rows` and not `session.sources`**, so the shape is derived once on this page:
+    /// `SourceRow` says of itself that it comes "through `DummyItem.shape(of:)` and nowhere else",
+    /// and the glance sitting three lines above the list must not be a second caller.
+    var glance: [SourceMarkRow.Mark]? {
+        guard SourceMarkRow.drawn(sources: session.sources.count) else { return nil }
+        return session.rows.map {
+            Self.mark($0, signedIn: session.forums.reachedSignIn(host: $0.source.host))
         }
     }
 
@@ -254,6 +292,22 @@ struct AccountPane: View {
         session.checking || session.stage?.surface == .sheet
     }
 
+    /// The magnifier's ink, and **the whole of what `.disabled` is visible as on this control**.
+    ///
+    /// `.buttonStyle(.plain)` supplies no dimming of its own and an explicit `.foregroundStyle`
+    /// overrides the one `.disabled` would supply — so this button was refused behind a sheet and
+    /// looked exactly as pressable as before. **The fourth instance of that defect on this
+    /// branch**, and the one on the page whose other controls this unit had just fixed: the row's
+    /// four glyphs went through `RowActionState`, `ShellChrome.well` left this pane with the
+    /// boards plate, and this control went on saying press-me.
+    ///
+    /// **Internal rather than private so a test can read it**, on the same grounds as `busy` and
+    /// `pageWaiting`: a style decided inside a `View` body is reachable from nothing, which is
+    /// precisely how the first three instances survived a green suite.
+    var searchInk: Color {
+        busy ? ShellChrome.inkFaint(colorScheme) : ShellChrome.ink(colorScheme)
+    }
+
     private var searchField: some View {
         HStack(alignment: .center, spacing: ShellSpace.snug) {
             TextField(L10n.t("account.search.placeholder"), text: $session.hostname)
@@ -274,7 +328,7 @@ struct AccountPane: View {
                 Image(systemName: "magnifyingglass")
                     .font(ShellType.body.weight(.semibold))
                     .frame(width: Metrics.icon, height: Metrics.icon)
-                    .foregroundStyle(ShellChrome.ink(colorScheme))
+                    .foregroundStyle(searchInk)
             }
             .buttonStyle(.plain)
             .disabled(busy)
@@ -298,18 +352,53 @@ struct AccountPane: View {
     /// the sentence naming the boards that failed and then never draw it. That is the exact shape
     /// this branch keeps writing down: the answer exists and nobody is asked for it.
     private var statusVisible: Bool {
-        session.checking || session.refuse != nil || !session.unread.isEmpty
+        pageWaiting != nil || session.refuse != nil || !session.unread.isEmpty
+    }
+
+    /// The sentence under the field while the **page** is the one waiting, or nothing.
+    ///
+    /// **Through `ShellSession.pageProgress` and never through `checking` alone.** A restate is
+    /// pressed inside a row and draws its own status line there; a gate asking only whether
+    /// something is on the wire drew both, so one press produced two spinners and two sentences —
+    /// and the one under the field said "Checking …", the detection vocabulary, about the one
+    /// errand whose whole justification is that it detects nothing.
+    ///
+    /// **The key comes with the owner rather than being written here**, which is the other half
+    /// of that fix: the page reports both a look and the boards a reader picked, and those are
+    /// two errands in two sentences. See `ProgressReport.key`.
+    ///
+    /// **Internal rather than private so a test can read it**, on the same grounds as `busy`: this
+    /// term decides whether a sentence appears and which one, and a view's private property is
+    /// reachable from nothing.
+    var pageWaiting: String? {
+        waiting(.page)
+    }
+
+    /// The same sentence, where the **block's** own Subscribe is what is waiting.
+    ///
+    /// Internal for `pageWaiting`'s reason. The two cannot both answer and cannot both stay
+    /// silent: they are two readings of one value through one rule.
+    var blockWaiting: String? {
+        waiting(.block)
+    }
+
+    /// The sentence this surface draws, or nothing where the errand is somebody else's.
+    ///
+    /// **Through `ShellSession.reporting` and not through `progress.owner` directly**, because the
+    /// block can be dismissed out from under its own errand — its Cancel stays live while its
+    /// Subscribe is on the wire — and a sentence owned by a surface that has gone is a reader
+    /// waiting with every control grey and nothing on screen saying why. The page takes it back.
+    private func waiting(_ owner: ProgressOwner) -> String? {
+        guard ShellSession.reporting(session.progress, drawnAs: session.stage) == owner,
+              let key = session.progress?.key
+        else { return nil }
+        return String(format: L10n.t(key), session.progressHost)
     }
 
     @ViewBuilder
     private var status: some View {
-        if session.checking {
-            HStack(spacing: ShellSpace.snug) {
-                ProgressView()
-                Text(String(format: L10n.t("account.detect.progress"), session.progressHost))
-                    .font(ShellType.meta)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
-            }
+        if let waiting = pageWaiting {
+            ForumWaiting(line: waiting)
         } else if let refuse = session.refuse {
             VStack(alignment: .leading, spacing: ShellSpace.snug) {
                 Text(refuse)
@@ -409,14 +498,30 @@ struct AccountPane: View {
                 .fixedSize(horizontal: false, vertical: true)
             // **A plain stack, because the page is the thing that scrolls.** A `ScrollView` here
             // would be the inner one the page comment above is about.
+            // Row-independent — `stage == nil && !checking` names no host — so it is asked once
+            // for the list rather than once per row.
+            let actsLive = ShellSession.rowActsLive(at: session.stage, checking: session.checking)
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(session.rows) { row in
                     SourceRowView(
                         row: row,
                         signedIn: session.forums.reachedSignIn(host: row.source.host),
+                        width: rowWidth,
+                        actsLive: actsLive,
+                        // **The comparison moved to a named function and the fold went with
+                        // it.** It used to be written here, folding case on both sides against a
+                        // guarantee three files away that nothing at this site stated — the shape
+                        // `ShellSession.remove` names as how a bug class reaches fourteen places.
+                        // `ProgressOwner.row` carries the host already folded by whoever set it.
+                        waiting: SourceRow.waitingLine(
+                            session.progress, drawnAs: session.stage, host: row.source.host
+                        ),
+                        refusal: session.boardsRefusal,
                         signIn: { Task { await press(row) } },
-                        clear: { Task { await clear(row) } },
-                        remove: { askRemove(row) }
+                        clear: { askClear(row) },
+                        remove: { askRemove(row) },
+                        changeBoards: { Task { await changeBoards(row) } },
+                        open: { openSource(row) }
                     )
                     // **Between rows and not after every one.** A rule under the last row is a
                     // list that looks cut off rather than finished, with the footnote below it
@@ -424,6 +529,20 @@ struct AccountPane: View {
                     if row.id != session.rows.last?.id { hairline }
                 }
             }
+            // **One reader for the whole list, not one per row.** Every row in it is the same
+            // width, and `SourceRow.regime` is a function of that width, so measuring it once and
+            // handing it down keeps each row a function of its inputs — which is what the row's
+            // own doc comment demands and what makes the decision drivable from a test.
+            //
+            // **This line is not reachable from a test, and it is now one of exactly two such
+            // seams left on this page** (risk 12). Nothing verifies that the number arriving in
+            // `rowWidth` is the row's width, and nothing can without a UI test target. The other
+            // is `FediqoRootView`'s `message:` closure, which feeds `SourceRow.clearDetailKey`.
+            // Every other decision on this page is a named value a test reads.
+            // On DESIGN-TAIL §6.3 and §6.4: whether it fires before first paint, and whether it
+            // fires when the macOS rail is expanded or collapsed — which moves the page by about
+            // 150pt and should flip the regime.
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { rowWidth = $0 }
             Text(L10n.t("account.sources.held"))
                 .font(ShellType.mark)
                 .foregroundStyle(ShellChrome.inkFaint(colorScheme))
@@ -491,9 +610,20 @@ struct AccountPane: View {
         }
     }
 
-    /// A row's Clear. The same act, and the same key, as the one on Preferences.
-    func clear(_ row: SourceRow) async {
-        await session.clear(host: row.source.host)
+    /// A row's Clear. **Empties nothing** — it raises the question, and only the dialog's confirm
+    /// reaches `clear(host:)`. Decision 29, and `askRemove`'s shape for its reason.
+    ///
+    /// The same act, and the same key, as the one on Preferences — which now asks the same
+    /// question through the same presenter, or one word would do two things two panes apart.
+    func askClear(_ row: SourceRow) {
+        session.clearing = row.source.host
+    }
+
+    /// A row's boards control. **Changes nothing by itself** — it reads the forum's index and
+    /// opens the picker pre-ticked; the reader still has to press Subscribe, and Cancel loses
+    /// nothing.
+    func changeBoards(_ row: SourceRow) async {
+        await session.changeBoards(host: row.source.host)
     }
 
     /// A row's Remove. **Destroys nothing** — it raises the question, and only the dialog's
@@ -502,14 +632,28 @@ struct AccountPane: View {
         session.removing = row.source.host
     }
 
-    /// The mark a joined source is drawn with. Internal rather than private only so that
-    /// `AccountMarkTests` can pin it: the globe it used to draw over every forum was invisible
-    /// to the suite, because a view's private helper is reachable from nothing.
-    static func mark(_ source: Source) -> DummySource {
-        // The shape the timeline already gives this protocol, rather than the `.microblog` that
-        // a deleted default argument used to supply here — which is why **both** a joined
-        // Discourse and a joined Discuz! drew with the globe icon, a microblog's mark over a
-        // forum. The source page reworks this row properly.
-        .unsigned(source.host, kind: DummyItem.shape(of: source.kind))
+    /// The row's own press — decision 31. **Asks nobody anything**: the profile is already in
+    /// `ShellSession.profiles`, and `openSource(host:)` is the only route in, because `look()`
+    /// refuses a host that is already a source by design.
+    func openSource(_ row: SourceRow) {
+        session.openSource(host: row.source.host)
+    }
+
+    /// The mark a joined source is drawn with in the masthead glance. Internal rather than private
+    /// only so that `AccountTests` can pin it: the globe it used to draw over every forum was
+    /// invisible to the suite, because a view's private helper is reachable from nothing.
+    ///
+    /// **`signedIn` is an argument now, and that is what kills a dead branch.** This used to build
+    /// a `DummySource.unsigned(_:kind:)`, so the mark's signed-in variant was unreachable from
+    /// this page — a mark that could never fill, standing over a row whose sign-in control does.
+    /// The fact travels with the value instead.
+    ///
+    /// **A `SourceRow` and not a `Source`, so the shape is derived once on this page.** `SourceRow`
+    /// says of itself that the shape comes "through `DummyItem.shape(of:)` and nowhere else … so
+    /// that no caller can hand a source one shape while the timeline draws it as another" — and a
+    /// second call to `shape(of:)` here was a second caller, three lines above the list it would
+    /// disagree with. The glance now reads exactly what the row beneath it reads.
+    static func mark(_ row: SourceRow, signedIn: Bool) -> SourceMarkRow.Mark {
+        SourceMarkRow.Mark(id: row.source.host, shape: row.shape, signedIn: signedIn)
     }
 }

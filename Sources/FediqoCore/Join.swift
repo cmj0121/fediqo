@@ -459,18 +459,66 @@ public struct DiscuzBoardJoin: Sendable {
     /// one button press is the traffic this package already refuses to spend elsewhere — see
     /// `SourceJoin`, "one detection, not one per protocol". A forum's page is not a resource
     /// anybody owes this app.
+    ///
+    /// **`keeping` is what the reader is already subscribed to, and it is correctness before it
+    /// is traffic.** A board named there that is still in `picks` is carried through unchanged and
+    /// never asked for again. Without that, a reader with eight boards who adds a ninth spends
+    /// nine sequential full-HTML fetches — which the paragraph above measures in seconds — and,
+    /// the half that matters, a board that reads perfectly today and happens to time out during
+    /// the ninth pick lands in `unread`, falls out of `subscribed`, and is therefore
+    /// **unsubscribed from a subscription the reader never touched**. Re-reading a board to
+    /// confirm a subscription that already exists is not a check, it is a chance to lose it.
+    ///
+    /// **What is skipped is the fetch, and only the fetch — the name is taken fresh.** A kept
+    /// board still gets its `BoardSubscription` built from the `DiscuzBoard` in `picks`, which
+    /// came from the index read on *this* press, so a board renamed on the forum is stored under
+    /// the name the forum uses now. `Source.boards` states the rule this follows: "the number is
+    /// the subscription and the name is the label", and a moderator renaming a board does not
+    /// change the `fid` it is served at. Keeping a stale label with a fresh one already in hand
+    /// honours neither half of that.
+    ///
+    /// **The mixed row is what settles it.** Appending the *stored* subscription would give a
+    /// newly ticked board the fresh index name and a kept board the old one, so one press could
+    /// leave a row listing the same forum's boards under two generations of naming — and the
+    /// picker, drawn from the index, would disagree with the row, drawn from the store, about a
+    /// board neither of them changed.
+    ///
+    /// **A board in `keeping` and not in `picks` is dropped, and that is the untick.** The final
+    /// list walks `picks`, which is already the forum's own index order, so what comes back is
+    /// what the reader now wants and nothing else. `ItemStore.subscribe(host:to:)` then restates
+    /// the set, which is the act this whole path is.
+    ///
+    /// **No default on `keeping:`.** A caller that means "this is a first join" says `[]` in as
+    /// many words: this repo deleted `DummySource.unsigned`'s default argument after a wrong one
+    /// drew a microblog's globe over every joined forum, and a wrong one here would silently
+    /// re-fetch — or silently drop — a reader's whole subscription.
     @discardableResult
-    func subscribe(host: String, to picks: [DiscuzBoard]) async throws -> JoinOutcome {
+    func subscribe(
+        host: String,
+        to picks: [DiscuzBoard],
+        keeping: [BoardSubscription]
+    ) async throws -> JoinOutcome {
         // **The source stamped into a note carries no subscriptions, and the one in the store
         // does.** A note records which server it came from; it is not a live view of that
         // server's settings, and it would go stale the moment the reader picked a ninth board.
         let stamp = Source(host: host, kind: .discuz)
         let client = DiscuzClient(http: http, host: host)
+        // `fid` and nothing else, because `fid` is the identity — a board renamed between two
+        // reads is the same board, and `DummyTimeline`'s matching by name is written down in this
+        // repo as the thing that is *not* the identity. A set rather than a map of the stored
+        // subscriptions, so there is nothing stale here to reach for by accident.
+        let held = Set(keeping.map(\.fid))
 
         var subscribed: [BoardSubscription] = []
         var unread: [UnreadBoard] = []
         var threads: [Note] = []
         for board in picks {
+            // Already subscribed and still picked: not asked for. Built from the board in hand,
+            // so the subscription that survives carries the forum's current name for it.
+            if held.contains(board.fid) {
+                subscribed.append(BoardSubscription(board))
+                continue
+            }
             do {
                 threads += try await client.threads(board: board, source: stamp)
                 subscribed.append(BoardSubscription(board))
@@ -751,15 +799,56 @@ public struct SourceJoin: Sendable {
     /// each carrying that board's own reason. A pick where some boards read and some did not does
     /// not throw: the ones that read are subscribed and the rest come back in
     /// `JoinOutcome.unread`.
+    ///
+    /// `keeping` is what this host is subscribed to now — `[]` from a join, the source's own
+    /// boards from a restate. See `DiscuzBoardJoin.subscribe` for what it costs to get it wrong,
+    /// and for why it has no default.
     @discardableResult
-    public func subscribe(_ offer: JoinOffer, to picks: [DiscuzBoard]) async throws -> JoinOutcome {
+    public func subscribe(
+        _ offer: JoinOffer,
+        to picks: [DiscuzBoard],
+        keeping: [BoardSubscription]
+    ) async throws -> JoinOutcome {
         switch offer.kind {
         case .discuz:
             return try await DiscuzBoardJoin(http: http, store: store)
-                .subscribe(host: offer.host, to: picks)
+                .subscribe(host: offer.host, to: picks, keeping: keeping)
         case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
             .gotosocial, .discourse, .unknown:
             throw JoinError.unsupportedKind(offer.kind)
+        }
+    }
+
+    /// The boards of a source the reader **already has**, so they can change which of them they
+    /// read.
+    ///
+    /// **Detects nothing, and that is the whole reason this exists rather than a reuse.** This
+    /// host is in the reader's list because it was detected once already, and the kind travelled
+    /// with the `Source`; asking a stranger's forum what it is a second time for an errand that
+    /// begins with knowing is the spend this type refuses in as many words. Every other route in
+    /// is wrong for a reason of its own: `look` refuses a host that is added, `begin(host:)`
+    /// detects, and `begin(_:)` wants a `SourcePreview` — which could only be fabricated here with
+    /// an invented `ProfileAnswer`, and `ShellSession.profiles` is the map the source row draws
+    /// from, so the lie would be drawn.
+    ///
+    /// **Nothing is added and nothing is changed.** This is the index, as a value; the restate
+    /// itself is `subscribe(_:to:keeping:)`, and the reader can still cancel.
+    ///
+    /// **No `default:`.** A protocol with no boards has no answer to this and says so, rather than
+    /// inheriting Discuz!'s — decision 6 leaves open whether Lemmy needs a picker at all, and unit
+    /// 7 has to answer it here rather than find it already answered.
+    ///
+    /// Throws `JoinError.unsupportedKind` for a source whose protocol has no boards, and whatever
+    /// reading the index throws — `.unreachable`, `.refused`, `.publicTimelineFailed`.
+    public func boards(of source: Source) async throws -> JoinOffer {
+        switch source.kind {
+        case .discuz:
+            let categories = try await DiscuzBoardJoin(http: http, store: store)
+                .index(host: source.host)
+            return JoinOffer(host: source.host, kind: source.kind, categories: categories)
+        case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
+            .gotosocial, .discourse, .unknown:
+            throw JoinError.unsupportedKind(source.kind)
         }
     }
 

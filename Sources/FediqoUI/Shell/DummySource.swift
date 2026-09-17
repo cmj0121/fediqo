@@ -4,7 +4,8 @@ public enum DummySourceKind: String, Sendable, Hashable {
     case forum
     /// **Not a shape a protocol has — a query inside a source.** No host answers "board" to
     /// "what do you speak"; a reader picked one section out of a forum and this is the row that
-    /// draws that. `DummySource.board` builds one and `DummyItemRow` asks for it twice.
+    /// draws that. `DummyItemRow` reads this case twice — at its board line and in its height
+    /// count — and `DummySource.board` is a fixture, not one of those readers.
     /// `DummyItem.shape(of:)` must never return it: a whole host drawn as one section of itself
     /// is the same silent wrong answer as a forum drawn as microblog posts.
     case board

@@ -10,7 +10,6 @@
 "shell.preferences.summary" = "語言、主題、字級與已存內容";
 "shell.timeline.disabled" = "先到帳號頁新增來源";
 "shell.notices.disabled" = "通知需要已登入的來源";
-"source.signedIn" = "已登入";
 "account.rail.empty" = "新增來源";
 "account.add.title" = "新增來源";
 "account.hero.promise" = "你的時間軸。你的規則。";
@@ -88,8 +87,6 @@
 "timeline.empty.detail" = "你加的來源的公開貼文會落在這裡，新的在上面。";
 "timeline.empty.trends.title" = "目前沒有趨勢";
 "timeline.empty.trends.detail" = "來源標為趨勢的貼文會落在這裡，依發文時間排列。";
-"timeline.sources" = "來源";
-"source.unsigned" = "尚未登入";
 
 "item.replies" = "則回覆";
 "item.board.dev" = "dev";
@@ -297,8 +294,45 @@
 "account.sources.held"           = "每一個在這個裝置上還留著什麼，在偏好設定裡。";
 "account.source.boards"          = "%1$d 個版塊：%2$@";
 "account.source.unread"          = "讀不到它的自我介紹。";
-"account.source.remove"          = "移除";
 "account.source.remove.label"    = "移除 %@，連同它留在這裡的東西";
-"account.source.signin"          = "登入";
-"account.source.signout"         = "登出";
 "account.source.signout.label"   = "登出 %@，並忘掉它留在這裡的東西";
+
+/* M1 tail — the row's controls, and changing a forum's boards. */
+"account.source.boards.change"    = "換一批你在 %@ 上讀的版塊";
+"account.source.boards.progress"  = "正在讀 %@ 的版塊…";
+"account.source.boards.unread"    = "現在讀不到 %@ 的版塊。";
+"board.choose.detail.change"      = "挑你想看的版塊。挑好的會取代你現在讀的。";
+
+/* M1 tail rev 3 — four controls at every width, both confirmations, and the masthead glance. */
+
+/* Decision 28: a control this protocol has no such thing for has to say why it is struck. */
+"account.source.signin.struck"    = "Fediqo 還不能登入 %@";
+"account.source.boards.struck"    = "Fediqo 不會在 %@ 上挑版塊";
+"account.source.boards.none"      = "%@ 沒有版塊可以挑";
+
+/* Decision 29: Clear asks first, and says what actually goes. */
+"account.clear.title"             = "清除 %@ 留在這裡的東西？";
+"account.clear.detail"            = "這個裝置為它存的圖片、表情名稱和第一篇文章都會清掉。你再讀它的時候會回來，它也還留在你的來源裡，版塊和文章都在。";
+"account.clear.detail.signedout"  = "這個裝置為它存的圖片、表情名稱和第一篇文章都會清掉，你也會從這個論壇登出。它們會在你再讀的時候回來，它也還留在你的來源裡，版塊和文章都在。";
+"account.clear.detail.password"   = "這個裝置為它存的圖片、表情名稱和第一篇文章都會清掉，你會從這個論壇登出，為它存的密碼也會刪掉。只有密碼不會回來：下次要再打一次。它還留在你的來源裡，版塊和文章都在。";
+"account.clear.confirm"           = "清除";
+
+/* The masthead glance: the whole collection, on one line, without scrolling. */
+"account.standing.count"          = "%d 個來源";
+"account.standing.count.signedIn" = "%1$d 個來源，已登入 %2$d 個";
+
+/* M1 tail rev 2 — a source you already have, looked at, and one way of waiting. */
+
+/* Pressing a row. Decision 31: the row opens what that server says about itself. */
+"account.source.open"             = "%@ 怎麼介紹自己";
+"account.source.open.hint"        = "打開這個來源怎麼介紹自己。";
+
+/* The detail: the same evidence, and the three sentences a preview says that are false here. */
+"source.held.detail"              = "這個來源怎麼介紹自己。你已經在讀它了。";
+"source.held.microblog"           = "你正在讀這個來源的公開時間軸。";
+"source.held.forum"               = "你正在讀這個論壇最新的主題。";
+"source.held.closed"              = "這個論壇說沒登入的人不能讀它。在它那一列登入，就能多讀一些。";
+"source.held.turnedAway"          = "上次問的時候，這個來源前面有東西把 Fediqo 擋掉了。登入通常就能解決。";
+
+/* The longest wait in the app, said correctly: it detects nothing. */
+"account.join.boards.progress"    = "正在讀你在 %@ 上挑的版塊…";

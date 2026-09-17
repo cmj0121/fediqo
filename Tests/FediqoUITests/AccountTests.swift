@@ -385,17 +385,153 @@ struct AccountMarkTests {
         //
         // Both protocols named rather than one, because Discuz! is only the one that was
         // noticed. Nothing about the bug was particular to it.
-        #expect(AccountPane.mark(Source(host: "a.example", kind: .discourse)).kind == .forum)
-        #expect(AccountPane.mark(Source(host: "b.example", kind: .discuz)).kind == .forum)
+        func row(_ host: String, _ kind: ProtocolKind) -> SourceRow {
+            SourceRow(source: Source(host: host, kind: kind),
+                      profile: .unasked(host: host, kind: kind))
+        }
+
+        #expect(AccountPane.mark(row("a.example", .discourse), signedIn: false).shape == .forum)
+        #expect(AccountPane.mark(row("b.example", .discuz), signedIn: false).shape == .forum)
 
         // The control: the shape that was right by accident stays right on purpose. Without it
         // a `mark` hard-coded the other way round would pass everything above.
-        #expect(AccountPane.mark(Source(host: "c.example", kind: .mastodon)).kind == .microblog)
+        #expect(AccountPane.mark(row("c.example", .mastodon), signedIn: false).shape == .microblog)
 
         // Stated, not derived from `shape(of:)` — a test that asks the code what it does agrees
         // with it whatever it does.
-        let mark = AccountPane.mark(Source(host: "a.example", kind: .discourse))
-        #expect(mark.host == "a.example")
-        #expect(!mark.isSignedIn)
+        let mark = AccountPane.mark(row("a.example", .discourse), signedIn: false)
+        #expect(mark.id == "a.example")
+        #expect(!mark.signedIn)
+
+        // **The dead branch, now reachable.** This used to build a `DummySource.unsigned(_:_:)`,
+        // so the glance's signed-in variant could never be drawn from this page however signed in
+        // the reader was — a mark that could not fill, three lines above a sign-in control that
+        // does. The fact travels with the value now.
+        #expect(AccountPane.mark(row("d.example", .discuz), signedIn: true).signedIn)
+
+        // **One derivation, not two.** The glance takes the shape the row beside it already
+        // derived, so the masthead and the list three lines below cannot disagree about what a
+        // protocol looks like — which is what `SourceRow`'s own doc demands of `shape(of:)`.
+        let discuz = row("e.example", .discuz)
+        #expect(AccountPane.mark(discuz, signedIn: false).shape == discuz.shape)
+    }
+
+    // MARK: - The masthead glance
+
+    /// **What it is for, once the Sources list exists three lines beneath it**: the whole, on one
+    /// line, without scrolling. You read three things and are signed in to one. The list below is
+    /// per-source; this is the collection, and the count is the one fact a list of rows cannot
+    /// state at a glance.
+    @Test("The glance says how many sources there are, and how many are signed in")
+    func theGlanceCountsTheCollection() {
+        func marks(_ shapes: [DummySourceKind], signedIn: Int) -> [SourceMarkRow.Mark] {
+            shapes.enumerated().map {
+                SourceMarkRow.Mark(id: "\($0.offset).example", shape: $0.element,
+                                   signedIn: $0.offset < signedIn)
+            }
+        }
+
+        // **Chosen on `signedIn > 0`, so an all-Mastodon reader is not told "0 signed in"** about
+        // a capability their protocols never had.
+        #expect(SourceMarkRow.countKey(signedIn: 0) == "account.standing.count")
+        #expect(SourceMarkRow.countKey(signedIn: 1) == "account.standing.count.signedIn")
+        #expect(SourceMarkRow.count(marks([.microblog, .microblog, .forum], signedIn: 0))
+            == "3 sources")
+        #expect(SourceMarkRow.count(marks([.microblog, .forum, .forum], signedIn: 1))
+            == "3 sources, 1 signed in")
+
+        // **A seventh source is counted although it is not drawn**, which is what makes the cap
+        // affordable: nothing is hidden by it.
+        let seven = marks(Array(repeating: .forum, count: 7), signedIn: 2)
+        #expect(SourceMarkRow.shown == 6)
+        #expect(SourceMarkRow.count(seven) == "7 sources, 2 signed in")
+
+        // **Drawn only at two or more, which disposes of the plural problem rather than working
+        // around it.** This repo ships no `.stringsdict`, and "1 sources" is the one bad case.
+        #expect(!SourceMarkRow.drawn(sources: 0))
+        #expect(!SourceMarkRow.drawn(sources: 1), """
+            The glance was drawn over one source, which is the only count whose English is \
+            ungrammatical — and the pane title already says it.
+            """)
+        #expect(SourceMarkRow.drawn(sources: 2))
+
+        // The Chinese says 來源 for a source, never 主機 or 伺服器 — the terminology rule, from
+        // the side a derived ban cannot check: that the noun is present at all.
+        for key in ["account.standing.count", "account.standing.count.signedIn"] {
+            #expect(L10n.t(key, language: .taiwanese).contains("來源"), "\(key)")
+        }
+    }
+
+    /// **The wiring, which is the half risk 12 counts.** `drawn(sources:)`, `countKey`, `count`
+    /// and `mark` are each named and driven — and before this nothing proved the masthead body
+    /// called any of them: not that the gate is asked with the *source count*, not that the marks
+    /// come from `session.rows`. That is the shape of all four defects this branch has shipped.
+    @Test("The masthead asks the gate with its source count and builds marks from the rows")
+    func theGlanceIsWiredToTheRulesItDeclares() async throws {
+        let session = ShellSession(http: FixtureHTTP(), store: ItemStore())
+        let pane = AccountPane(session: session)
+
+        // Nothing joined, and nothing drawn.
+        #expect(pane.glance == nil)
+
+        // One source: the gate is asked with the count, so the glance is withheld and "1 sources"
+        // cannot be produced.
+        await session.store.add(Source(host: "a.example", kind: .mastodon))
+        session.sources = await session.store.sources()
+        #expect(pane.glance == nil, """
+            The masthead drew a glance over one source. Either the gate is not being asked, or it \
+            is being asked with something other than the source count.
+            """)
+
+        // Two: drawn, and every mark is the row's own — same host, same shape, in join order.
+        await session.store.add(Source(host: "b.example", kind: .discuz))
+        session.sources = await session.store.sources()
+        let glance = try #require(pane.glance)
+        #expect(glance.count == 2)
+        #expect(glance.map(\.id) == session.rows.map(\.source.host))
+        #expect(glance.map(\.shape) == session.rows.map(\.shape), """
+            The glance derived the shape itself instead of taking the row's, so the masthead and \
+            the list three lines below it can disagree about what a protocol looks like.
+            """)
+        #expect(glance.allSatisfy { !$0.signedIn }, "nobody has signed in to either")
+
+        // And the signed-in fact reaches it from the same place the row's control reads.
+        session.forums.recordSignIn(host: "b.example")
+        let after = try #require(pane.glance)
+        #expect(after.filter(\.signedIn).map(\.id) == ["b.example"])
+        #expect(SourceMarkRow.count(after) == "2 sources, 1 signed in")
+    }
+
+    /// **The fourth instance of style-over-state on this branch, and the one on the page whose
+    /// other controls were just fixed.** `.buttonStyle(.plain)` supplies no dimming and an
+    /// explicit `.foregroundStyle` overrides the one `.disabled` would supply, so the magnifier
+    /// was refused behind a sheet and looked exactly as pressable as before.
+    @Test("The magnifier stops looking pressable exactly when it stops being pressable")
+    func theMagnifierLooksRefusedWhenItIsRefused() {
+        let session = ShellSession(http: FixtureHTTP(), store: ItemStore())
+        let pane = AccountPane(session: session)
+
+        #expect(!pane.busy)
+        #expect(pane.searchInk == ShellChrome.ink(.light))
+
+        // A sheet is up: the field and both buttons are out of the reader's hands, and now the
+        // magnifier says so.
+        session.stage = .browsing
+        #expect(pane.busy)
+        #expect(pane.searchInk == ShellChrome.inkFaint(.light), """
+            The magnifier drew at full ink while refused — zero visual difference between a \
+            control the reader can press and one they cannot.
+            """)
+    }
+
+    /// The glyph table stays shared, and the override that was never safe to share is gone: a
+    /// signed-in microblog drawn as a person gave `person.crop.circle` a third meaning, two of
+    /// them on the Account page at once — the row's sign-in control being the other.
+    @Test("The glance and the row read one glyph table, and nothing overrides it")
+    func theGlanceReadsTheOneTable() {
+        #expect(SourceMark.symbol(.microblog) == "globe")
+        #expect(SourceMark.symbol(.forum) == "text.bubble")
+        // The signed-in microblog is a globe, filled — not a person. The person is a control.
+        #expect(SourceMark.symbol(.microblog) != "person.crop.circle")
     }
 }

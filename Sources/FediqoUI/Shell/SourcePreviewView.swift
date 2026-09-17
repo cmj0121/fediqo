@@ -25,6 +25,14 @@ struct SourcePreviewView: View {
     /// Decision 20's derived value, passed in. It decides exactly two things — the title's role
     /// and the horizontal inset — and nothing else on this screen differs between the two.
     let surface: JoinSurface
+    /// Where the reader reached this screen from — **decision 31, and it decides three sentences
+    /// and nothing else**. The evidence is identical: the hero, the identity, the title, the
+    /// summary, the figures, the registration and the rules are what the server said, and what
+    /// the server said does not depend on whether the reader has taken it. What *is* false for a
+    /// source already subscribed is the framing, the outcome and the caution, and those three go
+    /// through `framingKey`, `heldLine` and `cautionKey`, each exhaustive and none of them here
+    /// in a `View` body.
+    let origin: PreviewOrigin
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -73,6 +81,7 @@ struct SourcePreviewView: View {
     struct Header: View {
         let preview: SourcePreview
         let surface: JoinSurface
+        let origin: PreviewOrigin
 
         @Environment(\.colorScheme) private var colorScheme
 
@@ -82,7 +91,7 @@ struct SourcePreviewView: View {
                     .font(SourcePreviewView.titleFont(for: surface))
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
-                Text(L10n.t("join.preview.detail"))
+                Text(L10n.t(SourcePreviewView.framingKey(for: origin)))
                     .font(ShellType.meta)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
@@ -286,19 +295,19 @@ struct SourcePreviewView: View {
         if let active = profile.activeMonth {
             pieces.append(String(
                 format: L10n.t("join.preview.activeMonth", language: language),
-                JoinSheet.compact(active, language: language)
+                L10n.compact(active, language: language)
             ))
         }
         if let people = profile.people {
             pieces.append(String(
                 format: L10n.t("account.catalog.people", language: language),
-                JoinSheet.compact(people, language: language)
+                L10n.compact(people, language: language)
             ))
         }
         if let posts = profile.posts {
             pieces.append(String(
                 format: L10n.t("join.preview.posts", language: language),
-                JoinSheet.compact(posts, language: language)
+                L10n.compact(posts, language: language)
             ))
         }
         return pieces
@@ -350,8 +359,46 @@ struct SourcePreviewView: View {
         .accessibilityLabel(L10n.t("join.preview.rules"))
     }
 
+    /// The sentence under the host, which frames everything below it.
+    ///
+    /// "Nothing is added until you subscribe" is a promise about a decision, and a reader looking
+    /// at a source they already have is not taking one. **No `default:`.**
+    static func framingKey(for origin: PreviewOrigin) -> String {
+        switch origin {
+        case .field, .directory: "join.preview.detail"
+        case .joined: "source.held.detail"
+        }
+    }
+
+    /// What is true of a source the reader **has**, in the present tense — `DESIGN-R2` §4.3.
+    ///
+    /// **No `default:`**, so units 6–8 answer here as they answer at `outcomeKey`.
+    ///
+    /// **Discuz! is why this sheet earns its existence beyond "the profile again".** It is the one
+    /// surface in the app where the whole board list is readable: the row clips it at two lines,
+    /// and `SourceRow.spoken(_:)` gives a VoiceOver reader the untruncated list while a sighted
+    /// reader had no equivalent at all. The same key as the row's line, so the count leads and the
+    /// names follow in the same words.
+    ///
+    /// The fallback names the forum rather than asserting boards it has none of. It is
+    /// unreachable: `DiscuzBoardJoin.subscribe` returns before `store.subscribe` where nothing
+    /// read, so a joined forum carries at least one board — and a total function is what stops
+    /// that guarantee, which lives two files away, being the thing this screen depends on.
+    @MainActor
+    static func heldLine(_ source: Source) -> String {
+        switch source.kind {
+        case .discuz:
+            SourceRow.boardsLine(source) ?? L10n.t("source.held.forum")
+        case .discourse:
+            L10n.t("source.held.forum")
+        case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
+             .gotosocial, .unknown:
+            L10n.t("source.held.microblog")
+        }
+    }
+
     /// What pressing Subscribe will do — or, where the server has said a signed-out reader may
-    /// not read it, what it will most likely do instead.
+    /// not read it, what it will most likely do instead. On a detail, what **is** happening.
     @ViewBuilder
     private func outcome() -> some View {
         if let caution = Self.caution(preview) {
@@ -367,12 +414,20 @@ struct SourcePreviewView: View {
                 Image(systemName: "lock")
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                     .accessibilityHidden(true)
-                Text(L10n.t(caution.key))
+                Text(L10n.t(Self.cautionKey(caution, for: origin)))
                     .font(ShellType.meta.weight(.medium))
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+        } else if let held = origin.held {
+            // The outcome line is a prediction about a press, and on a detail there is no press.
+            // What replaces it is the present tense of the same fact: what the reader is reading.
+            Text(SourcePreviewView.heldLine(held))
+                .font(ShellType.meta)
+                .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             Text(L10n.t(Self.outcomeKey(preview.kind)))
                 .font(ShellType.meta)
@@ -400,6 +455,34 @@ struct SourcePreviewView: View {
             case .needsAccount: "join.preview.closed"
             case .turnedAway: "join.preview.turnedAway"
             }
+        }
+
+        /// The same two facts, said to a reader who already has this server.
+        ///
+        /// **No `default:`.**
+        var heldKey: String {
+            switch self {
+            case .needsAccount: "source.held.closed"
+            case .turnedAway: "source.held.turnedAway"
+            }
+        }
+    }
+
+    /// Which wording the caution takes, which is a function of the entrance and not of the fact.
+    ///
+    /// **Reworded rather than dropped, and that was a decision.** Its job is to warn before a
+    /// press and on a detail there is no press — but it is the only sentence in this app that
+    /// explains **why a forum you read is empty**, and the remedy it names is one the reader has:
+    /// the Sign in on that server's own row. Both sentences end "…will most likely be refused",
+    /// which is a prediction about a subscription that has already happened, so both are false
+    /// here and both are replaced. The glyph, the full `ink` and the weight are unchanged; the
+    /// withdrawn Return is moot, because a detail has no default button to withdraw.
+    ///
+    /// **No `default:`.**
+    static func cautionKey(_ caution: Caution, for origin: PreviewOrigin) -> String {
+        switch origin {
+        case .field, .directory: caution.key
+        case .joined: caution.heldKey
         }
     }
 

@@ -272,7 +272,7 @@ struct CancellationTests {
             return
         }
         await #expect(throws: CancellationError.self) {
-            try await join.subscribe(offer, to: offer.boards)
+            try await join.subscribe(offer, to: offer.boards, keeping: [])
         }
         // Nothing written, though one board read perfectly well before the reader left.
         #expect(await store.sources().isEmpty)
@@ -298,7 +298,7 @@ struct CancellationTests {
             return
         }
         await #expect(throws: CancellationError.self) {
-            try await join.subscribe(offer, to: offer.boards)
+            try await join.subscribe(offer, to: offer.boards, keeping: [])
         }
         #expect(await store.sources().isEmpty)
         let asked = await http.requested.map(\.absoluteString)

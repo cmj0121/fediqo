@@ -68,6 +68,23 @@ final class ShellSession {
     /// held here would be a copy that goes stale the moment the reader changes their boards.
     var removing: String?
 
+    /// The server the reader has pressed Clear on and not yet answered for, or nothing.
+    ///
+    /// **Nothing is emptied while this is set** — `removing`'s shape, for a reason decision 29
+    /// only half states. The colour is the user's overstatement; the confirmation is closing a
+    /// real hole. `clear(host:)` reaches `ForumSessions.forget(host:)`, which drops the forum's
+    /// cookies **and deletes the saved password from the Keychain** — and `forget`'s own doc makes
+    /// the fairness of that conditional on one thing: *"the row says a password is held before the
+    /// button is pressed"*. `PreferencesPane` draws `passwordLine` and meets it. An Account row
+    /// draws no inventory line at all, by `DESIGN.md` §3.6's own rule, so until now this device
+    /// deleted a password with nothing on screen having said one was held — and signed the reader
+    /// out of a forum, changing the state of the icon beside the one they pressed.
+    ///
+    /// **One presenter, both entrances.** `prefs.cache.clear` is one word for one call, so a Clear
+    /// that confirms on Account and fires straight on Preferences would be the same word doing two
+    /// different things two panes apart. `PreferencesPane` sets this too.
+    var clearing: String?
+
     /// Which stage of adding a source the reader is being shown, or nothing.
     ///
     /// **Nothing has been added at any of the three.** Browsing is a list, previewing is what a
@@ -276,7 +293,13 @@ final class ShellSession {
     /// **`origin` is not defaulted.** It decides where the preview is drawn and what its Back
     /// button says, and this house has already had a wrong default argument draw a microblog's
     /// globe over every joined forum. A new call site has to say which entrance it is.
-    func add(from origin: PreviewOrigin) async {
+    ///
+    /// **`JoinEntrance` and not `PreviewOrigin`, for the reason `take` takes the narrow one.**
+    /// This is the only other producer of `.previewing`, and with `.joined` unspellable here the
+    /// detail can be built by exactly one function — `openSource(host:)`. Widened, this would
+    /// accept `.joined(someSource)` and build a stage whose origin and whose preview are about
+    /// two different servers, with a stale `Source` inside it.
+    func add(from origin: JoinEntrance) async {
         // The preview this look is about to replace, asked before the await. A reader who types a
         // second hostname over an inline preview has left the first server, and the picture it
         // pulled is otherwise held for the run under a host that appears in no inventory — the
@@ -287,7 +310,7 @@ final class ShellSession {
         if let replaced, replaced != preview.host, !isAdded(replaced) {
             pictures.forget(host: replaced)
         }
-        stage = .previewing(preview, from: origin)
+        stage = .previewing(preview, from: origin.origin, ticked: [])
     }
 
     /// The reader was turned away, went and signed in, and came back — **and does not see the
@@ -309,7 +332,11 @@ final class ShellSession {
     /// behind them.
     func resumeAfterSignIn() async {
         guard let preview = await look() else { return }
-        await take(preview, from: .field)
+        // **`.page`, stated rather than derived.** The refusal this resumes was reported under the
+        // field, and that is where the reader pressed. A block may well be open behind all this —
+        // a preview of *another* server, typed before this one — and attributing the sentence to
+        // it would draw "Checking B…" under A's Subscribe with nothing under the field at all.
+        await take(preview, from: .field, ticked: [], reportedBy: .page)
     }
 
     /// One look: the duplicate guard, the parse, the request, and every way it can go wrong said
@@ -344,7 +371,11 @@ final class ShellSession {
         errand += 1
         let mine = errand
         checking = true
-        defer { checking = false }
+        // **The page owns a look, even beside an open block.** The reader typed into the field, so
+        // that is where the sentence belongs — which is the one place `owner(drawing:)` would give
+        // the wrong answer, and the reason this is stated rather than derived.
+        progress = ProgressReport(owner: .page, key: "account.detect.progress")
+        defer { checking = false; progress = nil }
         do {
             let preview = try await joiner(for: parsed).look(host: raw)
             guard mine == errand else { return nil }
@@ -376,9 +407,49 @@ final class ShellSession {
     /// between the look and the press — the reader was offered a sign-in on a refusal and took it
     /// — so the transport is chosen again here, against what this run holds now. `SourcePreview`
     /// states the same rule from the other side.
+    ///
+    /// **A detail is refused here, and it is refused structurally.** Once `PreviewOrigin` has a
+    /// third case, a press that matched any `.previewing` would try to join a source the reader
+    /// already has — `look`'s duplicate guard reporting an errand nobody started, which is the
+    /// incident `signInFinished` already records once. `entrance` is a total function with no
+    /// `default:`, and `.joined` has no entrance to hand over, so there is no guard to forget:
+    /// `take` cannot be called. `JoinSheet.primary` reads the same `nil` and draws no button.
     func confirm() async {
-        guard !checking, case .previewing(let preview, let origin) = stage else { return }
-        await take(preview, from: origin)
+        guard !checking, case .previewing(let preview, let origin, let ticked) = stage,
+              let entrance = origin.entrance
+        else { return }
+        await take(preview, from: entrance, ticked: ticked, reportedBy: entrance.reporter)
+    }
+
+    /// A source row was pressed: the reader wants that server's own account of itself —
+    /// **decision 31**.
+    ///
+    /// **It costs no request, and that is the whole shape of it.** The answer is already in
+    /// `profiles`, put there by the look they waited for when they added it, so this is `rows`'
+    /// own derivation read once more rather than a second one. **Never through `look()`**, which
+    /// refuses an added host by design and would answer a press with "You are already reading this
+    /// server".
+    ///
+    /// **`rowActsLive` and not a predicate of its own**, which is `DESIGN-R2` §10.1: one rule now
+    /// gates the boards control, all four controls and this press, and a fourth entrance with a
+    /// second predicate is how risk 12's class is reached again. Opening a detail replaces
+    /// `stage`, so a row pressed under an inline preview would delete a screen the reader is
+    /// part-way through.
+    ///
+    /// **`boards: []` on the preview**, because `SourcePreview.boards` means *the forum's index*
+    /// and nothing read one here. The boards the reader subscribed to travel in the origin
+    /// instead, where they are what they say they are.
+    func openSource(host raw: String) {
+        let host = raw.lowercased()
+        guard Self.rowActsLive(at: stage, checking: checking),
+              let row = rows.first(where: { $0.id == host })
+        else { return }
+        errand += 1
+        stage = .previewing(
+            SourcePreview(host: row.source.host, kind: row.source.kind, profile: row.profile),
+            from: .joined(row.source),
+            ticked: []
+        )
     }
 
     /// The press itself, wherever it was pressed from.
@@ -387,7 +458,12 @@ final class ShellSession {
     /// and that list opens in the sheet whichever surface the preview was on (decision 21). The
     /// origin is what lets the page keep drawing its block underneath, and what lets Back land on
     /// the preview it already has rather than asking the forum for its index again.
-    private func take(_ preview: SourcePreview, from origin: PreviewOrigin) async {
+    private func take(
+        _ preview: SourcePreview,
+        from origin: JoinEntrance,
+        ticked: Set<Int>,
+        reportedBy owner: ProgressOwner
+    ) async {
         refuse = nil
         offerSignIn = nil
         unread = []
@@ -396,7 +472,9 @@ final class ShellSession {
         errand += 1
         let mine = errand
         checking = true
-        defer { checking = false }
+        // Where the press was — **the caller's answer, not this function reading the screen**.
+        progress = ProgressReport(owner: owner, key: "account.detect.progress")
+        defer { checking = false; progress = nil }
         do {
             // **No `default:`.** A join step falling through a switch is a silent wrong answer:
             // a forum reported as joined, with no source and no boards behind it, and the
@@ -415,7 +493,9 @@ final class ShellSession {
                 // left takes the whole errand with them — which is why this one *is* entirely
                 // behind the token: writing it would spring the sheet back open behind them.
                 guard mine == errand else { return }
-                stage = .choosingBoards(offer, from: .preview(preview, from: origin))
+                stage = .choosingBoards(
+                    offer, from: .preview(preview, from: origin, ticked: ticked)
+                )
             }
         }
         // **The one branch that does not touch the sheet, and the asymmetry is deliberate.** The
@@ -477,6 +557,15 @@ final class ShellSession {
     /// **No `default:`.** A restate has no preview behind it, so a swipe there *is* a cancel and
     /// has to say so at the place that decides rather than inherit a join's answer.
     func sheetDismissed() {
+        // **The sheet also goes away when the stage stops being a sheet, and that is not this.**
+        // On the inline route Back flips the surface to `.pane` while the sheet is up, so SwiftUI
+        // takes the sheet down and may re-enter the presentation binding's setter — arriving here
+        // with the stage already at `.previewing(_, .field)`, which would be read as a dismissal
+        // and answered with `dismissStage()`, deleting the preview the reader just stepped back
+        // onto and the ticks with it. This method exists to answer *the reader dismissed the
+        // sheet*; when the stage is already pane-surfaced the sheet went because the stage moved,
+        // and there is nothing to answer. **Not a redundant check — do not remove it.**
+        guard stage?.surface != .pane else { return }
         switch stage {
         case .choosingBoards(_, .preview): backToPreview()
         case .choosingBoards(_, .joined), .browsing, .previewing, nil: dismissStage()
@@ -510,7 +599,7 @@ final class ShellSession {
     /// to the wire because a spinner over a request that cannot do anything is a worse account of
     /// the same nothing.
     func subscribe(_ picks: [DiscuzBoard]) async {
-        guard case .choosingBoards(let offer, _) = stage, !checking else { return }
+        guard case .choosingBoards(let offer, let origin) = stage, !checking else { return }
         // Taken down once this call is certain to handle it, so the sheet is gone while the
         // boards are read one at a time and a second press cannot start a second pick against
         // the same offer — and so a call that declines to act does not close the sheet on a
@@ -521,13 +610,37 @@ final class ShellSession {
         guard !picks.isEmpty else { return }
         refuse = nil
         offerSignIn = nil
+        boardsRefusal = nil
         unread = []
         unreadAll = 0
         progressHost = offer.host
         checking = true
-        defer { checking = false }
+        // A restate was pressed inside a row, so the row reports it — this is the second half of
+        // the same errand `changeBoards` began, and it must not change surfaces half way through.
+        //
+        // **And both entrances say the same thing, which is the correction.** This phase reads one
+        // page per picked board, sequentially; it is the longest wait in the app and it detects
+        // nothing. The restate's half was routed into the row by unit C and the join's half was
+        // still drawing "Checking %@…" under the field, which is the detection vocabulary over a
+        // phase that does not detect. One key, both owners.
+        progress = ProgressReport(
+            // **Folded here.** `changeBoards` folds what it is handed and this did not, staying
+            // correct only because `DiscuzBoardJoin` builds its offer from `source.host` — a
+            // guarantee three files away that nothing at this site stated. An unfolded host here
+            // matches no row, and the app's longest phase draws no line at all.
+            owner: origin.isRestate ? .row(host: offer.host.lowercased()) : .page,
+            key: "account.join.boards.progress"
+        )
+        defer { checking = false; progress = nil }
         do {
-            let outcome = try await joiner(for: offer.host).subscribe(offer, to: picks)
+            // **`keeping` is what this host is subscribed to now, and it is correctness before it
+            // is traffic.** A restate re-reading the eight boards the reader already had would
+            // spend eight sequential page fetches to confirm what it already knows — and any one
+            // of them timing out would drop that board out of `subscribed`, unsubscribing the
+            // reader from something they never touched. A join has nothing to keep and says `[]`
+            // rather than defaulting to it; see `BoardsOrigin.keeping`.
+            let outcome = try await joiner(for: offer.host)
+                .subscribe(offer, to: picks, keeping: origin.keeping)
             // **The reader removed this server while its boards were being read, so it must not
             // come back.** One request per board means this runs for seconds, which is ample time
             // to press Remove on a row — and Core writes `add`, `subscribe` and `ingest` at the
@@ -562,11 +675,226 @@ final class ShellSession {
         } catch let error as JoinError {
             // Every board failed, so nothing was added. Core threw the first board's reason and
             // kept no list; the count is what lets the sentence say how much it is about.
-            unreadAll = picks.count
-            report(error, raw: offer.host, host: offer.host)
+            failed(error, offer: offer, picked: picks.count)
         } catch {
-            unreadAll = picks.count
+            failed(nil, offer: offer, picked: picks.count)
+        }
+    }
+
+    /// Every board the reader picked failed. Which surface is told, and in what colour.
+    ///
+    /// **The same rule `boardsRefusal` was built for, applied to the other half of the errand.** A
+    /// join that fails has not added a host, so its sentence belongs under the field, in `alarm`,
+    /// beside the offer of a sign-in that might fix it. A **restate** that fails is about a host
+    /// the reader added weeks ago and is still reading: nothing was undone, nothing is missing
+    /// from their list, and drawing an alarm-coloured line under a field they never touched —
+    /// possibly a screen away from the row they pressed — says something untrue in a colour this
+    /// app spends on one thing.
+    ///
+    /// So a restate answers where it was pressed, in `inkDim`, exactly as its index failure does.
+    /// No `offerSignIn` either: that offer exists to give a refused *join* somewhere to go, and a
+    /// joined forum's row already carries its own Sign in control (decision 13).
+    private func failed(_ error: JoinError?, offer: JoinOffer, picked: Int) {
+        // **A `switch` and not `if case .row`, which is the rule `backToBrowsing` was sent back
+        // for, applied to the one site left holding the old shape — and it is in the type this
+        // unit introduced.** `if case` compiles clean against a fourth owner and silently gives
+        // it the page's alarm-coloured sentence under a field the reader never touched. It is
+        // unreachable today only because `subscribe` sets two of the four; "unreachable today"
+        // is exactly the argument that did not save the other site.
+        switch progress?.owner {
+        case .row:
+            boardsRefusal = (host: offer.host, key: "account.source.boards.unread")
+            return
+        // A join, pressed at the field or in the block, and reported under the field either way.
+        // `.sheet` is never an owner — it is only ever `reporting`'s answer — so it falls here
+        // with the rest rather than being given a branch it cannot reach.
+        case .page, .block, .sheet, nil:
+            break
+        }
+        unreadAll = picked
+        guard let error else {
             refuse = L10n.t("account.refuse.network")
+            return
+        }
+        report(error, raw: offer.host, host: offer.host)
+    }
+
+    /// What is on the wire: **who reports it, and what it says while it runs** — or nothing.
+    ///
+    /// **One value and not two properties.** The surface and the sentence are written together at
+    /// four call sites and read together at three, and two properties is two things to forget at
+    /// each of them. It replaces `rowErrand: String?`, which could express two owners and now has
+    /// to express three (`DESIGN-R2` §10.2): without a third, the inline block's own Subscribe
+    /// draws a bare spinner while the page draws a sentence about the same errand 300pt away.
+    ///
+    /// Written at the top of every errand and cleared with `checking`, so no sentence outlives the
+    /// press it is about.
+    private(set) var progress: ProgressReport?
+
+    /// Which surface **draws** a report — which is not always the one that claimed it.
+    ///
+    /// **Ownership and visibility are two questions, and answering only the first is the fourth
+    /// shape this unit's own lesson did not cover.** `ProgressOwner` says whose press it was, and
+    /// that is a function of the entrance, correctly. It says nothing about whether that surface
+    /// is *on screen*, and a sentence drawn on a surface nobody can see is the same silence as no
+    /// sentence at all.
+    ///
+    /// Two ways the claimed surface goes away, and the first version of this caught only one:
+    ///
+    /// - **The block is dismissed out from under its own errand.** Its Cancel stays live while its
+    ///   Subscribe is on the wire — deliberately, a reader may leave — and leaving runs
+    ///   `dismissStage()`. The page takes it back.
+    /// - **A sheet covers the page, and the page is where `.page` draws.** `JoinEntrance.directory`
+    ///   reports `.page`, a browsed preview's surface *is* `.sheet`, and `take` holds the stage for
+    ///   the whole of `begin(preview)` — unlike `subscribe`, which nils it first, which is the only
+    ///   reason the boards phase was ever visible. So: browse, open a server, press Subscribe, and
+    ///   the sentence rendered under the field **behind the sheet**, with every visible control
+    ///   refused. Verbatim the failure the block case was written about, by the symmetric route
+    ///   that was never asked. Pre-existing — but the claim *"true by construction"* was this
+    ///   unit's, and a reader who meets "by construction" stops checking.
+    ///
+    /// **A sheet covers the page and everything in it** — the field, the block and every row — so
+    /// it is asked first and answers for all three. That is what makes *none of them can stay
+    /// silent* true by construction rather than by every surface promising to stay put, and this
+    /// time the claim is carried by a term that reads `surface` rather than by one that reads a
+    /// single case of it.
+    ///
+    /// **No `default:`.**
+    static func reporting(
+        _ progress: ProgressReport?, drawnAs stage: JoinStage?
+    ) -> ProgressOwner? {
+        guard let progress else { return nil }
+        // Asked before the owner, because the answer does not depend on it: whatever claimed the
+        // errand, the reader is looking at the sheet.
+        if stage?.surface == .sheet { return .sheet }
+        switch progress.owner {
+        case .page, .row: return progress.owner
+        case .block: return stage?.inlinePreview == nil ? .page : .block
+        // A sheet is the only thing that draws over the page, so it cannot be uncovered here.
+        case .sheet: return .page
+        }
+    }
+
+    /// Whether the **page's** progress line under the field is the one to draw.
+    ///
+    /// **A named rule for the same reason `rowActsLive` is one.** Three surfaces report progress
+    /// now, and an expression in a `View` body deciding which is the shape this branch has shipped
+    /// a defect in four times. The row draws its own status line, the block draws its own, and
+    /// this is the third: no two of them can fire, and none of them can stay silent, because they
+    /// are readings of one value.
+    static func pageProgress(_ progress: ProgressReport?, drawnAs stage: JoinStage?) -> Bool {
+        reporting(progress, drawnAs: stage) == .page
+    }
+
+    /// Whether a row's controls are live, as one rule both the drawing and every press read.
+    ///
+    /// **One function, because the alternative is the defect risk 12 counts.** A control that is
+    /// drawn live and refused by a guard somewhere else is a button that does nothing, and this
+    /// branch has now shipped four of those. `SourceRowView` dims all four on this and
+    /// `changeBoards(host:)` refuses on this, so they cannot come to disagree.
+    ///
+    /// **`rowActsLive` and not `boardsLive`, which is a rename and not a widening of the rule.**
+    /// Decision 30 makes the boards a fourth trailing control beside Sign in, Clear and Remove,
+    /// and the answer to *may this row be acted on right now* was never particular to the boards.
+    /// A name for one control standing over four is how a later reader concludes the other three
+    /// were decided somewhere else.
+    ///
+    /// **Stricter than `AccountPane.busy`, on purpose.** `busy` lets a control stay live beside an
+    /// inline preview, which is right for the field — the block sits *beside* it. It is not right
+    /// here: a boards press replaces the stage outright, so pressing it under a preview the reader
+    /// is part-way through would delete a screen they are reading.
+    /// **Two invariants elsewhere are enforced *here* and nowhere else, so they are named here.**
+    /// This is the shape just corrected in `subscribe` — a site relying on a guarantee three files
+    /// away that nothing at the enforcement point stated. Somebody relaxing this reads this doc,
+    /// and both of these break in silence:
+    ///
+    /// - **`PreviewOrigin.joined` carries a `Source` and is safe from going stale because of this
+    ///   term.** `removing` refuses to hold a copy for exactly that reason; the detail may hold
+    ///   one because no row control can change a source's boards while a stage is up, and
+    ///   `stage == nil` is the whole of why.
+    /// - **A row is always visible while its own errand runs**, which is what lets
+    ///   `reporting(_:drawnAs:)` hand `.row` straight back. `changeBoards` and `subscribe` both
+    ///   run with no stage, so no sheet can be covering the row that is speaking.
+    static func rowActsLive(at stage: JoinStage?, checking: Bool) -> Bool {
+        stage == nil && !checking
+    }
+
+    /// A row's boards control was pressed and the forum's index could not be read.
+    ///
+    /// **Drawn by the row whose host matches, and by nothing else.** The refusal sentence every
+    /// other errand on this page writes is `refuse`, which `AccountPane` draws under the field —
+    /// and a reader who pressed a control in row four of six is 900pt away from it. A refusal
+    /// nobody can see is not a refusal.
+    ///
+    /// **Not `alarm`, and the row says why**: that colour is spent on the line that says a host
+    /// was *not added* and why, and this host was added weeks ago. Nothing changed here.
+    var boardsRefusal: (host: String, key: String)?
+
+    /// The reader wants a different set of boards on a forum they already read.
+    ///
+    /// **A restate and not a join.** The source stays, its notes stay — decision 22, and
+    /// unsubscribing changes only what this device fetches *next* — and what the picker hands back
+    /// replaces the set outright, which is why it opens **pre-ticked**.
+    ///
+    /// **Nothing is detected.** `SourceJoin.boards(of:)` takes the `Source` this session already
+    /// holds, so the kind travels in the value and a forum the reader already reads is not asked
+    /// what it is a second time. It is also the only route in that is not wrong: `look` refuses a
+    /// host that is added, `begin(host:)` detects, and `begin(_:)` would need a `SourcePreview`
+    /// that does not exist for a source nobody previewed.
+    ///
+    /// **The picker opens ticked from what is subscribed, intersected with what the forum still
+    /// offers.** Decision 25 is the first half — an empty picker plus one new tick is a silent
+    /// unsubscribe from the other eight. Decision 26 is the second: a board the forum no longer
+    /// lists cannot be ticked, so a press drops it and nothing says so, because the honest reading
+    /// is that the forum stopped offering it and Cancel still loses nothing.
+    ///
+    /// Behind the same errand token every other press here is, so a reader who removes this source
+    /// while its index is on the wire does not get a sheet back over a row that has gone.
+    func changeBoards(host raw: String) async {
+        let host = raw.lowercased()
+        guard Self.rowActsLive(at: stage, checking: checking),
+              let source = sources.first(where: { $0.host == host }),
+              // **The same predicate the control is drawn on**, asked again where the press lands.
+              // `rowActsLive` answers *when* and this answers *which protocol*, and a press that
+              // asked only the first would reach `SourceJoin.boards(of:)`, be refused
+              // `unsupportedKind`, and tell the reader "boards could not be read just now" — a
+              // sentence about a wire, for a protocol that has no picker. Unreachable from a row
+              // that draws no control; stated here because "one rule, both ends" is the claim
+              // this whole entrance is built on.
+              SourceRow.canChangeBoards(source.kind)
+        else { return }
+        boardsRefusal = nil
+        refuse = nil
+        unread = []
+        unreadAll = 0
+        progressHost = host
+        errand += 1
+        let mine = errand
+        checking = true
+        // This row's press, so this row reports it — the page's line stays down. Cleared with
+        // `checking`, because the two are the same errand seen from two surfaces.
+        //
+        // `account.source.boards.progress` and not the key above: what this phase reads is the
+        // forum's **index**, which is what that sentence has always meant.
+        progress = ProgressReport(
+            owner: .row(host: host), key: "account.source.boards.progress"
+        )
+        defer { checking = false; progress = nil }
+        do {
+            let offer = try await joiner(for: host).boards(of: source)
+            guard mine == errand else { return }
+            let offered = Set(offer.boards.map(\.fid))
+            stage = .choosingBoards(offer, from: .joined(
+                subscribed: source.boards,
+                ticked: Set(source.boards.map(\.fid)).intersection(offered)
+            ))
+        } catch let error where Cancellation.happened(error) {
+            progressHost = ""
+        } catch {
+            // One sentence, in the row the reader pressed. Which failure it was does not change
+            // what they can do about it — press again — so it does not change what they are told.
+            guard mine == errand else { return }
+            boardsRefusal = (host: host, key: "account.source.boards.unread")
         }
     }
 
@@ -576,10 +904,29 @@ final class ShellSession {
     /// and is refused while a sheet is up, because a reader reading a preview did not ask for it
     /// to be replaced. This is the sheet's own Back, where being at a preview is the *premise*.
     /// The catalog is already loaded by the time this can be pressed, so nothing is refetched.
+    /// **The origin is answered by a `switch` and not by a bare `case .previewing`** — the rule
+    /// `backToPreview` states in as many words, applied to the site that did not have it. A
+    /// `guard case .previewing = stage` compiles clean against a third origin and quietly answers
+    /// on its behalf: it would have thrown a reader who opened a source's detail into the server
+    /// directory. That is a `default:` wearing a different hat, and this repo bans those.
+    ///
+    /// **Do not "simplify" it back to `guard case .previewing = stage`.** Two of these three arms
+    /// do nothing, so the switch reads like ceremony over a one-line guard — and that is exactly
+    /// what it looked like before the third origin existed, which is why the third origin walked
+    /// straight into it. The arms that do nothing are the ones carrying the decision.
     func backToBrowsing() {
-        guard case .previewing = stage else { return }
-        errand += 1
-        stage = .browsing
+        guard case .previewing(_, let origin, _) = stage else { return }
+        switch origin {
+        case .directory:
+            errand += 1
+            stage = .browsing
+        // Neither of these has the directory behind it — a typed host has the page, and a detail
+        // has nothing — and `JoinSheet.leading(for:)` offers this button to neither of them. So
+        // this is unreachable from the sheet, and it declines by deciding rather than by falling
+        // through somebody else's answer.
+        case .field, .joined:
+            return
+        }
     }
 
     /// The reader stepped back from the boards to the preview they arrived through.
@@ -590,10 +937,29 @@ final class ShellSession {
     ///
     /// **Only where a preview is what is behind them.** A reader restating a joined forum's boards
     /// has no preview to step back to, so this declines rather than inventing one.
+    ///
+    /// **The origin is answered by a `switch` and not by a second `guard case`, and it has to
+    /// stay one — do not "simplify" it back.** Three places in this app ask whether there is a
+    /// preview behind a board list: `JoinSheet.leading(for:)`, `sheetDismissed()` and this. Three
+    /// sites is fine; three sites of which one can drift in silence is not. The other two are
+    /// exhaustive switches, so a fourth `BoardsOrigin` breaks the build there and somebody has to
+    /// decide what is behind it. A `guard case .preview … else { return }` here would compile
+    /// clean against that fourth case and quietly answer "decline" on its behalf — which is a
+    /// `default:` wearing a different hat, and this repo bans those with two incidents behind it.
     func backToPreview() {
-        guard case .choosingBoards(_, .preview(let preview, let origin)) = stage else { return }
-        errand += 1
-        stage = .previewing(preview, from: origin)
+        guard case .choosingBoards(_, let origin) = stage else { return }
+        switch origin {
+        case .preview(let preview, let from, let ticked):
+            errand += 1
+            // **The ticks come back with them** — decision 27. This sheet is about to unmount, and
+            // before the ticks lived in the stage that is where they went.
+            stage = .previewing(preview, from: from.origin, ticked: ticked)
+        // A restate has nothing behind it, so there is nothing to step back to. The reader is
+        // offered Cancel rather than Back (`JoinSheet.leading(for:)`), so this is unreachable from
+        // the sheet — and it refuses rather than inventing a preview if it is reached anyway.
+        case .joined:
+            return
+        }
     }
 
     /// What the store now holds, and the queries that draw it.
@@ -746,6 +1112,12 @@ final class ShellSession {
     /// is the right way round — the alternative is a reader losing their picks to a cookie.
     func clear(host: String) async {
         let host = host.lowercased()
+        // The question has been answered, so nothing is pending any more — set before the awaits,
+        // so no dialog state outlives the decision it was asking about. `remove`'s own line, for
+        // its reason. Unconditional, because `remove` reaches this too and a Remove answered while
+        // a Clear was pending would otherwise leave that Clear's question standing over a row that
+        // has gone.
+        clearing = nil
         await emoji.forget(host: host)
         emojis.forget(host: host)
         pictures.forget(host: host)
@@ -806,6 +1178,9 @@ final class ShellSession {
         // away that nothing at this site states, which is the shape `add`'s own comment names as
         // how a class of bug reached fourteen places.
         if offerSignIn?.lowercased() == host { offerSignIn = nil }
+        // A sentence drawn by a row that has gone. Its own host and not `progressHost`, because a
+        // refusal outlives the errand that produced it — that is the whole of what it is for.
+        if boardsRefusal?.host == host { boardsRefusal = nil }
         // The sheet holding somebody else's login page, where it is that server's. A race rather
         // than a click today, because `signIn` sets this *after* `await forums.signIn(host:)` and
         // that await is exactly the window a Remove is pressable in — and properly reachable once
@@ -952,4 +1327,59 @@ final class ShellSession {
             String(format: L10n.t("account.refuse.refused"), host, status)
         }
     }
+}
+
+/// Which surface reports an errand while it is on the wire.
+///
+/// **Three, because three presses start one.** A look and a join are pressed at the field and
+/// answered under it; a restate is pressed inside one row and answered in that row; and the inline
+/// preview's own Subscribe is a third — it sits in a block in the page, and a sentence under the
+/// field about it is a sentence the reader is not looking at.
+///
+/// **No `default:`** at any site that switches on it.
+enum ProgressOwner: Equatable {
+    /// The field's errand: a look, or a join with no block on screen.
+    case page
+    /// One row's own errand: a restate, its index read or the boards that follow it.
+    case row(host: String)
+    /// The inline preview's own Subscribe, answered in the block the reader pressed.
+    case block
+    /// **Not a claim — an answer.** Nothing sets this as an owner: it is what
+    /// `ShellSession.reporting(_:drawnAs:)` returns when a sheet is standing over whichever
+    /// surface did claim the errand, because a sentence drawn behind a sheet is not drawn. The
+    /// sheet had no waiting site at all until this existed, which is how a browsed preview's
+    /// Subscribe came to say nothing anywhere.
+    case sheet
+}
+
+/// What is on the wire, said where the press was.
+///
+/// **The key is carried and not derived from the owner**, because it is not a function of it: the
+/// page reports both a look and the boards a reader picked, and those are different errands in
+/// different words. That is the whole of the defect this closes — see `ProgressReport.key`.
+struct ProgressReport: Equatable {
+    let owner: ProgressOwner
+    /// The sentence this phase says, as a key taking the host.
+    ///
+    /// - `account.detect.progress` — "Checking %@…", and it means **detection**.
+    /// - `account.source.boards.progress` — "Reading %@'s boards…", the forum's *index*, which is
+    ///   what it has always meant.
+    /// - `account.join.boards.progress` — "Reading the boards you picked on %@…", one request per
+    ///   picked board, sequentially.
+    ///
+    /// **The third key exists because the longest wait in this app was labelled with the first.**
+    /// `subscribe(_:)` reads one page per picked board, so a reader who picked eight boards watched
+    /// "Checking forum.example…" for as long as eight page fetches take — the detection vocabulary
+    /// over the one phase in the app that detects nothing. The restate's half of that was routed
+    /// into the row; the join's half was still under the field.
+    ///
+    /// Core reports no per-board progress, so "board 3 of 8" is not buildable today. Recorded, not
+    /// designed.
+    ///
+    /// **Do not derive this from `owner`. It is the tidier shape and it reinstates the defect this
+    /// unit exists to fix**: `.page` carries two of the three keys — a look, and the boards the
+    /// reader picked — so a function from owner to key has to pick one of them, and picking the
+    /// detection one is how the longest wait in the app came to be labelled "Checking %@…" over a
+    /// phase that detects nothing.
+    let key: String
 }
