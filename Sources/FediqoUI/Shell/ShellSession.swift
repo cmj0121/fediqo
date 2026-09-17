@@ -75,9 +75,14 @@ final class ShellSession {
     /// its threads all wait on the reader through every one of them. Clearing this is therefore a
     /// complete undo at any stage: there is nothing to take back.
     ///
-    /// **One presenter and one piece of state for all three**, which is what buys the Back button
-    /// on the boards stage: the reader returns to the preview they already have instead of the
-    /// app asking the forum for its index again. See `JoinStage`.
+    /// **One piece of state for all three**, which is what buys the Back button on the boards
+    /// stage: the reader returns to the preview they already have instead of the app asking the
+    /// forum for its index again. See `JoinStage`.
+    ///
+    /// **Two presenters read it and they cannot both fire.** A typed hostname's preview is drawn
+    /// in `AccountPane`; everything else is the sheet on `FediqoRootView`. Which one is a function
+    /// of the stage — `JoinStage.surface` — and not a second flag beside it, so there is no
+    /// arrangement of this object in which both are true or neither is.
     var stage: JoinStage?
 
     /// D28's pause, read off the stage.
@@ -254,25 +259,35 @@ final class ShellSession {
 
     func pick(_ server: CatalogServer) async {
         hostname = server.domain
-        await add()
+        await add(from: .directory)
     }
 
     /// Add pressed. **Looks, and adds nothing** — the reader sees what the server says about
     /// itself and then decides, which is what `confirm` is for.
     ///
-    /// **Guarded on the stage as well as on `checking`.** `checking` is false the whole time the
-    /// preview sheet is up, so the field and the Add button are live again and a second look
-    /// would overwrite the stage under a reader who is reading the first one. The sheet being up
-    /// *is* the errand being in progress, and it is the stage that says so.
+    /// **Guarded on the stage as well as on `checking`.** `checking` is false the whole time a
+    /// preview is up, so the field and the Add button would otherwise be live again and a second
+    /// look would overwrite a stage the reader is in the middle of reading.
     ///
-    /// **`stage?.host` and not `stage`, because browsing is where a look is started from.** A row
-    /// pressed in the directory is this call, so refusing it whenever any stage is up would make
-    /// the whole list dead to the touch. What has to stop a second look is a stage that is
-    /// already *about a server* — a preview, or its boards — and `host` is the question that
-    /// separates those from the list.
-    func add() async {
+    /// **`admitsASecondLook` and not `stage == nil`, because browsing is where a look is started
+    /// from** — and so, now, is a preview the reader can still see the field beside. The stage
+    /// answers for itself; see `JoinStage.admitsASecondLook`.
+    ///
+    /// **`origin` is not defaulted.** It decides where the preview is drawn and what its Back
+    /// button says, and this house has already had a wrong default argument draw a microblog's
+    /// globe over every joined forum. A new call site has to say which entrance it is.
+    func add(from origin: PreviewOrigin) async {
+        // The preview this look is about to replace, asked before the await. A reader who types a
+        // second hostname over an inline preview has left the first server, and the picture it
+        // pulled is otherwise held for the run under a host that appears in no inventory — the
+        // same leak `dismissStage` exists to close, reached by a route that only opens once the
+        // field is live behind a preview.
+        let replaced = stage?.inlinePreview?.host
         guard let preview = await look() else { return }
-        stage = .previewing(preview)
+        if let replaced, replaced != preview.host, !isAdded(replaced) {
+            pictures.forget(host: replaced)
+        }
+        stage = .previewing(preview, from: origin)
     }
 
     /// The reader was turned away, went and signed in, and came back — **and does not see the
@@ -287,16 +302,27 @@ final class ShellSession {
     /// genuinely a different document from the signed-out one — it is the index that says which
     /// boards they may see — so the answer this carries forward has to be the one read through
     /// the engine they just signed in to, not the one they were refused with.
+    ///
+    /// **`from: .field`, because the refusal this resumes was reported under the field.** The
+    /// sheet came down when the join was refused (`closeIfStillMine`), so the button the reader
+    /// pressed to go and sign in was on the page, and the boards this lands them at have the page
+    /// behind them.
     func resumeAfterSignIn() async {
         guard let preview = await look() else { return }
-        await take(preview)
+        await take(preview, from: .field)
     }
 
     /// One look: the duplicate guard, the parse, the request, and every way it can go wrong said
     /// as a sentence. **Sets no stage** — what to do with the answer is the caller's, which is
     /// the whole of the difference between `add` and `resumeAfterSignIn`.
+    ///
+    /// **The stage guard is `admitsASecondLook` and it had to move with `AccountPane.busy`.**
+    /// `stage?.host == nil` was the right question while every stage covered the field; an inline
+    /// preview sits *beside* the field, so the field is live again and this guard left alone would
+    /// make Return and the magnifier controls that do nothing — unit 5b's defect exactly, and
+    /// risk 12's class.
     private func look() async -> SourcePreview? {
-        guard !checking, stage?.host == nil else { return nil }
+        guard !checking, stage?.admitsASecondLook ?? true else { return nil }
         let raw = hostname.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else { return nil }
         refuse = nil
@@ -351,12 +377,17 @@ final class ShellSession {
     /// — so the transport is chosen again here, against what this run holds now. `SourcePreview`
     /// states the same rule from the other side.
     func confirm() async {
-        guard !checking, case .previewing(let preview) = stage else { return }
-        await take(preview)
+        guard !checking, case .previewing(let preview, let origin) = stage else { return }
+        await take(preview, from: origin)
     }
 
     /// The press itself, wherever it was pressed from.
-    private func take(_ preview: SourcePreview) async {
+    ///
+    /// **The entrance is carried through**, because a Discuz! answers a press with its board list
+    /// and that list opens in the sheet whichever surface the preview was on (decision 21). The
+    /// origin is what lets the page keep drawing its block underneath, and what lets Back land on
+    /// the preview it already has rather than asking the forum for its index again.
+    private func take(_ preview: SourcePreview, from origin: PreviewOrigin) async {
         refuse = nil
         offerSignIn = nil
         unread = []
@@ -384,7 +415,7 @@ final class ShellSession {
                 // left takes the whole errand with them — which is why this one *is* entirely
                 // behind the token: writing it would spring the sheet back open behind them.
                 guard mine == errand else { return }
-                stage = .choosingBoards(offer, from: preview)
+                stage = .choosingBoards(offer, from: .preview(preview, from: origin))
             }
         }
         // **The one branch that does not touch the sheet, and the asymmetry is deliberate.** The
@@ -418,11 +449,38 @@ final class ShellSession {
 
     /// Browse pressed. **The catalog is fetched here and not on the page appearing** — decision
     /// 10 — so a reader who never browses never has this app contact a third party for them.
+    ///
+    /// **Relaxed the same way `look` was, and for the same reason.** `stage == nil` was right
+    /// while every stage covered the page; Browse sits beside the field, and an inline preview
+    /// covers neither. A Browse refused under a button the reader can see and press is the dead
+    /// control this branch has now shipped four times.
+    ///
+    /// **Through `dismissStage` and not by assignment**, so a preview being replaced still forgets
+    /// the picture it pulled for a host nobody joined. Harmless where there is no stage: it bumps
+    /// the errand token, which a press about to open the directory wants bumped anyway.
     func browse() {
-        guard !checking, stage == nil else { return }
+        guard !checking, stage?.admitsASecondLook ?? true else { return }
+        dismissStage()
         refuse = nil
         stage = .browsing
         Task { await loadCatalog() }
+    }
+
+    /// The sheet went away by a route that is not a button — a swipe, Escape, the scene going.
+    ///
+    /// **On a boards stage that stands on a preview, that is Back and not Cancel**, because the
+    /// preview it stands on is still on screen behind it: in the page where the reader typed the
+    /// host, and in this sheet's own history where they picked it off the directory. A dismissal
+    /// that cancelled the errand would delete a screen the reader can see, and take the inline
+    /// block down with it.
+    ///
+    /// **No `default:`.** A restate has no preview behind it, so a swipe there *is* a cancel and
+    /// has to say so at the place that decides rather than inherit a join's answer.
+    func sheetDismissed() {
+        switch stage {
+        case .choosingBoards(_, .preview): backToPreview()
+        case .choosingBoards(_, .joined), .browsing, .previewing, nil: dismissStage()
+        }
     }
 
     /// The sheet closed, by whatever route — a button, a swipe, Escape.
@@ -529,10 +587,13 @@ final class ShellSession {
     /// **No second request, which is the whole gain of one sheet over three.** The preview
     /// travelled in the stage precisely so that this is a value being read and not a forum being
     /// asked for its index again — decision 12.
+    ///
+    /// **Only where a preview is what is behind them.** A reader restating a joined forum's boards
+    /// has no preview to step back to, so this declines rather than inventing one.
     func backToPreview() {
-        guard case .choosingBoards(_, let preview) = stage else { return }
+        guard case .choosingBoards(_, .preview(let preview, let origin)) = stage else { return }
         errand += 1
-        stage = .previewing(preview)
+        stage = .previewing(preview, from: origin)
     }
 
     /// What the store now holds, and the queries that draw it.

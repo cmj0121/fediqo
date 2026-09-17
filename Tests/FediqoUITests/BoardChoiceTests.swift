@@ -71,12 +71,12 @@ struct BoardChoiceTests {
         </div></body></html>
         """#)))
         session.hostname = Self.host
-        await session.add()
+        await session.add(from: .field)
 
         // Stage one, and what a Discuz! can say about itself: its index answered a signed-out
         // reader, so it reads without an account — and the index it answered with is carried, so
         // the press has nothing left to ask.
-        guard case .previewing(let preview) = session.stage else {
+        guard case .previewing(let preview, _) = session.stage else {
             Issue.record("a look should open a preview")
             return
         }
@@ -128,11 +128,11 @@ struct BoardChoiceTests {
             "/api/v1/trends/statuses": .text("[]"),
         ]))
         session.hostname = "first.example"
-        await session.add()
+        await session.add(from: .field)
 
         // Stage one, and the server had something to say — so the preview is the rich one and
         // nothing has been joined yet.
-        guard case .previewing(let preview) = session.stage else {
+        guard case .previewing(let preview, _) = session.stage else {
             Issue.record("a Mastodon should be looked at before it is taken")
             return
         }
@@ -165,7 +165,7 @@ struct BoardChoiceTests {
         """#))
         let session = Self.session(http)
         session.hostname = Self.host
-        await session.add()
+        await session.add(from: .field)
         await session.confirm()
         #expect(session.choosing != nil)
 
@@ -186,7 +186,7 @@ struct BoardChoiceTests {
         // guard does not stand in the way, and what they typed is still in the field.
         #expect(session.hostname == Self.host)
         #expect(!session.isAdded(Self.host))
-        await session.add()
+        await session.add(from: .field)
         await session.confirm()
         #expect(session.choosing?.offer.host == Self.host)
     }
@@ -204,7 +204,7 @@ struct BoardChoiceTests {
         </div></body></html>
         """#)))
         session.hostname = Self.host
-        await session.add()
+        await session.add(from: .field)
         await session.confirm()
         // The premise, pinned: without it every assertion below is satisfied by a join that
         // never happened, and the test passes with `confirm()` deleted.
@@ -271,7 +271,7 @@ struct BoardChoiceTests {
             ]
         ))
         session.hostname = Self.host
-        await session.add()
+        await session.add(from: .field)
         await session.confirm()
         guard let offer = session.choosing?.offer else {
             Issue.record("a Discuz! should have paused for the reader to choose")
@@ -320,7 +320,7 @@ struct BoardChoiceTests {
             """#)]
         ))
         session.hostname = Self.host
-        await session.add()
+        await session.add(from: .field)
         await session.confirm()
         guard let offer = session.choosing?.offer else {
             Issue.record("a Discuz! should have paused")
@@ -394,7 +394,7 @@ struct BoardChoiceTests {
             """#)]
         ))
         session.hostname = Self.host
-        await session.add()
+        await session.add(from: .field)
         await session.confirm()
         guard let offer = session.choosing?.offer else {
             Issue.record("a Discuz! should have paused")
@@ -449,7 +449,7 @@ struct BoardChoiceTests {
             ]
         ))
         session.hostname = Self.host
-        await session.add()
+        await session.add(from: .field)
         await session.confirm()
         guard let offer = session.choosing?.offer else {
             Issue.record("a Discuz! should have paused")
@@ -494,7 +494,7 @@ struct BoardChoiceTests {
             boards: [33: unreadable, 41: unreadable]
         ))
         session.hostname = Self.host
-        await session.add()
+        await session.add(from: .field)
         await session.confirm()
         guard let offer = session.choosing?.offer else {
             Issue.record("a Discuz! should have paused")
@@ -553,7 +553,7 @@ struct BoardChoiceTests {
             """#),
         ]))
         session.hostname = Self.host
-        await session.add()
+        await session.add(from: .field)
         await session.confirm()
 
         // The forum's own notice page is a refusal — the host is fine, the spelling is fine, and
@@ -594,7 +594,7 @@ struct BoardChoiceTests {
             """#),
         ]))
         session.hostname = Self.host
-        await session.add()
+        await session.add(from: .field)
         await session.confirm()
 
         // An index with no board is an account question, not an address question — sending the
@@ -697,7 +697,7 @@ struct BoardChoiceTests {
             """#)]
         ))
         session.hostname = Self.host
-        await session.add()
+        await session.add(from: .field)
         await session.confirm()
         guard let offer = session.choosing?.offer else {
             Issue.record("a Discuz! should have paused")
@@ -755,6 +755,147 @@ struct BoardChoiceTests {
             let extra = translated.subtracting(english).sorted()
             #expect(extra.isEmpty, "\(lproj) has strings en does not: \(extra.joined(separator: ", "))")
         }
+    }
+
+    /// **來源 is a source; 主機 is a hostname or an address.** The user's ruling, and three keys
+    /// shipped with it backwards — `shell.account.summary`, `join.browse.title` and
+    /// `account.browse.label` all said 主機 about a thing that is a 來源. Their English was already
+    /// right, which is exactly why nobody saw it: a reader in English reads "servers you read"
+    /// and a reader in 中文 read "the hosts you read", and the two are not the same sentence.
+    ///
+    /// **Derived, and not the three literals this first shipped as.** A list of the keys that were
+    /// wrong today is a test that describes a smaller world than the code — the branch's own first
+    /// earned convention, and the comment over the literal version claimed a rule it did not
+    /// implement, which is worse than the missing pin because it stops the next reader looking.
+    /// So the rule is read off the development bundle: **every key whose English says "server" is
+    /// a key whose 中文 must say neither 主機 nor 伺服器.** A key written the wrong way tomorrow is
+    /// on no list here and is caught where it is written.
+    ///
+    /// **Two banned spellings and not one, because the app had three words for one concept.** 主機
+    /// was the ruling's own case. 伺服器 was found in two pre-M1 sentences while this was being
+    /// written — `prefs.cache.footer` and `forum.signin.save.on` — and a test banning only 主機
+    /// would have shipped one third of the inconsistency with a green tick over it. The user ruled
+    /// on a *rule*, so it reaches both.
+    ///
+    /// **The keys the rule does not touch are as deliberate as the ones it does.**
+    /// `join.browse.filter` is "Filter by hostname or keyword" and keeps 主機名稱; so do
+    /// `account.add.host`, `account.refuse.network` and the rest of the address vocabulary. They
+    /// are about a machine's name, which is precisely what 主機 is reserved for, and the word
+    /// boundary is what keeps them out — as it keeps `observer` out.
+    ///
+    /// `account.sources.title` is 來源 and is the reference.
+    @Test("No key whose English says server calls it 主機 or 伺服器 in 中文")
+    func sourcesAreNotCalledHosts() throws {
+        let english = try Self.pairs(in: "en")
+        // Both bundles, not one. `L10n` falls back from `zh-TW` to `zh-Hant`, so a correction made
+        // in one and missed in the other still resolves — and the reader whose system picks the
+        // bundle that was missed sees the old sentence.
+        for lproj in ["zh-Hant", "zh-TW"] {
+            let chinese = try Self.pairs(in: lproj)
+            // If the parser ever stops reading these files, every loop below runs zero times and
+            // the test passes while proving nothing. These two lines refuse that.
+            #expect(english.count > 200, "the strings file stopped parsing; this proves nothing")
+
+            let aboutServers = english.filter { Self.saysServer($0.value) }
+            #expect(aboutServers.count >= 11, "the English rule stopped matching; it proves nothing")
+
+            for key in aboutServers.keys.sorted() {
+                let said = chinese[key] ?? ""
+                for wrong in Self.notASource {
+                    #expect(!said.contains(wrong), """
+                        \(lproj)/\(key) calls a source \(wrong). This app says 來源 for a source \
+                        and keeps 主機 for a hostname or an address. Its English says server. \
+                        中文: \(said)
+                        """)
+                }
+            }
+
+            // From the other side, on the keys this work corrected: they must *say* 來源 and not
+            // merely avoid the wrong words, or a translation that dropped the noun entirely would
+            // pass the rule above while saying less than the English.
+            for key in Self.correctedToSource {
+                #expect(chinese[key]?.contains("來源") == true, """
+                    \(lproj)/\(key) stopped calling a source 來源: \(chinese[key] ?? "missing")
+                    """)
+            }
+        }
+    }
+
+    /// The two words this app does **not** use for a source. 主機 is a hostname or an address;
+    /// 伺服器 is a third spelling that reached two pre-M1 sentences and is now spent.
+    private static let notASource = ["主機", "伺服器"]
+
+    /// The eleven keys whose English says server, which must therefore name a 來源 outright.
+    ///
+    /// Listed only for the positive half — that the noun is *present*. The ban above is derived
+    /// and needs no list; this cannot be, because "said nothing at all" is indistinguishable from
+    /// "said it right" to a rule written as an absence.
+    private static let correctedToSource = [
+        "account.browse.label",
+        "forum.signin.save.on",
+        "join.browse.title",
+        "join.preview.closed.hint",
+        "join.preview.detail",
+        "join.preview.next.microblog",
+        "join.preview.rules",
+        "join.preview.turnedAway",
+        "join.preview.unread",
+        "prefs.cache.footer",
+        "shell.account.summary",
+    ]
+
+    /// Whether a sentence is about a server, in the one language the rule is derived from.
+    ///
+    /// Word-bounded, so `observer` is not a server and a key is not swept in by a substring.
+    private static func saysServer(_ english: String) -> Bool {
+        english.range(
+            of: #"\bservers?\b"#, options: [.regularExpression, .caseInsensitive]
+        ) != nil
+    }
+
+    /// Every key and its value from one shipped `.lproj`, read off disk for `keys(in:)`'s reason:
+    /// `L10n` falls back between the two Chinese bundles and cannot see what one of them says.
+    private static func pairs(in lproj: String) throws -> [String: String] {
+        let text = try bundleText(lproj)
+        var found: [String: String] = [:]
+        for line in text.split(separator: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("\""), trimmed.hasSuffix("\";") else { continue }
+            let body = trimmed.dropFirst()
+            guard let keyEnd = body.firstIndex(of: "\"") else { continue }
+            let key = String(body[body.startIndex..<keyEnd])
+            guard let equals = body[keyEnd...].firstIndex(of: "=") else { continue }
+            var value = body[body.index(after: equals)...]
+                .trimmingCharacters(in: .whitespaces)
+            guard value.hasPrefix("\""), value.hasSuffix("\";"), value.count >= 3 else { continue }
+            value.removeFirst()
+            value.removeLast(2)
+            found[key] = value
+        }
+        return found
+    }
+
+    /// The two Chinese bundles are the same file, byte for byte — `zh-TW` exists because App
+    /// Store Connect wants that code, not because the wording differs. A correction applied to one
+    /// and not the other is a reader seeing the old sentence depending on which bundle answered.
+    @Test("The two Chinese bundles are byte-identical")
+    func theChineseBundlesAreTheSameFile() throws {
+        let hant = try Self.bundleText("zh-Hant")
+        let tw = try Self.bundleText("zh-TW")
+        #expect(hant == tw, "zh-Hant and zh-TW have drifted apart")
+    }
+
+    private static func bundleText(_ lproj: String) throws -> String {
+        try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appendingPathComponent(
+                    "Sources/FediqoUI/Resources/\(lproj).lproj/Localizable.strings"
+                ),
+            encoding: .utf8
+        )
     }
 
     /// The keys one shipped `.lproj` declares, read from the file the app is built from.

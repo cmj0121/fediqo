@@ -201,7 +201,7 @@ struct ForumTransportTests {
             "/latest.json": .text("nope", status: 403),
         ]), forums: ForumSessions(credentials: MemoryCredentials()))
         session.hostname = "forum.example"
-        await session.add()
+        await session.add(from: .field)
         await session.confirm()
         #expect(session.refuse != nil, "the premise did not hold: nothing was refused")
         #expect(session.offerSignIn == "forum.example", "a refusal offered the reader nothing")
@@ -211,7 +211,7 @@ struct ForumTransportTests {
     func unreachableOffersNothing() async {
         let session = ShellSession(http: FixtureHTTP(), forums: ForumSessions(credentials: MemoryCredentials()))
         session.hostname = "nowhere.example"
-        await session.add()
+        await session.add(from: .field)
         #expect(session.refuse != nil)
         #expect(session.offerSignIn == nil, "a dead server invited the reader to go and sign in to it")
     }
@@ -221,7 +221,7 @@ struct ForumTransportTests {
         let session = ShellSession(http: FixtureHTTP(), forums: ForumSessions(credentials: MemoryCredentials()))
         session.offerSignIn = "stale.example"
         session.hostname = "nowhere.example"
-        await session.add()
+        await session.add(from: .field)
         #expect(session.offerSignIn == nil, "one host's offer was shown for another")
     }
 

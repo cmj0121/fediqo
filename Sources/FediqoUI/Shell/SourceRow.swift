@@ -57,12 +57,12 @@ struct SourceRow: Identifiable, Hashable {
     /// What the server stated about its size, or nothing.
     ///
     /// **Only `.stated` has figures, and the three silences are named rather than swept together.**
-    /// `JoinSheet.figurePieces` is the one place they are worded, so the preview and the row say
-    /// the same numbers in the same words about the same server.
+    /// `SourcePreviewView.figurePieces` is the one place they are worded, so the preview and the
+    /// row say the same numbers in the same words about the same server.
     @MainActor
     static func figures(_ answer: ProfileAnswer, language: DummyLanguage? = nil) -> [String] {
         switch answer {
-        case .stated(let profile): JoinSheet.figurePieces(profile, language: language)
+        case .stated(let profile): SourcePreviewView.figurePieces(profile, language: language)
         case .silent, .unread, .unasked: []
         }
     }
@@ -194,7 +194,7 @@ struct SourceRowView: View {
                 .foregroundStyle(ShellChrome.ink(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
             identity
-            if let figures = JoinSheet.dotted(SourceRow.figures(row.profile)) {
+            if let figures = SourcePreviewView.dotted(SourceRow.figures(row.profile)) {
                 figures
                     .font(ShellType.reading)
                     .foregroundStyle(ShellChrome.inkFaint(colorScheme))

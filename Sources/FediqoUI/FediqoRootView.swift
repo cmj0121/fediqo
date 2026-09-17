@@ -55,10 +55,23 @@ public struct FediqoRootView: View {
     ///
     /// Written out here rather than inline, because a `Binding` built inside the modifier chain
     /// pushes `body` past what the type-checker will solve in reasonable time.
+    ///
+    /// **Both halves of this were wrong the moment a preview could be drawn in the page, and
+    /// neither is reachable from a test** — risk 12's class, on a path only a person walks.
+    ///
+    /// *The getter.* `session.stage != nil` is true for a preview that `AccountPane` is drawing
+    /// between the field and the sources list, so this would put an empty sheet over it — empty
+    /// because `JoinSheet` draws nothing it is not asked for, and over a screen the reader is
+    /// reading. It asks the stage which surface draws it instead, which is what decision 20's
+    /// `surface` exists for.
+    ///
+    /// *The setter.* `dismissStage()` cancels the whole errand. On the boards sheet that is wrong
+    /// twice over: a swipe there is Back, and the preview it would throw away is still on screen
+    /// underneath. `sheetDismissed()` is the routing, and it is a named method a test can call.
     private var stagePresented: Binding<Bool> {
         Binding(
-            get: { session.stage != nil },
-            set: { shown in if !shown { session.dismissStage() } }
+            get: { session.stage?.surface == .sheet },
+            set: { shown in if !shown { session.sheetDismissed() } }
         )
     }
 

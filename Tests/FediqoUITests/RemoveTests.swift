@@ -327,7 +327,10 @@ struct RemoveTests {
         session.unreadAll = 4
         session.stage = .choosingBoards(
             JoinOffer(host: alpha, kind: .discuz, categories: []),
-            from: SourcePreview(host: alpha, kind: .discuz, profile: .silent(host: alpha, kind: .discuz))
+            from: .preview(
+                SourcePreview(host: alpha, kind: .discuz, profile: .silent(host: alpha, kind: .discuz)),
+                from: .directory
+            )
         )
         session.signingIn = ForumSignInRequest(host: alpha, stop: .noCredential)
 
@@ -359,7 +362,10 @@ struct RemoveTests {
         session.unreadAll = 4
         session.stage = .choosingBoards(
             JoinOffer(host: beta, kind: .discuz, categories: []),
-            from: SourcePreview(host: beta, kind: .discuz, profile: .silent(host: beta, kind: .discuz))
+            from: .preview(
+                SourcePreview(host: beta, kind: .discuz, profile: .silent(host: beta, kind: .discuz)),
+                from: .directory
+            )
         )
         session.signingIn = ForumSignInRequest(host: beta, stop: .noCredential)
 

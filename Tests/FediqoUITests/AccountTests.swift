@@ -35,7 +35,7 @@ struct AccountAddTests {
             """#),
         ]))
         session.hostname = "first.example"
-        await session.add()
+        await session.add(from: .field)
         await session.confirm()
         #expect(session.sources.map(\.host) == ["first.example"])
         #expect(session.queries.map(\.id) == ["all", "trends"])
@@ -57,7 +57,7 @@ struct AccountAddTests {
         """#)])
         let session = ShellSession(http: http)
         session.hostname = "pleroma.example"
-        await session.add()
+        await session.add(from: .field)
         #expect(
             session.refuse
                 == String(
@@ -88,13 +88,13 @@ struct AccountAddTests {
             "/api/v1/trends/statuses": .text("[]"),
         ]))
         session.hostname = "https://First.Example/about"
-        await session.add()
+        await session.add(from: .field)
         await session.confirm()
         #expect(session.sources.count == 1)
         session.hostname = "first.example"
         // **The duplicate is caught before the look**, which is what keeps it free: a host this
         // device already reads costs no detection and no profile request, only the sentence.
-        await session.add()
+        await session.add(from: .field)
         #expect(session.stage == nil, "a duplicate opened a preview of a server already added")
         #expect(session.refuse == L10n.t("account.refuse.duplicate", language: .english))
         #expect(session.sources.count == 1)
@@ -150,7 +150,7 @@ struct AccountAddTests {
     func invalidHost() async {
         let session = ShellSession(http: FixtureHTTP())
         session.hostname = "http://first.example"
-        await session.add()
+        await session.add(from: .field)
         #expect(
             session.refuse
                 == String(
@@ -168,7 +168,7 @@ struct AccountAddTests {
         let http = FixtureHTTP(["/": .fail, "/api/v2/instance": .fail])
         let session = ShellSession(http: http)
         session.hostname = "gone.example"
-        await session.add()
+        await session.add(from: .field)
         #expect(session.refuse == L10n.t("account.refuse.network", language: .english))
         #expect(session.sources.isEmpty)
         #expect(!session.availability.timelineEnabled)
@@ -317,7 +317,7 @@ struct AccountAddTests {
             "/api/v1/trends/statuses": .text("[]"),
         ]))
         session.hostname = "first.example"
-        await session.add()
+        await session.add(from: .field)
         // The premise, pinned. Every assertion below is about an *absence*, so without this the
         // test is satisfied by a look that never reached the press — and its own claim to pin
         // the whole chain end to end would be false.
@@ -351,7 +351,7 @@ struct AccountAddTests {
             "https://install-a.example/forum.php?mod=forumdisplay&fid=33": .cancelled,
         ]))
         session.hostname = "install-a.example"
-        await session.add()
+        await session.add(from: .field)
         await session.confirm()
         guard let choice = session.choosing else {
             Issue.record("a Discuz! should pause on the picker")

@@ -50,7 +50,7 @@ struct TimelineStreamTests {
             """#),
         ]))
         session.hostname = "first.example"
-        await session.add()
+        await session.add(from: .field)
         await session.confirm()
         #expect(session.timelineID == "all")
 
@@ -100,7 +100,7 @@ struct TimelineStreamTests {
             "/api/v1/trends/statuses": .text("[]"),
         ]))
         session.hostname = "first.example"
-        await session.add()
+        await session.add(from: .field)
         await session.confirm()
         let marks = session.sources.map {
             DummySource.unsigned($0.host, kind: DummyItem.shape(of: $0.kind))
@@ -127,7 +127,7 @@ struct TimelineStreamTests {
             "/api/v1/trends/statuses": .fail,
         ]))
         session.hostname = "first.example"
-        await session.add()
+        await session.add(from: .field)
         await session.confirm()
         #expect(!DummyTimeline(id: "all").items(from: session.notes, among: []).isEmpty)
         #expect(DummyTimeline(id: "trends").items(from: session.notes, among: []).isEmpty)
@@ -165,7 +165,7 @@ struct TimelineStreamTests {
             "/api/v1/trends/statuses": .text("[]"),
         ]))
         session.hostname = "first.example"
-        await session.add()
+        await session.add(from: .field)
         await session.confirm()
         let ids = DummyTimeline(id: session.timelineID ?? "all").items(from: session.notes, among: []).map(\.id)
         #expect(!ids.isEmpty)

@@ -14,6 +14,8 @@ import Testing
 @Suite("Two-stage subscribe")
 struct JoinStageTests {
     private static let forum = "install-c.example"
+    /// A second forum, for the tests about a look replacing a look.
+    private static let other = "install-d.example"
 
     init() {
         L10n.language = .english
@@ -112,20 +114,50 @@ struct JoinStageTests {
     /// the look returns, so the field and the Add button are live again behind an open preview —
     /// and a second press would replace the stage under a reader who is still reading the first
     /// one. The stage is what says so, and `add` is guarded on it.
-    @Test("A second Add behind an open preview changes nothing")
+    ///
+    /// **Driven from the directory, which is where this stays true.** A preview reached from a
+    /// catalogue row is drawn over the page in the sheet, so the reader cannot see what a second
+    /// look would replace. One reached by typing is drawn beside the field, and that case is the
+    /// test below.
+    @Test("A second Add behind a preview the reader cannot see past changes nothing")
     func aSecondAddIsRefusedWhileTheSheetIsUp() async {
         let (session, http) = Self.forumSession()
         session.hostname = Self.forum
-        await session.add()
+        await session.add(from: .directory)
         let opened = session.stage
         #expect(opened != nil, "the premise did not hold: no preview was opened")
+        #expect(opened?.surface == .sheet, "the premise did not hold: this preview is in the page")
         let asked = await http.paths.count
 
         session.hostname = "somewhere.else.example"
-        await session.add()
+        await session.add(from: .field)
 
         #expect(session.stage == opened, "a second look replaced the stage behind the reader")
         #expect(await http.paths.count == asked, "a second look was spent on a refused press")
+    }
+
+    /// **The other half of splitting `busy`, and the half that makes the first half honest.**
+    /// `AccountPane` re-enables the field beside an inline preview, because the block is beside it
+    /// and not over it. If `look`'s guard had stayed `stage?.host == nil`, Return and the
+    /// magnifier would both be live and both refused three files away — a control that does
+    /// nothing, which is unit 5b's defect and risk 12's whole class.
+    @Test("A second hostname typed beside an inline preview replaces it")
+    func aSecondAddIsTakenBesideAnInlinePreview() async {
+        var routes = Self.forumRoutes()
+        routes["https://\(Self.other)/forum.php"] = .text(Self.discuzIndex)
+        let session = ShellSession(http: FixtureHTTP(routes), store: ItemStore())
+
+        session.hostname = Self.forum
+        await session.add(from: .field)
+        #expect(session.stage?.inlinePreview?.host == Self.forum, "the premise: a block in the page")
+
+        session.hostname = Self.other
+        await session.add(from: .field)
+
+        #expect(session.stage?.inlinePreview?.host == Self.other, """
+            The field was live beside the block and its Return did nothing — the shape this \
+            branch has now shipped four times.
+            """)
     }
 
     /// The same guard from the other side: a press cannot start while one is on the wire.
@@ -133,7 +165,7 @@ struct JoinStageTests {
     func confirmIsRefusedWhileChecking() async {
         let (session, http) = Self.forumSession()
         session.hostname = Self.forum
-        await session.add()
+        await session.add(from: .field)
         let asked = await http.paths.count
 
         session.checking = true
@@ -182,7 +214,7 @@ struct JoinStageTests {
             profile: .stated(SourceProfile(
                 host: Self.forum, kind: .discuz, readsWithoutAccount: false
             ))
-        ))
+        ), from: .field)
 
         let press = Task { await session.confirm() }
         // The press is parked on the index. The reader leaves.
@@ -237,7 +269,7 @@ struct JoinStageTests {
         defer { watchdog.cancel() }
 
         session.hostname = "first.example"
-        await session.add()
+        await session.add(from: .field)
 
         let press = Task { await session.confirm() }
         #expect(await Self.spun { session.checking }, "the press never reached the wire")
@@ -265,7 +297,7 @@ struct JoinStageTests {
             "/api/v2/instance": .cancelled,
         ]), store: ItemStore())
         looking.hostname = "first.example"
-        await looking.add()
+        await looking.add(from: .field)
         #expect(looking.stage == nil)
         #expect(looking.refuse == nil, "a reader's leaving was reported as the server's fault")
         #expect(looking.progressHost == "")
@@ -279,7 +311,7 @@ struct JoinStageTests {
             "/api/v1/trends/statuses": .text("[]"),
         ]), store: ItemStore())
         pressing.hostname = "first.example"
-        await pressing.add()
+        await pressing.add(from: .field)
         #expect(pressing.progressHost == "first.example", "the premise: the press names the host")
         await pressing.confirm()
         #expect(pressing.refuse == nil)
@@ -296,8 +328,8 @@ struct JoinStageTests {
     func backFromTheBoardsCostsNothing() async {
         let (session, http) = Self.forumSession()
         session.hostname = Self.forum
-        await session.add()
-        guard case .previewing(let looked) = session.stage else {
+        await session.add(from: .field)
+        guard case .previewing(let looked, _) = session.stage else {
             Issue.record("a look should open a preview")
             return
         }
@@ -307,7 +339,7 @@ struct JoinStageTests {
 
         session.backToPreview()
 
-        #expect(session.stage == .previewing(looked), "Back landed somewhere else")
+        #expect(session.stage == .previewing(looked, from: .field), "Back landed somewhere else")
         #expect(await http.paths == asked, "Back asked the forum for its index again")
         #expect(session.sources.isEmpty)
     }
@@ -340,14 +372,42 @@ struct JoinStageTests {
 
     /// The page's Browse button, which is a different press from the sheet's Back: a reader
     /// reading a preview did not ask for it to be replaced by a list.
-    @Test("Browse is refused behind an open sheet, like every other way in from the page")
+    ///
+    /// **From the directory, where the reader cannot see past the sheet.** The typed-host case is
+    /// the test below, and it goes the other way for the same reason `look`'s does.
+    @Test("Browse is refused behind a preview the reader cannot see past")
     func browseIsRefusedWhileTheSheetIsUp() async {
         let (session, _) = Self.forumSession()
         session.hostname = Self.forum
-        await session.add()
+        await session.add(from: .directory)
         let opened = session.stage
         session.browse()
         #expect(session.stage == opened, "Browse replaced a preview the reader was reading")
+    }
+
+    /// Browse sits beside the field, and an inline preview covers neither. A Browse refused under
+    /// a button the reader can see and press is the dead control this branch has shipped four
+    /// times — and the replaced preview still has to forget the picture it pulled, or a host that
+    /// was never joined holds bytes that appear in no inventory.
+    @Test("Browse beside an inline preview opens the directory, and forgets what it replaced")
+    func browseIsTakenBesideAnInlinePreview() async {
+        let pictures = ShellPictures(http: FixtureHTTP())
+        var routes = Self.forumRoutes()
+        routes["/servers"] = .text("[]")
+        let session = ShellSession(
+            http: FixtureHTTP(routes), store: ItemStore(), pictures: pictures
+        )
+        session.hostname = Self.forum
+        await session.add(from: .field)
+        #expect(session.stage?.inlinePreview != nil, "the premise: a block in the page")
+        let before = pictures.generation
+
+        session.browse()
+
+        #expect(session.stage == .browsing, "Browse did nothing beside a block it does not sit under")
+        #expect(pictures.generation > before, """
+            A preview replaced by Browse kept the picture it pulled for a host nobody joined.
+            """)
     }
 
     /// **The directory is where a look is started from, so a row in it must be pressable.** The
@@ -387,8 +447,11 @@ struct JoinStageTests {
     func backFromAPreviewReturnsToBrowsing() async {
         let (session, _) = Self.forumSession()
         session.hostname = Self.forum
-        await session.add()
-        #expect(session.stage != nil, "the premise did not hold: no preview was opened")
+        // Through the directory, which is what this test is named for. `backToBrowsing()` is
+        // origin-blind, so a typed host passed here too — and the test then proved nothing about
+        // the entrance its own sentence is about.
+        await session.add(from: .directory)
+        #expect(session.stage?.surface == .sheet, "the premise: a preview with a directory behind it")
 
         session.backToBrowsing()
 
@@ -459,18 +522,233 @@ struct JoinStageTests {
     }
 
     private static func preview(_ host: String) -> JoinStage {
-        .previewing(SourcePreview(host: host, kind: .discuz, profile: .stated(SourceProfile(
-            host: host, kind: .discuz, readsWithoutAccount: true
-        ))))
+        .previewing(previewOf(host), from: .directory)
     }
 
     private static func boards(_ host: String) -> JoinStage {
         .choosingBoards(
             JoinOffer(host: host, kind: .discuz, categories: []),
-            from: SourcePreview(host: host, kind: .discuz, profile: .stated(SourceProfile(
-                host: host, kind: .discuz, readsWithoutAccount: true
-            )))
+            from: .preview(previewOf(host), from: .directory)
         )
+    }
+
+    private static func previewOf(_ host: String) -> SourcePreview {
+        SourcePreview(host: host, kind: .discuz, profile: .stated(SourceProfile(
+            host: host, kind: .discuz, readsWithoutAccount: true
+        )))
+    }
+
+    // MARK: - Decision 20: the entrance travels in the stage
+
+    /// **The two presenters cannot both fire, because they read one function of one value.**
+    /// `FediqoRootView` puts the sheet up at `.sheet` and `AccountPane` draws the block at
+    /// `.pane`; before this, the sheet's getter was `stage != nil` and would have put an empty
+    /// sheet over a preview drawn in the page.
+    @Test("Every stage says which surface draws it, and only one of them is the page")
+    func everyStageNamesItsSurface() {
+        let preview = Self.previewOf(Self.forum)
+        let offer = JoinOffer(host: Self.forum, kind: .discuz, categories: [])
+
+        #expect(JoinStage.browsing.surface == .sheet)
+        #expect(JoinStage.previewing(preview, from: .field).surface == .pane)
+        #expect(JoinStage.previewing(preview, from: .directory).surface == .sheet)
+        #expect(JoinStage.choosingBoards(offer, from: .preview(preview, from: .field)).surface
+            == .sheet, "decision 21: a typed host's boards open the sheet, not the page")
+        #expect(JoinStage.choosingBoards(offer, from: .joined(subscribed: [])).surface == .sheet)
+    }
+
+    /// **The page keeps drawing its block while the boards sheet stands on it** — §1.5(b). A pane
+    /// that asked `if case .previewing` would blank the block the moment Subscribe opened the
+    /// picker and rebuild it on Back, which is the page throwing the reader somewhere and then
+    /// throwing them back.
+    @Test("The page knows which preview it is drawing, including under an open sheet")
+    func thePageKnowsWhatItIsDrawing() {
+        let preview = Self.previewOf(Self.forum)
+        let offer = JoinOffer(host: Self.forum, kind: .discuz, categories: [])
+
+        #expect(JoinStage.browsing.inlinePreview == nil)
+        #expect(JoinStage.previewing(preview, from: .field).inlinePreview?.host == Self.forum)
+        #expect(JoinStage.previewing(preview, from: .directory).inlinePreview == nil)
+        #expect(
+            JoinStage.choosingBoards(offer, from: .preview(preview, from: .field))
+                .inlinePreview?.host == Self.forum,
+            "the block went down the moment the boards sheet opened over it"
+        )
+        #expect(JoinStage.choosingBoards(offer, from: .preview(preview, from: .directory))
+            .inlinePreview == nil, "the page drew a block for a preview that lives in the sheet")
+        #expect(JoinStage.choosingBoards(offer, from: .joined(subscribed: [])).inlinePreview == nil)
+    }
+
+    /// The rule the field and Browse are both gated on. Pinned as a value, because the two
+    /// controls that read it are in a `View` body and a session guard respectively, and those two
+    /// disagreeing is how a live control gets refused three files away.
+    @Test("Only a stage the reader can see past admits a second look")
+    func onlyAVisibleStageAdmitsASecondLook() {
+        let preview = Self.previewOf(Self.forum)
+        let offer = JoinOffer(host: Self.forum, kind: .discuz, categories: [])
+
+        #expect(JoinStage.browsing.admitsASecondLook, "the directory's own rows are looks")
+        #expect(JoinStage.previewing(preview, from: .field).admitsASecondLook)
+        #expect(!JoinStage.previewing(preview, from: .directory).admitsASecondLook)
+        #expect(!JoinStage.choosingBoards(offer, from: .preview(preview, from: .field))
+            .admitsASecondLook)
+        #expect(!JoinStage.choosingBoards(offer, from: .joined(subscribed: [])).admitsASecondLook)
+    }
+
+    /// **A swipe on the boards sheet is Back and not Cancel** — §1.5(d). The setter this replaces
+    /// called `dismissStage()`, which would cancel the whole errand and take an inline block the
+    /// reader can see down with it. Neither the binding nor the swipe is reachable from a test;
+    /// the method both of them land on is, which is why it is a method.
+    @Test("A swipe on the boards sheet steps back rather than cancelling the errand")
+    func aSwipeOnTheBoardsStepsBack() {
+        let preview = Self.previewOf(Self.forum)
+        let offer = JoinOffer(host: Self.forum, kind: .discuz, categories: [])
+
+        let fromPage = ShellSession(http: FixtureHTTP())
+        fromPage.stage = .choosingBoards(offer, from: .preview(preview, from: .field))
+        fromPage.sheetDismissed()
+        #expect(fromPage.stage == .previewing(preview, from: .field), """
+            A swipe on the boards sheet cancelled the errand and took the page's block with it.
+            """)
+
+        let fromSheet = ShellSession(http: FixtureHTTP())
+        fromSheet.stage = .choosingBoards(offer, from: .preview(preview, from: .directory))
+        fromSheet.sheetDismissed()
+        #expect(fromSheet.stage == .previewing(preview, from: .directory))
+
+        // Every other stage is a complete cancel, as it was.
+        for stage in [JoinStage.browsing, .previewing(preview, from: .directory)] {
+            let leaving = ShellSession(http: FixtureHTTP())
+            leaving.stage = stage
+            leaving.sheetDismissed()
+            #expect(leaving.stage == nil)
+        }
+    }
+
+    /// **The same leak as Browse's, down the other route, and it had no test.** A reader who types
+    /// a second hostname over an inline preview has left the first server — and `dismissStage`,
+    /// which is what forgets a looked-at host's pictures, is never reached on this path because
+    /// the stage is overwritten rather than cleared. The route only exists because the field is
+    /// live beside the block, so it arrived with this unit.
+    @Test("A second hostname typed over a block forgets the picture the first one pulled")
+    func replacingAnInlinePreviewForgetsItsPicture() async {
+        let pictures = ShellPictures(http: FixtureHTTP())
+        var routes = Self.forumRoutes()
+        routes["https://\(Self.other)/forum.php"] = .text(Self.discuzIndex)
+        let session = ShellSession(
+            http: FixtureHTTP(routes), store: ItemStore(), pictures: pictures
+        )
+
+        session.hostname = Self.forum
+        await session.add(from: .field)
+        #expect(session.stage?.inlinePreview?.host == Self.forum, "the premise: a block in the page")
+        let before = pictures.generation
+
+        session.hostname = Self.other
+        await session.add(from: .field)
+
+        #expect(session.stage?.inlinePreview?.host == Self.other, "the premise: the block was replaced")
+        #expect(pictures.generation > before, """
+            A preview replaced by a second typed hostname kept the picture it pulled. The host was \
+            never joined, so `PreferencesPane` lists no such server and those bytes are held for \
+            the run in an inventory nobody can see.
+            """)
+    }
+
+    /// And the two guards on it, because a forget that fires too eagerly is its own defect: a host
+    /// the reader did join keeps its pictures, and a re-look of the same host does not drop the one
+    /// it is about to draw.
+    @Test("Replacing a block forgets nothing it should keep")
+    func replacingAnInlinePreviewKeepsWhatItShould() async {
+        let pictures = ShellPictures(http: FixtureHTTP())
+        let session = ShellSession(
+            http: FixtureHTTP(Self.forumRoutes()), store: ItemStore(), pictures: pictures
+        )
+
+        session.hostname = Self.forum
+        await session.add(from: .field)
+        let before = pictures.generation
+
+        // The same host looked at again: the picture being dropped is the one about to be drawn.
+        session.hostname = Self.forum
+        await session.add(from: .field)
+        #expect(pictures.generation == before, "a re-look dropped the picture it was re-drawing")
+    }
+
+    /// **The block's own Subscribe stops being the live one the moment the boards sheet opens over
+    /// it.** Two live Subscribe buttons on two surfaces at once is the two-presenters failure in a
+    /// new shape — and the gate saying so lived inside a `View` body, where nothing could read it.
+    @Test("The block's actions are live only while the preview is the stage")
+    func theBlocksActionsAreLiveOnlyAtThePreview() {
+        let preview = Self.previewOf(Self.forum)
+        let offer = JoinOffer(host: Self.forum, kind: .discuz, categories: [])
+
+        #expect(AccountPane.actionsLive(at: .previewing(preview, from: .field)))
+        let overIt = JoinStage.choosingBoards(offer, from: .preview(preview, from: .field))
+        #expect(!AccountPane.actionsLive(at: overIt), """
+            The block kept a live Subscribe under the boards sheet standing on it.
+            """)
+        #expect(!AccountPane.actionsLive(at: .browsing))
+        #expect(!AccountPane.actionsLive(at: nil))
+        // The block is drawn for exactly these stages, and it is disabled in all but the first.
+        for stage in [JoinStage.previewing(preview, from: .field),
+                      .choosingBoards(offer, from: .preview(preview, from: .field))] {
+            #expect(stage.inlinePreview != nil, "the premise: the block is drawn at this stage")
+        }
+    }
+
+    /// **Decision 27's cost, pinned as the regression it is rather than left to a plan row.**
+    ///
+    /// At `1ac5dd4` a typed host previewed in the sheet, so Back from the boards left that sheet
+    /// mounted and `JoinSheet`'s `@State picked` survived. A typed host now previews in the page,
+    /// so Back drops the stage to `.pane`, the sheet unmounts, and the ticks go with it. The rule
+    /// in `ticks(_:movingTo:)` is unchanged and still right — the state is simply no longer there
+    /// to carry.
+    ///
+    /// **This records today's behaviour so it cannot ship silently.** Fixing it means hoisting
+    /// `picked` onto the session, which is adding state this unit was told to spend down, so it
+    /// is unit C's. When unit C takes it, this test fails, and that is the point of it.
+    @Test("A typed host's boards sheet unmounts on Back, and that is where the ticks go")
+    func theInlinePathDropsItsTicksOnBack() async {
+        let (session, _) = Self.forumSession()
+        session.hostname = Self.forum
+        await session.add(from: .field)
+        await session.confirm()
+        #expect(session.stage?.surface == .sheet, "the premise: the boards opened in the sheet")
+
+        session.backToPreview()
+
+        #expect(session.stage?.surface == .pane, """
+            UNIT C: the sheet stays mounted across Back now, so the ticks survive and this \
+            expectation is the thing to delete — along with the note on `ticks(_:movingTo:)`.
+            """)
+    }
+
+    /// Decision 21, end to end: a typed host's Subscribe on a Discuz! opens the **sheet** at the
+    /// boards, the page keeps its block underneath, and Back returns to that same preview without
+    /// asking the forum for its index a second time.
+    @Test("A typed host's boards open over the page, and Back lands on the block still drawn")
+    func aTypedHostsBoardsOpenOverThePage() async {
+        let (session, http) = Self.forumSession()
+        session.hostname = Self.forum
+        await session.add(from: .field)
+        guard case .previewing(let looked, .field) = session.stage else {
+            Issue.record("a typed host should preview in the page")
+            return
+        }
+
+        await session.confirm()
+        #expect(session.choosing != nil, "the premise: the boards were reached")
+        #expect(session.stage?.surface == .sheet, "the boards were drawn in the page")
+        #expect(session.stage?.inlinePreview?.host == Self.forum, """
+            The page stopped drawing its block the moment the sheet opened over it.
+            """)
+        let asked = await http.paths
+
+        session.backToPreview()
+
+        #expect(session.stage == .previewing(looked, from: .field), "Back landed somewhere else")
+        #expect(await http.paths == asked, "Back asked the forum for its index again")
     }
 
     // MARK: - Which button calls which method
@@ -486,17 +764,25 @@ struct JoinStageTests {
         )
         let offer = JoinOffer(host: Self.forum, kind: .discuz, categories: [])
 
-        #expect(JoinSheet.leading(for: nil, cameFromBrowsing: false) == nil)
-        #expect(JoinSheet.leading(for: .browsing, cameFromBrowsing: false) == .close)
+        #expect(JoinSheet.leading(for: nil) == nil)
+        #expect(JoinSheet.leading(for: .browsing) == .close)
         // A preview reached from the field has the field behind it; one reached from a row has
         // the directory. Same stage, different answer — §2.2's rule by shape, not by history.
-        #expect(JoinSheet.leading(for: .previewing(preview), cameFromBrowsing: false) == .cancel)
+        //
+        // **And the answer is now a function of one value.** It used to take the entrance as a
+        // second argument, fed from a `@State` inside `JoinSheet` that nothing here could set —
+        // so this test proved the rule while the thing deciding which way to call it was
+        // reachable from no test at all.
+        #expect(JoinSheet.leading(for: .previewing(preview, from: .field)) == .cancel)
+        #expect(JoinSheet.leading(for: .previewing(preview, from: .directory)) == .backToBrowsing)
         #expect(
-            JoinSheet.leading(for: .previewing(preview), cameFromBrowsing: true) == .backToBrowsing
+            JoinSheet.leading(for: .choosingBoards(offer, from: .preview(preview, from: .field)))
+                == .backToPreview
         )
         #expect(
-            JoinSheet.leading(for: .choosingBoards(offer, from: preview), cameFromBrowsing: false)
-                == .backToPreview
+            JoinSheet.leading(for: .choosingBoards(offer, from: .joined(subscribed: [])))
+                == .backToPreview,
+            "the restate entrance is unbuilt; when it is built this becomes Cancel"
         )
 
         // And every one of them is a word, in every language.
@@ -517,19 +803,27 @@ struct JoinStageTests {
 
         let (cancelling, _) = Self.forumSession()
         cancelling.hostname = Self.forum
-        await cancelling.add()
+        await cancelling.add(from: .field)
         JoinSheet.press(.cancel, on: cancelling)
         #expect(cancelling.stage == nil)
 
         let (back, _) = Self.forumSession()
         back.hostname = Self.forum
-        await back.add()
+        // **The directory, and it has to be.** `leading(for:)` offers `.backToBrowsing` only to a
+        // preview reached through the directory; a typed host is offered Cancel. Pressing it on a
+        // `.field` stage pairs a button with a stage that can never present it, and passes only
+        // because `press` switches on the button — in the test whose whole purpose is to catch a
+        // button calling the wrong method.
+        await back.add(from: .directory)
+        #expect(JoinSheet.leading(for: back.stage) == .backToBrowsing, """
+            The premise: this is the stage that actually offers this button.
+            """)
         JoinSheet.press(.backToBrowsing, on: back)
         #expect(back.stage == .browsing, "Back to the directory went nowhere")
 
         let (boards, _) = Self.forumSession()
         boards.hostname = Self.forum
-        await boards.add()
+        await boards.add(from: .field)
         await boards.confirm()
         #expect(boards.choosing != nil, "the premise: the boards were reached")
         JoinSheet.press(.backToPreview, on: boards)
@@ -549,7 +843,7 @@ struct JoinStageTests {
         let pictures = ShellPictures(http: FixtureHTTP())
         let leaving = ShellSession(http: FixtureHTTP(Self.forumRoutes()), pictures: pictures)
         leaving.hostname = Self.forum
-        await leaving.add()
+        await leaving.add(from: .field)
         let before = pictures.generation
 
         leaving.dismissStage()
@@ -561,7 +855,7 @@ struct JoinStageTests {
         staying.sources = [Source(host: Self.forum, kind: .discuz)]
         staying.stage = .previewing(SourcePreview(
             host: Self.forum, kind: .discuz, profile: .silent(host: Self.forum, kind: .discuz)
-        ))
+        ), from: .field)
         let held = kept.generation
         staying.dismissStage()
         #expect(kept.generation == held, "a joined server's pictures were dropped on a dismissal")
@@ -573,9 +867,10 @@ struct JoinStageTests {
             host: Self.forum, kind: .discuz, profile: .silent(host: Self.forum, kind: .discuz)
         )
         #expect(JoinStage.browsing.host == nil)
-        #expect(JoinStage.previewing(preview).host == Self.forum)
+        #expect(JoinStage.previewing(preview, from: .field).host == Self.forum)
         let offer = JoinOffer(host: Self.forum, kind: .discuz, categories: [])
-        #expect(JoinStage.choosingBoards(offer, from: preview).host == Self.forum)
+        #expect(JoinStage.choosingBoards(offer, from: .preview(preview, from: .field)).host
+            == Self.forum)
     }
 
     // MARK: - What the preview says
@@ -588,15 +883,15 @@ struct JoinStageTests {
         // `allCases`, not a list written out here: a thirteenth protocol must be covered the day
         // it is added, not the day somebody remembers this test exists.
         for kind in ProtocolKind.allCases {
-            let key = JoinSheet.outcomeKey(kind)
+            let key = SourcePreviewView.outcomeKey(kind)
             for language in [DummyLanguage.english, .taiwanese] {
                 #expect(L10n.t(key, language: language) != key, "\(kind) has no sentence")
             }
         }
         // A forum's two answers are its own, and neither is the microblog sentence.
-        #expect(JoinSheet.outcomeKey(.discuz) == "join.preview.next.boards")
-        #expect(JoinSheet.outcomeKey(.discourse) == "join.preview.next.forum")
-        #expect(JoinSheet.outcomeKey(.mastodon) == "join.preview.next.microblog")
+        #expect(SourcePreviewView.outcomeKey(.discuz) == "join.preview.next.boards")
+        #expect(SourcePreviewView.outcomeKey(.discourse) == "join.preview.next.forum")
+        #expect(SourcePreviewView.outcomeKey(.mastodon) == "join.preview.next.microblog")
     }
 
     @Test("Every way a profile could not be read has a sentence of its own")
@@ -604,12 +899,12 @@ struct JoinStageTests {
         let reasons: [ProfileError] = [.unreachable, .refused(403), .unreadable]
         var said: Set<String> = []
         for reason in reasons {
-            let sentence = JoinSheet.unreadMessage(reason)
+            let sentence = SourcePreviewView.unreadMessage(reason)
             #expect(!sentence.hasPrefix("join.preview.unread."), "\(reason) has no sentence")
             said.insert(sentence)
         }
         #expect(said.count == 3, "two reasons were told to the reader as the same sentence")
-        #expect(JoinSheet.unreadMessage(.refused(429)).contains("429"))
+        #expect(SourcePreviewView.unreadMessage(.refused(429)).contains("429"))
     }
 
     @Test("Every registration state has a sentence of its own")
@@ -617,7 +912,7 @@ struct JoinStageTests {
         let states: [SourceProfile.Registration] = [.open, .byApproval, .closed]
         var said: Set<String> = []
         for state in states {
-            let key = JoinSheet.registrationKey(state)
+            let key = SourcePreviewView.registrationKey(state)
             #expect(L10n.t(key, language: .english) != key, "\(state) has no sentence")
             said.insert(key)
         }
@@ -634,10 +929,13 @@ struct JoinStageTests {
                 host: "a.example", kind: .discourse, readsWithoutAccount: reads
             )))
         }
-        #expect(JoinSheet.warns(preview(false)))
-        #expect(!JoinSheet.warns(preview(true)))
-        #expect(!JoinSheet.warns(preview(nil)), "a field the protocol has no idea of was a warning")
-        #expect(!JoinSheet.warns(SourcePreview(
+        #expect(SourcePreviewView.warns(preview(false)))
+        #expect(!SourcePreviewView.warns(preview(true)))
+        #expect(
+            !SourcePreviewView.warns(preview(nil)),
+            "a field the protocol has no idea of was a warning"
+        )
+        #expect(!SourcePreviewView.warns(SourcePreview(
             host: "a.example", kind: .discuz, profile: .silent(host: "a.example", kind: .discuz)
         )))
     }
@@ -659,13 +957,13 @@ struct JoinStageTests {
             """#),
         ]), store: ItemStore())
         session.hostname = Self.forum
-        await session.add()
+        await session.add(from: .field)
 
-        guard case .previewing(let preview) = session.stage else {
+        guard case .previewing(let preview, _) = session.stage else {
             Issue.record("a forum that refuses should still be previewed, not refused outright")
             return
         }
-        #expect(JoinSheet.warns(preview), """
+        #expect(SourcePreviewView.warns(preview), """
             The lock warning cannot fire for a Discuz!, which is the protocol it was designed \
             for. A preview that cannot say "this needs an account" is the affordance missing.
             """)
@@ -687,27 +985,27 @@ struct JoinStageTests {
             """#),
         ]), store: ItemStore())
         session.hostname = Self.forum
-        await session.add()
+        await session.add(from: .field)
 
-        guard case .previewing(let preview) = session.stage else {
+        guard case .previewing(let preview, _) = session.stage else {
             Issue.record("a forum behind a filter should still be previewed, not refused outright")
             return
         }
-        #expect(JoinSheet.caution(preview) == .turnedAway, """
+        #expect(SourcePreviewView.caution(preview) == .turnedAway, """
             A forum behind a filter is warned about with the wrong sentence, or not at all. \
             The ruling that split it from the forum's own policy must not cost the warning.
             """)
         // The press is still theirs, and is still the thing that fails — a prediction, not a
         // refusal that has happened.
         #expect(session.refuse == nil)
-        #expect(JoinSheet.warns(preview), "Return was left on a press the screen warned about")
+        #expect(SourcePreviewView.warns(preview), "Return was left on a press the screen warned about")
 
         // And the two cautions do not say the same thing in any language.
         for language in [DummyLanguage.english, .taiwanese] {
-            let shut = L10n.t(JoinSheet.Caution.needsAccount.key, language: language)
-            let filtered = L10n.t(JoinSheet.Caution.turnedAway.key, language: language)
+            let shut = L10n.t(SourcePreviewView.Caution.needsAccount.key, language: language)
+            let filtered = L10n.t(SourcePreviewView.Caution.turnedAway.key, language: language)
             #expect(shut != filtered, "two different facts were given one sentence")
-            #expect(filtered != JoinSheet.Caution.turnedAway.key, "no sentence in \(language)")
+            #expect(filtered != SourcePreviewView.Caution.turnedAway.key, "no sentence in \(language)")
         }
     }
 
@@ -722,10 +1020,10 @@ struct JoinStageTests {
                 host: "a.example", kind: .mastodon, error
             ))
         }
-        #expect(JoinSheet.caution(preview(.refused(403))) == .turnedAway)
-        #expect(JoinSheet.caution(preview(.unreadable)) == nil)
-        #expect(JoinSheet.caution(preview(.unreachable)) == nil)
-        #expect(JoinSheet.caution(SourcePreview(
+        #expect(SourcePreviewView.caution(preview(.refused(403))) == .turnedAway)
+        #expect(SourcePreviewView.caution(preview(.unreadable)) == nil)
+        #expect(SourcePreviewView.caution(preview(.unreachable)) == nil)
+        #expect(SourcePreviewView.caution(SourcePreview(
             host: "a.example", kind: .discuz, profile: .unasked(host: "a.example", kind: .discuz)
         )) == nil)
     }
@@ -780,7 +1078,7 @@ struct JoinStageTests {
         defer { watchdog.cancel() }
 
         session.hostname = Self.forum
-        await session.add()
+        await session.add(from: .field)
         await session.confirm()
         guard let offer = session.choosing?.offer else {
             Issue.record("a Discuz! should have paused for the reader to choose")
@@ -835,7 +1133,7 @@ struct JoinStageTests {
         session.sources = await session.store.sources()
 
         session.hostname = Self.forum
-        await session.add()
+        await session.add(from: .field)
         await session.confirm()
         guard let offer = session.choosing?.offer else {
             Issue.record("a Discuz! should have paused for the reader to choose")
@@ -876,7 +1174,7 @@ struct JoinStageTests {
     func theLookRecordsWhatWasSaid() async {
         let (session, _) = Self.forumSession()
         session.hostname = "  HTTPS://\(Self.forum)/forum.php  "
-        await session.add()
+        await session.add(from: .field)
         #expect(session.profiles[Self.forum] == .stated(SourceProfile(
             host: Self.forum, kind: .discuz, readsWithoutAccount: true
         )))

@@ -3,7 +3,7 @@
 "shell.notices.title" = "通知";
 "shell.notices.summary" = "誰來找你";
 "shell.account.title" = "帳號";
-"shell.account.summary" = "你讀的主機";
+"shell.account.summary" = "你讀的來源";
 "shell.usage.title" = "用量";
 "shell.usage.summary" = "這台機器上留了什麼";
 "shell.preferences.title" = "偏好";
@@ -164,7 +164,7 @@
 "prefs.fontSize.largest" = "最大";
 
 "prefs.cache" = "這次執行所存";
-"prefs.cache.footer" = "除了一項例外，這些都不會寫進磁碟。下次開啟 Fediqo 時，每個伺服器都會重新讀取；伺服器的表情符號名稱則會在一天後自行重新讀取。例外是你要求 Fediqo 存起來的密碼：它放在這台裝置的鑰匙圈裡，按「清除」時會和其他東西一起刪掉。";
+"prefs.cache.footer" = "除了一項例外，這些都不會寫進磁碟。下次開啟 Fediqo 時，每個來源都會重新讀取；來源的表情符號名稱則會在一天後自行重新讀取。例外是你要求 Fediqo 存起來的密碼：它放在這台裝置的鑰匙圈裡，按「清除」時會和其他東西一起刪掉。";
 "prefs.cache.empty" = "先到「帳號」加入來源。各來源送來的內容會留在這裡，直到你關閉 Fediqo。";
 "prefs.cache.catalogue" = "%d 個表情符號名稱 ·";
 "prefs.cache.catalogue.none" = "未存表情符號名稱";
@@ -180,7 +180,7 @@
 "forum.signin.web.label" = "%@ 自己的頁面";
 "forum.signin.save" = "把我的帳號與密碼存在這台裝置上";
 "forum.signin.save.off" = "這個程式看不到你的密碼。你是在這個論壇自己的頁面上輸入，這裡不會去讀你打了什麼。";
-"forum.signin.save.on" = "這個程式會看到你的密碼，因為要自己幫你登入就得握著它。密碼會存進這台裝置的鑰匙圈，只會送往這個論壇，也絕不會複製到 iCloud。清除這個伺服器、或在「偏好設定」按「忘掉」，都會把它刪掉。";
+"forum.signin.save.on" = "這個程式會看到你的密碼，因為要自己幫你登入就得握著它。密碼會存進這台裝置的鑰匙圈，只會送往這個論壇，也絕不會複製到 iCloud。清除這個來源、或在「偏好設定」按「忘掉」，都會把它刪掉。";
 "forum.signin.cancel" = "取消";
 "forum.signin.done" = "完成";
 "forum.stop.first" = "第一次登入是你自己來。請在下面這個論壇自己的頁面上輸入。";
@@ -253,43 +253,43 @@
 "join.close" = "關閉";
 "join.back" = "返回";
 
-"join.browse.title" = "可以讀的主機";
+"join.browse.title" = "可以讀的來源";
 "join.browse.detail" = "挑一台看看它是什麼。你沒開口之前不會加入任何東西。";
 "join.browse.filter" = "用主機名稱或關鍵字篩選";
 "join.browse.look" = "看看 %@";
 "join.browse.look.detail" = "不在目錄裡。加入之前先看看它是什麼。";
 "account.browse" = "瀏覽";
-"account.browse.label" = "瀏覽可以讀的主機";
+"account.browse.label" = "瀏覽可以讀的來源";
 
 "source.shape.microblog" = "微網誌";
 "source.shape.forum" = "論壇";
 "source.shape.video" = "影片";
 "source.spoken" = "%1$@，%2$@，%3$@";
 
-"join.preview.detail" = "這台主機自己說它是什麼。你按下訂閱之前不會加入任何東西。";
+"join.preview.detail" = "這個來源自己說它是什麼。你按下訂閱之前不會加入任何東西。";
 "join.preview.thumbnail" = "%@ 自己放的圖";
 "join.preview.activeMonth" = "本月活躍 %@";
 "join.preview.posts" = "%@ 篇文章";
 "join.preview.reg.open" = "任何人都可以註冊";
 "join.preview.reg.approval" = "註冊需要審核";
 "join.preview.reg.closed" = "已關閉註冊";
-"join.preview.rules" = "這台主機要求讀的人遵守什麼";
+"join.preview.rules" = "這個來源要求讀的人遵守什麼";
 "join.preview.rules.spoken" = "第 %1$d 條，共 %2$d 條：%3$@";
 
 "join.preview.silent" = "%@ 不對外公布任何關於自己的事。這個 app 沒有問過它，也沒有什麼好等的。";
-"join.preview.unread" = "這個 app 請 %@ 自我介紹，但讀不懂它的回答。這跟它能不能讀無關——很多主機給得出文章，卻沒有說明。";
+"join.preview.unread" = "這個 app 請 %@ 自我介紹，但讀不懂它的回答。這跟它能不能讀無關——很多來源給得出文章，卻沒有說明。";
 "join.preview.unread.network" = "那台主機沒有回應。";
 "join.preview.unread.refused" = "那台主機拒絕了這個請求（HTTP %d）。";
 "join.preview.unread.unreadable" = "那個回答不是這個 app 讀得懂的形狀。";
 "join.preview.unasked" = "這個 app 還沒問過 %@ 它是什麼。";
 
-"join.preview.next.microblog" = "訂閱之後，這台主機的公開時間軸會併進你的時間軸。";
+"join.preview.next.microblog" = "訂閱之後，這個來源的公開時間軸會併進你的時間軸。";
 "join.preview.next.forum" = "訂閱之後，這個論壇最新的主題會併進你的時間軸。";
 "join.preview.next.boards" = "接下來你要挑讀哪幾個版塊。挑完之前不會加入任何東西。";
 
 "join.preview.closed" = "要讀這個論壇得先有帳號，所以訂閱多半會被拒絕。";
-"join.preview.closed.hint" = "訂閱這台主機多半會被拒絕。";
-"join.preview.turnedAway" = "這台主機前面有東西把 Fediqo 擋掉了，所以訂閱多半會被拒絕。登入通常就能解決。";
+"join.preview.closed.hint" = "訂閱這個來源多半會被拒絕。";
+"join.preview.turnedAway" = "這個來源前面有東西把 Fediqo 擋掉了，所以訂閱多半會被拒絕。登入通常就能解決。";
 
 /* Unit 5 — one row per server, and what it is. */
 "account.sources.title"          = "來源";

@@ -57,7 +57,7 @@ struct SourcePageTests {
         ])
         let session = ShellSession(http: http, store: ItemStore())
         session.hostname = Self.micro
-        await session.add()
+        await session.add(from: .field)
         await session.confirm()
         // Joined second, and never looked at, so it has no entry in `profiles` at all.
         await session.store.add(Source(
@@ -378,7 +378,7 @@ struct SourcePageTests {
         let identity = String(
             format: L10n.t("source.spoken"), "f.example", "Discourse", DummyItem.shapeWord(.forum)
         )
-        let expected = ([identity] + JoinSheet.figurePieces(profile)
+        let expected = ([identity] + SourcePreviewView.figurePieces(profile)
             + ["1 boards: General"]).joined(separator: ", ")
 
         #expect(SourceRow.spoken(row) == expected, """
@@ -429,13 +429,45 @@ struct SourcePageTests {
             The field's control asked the server nothing. A reader who types a hostname and \
             presses Return has no other way to add it — Browse opens a directory, not their host.
             """)
-        guard case .previewing(let preview)? = session.stage else {
+        guard case .previewing(let preview, _)? = session.stage else {
             Issue.record("typing a hostname did not open its preview")
             return
         }
         #expect(preview.host == Self.micro)
         // Looked, and **nothing added** — the reader still presses Subscribe.
         #expect(session.sources.isEmpty)
+        // And the field it was typed into is live beside the block it opened. It used to be
+        // disabled by any stage at all, which was one term answering two questions: *is something
+        // on the wire* and *is the reader looking at something else*. A block in the page is
+        // neither over the field nor instead of it.
+        #expect(!pane.busy, "the field was greyed out under a preview drawn beside it")
+    }
+
+    /// The other side of the same term, and the reason it still exists. A preview in the sheet
+    /// covers the page, so a second look started behind it would replace a stage the reader cannot
+    /// see — PLAN risk 8, which this split must not undo.
+    @Test("The field is out of the reader's hands behind a sheet, and only behind a sheet")
+    func theFieldIsDisabledOnlyWhereTheReaderCannotSeePastTheStage() async {
+        let session = ShellSession(http: FixtureHTTP())
+        let pane = AccountPane(session: session)
+        let preview = SourcePreview(
+            host: Self.micro, kind: .mastodon, profile: .unasked(host: Self.micro, kind: .mastodon)
+        )
+
+        #expect(!pane.busy, "nothing is happening and the field was grey")
+
+        session.stage = .previewing(preview, from: .directory)
+        #expect(pane.busy, "a second look could start behind a sheet the reader cannot see past")
+
+        session.stage = .browsing
+        #expect(pane.busy, "the directory covers the page")
+
+        session.stage = .previewing(preview, from: .field)
+        #expect(!pane.busy)
+
+        session.stage = nil
+        session.checking = true
+        #expect(pane.busy, "something on the wire still takes the top half out of the reader's hands")
     }
 
     /// The same control, refusing the same way `add` refuses, so nothing had to be re-guarded when

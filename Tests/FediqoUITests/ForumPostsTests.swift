@@ -713,7 +713,7 @@ struct ForumPostsTests {
         ])
         let session = ShellSession(http: http, store: ItemStore())
         session.hostname = "install-d.example"
-        await session.add()
+        await session.add(from: .field)
         await session.confirm()
 
         let offer = try #require(session.choosing?.offer)

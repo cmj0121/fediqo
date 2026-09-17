@@ -6,6 +6,10 @@ import SwiftUI
 struct AccountPane: View {
     @Bindable var session: ShellSession
     @FocusState private var searchFocused: Bool
+    /// `JoinSheet`'s `headerFocused` doctrine applied to the page: without it a VoiceOver reader
+    /// who pressed Return in the field is left with focus on a field while a screenful of new
+    /// content has appeared below it.
+    @AccessibilityFocusState private var previewFocused: Bool
     @Environment(\.colorScheme) private var colorScheme
 
     private enum Metrics {
@@ -17,6 +21,9 @@ struct AccountPane: View {
         static let saying: CGFloat = 560
         static let fieldRadius: CGFloat = 6
         static let icon: CGFloat = 18
+        /// The one orchestrated moment on this page, and it answers the reader's own press: it
+        /// shows them what changed. There is no other motion here that a press did not ask for.
+        static let scroll: TimeInterval = 0.2
     }
 
     /// **The whole page scrolls, not a list inside it.** `PreferencesPane` is a `Form` and every
@@ -27,28 +34,135 @@ struct AccountPane: View {
     /// there is nothing the reader can scroll to reach it. No test can see that, which is the
     /// reason it is written down here.
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: ShellSpace.room) {
-            masthead
-            adding
-            // **Nothing at all where nothing is joined** — not a hairline, not a header, not an
-            // empty state. The hero above already says what the app is for and names the next act,
-            // and Browse is beside the field; a second invitation under a rule would be two of
-            // them on one screen, with the mascot arguing against the other. `PreferencesPane`
-            // draws its empty state and is right to, because it has no hero to be contradicted by.
-            if !session.sources.isEmpty {
-                hairline
-                sources
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: ShellSpace.room) {
+                masthead
+                adding
+                // A hostname the reader typed, previewed where they typed it. From the directory
+                // it stays in the sheet the directory is in, which is `inlinePreview`'s answer
+                // rather than this view's.
+                if let preview = session.stage?.inlinePreview {
+                    inlinePreview(preview)
+                        .id(Self.previewAnchor)
+                }
+                // **Nothing at all where nothing is joined** — not a hairline, not a header,
+                // not an empty state. The hero above already says what the app is for and names
+                // the next act, and Browse is beside the field; a second invitation under a rule
+                // would be two of them on one screen, with the mascot arguing against the other.
+                // `PreferencesPane` draws its empty state and is right to, because it has no
+                // hero to be contradicted by.
+                if !session.sources.isEmpty {
+                    hairline
+                    sources
+                }
+                }
+                .padding(ShellSpace.pad)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            // **The page takes the reader to the block, once, on its appearing.**
+            //
+            // **Gated on `nil → non-nil` and nothing else.** A reader coming back from the boards
+            // sheet must find the page where they left it; a scroll fired on that transition is
+            // the page throwing them somewhere they did not ask to go. `inlinePreview` stays
+            // non-nil across that whole round trip, which is what makes the gate expressible.
+            //
+            // **Neither the scroll nor the focus is reachable from a test**, and this project has
+            // no UI test target (risk 12). What a test can reach is the value both of them read —
+            // `JoinStage.inlinePreview`, pinned four ways in `JoinStageTests`. Listed for a
+            // running window in DESIGN-TAIL §6.5.
+            .onChange(of: session.stage?.inlinePreview?.host) { old, new in
+                guard old == nil, new != nil else { return }
+                withAnimation(.easeOut(duration: Metrics.scroll)) {
+                    proxy.scrollTo(Self.previewAnchor, anchor: .top)
+                }
+                previewFocused = true
             }
-            .padding(ShellSpace.pad)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .onChange(of: searchFocused) { _, on in
+                session.searchFocused = on
+            }
+            .onDisappear { session.searchFocused = false }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .onChange(of: searchFocused) { _, on in
-            session.searchFocused = on
+    }
+
+    /// Where the page scrolls to when a block appears. One anchor, on the block itself, so the
+    /// header lands at the top rather than the reader guessing what moved.
+    static let previewAnchor = "account.preview"
+
+    /// The preview, drawn into the page as **the sheet's own frame unrolled**: hairline, header,
+    /// hairline, evidence, hairline, actions. Nothing else on this page has that structure, so it
+    /// reads as an inserted object rather than as a third permanent section — and it needs no
+    /// plate, fill, border, radius or shadow to say so, which is what keeps `DESIGN.md` §0's ban
+    /// on a card intact.
+    ///
+    /// **No hairline under the actions.** `sources`' own comment argues it from the other side: a
+    /// rule under the last row is a list that looks cut off rather than finished. Where sources
+    /// exist the page's own hairline closes the block; where they do not, the block simply ends.
+    private func inlinePreview(_ preview: SourcePreview) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            hairline
+            SourcePreviewView.Header(preview: preview, surface: .pane)
+                .padding(.vertical, ShellSpace.pad)
+                .accessibilityFocused($previewFocused)
+            hairline
+            SourcePreviewView(preview: preview, surface: .pane)
+            hairline
+            previewActions(preview)
+                .padding(.vertical, ShellSpace.pad)
         }
-        .onDisappear { session.searchFocused = false }
+    }
+
+    /// Cancel and Subscribe, with no footer to hold them.
+    ///
+    /// **Leading-aligned, because this is the page and not a dialog footer** — `DESIGN.md` §0's
+    /// fourth rule. **Cancel first and Subscribe second, which is the sheet's own order**: a
+    /// reader who previews one server from Browse and the next from the field must not meet the
+    /// two buttons the other way round. The emphasis is carried by `.defaultAction` and not by
+    /// position, exactly as it is inside the sheet.
+    ///
+    /// **Disabled, and still drawn, while the boards sheet stands over the block** (§1.5(c)). Two
+    /// live Subscribe buttons on two surfaces at once is the two-presenters failure in a new
+    /// shape; removing the row instead of disabling it would change the block's height twice, once
+    /// when the sheet opens and once when it closes.
+    ///
+    /// The gate itself is `actionsLive(at:)`, so the rule is a value rather than an expression
+    /// inside a `View` body — the same argument that made `busy` internal, applied to the newer
+    /// of the two rules.
+    private func previewActions(_ preview: SourcePreview) -> some View {
+        let warned = SourcePreviewView.warns(preview)
+        return HStack(spacing: ShellSpace.step) {
+            Button(L10n.t("board.choose.cancel")) { cancelPreview() }
+            Button(L10n.t("board.choose.subscribe")) { Task { await subscribePreview() } }
+                .disabled(session.checking)
+                // Withdrawn in the one state the block has just warned about, on the same terms
+                // as the sheet's footer and from the same function — so the two surfaces cannot
+                // come to disagree about which press was warned about.
+                .keyboardShortcut(warned ? .none : .defaultAction)
+                .accessibilityHint(warned ? Text(L10n.t("join.preview.closed.hint")) : Text(""))
+            // After Subscribe rather than replacing it, so the button does not move under a
+            // finger mid-press.
+            if session.checking, session.progressHost == preview.host {
+                ProgressView().controlSize(.small)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .disabled(!Self.actionsLive(at: session.stage))
+    }
+
+    /// Whether the block's own Cancel and Subscribe are the live ones.
+    ///
+    /// **They are live exactly while the preview *is* the stage.** Once Subscribe has opened the
+    /// boards sheet over the block, the errand has moved into the sheet and two live Subscribe
+    /// buttons on two surfaces at once is the two-presenters failure in a new shape.
+    ///
+    /// **A `static func` and not an expression in the body**, on the same grounds `busy` is
+    /// internal: this is the rule that stops that happening, and a rule written inside a `View`
+    /// body is reachable from nothing. `titleFont(for:)` and `inset(for:)` are already this shape.
+    /// The block is drawn in exactly the cases `JoinStage.inlinePreview` answers, so this is asked
+    /// only of those — and it is false for the boards stage among them, which is the whole point.
+    static func actionsLive(at stage: JoinStage?) -> Bool {
+        stage?.surface == .pane
     }
 
     @ViewBuilder
@@ -117,14 +231,27 @@ struct AccountPane: View {
         }
     }
 
-    /// Whether the top half is out of the reader's hands: something on the wire, or the sheet up.
+    /// Whether the top half is out of the reader's hands: something on the wire, or a stage the
+    /// reader cannot see past.
     ///
-    /// **The sheet counts, which is PLAN risk 8.** `checking` is false the whole time a preview
-    /// is on screen, so a gate asking only about it would leave the field and both buttons live
+    /// **A sheet counts, which is PLAN risk 8.** `checking` is false the whole time a preview is
+    /// on screen, so a gate asking only about it would leave the field and both buttons live
     /// behind an open sheet — and a second look would overwrite the stage under a reader who is
     /// reading the first one.
-    private var busy: Bool {
-        session.checking || session.stage != nil
+    ///
+    /// **An inline preview does not, and that is the correction.** This term was answering two
+    /// questions at once: *is something on the wire* and *is the reader looking at something
+    /// else*. A block drawn in the page is neither over the field nor instead of it — it is
+    /// beside it — so disabling the field under it would grey out a control for no reason the
+    /// reader can see. What stops a second look from being nonsense is
+    /// `JoinStage.admitsASecondLook`, at the session, where the press lands.
+    ///
+    /// **Internal rather than private so a test can read it**, on the same grounds as `mark(_:)`
+    /// below: this term decides whether three controls are grey, it has just been narrowed, and
+    /// a view's private property is reachable from nothing. The four defects risk 12 lists were
+    /// all correct rules attached where no test could see them.
+    var busy: Bool {
+        session.checking || session.stage?.surface == .sheet
     }
 
     private var searchField: some View {
@@ -327,12 +454,24 @@ struct AccountPane: View {
     /// press Subscribe; every guard that press has — the duplicate check, the parse, the sheet
     /// already being up — is `look`'s and applies unchanged.
     func typedHost() async {
-        await session.add()
+        await session.add(from: .field)
     }
 
     /// Browse pressed. The catalogue is fetched here and not on the page appearing (decision 10).
     func browse() {
         session.browse()
+    }
+
+    /// The inline preview's Cancel. **Through `dismissStage` and not by clearing the stage**, so
+    /// the pictures a preview pulled for a host that was never joined are still forgotten. A block
+    /// in the page has no swipe and no Escape; this is its only way out.
+    func cancelPreview() {
+        session.dismissStage()
+    }
+
+    /// The inline preview's Subscribe — the same press as the sheet's, and the same method.
+    func subscribePreview() async {
+        await session.confirm()
     }
 
     /// The sign-in a refusal offered, taken.
