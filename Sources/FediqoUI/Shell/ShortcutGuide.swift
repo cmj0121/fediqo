@@ -7,11 +7,7 @@ struct ShortcutGuide: View {
 
     var body: some View {
         ZStack {
-            ShellChrome.dim(colorScheme)
-                .ignoresSafeArea()
-                .contentShape(Rectangle())
-                .onTapGesture(perform: onClose)
-
+            ShellGround(popUp: .shortcutGuide, dismiss: onClose)
             card
         }
     }

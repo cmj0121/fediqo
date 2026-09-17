@@ -117,11 +117,12 @@ struct AttachmentViewer: View {
 
     /// The sheet of nothing behind it, which is also the way out: a press anywhere that is not
     /// the picture closes it, the way it does behind the shortcut guide.
+    ///
+    /// **Through `ShellGround` rather than spelled here.** It *was* spelled here, and identically
+    /// in `ShortcutGuide`, with this comment pointing at the other copy as its authority — which
+    /// is an agreement by convention between two `View` bodies that nothing could check.
     private var ground: some View {
-        ShellChrome.behindPicture
-            .ignoresSafeArea()
-            .contentShape(Rectangle())
-            .onTapGesture(perform: onClose)
+        ShellGround(popUp: .attachmentViewer, dismiss: onClose)
     }
 
     /// The picture, or the film playing in the rectangle the still was in.
