@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<defs>
+  <mask id="m">
+    <rect x="128" y="64" width="768" height="576" rx="192" ry="192" fill="#fff"/><path fill="#fff" d="
+      M 128 384
+      C 128 640, 128 832, 320 896
+      C 448 960, 768 960, 832 768
+      C 832 704, 704 704, 576 768
+      C 448 832, 384 704, 384 512
+      C 384 448, 256 384, 128 384 Z"/>
+    <path d="M 352 512 V 288 C 352 224 512 224 512 288 V 384"
+          fill="none" stroke="#000" stroke-width="64" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M 576 384 V 288 C 576 224 736 224 736 288 V 512"
+          fill="none" stroke="#000" stroke-width="64" stroke-linecap="round" stroke-linejoin="round"/>
+  </mask>
+</defs>
+  <rect width="1024" height="1024" fill="#000" mask="url(#m)"/>
+</svg>

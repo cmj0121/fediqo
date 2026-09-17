@@ -292,8 +292,10 @@
 
 /* Unit 5 — one row per server, and what it is. */
 "account.sources.title"          = "Sources";
-"account.sources.detail"         = "Everything this device reads. Removing one takes its boards and its posts with it.";
+"account.sources.detail"         = "Everything this device reads. Press a row for what that server says about itself — its name, its size, its boards. Removing one takes its boards and its posts with it.";
 "account.sources.held"           = "What each one has left on this device is on Preferences.";
+/* M1 tail rev 4 — the compact row. What the marks on a row mean, said once for the list. */
+"account.sources.marks"          = "A row carries only the marks its own server has: sign in, change boards, clear what it left here, and remove it.";
 "account.source.boards"          = "%1$d boards: %2$@";
 "account.source.unread"          = "Its description could not be read.";
 "account.source.remove.label"    = "Remove %@ and everything it left here";
@@ -305,12 +307,6 @@
 "account.source.boards.unread"    = "%@'s boards could not be read just now.";
 "board.choose.detail.change"      = "Pick the boards you want to read. What you pick replaces what you read now.";
 
-/* M1 tail rev 3 — four controls at every width, both confirmations, and the masthead glance. */
-
-/* Decision 28: a control this protocol has no such thing for has to say why it is struck. */
-"account.source.signin.struck"    = "Fediqo cannot sign in to a %@ yet";
-"account.source.boards.struck"    = "Fediqo does not pick boards on a %@";
-"account.source.boards.none"      = "%@ has no boards to pick from";
 
 /* Decision 29: Clear asks first, and says what actually goes. */
 "account.clear.title"             = "Clear what %@ left here?";

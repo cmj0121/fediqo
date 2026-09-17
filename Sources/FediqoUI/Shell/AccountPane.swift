@@ -11,7 +11,8 @@ struct AccountPane: View {
     /// content has appeared below it.
     @AccessibilityFocusState private var previewFocused: Bool
     /// What the source list measured itself to be. **Zero until the first measurement lands**, and
-    /// `SourceRow.regime` reads that zero as "not measured yet" rather than as a narrow row.
+    /// `SourceRow.regime(width:threshold:)` reads that zero as "not measured yet" rather than as a
+    /// narrow row.
     @State private var rowWidth: CGFloat = 0
     @Environment(\.colorScheme) private var colorScheme
 
@@ -476,13 +477,24 @@ struct AccountPane: View {
     /// The sources this device reads, one row each.
     ///
     /// **This list and `PreferencesPane`'s answer different questions and are kept visibly apart.**
-    /// This one is *what am I reading, and what is it* — identity: protocol, shape, boards, and the
-    /// one figure the server stated about itself. That one is *what is this device holding* — an
-    /// inventory, every line of it with a byte count or a date. So **no byte figure and no date
-    /// appears on a row here, ever**, the shape glyph appears only here, and the footnote below
+    /// This one is *what am I reading* — a mark, a hostname, and what can be done about it. That
+    /// one is *what is this device holding* — an inventory, every line of it with a byte count or a
+    /// date. So **no byte figure and no date appears on a row here, ever**, and the footnote below
     /// names the other list and its job rather than repeating it. Clear is in both, which is one
     /// act reached from two questions and not a duplicate; Remove is only here, because removing is
     /// about what you read and not about what is held.
+    ///
+    /// **What a row used to say about one server is now behind its press** — decision 34 with
+    /// decision 31. Protocol, shape, figures, evidence and the whole board list are drawn by
+    /// `SourcePreviewView` under `PreviewOrigin.joined`, and this unit adds no drawing there. Two
+    /// facts that are about **the list** rather than about any one server stay on the page in
+    /// words: the header paragraph says that a row opens, and the footer legend says what the
+    /// marks mean. A per-server fact cannot go in a header — a section header cannot say
+    /// "mastodon.social has 1.2M active people" — which is the line that decides what moved where.
+    ///
+    /// **Named cost, for the record:** a server's size was readable while scanning six rows and is
+    /// now one press per server, with no way to compare two without two presses. That is the
+    /// largest single loss and it is not recoverable inside decision 34.
     private var sources: some View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
             // `name` and not `pane`: `pane` is documented as a page's own title, one per page, and
@@ -501,12 +513,31 @@ struct AccountPane: View {
             // Row-independent — `stage == nil && !checking` names no host — so it is asked once
             // for the list rather than once per row.
             let actsLive = ShellSession.rowActsLive(at: session.stage, checking: session.checking)
+            // **Read once for the list, beside `actsLive` and for its reason.** `session.rows` is
+            // a computed property that allocates a fresh `[SourceRow]`, and `widest` folds the
+            // whole of it — so referenced from inside the `ForEach` they are O(n²) on the app's
+            // launch screen, and the sentence below would have read as though it were true while
+            // being false.
+            let rows = session.rows
+            // **The property, not a second call to the same function.** They agreed by being the
+            // same expression, so changing the body alone would have left
+            // `thePaneHandsOneWidestToEveryRow` green while every row was drawn to a threshold
+            // nothing had pinned — the risk-12 shape with the test on the wrong side of it.
+            let widest = widest
             VStack(alignment: .leading, spacing: 0) {
-                ForEach(session.rows) { row in
+                ForEach(rows) { row in
                     SourceRowView(
                         row: row,
                         signedIn: session.forums.reachedSignIn(host: row.source.host),
                         width: rowWidth,
+                        // **Handed down, never derived per row.** Decision 33 made the control
+                        // count per-protocol, so the widest row is a property of the list; a row
+                        // asking `controls(of:)` about itself would give a Mastodon one threshold
+                        // and the Discuz! beside it another, and a list where one row is trailing
+                        // and the row above it is beneath at the same width reads as broken.
+                        // Risk 14's generalised fix: the caller states the answer, the callee
+                        // never looks around for it.
+                        widest: widest,
                         actsLive: actsLive,
                         // **The comparison moved to a named function and the fold went with
                         // it.** It used to be written here, folding case on both sides against a
@@ -526,11 +557,12 @@ struct AccountPane: View {
                     // **Between rows and not after every one.** A rule under the last row is a
                     // list that looks cut off rather than finished, with the footnote below it
                     // hanging off the end of a table.
-                    if row.id != session.rows.last?.id { hairline }
+                    if row.id != rows.last?.id { hairline }
                 }
             }
             // **One reader for the whole list, not one per row.** Every row in it is the same
-            // width, and `SourceRow.regime` is a function of that width, so measuring it once and
+            // width, and `SourceRow.regime` is a function of that width and of the list's own
+            // widest control set, so measuring it once and
             // handing it down keeps each row a function of its inputs — which is what the row's
             // own doc comment demands and what makes the decision drivable from a test.
             //
@@ -543,11 +575,38 @@ struct AccountPane: View {
             // fires when the macOS rail is expanded or collapsed — which moves the page by about
             // 150pt and should flip the regime.
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { rowWidth = $0 }
+            // **What the marks mean, said once for the list rather than four times per row.**
+            // Decision 34 deleted the words from the row and decision 33 makes *absence*
+            // meaningful, so a reader looking at a two-mark Mastodon above a four-mark Discuz! has
+            // no other way to learn that the short row is short on purpose. `.help()` is a no-op
+            // on iOS, so without this line a phone reader has nothing anywhere naming these marks.
+            //
+            // **Its verbs are the controls' own verbs** — sign in, change boards, clear, remove —
+            // matching `account.refuse.signin.label`, `account.source.boards.change`,
+            // `prefs.cache.clear.label` and `account.source.remove.label`, so an act keeps its
+            // name through the whole surface.
+            Text(L10n.t("account.sources.marks"))
+                .font(ShellType.mark)
+                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
             Text(L10n.t("account.sources.held"))
                 .font(ShellType.mark)
                 .foregroundStyle(ShellChrome.inkFaint(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    /// The control set of the widest row in this list — decision 33's one-threshold rule.
+    ///
+    /// **Internal rather than private so a test can read it**, on the same grounds as `busy` and
+    /// `searchInk`: this value decides the arrangement of *every* row on the page, and a value
+    /// computed inside a `View` body is reachable from nothing — which is precisely how the four
+    /// defects risk 12 counts all survived a green suite.
+    ///
+    /// **From `session.rows` and not `session.sources`**, so the list the threshold is computed
+    /// from is the list that is drawn.
+    var widest: [SourceRow.Control] {
+        SourceRow.widest(session.rows)
     }
 
     // MARK: - What every control on this page actually does
@@ -648,12 +707,19 @@ struct AccountPane: View {
     /// this page — a mark that could never fill, standing over a row whose sign-in control does.
     /// The fact travels with the value instead.
     ///
+    /// **`kind` travels beside `shape` so the glance draws the same picture the row does.** The
+    /// glance asked only for the shape, so a Discuz! was `text.bubble` here and its own mark three
+    /// lines below — one server with two pictures on one screen. Both halves are taken from the
+    /// same `SourceRow`, so they cannot be handed in disagreeing.
+    ///
     /// **A `SourceRow` and not a `Source`, so the shape is derived once on this page.** `SourceRow`
     /// says of itself that the shape comes "through `DummyItem.shape(of:)` and nowhere else … so
     /// that no caller can hand a source one shape while the timeline draws it as another" — and a
     /// second call to `shape(of:)` here was a second caller, three lines above the list it would
     /// disagree with. The glance now reads exactly what the row beneath it reads.
     static func mark(_ row: SourceRow, signedIn: Bool) -> SourceMarkRow.Mark {
-        SourceMarkRow.Mark(id: row.source.host, shape: row.shape, signedIn: signedIn)
+        SourceMarkRow.Mark(
+            id: row.source.host, kind: row.source.kind, shape: row.shape, signedIn: signedIn
+        )
     }
 }

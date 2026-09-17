@@ -1,3 +1,4 @@
+import FediqoCore
 import SwiftUI
 
 /// The glyph a source's shape is drawn with.
@@ -16,6 +17,13 @@ enum SourceMark {
     /// The glyph for a shape, with nobody signed in. **The one table**, read by the source page's
     /// rows and by the masthead glance.
     ///
+    /// **The fallback tier, and `kindMark` below is the tier above it.** The two are one pair, and
+    /// the row and the masthead glance both ask the pair in that order — so a protocol that gains
+    /// a drawing gains it in *both* places at once, and neither can come to show a different
+    /// picture of the same server. That property is the reason the pair is asked and not copied;
+    /// a surface reading only this table would go on drawing `text.bubble` for a Discuz! the row
+    /// beside it draws as a Discuz!.
+    ///
     /// **No `default:`**, the rule this branch states everywhere it switches over a closed set: a
     /// shape swept into somebody else's glyph is a film drawn with a globe over it, and nothing
     /// would break.
@@ -29,6 +37,67 @@ enum SourceMark {
         // one alongside the row that draws a film.
         case .video: "film"
         }
+    }
+
+    /// The protocol's own mark, where this repo draws one — decision 36, and decision 37 makes it
+    /// the row's leading icon always rather than a fallback behind the server's own picture.
+    ///
+    /// **Two drawings per protocol, chosen by rendered pixels**, which is the artwork's own rule:
+    /// `assets/README.md` snaps the `-small` pair to the 64-unit grid because anything narrower
+    /// lands mid-pixel and anti-aliases to grey. At 24pt the row draws 24px on a 1× display and
+    /// 48px on a 2×, which straddles that boundary — so the row asks rather than picks, and the
+    /// gate is the pixel count and never the platform.
+    ///
+    /// **No `default:`.** A protocol added without an answer here falls to the shape glyph, which
+    /// is a correct fallback — but it must be a *chosen* one. Discourse is the case that proves it
+    /// is: it is drawn, joinable and deliberately `nil`, because this repo has no Discourse
+    /// drawing and inventing one to avoid a `nil` would be worse than the glyph.
+    ///
+    /// Returns a name in `Media.xcassets`, drawn `.renderingMode(.template)` so it takes the
+    /// enclosing ink rather than any colour of its own.
+    ///
+    /// The ink it takes is `ink(signedIn:quiet:scheme:)` below, on both surfaces and in both tiers.
+    static func kindMark(_ kind: ProtocolKind, pixels: CGFloat) -> String? {
+        // **The switch answers which protocol; the line after it answers which drawing.** They are
+        // two independent questions, and a `fine ? … : …` inside every case mixed them: each new
+        // protocol would have restated an artwork rule that has nothing to do with protocols, and
+        // could have got it wrong one case at a time.
+        let base: String?
+        switch kind {
+        // One drawing for the whole Mastodon-API family. What the mark says is *this is a place
+        // that speaks the Mastodon API*, which is true of every fork in this list — and unit 6
+        // unlocks five of them at once, so a per-fork drawing would be five drawings for one fact.
+        case .mastodon, .pleroma, .akkoma, .gotosocial, .pixelfed, .friendica, .misskey:
+            base = "KindMastodon"
+        case .discuz:
+            base = "KindDiscuz"
+        // No drawing yet. The shape glyph answers, and that is a decision and not a gap.
+        case .discourse, .lemmy, .peertube, .unknown:
+            base = nil
+        }
+        // 32 rendered pixels: above it the fine drawings' geometry resolves, at or below it the
+        // 64-unit pair is what stays on whole pixels.
+        return base.map { pixels > 32 ? $0 : $0 + "Small" }
+    }
+
+    /// What a source's mark is drawn in: `filament` once the reader has switched this device's
+    /// relationship with it on, and the surface's own quiet ink otherwise.
+    ///
+    /// **One function because the fact is one fact, and the surfaces disagreed about it.** The
+    /// row's tier 3 hardcoded `inkFaint` with no variant while the glance's tier 3 honoured
+    /// `signedIn` — unreachable today only because the one protocol with a sign-in is also the one
+    /// with a drawing, so tier 3 is never reached for it. **The first protocol with a sign-in and
+    /// no drawing would have made the masthead and the row say different things about one server**,
+    /// which is exactly what the one-server-one-picture ruling exists to prevent, arriving through
+    /// the ink instead of through the picture.
+    ///
+    /// `quiet` is the caller's, and the two callers differ on purpose: the row's kind mark is
+    /// `inkDim` because it is a leading mark on a row of controls, the glance's is `inkFaint`
+    /// because it is a glance and not a control, and either surface's shape glyph is `inkFaint`.
+    /// What must not differ is **whether `signedIn` is honoured at all**, and that is this
+    /// function.
+    static func ink(signedIn: Bool, quiet: Color, scheme: ColorScheme) -> Color {
+        signedIn ? ShellChrome.filament(scheme) : quiet
     }
 }
 
@@ -56,11 +125,19 @@ enum SourceMark {
 /// says what the glyphs say, and collapsing them is what stops a reader hearing six unlabelled
 /// images before the fact.
 struct SourceMarkRow: View {
-    /// One source, as the glance sees it: the shape it is drawn with, and whether this device last
-    /// saw a sign-in reached there. The host is the id and is never drawn — the row below carries
-    /// the identity, and this line carries the collection.
+    /// One source, as the glance sees it: what it is, and whether this device last saw a sign-in
+    /// reached there. The host is the id and is never drawn — the row below carries the identity,
+    /// and this line carries the collection.
+    ///
+    /// **Both `kind` and `shape`, because the two tiers need one each.** `kind` asks
+    /// `SourceMark.kindMark` for the protocol's own drawing; `shape` answers `SourceMark.symbol`
+    /// where this repo has none. Carrying only the shape is what let the glance draw `text.bubble`
+    /// over a Discuz! the row three lines below drew as a Discuz! — one server with two pictures
+    /// on one screen. They are derived together in `AccountPane.mark(_:signedIn:)` from the row
+    /// itself, so they cannot be handed in disagreeing.
     struct Mark: Identifiable, Hashable {
         let id: String
+        let kind: ProtocolKind
         let shape: DummySourceKind
         let signedIn: Bool
     }
@@ -68,6 +145,11 @@ struct SourceMarkRow: View {
     let marks: [Mark]
 
     @Environment(\.colorScheme) private var colorScheme
+    /// How many pixels a point is, so a mark can ask for the drawing made for the size it will
+    /// actually be rendered at. At 16pt this glance is 16px at 1x and 32px at 2x — both at or
+    /// under `kindMark`'s 32-pixel gate, so the glance is normally drawn from the `-small` pair
+    /// the 64-unit grid was made for, and a 3x phone reaches the fine one.
+    @Environment(\.displayScale) private var displayScale
     /// Scaling, unlike the 28pt avatar it replaces, because it sits beside text that scales.
     @ScaledMetric(relativeTo: .callout) private var glyph: CGFloat = 16
 
@@ -89,9 +171,9 @@ struct SourceMarkRow: View {
     /// Which sentence the count is said in.
     ///
     /// **Chosen on `signedIn > 0`, so an all-Mastodon reader is not told "0 signed in"** about a
-    /// capability their protocols never had — decision 28 draws the *control* for a protocol that
-    /// lacks a sign-in, struck, because a control is where a reader asks that question. A masthead
-    /// readout is not, and a zero there would be a figure about nothing.
+    /// capability their protocols never had. Decision 33 draws no control at all for a protocol
+    /// that lacks a sign-in, so there is nothing anywhere on this page implying such a reader has
+    /// a sign-in to be counted — and a zero here would be a figure about nothing.
     static func countKey(signedIn: Int) -> String {
         signedIn > 0 ? "account.standing.count.signedIn" : "account.standing.count"
     }
@@ -114,17 +196,11 @@ struct SourceMarkRow: View {
         return VStack(alignment: .leading, spacing: ShellSpace.tight) {
             HStack(spacing: ShellSpace.snug) {
                 ForEach(marks.prefix(Self.shown)) { mark in
-                    Image(systemName: SourceMark.symbol(mark.shape))
-                        .font(.system(size: glyph))
-                        // The same relationship spelt the same way as the row's sign-in control,
-                        // so the masthead and the row agree rather than collide.
-                        .symbolVariant(mark.signedIn ? .fill : .none)
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(
-                            mark.signedIn
-                                ? ShellChrome.filament(colorScheme)
-                                : ShellChrome.inkFaint(colorScheme)
-                        )
+                    drawing(mark)
+                        .frame(width: glyph, height: glyph)
+                        // The same relationship spelt the same way as the row's, through the same
+                        // function, so the masthead and the row agree rather than collide.
+                        .foregroundStyle(Self.ink(mark, scheme: colorScheme))
                 }
             }
             Text(line)
@@ -134,5 +210,42 @@ struct SourceMarkRow: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(line)
+    }
+
+    /// One source's picture: the protocol's own mark, or the shape glyph where this repo draws
+    /// none.
+    ///
+    /// **The same two tiers the row asks, in the same order** — `SourceMark.kindMark` then
+    /// `SourceMark.symbol`. Not a copy of the row's drawing but the same pair of questions, which
+    /// is what makes "one server, one picture" hold by construction rather than by two surfaces
+    /// remembering: a protocol that gains a drawing gains it here and in the row at once.
+    ///
+    /// **What stays different, deliberately.** This is a glance and not a control, so the quiet
+    /// half is `inkFaint` where the row's kind mark is `inkDim`, and it is 16pt where the row is
+    /// 24. What it *says* has not changed at all: the count and the signed-in fact, in the
+    /// sentence beneath. What is **not** allowed to differ is whether `signedIn` is honoured —
+    /// see `SourceMark.ink`.
+    @ViewBuilder
+    private func drawing(_ mark: Mark) -> some View {
+        if let name = SourceMark.kindMark(mark.kind, pixels: glyph * displayScale) {
+            Image(name, bundle: .module)
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+        } else {
+            Image(systemName: SourceMark.symbol(mark.shape))
+                .font(.system(size: glyph))
+                .symbolVariant(mark.signedIn ? .fill : .none)
+                .symbolRenderingMode(.hierarchical)
+        }
+    }
+
+    /// One mark's ink. **Internal and pinned**, because "the glance and the row say the same thing
+    /// about one server" is a property of these two values and not of the two drawings alone — and
+    /// a colour decided inside a `View` body is reachable from nothing.
+    static func ink(_ mark: Mark, scheme: ColorScheme) -> Color {
+        // One quiet ink for both tiers here: a glance is not a control, so neither its kind mark
+        // nor its shape glyph takes the row's `inkDim`.
+        SourceMark.ink(signedIn: mark.signedIn, quiet: ShellChrome.inkFaint(scheme), scheme: scheme)
     }
 }

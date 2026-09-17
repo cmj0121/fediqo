@@ -11,7 +11,23 @@ DERIVED         := $(ROOT)/.build/xcode
 #
 #     make -C Apps ios IOS_DESTINATION='platform=iOS Simulator,name=iPhone 17'
 IOS_DESTINATION ?= generic/platform=iOS Simulator
-MASCOT          := $(ROOT)/Sources/FediqoUI/Resources/Media.xcassets/Mascot.imageset/mascot.svg
+CATALOG         := $(ROOT)/Sources/FediqoUI/Resources/Media.xcassets
+# Every drawing the app bundles, as `<file in assets/>:<imageset>`. `assets/` stays the editable
+# source and the catalogue holds a copy.
+#
+# **One list and one mechanism, including the mascot.** The mascot had its own variable and its
+# own `cp` line, and the protocol marks -- decisions 36 and 37, two drawings each, picked between
+# by `SourceMark.kindMark` on rendered pixels -- were added beside it. Two mechanisms for one job
+# is how the next drawing gets copied by whichever one its author happened to read, and the
+# mascot's was the one *not* covered by the argument below.
+#
+# **Copied here rather than by hand, which is why this list exists at all:** the four marks were
+# hand-copied once while the unit that added them was running, and two of them were edited
+# twenty-four seconds later -- so the catalogue held a drawing that was already out of date, the
+# app drew it, and nothing anywhere said so.
+ARTWORK         := mascot:Mascot \
+                   kind-mastodon:KindMastodon kind-mastodon-small:KindMastodonSmall \
+                   kind-discuz:KindDiscuz kind-discuz-small:KindDiscuzSmall
 # Where the UI run leaves what it did, and what the coverage is read out of.
 UITEST_RESULT   := $(DERIVED)/uitest.xcresult
 UITEST_IOS_RESULT := $(DERIVED)/uitest-ios.xcresult
@@ -134,8 +150,11 @@ xcodeproj: sync-assets	# generate Fediqo.xcodeproj from project.yml
 	@xcodegen generate --quiet --spec $(ROOT)/project.yml --project $(ROOT)
 
 sync-assets:		# copy the artwork in assets/ into the asset catalog
-	@mkdir -p "$(dir $(MASCOT))"
-	@cp $(ROOT)/assets/mascot.svg $(MASCOT)
+	@for pair in $(ARTWORK); do \
+		file=$${pair%%:*}; set=$${pair##*:}; \
+		mkdir -p "$(CATALOG)/$$set.imageset"; \
+		cp "$(ROOT)/assets/$$file.svg" "$(CATALOG)/$$set.imageset/$$file.svg"; \
+	done
 
 clean:				# remove the generated project and everything it built
 	@rm -rf $(XCODEPROJ) $(DERIVED)

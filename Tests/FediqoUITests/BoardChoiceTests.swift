@@ -1193,19 +1193,16 @@ struct BoardChoiceTests {
             host: Self.host, kind: .discuz,
             boards: [BoardSubscription(fid: 33, name: "启动盘工具")]
         )
-        #expect(SourceRow.state(of: .boards, source: source, actsLive: true) == .live)
-        #expect(SourceRow.state(of: .boards, source: source, actsLive: false) == .dimmed, """
-            A control refused by `rowActsLive` still drew as live. That is the defect the whole \
-            rule exists to close, arriving by the one route the rule cannot reach: the reader \
-            cannot see that the press is refused.
-            """)
-
-        // And the row's own drawing follows it, rather than the rule being right where nothing
-        // reads it — which is the whole of what risk 12 counts.
+        // **`SourceRow.state(of:source:actsLive:)` is gone, and this reads the view's rule
+        // directly — which is the stronger of the two anyway.** With decision 33 withdrawing the
+        // strike, that function was a function of `actsLive` alone and no longer read `source` at
+        // all: a signature that lies about what decides. The rule now lives in one place, on the
+        // view, where the drawing is.
         let row = SourceRow(source: source, profile: .unasked(host: Self.host, kind: .discuz))
         func drawn(live: Bool) -> SourceRowView {
             SourceRowView(
                 row: row, signedIn: false, width: 900,
+                widest: SourceRow.controls(of: source),
                 actsLive: live, waiting: nil, refusal: nil,
                 signIn: {}, clear: {}, remove: {}, changeBoards: {}, open: {}
             )

@@ -1,4 +1,5 @@
 import FediqoCore
+import SwiftUI
 import Testing
 @testable import FediqoUI
 
@@ -414,6 +415,84 @@ struct AccountMarkTests {
         // protocol looks like — which is what `SourceRow`'s own doc demands of `shape(of:)`.
         let discuz = row("e.example", .discuz)
         #expect(AccountPane.mark(discuz, signedIn: false).shape == discuz.shape)
+
+        // **One server, one picture.** The glance carried only the shape, so a Discuz! was drawn
+        // `text.bubble` in the masthead and as its own mark in the row three lines below — one
+        // server with two pictures on one screen. Both halves now travel from the same `SourceRow`
+        // and cannot be handed in disagreeing.
+        #expect(AccountPane.mark(discuz, signedIn: false).kind == .discuz)
+        #expect(AccountPane.mark(row("f.example", .mastodon), signedIn: false).kind == .mastodon)
+    }
+
+    /// **The property that stops this recurring**: the glance and the row ask *one* tier pair —
+    /// `SourceMark.kindMark` first, `SourceMark.symbol` where that draws none — so a protocol that
+    /// gains a drawing gains it in both places at once. Asked here of every protocol, because a
+    /// surface reading only the shape table is exactly how the two came to disagree.
+    ///
+    /// **And at both sign-in states, which is the half the first version of this test could not
+    /// see.** It compared the picture and never the ink, and the ink was where a fourth difference
+    /// was hiding: the row's shape glyph hardcoded `inkFaint` with no variant while the glance's
+    /// honoured `signedIn`. Unreachable today only because Discuz! is both the one protocol with a
+    /// sign-in and the one with a drawing — so the **first protocol with a sign-in and no drawing**
+    /// would have had the masthead and the row saying different things about one server, which is
+    /// the ruling this test exists for arriving through the ink instead of the picture.
+    @Test("The glance and the row draw one server with one picture, for every protocol")
+    func theGlanceAndTheRowDrawOnePicture() {
+        // **Signed in is signed in, whichever surface and whichever tier.** The quiet inks differ
+        // on purpose — a glance is not a control — but whether `signedIn` is honoured at all must
+        // not, and that is `SourceMark.ink`.
+        for scheme in [ColorScheme.light, .dark] {
+            for quiet in [ShellChrome.inkDim(scheme), ShellChrome.inkFaint(scheme)] {
+                #expect(SourceMark.ink(signedIn: true, quiet: quiet, scheme: scheme)
+                    == ShellChrome.filament(scheme))
+                #expect(SourceMark.ink(signedIn: false, quiet: quiet, scheme: scheme) == quiet)
+            }
+        }
+
+        for kind in ProtocolKind.allCases {
+            let row = SourceRow(source: Source(host: "a.example", kind: kind),
+                                profile: .unasked(host: "a.example", kind: kind))
+            let mark = AccountPane.mark(row, signedIn: false)
+            #expect(mark.kind == row.source.kind, "\(kind)")
+            #expect(mark.shape == row.shape, "\(kind)")
+            // Both surfaces ask the same two questions of the same source, so whichever tier
+            // answers, it answers identically for the glance and for the row.
+            for pixels in [CGFloat(16), 32, 48, 72] {
+                let drawn = SourceMark.kindMark(mark.kind, pixels: pixels)
+                #expect(drawn == SourceMark.kindMark(row.source.kind, pixels: pixels), "\(kind)")
+                if drawn == nil {
+                    #expect(SourceMark.symbol(mark.shape) == SourceMark.symbol(row.shape), "\(kind)")
+                }
+            }
+        }
+        // The case that made the ruling: a Discuz! has a drawing, so neither surface falls to the
+        // shape glyph and neither draws `text.bubble` any more.
+        #expect(SourceMark.kindMark(.discuz, pixels: 16) != nil)
+        #expect(SourceMark.symbol(DummyItem.shape(of: .discuz)) == "text.bubble", """
+            The fallback tier moved. It is still what a Discourse draws, and it is what a Discuz! \
+            no longer needs — both facts matter to the ruling this test pins.
+            """)
+        // And a Discourse still falls through to it, which is a chosen fallback and not a gap.
+        #expect(SourceMark.kindMark(.discourse, pixels: 16) == nil)
+
+        // **The fourth difference, closed at both surfaces and in both tiers.** A protocol with a
+        // drawing and one without, signed in and out, on both surfaces: `filament` exactly where
+        // the reader has switched this device's relationship on, and never anywhere else.
+        for kind in [ProtocolKind.discuz, .discourse] {
+            for signedIn in [false, true] {
+                let row = SourceRow(source: Source(host: "a.example", kind: kind),
+                                    profile: .unasked(host: "a.example", kind: kind))
+                let drawn = SourcePageTests.drawn(row, at: 900, signedIn: signedIn)
+                let glance = SourceMarkRow.ink(
+                    AccountPane.mark(row, signedIn: signedIn), scheme: .light
+                )
+                #expect((drawn.markInk == ShellChrome.filament(.light)) == signedIn, """
+                    The row's leading mark stopped saying whether this device is signed in, for \
+                    \(kind). The shape-glyph tier used to ignore it outright.
+                    """)
+                #expect((glance == ShellChrome.filament(.light)) == signedIn, "\(kind)")
+            }
+        }
     }
 
     // MARK: - The masthead glance
@@ -424,9 +503,11 @@ struct AccountMarkTests {
     /// state at a glance.
     @Test("The glance says how many sources there are, and how many are signed in")
     func theGlanceCountsTheCollection() {
+        // The kind is immaterial here — this test is about the *sentence*, which counts marks and
+        // signed-in marks and never asks what any of them is drawn with.
         func marks(_ shapes: [DummySourceKind], signedIn: Int) -> [SourceMarkRow.Mark] {
             shapes.enumerated().map {
-                SourceMarkRow.Mark(id: "\($0.offset).example", shape: $0.element,
+                SourceMarkRow.Mark(id: "\($0.offset).example", kind: .mastodon, shape: $0.element,
                                    signedIn: $0.offset < signedIn)
             }
         }

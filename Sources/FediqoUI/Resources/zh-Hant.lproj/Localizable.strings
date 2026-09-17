@@ -290,8 +290,10 @@
 
 /* Unit 5 — one row per server, and what it is. */
 "account.sources.title"          = "來源";
-"account.sources.detail"         = "這個裝置讀的全部。移除其中一個，它的版塊和它的文章都會跟著走。";
+"account.sources.detail"         = "這個裝置讀的全部。按一列，看那個來源怎麼說它自己——它的名字、它的規模、它的版塊。移除其中一個，它的版塊和它的文章都會跟著走。";
 "account.sources.held"           = "每一個在這個裝置上還留著什麼，在偏好設定裡。";
+/* M1 tail rev 4 — the compact row. What the marks on a row mean, said once for the list. */
+"account.sources.marks"          = "一列只帶它自己那個來源有的標記：登入、換版塊、清除它留在這裡的東西、移除它。";
 "account.source.boards"          = "%1$d 個版塊：%2$@";
 "account.source.unread"          = "讀不到它的自我介紹。";
 "account.source.remove.label"    = "移除 %@，連同它留在這裡的東西";
@@ -303,12 +305,6 @@
 "account.source.boards.unread"    = "現在讀不到 %@ 的版塊。";
 "board.choose.detail.change"      = "挑你想看的版塊。挑好的會取代你現在讀的。";
 
-/* M1 tail rev 3 — four controls at every width, both confirmations, and the masthead glance. */
-
-/* Decision 28: a control this protocol has no such thing for has to say why it is struck. */
-"account.source.signin.struck"    = "Fediqo 還不能登入 %@";
-"account.source.boards.struck"    = "Fediqo 不會在 %@ 上挑版塊";
-"account.source.boards.none"      = "%@ 沒有版塊可以挑";
 
 /* Decision 29: Clear asks first, and says what actually goes. */
 "account.clear.title"             = "清除 %@ 留在這裡的東西？";
