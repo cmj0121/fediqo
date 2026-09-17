@@ -1,6 +1,7 @@
 import FediqoCore
 import Foundation
 import Observation
+import SwiftUI
 
 /// In-memory session: unsigned sources, All and Trends, and the Account add flow.
 @MainActor
@@ -929,6 +930,28 @@ final class ShellSession {
     /// browser is the only stage that admits one.
     static func pageActsLive(at stage: JoinStage?, checking: Bool) -> Bool {
         !checking && (stage?.admitsASecondLook ?? true)
+    }
+
+    /// Whether a scene phase means **the reader has left this window**.
+    ///
+    /// **The two platforms do not mean the same thing by `.inactive`, and reading it as one rule
+    /// is the defect.** On a Mac it fires whenever the window stops being the key one, which is
+    /// exactly the "unfocus" a selector should close on — this file already records that fact
+    /// elsewhere, about the cache wake. On iOS the same value fires for things the reader has not
+    /// left for at all: Notification Centre pulled down, a call banner, the app switcher
+    /// previewed and dismissed. A board picker that threw the reader's ticks away because a
+    /// banner appeared would be a defect wearing this feature's clothes, so there it is
+    /// `.background` and nothing less.
+    ///
+    /// **Here rather than in the view**, on the same grounds as `pageActsLive`: it decides
+    /// whether a reader's work is discarded, and a rule inside a `View` body is reachable from
+    /// nothing.
+    static func windowLeft(_ phase: ScenePhase) -> Bool {
+        #if os(macOS)
+        phase != .active
+        #else
+        phase == .background
+        #endif
     }
 
     /// A row's boards control was pressed and the forum's index could not be read.

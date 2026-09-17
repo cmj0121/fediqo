@@ -277,7 +277,17 @@ public struct FediqoRootView: View {
             // than anything the stranded cohort could cause itself, which is the rule that
             // matters — and the cache's own dedup makes a fetch nobody needs free.
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active { wakeTheCaches() }
+                if phase == .active {
+                    wakeTheCaches()
+                } else if ShellSession.windowLeft(phase),
+                          session.stage?.closesWhenTheWindowLeaves == true {
+                    // **The selectors only**, and the stage is what says so. The editor and a new
+                    // post are `composing` and `signingIn` below, which this cannot reach: a
+                    // sign-in closed because the reader went to their password manager would be
+                    // the worst version of this feature, and it is unreachable rather than
+                    // remembered.
+                    session.dismissStage()
+                }
             }
             .dummyShellKeys { character, shift, control in
                 performDummyKey(character, shift: shift, control: control)

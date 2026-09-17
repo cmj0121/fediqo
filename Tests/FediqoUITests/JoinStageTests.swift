@@ -891,6 +891,55 @@ struct JoinStageTests {
         }
     }
 
+    /// **A selector the reader walked away from closes; everything else stays.**
+    ///
+    /// The user's ruling, and it was made after the cost was put to them: `.choosingBoards` is
+    /// holding ticks, and on a Mac this fires whenever the window stops being key. That cost is
+    /// recorded on the property rather than argued away here.
+    @Test("Only the stages that ask the reader a question close when the window goes")
+    func onlyTheSelectorsCloseWhenTheReaderLeaves() {
+        let preview = Self.previewOf(Self.forum)
+        let offer = JoinOffer(host: Self.forum, kind: .discuz, categories: [])
+        let source = Source(host: Self.forum, kind: .discuz)
+
+        #expect(JoinStage.browsing.closesWhenTheWindowLeaves)
+        #expect(JoinStage.browsingServers(.mastodon).closesWhenTheWindowLeaves)
+        #expect(JoinStage.choosingBoards(offer, from: .preview(preview, ticked: []))
+            .closesWhenTheWindowLeaves)
+        #expect(JoinStage.choosingBoards(offer, from: .joined(subscribed: [], ticked: []))
+            .closesWhenTheWindowLeaves)
+
+        #expect(!JoinStage.previewing(preview, from: .field, ticked: []).closesWhenTheWindowLeaves,
+                "a block drawn in the page is not a window to be left")
+        #expect(!JoinStage.previewing(preview, from: .joined(source), ticked: [])
+            .closesWhenTheWindowLeaves, """
+            The detail of a source already held is a thing to read, not a question to answer — \
+            and it was taken away from a reader who glanced at another app.
+            """)
+    }
+
+    /// **`.inactive` does not mean the same thing on the two platforms, and one rule for both is
+    /// the defect this pins.**
+    ///
+    /// On a Mac it is the window losing key, which is the whole feature. On iOS it fires for
+    /// Notification Centre, a call banner and an app-switcher peek — none of which is the reader
+    /// leaving, and any of which would take a board picker's ticks with it.
+    @Test("What counts as leaving is not the same on a Mac as on a phone")
+    func leavingMeansSomethingDifferentOnEachPlatform() {
+        #expect(!ShellSession.windowLeft(.active), "the reader is right here")
+        #expect(ShellSession.windowLeft(.background), "the app went away on either platform")
+        #if os(macOS)
+        #expect(ShellSession.windowLeft(.inactive), """
+            On a Mac the window stopping being key is exactly the unfocus a selector closes on.
+            """)
+        #else
+        #expect(!ShellSession.windowLeft(.inactive), """
+            A notification banner is not the reader leaving, and this would have thrown away the \
+            ticks of anybody who got one while choosing boards.
+            """)
+        #endif
+    }
+
     /// The rule the field and Browse are both gated on. Pinned as a value, because the two
     /// controls that read it are in a `View` body and a session guard respectively, and those two
     /// disagreeing is how a live control gets refused three files away.

@@ -219,6 +219,34 @@ enum JoinStage: Identifiable, Equatable {
     /// D28's pause: the forum's boards, and what the reader was doing when they got here.
     case choosingBoards(JoinOffer, from: BoardsOrigin)
 
+    /// Whether this stage goes away when the reader leaves the window.
+    ///
+    /// **The selectors do; nothing else does — the user's ruling, stated with its cost.** A
+    /// picker is a question the reader came to answer, and one they walked away from is a
+    /// question they stopped answering. What it costs is named here rather than argued away:
+    /// **`.choosingBoards` is holding their ticks**, and on a Mac `scenePhase` goes `.inactive`
+    /// whenever the window stops being the key one — so a reader who switches to a browser to
+    /// copy a hostname comes back to an unticked picker. That was put to the user and this is
+    /// the answer; `ShellSession.windowLeft(_:)` is where the platforms are told apart, and it is
+    /// deliberately *not* `.inactive` on iOS for the same reason.
+    ///
+    /// **The editor and a new post are excluded and are not here to exclude.** Compose and
+    /// sign-in are their own sheets on `FediqoRootView`, not stages, so this property cannot
+    /// reach them and no future case can accidentally give them this behaviour.
+    ///
+    /// **No `default:`.** A fifth stage answers, or it does not build.
+    var closesWhenTheWindowLeaves: Bool {
+        switch self {
+        case .browsing, .browsingServers: true
+        // Drawn in the page beside the field, not over it — decision 38. There is no window to
+        // leave that would make a block in a page a thing to take away.
+        case .previewing(_, .field, _): false
+        // The detail of a source already held is a thing to read, not a question to answer.
+        case .previewing(_, .joined, _): false
+        case .choosingBoards: true
+        }
+    }
+
     var id: String {
         switch self {
         case .browsing: "browsing"
