@@ -36,7 +36,7 @@ struct AccountAddTests {
             """#),
         ]))
         session.hostname = "first.example"
-        await session.add(from: .field)
+        await session.add()
         await session.confirm()
         #expect(session.sources.map(\.host) == ["first.example"])
         #expect(session.queries.map(\.id) == ["all", "trends"])
@@ -58,7 +58,7 @@ struct AccountAddTests {
         """#)])
         let session = ShellSession(http: http)
         session.hostname = "pleroma.example"
-        await session.add(from: .field)
+        await session.add()
         #expect(
             session.refuse
                 == String(
@@ -89,13 +89,13 @@ struct AccountAddTests {
             "/api/v1/trends/statuses": .text("[]"),
         ]))
         session.hostname = "https://First.Example/about"
-        await session.add(from: .field)
+        await session.add()
         await session.confirm()
         #expect(session.sources.count == 1)
         session.hostname = "first.example"
         // **The duplicate is caught before the look**, which is what keeps it free: a host this
         // device already reads costs no detection and no profile request, only the sentence.
-        await session.add(from: .field)
+        await session.add()
         #expect(session.stage == nil, "a duplicate opened a preview of a server already added")
         #expect(session.refuse == L10n.t("account.refuse.duplicate", language: .english))
         #expect(session.sources.count == 1)
@@ -137,8 +137,15 @@ struct AccountAddTests {
         }
         #expect(servers.map(\.domain) == ["first.example", "second.example"])
         #expect(servers[0].summary == "The flagship server")
-        // A catalog row is a *look*, like every other way in — pressing one opens the preview
-        // and adds nothing. It is the press after it that joins.
+        // **Decision 39: the picker row keeps the description and the figures**, because this row
+        // is the evidence a reader decides on. `CatalogServer` carries all of it, so it costs no
+        // request — and a directory that stopped serving them would leave a row with nothing on it
+        // to choose by.
+        #expect(servers[0].weekUsers == 50_000)
+        #expect(servers[0].users == 1_000_000)
+        #expect(servers[0].language == "en")
+        // A chosen server fills the field and looks, exactly as typing does — decision 38.
+        // Pressing one opens the preview and adds nothing; it is the press after it that joins.
         await session.pick(servers[0])
         #expect(session.hostname == "first.example")
         #expect(session.sources.isEmpty, "a catalog row joined a server the reader only looked at")
@@ -151,7 +158,7 @@ struct AccountAddTests {
     func invalidHost() async {
         let session = ShellSession(http: FixtureHTTP())
         session.hostname = "http://first.example"
-        await session.add(from: .field)
+        await session.add()
         #expect(
             session.refuse
                 == String(
@@ -169,70 +176,64 @@ struct AccountAddTests {
         let http = FixtureHTTP(["/": .fail, "/api/v2/instance": .fail])
         let session = ShellSession(http: http)
         session.hostname = "gone.example"
-        await session.add(from: .field)
+        await session.add()
         #expect(session.refuse == L10n.t("account.refuse.network", language: .english))
         #expect(session.sources.isEmpty)
         #expect(!session.availability.timelineEnabled)
     }
 
-    @Test("Keyword filters domain and description live, and filtering joins nothing")
-    func keywordFiltersCatalog() async {
-        // Two rows, and each one is reached by a different half of the filter: the first by a
-        // word out of its description, the second by a piece of its domain. Nothing here joins,
-        // so the directory is the only thing that has to answer.
+    /// **The browser shows the directory as the directory listed it, and filters nothing** —
+    /// decision 38's "no input", which deletes four tests and is declared rather than done
+    /// quietly.
+    ///
+    /// What went: `visibleServers` (the live filter over domain and description), `extraJoinHost`
+    /// (a typed host the directory does not carry, offered as its own row), `matches(_:query:)`
+    /// and `query`. All four were computed off `session.hostname`, which is the *page's* field —
+    /// so with no field in the sheet they would have become a hidden filter with no visible cause:
+    /// a reader who typed `flagship`, pressed Browse and picked Mastodon would meet one server and
+    /// no explanation. The four tests that pinned them described a screen that no longer exists.
+    ///
+    /// **The route those tests were really protecting is not lost, it moved to the page.** A host
+    /// the directory does not list is typed into the field and pressed, which is `typedHost()` and
+    /// is pinned in `SourcePageTests`; the browser is for readers who do not have a hostname.
+    ///
+    /// **What this checks, stated exactly, because the claim above is larger than the assertion.**
+    /// It observes one thing: `ShellSession` offers no reading of the catalogue that `hostname`
+    /// can move. That is the whole of what a test can reach here — the four deleted members are
+    /// gone at compile time, which is a stronger pin than any assertion and is also why nothing
+    /// here can fail on their account.
+    ///
+    /// **What it does not reach: a filter reintroduced inside `JoinSheet.servers(of:)`.** The
+    /// sheet's body is a `View` body and this project has no UI test target (risk 12), so a
+    /// `.filter` written between the catalogue and the `ForEach` would pass this test. Named
+    /// rather than implied — a doc claiming the screen is covered is how the four defects risk 12
+    /// counts survived a green suite, and this test's first draft made exactly that claim.
+    @Test("The session offers no filtered reading of the catalogue for the field to move")
+    func theBrowserDoesNotFilter() async {
         let session = ShellSession(http: FixtureHTTP(["/servers": .text(#"""
         [
           {"domain": "first.example", "description": "The flagship server"},
           {"domain": "second.example", "description": "A community for professionals"}
         ]
         """#)]))
+        session.browse()
+        session.chooseProtocol(.mastodon)
         await session.loadCatalog()
-        session.hostname = "seco"
-        #expect(session.visibleServers.map(\.domain) == ["second.example"])
-        #expect(session.extraJoinHost == nil)
-        session.hostname = "flagship"
-        #expect(session.visibleServers.map(\.domain) == ["first.example"])
+
+        // Whatever is in the page's field, and whether it is a hostname or a word.
+        for typed in ["", "seco", "flagship", "my.example"] {
+            session.hostname = typed
+            guard case .ready(let servers) = session.catalog else {
+                Issue.record("catalog \(session.catalog)")
+                return
+            }
+            #expect(servers.map(\.domain) == ["first.example", "second.example"], """
+                The session grew a reading of the catalogue that the page's field narrows — a \
+                filter with no visible cause, which is what "no input" rules out.
+                """)
+        }
         #expect(session.sources.isEmpty)
         #expect(!session.availability.timelineEnabled)
-        session.hostname = ""
-        #expect(session.visibleServers.map(\.domain) == ["first.example", "second.example"])
-    }
-
-    @Test("A typed host not in the catalog is an extra row the sheet offers")
-    func extraJoinHostDoesNotJoin() async {
-        let session = ShellSession(http: FixtureHTTP(["/servers": .text(#"""
-        [{"domain": "first.example", "description": "The flagship server"}]
-        """#)]))
-        await session.loadCatalog()
-        session.hostname = "my.example"
-        #expect(session.extraJoinHost == "my.example")
-        #expect(session.visibleServers.isEmpty)
-        #expect(session.sources.isEmpty)
-        #expect(!session.availability.timelineEnabled)
-    }
-
-    @Test("A keyword without a dot is not an Add-host row")
-    func keywordIsNotAHost() async {
-        let session = ShellSession(http: FixtureHTTP(["/servers": .text(#"""
-        [{"domain": "first.example", "description": "The flagship server"}]
-        """#)]))
-        await session.loadCatalog()
-        // No dot in it, so it is a word to search by and not a host to offer to add.
-        session.hostname = "flagship"
-        #expect(session.extraJoinHost == nil)
-        #expect(session.visibleServers.map(\.domain) == ["first.example"])
-    }
-
-    @Test("A catalog host in the field is not an extra row")
-    func catalogHostIsNotExtra() async {
-        let session = ShellSession(http: FixtureHTTP(["/servers": .text(#"""
-        [{"domain": "first.example", "description": "The flagship server"}]
-        """#)]))
-        await session.loadCatalog()
-        session.hostname = "first.example"
-        #expect(session.extraJoinHost == nil)
-        #expect(session.visibleServers.map(\.domain) == ["first.example"])
-        #expect(session.sources.isEmpty)
     }
 
     @Test("Account copy is translated and unknown never says is unknown")
@@ -241,14 +242,10 @@ struct AccountAddTests {
         #expect(L10n.t("account.add.host", language: .english) == "Hostname")
         #expect(L10n.t("account.search", language: .english) == "Search")
         #expect(L10n.t("account.search.placeholder", language: .english) == "Host or keyword")
-        // **`account.catalog.addHost` is retired, not renamed.** It read "Add %@" and the row no
-        // longer adds anything — it opens a preview — so the verb was a lie about what the press
-        // does. The two keys below replace it and say what actually happens.
-        #expect(L10n.t("join.browse.look", language: .english) == "Look at %@")
-        #expect(
-            L10n.t("join.browse.look.detail", language: .english)
-                == "Not in the directory. See what it is before you add it."
-        )
+        // **Three more keys are retired here and pinned absent below.** `join.browse.look` and
+        // `join.browse.look.detail` were the extra row — a typed host the directory does not carry
+        // — and `join.browse.filter` was the sheet's own field. Decision 38 takes all three: the
+        // browser has no input, so there is nothing to filter by and nothing typed in it to offer.
         #expect(L10n.t("account.catalog.weekly", language: .english) == "%@ active this week")
         #expect(L10n.t("account.catalog.people", language: .english) == "%@ people")
         #expect(
@@ -285,6 +282,17 @@ struct AccountAddTests {
         #expect(L10n.t("account.add", language: .taiwanese) == "新增")
         #expect(L10n.t("account.catalog.added", language: .taiwanese) == "已新增")
         #expect(L10n.t("account.refuse.network", language: .taiwanese) != "account.refuse.network")
+
+        // **Retired with the browser's field, and pinned absent in the shape unit A used for six
+        // keys and unit F for three.** A string nothing reads is a translation cost in three
+        // bundles and a reader of this file inferring a control that is not there.
+        for key in ["join.browse.filter", "join.browse.look", "join.browse.look.detail"] {
+            #expect(L10n.t(key, language: .english) == key, """
+                \(key) is back in the bundle. Nothing draws it: the browser has no field, so \
+                there is nothing to filter by and nothing typed in it to offer as its own row. \
+                If a field has returned, it needs a decision, not a revived key.
+                """)
+        }
     }
 
     // MARK: - The reader who walked away
@@ -318,7 +326,7 @@ struct AccountAddTests {
             "/api/v1/trends/statuses": .text("[]"),
         ]))
         session.hostname = "first.example"
-        await session.add(from: .field)
+        await session.add()
         // The premise, pinned. Every assertion below is about an *absence*, so without this the
         // test is satisfied by a look that never reached the press — and its own claim to pin
         // the whole chain end to end would be false.
@@ -352,7 +360,7 @@ struct AccountAddTests {
             "https://install-a.example/forum.php?mod=forumdisplay&fid=33": .cancelled,
         ]))
         session.hostname = "install-a.example"
-        await session.add(from: .field)
+        await session.add()
         await session.confirm()
         guard let choice = session.choosing else {
             Issue.record("a Discuz! should pause on the picker")

@@ -365,7 +365,7 @@ struct SourcePreviewView: View {
     /// at a source they already have is not taking one. **No `default:`.**
     static func framingKey(for origin: PreviewOrigin) -> String {
         switch origin {
-        case .field, .directory: "join.preview.detail"
+        case .field: "join.preview.detail"
         case .joined: "source.held.detail"
         }
     }
@@ -481,7 +481,7 @@ struct SourcePreviewView: View {
     /// **No `default:`.**
     static func cautionKey(_ caution: Caution, for origin: PreviewOrigin) -> String {
         switch origin {
-        case .field, .directory: caution.key
+        case .field: caution.key
         case .joined: caution.heldKey
         }
     }

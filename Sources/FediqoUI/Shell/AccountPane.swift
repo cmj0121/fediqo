@@ -631,11 +631,17 @@ struct AccountPane: View {
     /// Nothing is added by this. `add()` looks and opens the preview, and the reader still has to
     /// press Subscribe; every guard that press has — the duplicate check, the parse, the sheet
     /// already being up — is `look`'s and applies unchanged.
+    ///
+    /// **It is also what the browser's own rows reach**, through `pick(_:)` — decision 38. A
+    /// chosen server fills this field and runs this errand, so there is one way in and not two
+    /// that have to agree.
     func typedHost() async {
-        await session.add(from: .field)
+        await session.add()
     }
 
-    /// Browse pressed. The catalogue is fetched here and not on the page appearing (decision 10).
+    /// Browse pressed. **It opens the protocols this app can read and contacts nobody** —
+    /// decisions 19 and 38. The directory is fetched a press later, when a protocol that has one
+    /// is chosen, which is decision 10's argument carried one step further.
     func browse() {
         session.browse()
     }

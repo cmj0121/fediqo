@@ -62,11 +62,20 @@ struct JoinStageTests {
         /// *the take is parked on the wire*, which is the state those tests are about.
         private(set) var reached = false
 
+        /// How many times the held address has been **asked for**, counted where the request
+        /// starts rather than where it lands.
+        ///
+        /// **A request that is refused before it is made never reaches `FixtureHTTP.paths`**, and
+        /// neither does one still parked on the gate — so a test asking "did a second fetch
+        /// start?" cannot ask `paths`. It has to ask here, in front of the gate.
+        private(set) var asks = 0
+
         /// Matched on the path as well as the whole address, because a Mastodon's timeline
         /// carries a query this test has no business knowing the value of.
         func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
             if url.absoluteString == held || url.path == held {
                 reached = true
+                asks += 1
                 await gate.wait()
             }
             return try await inner.data(from: url)
@@ -127,22 +136,23 @@ struct JoinStageTests {
     /// and a second press would replace the stage under a reader who is still reading the first
     /// one. The stage is what says so, and `add` is guarded on it.
     ///
-    /// **Driven from the directory, which is where this stays true.** A preview reached from a
-    /// catalogue row is drawn over the page in the sheet, so the reader cannot see what a second
-    /// look would replace. One reached by typing is drawn beside the field, and that case is the
-    /// test below.
-    @Test("A second Add behind a preview the reader cannot see past changes nothing")
+    /// **Driven from the browser, which is where this stays true** — and decision 38 moved which
+    /// stage that is. No preview can be reached from the browser any more, so the stage covering
+    /// the page is the browser itself: a look started behind it would replace a screen the reader
+    /// cannot see past. One reached by typing is drawn beside the field, and that case is the test
+    /// below.
+    @Test("A second Add behind a stage the reader cannot see past changes nothing")
     func aSecondAddIsRefusedWhileTheSheetIsUp() async {
         let (session, http) = Self.forumSession()
-        session.hostname = Self.forum
-        await session.add(from: .directory)
+        session.browse()
+        session.chooseProtocol(.discuz)
         let opened = session.stage
-        #expect(opened != nil, "the premise did not hold: no preview was opened")
-        #expect(opened?.surface == .sheet, "the premise did not hold: this preview is in the page")
+        #expect(opened == .browsingServers(.discuz), "the premise did not hold: no browser is up")
+        #expect(opened?.surface == .sheet, "the premise did not hold: the browser is in the page")
         let asked = await http.paths.count
 
-        session.hostname = "somewhere.else.example"
-        await session.add(from: .field)
+        session.hostname = Self.forum
+        await session.add()
 
         #expect(session.stage == opened, "a second look replaced the stage behind the reader")
         #expect(await http.paths.count == asked, "a second look was spent on a refused press")
@@ -160,11 +170,11 @@ struct JoinStageTests {
         let session = ShellSession(http: FixtureHTTP(routes), store: ItemStore())
 
         session.hostname = Self.forum
-        await session.add(from: .field)
+        await session.add()
         #expect(session.stage?.inlinePreview?.host == Self.forum, "the premise: a block in the page")
 
         session.hostname = Self.other
-        await session.add(from: .field)
+        await session.add()
 
         #expect(session.stage?.inlinePreview?.host == Self.other, """
             The field was live beside the block and its Return did nothing — the shape this \
@@ -177,7 +187,7 @@ struct JoinStageTests {
     func confirmIsRefusedWhileChecking() async {
         let (session, http) = Self.forumSession()
         session.hostname = Self.forum
-        await session.add(from: .field)
+        await session.add()
         let asked = await http.paths.count
 
         session.checking = true
@@ -281,7 +291,7 @@ struct JoinStageTests {
         defer { watchdog.cancel() }
 
         session.hostname = "first.example"
-        await session.add(from: .field)
+        await session.add()
 
         let press = Task { await session.confirm() }
         #expect(await Self.spun { session.checking }, "the press never reached the wire")
@@ -309,7 +319,7 @@ struct JoinStageTests {
             "/api/v2/instance": .cancelled,
         ]), store: ItemStore())
         looking.hostname = "first.example"
-        await looking.add(from: .field)
+        await looking.add()
         #expect(looking.stage == nil)
         #expect(looking.refuse == nil, "a reader's leaving was reported as the server's fault")
         #expect(looking.progressHost == "")
@@ -323,7 +333,7 @@ struct JoinStageTests {
             "/api/v1/trends/statuses": .text("[]"),
         ]), store: ItemStore())
         pressing.hostname = "first.example"
-        await pressing.add(from: .field)
+        await pressing.add()
         #expect(pressing.progressHost == "first.example", "the premise: the press names the host")
         await pressing.confirm()
         #expect(pressing.refuse == nil)
@@ -340,7 +350,7 @@ struct JoinStageTests {
     func backFromTheBoardsCostsNothing() async {
         let (session, http) = Self.forumSession()
         session.hostname = Self.forum
-        await session.add(from: .field)
+        await session.add()
         guard case .previewing(let looked, _, _) = session.stage else {
             Issue.record("a look should open a preview")
             return
@@ -378,7 +388,7 @@ struct JoinStageTests {
     func aSheetLeavingForThePageIsNotADismissal() async {
         let (session, _) = Self.forumSession()
         session.hostname = Self.forum
-        await session.add(from: .field)
+        await session.add()
         await session.confirm()
         #expect(session.stage?.surface == .sheet, "the premise: the boards opened in the sheet")
         session.stage = session.stage?.ticking([33, 41])
@@ -427,35 +437,190 @@ struct JoinStageTests {
 
     // MARK: - Decision 10: the catalog waits for Browse
 
-    /// **Nothing is contacted on launch any more.** The catalog used to load from
-    /// `AccountPane`'s `.task`, so a reader who opened the app and added nothing had still had a
-    /// third party told about them. It loads when they ask for it and not before.
-    @Test("The directory is not contacted until Browse is pressed")
-    func theCatalogWaitsForBrowse() async {
+    /// **Nothing is contacted on launch any more, and now not on Browse either.** The catalog
+    /// used to load from `AccountPane`'s `.task`; decision 10 moved it to the Browse press, and
+    /// decision 38 moves it one press further — the browser's first step names no directory, so a
+    /// reader who opens it to see what this app reads, or who picks a forum, contacts nobody.
+    @Test("The directory is not contacted until a protocol that has one is chosen")
+    func theCatalogWaitsForAProtocol() async {
         let http = FixtureHTTP(["/servers": .text("[]")])
         let session = ShellSession(http: http, store: ItemStore())
         #expect(await http.paths.isEmpty, "the directory was contacted before anybody asked")
 
         session.browse()
         #expect(session.stage == .browsing)
-        // `browse` starts the load rather than awaiting it, so the sheet is up at once.
+        #expect(await http.paths.isEmpty, "opening the browser contacted a third party")
+
+        // A protocol this app reads and has no list for reaches nobody either, and says so.
+        session.chooseProtocol(.discuz)
+        #expect(session.stage == .browsingServers(.discuz))
+        #expect(await http.paths.isEmpty, "a protocol with no directory asked one for its servers")
+
+        session.backToProtocols()
+        session.chooseProtocol(.mastodon)
+        #expect(session.stage == .browsingServers(.mastodon))
+        // `chooseProtocol` starts the load rather than awaiting it, so the step is up at once.
         while await http.paths.isEmpty { await Task.yield() }
         #expect(await http.paths == ["/servers"])
     }
 
-    /// The page's Browse button, which is a different press from the sheet's Back: a reader
-    /// reading a preview did not ask for it to be replaced by a list.
+    /// **The two steps, and what the second one says when there is nothing to suggest.** Until M3
+    /// this is the majority state: three protocols are readable and one has a directory.
+    @Test("The browser offers what this app can read, and only Mastodon has servers to suggest")
+    func theBrowserOffersWhatCanBeRead() {
+        #expect(JoinSheet.protocols == [.mastodon, .discourse, .discuz], """
+            The browser's first step is derived from `SourceJoin.reads` and is offering something \
+            else. A second list is a protocol still offered the day Core stopped reading it.
+            """)
+        #expect(!JoinSheet.protocols.contains(.unknown), "a protocol that is not one was offered")
+        // A total map over every protocol rather than a set of the interesting ones: a protocol
+        // added must answer here the day it is added, not the day somebody remembers this test.
+        for kind in ProtocolKind.allCases {
+            #expect(ServerDirectory.covers(kind) == (kind == .mastodon), """
+                \(kind) disagrees about whether this app has servers to suggest for it.
+                """)
+        }
+        for language in [DummyLanguage.english, .taiwanese] {
+            for key in ["join.browse.title", "join.browse.protocols.detail",
+                        "join.browse.servers.title", "join.browse.detail", "join.browse.none"] {
+                #expect(L10n.t(key, language: language) != key, "\(key) has no sentence")
+            }
+        }
+        // The sentence the majority state draws, named as it will be drawn: it names the protocol
+        // and names the remedy, which is the field on the page behind.
+        #expect(L10n.t("join.browse.none", language: .english)
+            == "No suggestions for %@ yet. Type a hostname in the field instead.")
+        #expect(String(format: L10n.t("join.browse.none", language: .english),
+                       ProtocolKind.discourse.displayName).contains("Discourse"))
+        #expect(L10n.t("join.browse.servers.title", language: .english) == "%@ servers")
+        #expect(L10n.t("join.browse.title", language: .english) == "Protocols Fediqo reads")
+    }
+
+    /// **A protocol can only be chosen from the step that offers them.** Risk 12's shape: the rows
+    /// are drawn at one stage, and a rule that did not ask would let a press arrive from anywhere
+    /// and replace a screen the reader is part-way through.
     ///
-    /// **From the directory, where the reader cannot see past the sheet.** The typed-host case is
+    /// **Every stage, because the press answers with a `switch` and not a `guard case`.** Sampling
+    /// three by hand is what let the banned shape in: a fifth stage compiles clean against a guard
+    /// and inherits step one's answer in silence.
+    ///
+    /// **There is no `checking == true` leg, and its absence is deliberate.** An earlier cut of
+    /// this test hand-set `checking` with `.browsing` up — a pairing `noErrandRunsBehindTheSheet`
+    /// says cannot happen — to cover a `!checking` term in the press. Forcing an impossible state
+    /// to cover a guard that cannot fire is how dead code outlives the thing it guarded; the term
+    /// went, and so did the leg.
+    @Test("Choosing a protocol is refused from every stage that is not the protocol list")
+    func aProtocolIsChosenOnlyFromItsOwnStep() async {
+        let (session, _) = Self.forumSession()
+        let preview = Self.previewOf(Self.forum)
+        let offer = JoinOffer(host: Self.forum, kind: .discuz, categories: [])
+
+        for stage in [JoinStage.browsingServers(.discuz),
+                      .previewing(preview, from: .field, ticked: []),
+                      .previewing(preview, from: .joined(Source(host: Self.forum, kind: .discuz)),
+                                  ticked: []),
+                      .choosingBoards(offer, from: .preview(preview, ticked: [])),
+                      .choosingBoards(offer, from: .joined(subscribed: [], ticked: []))] {
+            session.stage = stage
+            session.chooseProtocol(.mastodon)
+            #expect(session.stage == stage, "\(stage.id) was replaced by a protocol press")
+        }
+
+        session.stage = nil
+        session.chooseProtocol(.mastodon)
+        #expect(session.stage == nil, "a protocol press opened the browser from nowhere")
+
+        // And from the one step that does offer them, it moves.
+        session.browse()
+        session.chooseProtocol(.mastodon)
+        #expect(session.stage == .browsingServers(.mastodon))
+    }
+
+    /// **Mastodon → Back → Mastodon asks joinmastodon once, which `backToProtocols` promises.**
+    ///
+    /// `loadCatalog`'s two guards test `.ready` and `.empty` and cannot test `.loading`, because
+    /// the property *starts* there — so while the first fetch was on the wire a second press
+    /// started a second request to the same third party and decoded the whole directory twice.
+    /// Reachable only once the browser had two steps, since `browse()` is refused while a sheet is
+    /// up and could not be pressed twice.
+    @Test(
+        "Stepping back and forward between the two steps asks the directory once",
+        .timeLimit(.minutes(1))
+    )
+    func steppingBackAndForwardAsksTheDirectoryOnce() async {
+        let http = GatedHTTP(["/servers": .text(#"""
+        [{"domain": "first.example", "description": "The flagship server"}]
+        """#)], holding: "/servers")
+        // Armed before anything can await, for the reason the other gated tests give: nothing but
+        // this test releases the gate, and `.timeLimit` does not rescue a task parked on a
+        // continuation.
+        let watchdog = Task {
+            try? await Task.sleep(for: .seconds(5))
+            await http.gate.open()
+        }
+        defer { watchdog.cancel() }
+
+        let session = ShellSession(http: http, store: ItemStore())
+
+        session.browse()
+        session.chooseProtocol(.mastodon)
+        // **The first fetch is provably parked on the wire before the second press**, which is the
+        // whole premise and what the first cut of this test only assumed. It called
+        // `loadCatalog()` directly afterwards instead, and under parallel load that direct call
+        // could reach `.ready` before either spawned task ran — so both took the early return and
+        // one request was made *for the wrong reason*. Neutered, it passed one full-suite run in
+        // four: a pin that looks present and is not, which is the shape this branch has spent four
+        // incidents on.
+        var parked = false
+        for _ in 0..<100_000 {
+            if await http.asks == 1 { parked = true; break }
+            await Task.yield()
+        }
+        #expect(parked, "the premise: the first fetch never reached the wire")
+
+        session.backToProtocols()
+        session.chooseProtocol(.mastodon)
+
+        // **Counted in front of the gate, not in `paths`.** A second fetch started while the first
+        // is parked would sit on the gate too and reach `paths` only after it opens, so the count
+        // has to be taken where the request begins. The loop gives the second press every chance
+        // to start one and reports that it never did.
+        // 10_000 yields: the second press's `Task` needs only to be *scheduled* to reach the
+        // request, so this is generous by orders of magnitude while costing a fraction of a
+        // second. Verified by neutering `fetchingCatalog` — it trips within the first few.
+        var second = false
+        for _ in 0..<10_000 {
+            if await http.asks > 1 { second = true; break }
+            await Task.yield()
+        }
+        #expect(!second, """
+            A second press while the first fetch was still on the wire contacted the directory \
+            again — two requests to a third party for one reader's one question. `loadCatalog`'s \
+            two guards test `.ready` and `.empty` and cannot test `.loading`, because the property \
+            starts there; `fetchingCatalog` is what answers.
+            """)
+
+        // And the one fetch that was made still lands, so the reader's second press leaves them
+        // looking at the directory rather than at a `.loading` that nothing will ever finish.
+        await http.gate.open()
+        #expect(await Self.spun { if case .ready = session.catalog { true } else { false } },
+                "the one fetch was refused as well as the second, and nothing answered")
+        #expect(await http.asks == 1, "a third request arrived once the gate opened")
+    }
+
+    /// The page's Browse button, which is a different press from the sheet's Back: a reader
+    /// already inside the browser did not ask for it to be started again from the top.
+    ///
+    /// **From the browser, where the reader cannot see past the sheet.** The typed-host case is
     /// the test below, and it goes the other way for the same reason `look`'s does.
-    @Test("Browse is refused behind a preview the reader cannot see past")
+    @Test("Browse is refused behind a stage the reader cannot see past")
     func browseIsRefusedWhileTheSheetIsUp() async {
         let (session, _) = Self.forumSession()
-        session.hostname = Self.forum
-        await session.add(from: .directory)
+        session.browse()
+        session.chooseProtocol(.discuz)
         let opened = session.stage
         session.browse()
-        #expect(session.stage == opened, "Browse replaced a preview the reader was reading")
+        #expect(session.stage == opened, "Browse threw the reader out of the step they were on")
     }
 
     /// Browse sits beside the field, and an inline preview covers neither. A Browse refused under
@@ -471,7 +636,7 @@ struct JoinStageTests {
             http: FixtureHTTP(routes), store: ItemStore(), pictures: pictures
         )
         session.hostname = Self.forum
-        await session.add(from: .field)
+        await session.add()
         #expect(session.stage?.inlinePreview != nil, "the premise: a block in the page")
         let before = pictures.generation
 
@@ -483,12 +648,17 @@ struct JoinStageTests {
             """)
     }
 
-    /// **The directory is where a look is started from, so a row in it must be pressable.** The
-    /// guard that stops a second look cannot be "any stage is up": browsing *is* a stage, and a
-    /// row pressed in it is the very call being guarded. Without this the whole list is dead to
-    /// the touch the moment Browse becomes a sheet — every row does nothing, silently.
-    @Test("A row pressed in the directory opens its preview")
-    func aRowInTheDirectoryOpensAPreview() async {
+    /// **Decision 38, end to end: choosing a server closes the browser, fills the field, and
+    /// behaves exactly as typing did.** Every clause is asserted, because each one is a thing the
+    /// old behaviour did differently — the sheet stayed up, the preview drew inside it, and its
+    /// Back went to the directory.
+    ///
+    /// **The order inside `pick` is load-bearing and the pin is here.** `.browsingServers` does
+    /// not admit a second look, so the sheet has to come down before anything is looked up; a
+    /// press made the other way round is refused in silence, which is the dead-control shape risk
+    /// 12 counts and the reason this drives the press rather than the guard.
+    @Test("Choosing a server closes the browser, fills the field, and looks at once")
+    func choosingAServerBehavesLikeTyping() async {
         let session = ShellSession(http: FixtureHTTP([
             "/servers": .text(#"""
             [{"domain": "install-c.example", "description": "A forum", "language": "en",
@@ -500,6 +670,7 @@ struct JoinStageTests {
         ]), store: ItemStore())
 
         session.browse()
+        session.chooseProtocol(.mastodon)
         await session.loadCatalog()
         guard case .ready(let servers) = session.catalog, let row = servers.first else {
             Issue.record("the premise did not hold: catalog \(session.catalog)")
@@ -508,32 +679,71 @@ struct JoinStageTests {
 
         await session.pick(row)
 
-        #expect(session.stage?.host == Self.forum, "a row in the directory did nothing")
+        #expect(session.hostname == Self.forum, "the field was not filled with what was chosen")
+        #expect(session.stage?.host == Self.forum, "choosing a server did nothing")
+        #expect(session.stage?.surface == .pane, """
+            The chosen server previewed in the sheet. Decision 38: the browser closes and the \
+            preview is drawn beside the field, exactly as a typed host's is.
+            """)
+        #expect(session.stage?.inlinePreview?.host == Self.forum)
+        #expect(JoinSheet.leading(for: session.stage) == .cancel, """
+            The preview offered Back to a browser that is no longer behind it.
+            """)
         #expect(session.choosing == nil)
-        #expect(session.sources.isEmpty, "a row in the directory joined instead of looking")
+        #expect(session.sources.isEmpty, "a chosen server joined instead of being looked at")
     }
 
-    /// **The sheet's own Back, which `browse()` cannot be.** A reader who picked a row off the
-    /// directory and wants the directory again is at a preview by definition — so the guard that
-    /// makes the page's Browse safe is exactly the guard this press must not have.
-    @Test("Back from a preview reached through the directory returns to the directory")
-    func backFromAPreviewReturnsToBrowsing() async {
+    /// **The sheet's own Back, which `browse()` cannot be.** A reader at the server list who wants
+    /// the protocols again is inside the browser by definition — so the guard that makes the
+    /// page's Browse safe is exactly the guard this press must not have.
+    ///
+    /// **This is not `backToBrowsing` renamed.** That press stepped back from a *preview* into the
+    /// server list; decision 38 leaves no preview with a browser behind it, so its premise cannot
+    /// be constructed — `PreviewOrigin` has no case meaning "reached from the browser", and
+    /// `eachStageOffersItsOwnLeadingButton` pins that no preview offers Back at all. This one
+    /// lives between the browser's own two steps, a stage the old press could never be offered at.
+    @Test("Back from one protocol's servers returns to the protocols")
+    func backFromTheServersReturnsToTheProtocols() async {
         let (session, _) = Self.forumSession()
-        session.hostname = Self.forum
-        // Through the directory, which is what this test is named for. `backToBrowsing()` is
-        // origin-blind, so a typed host passed here too — and the test then proved nothing about
-        // the entrance its own sentence is about.
-        await session.add(from: .directory)
-        #expect(session.stage?.surface == .sheet, "the premise: a preview with a directory behind it")
+        session.browse()
+        session.chooseProtocol(.discourse)
+        #expect(session.stage?.surface == .sheet, "the premise: the reader is at the server list")
 
-        session.backToBrowsing()
+        session.backToProtocols()
 
-        #expect(session.stage == .browsing, "Back from a preview went nowhere")
+        #expect(session.stage == .browsing, "Back from the server list went nowhere")
         #expect(session.sources.isEmpty)
 
-        // And it is a step back, not a dismissal: there is nothing behind the directory.
-        session.backToBrowsing()
+        // And it is a step back, not a dismissal: there is nothing behind the protocol list, so
+        // pressing it again changes nothing rather than closing the sheet.
+        session.backToProtocols()
         #expect(session.stage == .browsing)
+    }
+
+    /// **Every stage that has no browser step behind it declines, and it declines by deciding.**
+    /// A `guard case .browsingServers = stage else { return }` compiles clean against a fifth
+    /// stage and answers on its behalf — a `default:` wearing a different hat, and the exact shape
+    /// `backToBrowsing` was sent back for when a third `PreviewOrigin` walked into it.
+    @Test("Back to the protocols declines for every stage that is not a step of the browser")
+    func backToProtocolsDecidesForEveryStage() async {
+        let (session, _) = Self.forumSession()
+        let preview = Self.previewOf(Self.forum)
+        let offer = JoinOffer(host: Self.forum, kind: .discuz, categories: [])
+
+        for stage in [JoinStage.browsing,
+                      .previewing(preview, from: .field, ticked: []),
+                      .previewing(preview, from: .joined(Source(host: Self.forum, kind: .discuz)),
+                                  ticked: []),
+                      .choosingBoards(offer, from: .preview(preview, ticked: [])),
+                      .choosingBoards(offer, from: .joined(subscribed: [], ticked: []))] {
+            session.stage = stage
+            session.backToProtocols()
+            #expect(session.stage == stage, "\(stage.id) was thrown back into the browser")
+        }
+
+        session.stage = nil
+        session.backToProtocols()
+        #expect(session.stage == nil)
     }
 
     // MARK: - Ticks belong to one forum
@@ -555,34 +765,38 @@ struct JoinStageTests {
             One forum's ticks were carried onto another's board list. Discuz! fids collide, so \
             this subscribes the reader to boards they never ticked.
             """)
-        #expect(JoinStage.browsing.ticked == [], "the directory names no forum to tick boards on")
+        #expect(JoinStage.browsing.ticked == [], "the browser names no forum to tick boards on")
         #expect(JoinStage.browsing.ticking([33, 41]).ticked == [])
+        #expect(JoinStage.browsingServers(.discuz).ticking([33, 41]).ticked == [])
         #expect(Self.preview("a.example").ticked == [], "a fresh look opens nothing ticked")
     }
 
     /// The other half: stepping back to the preview and forward to the boards again is one forum
     /// and one decision, so the reader does not lose eight ticks out of forty for looking at the
-    /// description again — **on either surface**, which is what decision 27 bought. It used to be
-    /// true from the directory only, by the accident that the sheet stayed mounted there.
-    @Test("Ticks survive a step back to the preview and forward again, from either entrance")
+    /// description again.
+    ///
+    /// **It used to be run over two entrances and there is one now, which strengthens it rather
+    /// than weakening it.** The entrance that made this hard was the field's: the preview is drawn
+    /// in the page, so the sheet unmounts on Back and — before decision 27 — took the ticks with
+    /// it. The directory's was the easy one, true by the accident that its sheet stayed mounted.
+    /// Decision 38 deletes the easy entrance, so what is left is the case the decision was for.
+    @Test("Ticks survive a step back to the preview and forward again")
     func ticksSurviveABackAndForth() async {
-        for origin in [JoinEntrance.field, .directory] {
-            let (session, _) = Self.forumSession()
-            session.hostname = Self.forum
-            await session.add(from: origin)
-            await session.confirm()
-            #expect(session.choosing != nil, "the premise: the boards were reached")
+        let (session, _) = Self.forumSession()
+        session.hostname = Self.forum
+        await session.add()
+        await session.confirm()
+        #expect(session.choosing != nil, "the premise: the boards were reached")
 
-            session.stage = session.stage?.ticking([33, 41])
-            session.backToPreview()
-            #expect(session.stage?.ticked == [33, 41], """
-                Stepping back to the preview dropped the reader's ticks. From the field the sheet \
-                unmounts on Back, and before decision 27 it took them with it.
-                """)
+        session.stage = session.stage?.ticking([33, 41])
+        session.backToPreview()
+        #expect(session.stage?.ticked == [33, 41], """
+            Stepping back to the preview dropped the reader's ticks. The preview is in the page, \
+            so the sheet unmounts on Back and before decision 27 it took them with it.
+            """)
 
-            await session.confirm()
-            #expect(session.stage?.ticked == [33, 41], "the picker did not reopen ticked")
-        }
+        await session.confirm()
+        #expect(session.stage?.ticked == [33, 41], "the picker did not reopen ticked")
     }
 
     /// **The route to the bug, walked press by press.** The rule being right was never what was
@@ -594,18 +808,19 @@ struct JoinStageTests {
         var routes = Self.forumRoutes()
         routes["https://\(Self.other)/forum.php"] = .text(Self.discuzIndex)
         let session = ShellSession(http: FixtureHTTP(routes), store: ItemStore())
-        // browsing → row A → preview(A) → Subscribe → boards(A)
-        session.browse()
+        // field A → preview(A) → Subscribe → boards(A)
         session.hostname = Self.forum
-        await session.add(from: .directory)
+        await session.add()
         await session.confirm()
         // The reader ticks two boards on A.
         session.stage = session.stage?.ticking([33, 41])
-        // Back → preview(A) → Back → browsing → row B → preview(B) → Subscribe → boards(B)
+        // Back → preview(A), then a second hostname typed over the block: the route that replaces
+        // one forum's screen with another's without the sheet ever coming down on its own. It used
+        // to run through the directory, and decision 38 takes that route away — this is the one
+        // that is left, and it is the one where the field stays live beside the block.
         session.backToPreview()
-        session.backToBrowsing()
         session.hostname = Self.other
-        await session.add(from: .directory)
+        await session.add()
         await session.confirm()
 
         #expect(session.stage?.host == Self.other, "the premise: the reader reached B")
@@ -616,13 +831,13 @@ struct JoinStageTests {
     }
 
     private static func preview(_ host: String) -> JoinStage {
-        .previewing(previewOf(host), from: .directory, ticked: [])
+        .previewing(previewOf(host), from: .field, ticked: [])
     }
 
     private static func boards(_ host: String) -> JoinStage {
         .choosingBoards(
             JoinOffer(host: host, kind: .discuz, categories: []),
-            from: .preview(previewOf(host), from: .directory, ticked: [])
+            from: .preview(previewOf(host), ticked: [])
         )
     }
 
@@ -644,9 +859,12 @@ struct JoinStageTests {
         let offer = JoinOffer(host: Self.forum, kind: .discuz, categories: [])
 
         #expect(JoinStage.browsing.surface == .sheet)
+        #expect(JoinStage.browsingServers(.mastodon).surface == .sheet)
         #expect(JoinStage.previewing(preview, from: .field, ticked: []).surface == .pane)
-        #expect(JoinStage.previewing(preview, from: .directory, ticked: []).surface == .sheet)
-        #expect(JoinStage.choosingBoards(offer, from: .preview(preview, from: .field, ticked: [])).surface
+        // **Decision 38: no preview of a server the reader might take is drawn in the sheet any
+        // more.** The one `.previewing` that still is is the detail of a source they already have,
+        // which is decision 31 and is pinned in `SourcePageTests`.
+        #expect(JoinStage.choosingBoards(offer, from: .preview(preview, ticked: [])).surface
             == .sheet, "decision 21: a typed host's boards open the sheet, not the page")
         #expect(JoinStage.choosingBoards(offer, from: .joined(subscribed: [], ticked: [])).surface == .sheet)
     }
@@ -661,15 +879,13 @@ struct JoinStageTests {
         let offer = JoinOffer(host: Self.forum, kind: .discuz, categories: [])
 
         #expect(JoinStage.browsing.inlinePreview == nil)
+        #expect(JoinStage.browsingServers(.mastodon).inlinePreview == nil)
         #expect(JoinStage.previewing(preview, from: .field, ticked: []).inlinePreview?.host == Self.forum)
-        #expect(JoinStage.previewing(preview, from: .directory, ticked: []).inlinePreview == nil)
         #expect(
-            JoinStage.choosingBoards(offer, from: .preview(preview, from: .field, ticked: []))
+            JoinStage.choosingBoards(offer, from: .preview(preview, ticked: []))
                 .inlinePreview?.host == Self.forum,
             "the block went down the moment the boards sheet opened over it"
         )
-        #expect(JoinStage.choosingBoards(offer, from: .preview(preview, from: .directory, ticked: []))
-            .inlinePreview == nil, "the page drew a block for a preview that lives in the sheet")
         #expect(JoinStage.choosingBoards(offer, from: .joined(subscribed: [], ticked: [])).inlinePreview == nil)
     }
 
@@ -681,10 +897,15 @@ struct JoinStageTests {
         let preview = Self.previewOf(Self.forum)
         let offer = JoinOffer(host: Self.forum, kind: .discuz, categories: [])
 
-        #expect(JoinStage.browsing.admitsASecondLook, "the directory's own rows are looks")
+        // **Both browsing steps answer no, and decision 38 turned that answer over.** `.browsing`
+        // used to admit one because the browser's own rows *were* looks started from inside it.
+        // They are not: a picked server takes the sheet down first, so `look` is never asked this
+        // question with a browser stage in hand. Answering yes would leave a second look startable
+        // behind a sheet the reader cannot see past — PLAN risk 8 exactly.
+        #expect(!JoinStage.browsing.admitsASecondLook, "a look could start behind the browser")
+        #expect(!JoinStage.browsingServers(.mastodon).admitsASecondLook)
         #expect(JoinStage.previewing(preview, from: .field, ticked: []).admitsASecondLook)
-        #expect(!JoinStage.previewing(preview, from: .directory, ticked: []).admitsASecondLook)
-        #expect(!JoinStage.choosingBoards(offer, from: .preview(preview, from: .field, ticked: []))
+        #expect(!JoinStage.choosingBoards(offer, from: .preview(preview, ticked: []))
             .admitsASecondLook)
         #expect(!JoinStage.choosingBoards(offer, from: .joined(subscribed: [], ticked: [])).admitsASecondLook)
     }
@@ -699,23 +920,22 @@ struct JoinStageTests {
         let offer = JoinOffer(host: Self.forum, kind: .discuz, categories: [])
 
         let fromPage = ShellSession(http: FixtureHTTP())
-        fromPage.stage = .choosingBoards(offer, from: .preview(preview, from: .field, ticked: []))
+        fromPage.stage = .choosingBoards(offer, from: .preview(preview, ticked: []))
         fromPage.sheetDismissed()
         #expect(fromPage.stage == .previewing(preview, from: .field, ticked: []), """
             A swipe on the boards sheet cancelled the errand and took the page's block with it.
             """)
 
-        let fromSheet = ShellSession(http: FixtureHTTP())
-        fromSheet.stage = .choosingBoards(offer, from: .preview(preview, from: .directory, ticked: []))
-        fromSheet.sheetDismissed()
-        #expect(fromSheet.stage == .previewing(preview, from: .directory, ticked: []))
-
-        // Every other stage is a complete cancel, as it was.
-        for stage in [JoinStage.browsing, .previewing(preview, from: .directory, ticked: [])] {
+        // Every other sheet-surfaced stage is a complete cancel, as it was — **including the
+        // browser's second step**, which is the one addition. A swipe there is the reader being
+        // rid of the browser, not a step back inside it: landing them on the protocol list would
+        // keep up a sheet they asked to be rid of. Back is the button for that.
+        for stage in [JoinStage.browsing, .browsingServers(.mastodon),
+                      .choosingBoards(offer, from: .joined(subscribed: [], ticked: []))] {
             let leaving = ShellSession(http: FixtureHTTP())
             leaving.stage = stage
             leaving.sheetDismissed()
-            #expect(leaving.stage == nil)
+            #expect(leaving.stage == nil, "a swipe on \(stage.id) did not take it down")
         }
     }
 
@@ -734,12 +954,12 @@ struct JoinStageTests {
         )
 
         session.hostname = Self.forum
-        await session.add(from: .field)
+        await session.add()
         #expect(session.stage?.inlinePreview?.host == Self.forum, "the premise: a block in the page")
         let before = pictures.generation
 
         session.hostname = Self.other
-        await session.add(from: .field)
+        await session.add()
 
         #expect(session.stage?.inlinePreview?.host == Self.other, "the premise: the block was replaced")
         #expect(pictures.generation > before, """
@@ -760,12 +980,12 @@ struct JoinStageTests {
         )
 
         session.hostname = Self.forum
-        await session.add(from: .field)
+        await session.add()
         let before = pictures.generation
 
         // The same host looked at again: the picture being dropped is the one about to be drawn.
         session.hostname = Self.forum
-        await session.add(from: .field)
+        await session.add()
         #expect(pictures.generation == before, "a re-look dropped the picture it was re-drawing")
     }
 
@@ -778,15 +998,16 @@ struct JoinStageTests {
         let offer = JoinOffer(host: Self.forum, kind: .discuz, categories: [])
 
         #expect(AccountPane.actionsLive(at: .previewing(preview, from: .field, ticked: [])))
-        let overIt = JoinStage.choosingBoards(offer, from: .preview(preview, from: .field, ticked: []))
+        let overIt = JoinStage.choosingBoards(offer, from: .preview(preview, ticked: []))
         #expect(!AccountPane.actionsLive(at: overIt), """
             The block kept a live Subscribe under the boards sheet standing on it.
             """)
         #expect(!AccountPane.actionsLive(at: .browsing))
+        #expect(!AccountPane.actionsLive(at: .browsingServers(.mastodon)))
         #expect(!AccountPane.actionsLive(at: nil))
         // The block is drawn for exactly these stages, and it is disabled in all but the first.
         for stage in [JoinStage.previewing(preview, from: .field, ticked: []),
-                      .choosingBoards(offer, from: .preview(preview, from: .field, ticked: []))] {
+                      .choosingBoards(offer, from: .preview(preview, ticked: []))] {
             #expect(stage.inlinePreview != nil, "the premise: the block is drawn at this stage")
         }
     }
@@ -798,7 +1019,7 @@ struct JoinStageTests {
     func aTypedHostsBoardsOpenOverThePage() async {
         let (session, http) = Self.forumSession()
         session.hostname = Self.forum
-        await session.add(from: .field)
+        await session.add()
         guard case .previewing(let looked, .field, _) = session.stage else {
             Issue.record("a typed host should preview in the page")
             return
@@ -833,17 +1054,20 @@ struct JoinStageTests {
 
         #expect(JoinSheet.leading(for: nil) == nil)
         #expect(JoinSheet.leading(for: .browsing) == .close)
-        // A preview reached from the field has the field behind it; one reached from a row has
-        // the directory. Same stage, different answer — §2.2's rule by shape, not by history.
-        //
-        // **And the answer is now a function of one value.** It used to take the entrance as a
-        // second argument, fed from a `@State` inside `JoinSheet` that nothing here could set —
-        // so this test proved the rule while the thing deciding which way to call it was
-        // reachable from no test at all.
+        #expect(JoinSheet.leading(for: .browsingServers(.mastodon)) == .backToProtocols)
+        // **No preview offers Back any more, and that is how the deleted case is pinned absent.**
+        // `.backToBrowsing` stepped from a preview into the server list, and `PreviewOrigin` has
+        // no case left meaning "reached from the browser" — so the stage it answered on cannot be
+        // constructed. The two that exist are covered here, the switch over them is exhaustive,
+        // and neither is Back.
         #expect(JoinSheet.leading(for: .previewing(preview, from: .field, ticked: [])) == .cancel)
-        #expect(JoinSheet.leading(for: .previewing(preview, from: .directory, ticked: [])) == .backToBrowsing)
         #expect(
-            JoinSheet.leading(for: .choosingBoards(offer, from: .preview(preview, from: .field, ticked: [])))
+            JoinSheet.leading(for: .previewing(
+                preview, from: .joined(Source(host: Self.forum, kind: .discuz)), ticked: []
+            )) == .close
+        )
+        #expect(
+            JoinSheet.leading(for: .choosingBoards(offer, from: .preview(preview, ticked: [])))
                 == .backToPreview
         )
         // **Built, and it is Cancel.** A restate has nothing behind it: the reader pressed a
@@ -857,7 +1081,7 @@ struct JoinStageTests {
         )
 
         // And every one of them is a word, in every language.
-        for button in [JoinSheet.Leading.close, .backToBrowsing, .backToPreview, .cancel] {
+        for button in [JoinSheet.Leading.close, .backToProtocols, .backToPreview, .cancel] {
             for language in [DummyLanguage.english, .taiwanese] {
                 #expect(L10n.t(button.key, language: language) != button.key)
             }
@@ -874,27 +1098,26 @@ struct JoinStageTests {
 
         let (cancelling, _) = Self.forumSession()
         cancelling.hostname = Self.forum
-        await cancelling.add(from: .field)
+        await cancelling.add()
         JoinSheet.press(.cancel, on: cancelling)
         #expect(cancelling.stage == nil)
 
         let (back, _) = Self.forumSession()
-        back.hostname = Self.forum
-        // **The directory, and it has to be.** `leading(for:)` offers `.backToBrowsing` only to a
-        // preview reached through the directory; a typed host is offered Cancel. Pressing it on a
-        // `.field` stage pairs a button with a stage that can never present it, and passes only
-        // because `press` switches on the button — in the test whose whole purpose is to catch a
-        // button calling the wrong method.
-        await back.add(from: .directory)
-        #expect(JoinSheet.leading(for: back.stage) == .backToBrowsing, """
+        // **The server list, and it has to be.** `leading(for:)` offers `.backToProtocols` only
+        // there. Pressing it on any other stage pairs a button with a stage that can never present
+        // it, and passes only because `press` switches on the button — in the test whose whole
+        // purpose is to catch a button calling the wrong method.
+        back.browse()
+        back.chooseProtocol(.discuz)
+        #expect(JoinSheet.leading(for: back.stage) == .backToProtocols, """
             The premise: this is the stage that actually offers this button.
             """)
-        JoinSheet.press(.backToBrowsing, on: back)
-        #expect(back.stage == .browsing, "Back to the directory went nowhere")
+        JoinSheet.press(.backToProtocols, on: back)
+        #expect(back.stage == .browsing, "Back to the protocols went nowhere")
 
         let (boards, _) = Self.forumSession()
         boards.hostname = Self.forum
-        await boards.add(from: .field)
+        await boards.add()
         await boards.confirm()
         #expect(boards.choosing != nil, "the premise: the boards were reached")
         JoinSheet.press(.backToPreview, on: boards)
@@ -914,7 +1137,7 @@ struct JoinStageTests {
         let pictures = ShellPictures(http: FixtureHTTP())
         let leaving = ShellSession(http: FixtureHTTP(Self.forumRoutes()), pictures: pictures)
         leaving.hostname = Self.forum
-        await leaving.add(from: .field)
+        await leaving.add()
         let before = pictures.generation
 
         leaving.dismissStage()
@@ -938,9 +1161,12 @@ struct JoinStageTests {
             host: Self.forum, kind: .discuz, profile: .silent(host: Self.forum, kind: .discuz)
         )
         #expect(JoinStage.browsing.host == nil)
+        // The server list names none either: the press that names a server also closes the sheet,
+        // so no stage in the browser is ever *about* one.
+        #expect(JoinStage.browsingServers(.mastodon).host == nil)
         #expect(JoinStage.previewing(preview, from: .field, ticked: []).host == Self.forum)
         let offer = JoinOffer(host: Self.forum, kind: .discuz, categories: [])
-        #expect(JoinStage.choosingBoards(offer, from: .preview(preview, from: .field, ticked: [])).host
+        #expect(JoinStage.choosingBoards(offer, from: .preview(preview, ticked: [])).host
             == Self.forum)
     }
 
@@ -1028,7 +1254,7 @@ struct JoinStageTests {
             """#),
         ]), store: ItemStore())
         session.hostname = Self.forum
-        await session.add(from: .field)
+        await session.add()
 
         guard case .previewing(let preview, _, _) = session.stage else {
             Issue.record("a forum that refuses should still be previewed, not refused outright")
@@ -1056,7 +1282,7 @@ struct JoinStageTests {
             """#),
         ]), store: ItemStore())
         session.hostname = Self.forum
-        await session.add(from: .field)
+        await session.add()
 
         guard case .previewing(let preview, _, _) = session.stage else {
             Issue.record("a forum behind a filter should still be previewed, not refused outright")
@@ -1149,7 +1375,7 @@ struct JoinStageTests {
         defer { watchdog.cancel() }
 
         session.hostname = Self.forum
-        await session.add(from: .field)
+        await session.add()
         await session.confirm()
         guard let offer = session.choosing?.offer else {
             Issue.record("a Discuz! should have paused for the reader to choose")
@@ -1204,7 +1430,7 @@ struct JoinStageTests {
         session.sources = await session.store.sources()
 
         session.hostname = Self.forum
-        await session.add(from: .field)
+        await session.add()
         await session.confirm()
         guard let offer = session.choosing?.offer else {
             Issue.record("a Discuz! should have paused for the reader to choose")
@@ -1245,7 +1471,7 @@ struct JoinStageTests {
     func theLookRecordsWhatWasSaid() async {
         let (session, _) = Self.forumSession()
         session.hostname = "  HTTPS://\(Self.forum)/forum.php  "
-        await session.add(from: .field)
+        await session.add()
         #expect(session.profiles[Self.forum] == .stated(SourceProfile(
             host: Self.forum, kind: .discuz, readsWithoutAccount: true
         )))
@@ -1286,7 +1512,7 @@ struct JoinStageTests {
 
         // A's block is open in the page, and the field beside it is live.
         session.hostname = first
-        await session.add(from: .field)
+        await session.add()
         #expect(session.stage?.inlinePreview?.host == first, "the premise: A's block is drawn")
 
         // The reader types B and resumes it the way a refusal's sign-in offer does.
@@ -1341,7 +1567,7 @@ struct JoinStageTests {
         let session = ShellSession(http: http, store: ItemStore())
         let pane = AccountPane(session: session)
         session.hostname = "first.example"
-        await session.add(from: .field)
+        await session.add()
 
         let press = Task { await session.confirm() }
         #expect(await Self.spun { session.checking }, "the press never reached the wire")
@@ -1365,18 +1591,28 @@ struct JoinStageTests {
         #expect(session.progress == nil)
     }
 
-    /// **Ownership was fixed; visibility was never made a function of anything.** `.directory`'s
-    /// reporter is `.page`, a browsed preview's surface *is* `.sheet`, and `take` holds the stage
-    /// for the whole of `begin(preview)` — unlike `subscribe`, which nils it first, which is the
-    /// only reason the boards phase was ever visible. So browsing a server and pressing Subscribe
-    /// drew the sentence under the field, **behind the sheet**: a reader waiting on a request,
-    /// told nothing, with every visible control refused.
+    /// **The seam this unit deletes, driven down the route that used to have it.**
     ///
-    /// The suite could not see it because every `pageProgress` assertion passed `drawnAs: nil`.
-    /// This one passes a sheet stage and follows the answer through to where the sentence lands.
-    @Test("A browsed Subscribe says so in the sheet the reader is looking at, not behind it")
-    func aSheetDoesNotHideTheSentenceAboutItsOwnPress() async {
+    /// The defect: `PreviewOrigin.directory` reported `.page` while its own stage was surfaced
+    /// `.sheet`, and `take` holds the stage for the whole of `begin(preview)` — so browsing a
+    /// server and pressing Subscribe drew the sentence under the field **behind the sheet**: a
+    /// reader waiting on a request, told nothing, every visible control refused. It was rescued by
+    /// `reporting` answering `.sheet` and by the sheet growing a waiting site of its own.
+    ///
+    /// **Both are gone, and this test is what says the rescue is not owed.** Decision 38 deletes
+    /// the route: choosing a server closes the browser before anything goes on the wire, so the
+    /// press runs with the preview drawn in the page, reports `.block`, and the reader is looking
+    /// straight at it. There is no sheet up to hide anything and no `.sheet` answer to give.
+    ///
+    /// **The premise is asserted before the conclusion**, because "no sheet is up" is the whole of
+    /// why this is safe — a change that left one up would make the rest of this pass while a
+    /// reader waited in silence again.
+    @Test("A server chosen in the browser reports where the reader is looking, not behind a sheet")
+    func aChosenServersPressReportsWhereItIsVisible() async {
         let http = GatedHTTP([
+            "/servers": .text(#"""
+            [{"domain": "first.example", "description": "The flagship server"}]
+            """#),
             "/": .text(#"""
             <html><head><meta name="application-name" content="Mastodon"></head><body></body></html>
             """#),
@@ -1392,50 +1628,88 @@ struct JoinStageTests {
 
         let session = ShellSession(http: http, store: ItemStore())
         let pane = AccountPane(session: session)
-        let sheet = JoinSheet(session: session)
-        session.hostname = "first.example"
-        await session.add(from: .directory)
-        #expect(session.stage?.surface == .sheet, "the premise: the preview is in the sheet")
+        session.browse()
+        session.chooseProtocol(.mastodon)
+        await session.loadCatalog()
+        guard case .ready(let servers) = session.catalog, let row = servers.first else {
+            Issue.record("the premise did not hold: catalog \(session.catalog)")
+            return
+        }
+
+        await session.pick(row)
+        #expect(session.stage?.surface == .pane, """
+            The premise: choosing a server took the browser down and drew the preview in the page. \
+            A sheet left standing here is the seam back.
+            """)
 
         let press = Task { await session.confirm() }
         #expect(await Self.spun { session.checking }, "the press never reached the wire")
 
-        // The press belonged to the page — the field is where a browsed join is reported from —
-        // and the page is not what the reader can see.
-        #expect(session.progress?.owner == .page)
-        #expect(
-            ShellSession.reporting(session.progress, drawnAs: session.stage) == .sheet,
-            "the errand was attributed to a surface the sheet is standing over"
-        )
-        #expect(pane.pageWaiting == nil, "the sentence was drawn under a field nobody can see")
-        #expect(sheet.sheetWaiting?.contains("first.example") == true, """
-            Nothing in the sheet said anything, while its Subscribe was grey and its Cancel was \
-            the only live control on screen.
+        #expect(session.stage?.surface == .pane, "a sheet came up over the press mid-flight")
+        #expect(session.progress?.owner == .block, """
+            A chosen server's Subscribe is pressed in the block, like a typed host's, because it \
+            *is* a typed host's from `pick` onwards.
             """)
+        #expect(
+            ShellSession.reporting(session.progress, drawnAs: session.stage) == .block,
+            "the errand was attributed to a surface nobody is looking at"
+        )
+        #expect(pane.blockWaiting?.contains("first.example") == true, """
+            Nothing was said under the Subscribe the reader pressed.
+            """)
+        #expect(pane.pageWaiting == nil, "one press drew two sentences on two surfaces")
 
         await http.gate.open()
         await press.value
         #expect(session.progress == nil)
     }
 
-    /// The sheet has two places for one sentence — a directory row, and the footer — and they must
-    /// not both fire. A row the catalogue lists draws its own; a preview being taken has no row,
-    /// and neither does a host the directory does not list, so those go to the footer.
-    @Test("One sentence, one place in the sheet, whichever stage the reader is on")
-    func theSheetPutsItsSentenceInExactlyOnePlace() {
-        let listed = ["first.example"]
-        #expect(JoinSheet.drawnByARow(.browsing, host: "first.example", listed: listed))
-        // `extraRow` — a host the reader typed that the directory does not carry. It has no row
-        // foot at all, so the footer is the only site it can have.
-        #expect(!JoinSheet.drawnByARow(.browsing, host: "other.example", listed: listed))
-        // A preview being taken: the catalogue is not even on screen.
-        let previewing = JoinStage.previewing(
-            SourcePreview(host: "first.example", kind: .mastodon, profile: .unasked(
-                host: "first.example", kind: .mastodon
-            )),
-            from: .directory, ticked: []
-        )
-        #expect(!JoinSheet.drawnByARow(previewing, host: "first.example", listed: listed))
-        #expect(!JoinSheet.drawnByARow(nil, host: "first.example", listed: listed))
+    /// **No errand can be on the wire while a sheet-surfaced stage is up, and that is the
+    /// invariant `ProgressOwner.sheet` used to exist in place of.**
+    ///
+    /// The old rescue asked, at every draw, whether a sheet was covering whichever surface had
+    /// claimed the errand. It is not needed because no such pairing can be reached: the browser
+    /// presses nothing, `subscribe(_:)` nils the stage before the boards go on the wire, and
+    /// `changeBoards(host:)` runs with no stage at all. So **all four stages this sheet draws** are
+    /// walked here and each is asked the one question that matters.
+    ///
+    /// **Four stages, five entrances** — `chooseProtocol(_:)` and `browse()` both land on the
+    /// browser. `ShellSession.reporting(_:drawnAs:)` lists the five and what holds each; this walks
+    /// what they produce.
+    ///
+    /// **Not a proof, and it does not claim to be one** — no test can enumerate the futures. It is
+    /// the routes that exist, so a sixth sheet entrance added without joining them fails here
+    /// rather than on a reader's screen.
+    @Test("Nothing is on the wire while the sheet is up, at any of its stages")
+    func noErrandRunsBehindTheSheet() async {
+        let (session, _) = Self.forumSession()
+
+        session.browse()
+        #expect(session.stage?.surface == .sheet && !session.checking)
+        #expect(session.progress == nil, "the protocol list came up over a running errand")
+
+        session.chooseProtocol(.discuz)
+        #expect(session.stage?.surface == .sheet && !session.checking)
+        #expect(session.progress == nil, "the server list came up over a running errand")
+
+        // The boards, reached by the one route that opens a sheet after an await. `take` writes
+        // the stage and returns, and `progress` is cleared by its own `defer` on the way out.
+        session.dismissStage()
+        session.hostname = Self.forum
+        await session.add()
+        await session.confirm()
+        #expect(session.stage?.surface == .sheet, "the premise: the boards are in the sheet")
+        #expect(!session.checking, "the boards sheet stands over a request still on the wire")
+        #expect(session.progress == nil, "a sentence outlived the press that opened this sheet")
+
+        // And the fourth, which is the detail of a source the reader has — decision 31, the one
+        // `.previewing` that is still drawn in the sheet. It costs no request at all, and
+        // `rowActsLive` refuses the press that opens it unless the session is idle.
+        session.dismissStage()
+        session.sources = [Source(host: Self.forum, kind: .discuz)]
+        session.openSource(host: Self.forum)
+        #expect(session.stage?.surface == .sheet, "the premise: the detail is in the sheet")
+        #expect(!session.checking, "the detail stands over a request still on the wire")
+        #expect(session.progress == nil, "a sentence outlived the press that opened the detail")
     }
 }

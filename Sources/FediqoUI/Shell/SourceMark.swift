@@ -99,6 +99,48 @@ enum SourceMark {
     static func ink(signedIn: Bool, quiet: Color, scheme: ColorScheme) -> Color {
         signedIn ? ShellChrome.filament(scheme) : quiet
     }
+
+    /// The picture itself: the protocol's own drawing, or the shape glyph where this repo has
+    /// none.
+    ///
+    /// **One drawing, because three surfaces were drawing it.** `SourceRow`'s leading mark, the
+    /// masthead glance and the browser's protocol row all asked the same pair of questions —
+    /// `kindMark` then `symbol` — and all three then wrote the same seven modifiers out. The
+    /// glance's own doc claimed it was "not a copy of the row's drawing but the same pair of
+    /// questions", and the third copy is what made that false: it dropped `.symbolVariant`, so one
+    /// surface stopped filling a signed-in glyph while the other two went on filling it. That is
+    /// the one-server-one-picture rule breaking through the *rendering* rather than through the
+    /// asset name, which is the half a shared `kindMark` could never protect.
+    ///
+    /// `SourceRow.swift`'s own comment asked for this in as many words: `.renderingMode(.template)`
+    /// is belt and braces beside the catalogue's `template-rendering-intent` because "a later hand
+    /// copying this code elsewhere will not read the JSON". There is one hand now.
+    ///
+    /// **What stays the caller's**: the size, the pixel count it implies, and the ink. Those differ
+    /// on purpose — the row is 24pt `inkDim`, the glance is a scaling 16pt `inkFaint` — and the
+    /// thing that must **not** differ is what is drawn and whether `signedIn` reaches it.
+    @ViewBuilder
+    static func drawing(
+        _ kind: ProtocolKind, shape: DummySourceKind, points: CGFloat, scale: CGFloat,
+        signedIn: Bool
+    ) -> some View {
+        if let name = kindMark(kind, pixels: points * scale) {
+            Image(name, bundle: .module)
+                // Belt and braces beside the catalogue's own `template-rendering-intent`: a
+                // catalogue property is invisible at the call site, and a later hand copying
+                // this code elsewhere will not read the JSON.
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+        } else {
+            // Tier 3, and it *asks* rather than assuming: a protocol this repo has no drawing for
+            // still fills its glyph where the reader is signed in.
+            Image(systemName: symbol(shape))
+                .font(.system(size: points))
+                .symbolVariant(signedIn ? .fill : .none)
+                .symbolRenderingMode(.hierarchical)
+        }
+    }
 }
 
 /// The whole of what this device reads, on one line, without scrolling.
@@ -225,19 +267,11 @@ struct SourceMarkRow: View {
     /// 24. What it *says* has not changed at all: the count and the signed-in fact, in the
     /// sentence beneath. What is **not** allowed to differ is whether `signedIn` is honoured —
     /// see `SourceMark.ink`.
-    @ViewBuilder
     private func drawing(_ mark: Mark) -> some View {
-        if let name = SourceMark.kindMark(mark.kind, pixels: glyph * displayScale) {
-            Image(name, bundle: .module)
-                .renderingMode(.template)
-                .resizable()
-                .scaledToFit()
-        } else {
-            Image(systemName: SourceMark.symbol(mark.shape))
-                .font(.system(size: glyph))
-                .symbolVariant(mark.signedIn ? .fill : .none)
-                .symbolRenderingMode(.hierarchical)
-        }
+        SourceMark.drawing(
+            mark.kind, shape: mark.shape, points: glyph, scale: displayScale,
+            signedIn: mark.signedIn
+        )
     }
 
     /// One mark's ink. **Internal and pinned**, because "the glance and the row say the same thing

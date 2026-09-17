@@ -14,64 +14,25 @@ enum JoinSurface: Equatable {
     case pane
 }
 
-/// Where a *join* was started. The two entrances that end in something being added.
-///
-/// **A second enum rather than three cases in one, and it is unit A's own argument honoured
-/// rather than departed from.** `PreviewOrigin` gained `.joined` — a source the reader already
-/// has, looked at again — and a detail has no Subscribe, so it can never reach a board list.
-/// Carried in `BoardsOrigin.preview` and in `ShellSession.take`, `PreviewOrigin` would have made
-/// `.preview(_, from: .joined, _)` a value somebody can write: an unreachable combination in a
-/// type, which unit A recorded as *a case somebody later writes a branch for*. Narrowed here, the
-/// combination cannot be constructed, so no switch in this app ever answers for it — and
-/// `confirm()`'s refusal is structural rather than a guard that can be forgotten.
-enum JoinEntrance: Equatable {
-    /// The reader typed a hostname on `AccountPane` and pressed Return or the magnifier.
-    case field
-    /// The reader pressed a row in the directory.
-    case directory
-
-    /// The same entrance, said as the preview origin it produces. Total, because both of these
-    /// *are* previews of something the reader might take.
-    var origin: PreviewOrigin {
-        switch self {
-        case .field: .field
-        case .directory: .directory
-        }
-    }
-
-    /// Which surface reports a press made at this entrance.
-    ///
-    /// **A function of the entrance and never of what happens to be drawn.** Derived from the
-    /// stage it read *whatever block was on screen*, and a reader can have host A's block open
-    /// while being turned away typing host B — so B's sentence appeared inside A's block, under
-    /// A's Subscribe, with nothing at all under the field where they actually pressed. The
-    /// entrance is the press, and the sentence is about the press.
-    ///
-    /// **No `default:`.**
-    var reporter: ProgressOwner {
-        // The field's preview is drawn as a block in the page and its Subscribe is in that block,
-        // 300pt from the field's own line.
-        switch self {
-        case .field: .block
-        // A browsed preview is in the sheet, which has no line of its own, so the page keeps it —
-        // and the directory row the reader pressed draws its own from `progressHost`.
-        case .directory: .page
-        }
-    }
-}
-
 /// Where a preview was reached from.
 ///
 /// **Per-case rather than a field on the stage, so an illegal pairing cannot be written.** There
 /// is no such thing as browsing-from-the-field, and a single origin beside the stage would let
 /// somebody spell it.
+///
+/// **Two cases, and the third one's going is decision 38.** There was a `.directory` — a preview
+/// reached by pressing a row in the browser, drawn in the sheet the browser was in. The browser is
+/// a picker now: choosing a server closes it, fills the field and runs the errand a typed host
+/// runs, so every preview of a server the reader might take arrives through the field and is drawn
+/// beside it. **What went with that case is this milestone's hardest defect** — `.directory`'s
+/// press reported itself on the page while its stage was surfaced in the sheet, so the progress
+/// sentence drew under a field the sheet was standing on. No `.directory`, no contradiction, and
+/// no rescue needed for one; see `ShellSession.reporting(_:drawnAs:)`.
 enum PreviewOrigin: Equatable {
-    /// The reader typed a hostname on `AccountPane` and pressed Return or the magnifier. Drawn in
-    /// the page, beside the field they typed into.
+    /// The reader typed a hostname on `AccountPane` and pressed Return or the magnifier — or
+    /// picked a server in the browser, which fills that same field and presses it for them. Drawn
+    /// in the page, beside the field.
     case field
-    /// The reader pressed a row in the directory. The directory is behind them, so this stays in
-    /// the sheet the directory is in.
-    case directory
     /// A source the reader already has, whose own account of itself they asked to see —
     /// **decision 31**.
     ///
@@ -93,19 +54,25 @@ enum PreviewOrigin: Equatable {
     /// difference.
     case joined(Source)
 
-    /// The join this entrance is part of, or nothing where it is not part of one.
+    /// Which surface reports a Subscribe pressed here — and **nothing where there is no Subscribe
+    /// to press.**
     ///
     /// **A total function and the only door to `ShellSession.take`**, which is what makes a
-    /// detail's Subscribe unrepresentable rather than guarded against: `.joined` has no
-    /// `JoinEntrance` to hand over, so there is nothing for `take` to be called with, and
-    /// `JoinSheet` reads the same `nil` to draw no primary button at all.
+    /// detail's Subscribe unrepresentable rather than guarded against: `.joined` has no owner to
+    /// hand over, so there is nothing for `take` to be called with, and `JoinSheet` reads the same
+    /// `nil` to draw no primary button at all. It carried a `JoinEntrance` until decision 38 left
+    /// that enum with one case; what the entrance was ever *for* was this answer, so the answer is
+    /// what stayed.
     ///
-    /// **No `default:`** — a fourth entrance says whether a press means anything on it rather
-    /// than inheriting `.field`'s yes.
-    var entrance: JoinEntrance? {
+    /// **`.block` and not `.page`, because a join's preview is a block in the page and its
+    /// Subscribe is in that block**, 300pt from the field's own line. That is now true of every
+    /// Subscribe there is, which is the contradiction decision 38 deleted.
+    ///
+    /// **No `default:`** — a third origin says whether a press means anything on it rather than
+    /// inheriting `.field`'s yes.
+    var reporter: ProgressOwner? {
         switch self {
-        case .field: .field
-        case .directory: .directory
+        case .field: .block
         case .joined: nil
         }
     }
@@ -117,7 +84,7 @@ enum PreviewOrigin: Equatable {
     /// back out of the session by a view.
     var held: Source? {
         switch self {
-        case .field, .directory: nil
+        case .field: nil
         case .joined(let source): source
         }
     }
@@ -128,30 +95,19 @@ enum PreviewOrigin: Equatable {
 /// The two are different errands and the sheet has to tell them apart: one is a join with a
 /// preview behind it, the other is a reader restating what they already read.
 enum BoardsOrigin: Equatable {
-    /// A join in progress. Carries the preview — decision 12 — so Back costs no second request,
-    /// and the origin of *that* preview.
+    /// A join in progress. Carries the preview — decision 12 — so Back costs no second request.
     ///
-    /// **The origin is load-bearing and not a note about where the reader came from.**
-    /// `backToPreview()` does not restore a stage, it **reconstructs** one:
-    /// `.previewing(preview, from: origin)`. Drop the origin here and there is nothing to
-    /// reconstruct it from, so Back would have to guess — and either guess is a reader thrown onto
-    /// the wrong surface. Guess `.field` and a preview picked off the directory comes back as a
-    /// block in the page, for somebody who never typed anything and whose sheet has just vanished.
-    /// Guess `.directory` and a typed host's Back opens a sheet over the page that is still
-    /// drawing that same preview underneath it.
+    /// **It carried the preview's own origin too, and decision 38 is what retired that.**
+    /// `backToPreview()` does not restore a stage, it **reconstructs** one — and while a preview
+    /// could be reached from two places, a guess about which would throw the reader onto the wrong
+    /// surface. Every join preview is now the field's, so the reconstruction has one answer and
+    /// nothing to carry it in.
     ///
-    /// It is also what `JoinStage.inlinePreview` reads to keep the page's block drawn while this
-    /// sheet stands over it, which is the more visible of the two but the weaker reason.
-    ///
-    /// **`ticked` is what the picker opens ticked here** — decision 27. From the directory both
-    /// stages are this sheet, so the sheet stayed mounted and its ticks survived Back by accident
-    /// of where they were stored; from the field the preview is `.pane`, the sheet comes down on
-    /// Back and took them with it. Carried in the stage, the two entrances answer the same
-    /// question from the same place, and no surface keeps state another cannot.
-    ///
-    /// **`JoinEntrance` and not `PreviewOrigin`**, because only a join reaches a board list: see
-    /// `JoinEntrance` for why the narrower type is unit A's argument kept rather than broken.
-    case preview(SourcePreview, from: JoinEntrance, ticked: Set<Int>)
+    /// **`ticked` is what the picker opens ticked here** — decision 27. The preview is drawn in
+    /// the page, so the sheet comes down on Back and would take a tick set stored in the view with
+    /// it. Carried in the stage, a swipe and a Back behave identically because neither surface is
+    /// holding anything.
+    case preview(SourcePreview, ticked: Set<Int>)
     /// A source the reader already has, whose boards they are changing.
     ///
     /// **`subscribed` is the baseline and `ticked` is the reader's hand on it**, and they are two
@@ -173,7 +129,7 @@ enum BoardsOrigin: Equatable {
     /// re-subscribes to boards the reader unticked.
     var ticked: Set<Int> {
         switch self {
-        case .preview(_, _, let ticked): ticked
+        case .preview(_, let ticked): ticked
         case .joined(_, let ticked): ticked
         }
     }
@@ -209,18 +165,24 @@ enum BoardsOrigin: Equatable {
     /// a test writing one are the same call.
     func ticking(_ picked: Set<Int>) -> BoardsOrigin {
         switch self {
-        case .preview(let preview, let origin, _): .preview(preview, from: origin, ticked: picked)
+        case .preview(let preview, _): .preview(preview, ticked: picked)
         case .joined(let subscribed, _): .joined(subscribed: subscribed, ticked: picked)
         }
     }
 }
 
-/// Where the reader is in adding a source: looking for one, looking *at* one, or picking what of
-/// it to read.
+/// Where the reader is in adding a source: looking for a protocol, looking through its servers,
+/// looking *at* one, or picking what of it to read.
 ///
-/// **Three stages, one piece of state, and the stage says which surface draws it.** Three sheets
+/// **Four stages, one piece of state, and the stage says which surface draws it.** Three sheets
 /// driven by three optionals is what this replaces, and on iOS two `.sheet` modifiers that can
 /// both be active means the second is silently ignored.
+///
+/// **The browser is two steps and has no field of its own** — decisions 19 and 38. `.browsing` is
+/// the protocols this app can read; `.browsingServers` is one protocol's suggested servers.
+/// Choosing a server does not open a preview *here*: it closes the sheet, fills the hostname
+/// field and runs the same errand typing would, which is why no browsing stage leads anywhere
+/// inside this sheet.
 ///
 /// **The entrance travels in the case** — decision 20. It used to be a `@State` inside `JoinSheet`
 /// called `cameFromBrowsing`: a view-local flag no test could reach, which is the shape this
@@ -232,8 +194,14 @@ enum BoardsOrigin: Equatable {
 /// boards stage draw a Back button at all, and Back without a second request is the reader-visible
 /// gain of merging the three sheets.
 enum JoinStage: Identifiable, Equatable {
-    /// A list of servers to look at. Nothing has been typed and nothing detected.
+    /// Step one of the browser: the protocols this app can read. **Names no server and reaches no
+    /// wire** — the directory is not asked for until a protocol that has one is chosen, which is
+    /// decision 10 moved one press later than it was.
     case browsing
+    /// Step two: the servers suggested for one protocol, or the sentence saying there are none
+    /// suggested for it yet. **Nothing is typed here and nothing is filtered** — the user's
+    /// ruling, decision 38: the browser is a picker and the field is on the page.
+    case browsingServers(ProtocolKind)
     /// One server, and what it says about itself. **Nothing added.**
     ///
     /// **`ticked` is the boards stage's ticks, in transit** — decision 27, and the one part of it
@@ -254,6 +222,7 @@ enum JoinStage: Identifiable, Equatable {
     var id: String {
         switch self {
         case .browsing: "browsing"
+        case .browsingServers(let kind): "browsingServers:\(kind.rawValue)"
         case .previewing(let preview, _, _): "previewing:\(preview.host)"
         case .choosingBoards(let offer, _): "choosingBoards:\(offer.host)"
         }
@@ -268,7 +237,7 @@ enum JoinStage: Identifiable, Equatable {
     /// **No `default:`.**
     var ticked: Set<Int> {
         switch self {
-        case .browsing: []
+        case .browsing, .browsingServers: []
         case .previewing(_, _, let ticked): ticked
         case .choosingBoards(_, let origin): origin.ticked
         }
@@ -277,11 +246,13 @@ enum JoinStage: Identifiable, Equatable {
     /// The same stage with the reader's hand moved. **Pure and total**, so the picker's binding is
     /// a call to this and the press-by-press route a test walks is the same one.
     ///
-    /// `.browsing` names no forum, so there is nothing on it to tick and it answers itself
-    /// unchanged rather than inventing a set — which is the same fact `host` reports as `nil`.
+    /// Neither browsing step names a forum, so there is nothing on either to tick and both answer
+    /// themselves unchanged rather than inventing a set — which is the same fact `host` reports as
+    /// `nil`.
     func ticking(_ picked: Set<Int>) -> JoinStage {
         switch self {
         case .browsing: .browsing
+        case .browsingServers(let kind): .browsingServers(kind)
         case .previewing(let preview, let origin, _):
             .previewing(preview, from: origin, ticked: picked)
         case .choosingBoards(let offer, let origin):
@@ -291,12 +262,13 @@ enum JoinStage: Identifiable, Equatable {
 
     /// The server this stage is about, where it is about one.
     ///
-    /// **`.browsing` is about none, and that is a fact rather than a gap.** A reader with the
-    /// directory open has not named a host yet, so a caller asking "is this stage about the
-    /// server that just went away" gets the true answer of no.
+    /// **Neither browsing step is about one, and that is a fact rather than a gap.** A reader with
+    /// the browser open has not named a host yet — not even at the server list, where the press
+    /// that names one also closes the sheet — so a caller asking "is this stage about the server
+    /// that just went away" gets the true answer of no.
     var host: String? {
         switch self {
-        case .browsing: nil
+        case .browsing, .browsingServers: nil
         case .previewing(let preview, _, _): preview.host
         case .choosingBoards(let offer, _): offer.host
         }
@@ -304,17 +276,17 @@ enum JoinStage: Identifiable, Equatable {
 
     /// Which surface draws this stage. **Derived, never stored** — decision 20.
     ///
-    /// A typed hostname's preview belongs beside the field the reader typed into; one reached from
-    /// the directory belongs in the sheet the directory is in, because the directory is what is
-    /// behind it. Everything else is the sheet.
+    /// **Every preview of a server the reader might take is drawn in the page** — decision 38. It
+    /// belongs beside the field they typed into, and since the browser fills that field rather than
+    /// previewing anything itself, there is no longer a second answer. The detail of a source they
+    /// already have is the exception and says why at its own case.
     ///
-    /// **No `default:`**, and the `.previewing` cases are split rather than folded: a fourth
-    /// entrance has to say where it draws rather than inherit somebody else's answer.
+    /// **No `default:`**, and the `.previewing` cases are split rather than folded: a third origin
+    /// has to say where it draws rather than inherit somebody else's answer.
     var surface: JoinSurface {
         switch self {
-        case .browsing: .sheet
+        case .browsing, .browsingServers: .sheet
         case .previewing(_, .field, _): .pane
-        case .previewing(_, .directory, _): .sheet
         // **The page has no slot for a detail that is not above the list.** `AccountPane` draws
         // its block between the field and the sources, so opening row four's detail inline would
         // push a screenful in above the list and scroll the reader away from the row they
@@ -335,13 +307,11 @@ enum JoinStage: Identifiable, Equatable {
     /// **No `default:`**, so the boards origins each answer for themselves.
     var inlinePreview: SourcePreview? {
         switch self {
-        case .browsing: nil
+        case .browsing, .browsingServers: nil
         case .previewing(let preview, .field, _): preview
-        case .previewing(_, .directory, _): nil
         // A detail is drawn in the sheet, so the page draws nothing for it.
         case .previewing(_, .joined, _): nil
-        case .choosingBoards(_, .preview(let preview, .field, _)): preview
-        case .choosingBoards(_, .preview(_, .directory, _)): nil
+        case .choosingBoards(_, .preview(let preview, _)): preview
         case .choosingBoards(_, .joined): nil
         }
     }
@@ -354,25 +324,26 @@ enum JoinStage: Identifiable, Equatable {
     /// a field that is live and whose Return is refused by a guard three files away is a control
     /// that does nothing, which is exactly the defect unit 5b closed and risk 12 names.
     ///
-    /// `.browsing` admits one because the directory's own rows *are* looks. A preview in the sheet
-    /// and a board list do not, because the reader cannot see past them to know they replaced
-    /// something.
+    /// **Neither browsing step admits one, and that is decision 38 turning an answer over.**
+    /// `.browsing` used to, because the browser's own rows *were* looks started from inside it.
+    /// They are not: a picked server closes the sheet before anything is looked up, so by the time
+    /// `look` asks this question there is no stage left to ask about. Answering yes would leave a
+    /// second look startable behind a sheet the reader cannot see past — PLAN risk 8 exactly, and
+    /// the browser is the only stage that ever needed the exception.
     ///
     /// **No `default:`**, in the house style of `hasTrends` and `canSignIn`.
     var admitsASecondLook: Bool {
         switch self {
-        case .browsing: true
+        case .browsing, .browsingServers: false
         case .previewing(_, .field, _): true
-        case .previewing(_, .directory, _): false
-        // A detail covers the field, like a browsed preview and for its reason: the reader cannot
-        // see what a second look would replace.
+        // A detail covers the field: the reader cannot see what a second look would replace.
         case .previewing(_, .joined, _): false
         case .choosingBoards: false
         }
     }
 }
 
-/// The one sheet adding a source is done in, at whichever of its three stages the reader is on.
+/// The one sheet adding a source is done in, at whichever of its four stages the reader is on.
 ///
 /// **Presented over `.sheet(isPresented:)`, and the `id` is exactly why.** A stable identity is
 /// what stops SwiftUI re-presenting a sheet, so `.sheet(item:)` would leave whether the content
@@ -389,12 +360,35 @@ struct JoinSheet: View {
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.locale) private var locale
+    /// How many pixels a point is, so a mark can ask for the drawing made for the size it will
+    /// actually be rendered at — `SourceMark.kindMark`'s own rule, and the gate is the pixel
+    /// count and never the platform.
+    @Environment(\.displayScale) private var displayScale
 
     @AccessibilityFocusState private var headerFocused: Bool
 
     private enum Metrics {
-        static let fieldRadius: CGFloat = 6
+        /// A protocol's mark, at **the source row's own constant** rather than a second 24 written
+        /// here. `SourceRow.markBase`'s doc records a bare literal being changed to 28 with the
+        /// suite still green; this is the same picture of the same kind of thing, so it takes the
+        /// same number from the same place.
+        static let mark: CGFloat = SourceRow.markBase
     }
+
+    /// The protocols this app can read, in the order the reader meets them.
+    ///
+    /// **Derived from `SourceJoin.reads` and never written out here** — decision 19, and risk 12's
+    /// mitigation applied to a list rather than to a rule. A hand-written list is a second answer
+    /// to a question Core already owns: it would go on offering a protocol the day Core stopped
+    /// reading one, and the reader would meet `unsupportedKind` after the press instead of a
+    /// browser that never offered it. M2 unlocks five forks by moving them across that switch, and
+    /// they appear here the same day with nothing edited.
+    ///
+    /// `ProtocolKind.allCases` order, which puts the Mastodon family first and the two forums
+    /// after it. `.unknown` is not read, so it is not offered.
+    /// `static let`, because it is a compile-time constant: `reads` is a pure switch over a closed
+    /// set and `allCases` does not change at runtime.
+    static let protocols: [ProtocolKind] = ProtocolKind.allCases.filter(SourceJoin.reads)
 
     var body: some View {
         VStack(spacing: 0) {
@@ -406,9 +400,12 @@ struct JoinSheet: View {
             footer
         }
         .background(ShellChrome.page(colorScheme))
-        // Nothing is added until the reader says so, so a swipe is a complete cancel — except
-        // while something is actually on the wire, where leaving would strand the press.
-        .interactiveDismissDisabled(session.checking)
+        // **Nothing is added at any stage this sheet draws, so a swipe is always a complete
+        // cancel.** It used to be held shut on `session.checking`, against a press stranded
+        // mid-flight — and no press can be in flight here any more: see
+        // `ShellSession.reporting(_:drawnAs:)` for the invariant and the entrances that hold it,
+        // and `catalogRow` for the same term dropped for the same reason. Armour that cannot fire
+        // is a reader of this file inferring a state the app does not have.
         // **`id` and not the stage itself.** The ticks now live *in* the stage, so every tick is a
         // change of it — and focus moved on every change would throw a VoiceOver reader back to
         // the header each time they ticked a board. `id` names the stage and the forum and nothing
@@ -441,8 +438,12 @@ struct JoinSheet: View {
         VStack(alignment: .leading, spacing: ShellSpace.tight) {
             switch session.stage {
             case .browsing:
-                titled(L10n.t("join.browse.title"), L10n.t("join.browse.detail"))
-                filterField
+                titled(L10n.t("join.browse.title"), L10n.t("join.browse.protocols.detail"))
+            case .browsingServers(let kind):
+                titled(
+                    String(format: L10n.t("join.browse.servers.title"), kind.displayName),
+                    L10n.t("join.browse.detail")
+                )
             // **The one block this sheet shares with the page, in the sheet's own header slot.**
             // It stays pinned above the hairline here and scrolls with the block there, which is
             // why it is placed by each surface rather than carried inside the shared body.
@@ -508,7 +509,9 @@ struct JoinSheet: View {
     private func body(for stage: JoinStage?) -> some View {
         switch stage {
         case .browsing:
-            browsing
+            protocolList
+        case .browsingServers(let kind):
+            servers(of: kind)
         case .previewing(let preview, let origin, _):
             // **The `ScrollView` is the sheet's and not the shared view's.** `AccountPane` is
             // already one scroller and nesting a second inside it is the failure that pane's own
@@ -554,49 +557,18 @@ struct JoinSheet: View {
         .padding(ShellSpace.pad)
     }
 
-    /// The sentence about the errand **this sheet** is the visible surface for, or nothing.
+    /// The footer's count, where the stage has one.
     ///
-    /// **The sheet had no waiting site at all before this**, which is how a browsed preview's
-    /// Subscribe came to draw its sentence under a field the sheet was covering. See
-    /// `ShellSession.reporting(_:drawnAs:)`: ownership was right and visibility was never asked.
-    ///
-    /// Read from `session.progress` rather than spelled here, so the sheet says what the errand
-    /// says — `SourceRow.waitingLine`'s rule, which exists to abolish exactly the fifth call site
-    /// that spells it differently.
-    var sheetWaiting: String? {
-        guard ShellSession.reporting(session.progress, drawnAs: session.stage) == .sheet,
-              let key = session.progress?.key
-        else { return nil }
-        return String(format: L10n.t(key), session.progressHost)
-    }
-
-    /// Whether a directory row is drawing this errand itself.
-    ///
-    /// **The sheet has two places to put one sentence and they must not both fire.** A catalogue
-    /// row draws its own — which of forty rows they pressed is the thing they cannot otherwise
-    /// see — and everything else goes in the footer: a preview being taken, which has no row, and
-    /// a host the directory does not list, which is `extraRow` and had no site before either.
-    ///
-    /// A `static func` over the hosts rather than a term in a `View` body, so the rule that keeps
-    /// them apart is drivable (risk 12).
-    static func drawnByARow(_ stage: JoinStage?, host: String, listed: [String]) -> Bool {
-        guard case .browsing = stage else { return false }
-        return listed.contains(host)
-    }
-
-    /// The footer's count, where the stage has one — or the sheet's own sentence, where there is
-    /// no row to put it on. **Mutually exclusive**: `.choosingBoards` has a count and no errand
-    /// this sheet reports, and every other stage has no count.
+    /// **This slot also held the sheet's own progress sentence, and decision 38 took the need for
+    /// it away.** A browsed preview's Subscribe used to run with this sheet standing over the
+    /// field its errand was reported under, so the sheet needed a waiting site of its own and a
+    /// rule (`drawnByARow`) keeping it from firing twice. The browser presses nothing now — it
+    /// fills the field and closes — so no errand is ever on the wire while this sheet is up, and a
+    /// waiting line here would be a site nothing can reach. See `ShellSession.reporting(_:drawnAs:)`
+    /// for where that invariant is stated and what enforces it.
     @ViewBuilder
     private var reading: some View {
-        if let waiting = sheetWaiting,
-           !Self.drawnByARow(
-               session.stage,
-               host: session.progressHost,
-               listed: session.visibleServers.map { $0.domain.lowercased() }
-           ) {
-            ForumWaiting(line: waiting)
-        } else if case .choosingBoards(let offer, _) = session.stage {
+        if case .choosingBoards(let offer, _) = session.stage {
             Text(String(
                 format: L10n.t("board.choose.count"),
                 picked.wrappedValue.count,
@@ -608,8 +580,8 @@ struct JoinSheet: View {
     }
 
     /// **By rule rather than by history** — §2.2. What is behind the reader decides the word:
-    /// nothing at the directory, the directory or the field at a preview, and always the preview
-    /// at the boards.
+    /// nothing at the protocols, the protocols at a server list, and always the preview at the
+    /// boards.
     ///
     /// **Named as a value rather than written straight into the button**, because the one bug
     /// this control has already had was a button calling the wrong method — Back from a preview
@@ -618,7 +590,11 @@ struct JoinSheet: View {
     /// the press are both reachable here, and both are pinned.
     enum Leading: Equatable {
         case close
-        case backToBrowsing
+        /// Step two of the browser back to step one. **Not the `.backToBrowsing` this replaces**:
+        /// that one stepped back from a *preview* into the server list, and decision 38 leaves no
+        /// preview with a browser behind it. This one is inside the browser, between its two
+        /// steps, and the stage it is offered at is one the old case could never be offered at.
+        case backToProtocols
         case backToPreview
         case cancel
 
@@ -626,20 +602,20 @@ struct JoinSheet: View {
         var key: String {
             switch self {
             case .close: "join.close"
-            case .backToBrowsing, .backToPreview: "join.back"
+            case .backToProtocols, .backToPreview: "join.back"
             // Reused rather than duplicated, so the two stages cannot drift in translation.
             case .cancel: "board.choose.cancel"
             }
         }
     }
 
-    /// Which button the reader is looking at. **No `default:`** — a fourth stage has to decide
+    /// Which button the reader is looking at. **No `default:`** — a fifth stage has to decide
     /// what is behind it rather than inherit somebody else's answer.
     ///
     /// **A pure function of one value, and that is the whole of what changed here.** The
     /// directory-or-field distinction used to arrive as a second argument fed from a view-local
     /// `@State`, so the rule was pinned and the thing that set it was reachable from no test. The
-    /// entrance now travels in the stage, so four stage-shapes give four answers and every one of
+    /// entrance now travels in the stage, so the stage-shapes give the answers and every one of
     /// them is driven from a test.
     ///
     /// `.previewing(_, .field)` is drawn in the page and has no footer to put a button in; it
@@ -648,7 +624,7 @@ struct JoinSheet: View {
     static func leading(for stage: JoinStage?) -> Leading? {
         switch stage {
         case .browsing: .close
-        case .previewing(_, .directory, _): .backToBrowsing
+        case .browsingServers: .backToProtocols
         case .previewing(_, .field, _): .cancel
         // **Nothing is behind a detail and it is not a step in a flow**, so the word is Close and
         // not Cancel: there is no errand to call off. Decision 31, and `DESIGN-R2` §4.1.
@@ -668,7 +644,7 @@ struct JoinSheet: View {
     static func press(_ leading: Leading, on session: ShellSession) {
         switch leading {
         case .close, .cancel: session.dismissStage()
-        case .backToBrowsing: session.backToBrowsing()
+        case .backToProtocols: session.backToProtocols()
         case .backToPreview: session.backToPreview()
         }
     }
@@ -680,24 +656,31 @@ struct JoinSheet: View {
         }
     }
 
+    /// **No preview draws a Subscribe in this sheet any more, and both origins say so by name.**
+    ///
+    /// This arm used to carry one — it was the browsed preview's, the only takeable preview this
+    /// sheet ever presented. Decision 38 retires it: a chosen server closes the sheet and previews
+    /// beside the field, so the only `.previewing` that is still sheet-surfaced is the detail of a
+    /// source the reader already has, which has nothing to subscribe to. The button left behind was
+    /// a byte-for-byte copy of `AccountPane.previewActions` with no stage left to present it, and
+    /// it read as a second live Subscribe on a second surface — the two-presenters failure this
+    /// file's docs warn about, sitting in the file that warns about it.
+    ///
+    /// **Two named arms rather than a `where` clause**, so a third origin has to decide what it
+    /// draws here rather than falling into whichever arm it happens to match.
     @ViewBuilder
     private var primary: some View {
         switch session.stage {
-        // **A detail has nothing to subscribe to, so it draws no primary at all** — and it is the
-        // same `nil` `ShellSession.confirm()` refuses on, not a second reading of the same fact.
-        // Close alone: Remove, Clear and Boards stay on the row, because a second entrance to
-        // Remove is the two-presenters failure in a new shape.
-        case .previewing(_, let origin, _) where origin.entrance == nil:
+        // Drawn in the page, where the block owns Cancel and Subscribe — `AccountPane`. This sheet
+        // is not presented for a `.pane` stage at all; the arm exists so the switch is total.
+        case .previewing(_, .field, _):
             EmptyView()
-        case .previewing(let preview, _, _):
-            let warned = SourcePreviewView.warns(preview)
-            Button(L10n.t("board.choose.subscribe")) { Task { await session.confirm() } }
-                .disabled(session.checking)
-                // **Withdrawn in the one state the screen has just warned about.** The reader may
-                // still press it — the warning is a prediction and not a refusal — but Return
-                // must not fire the press they were told would probably fail. They have to aim.
-                .keyboardShortcut(warned ? .none : .defaultAction)
-                .accessibilityHint(warned ? Text(L10n.t("join.preview.closed.hint")) : Text(""))
+        // **A detail has nothing to subscribe to** — the same fact `ShellSession.confirm()` refuses
+        // on, where `PreviewOrigin.reporter` is `nil`. Close alone: Remove, Clear and Boards stay
+        // on the row, because a second entrance to Remove is the two-presenters failure in a new
+        // shape.
+        case .previewing(_, .joined, _):
+            EmptyView()
         case .choosingBoards(let offer, _):
             Button(L10n.t("board.choose.subscribe")) {
                 // **In the index's order, not the order they were tapped.** The rail reads this
@@ -719,78 +702,118 @@ struct JoinSheet: View {
             // press that goes through**: that press would be a silent mass-unsubscribe, and the
             // honest route to reading none of a forum is Remove.
             .disabled(picked.wrappedValue.isEmpty)
-        case .browsing, nil:
+        case .browsing, .browsingServers, nil:
             EmptyView()
         }
     }
 
-    // MARK: - Stage: browsing
+    // MARK: - Step one: what this app can read
 
-    /// The catalog, with the sheet's header over it and a field inside it.
-    ///
-    /// **The field is load-bearing and not an addition.** `visibleServers` and `extraJoinHost` are
-    /// both computed off `session.hostname`, so without a field in here the filter and the
-    /// type-a-host-that-is-not-listed path are simply gone the moment Browse becomes a sheet.
-    /// Bound to the same property, so what is typed here is still in the page's field afterwards.
-    private var filterField: some View {
-        TextField(L10n.t("join.browse.filter"), text: $session.hostname)
-            .font(ShellType.body)
-            .textFieldStyle(.plain)
-            .disabled(session.checking)
-            .onSubmit { Task { await look() } }
-            #if os(iOS)
-            .textInputAutocapitalization(.never)
-            .keyboardType(.URL)
-            #endif
-            .autocorrectionDisabled()
-            .accessibilityLabel(L10n.t("join.browse.filter"))
-            .padding(.horizontal, ShellSpace.step)
-            .padding(.vertical, ShellSpace.snug)
-            .overlay {
-                RoundedRectangle(cornerRadius: Metrics.fieldRadius, style: .continuous)
-                    .strokeBorder(ShellChrome.hairline(colorScheme), lineWidth: ShellSpace.hair)
+    private var protocolList: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                ForEach(Self.protocols, id: \.self) { kind in
+                    protocolRow(kind)
+                    hairline
+                }
             }
+        }
+        .scrollIndicators(.never)
     }
 
-    /// A row was pressed here, so the preview it opens has the directory behind it.
+    /// One protocol: its mark and its name, and nothing else.
     ///
-    /// **The entrance goes to the session rather than into a flag here.** It used to set a
-    /// `@State` this sheet owned, which meant the one thing deciding where a preview is drawn and
-    /// what its Back button says lived in the one place a test cannot reach.
-    private func look() async {
-        await session.add(from: .directory)
+    /// **Deliberately the terse row, which is the opposite of the server row below it.** There is
+    /// one fact here and the reader already knows it or does not; a figure about a protocol is not
+    /// a thing this app can state. Whether a protocol has servers to suggest is *not* drawn either
+    /// — pressing it says so in a whole sentence, and a badge saying "none" beside a name is a
+    /// refusal in the one place a reader cannot press to find out why.
+    private func protocolRow(_ kind: ProtocolKind) -> some View {
+        Button {
+            session.chooseProtocol(kind)
+        } label: {
+            HStack(spacing: ShellSpace.step) {
+                mark(kind)
+                    .frame(width: Metrics.mark, height: Metrics.mark)
+                    .foregroundStyle(markInk(kind))
+                Text(kind.displayName)
+                    .font(ShellType.name)
+                    .foregroundStyle(ShellChrome.ink(colorScheme))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, ShellSpace.pad)
+            .padding(.vertical, ShellSpace.step)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(kind.displayName)
     }
+
+    /// A protocol's picture: its own mark, or the shape glyph where this repo draws none.
+    ///
+    /// **`SourceMark.drawing` and not a third copy of it.** Writing the two tiers out here is what
+    /// the source row's own comment predicted — and the copy had already dropped
+    /// `.symbolVariant`, so this surface would have stopped filling a signed-in glyph while the
+    /// other two went on filling it.
+    ///
+    /// **`signedIn: false`, and it is a statement rather than a default.** A protocol is not a
+    /// server: there is nothing here to be signed in to, and `filament` on this row would claim a
+    /// relationship with a whole protocol that this app cannot have.
+    private func mark(_ kind: ProtocolKind) -> some View {
+        SourceMark.drawing(
+            kind, shape: DummyItem.shape(of: kind), points: Metrics.mark, scale: displayScale,
+            signedIn: false
+        )
+    }
+
+    /// The mark's ink, **through `SourceMark.ink` and in the row's own two tiers**.
+    ///
+    /// A drawing is a mark at the head of a pressable row and takes `inkDim`; a shape glyph is
+    /// fainter. `SourceRow.markInk` draws exactly this distinction, and a flat `inkDim` here would
+    /// have put Discourse's fallback glyph a shade darker in the picker than in the list beside it.
+    private func markInk(_ kind: ProtocolKind) -> Color {
+        SourceMark.ink(
+            signedIn: false,
+            quiet: SourceMark.kindMark(kind, pixels: Metrics.mark * displayScale) != nil
+                ? ShellChrome.inkDim(colorScheme)
+                : ShellChrome.inkFaint(colorScheme),
+            scheme: colorScheme
+        )
+    }
+
+    // MARK: - Step two: that protocol's servers
 
     @ViewBuilder
-    private var browsing: some View {
-        switch session.catalog {
-        case .loading:
-            // One way of waiting, `ShellType.body` dropped to `meta` with it: a sentence about an
-            // errand is read second, whatever surface it is on.
-            note { ForumWaiting(line: L10n.t("account.catalog.loading")) }
-        case .failed:
-            note { Text(L10n.t("account.catalog.failed")) }
-        case .empty:
-            note { Text(L10n.t("account.catalog.empty")) }
-        case .ready:
-            ScrollView {
-                // Sections now, with the header drawn only where there is more than one — M1 has
-                // exactly one and draws none, so no speculative section name ships. M3 adds rows
-                // to a structure that is already here.
-                LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                    Section {
-                        if let host = session.extraJoinHost {
-                            extraRow(host)
-                            hairline
-                        }
-                        ForEach(session.visibleServers) { server in
-                            catalogRow(server)
+    private func servers(of kind: ProtocolKind) -> some View {
+        if ServerDirectory.covers(kind) {
+            switch session.catalog {
+            case .loading:
+                // One way of waiting, `ShellType.body` dropped to `meta` with it: a sentence about
+                // an errand is read second, whatever surface it is on.
+                note { ForumWaiting(line: L10n.t("account.catalog.loading")) }
+            case .failed:
+                note { Text(L10n.t("account.catalog.failed")) }
+            case .empty:
+                note { Text(L10n.t("account.catalog.empty")) }
+            case .ready(let servers):
+                // **Folded once for the list, not once per row.** `session.isAdded` lowercases and
+                // scans `sources` linearly, so asked inside the `ForEach` it is O(rows x sources)
+                // on every redraw — and this list is the directory whole now that the sheet has no
+                // filter, where it used to be a narrowed subset. `AccountPane`'s own comment about
+                // hoisting `rows` and `widest` out of its `ForEach` is the precedent.
+                let added = Set(session.sources.map(\.host))
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(servers) { server in
+                            catalogRow(server, added: added.contains(server.domain.lowercased()))
                             hairline
                         }
                     }
                 }
+                .scrollIndicators(.never)
             }
-            .scrollIndicators(.never)
+        } else {
+            note { Text(String(format: L10n.t("join.browse.none"), kind.displayName)) }
         }
     }
 
@@ -802,35 +825,26 @@ struct JoinSheet: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    /// A host the directory does not list. **It opens a preview, like every other row** — which
-    /// is why its copy no longer says Add.
-    private func extraRow(_ host: String) -> some View {
-        let added = session.isAdded(host)
-        return Button {
-            session.hostname = host
-            Task { await look() }
-        } label: {
-            VStack(alignment: .leading, spacing: ShellSpace.tight) {
-                Text(String(format: L10n.t("join.browse.look"), host))
-                    .font(ShellType.name)
-                    .foregroundStyle(ShellChrome.ink(colorScheme))
-                Text(added ? L10n.t("account.catalog.added") : L10n.t("join.browse.look.detail"))
-                    .font(ShellType.meta)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                    .lineLimit(2)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, ShellSpace.pad)
-            .padding(.vertical, ShellSpace.step)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(session.checking || added)
-        .accessibilityLabel(String(format: L10n.t("join.browse.look"), host))
-    }
-
-    private func catalogRow(_ server: CatalogServer) -> some View {
-        let added = session.isAdded(server.domain)
+    /// One suggested server: hostname, description, and the three figures — **decision 39**.
+    ///
+    /// **This is deliberately not the source row, and it must not be "unified" with it later.**
+    /// The compact row on the source page is terse because the reader already chose those servers
+    /// and can press one for the rest; this row exists to help them *decide which to choose*, and
+    /// the description, the language and the two figures are the deciding evidence. They cost no
+    /// request — `CatalogServer` carries all of them — and a reader comparing two servers here has
+    /// no other way to see the difference. Two rows about the same kind of thing, for two
+    /// different errands.
+    ///
+    /// **Pressing it closes the sheet and fills the field** — decision 38 — so this row draws no
+    /// waiting line of its own. It carried one, for the one row of forty the reader had pressed,
+    /// because the press used to preview inside this sheet; the press goes to the page now and
+    /// answers there.
+    private func catalogRow(_ server: CatalogServer, added: Bool) -> some View {
+        // **Built once and handed to both readers.** `rowFoot` draws these three and the spoken
+        // value says the same three, and each one costs a locale lookup, two bundle lookups and
+        // two compact-number formats — so asking twice doubled that for every visible row on every
+        // redraw. `AccountPane`'s `let widest = widest` hoist is the same move for the same reason.
+        let readings = readings(server)
         return Button {
             Task { await session.pick(server) }
         } label: {
@@ -842,7 +856,7 @@ struct JoinSheet: View {
                     .font(ShellType.meta)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .lineLimit(2)
-                if !added { rowFoot(server) }
+                if !added { rowFoot(readings) }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, ShellSpace.pad)
@@ -850,43 +864,36 @@ struct JoinSheet: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(session.checking || added)
+        // **`added` alone, and `checking` is gone rather than kept as armour.** Nothing is ever on
+        // the wire while this sheet is up, so that term could not fire — and a refusal that cannot
+        // fire is a reader of this file inferring a state the app does not have. A row that *is*
+        // refused says why in its own second line, which is the one thing a refused control here
+        // has always had to do.
+        .disabled(added)
         .accessibilityLabel(server.domain)
         .accessibilityValue(
-            added ? L10n.t("account.catalog.added") : "\(server.summary), \(metaLine(server))"
+            added
+                ? L10n.t("account.catalog.added")
+                : "\(server.summary), \(readings.joined(separator: ", "))"
         )
     }
 
-    /// The row's own readings, or — for the one row the reader just pressed — the fact that this
-    /// app is asking it. **Which of forty rows they pressed is the thing they cannot otherwise
-    /// see**, and `progressHost` already records it.
-    @ViewBuilder
-    private func rowFoot(_ server: CatalogServer) -> some View {
-        // **The sentence comes from the errand, not from here.** This site spelled both halves
-        // inline — a hard-coded key and a hand-rolled host comparison — while `session.progress`
-        // carried that exact key at that moment and went unread. That is the fifth call site
-        // spelling it differently, which is the shape `SourceRow.waitingLine` exists to abolish;
-        // a phase whose words changed would have changed everywhere but here.
-        if let waiting = sheetWaiting, session.progressHost == server.domain.lowercased() {
-            // `ShellType.mark` rises to `meta` with the vocabulary. It was the smallest engraving
-            // in the app under the one row of forty the reader had just pressed.
-            ForumWaiting(line: waiting)
-        } else {
-            // Three readings, each one a labelled sentence about the server. They used to be a
-            // single string joined with middle dots, where one of the numbers was labelled with
-            // an initialism and the other was not labelled at all — which is the objection this
-            // separation answers, and the reason a dot-joined line is not the tidier version of
-            // it. (`JoinSheet.figureLine` *does* dot-join, and may: there both halves say what
-            // they are.)
-            HStack(spacing: ShellSpace.pad) {
-                ForEach(readings(server), id: \.self) { reading in
-                    Text(reading)
-                }
+    /// The row's own readings.
+    ///
+    /// Three readings, each one a labelled sentence about the server. They used to be a single
+    /// string joined with middle dots, where one of the numbers was labelled with an initialism
+    /// and the other was not labelled at all — which is the objection this separation answers, and
+    /// the reason a dot-joined line is not the tidier version of it. (`metaLine` *does* dot-join,
+    /// and may: it is spoken, where both halves say what they are.)
+    private func rowFoot(_ readings: [String]) -> some View {
+        HStack(spacing: ShellSpace.pad) {
+            ForEach(readings, id: \.self) { reading in
+                Text(reading)
             }
-            .font(ShellType.mark)
-            .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-            .lineLimit(1)
         }
+        .font(ShellType.mark)
+        .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+        .lineLimit(1)
     }
 
     private func readings(_ server: CatalogServer) -> [String] {
@@ -895,10 +902,6 @@ struct JoinSheet: View {
             String(format: L10n.t("account.catalog.weekly"), L10n.compact(server.weekUsers)),
             String(format: L10n.t("account.catalog.people"), L10n.compact(server.users)),
         ]
-    }
-
-    private func metaLine(_ server: CatalogServer) -> String {
-        readings(server).joined(separator: ", ")
     }
 
     private func languageName(_ code: String) -> String {

@@ -329,7 +329,6 @@ struct RemoveTests {
             JoinOffer(host: alpha, kind: .discuz, categories: []),
             from: .preview(
                 SourcePreview(host: alpha, kind: .discuz, profile: .silent(host: alpha, kind: .discuz)),
-                from: .directory,
                 ticked: []
             )
         )
@@ -365,7 +364,6 @@ struct RemoveTests {
             JoinOffer(host: beta, kind: .discuz, categories: []),
             from: .preview(
                 SourcePreview(host: beta, kind: .discuz, profile: .silent(host: beta, kind: .discuz)),
-                from: .directory,
                 ticked: []
             )
         )

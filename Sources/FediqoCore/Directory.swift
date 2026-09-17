@@ -45,6 +45,33 @@ public struct ServerDirectory: Sendable {
         self.http = http
     }
 
+    /// Whether this app has a list of servers to suggest for a protocol — the browser's second
+    /// step, decision 19.
+    ///
+    /// **Here rather than in the UI, for the reason `SourceJoin.reads` is public.** This type *is*
+    /// the only directory there is, so the answer is a fact about this file: a predicate written in
+    /// a view would be a second answer to a question this module owns, and the day M3 adds a second
+    /// directory the fetch and the predicate would change in two modules with the compiler linking
+    /// neither.
+    ///
+    /// **A protocol with no list is a real state, and until M3 it is the majority one.** Three
+    /// protocols are readable and exactly one of them has a directory behind it, so the browser's
+    /// second step draws a sentence rather than an empty list.
+    ///
+    /// **No `default:`.** A protocol added has to say whether anything suggests servers for it,
+    /// rather than inheriting Mastodon's yes and drawing joinmastodon's Mastodons under the name of
+    /// a forum.
+    public static func covers(_ kind: ProtocolKind) -> Bool {
+        switch kind {
+        case .mastodon: true
+        // Discourse and Discuz! publish no directory anybody aggregates, and the nine protocols
+        // this app cannot read are not offered at all. M3's unit 9 is what changes this.
+        case .discourse, .discuz, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube,
+            .friendica, .gotosocial, .unknown:
+            false
+        }
+    }
+
     public func servers() async throws -> [CatalogServer] {
         guard let url = Host.httpsURL(host: "api.joinmastodon.org", path: "/servers") else {
             throw URLError(.badURL)

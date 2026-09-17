@@ -778,7 +778,11 @@ public struct SourceJoin: Sendable {
     /// can only throw. Moving cases between groups is exactly what unlocking the Mastodon family
     /// is, five times over. What actually holds the two together is
     /// `everyProtocolAgreesAboutWhetherItCanBeRead`, which walks `allCases` and asks both.
-    static func reads(_ kind: ProtocolKind) -> Bool {
+    /// **`public` because the browser's first step is this list** — decision 19. The picker
+    /// offers the protocols this app can read, and a second list written in the UI would be a
+    /// second answer to a question this function already owns: it would go on offering a protocol
+    /// the day this one stopped reading it, and the reader would meet the refusal after the press.
+    public static func reads(_ kind: ProtocolKind) -> Bool {
         switch kind {
         case .mastodon, .discourse, .discuz:
             true

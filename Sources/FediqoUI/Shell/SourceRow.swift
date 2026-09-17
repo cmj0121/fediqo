@@ -707,26 +707,15 @@ struct SourceRowView: View {
             .accessibilityHidden(true)
     }
 
-    @ViewBuilder
+    /// **Through `SourceMark.drawing` rather than written here**, so the row, the masthead glance
+    /// and the browser's protocol row draw one kind of thing one way. The `Group` is what gives the
+    /// two branches one type for `leadingMark`'s modifiers to land on, and the helper's
+    /// `@ViewBuilder` does that job now.
     private var markDrawing: some View {
-        Group {
-            if let name = SourceMark.kindMark(row.source.kind, pixels: mark * displayScale) {
-                Image(name, bundle: .module)
-                    // Belt and braces beside the catalogue's own `template-rendering-intent`: a
-                    // catalogue property is invisible at the call site, and a later hand copying
-                    // this code elsewhere will not read the JSON.
-                    .renderingMode(.template)
-                    .resizable()
-                    .scaledToFit()
-            } else {
-                // Tier 3. A Discourse looks exactly as it does today, because a Discourse cannot
-                // be signed in to — what changed is that this branch now *asks*.
-                Image(systemName: SourceMark.symbol(row.shape))
-                    .font(.system(size: mark))
-                    .symbolVariant(signedIn ? .fill : .none)
-                    .symbolRenderingMode(.hierarchical)
-            }
-        }
+        SourceMark.drawing(
+            row.source.kind, shape: row.shape, points: mark, scale: displayScale,
+            signedIn: signedIn
+        )
     }
 
     /// Put something on the hostname's own line, by its optical centre.

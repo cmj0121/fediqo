@@ -225,37 +225,24 @@ final class ShellSession {
         return sources.contains { $0.host == host }
     }
 
-    var query: String {
-        hostname.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    /// Catalog rows matching the field, live. Domain and description, case-insensitive.
-    var visibleServers: [CatalogServer] {
-        guard case .ready(let servers) = catalog else { return [] }
-        let needle = query
-        guard !needle.isEmpty else { return servers }
-        return servers.filter { Self.matches($0, query: needle) }
-    }
-
-    /// A typed host that is not in the visible catalog. Join is still a tap.
-    var extraJoinHost: String? {
-        guard let host = try? Host.parse(hostname) else { return nil }
-        let isAddress = host.contains(".") || host.contains(":")
-        guard isAddress else { return nil }
-        if visibleServers.contains(where: { $0.domain.compare(host, options: .caseInsensitive) == .orderedSame }) {
-            return nil
-        }
-        return host
-    }
-
-    static func matches(_ server: CatalogServer, query: String) -> Bool {
-        server.domain.localizedCaseInsensitiveContains(query)
-            || server.summary.localizedCaseInsensitiveContains(query)
-    }
+    /// **Whether a directory fetch is on the wire.** `catalog == .loading` cannot answer this: the
+    /// property *starts* at `.loading`, before anybody has asked for anything, which is exactly why
+    /// the guards below test `.ready` and `.empty` and not it.
+    ///
+    /// It became load-bearing when the browser grew a second step. `browse()` could only be pressed
+    /// once — it is refused while a sheet is up — but `chooseProtocol` can be reached again by
+    /// Mastodon → Back → Mastodon, which is a gesture `backToProtocols` documents as costing
+    /// nothing. Without this, a second press while the first fetch is still on the wire starts a
+    /// *second* request to the same third party and decodes the whole directory twice, with
+    /// whichever finishes last winning — and decision 5 counts requests to third parties.
+    @ObservationIgnored private var fetchingCatalog = false
 
     func loadCatalog() async {
         if case .ready = catalog { return }
         if case .empty = catalog { return }
+        guard !fetchingCatalog else { return }
+        fetchingCatalog = true
+        defer { fetchingCatalog = false }
         catalog = .loading
         do {
             let servers = try await ServerDirectory(http: http).servers()
@@ -274,9 +261,33 @@ final class ShellSession {
         }
     }
 
+    /// A server was chosen in the browser — **decision 38, and it is the whole of what the
+    /// browser does.**
+    ///
+    /// It closes the sheet, puts the hostname in the field, and runs the errand a typed host runs.
+    /// **It looks immediately rather than waiting for a second press**, because choosing a server
+    /// already is the intent a press would express — the reader has just read its description and
+    /// its figures and pressed the row.
+    ///
+    /// **The dismissal is first, and that order is load-bearing — do not reorder these lines.**
+    /// `.browsingServers` answers `admitsASecondLook` with no, and correctly: a look started
+    /// *behind* this sheet would put a request on the wire under a stage the reader cannot see
+    /// past, which is the seam decision 38 exists to delete. So the sheet has to come down before
+    /// anything is looked up. Reversed, `look` refuses this press and the whole server list goes
+    /// dead to the touch in silence — the shape risk 12 counts four times on this branch, which is
+    /// why `choosingAServerBehavesLikeTyping` drives the press rather than the guard.
+    ///
+    /// Through `dismissStage` rather than by assignment, for the reason `browse` uses it: it bumps
+    /// the errand token, which a press about to start a look wants bumped anyway.
+    ///
+    /// **`.field` is not a fiction about where the press was.** The reader's hostname is in the
+    /// field, the preview opens beside it, its Cancel and Subscribe are the page's, and its
+    /// sentence is drawn in the block. Every one of those is the typed-host answer because this
+    /// *is* the typed-host path from here on; that identity is the ruling.
     func pick(_ server: CatalogServer) async {
+        dismissStage()
         hostname = server.domain
-        await add(from: .directory)
+        await add()
     }
 
     /// Add pressed. **Looks, and adds nothing** — the reader sees what the server says about
@@ -290,16 +301,14 @@ final class ShellSession {
     /// from** — and so, now, is a preview the reader can still see the field beside. The stage
     /// answers for itself; see `JoinStage.admitsASecondLook`.
     ///
-    /// **`origin` is not defaulted.** It decides where the preview is drawn and what its Back
-    /// button says, and this house has already had a wrong default argument draw a microblog's
-    /// globe over every joined forum. A new call site has to say which entrance it is.
-    ///
-    /// **`JoinEntrance` and not `PreviewOrigin`, for the reason `take` takes the narrow one.**
-    /// This is the only other producer of `.previewing`, and with `.joined` unspellable here the
-    /// detail can be built by exactly one function — `openSource(host:)`. Widened, this would
-    /// accept `.joined(someSource)` and build a stage whose origin and whose preview are about
-    /// two different servers, with a stale `Source` inside it.
-    func add(from origin: JoinEntrance) async {
+    /// **It takes no origin at all now, and that is decision 38 making a narrowing structural.**
+    /// It used to take a `JoinEntrance` so that `.joined` could not be handed to the only other
+    /// producer of `.previewing` — which would build a stage whose origin and whose preview name
+    /// two different servers, with a stale `Source` inside it. With the browser no longer
+    /// previewing anything, every join preview is the field's and the case is written here rather
+    /// than passed in: `openSource(host:)` is the one function that can build a detail, and there
+    /// is no parameter left to hand the wrong value to.
+    func add() async {
         // The preview this look is about to replace, asked before the await. A reader who types a
         // second hostname over an inline preview has left the first server, and the picture it
         // pulled is otherwise held for the run under a host that appears in no inventory — the
@@ -310,7 +319,7 @@ final class ShellSession {
         if let replaced, replaced != preview.host, !isAdded(replaced) {
             pictures.forget(host: replaced)
         }
-        stage = .previewing(preview, from: origin.origin, ticked: [])
+        stage = .previewing(preview, from: .field, ticked: [])
     }
 
     /// The reader was turned away, went and signed in, and came back — **and does not see the
@@ -336,7 +345,7 @@ final class ShellSession {
         // field, and that is where the reader pressed. A block may well be open behind all this —
         // a preview of *another* server, typed before this one — and attributing the sentence to
         // it would draw "Checking B…" under A's Subscribe with nothing under the field at all.
-        await take(preview, from: .field, ticked: [], reportedBy: .page)
+        await take(preview, ticked: [], reportedBy: .page)
     }
 
     /// One look: the duplicate guard, the parse, the request, and every way it can go wrong said
@@ -408,17 +417,22 @@ final class ShellSession {
     /// — so the transport is chosen again here, against what this run holds now. `SourcePreview`
     /// states the same rule from the other side.
     ///
-    /// **A detail is refused here, and it is refused structurally.** Once `PreviewOrigin` has a
-    /// third case, a press that matched any `.previewing` would try to join a source the reader
+    /// **A detail is refused here, and it is refused structurally.** `PreviewOrigin` has a second
+    /// case, and a press that matched any `.previewing` would try to join a source the reader
     /// already has — `look`'s duplicate guard reporting an errand nobody started, which is the
-    /// incident `signInFinished` already records once. `entrance` is a total function with no
-    /// `default:`, and `.joined` has no entrance to hand over, so there is no guard to forget:
+    /// incident `signInFinished` already records once. `reporter` is a total function with no
+    /// `default:`, and `.joined` has no owner to hand over, so there is no guard to forget:
     /// `take` cannot be called. `JoinSheet.primary` reads the same `nil` and draws no button.
+    ///
+    /// **It is the reporter that carries the refusal, and that is not a coincidence.** What the
+    /// entrance enum ever held was the answer to *which surface says this press is running*, and
+    /// an origin with no Subscribe has no such surface — so asking for the one is asking for the
+    /// other, and there is one value rather than two to keep in step.
     func confirm() async {
         guard !checking, case .previewing(let preview, let origin, let ticked) = stage,
-              let entrance = origin.entrance
+              let owner = origin.reporter
         else { return }
-        await take(preview, from: entrance, ticked: ticked, reportedBy: entrance.reporter)
+        await take(preview, ticked: ticked, reportedBy: owner)
     }
 
     /// A source row was pressed: the reader wants that server's own account of itself —
@@ -452,15 +466,19 @@ final class ShellSession {
         )
     }
 
-    /// The press itself, wherever it was pressed from.
+    /// The press itself.
     ///
-    /// **The entrance is carried through**, because a Discuz! answers a press with its board list
-    /// and that list opens in the sheet whichever surface the preview was on (decision 21). The
-    /// origin is what lets the page keep drawing its block underneath, and what lets Back land on
-    /// the preview it already has rather than asking the forum for its index again.
+    /// **The preview is carried into the boards stage**, because a Discuz! answers a press with
+    /// its board list and that list opens in the sheet while the preview stays drawn in the page
+    /// (decision 21). Carrying it is what lets Back land on the preview the reader already has
+    /// rather than asking the forum for its index again.
+    ///
+    /// **`reportedBy` is the caller's answer and never this function reading the screen** — risk
+    /// 14's generalising fix. Two callers and two answers: a Subscribe pressed in the block says
+    /// `.block`, and a join resumed after a sign-in says `.page`, because the refusal it resumes
+    /// was reported under the field and a block open behind it belongs to another server.
     private func take(
         _ preview: SourcePreview,
-        from origin: JoinEntrance,
         ticked: Set<Int>,
         reportedBy owner: ProgressOwner
     ) async {
@@ -493,9 +511,7 @@ final class ShellSession {
                 // left takes the whole errand with them — which is why this one *is* entirely
                 // behind the token: writing it would spring the sheet back open behind them.
                 guard mine == errand else { return }
-                stage = .choosingBoards(
-                    offer, from: .preview(preview, from: origin, ticked: ticked)
-                )
+                stage = .choosingBoards(offer, from: .preview(preview, ticked: ticked))
             }
         }
         // **The one branch that does not touch the sheet, and the asymmetry is deliberate.** The
@@ -527,8 +543,14 @@ final class ShellSession {
         stage = nil
     }
 
-    /// Browse pressed. **The catalog is fetched here and not on the page appearing** — decision
-    /// 10 — so a reader who never browses never has this app contact a third party for them.
+    /// Browse pressed. **It opens the protocols this app can read, and contacts nobody** —
+    /// decisions 19 and 38.
+    ///
+    /// **The catalog moved one press later than decision 10 put it.** That decision took the fetch
+    /// off the page appearing so that "a reader who never browses contacts nobody"; the browser's
+    /// first step names no directory, so a reader who browses and picks a forum still contacts
+    /// nobody. `chooseProtocol` is where the third party is reached, and only for a protocol that
+    /// has one.
     ///
     /// **Relaxed the same way `look` was, and for the same reason.** `stage == nil` was right
     /// while every stage covered the page; Browse sits beside the field, and an inline preview
@@ -537,13 +559,55 @@ final class ShellSession {
     ///
     /// **Through `dismissStage` and not by assignment**, so a preview being replaced still forgets
     /// the picture it pulled for a host nobody joined. Harmless where there is no stage: it bumps
-    /// the errand token, which a press about to open the directory wants bumped anyway.
+    /// the errand token, which a press about to open the browser wants bumped anyway.
     func browse() {
         guard !checking, stage?.admitsASecondLook ?? true else { return }
         dismissStage()
         refuse = nil
         stage = .browsing
-        Task { await loadCatalog() }
+    }
+
+    /// A protocol was chosen in the browser — step two, and the only place a directory is asked
+    /// for.
+    ///
+    /// **The fetch is here rather than at `browse`**, which is decision 10's argument carried one
+    /// step further: the reader who opens the browser to see what this app reads, and closes it
+    /// again, has had no third party told about them.
+    ///
+    /// **A protocol with no directory still opens, and that is deliberate.** It is a real state and
+    /// until M3 it is the majority one, so pressing Discourse says so in a sentence rather than
+    /// refusing the press — a row that does nothing is the dead control this branch has shipped
+    /// four times, and "no list yet" is a fact the reader is owed. `ServerDirectory.covers(_:)` is
+    /// the one rule both the fetch and the sentence read — **in Core, beside the only directory
+    /// there is**, so the rule lives in the module that would change if its coverage ever did.
+    ///
+    /// **Answered by a `switch` and not by a bare `guard case`**, which is the rule
+    /// `backToProtocols` and `backToPreview` both state twenty lines below and which this press was
+    /// written in breach of. A `guard case .browsing = stage else { return }` compiles clean
+    /// against a fifth stage and silently inherits step one's answer — a `default:` wearing a
+    /// different hat, and this repo bans those with three incidents behind it.
+    ///
+    /// **There is no `!checking` term, and its absence is the same ruling `catalogRow` and
+    /// `interactiveDismissDisabled` got.** Nothing is ever on the wire while this sheet is up, so
+    /// such a term could not fire; a guard that cannot fire is a reader of this file inferring a
+    /// state the app does not have, and the file would then both assert the invariant and hedge
+    /// against it in one press. See `reporting(_:drawnAs:)` for where the invariant lives.
+    func chooseProtocol(_ kind: ProtocolKind) {
+        switch stage {
+        case .browsing:
+            errand += 1
+            stage = .browsingServers(kind)
+            // **`ServerDirectory.covers(_:)` owns this and not a predicate in a view** — the one
+            // directory there is, is that type, so the fetch and the sentence read one rule from
+            // the module that would change if its coverage ever did. A protocol it does not cover
+            // reaches nobody, and the second step says so in a whole sentence.
+            guard ServerDirectory.covers(kind) else { return }
+            Task { await loadCatalog() }
+        // None of these offers a protocol to press: the server list is a step further in, a
+        // preview and a board list are about one server, and a detail is about one the reader has.
+        case .browsingServers, .previewing, .choosingBoards, nil:
+            return
+        }
     }
 
     /// The sheet went away by a route that is not a button — a swipe, Escape, the scene going.
@@ -568,7 +632,12 @@ final class ShellSession {
         guard stage?.surface != .pane else { return }
         switch stage {
         case .choosingBoards(_, .preview): backToPreview()
-        case .choosingBoards(_, .joined), .browsing, .previewing, nil: dismissStage()
+        case .choosingBoards(_, .joined), .browsing, .browsingServers, .previewing, nil:
+            // **A swipe on the server list is a cancel and not a step back to the protocols.** The
+            // reader dismissed the browser, not a step of it; landing them on the protocol list
+            // would keep a sheet up that they asked to be rid of. Back is the button for that, and
+            // it is the button the footer offers.
+            dismissStage()
         }
     }
 
@@ -706,9 +775,7 @@ final class ShellSession {
             boardsRefusal = (host: offer.host, key: "account.source.boards.unread")
             return
         // A join, pressed at the field or in the block, and reported under the field either way.
-        // `.sheet` is never an owner — it is only ever `reporting`'s answer — so it falls here
-        // with the rest rather than being given a branch it cannot reach.
-        case .page, .block, .sheet, nil:
+        case .page, .block, nil:
             break
         }
         unreadAll = picked
@@ -733,45 +800,52 @@ final class ShellSession {
 
     /// Which surface **draws** a report — which is not always the one that claimed it.
     ///
-    /// **Ownership and visibility are two questions, and answering only the first is the fourth
-    /// shape this unit's own lesson did not cover.** `ProgressOwner` says whose press it was, and
-    /// that is a function of the entrance, correctly. It says nothing about whether that surface
-    /// is *on screen*, and a sentence drawn on a surface nobody can see is the same silence as no
-    /// sentence at all.
+    /// **Ownership and visibility are two questions, and answering only the first is risk 14's
+    /// fourth shape.** `ProgressOwner` says whose press it was, and that is a function of the
+    /// entrance, correctly. It says nothing about whether that surface is *on screen*, and a
+    /// sentence drawn on a surface nobody can see is the same silence as no sentence at all.
     ///
-    /// Two ways the claimed surface goes away, and the first version of this caught only one:
+    /// **One way the claimed surface goes away, and it is the block.** Its Cancel stays live while
+    /// its Subscribe is on the wire — deliberately, a reader may leave — and leaving runs
+    /// `dismissStage()`. The page takes it back.
     ///
-    /// - **The block is dismissed out from under its own errand.** Its Cancel stays live while its
-    ///   Subscribe is on the wire — deliberately, a reader may leave — and leaving runs
-    ///   `dismissStage()`. The page takes it back.
-    /// - **A sheet covers the page, and the page is where `.page` draws.** `JoinEntrance.directory`
-    ///   reports `.page`, a browsed preview's surface *is* `.sheet`, and `take` holds the stage for
-    ///   the whole of `begin(preview)` — unlike `subscribe`, which nils it first, which is the only
-    ///   reason the boards phase was ever visible. So: browse, open a server, press Subscribe, and
-    ///   the sentence rendered under the field **behind the sheet**, with every visible control
-    ///   refused. Verbatim the failure the block case was written about, by the symmetric route
-    ///   that was never asked. Pre-existing — but the claim *"true by construction"* was this
-    ///   unit's, and a reader who meets "by construction" stops checking.
+    /// **The other way is gone, and it is worth saying what went with it.** A sheet covers the
+    /// page, so an errand claimed by the page while a sheet stood over it drew its sentence behind
+    /// that sheet: the reader waiting on a request, every visible control refused, and nothing
+    /// anywhere saying why. That was reachable by exactly one route — browse, open a server, press
+    /// Subscribe — because a browsed preview's press reported `.page` while its own stage was
+    /// surfaced `.sheet`. Decision 38 deletes the route rather than rescuing it: the browser
+    /// presses nothing, so **no errand can be on the wire while a sheet-surfaced stage is up.**
     ///
-    /// **A sheet covers the page and everything in it** — the field, the block and every row — so
-    /// it is asked first and answers for all three. That is what makes *none of them can stay
-    /// silent* true by construction rather than by every surface promising to stay put, and this
-    /// time the claim is carried by a term that reads `surface` rather than by one that reads a
-    /// single case of it.
+    /// **Where that invariant is enforced, because it is not enforced here.** Every entrance that
+    /// can put a sheet-surfaced stage up, and what holds it. A sixth has to join them or this
+    /// rescue is owed again — `JoinStageTests.noErrandRunsBehindTheSheet` walks all four stages
+    /// they produce:
+    ///
+    /// - `pick(_:)` takes the browser down *before* it looks, so no look runs under it.
+    /// - `subscribe(_:)` nils the stage before the boards go on the wire.
+    /// - `changeBoards(host:)` runs with no stage at all (`rowActsLive`), and writes one only
+    ///   after its read has returned.
+    /// - `openSource(host:)` opens the detail, and is held by the same `rowActsLive` — whose
+    ///   `!checking` is the term doing the work here.
+    /// - `chooseProtocol(_:)` opens `.browsingServers`, and **has no `!checking` of its own.** It
+    ///   rests on `browse()`'s, one press earlier: nothing can be on the wire when the browser
+    ///   goes up, and nothing this sheet draws starts anything. **That is the one place a
+    ///   reachable change breaks this** — relax `browse()`'s `!checking` and a sheet can rise over
+    ///   a page-owned errand, restoring the seam decision 38 deleted. Somebody about to relax it
+    ///   is reading this line.
+    ///
+    /// `.previewing(_, .field, _)` is the one stage held across an await, and it is drawn in the
+    /// page, so the block below is what answers for it.
     ///
     /// **No `default:`.**
     static func reporting(
         _ progress: ProgressReport?, drawnAs stage: JoinStage?
     ) -> ProgressOwner? {
         guard let progress else { return nil }
-        // Asked before the owner, because the answer does not depend on it: whatever claimed the
-        // errand, the reader is looking at the sheet.
-        if stage?.surface == .sheet { return .sheet }
         switch progress.owner {
         case .page, .row: return progress.owner
         case .block: return stage?.inlinePreview == nil ? .page : .block
-        // A sheet is the only thing that draws over the page, so it cannot be uncovered here.
-        case .sheet: return .page
         }
     }
 
@@ -898,33 +972,39 @@ final class ShellSession {
         }
     }
 
-    /// The reader stepped back from a preview to the list they picked it off.
+    /// The reader stepped back from one protocol's servers to the list of protocols.
+    ///
+    /// **This replaces `backToBrowsing`, and it is a different press rather than a rename.** That
+    /// one stepped back from a *preview* into the server list, because a preview could be reached
+    /// by pressing a row there. Decision 38 ends that: choosing a server closes the sheet, so no
+    /// preview has a browser behind it and there is nothing for such a press to return to. This
+    /// one lives entirely inside the browser, between its two steps — a stage the old press could
+    /// never have been offered at.
     ///
     /// **Not `browse()`, and the difference is which press it is.** `browse` is the page's button
-    /// and is refused while a sheet is up, because a reader reading a preview did not ask for it
-    /// to be replaced. This is the sheet's own Back, where being at a preview is the *premise*.
-    /// The catalog is already loaded by the time this can be pressed, so nothing is refetched.
-    /// **The origin is answered by a `switch` and not by a bare `case .previewing`** — the rule
-    /// `backToPreview` states in as many words, applied to the site that did not have it. A
-    /// `guard case .previewing = stage` compiles clean against a third origin and quietly answers
-    /// on its behalf: it would have thrown a reader who opened a source's detail into the server
-    /// directory. That is a `default:` wearing a different hat, and this repo bans those.
+    /// and is refused while a sheet is up, because a reader inside the browser did not ask for it
+    /// to be replaced. This is the sheet's own Back, where being at step two is the *premise*.
     ///
-    /// **Do not "simplify" it back to `guard case .previewing = stage`.** Two of these three arms
-    /// do nothing, so the switch reads like ceremony over a one-line guard — and that is exactly
-    /// what it looked like before the third origin existed, which is why the third origin walked
-    /// straight into it. The arms that do nothing are the ones carrying the decision.
-    func backToBrowsing() {
-        guard case .previewing(_, let origin, _) = stage else { return }
-        switch origin {
-        case .directory:
+    /// **The stage is answered by a `switch` and not by a bare `guard case`** — the rule
+    /// `backToPreview` states in as many words. A `guard case .browsingServers = stage else
+    /// { return }` compiles clean against a fifth stage and quietly answers on its behalf, which
+    /// is a `default:` wearing a different hat, and this repo bans those with three incidents
+    /// behind it. The arms that do nothing are the ones carrying the decision.
+    ///
+    /// **The catalog is not refetched.** `loadCatalog` returns at once for a directory already
+    /// `.ready`, so a reader stepping back and forward between the two steps asks joinmastodon
+    /// once.
+    func backToProtocols() {
+        switch stage {
+        case .browsingServers:
             errand += 1
             stage = .browsing
-        // Neither of these has the directory behind it — a typed host has the page, and a detail
-        // has nothing — and `JoinSheet.leading(for:)` offers this button to neither of them. So
-        // this is unreachable from the sheet, and it declines by deciding rather than by falling
-        // through somebody else's answer.
-        case .field, .joined:
+        // None of these is a step of the browser: a preview has the page behind it, a detail has
+        // nothing, a board list has its preview, and step one has nothing before it.
+        // `JoinSheet.leading(for:)` offers this button to none of them, so this is unreachable
+        // from the sheet — and it declines by deciding rather than by falling through somebody
+        // else's answer.
+        case .browsing, .previewing, .choosingBoards, nil:
             return
         }
     }
@@ -949,11 +1029,16 @@ final class ShellSession {
     func backToPreview() {
         guard case .choosingBoards(_, let origin) = stage else { return }
         switch origin {
-        case .preview(let preview, let from, let ticked):
+        case .preview(let preview, let ticked):
             errand += 1
             // **The ticks come back with them** — decision 27. This sheet is about to unmount, and
             // before the ticks lived in the stage that is where they went.
-            stage = .previewing(preview, from: from.origin, ticked: ticked)
+            //
+            // **`.field` is written here rather than carried, and decision 38 is what made that
+            // safe.** The origin travelled in `BoardsOrigin.preview` precisely because a guess
+            // between two entrances would throw the reader onto the wrong surface. There is one
+            // entrance now, so this is the answer and not a guess.
+            stage = .previewing(preview, from: .field, ticked: ticked)
         // A restate has nothing behind it, so there is nothing to step back to. The reader is
         // offered Cancel rather than Back (`JoinSheet.leading(for:)`), so this is unreachable from
         // the sheet — and it refuses rather than inventing a preview if it is reached anyway.
@@ -1336,6 +1421,15 @@ final class ShellSession {
 /// preview's own Subscribe is a third — it sits in a block in the page, and a sentence under the
 /// field about it is a sentence the reader is not looking at.
 ///
+/// **There was a fourth and it is gone, which is decision 38 deleting machinery rather than
+/// adding it.** `.sheet` was never a claim, only an answer: what `reporting(_:drawnAs:)` returned
+/// when a sheet stood over whichever surface *had* claimed the errand. It existed for one route —
+/// a preview reached from the browser, whose press reported `.page` while its stage was surfaced
+/// `.sheet` — and the browser presses nothing now. No errand runs under a sheet, so nothing can be
+/// covered, so there is no answer of that shape to give. **Do not reintroduce it as armour**: see
+/// `reporting(_:drawnAs:)` for the five entrances that hold the invariant, which is where a sixth
+/// has to answer.
+///
 /// **No `default:`** at any site that switches on it.
 enum ProgressOwner: Equatable {
     /// The field's errand: a look, or a join with no block on screen.
@@ -1344,12 +1438,6 @@ enum ProgressOwner: Equatable {
     case row(host: String)
     /// The inline preview's own Subscribe, answered in the block the reader pressed.
     case block
-    /// **Not a claim — an answer.** Nothing sets this as an owner: it is what
-    /// `ShellSession.reporting(_:drawnAs:)` returns when a sheet is standing over whichever
-    /// surface did claim the errand, because a sentence drawn behind a sheet is not drawn. The
-    /// sheet had no waiting site at all until this existed, which is how a browsed preview's
-    /// Subscribe came to say nothing anywhere.
-    case sheet
 }
 
 /// What is on the wire, said where the press was.

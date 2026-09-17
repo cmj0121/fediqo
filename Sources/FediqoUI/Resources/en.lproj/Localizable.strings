@@ -252,11 +252,11 @@
 "join.close" = "Close";
 "join.back" = "Back";
 
-"join.browse.title" = "Servers to read";
+"join.browse.title" = "Protocols Fediqo reads";
+"join.browse.protocols.detail" = "Pick one to see the servers suggested for it.";
+"join.browse.servers.title" = "%@ servers";
 "join.browse.detail" = "Pick one to see what it is. Nothing is added until you say so.";
-"join.browse.filter" = "Filter by hostname or keyword";
-"join.browse.look" = "Look at %@";
-"join.browse.look.detail" = "Not in the directory. See what it is before you add it.";
+"join.browse.none" = "No suggestions for %@ yet. Type a hostname in the field instead.";
 "account.browse" = "Browse";
 "account.browse.label" = "Browse servers to read";
 

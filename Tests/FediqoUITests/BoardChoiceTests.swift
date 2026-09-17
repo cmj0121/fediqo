@@ -72,7 +72,7 @@ struct BoardChoiceTests {
         </div></body></html>
         """#)))
         session.hostname = Self.host
-        await session.add(from: .field)
+        await session.add()
 
         // Stage one, and what a Discuz! can say about itself: its index answered a signed-out
         // reader, so it reads without an account — and the index it answered with is carried, so
@@ -129,7 +129,7 @@ struct BoardChoiceTests {
             "/api/v1/trends/statuses": .text("[]"),
         ]))
         session.hostname = "first.example"
-        await session.add(from: .field)
+        await session.add()
 
         // Stage one, and the server had something to say — so the preview is the rich one and
         // nothing has been joined yet.
@@ -166,7 +166,7 @@ struct BoardChoiceTests {
         """#))
         let session = Self.session(http)
         session.hostname = Self.host
-        await session.add(from: .field)
+        await session.add()
         await session.confirm()
         #expect(session.choosing != nil)
 
@@ -187,7 +187,7 @@ struct BoardChoiceTests {
         // guard does not stand in the way, and what they typed is still in the field.
         #expect(session.hostname == Self.host)
         #expect(!session.isAdded(Self.host))
-        await session.add(from: .field)
+        await session.add()
         await session.confirm()
         #expect(session.choosing?.offer.host == Self.host)
     }
@@ -205,7 +205,7 @@ struct BoardChoiceTests {
         </div></body></html>
         """#)))
         session.hostname = Self.host
-        await session.add(from: .field)
+        await session.add()
         await session.confirm()
         // The premise, pinned: without it every assertion below is satisfied by a join that
         // never happened, and the test passes with `confirm()` deleted.
@@ -272,7 +272,7 @@ struct BoardChoiceTests {
             ]
         ))
         session.hostname = Self.host
-        await session.add(from: .field)
+        await session.add()
         await session.confirm()
         guard let offer = session.choosing?.offer else {
             Issue.record("a Discuz! should have paused for the reader to choose")
@@ -321,7 +321,7 @@ struct BoardChoiceTests {
             """#)]
         ))
         session.hostname = Self.host
-        await session.add(from: .field)
+        await session.add()
         await session.confirm()
         guard let offer = session.choosing?.offer else {
             Issue.record("a Discuz! should have paused")
@@ -395,7 +395,7 @@ struct BoardChoiceTests {
             """#)]
         ))
         session.hostname = Self.host
-        await session.add(from: .field)
+        await session.add()
         await session.confirm()
         guard let offer = session.choosing?.offer else {
             Issue.record("a Discuz! should have paused")
@@ -450,7 +450,7 @@ struct BoardChoiceTests {
             ]
         ))
         session.hostname = Self.host
-        await session.add(from: .field)
+        await session.add()
         await session.confirm()
         guard let offer = session.choosing?.offer else {
             Issue.record("a Discuz! should have paused")
@@ -495,7 +495,7 @@ struct BoardChoiceTests {
             boards: [33: unreadable, 41: unreadable]
         ))
         session.hostname = Self.host
-        await session.add(from: .field)
+        await session.add()
         await session.confirm()
         guard let offer = session.choosing?.offer else {
             Issue.record("a Discuz! should have paused")
@@ -554,7 +554,7 @@ struct BoardChoiceTests {
             """#),
         ]))
         session.hostname = Self.host
-        await session.add(from: .field)
+        await session.add()
         await session.confirm()
 
         // The forum's own notice page is a refusal — the host is fine, the spelling is fine, and
@@ -595,7 +595,7 @@ struct BoardChoiceTests {
             """#),
         ]))
         session.hostname = Self.host
-        await session.add(from: .field)
+        await session.add()
         await session.confirm()
 
         // An index with no board is an account question, not an address question — sending the
@@ -698,7 +698,7 @@ struct BoardChoiceTests {
             """#)]
         ))
         session.hostname = Self.host
-        await session.add(from: .field)
+        await session.add()
         await session.confirm()
         guard let offer = session.choosing?.offer else {
             Issue.record("a Discuz! should have paused")
@@ -816,7 +816,7 @@ struct BoardChoiceTests {
         ])
         let session = Self.session(http)
         session.hostname = host
-        await session.add(from: .field)
+        await session.add()
         await session.confirm()
         guard case .choosingBoards(let offer, _) = session.stage else { return (session, http) }
         await session.subscribe(offer.boards.filter { [33, 40, 37].contains($0.fid) })
@@ -1100,9 +1100,18 @@ struct BoardChoiceTests {
         let row = ProgressReport(owner: .row(host: Self.host), key: "account.detect.progress")
         #expect(ShellSession.reporting(row, drawnAs: nil) == .row(host: Self.host))
 
-        // And the reporter is a function of the entrance, never of what happens to be drawn.
-        #expect(JoinEntrance.field.reporter == .block)
-        #expect(JoinEntrance.directory.reporter == .page)
+        // And the reporter is a function of the origin, never of what happens to be drawn.
+        //
+        // **One entrance answers and one has nothing to answer with** — decision 38 leaves two
+        // preview origins, and `reporter` is what `confirm()` reads to refuse a detail's Subscribe
+        // structurally rather than at a guard. The `JoinEntrance` enum that used to carry this is
+        // gone: its second case, the browser's, is the seam that produced this milestone's hardest
+        // defect, and with one entrance left the enum was one value wrapping another.
+        #expect(PreviewOrigin.field.reporter == .block)
+        #expect(
+            PreviewOrigin.joined(Source(host: Self.host, kind: .discuz)).reporter == nil,
+            "a detail was given a surface to report a press it cannot make"
+        )
 
         let (seeded, _) = await Self.reading()
         let http = GatedHTTP(
@@ -1260,10 +1269,13 @@ struct BoardChoiceTests {
     }
 
     /// **The keys the rule does not touch are as deliberate as the ones it does.**
-    /// `join.browse.filter` is "Filter by hostname or keyword" and keeps 主機名稱; so do
+    /// `join.browse.none` says "Type a hostname in the field instead" and keeps 主機名稱; so do
     /// `account.add.host`, `account.refuse.network` and the rest of the address vocabulary. They
     /// are about a machine's name, which is precisely what 主機 is reserved for, and the word
     /// boundary is what keeps them out — as it keeps `observer` out.
+    ///
+    /// `join.browse.filter` was this comment's example until decision 38 retired it with the
+    /// browser's field; the replacement is the same point made by a key that still ships.
     ///
     /// `account.sources.title` is 來源 and is the reference.
     @Test("No key whose English says server calls it 主機 or 伺服器 in 中文")
@@ -1326,7 +1338,15 @@ struct BoardChoiceTests {
 
         "account.browse.label",
         "forum.signin.save.on",
-        "join.browse.title",
+        // **`join.browse.title` is off this list and two keys are on in its place**, which is
+        // decision 38 changing what that title is about rather than a rule being relaxed. It read
+        // "Servers to read" and is now "Protocols Fediqo reads" — the browser's first step, whose
+        // subject is a protocol and not a source, so the noun it must carry is not 來源 and the
+        // derived ban above does not reach it either. The two keys below are the ones whose
+        // subject *is* the source now: step two's title, and the sentence under step one saying
+        // what pressing a protocol shows.
+        "join.browse.protocols.detail",
+        "join.browse.servers.title",
         "join.preview.closed.hint",
         "join.preview.detail",
         "join.preview.next.microblog",
@@ -1505,7 +1525,7 @@ struct BoardChoiceTests {
         let session = ShellSession(http: http, store: ItemStore())
         let pane = AccountPane(session: session)
         session.hostname = Self.host
-        await session.add(from: .field)
+        await session.add()
         await session.confirm()
         guard let offer = session.choosing?.offer else {
             Issue.record("a Discuz! should have paused for the reader to choose")

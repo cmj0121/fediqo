@@ -58,7 +58,7 @@ struct SourcePageTests {
         ])
         let session = ShellSession(http: http, store: ItemStore())
         session.hostname = Self.micro
-        await session.add(from: .field)
+        await session.add()
         await session.confirm()
         // Joined second, and never looked at, so it has no entry in `profiles` at all.
         await session.store.add(Source(
@@ -471,11 +471,16 @@ struct SourcePageTests {
 
         #expect(!pane.busy, "nothing is happening and the field was grey")
 
-        session.stage = .previewing(preview, from: .directory, ticked: [])
+        session.stage = .previewing(
+            preview, from: .joined(Source(host: Self.micro, kind: .mastodon)), ticked: []
+        )
         #expect(pane.busy, "a second look could start behind a sheet the reader cannot see past")
 
         session.stage = .browsing
-        #expect(pane.busy, "the directory covers the page")
+        #expect(pane.busy, "the browser covers the page")
+
+        session.stage = .browsingServers(.mastodon)
+        #expect(pane.busy, "the browser's server list covers the page")
 
         session.stage = .previewing(preview, from: .field, ticked: [])
         #expect(!pane.busy)
@@ -503,10 +508,11 @@ struct SourcePageTests {
     }
 
     /// Browse, and the one thing that distinguishes it from the field beside it: it opens the
-    /// directory rather than looking a host up, and the catalogue is fetched on the press
-    /// (decision 10) rather than when the page appeared.
-    @Test("Browse opens the directory and nothing else")
-    func browseOpensTheDirectory() async {
+    /// browser rather than looking a host up. **And it fetches nothing** — decision 38 puts the
+    /// directory a press further in than decision 10 did, so the step this opens names no server
+    /// and reaches no third party.
+    @Test("Browse opens the browser and nothing else")
+    func browseOpensTheBrowser() async {
         let session = session()
         let pane = AccountPane(session: session)
         pane.browse()
@@ -1564,6 +1570,10 @@ struct SourcePageTests {
         session.openSource(host: Self.micro)
         #expect(session.stage == .browsing, "a row pressed under a sheet replaced the sheet")
 
+        session.stage = .browsingServers(.mastodon)
+        session.openSource(host: Self.micro)
+        #expect(session.stage == .browsingServers(.mastodon))
+
         session.stage = nil
         session.checking = true
         session.openSource(host: Self.micro)
@@ -1608,13 +1618,14 @@ struct SourcePageTests {
     @Test("A detail says three things a preview does not, and every entrance answers for itself")
     func aDetailSaysWhatAPreviewCannot() {
         let held = PreviewOrigin.joined(Source(host: Self.micro, kind: .mastodon))
+        // **Two origins now, and the switches over them stay split rather than collapsing.**
+        // Decision 38 removed the third; what is left is exactly the distinction these sentences
+        // are about — something the reader might take, and something they have.
         #expect(SourcePreviewView.framingKey(for: .field) == "join.preview.detail")
-        #expect(SourcePreviewView.framingKey(for: .directory) == "join.preview.detail")
         #expect(SourcePreviewView.framingKey(for: held) == "source.held.detail")
 
         for caution in [SourcePreviewView.Caution.needsAccount, .turnedAway] {
             #expect(SourcePreviewView.cautionKey(caution, for: .field) == caution.key)
-            #expect(SourcePreviewView.cautionKey(caution, for: .directory) == caution.key)
             #expect(SourcePreviewView.cautionKey(caution, for: held) == caution.heldKey)
             // The two are different facts — a policy and a doorman — on both entrances.
             #expect(caution.key != caution.heldKey)
@@ -1682,17 +1693,18 @@ struct SourcePageTests {
     }
 
     /// **A detail has nothing to subscribe to, and the refusal is structural rather than a guard.**
-    /// `PreviewOrigin.entrance` is total with no `default:`, and `.joined` has no entrance to hand
+    /// `PreviewOrigin.reporter` is total with no `default:`, and `.joined` has no owner to hand
     /// over — so `take` cannot be called, `JoinSheet` draws no primary button, and there is no
     /// `if origin == .joined` anywhere to be forgotten.
+    ///
+    /// **It is the reporter that carries it now, and that is a deletion rather than a swap.** The
+    /// door used to be `entrance: JoinEntrance?`, and what a `JoinEntrance` ever held was the
+    /// answer to *which surface reports a press made here*. With decision 38 leaving one entrance,
+    /// the enum was one value wrapping another; asking for the surface is asking for the door.
     @Test("Subscribe on a detail is not refused at a guard: there is nothing to press")
     func aDetailOffersNoSubscribe() async {
-        #expect(PreviewOrigin.field.entrance == .field)
-        #expect(PreviewOrigin.directory.entrance == .directory)
-        #expect(PreviewOrigin.joined(Source(host: Self.micro, kind: .mastodon)).entrance == nil)
-        // And back the other way, which is what `backToPreview` reconstructs a stage from.
-        #expect(JoinEntrance.field.origin == .field)
-        #expect(JoinEntrance.directory.origin == .directory)
+        #expect(PreviewOrigin.field.reporter == .block)
+        #expect(PreviewOrigin.joined(Source(host: Self.micro, kind: .mastodon)).reporter == nil)
 
         let http = FixtureHTTP()
         let session = ShellSession(http: http, store: ItemStore())
@@ -1771,57 +1783,64 @@ struct SourcePageTests {
 
     // MARK: - Where a third case meets code written when there were two
 
-    /// **A detail is not a preview with a directory behind it, and `backToBrowsing` had to be told
-    /// so.** `guard case .previewing = stage` matched the new origin and would have thrown a
-    /// reader who opened a source's own detail into the server directory. Unreachable from the
-    /// sheet — `leading(for:)` gives a detail Close — which is exactly what makes it the kind of
-    /// silent wrong answer `backToPreview`'s own doc bans: a `default:` wearing a different hat.
-    @Test("Back to the directory declines for every stage that has no directory behind it")
-    func backToBrowsingDecidesForEveryOrigin() async {
+    /// **`backToBrowsing` is gone, and what pins its absence is that its premise cannot be
+    /// written.** It stepped back from a preview into the server directory, and it had to be told
+    /// that a *detail* is not such a preview — a `guard case .previewing = stage` matched the
+    /// third origin and would have thrown a reader who opened a source's own account of itself
+    /// into the directory. That is this repo's `default:`-wearing-a-different-hat, found the hard
+    /// way.
+    ///
+    /// Decision 38 removes the case the press existed for: no preview has a browser behind it, so
+    /// `PreviewOrigin` has two cases and neither of them means "reached from the browser". The
+    /// switch below is exhaustive over both, so a third origin added tomorrow has to answer here
+    /// rather than inheriting an answer — which is the guarantee the deleted press needed and
+    /// never had.
+    ///
+    /// `ShellSession.backToProtocols()` is not this press renamed: it steps between the browser's
+    /// own two steps, and `JoinStageTests.backToProtocolsDecidesForEveryStage` drives it.
+    @Test("No preview has a browser behind it, and both origins say so")
+    func noPreviewStepsBackIntoTheBrowser() async {
         let session = ShellSession(http: FixtureHTTP(), store: ItemStore())
         await seed(session, [Source(host: Self.micro, kind: .mastodon)])
 
         session.openSource(host: Self.micro)
-        let detail = session.stage
-        session.backToBrowsing()
-        #expect(session.stage == detail, """
-            A reader looking at what a source says about itself was thrown into the directory.
-            """)
+        guard case .previewing(_, let held, _) = session.stage else {
+            Issue.record("the detail was not built")
+            return
+        }
+        let typed = PreviewOrigin.field
 
-        // A typed host's preview has the page behind it, not the directory, and is unchanged.
-        let typed = JoinStage.previewing(
-            SourcePreview(host: "elsewhere.example", kind: .mastodon, profile: .unasked(
-                host: "elsewhere.example", kind: .mastodon
-            )),
-            from: .field, ticked: []
-        )
-        session.stage = typed
-        session.backToBrowsing()
-        #expect(session.stage == typed)
-
-        // And the one origin that does have the directory behind it still steps back to it.
-        session.stage = .previewing(
-            SourcePreview(host: "elsewhere.example", kind: .mastodon, profile: .unasked(
-                host: "elsewhere.example", kind: .mastodon
-            )),
-            from: .directory, ticked: []
-        )
-        session.backToBrowsing()
-        #expect(session.stage == .browsing)
+        // Total over `PreviewOrigin`: what each origin has behind it, said by the button it is
+        // offered, and neither answer is a step into the browser.
+        for origin in [typed, held] {
+            let stage = JoinStage.previewing(
+                SourcePreview(host: "elsewhere.example", kind: .mastodon, profile: .unasked(
+                    host: "elsewhere.example", kind: .mastodon
+                )),
+                from: origin, ticked: []
+            )
+            let button = JoinSheet.leading(for: stage)
+            #expect(button == .cancel || button == .close, """
+                A preview offered a step back into a browser that is not behind it.
+                """)
+            #expect(button != .backToProtocols)
+            session.stage = stage
+            session.backToProtocols()
+            #expect(session.stage == stage, "a preview was thrown into the browser")
+        }
     }
 
-    /// **Only `openSource` can build a detail, and that is now structural.** `add(from:)` is the
-    /// only other producer of `.previewing`, and it takes the narrowed `JoinEntrance` — so
-    /// `.joined(someSource)` cannot be handed to it, and a stage whose origin names one server
-    /// while its preview names another is not a value anybody can write.
+    /// **Only `openSource` can build a detail, and it is more structural than it was.** `add()` is
+    /// the only other producer of `.previewing`, and it used to take a narrowed `JoinEntrance` so
+    /// that `.joined(someSource)` could not be handed to it. Decision 38 leaves one entrance, so
+    /// the origin is written inside `add()` rather than passed in: there is no parameter left to
+    /// hand the wrong value to, and a stage whose origin names one server while its preview names
+    /// another is not a value anybody can write.
     @Test("A detail can be built by one function, and the join path cannot spell one")
     func onlyOneFunctionBuildsADetail() async {
-        // The narrowing, stated: both join entrances map to a preview origin and neither of them
-        // is the held one, so `add`'s parameter cannot carry a source.
-        #expect(JoinEntrance.field.origin == .field)
-        #expect(JoinEntrance.directory.origin == .directory)
+        // The narrowing, stated: the join entrance carries no source at all, so nothing on that
+        // path can be a detail.
         #expect(PreviewOrigin.field.held == nil)
-        #expect(PreviewOrigin.directory.held == nil)
         let source = Source(host: Self.micro, kind: .mastodon)
         #expect(PreviewOrigin.joined(source).held == source)
 

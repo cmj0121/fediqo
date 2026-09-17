@@ -250,11 +250,11 @@
 "join.close" = "關閉";
 "join.back" = "返回";
 
-"join.browse.title" = "可以讀的來源";
+"join.browse.title" = "Fediqo 讀得懂的協定";
+"join.browse.protocols.detail" = "挑一個，看看有哪些建議的來源。";
+"join.browse.servers.title" = "%@ 來源";
 "join.browse.detail" = "挑一台看看它是什麼。你沒開口之前不會加入任何東西。";
-"join.browse.filter" = "用主機名稱或關鍵字篩選";
-"join.browse.look" = "看看 %@";
-"join.browse.look.detail" = "不在目錄裡。加入之前先看看它是什麼。";
+"join.browse.none" = "還沒有 %@ 的建議。請改在欄位輸入主機名稱。";
 "account.browse" = "瀏覽";
 "account.browse.label" = "瀏覽可以讀的來源";
 
