@@ -433,9 +433,15 @@ struct EmojiCatalogueTests {
         #expect(await catalogues.catalogue(host: "first.example") == nil)
     }
 
+    /// **Both reads refused, which is what a refused join now takes** (decision 18). With only
+    /// the public timeline closed this server joins on its trends, and a joined server is asked
+    /// for its catalogue — so a one-endpoint fixture here would be pinning the opposite fact.
     @Test("A refused join leaves no catalogue for a host this device never joined")
     func refusedJoinAsksForNothing() async {
-        let http = Self.joinHTTP(publicTimeline: .text("no", status: 404))
+        let http = Self.joinHTTP(
+            publicTimeline: .text("no", status: 404),
+            trending: .text("no", status: 404)
+        )
         let catalogues = EmojiCatalogueStore()
         await #expect(throws: JoinError.publicTimelineFailed) {
             try await MastodonJoin(http: http, store: ItemStore(), catalogues: catalogues)
@@ -591,6 +597,7 @@ struct EmojiCatalogueTests {
     /// server — every test above that turns on a *shape* writes its own literal.
     private static func joinHTTP(
         publicTimeline: FixtureHTTP.Outcome? = nil,
+        trending: FixtureHTTP.Outcome? = nil,
         catalogue: FixtureHTTP.Outcome? = nil
     ) -> FixtureHTTP {
         let front = """
@@ -682,7 +689,7 @@ struct EmojiCatalogueTests {
             "/": .body(Data(front.utf8)),
             "/api/v2/instance": .body(Data(instance.utf8)),
             "/api/v1/timelines/public": publicTimeline ?? .body(Data(publicBody.utf8)),
-            "/api/v1/trends/statuses": .body(Data(trendingBody.utf8)),
+            "/api/v1/trends/statuses": trending ?? .body(Data(trendingBody.utf8)),
             "/api/v1/custom_emojis": catalogue ?? .body(Data(catalogueBody.utf8)),
         ])
     }

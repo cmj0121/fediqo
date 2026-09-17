@@ -51,6 +51,30 @@ public struct FediqoRootView: View {
 
     private var availability: ShellAvailability { session.availability }
 
+    /// Whether the join sheet is up, derived from the stage rather than stored beside it.
+    ///
+    /// Written out here rather than inline, because a `Binding` built inside the modifier chain
+    /// pushes `body` past what the type-checker will solve in reasonable time.
+    ///
+    /// **Both halves of this were wrong the moment a preview could be drawn in the page, and
+    /// neither is reachable from a test** — risk 12's class, on a path only a person walks.
+    ///
+    /// *The getter.* `session.stage != nil` is true for a preview that `AccountPane` is drawing
+    /// between the field and the sources list, so this would put an empty sheet over it — empty
+    /// because `JoinSheet` draws nothing it is not asked for, and over a screen the reader is
+    /// reading. It asks the stage which surface draws it instead, which is what decision 20's
+    /// `surface` exists for.
+    ///
+    /// *The setter.* `dismissStage()` cancels the whole errand. On the boards sheet that is wrong
+    /// twice over: a swipe there is Back, and the preview it would throw away is still on screen
+    /// underneath. `sheetDismissed()` is the routing, and it is a named method a test can call.
+    private var stagePresented: Binding<Bool> {
+        Binding(
+            get: { session.stage?.surface == .sheet },
+            set: { shown in if !shown { session.sheetDismissed() } }
+        )
+    }
+
     public var body: some View {
         layout
             .onChange(of: place) { old, new in
@@ -92,17 +116,28 @@ public struct FediqoRootView: View {
                 if let request {
                     signInWindows.show(request, sessions: session.forums) { reached in
                         // **The same two lines as the sheet below, and they have to be.** A
-                        // sign-in that was reached goes straight back to `begin`: the reader
+                        // sign-in that was reached goes straight back to the join: the reader
                         // typed a host, was turned away, went and signed in, and the errand was
                         // always "add this forum". Without the retry the window closes onto the
                         // refusal it was opened from, which reads as a sign-in that did nothing.
+                        //
+                        // **`resumeAfterSignIn` and not `add`**, because `add` stops at the
+                        // preview — a screen this reader has already read and already answered.
+                        // They pressed Subscribe before they were turned away; this finishes that
+                        // press rather than asking for it again.
+                        //
+                        // **And the `if` is not only "was it reached".** A sign-in pressed on a
+                        // row of a server already joined is an errand that ends with the sign-in
+                        // itself, and `signInFinished` says no to those — see its doc comment for
+                        // what the reader sees instead, and for what this branch shipped without
+                        // it.
                         //
                         // This branch lost both the retry and the host when the page moved out of
                         // the sheet — the window was given the body the sheet had at the time,
                         // and the sheet grew them afterwards. Whatever is done to one of these
                         // two callbacks belongs in the other on the same day.
                         if session.signInFinished(reached: reached, host: request.host) {
-                            Task { await session.add() }
+                            Task { await session.resumeAfterSignIn() }
                         }
                     }
                 } else {
@@ -112,28 +147,106 @@ public struct FediqoRootView: View {
             #else
             .sheet(item: $session.signingIn) { request in
                 ForumSignInSheet(request: request, sessions: session.forums) { reached in
-                    // **A sign-in that was reached goes straight back to `begin`.** The reader
+                    // **A sign-in that was reached goes straight back to the join.** The reader
                     // typed a host, was turned away, and went and signed in; the errand was
                     // always "add this forum", and landing them at an empty field having lost
                     // what they typed would make them start it again. This second pass goes
                     // through the browser that now holds the session — see `ShellSession.joiner`.
+                    //
+                    // **`resumeAfterSignIn` and not `add`**: the preview is a question this
+                    // reader has already answered, so the retry finishes the press instead of
+                    // asking for it a second time.
+                    //
+                    // **And the `if` is not only "was it reached".** A sign-in pressed on a row
+                    // of a server already joined ends with the sign-in itself, and
+                    // `signInFinished` says no to those — see its doc comment.
                     if session.signInFinished(reached: reached, host: request.host) {
-                        Task { await session.add() }
+                        Task { await session.resumeAfterSignIn() }
                     }
                 }
             }
             #endif
-            // **The pause, on the root beside the other two.** A forum join stops to ask which
-            // boards, and until it is answered nothing has been added — so dismissing this by
-            // any route at all, the button or a swipe, is a complete cancel with nothing to undo.
-            // Attached here rather than to Account for the reason the sign-in sheet is: one
-            // presenter, driven by one piece of session state, survives a second call site.
-            .sheet(item: $session.choosing) { choice in
-                BoardPickerSheet(
-                    choice: choice,
-                    subscribe: { picks in Task { await session.subscribe(picks) } },
-                    cancel: { session.cancelChoosing() }
-                )
+            // **Adding a source, all three stages of it, on the root beside the other two.**
+            // Nothing has been added at any of them, so dismissing this by any route at all — the
+            // button, a swipe, Escape — is a complete cancel with nothing to undo. Attached here
+            // rather than to Account for the reason the sign-in sheet is: one presenter, driven by
+            // one piece of session state, survives a second call site.
+            //
+            // **`isPresented` and not `item:`, which is the correction and not the shortcut.** A
+            // stable `id` is precisely what stops SwiftUI re-presenting a sheet, so with `item:`
+            // whether the content builder re-runs when the stage changes under the same host is
+            // version-dependent behaviour rather than contract — and the likely outcome on a
+            // device is the preview sitting on screen while the session says boards. `JoinSheet`
+            // reads `session.stage` inside its own body and switches there, which is a redraw.
+            .sheet(isPresented: stagePresented) {
+                JoinSheet(session: session)
+            }
+            // **The Remove question, on the root beside the other three presenters**, and for the
+            // same documented reason: one presenter driven by one piece of session state survives
+            // a second call site. Remove is asked from a source row today and will be asked from
+            // the source page's own header the day that grows one.
+            //
+            // It is asked at all because Remove takes the board picks the reader made, and
+            // `ShellSession.clear`'s comment is the argument: pictures come back by themselves, a
+            // pick of eight boards out of forty does not.
+            .confirmationDialog(
+                Text(session.removing.map { String(format: L10n.t("account.remove.title"), $0) } ?? ""),
+                isPresented: Binding(
+                    get: { session.removing != nil },
+                    set: { if !$0 { session.removing = nil } }
+                ),
+                // Explicit, because macOS draws no title at all on `.automatic` — and the title is
+                // the only line that names which server this is about.
+                titleVisibility: .visible,
+                presenting: session.removing
+            ) { host in
+                Button(L10n.t("account.remove.confirm"), role: .destructive) {
+                    Task { await session.remove(host: host) }
+                }
+                // **Cancel stays the default action.** No `.keyboardShortcut(.defaultAction)` on
+                // the destructive button: Return dismisses this question, it never answers it.
+                Button(L10n.t("board.choose.cancel"), role: .cancel) { session.removing = nil }
+            } message: { host in
+                Text(Self.removeDetail(for: host, in: session.sources))
+            }
+            // **The Clear question, beside Remove's and driven the same way** (decision 29). One
+            // presenter, one piece of session state, two entrances: a source row and
+            // `PreferencesPane`'s row, which press the same key for the same call and must
+            // therefore ask the same question.
+            //
+            // **It exists because Clear is not reversible, whatever the row looks like.** It drops
+            // the pictures, the emoji names and the first posts, all of which come back — and it
+            // calls `ForumSessions.forget(host:)`, which deletes the saved Keychain password and
+            // signs the reader out of the forum. The Account row says neither of those before the
+            // press, so this is the one place they are said.
+            .confirmationDialog(
+                Text(session.clearing.map { String(format: L10n.t("account.clear.title"), $0) } ?? ""),
+                isPresented: Binding(
+                    get: { session.clearing != nil },
+                    set: { if !$0 { session.clearing = nil } }
+                ),
+                titleVisibility: .visible,
+                presenting: session.clearing
+            ) { host in
+                // **Plain, where Remove's confirm is `.destructive`, and the difference is
+                // deliberate.** The row's icon says *this takes something away*; the dialog says
+                // exactly how much, and the weight of the confirm matches the weight of the act. A
+                // destructive Clear would be the confirmation repeating the row's overstatement,
+                // which is the one thing decision 29 asks not to happen.
+                Button(L10n.t("account.clear.confirm")) {
+                    Task { await session.clear(host: host) }
+                }
+                Button(L10n.t("board.choose.cancel"), role: .cancel) { session.clearing = nil }
+            // **This closure is the one seam of this dialog a test cannot reach** (risk 12).
+            // `clearDetailKey` is pure and is driven across all four combinations; what nothing
+            // verifies is that *this* body asks it with `hasPassword` and `reachedSignIn` for the
+            // host being confirmed, because a `message:` builder only runs inside a presented
+            // dialog. Named here rather than left to be discovered.
+            } message: { host in
+                Text(L10n.t(SourceRow.clearDetailKey(
+                    hasPassword: session.forums.hasPassword(host: host),
+                    reachedSignIn: session.forums.reachedSignIn(host: host)
+                )))
             }
             .overlay {
                 if showingShortcuts {
@@ -164,7 +277,17 @@ public struct FediqoRootView: View {
             // than anything the stranded cohort could cause itself, which is the rule that
             // matters — and the cache's own dedup makes a fetch nobody needs free.
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active { wakeTheCaches() }
+                if phase == .active {
+                    wakeTheCaches()
+                } else if ShellSession.windowLeft(phase),
+                          session.stage?.closesWhenTheWindowLeaves == true {
+                    // **The selectors only**, and the stage is what says so. The editor and a new
+                    // post are `composing` and `signingIn` below, which this cannot reach: a
+                    // sign-in closed because the reader went to their password manager would be
+                    // the worst version of this feature, and it is unreachable rather than
+                    // remembered.
+                    session.dismissStage()
+                }
             }
             .dummyShellKeys { character, shift, control in
                 performDummyKey(character, shift: shift, control: control)
@@ -183,6 +306,22 @@ public struct FediqoRootView: View {
             .preferredColorScheme(prefs.theme.colorScheme)
             .dynamicTypeSize(prefs.fontSize.dynamicType)
             .id(prefs.language)
+    }
+
+    /// What the Remove question says goes, which depends on whether there are boards to lose.
+    ///
+    /// **Two whole sentences and two keys, not one sentence with a clause appended.** "the 3 boards
+    /// you picked" must never appear over a microblog, and a second half joined on with `+` is a
+    /// half no translator can put first. `ShellSession.clear` argues why the boards are the part
+    /// worth naming: pictures come back by themselves and a pick of eight boards out of forty does
+    /// not, so Remove — the act that takes them — is the act that has to say so before the press.
+    ///
+    /// Static and given the list, so the sentence is a function of its inputs that a test can read
+    /// without standing a view up.
+    static func removeDetail(for host: String, in sources: [Source]) -> String {
+        let boards = sources.first { $0.host == host }?.boards.count ?? 0
+        guard boards > 0 else { return L10n.t("account.remove.detail") }
+        return String(format: L10n.t("account.remove.detail.boards"), boards)
     }
 
     private func performDummyKey(_ character: Character, shift: Bool, control: Bool) -> Bool {
@@ -535,7 +674,7 @@ public struct FediqoRootView: View {
     /// would give the keys a stream that matched no note, so `j` and `k` would move through
     /// nothing on exactly the tabs this unit added. See `ShellSession.timeline(for:)`.
     private var streamItems: [DummyItem] {
-        session.timeline(for: session.timelineID).items(from: session.notes)
+        session.timeline(for: session.timelineID).items(from: session.notes, among: session.sources)
     }
 
     /// Whichever list is in front: the open conversation, or the stream under it.

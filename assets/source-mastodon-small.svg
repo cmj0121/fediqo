@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 1024 1024">
+<defs>
+  <linearGradient id="qg" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#6e7780"/><stop offset="18%" stop-color="#6e7780"/><stop offset="100%" stop-color="#363d45"/></linearGradient>
+  <clipPath id="plate"><rect width="1024" height="1024" rx="192" ry="192"/></clipPath>
+</defs>
+  <rect width="1024" height="1024" rx="192" ry="192" fill="#0e1114"/>
+  <rect width="1024" height="1024" rx="192" ry="192" fill="url(#qg)" opacity="0.92"/>
+  <g clip-path="url(#plate)">
+    <mask id="rim">
+      <rect x="128" y="64" width="768" height="576" rx="192" ry="192" fill="#fff"/><path fill="#fff" d="
+      M 128 384
+      C 128 640, 128 832, 320 896
+      C 448 960, 768 960, 832 768
+      C 832 704, 704 704, 576 768
+      C 448 832, 384 704, 384 512
+      C 384 448, 256 384, 128 384 Z"/>
+    </mask>
+    <rect width="1024" height="1024" fill="#dfe7ef" mask="url(#rim)"/>
+    <g transform="translate(512 512) scale(0.92) translate(-512 -512)">
+      <mask id="fill">
+        <rect x="128" y="64" width="768" height="576" rx="192" ry="192" fill="#fff"/><path fill="#fff" d="
+      M 128 384
+      C 128 640, 128 832, 320 896
+      C 448 960, 768 960, 832 768
+      C 832 704, 704 704, 576 768
+      C 448 832, 384 704, 384 512
+      C 384 448, 256 384, 128 384 Z"/>
+      </mask>
+      <rect width="1024" height="1024" fill="#141c2e" mask="url(#fill)"/>
+    </g>
+
+    <path d="M 352 512 V 288 C 352 224 512 224 512 288 V 384"
+          fill="none" stroke="#aeb8c2" stroke-width="64" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M 576 384 V 288 C 576 224 736 224 736 288 V 512"
+          fill="none" stroke="#aeb8c2" stroke-width="64" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

@@ -51,11 +51,12 @@ struct TimelineStreamTests {
         ]))
         session.hostname = "first.example"
         await session.add()
+        await session.confirm()
         #expect(session.timelineID == "all")
 
         let stored = await session.store.all()
-        let all = DummyTimeline(id: "all").items(from: session.notes)
-        let trends = DummyTimeline(id: "trends").items(from: session.notes)
+        let all = DummyTimeline(id: "all").items(from: session.notes, among: [])
+        let trends = DummyTimeline(id: "trends").items(from: session.notes, among: [])
         #expect(all.map(\.id) == stored.map(\.id))
         #expect(trends.map(\.id) == stored.filter { $0.origins.contains(.trending) }.map(\.id))
         #expect(trends.map(\.id) == [
@@ -100,7 +101,10 @@ struct TimelineStreamTests {
         ]))
         session.hostname = "first.example"
         await session.add()
-        let marks = session.sources.map { DummySource.unsigned($0.host) }
+        await session.confirm()
+        let marks = session.sources.map {
+            DummySource.unsigned($0.host, kind: DummyItem.shape(of: $0.kind))
+        }
         #expect(marks.map(\.host) == ["first.example"])
         #expect(marks.allSatisfy { $0.account == nil && $0.kind == .microblog && !$0.isSignedIn })
     }
@@ -124,8 +128,9 @@ struct TimelineStreamTests {
         ]))
         session.hostname = "first.example"
         await session.add()
-        #expect(!DummyTimeline(id: "all").items(from: session.notes).isEmpty)
-        #expect(DummyTimeline(id: "trends").items(from: session.notes).isEmpty)
+        await session.confirm()
+        #expect(!DummyTimeline(id: "all").items(from: session.notes, among: []).isEmpty)
+        #expect(DummyTimeline(id: "trends").items(from: session.notes, among: []).isEmpty)
         #expect(DummyTimeline(id: "all").emptyKey == "timeline.empty")
         #expect(DummyTimeline(id: "trends").emptyKey == "timeline.empty.trends")
         // emptyKey is a stem: the pane asks for its .title and its .detail.
@@ -161,7 +166,8 @@ struct TimelineStreamTests {
         ]))
         session.hostname = "first.example"
         await session.add()
-        let ids = DummyTimeline(id: session.timelineID ?? "all").items(from: session.notes).map(\.id)
+        await session.confirm()
+        let ids = DummyTimeline(id: session.timelineID ?? "all").items(from: session.notes, among: []).map(\.id)
         #expect(!ids.isEmpty)
         #expect(DummyItem.stored.isEmpty)
         #expect(ids != DummyItem.stored.map(\.id))
@@ -188,7 +194,7 @@ struct TimelineStreamTests {
             avatarURL: URL(string: "https://first.example/a.png"),
             counts: Counts(replies: 4, reblogs: 5, favourites: 6)
         )
-        let item = DummyItem(somebody)
+        let item = DummyItem(somebody, among: [])
         #expect(item.body == "item.note.public.body")
         #expect(item.body != L10n.t("item.note.public.body", language: .english))
         #expect(item.answering == .somebody)
@@ -197,7 +203,7 @@ struct TimelineStreamTests {
         #expect(item.hasAvatar)
         #expect(!item.hasThumb)
         #expect(item.kind == .note)
-        #expect(item.source == DummySource.unsigned("first.example"))
+        #expect(item.source == DummySource.unsigned("first.example", kind: .microblog))
         #expect(item.counts.replies == 4)
         #expect(item.counts.reblogs == 5)
         #expect(item.counts.favourites == 6)
@@ -219,7 +225,7 @@ struct TimelineStreamTests {
                 avatarURL: nil,
                 attachments: [Attachment(kind: .image, previewURL: URL(string: "https://first.example/p.jpg"))]
             )
-        )
+        , among: [])
         #expect(named.answering == .handle("@bob@second.example"))
         #expect(named.audience == .everyone)
         #expect(!named.hasAvatar)
@@ -243,7 +249,7 @@ struct TimelineStreamTests {
                     Attachment(kind: .audio, url: URL(string: "https://first.example/clip.mp3")),
                 ]
             )
-        )
+        , among: [])
         #expect(unillustrated.hasThumb)
         #expect(unillustrated.attachments[0].previewURL == nil)
 
@@ -258,7 +264,7 @@ struct TimelineStreamTests {
                 origins: [.publicTimeline],
                 audience: .unlisted
             )
-        )
+        , among: [])
         #expect(root.answering == .nothing)
         #expect(root.audience == .unlisted)
         #expect(!root.hasAvatar)
@@ -275,7 +281,7 @@ struct TimelineStreamTests {
                 origins: [.publicTimeline],
                 audience: .mentioned
             )
-        )
+        , among: [])
         #expect(mentioned.audience == .mentioned)
     }
 }

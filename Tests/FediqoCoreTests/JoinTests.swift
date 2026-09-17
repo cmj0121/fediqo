@@ -28,6 +28,43 @@ struct JoinTests {
         #expect(await store.sources().map(\.host) == ["first.example"])
     }
 
+    /// **Decision 9 on the real path, which is where it stops being a hypothesis.**
+    ///
+    /// Two instances, both carrying the same statuses — the ordinary case on a federated network,
+    /// and the one a path-keyed fixture reproduces exactly, because a canonical URI is the same
+    /// string whichever server hands it over. Every row is therefore stored once and stamped with
+    /// `first.example`, the instance that joined first.
+    ///
+    /// A Remove that went by that stamp would empty the timeline of a reader who removed one of
+    /// two instances and is still reading the other. What makes the failure quiet rather than
+    /// loud is that the source list would be right: one server left, and nothing under it.
+    @Test("Removing one of two instances carrying the same statuses leaves the timeline standing")
+    func removingOneOfTwoInstancesKeepsWhatTheOtherCarries() async throws {
+        let store = ItemStore()
+        let http = Self.joinHTTP()
+        for host in ["first.example", "second.example"] {
+            try await MastodonJoin(http: http, store: store, catalogues: EmojiCatalogueStore())
+                .join(host: host)
+        }
+        let before = await store.all()
+        #expect(before.count == 4)
+        #expect(before.allSatisfy { $0.source.host == "first.example" }, "the premise: one stamp")
+        #expect(before.allSatisfy { $0.hosts == ["first.example", "second.example"] })
+
+        await store.remove(host: "first.example")
+
+        #expect(await store.sources().map(\.host) == ["second.example"])
+        let after = await store.all()
+        #expect(after.map(\.id) == before.map(\.id), "rows second.example still serves were deleted")
+        #expect(after.allSatisfy { $0.hosts == ["second.example"] })
+        #expect(await store.trends().count == 2, "Trends went with the stamp too")
+
+        await store.remove(host: "second.example")
+
+        #expect(await store.all().isEmpty, "rows nobody is left reading were stranded")
+        #expect(await store.sources().isEmpty)
+    }
+
     @Test("All and Trends sort by postedAt descending, not API array order")
     func storeTimeNotAPIOrder() async throws {
         let store = ItemStore()
@@ -61,18 +98,67 @@ struct JoinTests {
         #expect(await store.all().allSatisfy { $0.origins == [.publicTimeline] })
     }
 
-    @Test("Public 404 fails the join and leaves the store empty")
-    func public404() async {
+    /// **Decision 18, and the whole of it.** A Mastodon that closes its public timeline to a
+    /// signed-out reader and still answers trends is a source with content, not an empty one:
+    /// `read before added` asks that something arrived, and something did. The join used to
+    /// throw on the timeline before it had even awaited the trends read it had already started,
+    /// so a server that had answered was refused on the strength of the answer it withheld.
+    @Test("A refused public timeline still joins where trends answers, and brings the trends")
+    func publicRefusedButTrendsAnswer() async throws {
+        let store = ItemStore()
+        try await MastodonJoin(
+            http: Self.joinHTTP(publicTimeline: .text("no", status: 404)),
+            store: store,
+            catalogues: EmojiCatalogueStore()
+        ).join(host: "first.example")
+        #expect(await store.sources().map(\.host) == ["first.example"])
+        #expect(await store.all().map(\.id) == [
+            "https://first.example/users/ada/statuses/trend-only",
+            "https://first.example/users/ada/statuses/shared",
+        ])
+        #expect(await store.all().allSatisfy { $0.origins == [.trending] })
+        // The Trends tab `hasTrends` offers has something behind it, which is the point.
+        #expect(await store.trends().count == 2)
+    }
+
+    @Test("Both reads refused fails the join and leaves the store empty")
+    func bothReadsRefused() async {
         let store = ItemStore()
         await #expect(throws: JoinError.publicTimelineFailed) {
             try await MastodonJoin(
-                http: Self.joinHTTP(publicTimeline: .text("no", status: 404)),
+                http: Self.joinHTTP(
+                    publicTimeline: .text("no", status: 404),
+                    trending: .text("no", status: 404)
+                ),
                 store: store,
                 catalogues: EmojiCatalogueStore()
             ).join(host: "first.example")
         }
         #expect(await store.sources().isEmpty)
         #expect(await store.all().isEmpty)
+    }
+
+    /// The rule the two errors follow now that it takes two failed reads to make one refusal:
+    /// a server that answered **either** endpoint answered, and only a host that said nothing to
+    /// both is one the reader should go and look at their network for.
+    @Test("Silence on both reads is unreachable; one answer anywhere is not")
+    func unreachableNeedsBothReadsSilent() async {
+        await #expect(throws: JoinError.unreachable) {
+            try await MastodonJoin(
+                http: Self.joinHTTP(publicTimeline: .fail, trending: .fail),
+                store: ItemStore(),
+                catalogues: EmojiCatalogueStore()
+            ).join(host: "first.example")
+        }
+        // The timeline said nothing at all and trends answered with a status. The host is
+        // plainly there, so the reader is not sent to check a network that is working.
+        await #expect(throws: JoinError.publicTimelineFailed) {
+            try await MastodonJoin(
+                http: Self.joinHTTP(publicTimeline: .fail, trending: .text("no", status: 404)),
+                store: ItemStore(),
+                catalogues: EmojiCatalogueStore()
+            ).join(host: "first.example")
+        }
     }
 
     @Test("HTML names Pleroma: join refuses Pleroma")
@@ -179,18 +265,20 @@ struct JoinTests {
 
     @Test("A host that answers and refuses is not a host that could not be reached")
     func refusalIsNotSilence() async {
-        // Detection succeeds either way: the difference is what the public timeline
-        // does afterwards. A status says the host answered; a dead socket does not.
+        // Detection succeeds in every case: the difference is what the reads do afterwards. A
+        // status says the host answered; a dead socket does not. **Trends is silent throughout**,
+        // because a refusal now takes both reads — with trends answering, each of these servers
+        // would be joined rather than named, which is decision 18 and is pinned above.
         await #expect(throws: JoinError.publicTimelineFailed) {
             try await MastodonJoin(
-                http: Self.joinHTTP(publicTimeline: .text("no", status: 401)),
+                http: Self.joinHTTP(publicTimeline: .text("no", status: 401), trending: .fail),
                 store: ItemStore(),
                 catalogues: EmojiCatalogueStore()
             ).join(host: "first.example")
         }
         await #expect(throws: JoinError.unreachable) {
             try await MastodonJoin(
-                http: Self.joinHTTP(publicTimeline: .fail),
+                http: Self.joinHTTP(publicTimeline: .fail, trending: .fail),
                 store: ItemStore(),
                 catalogues: EmojiCatalogueStore()
             ).join(host: "first.example")
@@ -199,7 +287,10 @@ struct JoinTests {
         // not be sent to look at a network that is working.
         await #expect(throws: JoinError.publicTimelineFailed) {
             try await MastodonJoin(
-                http: Self.joinHTTP(publicTimeline: .text("<html>a proxy page</html>")),
+                http: Self.joinHTTP(
+                    publicTimeline: .text("<html>a proxy page</html>"),
+                    trending: .fail
+                ),
                 store: ItemStore(),
                 catalogues: EmojiCatalogueStore()
             ).join(host: "first.example")

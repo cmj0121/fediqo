@@ -1,4 +1,5 @@
 import CoreGraphics
+import SwiftUI
 
 /// One spacing scale for the shell. Every gap in a pane is one of these.
 ///
@@ -23,4 +24,25 @@ enum ShellSpace {
 
     /// Around something that has to stand alone.
     static let room: CGFloat = 24
+}
+
+/// The shell's one-pixel rule, wherever a surface divides.
+///
+/// **A view rather than three copies of five lines.** `AccountPane`, `JoinSheet` and
+/// `SourcePreviewView` each grew a byte-identical `private var hairline`, and eleven other sites
+/// spell the same `Rectangle` inline — of which **eight omit `.accessibilityHidden(true)`**, so a
+/// VoiceOver reader hears the shell's rules in some panes and not others. Somewhere to put the
+/// answer is what that drift was missing.
+///
+/// **The scheme comes from its own environment**, so callers pass nothing and cannot pass the
+/// wrong one.
+struct ShellRule: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        Rectangle()
+            .fill(ShellChrome.hairline(colorScheme))
+            .frame(height: ShellSpace.hair)
+            .accessibilityHidden(true)
+    }
 }

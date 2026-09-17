@@ -3,14 +3,13 @@
 "shell.notices.title" = "Notices";
 "shell.notices.summary" = "Who has been in touch";
 "shell.account.title" = "Account";
-"shell.account.summary" = "This timeline's source";
+"shell.account.summary" = "The servers you read";
 "shell.usage.title" = "Usage";
 "shell.usage.summary" = "What this device is keeping";
 "shell.preferences.title" = "Preferences";
 "shell.preferences.summary" = "Language, theme, type, and what is held";
 "shell.timeline.disabled" = "Add a source on Account first";
 "shell.notices.disabled" = "Notices need a signed-in source";
-"source.signedIn" = "Signed in";
 "account.rail.empty" = "Add a source";
 "account.add.title" = "Add a source";
 "account.hero.promise" = "Your timeline. Your rules.";
@@ -29,8 +28,6 @@
 "account.catalog.failed" = "The directory could not be reached. Type a hostname.";
 "account.catalog.empty" = "The directory listed none. Type a hostname.";
 "account.catalog.added" = "Added";
-"account.catalog.addHost" = "Add %@";
-"account.catalog.addHost.detail" = "Not in the directory. Detect and add it this session.";
 "account.catalog.weekly" = "%@ active this week";
 "account.catalog.people" = "%@ people";
 "account.refuse.closed" = "%@ answered, but would not hand over its public timeline.";
@@ -90,8 +87,6 @@
 "timeline.empty.detail" = "Public notes from the sources you added land here, newest first.";
 "timeline.empty.trends.title" = "Nothing is trending";
 "timeline.empty.trends.detail" = "Notes your sources hand over as trending land here, in the order they were posted.";
-"timeline.sources" = "Sources";
-"source.unsigned" = "Not signed in";
 
 "item.replies" = "replies";
 "item.board.dev" = "dev";
@@ -246,3 +241,96 @@
 "thread.open" = "Open on %@";
 "thread.open.hint" = "Opens %@ in your browser";
 "thread.open.leaves" = "Leaves this app and opens your browser";
+
+/* Unit 3 — a source can be let go of, and what it asks before it does. */
+"account.remove.title" = "Remove %@?";
+"account.remove.detail" = "Its posts and everything this device holds for it go with it.";
+"account.remove.detail.boards" = "Its posts, everything this device holds for it, and the %d boards you picked go with it. The boards do not come back.";
+"account.remove.confirm" = "Remove";
+
+/* Unit 4 — the join sheet, and what a server says before you take it. */
+"join.close" = "Close";
+"join.back" = "Back";
+
+"join.browse.title" = "Protocols Fediqo reads";
+"join.browse.protocols.detail" = "Pick one to see the servers suggested for it.";
+"join.browse.servers.title" = "%@ servers";
+"join.browse.detail" = "Pick one to see what it is. Nothing is added until you say so.";
+"join.browse.none" = "No suggestions for %@ yet. Type a hostname in the field instead.";
+"account.browse" = "Browse";
+"account.browse.label" = "Browse servers to read";
+
+"source.shape.microblog" = "microblog";
+"source.shape.forum" = "forum";
+"source.shape.video" = "video";
+"source.spoken" = "%1$@, %2$@, %3$@";
+
+"join.preview.detail" = "What this server says about itself. Nothing is added until you subscribe.";
+"join.preview.thumbnail" = "%@'s own picture of itself";
+"join.preview.activeMonth" = "%@ active this month";
+"join.preview.posts" = "%@ posts";
+"join.preview.reg.open" = "Anyone can sign up";
+"join.preview.reg.approval" = "Sign-ups need approval";
+"join.preview.reg.closed" = "Sign-ups are closed";
+"join.preview.rules" = "What this server asks of readers";
+"join.preview.rules.spoken" = "Rule %1$d of %2$d: %3$@";
+
+"join.preview.silent" = "%@ publishes nothing about itself. Fediqo asked this host nothing, and there is nothing to wait for.";
+"join.preview.unread" = "Fediqo asked %@ to describe itself and could not read the answer. That says nothing about whether it reads — plenty of servers serve posts and no description.";
+"join.preview.unread.network" = "The host did not answer.";
+"join.preview.unread.refused" = "The host turned the request away (HTTP %d).";
+"join.preview.unread.unreadable" = "The answer was not in a shape Fediqo could read.";
+"join.preview.unasked" = "Fediqo has not asked %@ what it is.";
+
+"join.preview.next.microblog" = "Subscribing adds this server's public timeline to your timeline.";
+"join.preview.next.forum" = "Subscribing adds this forum's latest threads to your timeline.";
+"join.preview.next.boards" = "Next you pick which boards to read. Nothing is added until you do.";
+
+"join.preview.closed" = "Reading this forum needs an account, so subscribing will most likely be refused.";
+"join.preview.closed.hint" = "Subscribing to this server will most likely be refused.";
+"join.preview.turnedAway" = "Something in front of this server turned Fediqo away, so subscribing will most likely be refused. Signing in usually clears it.";
+
+/* Unit 5 — one row per server, and what it is. */
+"account.sources.title"          = "Sources";
+"account.sources.detail"         = "Everything this device reads. Press a row for what that server says about itself — its name, its size, its boards. Removing one takes its boards and its posts with it.";
+"account.sources.held"           = "What each one has left on this device is on Preferences.";
+/* M1 tail rev 4 — the compact row. What the marks on a row mean, said once for the list. */
+"account.sources.marks"          = "A row carries only the marks its own server has: sign in, change boards, clear what it left here, and remove it.";
+"account.source.boards"          = "%1$d boards: %2$@";
+"account.source.unread"          = "Its description could not be read.";
+"account.source.remove.label"    = "Remove %@ and everything it left here";
+"account.source.signout.label"   = "Sign out of %@ and forget what it left here";
+
+/* M1 tail — the row's controls, and changing a forum's boards. */
+"account.source.boards.change"    = "Change which boards you read on %@";
+"account.source.boards.progress"  = "Reading %@'s boards…";
+"account.source.boards.unread"    = "%@'s boards could not be read just now.";
+"board.choose.detail.change"      = "Pick the boards you want to read. What you pick replaces what you read now.";
+
+
+/* Decision 29: Clear asks first, and says what actually goes. */
+"account.clear.title"             = "Clear what %@ left here?";
+"account.clear.detail"            = "The pictures, emoji names and first posts this device is holding go. They come back as you read it again, and it stays in your sources, with its boards and its posts.";
+"account.clear.detail.signedout"  = "The pictures, emoji names and first posts this device is holding go, and you are signed out of this forum. They come back as you read it again, and it stays in your sources, with its boards and its posts.";
+"account.clear.detail.password"   = "The pictures, emoji names and first posts this device is holding go, you are signed out of this forum, and the password saved for it is deleted. Only the password does not come back: you type it again next time. It stays in your sources, with its boards and its posts.";
+"account.clear.confirm"           = "Clear";
+
+/* The masthead glance: the whole collection, on one line, without scrolling. */
+"account.standing.count"          = "%d sources";
+"account.standing.count.signedIn" = "%1$d sources, %2$d signed in";
+
+/* M1 tail rev 2 — a source you already have, looked at, and one way of waiting. */
+
+/* Pressing a row. Decision 31: the row opens what that server says about itself. */
+"account.source.open"             = "What %@ says about itself";
+"account.source.open.hint"        = "Opens what this server says about itself.";
+
+/* The detail: the same evidence, and the three sentences a preview says that are false here. */
+"source.held.detail"              = "What this server says about itself. You are already reading it.";
+"source.held.microblog"           = "You are reading this server's public timeline.";
+"source.held.forum"               = "You are reading this forum's latest threads.";
+"source.held.closed"              = "This forum says a signed-out reader may not read it. Sign in on its row to read more of it.";
+"source.held.turnedAway"          = "Something in front of this server turned Fediqo away the last time it was asked. Signing in usually clears it.";
+
+/* The longest wait in the app, said correctly: it detects nothing. */
+"account.join.boards.progress"    = "Reading the boards you picked on %@…";

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 1024 1024">
+<defs>
+  <mask id="m">
+    <rect x="160" y="48" width="704" height="580" rx="200" ry="200" fill="#fff"/><path fill="#fff" d="
+      M 160 380
+      C 150 680, 160 860, 320 960
+      C 460 1060, 760 1000, 790 840
+      C 805 770, 740 740, 620 760
+      C 500 790, 430 720, 420 540
+      C 410 460, 280 380, 160 380 Z"/>
+    <path d="M 310 560 V 280 C 310 180 505 180 505 280 V 440"
+          fill="none" stroke="#000" stroke-width="80" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M 545 440 V 280 C 545 180 740 180 740 280 V 560"
+          fill="none" stroke="#000" stroke-width="80" stroke-linecap="round" stroke-linejoin="round"/>
+  </mask>
+</defs>
+  <rect width="1024" height="1024" fill="#000" mask="url(#m)"/>
+</svg>

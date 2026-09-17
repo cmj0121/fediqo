@@ -7,11 +7,19 @@ subject; the metal behind it — silver panel, dark cut, lit chamfer, gun-metal 
 slot cut through the top and bottom edges — is what the mark was before the creature arrived,
 kept because the slots are where the timeline it came from is still legible.
 
-| File             | Drawn for                  | What differs                                                          |
-| ---------------- | -------------------------- | --------------------------------------------------------------------- |
-| `logo.svg`       | 64 px and up               | Creature at 1.48×, arms drawn thin enough to curl                     |
-| `logo-small.svg` | 32 px and below            | Every metal edge on the 64-unit grid; creature at 1.30× with fat arms |
-| `mascot.svg`     | Anywhere it is the subject | The same creature at 0.88 on a rounded plate, arms kept inside        |
+| File | Drawn for | What differs |
+| --- | --- | --- |
+| `logo.svg` | 64 px and up | Creature at 1.48×, arms drawn thin enough to curl |
+| `logo-small.svg` | 32 px and below | Every metal edge on the 64-unit grid; creature at 1.30× with fat arms |
+| `mascot.svg` | Anywhere it is the subject | The same creature at 0.88 on a rounded plate, arms kept inside |
+| `kind-mastodon.svg` | 64 px and up, as a template | Squircle, trunk, and m — after the official mark, one ink |
+| `kind-mastodon-small.svg` | 32 px and below, as a template | The same silhouette on the 64-unit grid |
+| `kind-discuz.svg` | 64 px and up, as a template | The letters D and !, one ink |
+| `kind-discuz-small.svg` | 32 px and below, as a template | D! on the 64-unit grid |
+| `source-mastodon.svg` | 64 px and up, protocol as subject | The same mark on the mascot plate, in the creature's metal |
+| `source-mastodon-small.svg` | 32 px and below | The same mark on the 64-unit grid |
+| `source-discuz.svg` | 64 px and up, protocol as subject | D! on the mascot plate |
+| `source-discuz-small.svg` | 32 px and below | D! on the 64-unit grid |
 
 A 1024-unit canvas drawn at 16 px means **64 units to the pixel**. Anything narrower than
 64 units lands mid-pixel and anti-aliasing turns it into grey, which is why `logo-small.svg`
@@ -36,6 +44,22 @@ rather than by reasoning:
 the edge, and a mascot's are meant to be seen. It is artwork in its own right and is edited
 here rather than derived from `logo.svg`.
 
-These three files are the artwork itself. Nothing here is generated, and nothing here needs
-a tool to build — a raster app icon is rendered from `logo.svg` and `logo-small.svg` when
+The `kind-*` drawings are the protocol glyphs a source row draws. Always — not only where a
+server published no picture of its own, and for two reasons. A server's own picture is a
+banner: Mastodon's is a wide hero and Discourse's usually a wordmark, so cropped square to a
+row's height it is a centre strip, or three letters from the middle of a forum's name. It is
+drawn whole in the sheet that shows one source instead. And a row that fetched it would have
+the list contact every server on it the moment the page opened, which is the thing the server
+catalogue was moved off that page to avoid.
+
+They are **templates**: one ink, transparent ground, so the row can paint them with `inkDim`
+(or `filament` where signed in) rather than a brand colour.
+Mastodon is this repo's drawing of the well-known squircle-and-trunk, with an m cut out —
+not the official file, and not purple. Discuz! is the letters D and !.
+
+The `source-*` drawings are the same subjects on the mascot plate, for where the protocol
+is the subject rather than a glyph in the chrome.
+
+These files are the artwork itself. Nothing here is generated, and nothing here needs a
+tool to build — a raster app icon is rendered from `logo.svg` and `logo-small.svg` when
 there is an app to put one in.

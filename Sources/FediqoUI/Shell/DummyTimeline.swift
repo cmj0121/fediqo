@@ -85,7 +85,11 @@ public struct DummyTimeline: Identifiable, Hashable, Sendable {
     /// wrong; matching loosely would put another board's threads under this board's name. See
     /// `PLAN.md`, "Found, not fixed here" — a note carrying its `fid` is the real answer and it
     /// belongs in Core.
-    public func items(from notes: [Note]) -> [DummyItem] {
+    /// **`among` has no default and is the sources this device reads** — `DummyItem.init`'s own
+    /// argument, passed down. The two call sites that reach a screen both hold a `ShellSession`
+    /// and hand it `session.sources`; a default here would let a third be written that silently
+    /// drew every shared row as if one instance carried it.
+    public func items(from notes: [Note], among sources: [Source]) -> [DummyItem] {
         if let board {
             let id = String(board.fid)
             return notes
@@ -99,13 +103,13 @@ public struct DummyTimeline: Identifiable, Hashable, Sendable {
                     if let carried = $0.boardID { return carried == id }
                     return $0.board == board.name
                 }
-                .map(DummyItem.init)
+                .map { DummyItem($0, among: sources) }
         }
         switch id {
         case "trends":
-            return notes.filter { $0.origins.contains(.trending) }.map(DummyItem.init)
+            return notes.filter { $0.origins.contains(.trending) }.map { DummyItem($0, among: sources) }
         case "all":
-            return notes.map(DummyItem.init)
+            return notes.map { DummyItem($0, among: sources) }
         default:
             return []
         }

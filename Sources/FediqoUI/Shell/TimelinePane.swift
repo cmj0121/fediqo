@@ -29,7 +29,7 @@ struct TimelinePane: View {
     /// board it is; an id carries only that it is one — see `ShellSession.timeline(for:)`.
     private var timeline: DummyTimeline { session.timeline(for: session.timelineID) }
 
-    private var items: [DummyItem] { timeline.items(from: session.notes) }
+    private var items: [DummyItem] { timeline.items(from: session.notes, among: session.sources) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {

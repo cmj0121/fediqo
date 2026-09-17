@@ -3,14 +3,13 @@
 "shell.notices.title" = "通知";
 "shell.notices.summary" = "誰來找你";
 "shell.account.title" = "帳號";
-"shell.account.summary" = "這條時間軸的來源";
+"shell.account.summary" = "你讀的來源";
 "shell.usage.title" = "用量";
 "shell.usage.summary" = "這台機器上留了什麼";
 "shell.preferences.title" = "偏好";
 "shell.preferences.summary" = "語言、主題、字級與已存內容";
 "shell.timeline.disabled" = "先到帳號頁新增來源";
 "shell.notices.disabled" = "通知需要已登入的來源";
-"source.signedIn" = "已登入";
 "account.rail.empty" = "新增來源";
 "account.add.title" = "新增來源";
 "account.hero.promise" = "你的時間軸。你的規則。";
@@ -29,8 +28,6 @@
 "account.catalog.failed" = "連不上目錄。請改輸入主機名稱。";
 "account.catalog.empty" = "目錄沒有列出任何主機。請改輸入主機名稱。";
 "account.catalog.added" = "已新增";
-"account.catalog.addHost" = "新增 %@";
-"account.catalog.addHost.detail" = "不在目錄裡。偵測並在這個工作階段加入。";
 "account.catalog.weekly" = "本週活躍 %@";
 "account.catalog.people" = "%@ 人";
 "account.refuse.closed" = "%@ 有回應，但不肯交出它的公開時間軸。";
@@ -90,8 +87,6 @@
 "timeline.empty.detail" = "你加的來源的公開貼文會落在這裡，新的在上面。";
 "timeline.empty.trends.title" = "目前沒有趨勢";
 "timeline.empty.trends.detail" = "來源標為趨勢的貼文會落在這裡，依發文時間排列。";
-"timeline.sources" = "來源";
-"source.unsigned" = "尚未登入";
 
 "item.replies" = "則回覆";
 "item.board.dev" = "dev";
@@ -166,7 +161,7 @@
 "prefs.fontSize.largest" = "最大";
 
 "prefs.cache" = "這次執行所存";
-"prefs.cache.footer" = "除了一項例外，這些都不會寫進磁碟。下次開啟 Fediqo 時，每個伺服器都會重新讀取；伺服器的表情符號名稱則會在一天後自行重新讀取。例外是你要求 Fediqo 存起來的密碼：它放在這台裝置的鑰匙圈裡，按「清除」時會和其他東西一起刪掉。";
+"prefs.cache.footer" = "除了一項例外，這些都不會寫進磁碟。下次開啟 Fediqo 時，每個來源都會重新讀取；來源的表情符號名稱則會在一天後自行重新讀取。例外是你要求 Fediqo 存起來的密碼：它放在這台裝置的鑰匙圈裡，按「清除」時會和其他東西一起刪掉。";
 "prefs.cache.empty" = "先到「帳號」加入來源。各來源送來的內容會留在這裡，直到你關閉 Fediqo。";
 "prefs.cache.catalogue" = "%d 個表情符號名稱 ·";
 "prefs.cache.catalogue.none" = "未存表情符號名稱";
@@ -182,7 +177,7 @@
 "forum.signin.web.label" = "%@ 自己的頁面";
 "forum.signin.save" = "把我的帳號與密碼存在這台裝置上";
 "forum.signin.save.off" = "這個程式看不到你的密碼。你是在這個論壇自己的頁面上輸入，這裡不會去讀你打了什麼。";
-"forum.signin.save.on" = "這個程式會看到你的密碼，因為要自己幫你登入就得握著它。密碼會存進這台裝置的鑰匙圈，只會送往這個論壇，也絕不會複製到 iCloud。清除這個伺服器、或在「偏好設定」按「忘掉」，都會把它刪掉。";
+"forum.signin.save.on" = "這個程式會看到你的密碼，因為要自己幫你登入就得握著它。密碼會存進這台裝置的鑰匙圈，只會送往這個論壇，也絕不會複製到 iCloud。清除這個來源、或在「偏好設定」按「忘掉」，都會把它刪掉。";
 "forum.signin.cancel" = "取消";
 "forum.signin.done" = "完成";
 "forum.stop.first" = "第一次登入是你自己來。請在下面這個論壇自己的頁面上輸入。";
@@ -244,3 +239,96 @@
 "thread.open" = "在 %@ 開啟";
 "thread.open.hint" = "用瀏覽器開啟 %@";
 "thread.open.leaves" = "會離開這個 App，改用瀏覽器開啟";
+
+/* Unit 3 — a source can be let go of, and what it asks before it does. */
+"account.remove.title" = "移除 %@？";
+"account.remove.detail" = "它的文章，還有這個裝置為它留的東西，都會跟著一起不見。";
+"account.remove.detail.boards" = "它的文章、這個裝置為它留的東西，還有你挑的 %d 個版塊，都會跟著一起不見。版塊不會自己回來。";
+"account.remove.confirm" = "移除";
+
+/* Unit 4 — the join sheet, and what a server says before you take it. */
+"join.close" = "關閉";
+"join.back" = "返回";
+
+"join.browse.title" = "Fediqo 讀得懂的協定";
+"join.browse.protocols.detail" = "挑一個，看看有哪些建議的來源。";
+"join.browse.servers.title" = "%@ 來源";
+"join.browse.detail" = "挑一台看看它是什麼。你沒開口之前不會加入任何東西。";
+"join.browse.none" = "還沒有 %@ 的建議。請改在欄位輸入主機名稱。";
+"account.browse" = "瀏覽";
+"account.browse.label" = "瀏覽可以讀的來源";
+
+"source.shape.microblog" = "微網誌";
+"source.shape.forum" = "論壇";
+"source.shape.video" = "影片";
+"source.spoken" = "%1$@，%2$@，%3$@";
+
+"join.preview.detail" = "這個來源自己說它是什麼。你按下訂閱之前不會加入任何東西。";
+"join.preview.thumbnail" = "%@ 自己放的圖";
+"join.preview.activeMonth" = "本月活躍 %@";
+"join.preview.posts" = "%@ 篇文章";
+"join.preview.reg.open" = "任何人都可以註冊";
+"join.preview.reg.approval" = "註冊需要審核";
+"join.preview.reg.closed" = "已關閉註冊";
+"join.preview.rules" = "這個來源要求讀的人遵守什麼";
+"join.preview.rules.spoken" = "第 %1$d 條，共 %2$d 條：%3$@";
+
+"join.preview.silent" = "%@ 不對外公布任何關於自己的事。這個 app 沒有問過它，也沒有什麼好等的。";
+"join.preview.unread" = "這個 app 請 %@ 自我介紹，但讀不懂它的回答。這跟它能不能讀無關——很多來源給得出文章，卻沒有說明。";
+"join.preview.unread.network" = "那台主機沒有回應。";
+"join.preview.unread.refused" = "那台主機拒絕了這個請求（HTTP %d）。";
+"join.preview.unread.unreadable" = "那個回答不是這個 app 讀得懂的形狀。";
+"join.preview.unasked" = "這個 app 還沒問過 %@ 它是什麼。";
+
+"join.preview.next.microblog" = "訂閱之後，這個來源的公開時間軸會併進你的時間軸。";
+"join.preview.next.forum" = "訂閱之後，這個論壇最新的主題會併進你的時間軸。";
+"join.preview.next.boards" = "接下來你要挑讀哪幾個版塊。挑完之前不會加入任何東西。";
+
+"join.preview.closed" = "要讀這個論壇得先有帳號，所以訂閱多半會被拒絕。";
+"join.preview.closed.hint" = "訂閱這個來源多半會被拒絕。";
+"join.preview.turnedAway" = "這個來源前面有東西把 Fediqo 擋掉了，所以訂閱多半會被拒絕。登入通常就能解決。";
+
+/* Unit 5 — one row per server, and what it is. */
+"account.sources.title"          = "來源";
+"account.sources.detail"         = "這個裝置讀的全部。按一列，看那個來源怎麼說它自己——它的名字、它的規模、它的版塊。移除其中一個，它的版塊和它的文章都會跟著走。";
+"account.sources.held"           = "每一個在這個裝置上還留著什麼，在偏好設定裡。";
+/* M1 tail rev 4 — the compact row. What the marks on a row mean, said once for the list. */
+"account.sources.marks"          = "一列只帶它自己那個來源有的標記：登入、換版塊、清除它留在這裡的東西、移除它。";
+"account.source.boards"          = "%1$d 個版塊：%2$@";
+"account.source.unread"          = "讀不到它的自我介紹。";
+"account.source.remove.label"    = "移除 %@，連同它留在這裡的東西";
+"account.source.signout.label"   = "登出 %@，並忘掉它留在這裡的東西";
+
+/* M1 tail — the row's controls, and changing a forum's boards. */
+"account.source.boards.change"    = "換一批你在 %@ 上讀的版塊";
+"account.source.boards.progress"  = "正在讀 %@ 的版塊…";
+"account.source.boards.unread"    = "現在讀不到 %@ 的版塊。";
+"board.choose.detail.change"      = "挑你想看的版塊。挑好的會取代你現在讀的。";
+
+
+/* Decision 29: Clear asks first, and says what actually goes. */
+"account.clear.title"             = "清除 %@ 留在這裡的東西？";
+"account.clear.detail"            = "這個裝置為它存的圖片、表情名稱和第一篇文章都會清掉。你再讀它的時候會回來，它也還留在你的來源裡，版塊和文章都在。";
+"account.clear.detail.signedout"  = "這個裝置為它存的圖片、表情名稱和第一篇文章都會清掉，你也會從這個論壇登出。它們會在你再讀的時候回來，它也還留在你的來源裡，版塊和文章都在。";
+"account.clear.detail.password"   = "這個裝置為它存的圖片、表情名稱和第一篇文章都會清掉，你會從這個論壇登出，為它存的密碼也會刪掉。只有密碼不會回來：下次要再打一次。它還留在你的來源裡，版塊和文章都在。";
+"account.clear.confirm"           = "清除";
+
+/* The masthead glance: the whole collection, on one line, without scrolling. */
+"account.standing.count"          = "%d 個來源";
+"account.standing.count.signedIn" = "%1$d 個來源，已登入 %2$d 個";
+
+/* M1 tail rev 2 — a source you already have, looked at, and one way of waiting. */
+
+/* Pressing a row. Decision 31: the row opens what that server says about itself. */
+"account.source.open"             = "%@ 怎麼介紹自己";
+"account.source.open.hint"        = "打開這個來源怎麼介紹自己。";
+
+/* The detail: the same evidence, and the three sentences a preview says that are false here. */
+"source.held.detail"              = "這個來源怎麼介紹自己。你已經在讀它了。";
+"source.held.microblog"           = "你正在讀這個來源的公開時間軸。";
+"source.held.forum"               = "你正在讀這個論壇最新的主題。";
+"source.held.closed"              = "這個論壇說沒登入的人不能讀它。在它那一列登入，就能多讀一些。";
+"source.held.turnedAway"          = "上次問的時候，這個來源前面有東西把 Fediqo 擋掉了。登入通常就能解決。";
+
+/* The longest wait in the app, said correctly: it detects nothing. */
+"account.join.boards.progress"    = "正在讀你在 %@ 上挑的版塊…";

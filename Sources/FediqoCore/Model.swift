@@ -204,7 +204,20 @@ public struct Attachment: Sendable, Hashable {
 /// A note this device has stored. Origins remember how it arrived.
 public struct Note: Identifiable, Hashable, Sendable {
     public let id: String
-    public let source: Source
+    /// Which server handed this copy over, and **what future fetches about it are tagged with**.
+    ///
+    /// Two jobs in one field, and decision 16 is the ruling that they cannot be separated cheaply
+    /// enough to bother. As a record of parsing it is exact: the handle, the reply and the emoji in
+    /// this copy were all resolved against this host. As fetch provenance it is what
+    /// `DummyItemRow` and `FediqoRootView` stamp on every avatar and emoji request they make for
+    /// this row — so a stamp naming a server the reader has removed keeps this device asking that
+    /// server for pictures, in an app whose whole claim is that nothing leaves it except to the
+    /// servers the reader chose.
+    ///
+    /// **`internal(set)` for that one writer**, the same door `hosts` below keeps shut and for a
+    /// stricter reason: `ItemStore.remove(host:)` re-stamps a surviving note to a source that
+    /// remains, and nothing outside this module may rewrite where a note says it came from.
+    public internal(set) var source: Source
     public let author: String
     public let handle: String
     public let body: String
@@ -235,6 +248,37 @@ public struct Note: Identifiable, Hashable, Sendable {
     public let boardID: String?
     public let postedAt: Date
     public var origins: Set<FetchOrigin>
+    /// Every server this note arrived through. Never empty.
+    ///
+    /// **`source` is a stamp and this is the provenance, and a Mastodon status is the case that
+    /// makes them two different things.** A Discourse topic's id and a Discuz! thread's are
+    /// host-prefixed, so a row of theirs can only ever have come from the one host that stamped
+    /// it. A Mastodon status's id is its canonical URI, which names the server that *wrote* it and
+    /// says nothing about the server this device *read* it from — so two joined instances both
+    /// carrying one status are one stored row, stamped with whichever joined first (see
+    /// `ItemStore.ingest`).
+    ///
+    /// That is why removing a source cannot go by the stamp. Doing so would delete rows the
+    /// remaining instance is still showing, and leave behind every row the removed instance was
+    /// the only route to. `ItemStore.ingest` unions each arrival's host in here, `remove(host:)`
+    /// takes one out, and a note goes only when the set empties (decision 9).
+    ///
+    /// Seeded from `source` rather than passed in, because a wire boundary has one host to declare
+    /// and no way to know of a second — the second arrives later, through `ingest`, which is the
+    /// only place that can see both. Seeding it from `self.source.host` also means the set is
+    /// folded by the one rule `Source.init` already applies, so it compares to `remove(host:)`'s
+    /// argument by `==` with no second folding rule to keep in step; a parameter would let a caller
+    /// declare a host that disagrees with the stamp.
+    ///
+    /// **`internal(set)` where `origins` beside it is freely settable, and the asymmetry is the
+    /// point rather than an oversight.** `origins` is a union of enum members with no invariant
+    /// riding on it — a note with no origins is simply a note in no timeline, which is a state the
+    /// app can hold and draw. This set is never empty, and emptiness is not a state here: it is the
+    /// signal `remove(host:)` deletes on. A caller outside this module assigning `note.hosts = []`
+    /// would therefore be arming a deletion rather than describing a note, so the two writers that
+    /// may touch it — `ItemStore.ingest` and `ItemStore.remove` — are both in this module and the
+    /// door is shut behind them.
+    public internal(set) var hosts: Set<String>
     public let reply: Reply?
     public let boostedBy: String?
     public let audience: Audience?
@@ -287,6 +331,9 @@ public struct Note: Identifiable, Hashable, Sendable {
         self.boardID = boardID
         self.postedAt = postedAt
         self.origins = origins
+        // `Source.init` has already folded the case, so every host in this set is comparable to
+        // every other by ==, which is what `remove(host:)` relies on.
+        self.hosts = [self.source.host]
         self.reply = reply
         self.boostedBy = boostedBy
         self.audience = audience

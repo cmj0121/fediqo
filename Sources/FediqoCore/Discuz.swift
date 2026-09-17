@@ -1408,6 +1408,50 @@ public struct DiscuzPost: Identifiable, Hashable, Sendable {
         self.isWithheld = isWithheld
         self.avatarURL = avatarURL
     }
+
+    /// Where this one post lives on the forum it was read from, for a reader who wants to go and
+    /// read it there.
+    ///
+    /// **Built, not lifted — the same guarantee `asNote` makes about a thread's address, and for
+    /// the same reason.** A host this device parsed and two integers this device parsed; nothing
+    /// here came out of a stranger's markup, so `javascript:` in somebody's `href` has nothing to
+    /// reach. Not lifting an address is a stronger guarantee than checking one, and the check is
+    /// applied anyway: `host` arrives as a `String` from a caller, and an empty one builds
+    /// `https:///forum.php`, which parses, has no host to reach, and would open nowhere.
+    ///
+    /// **The form is measured, not guessed.** Discuz!'s own floor permalink, as captured on the
+    /// desktop template, is `forum.php?mod=viewthread&tid=<tid>#pid<pid>` — the thread address
+    /// this file already builds, with the post's own anchor on the end. The forum writes that
+    /// link itself, beside every floor number, which is why this is the spelling rather than one
+    /// of the several others Discuz! also answers.
+    ///
+    /// ## Why the anchor is honest here, and the one thing that would make it dishonest
+    ///
+    /// An anchor only reaches a post that is **on the page the address opens**, and that address
+    /// opens a thread's first page. Every `DiscuzPost` this package hands out is a first-page
+    /// post: `replies(tid:)` states it in as many words — "a Discuz! thread paginates at the
+    /// forum's own configured size and this reads the first page only" — and `post(tid:)` reads
+    /// the same page. So the anchor resolves for every post that can reach a caller, and it is
+    /// not luck that it does; it is that invariant.
+    ///
+    /// **If later pages are ever fetched, this becomes wrong and silently so** — a reply from
+    /// page four would open page one and land the reader at the top of it, which is worse than
+    /// offering them nothing. Whoever adds pagination adds `&page=` here, or removes this. There
+    /// is no compiler stop for it, so this paragraph is the whole of the warning.
+    public func url(onHost host: String) -> URL? {
+        guard let base = Host.httpsURL(
+            host: host,
+            path: "/forum.php",
+            query: [
+                URLQueryItem(name: "mod", value: "viewthread"),
+                URLQueryItem(name: "tid", value: String(tid)),
+            ]
+        ) else { return nil }
+        var parts = URLComponents(url: base, resolvingAgainstBaseURL: false)
+        parts?.fragment = "pid\(pid)"
+        guard let url = parts?.url, Host.isFetchable(url) else { return nil }
+        return url
+    }
 }
 
 /// A Discuz! thread page, read as structure — `DiscuzPage`'s rule applied to the page a thread

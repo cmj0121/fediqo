@@ -58,6 +58,32 @@ public struct MastodonClient: Sendable {
         return CustomEmoji.folded(wire.compactMap(\.asEmoji))
     }
 
+    /// What this server says about itself: `GET /api/v2/instance`.
+    ///
+    /// Unauthenticated, and the one document Mastodon publishes for this. **No `/api/v1/instance`
+    /// fallback**, deliberately: v1 is deprecated, it carries a different shape, and a server old
+    /// enough to need it previews as `.unread(.unreadable)` rather than being read through a
+    /// second decoder nobody can test against a live server any more.
+    ///
+    /// `people`, `posts` and `readsWithoutAccount` come back nothing, because Mastodon has no such
+    /// idea — see `SourceProfile.activeMonth`.
+    public func profile() async throws -> SourceProfile {
+        guard let url = Host.httpsURL(host: host, path: "/api/v2/instance") else {
+            // Nothing was asked, so nothing answered badly. `unreadable` would claim a
+            // server sent something unreadable when no request was ever built.
+            throw ProfileError.unreachable
+        }
+        let (data, response) = try await http.data(from: url)
+        // **The status is read before the body is, and that ordering is the whole guard.** A
+        // Mastodon older than 4.0 does not have this endpoint and answers 404 with a page of
+        // HTML; a decoder handed that reports a corrupt profile for a server whose only fault is
+        // its age. Nothing non-2xx reaches `JSONDecoder` from here.
+        guard (200..<300).contains(response.statusCode) else {
+            throw ProfileError.of(status: response.statusCode)
+        }
+        return try MastodonJSON.decoder.decode(InstanceDTO.self, from: data).asProfile(host: host)
+    }
+
     private func statuses(
         path: String,
         limit: Int,
@@ -109,6 +135,76 @@ enum MastodonJSON {
         let whole = ISO8601DateFormatter()
         whole.formatOptions = [.withInternetDateTime]
         return whole.date(from: raw)
+    }
+}
+
+/// `/api/v2/instance`, in the fields a preview draws.
+///
+/// Every one of them is Optional here even where Mastodon's own documentation calls it
+/// guaranteed. This is a stranger's server and a fork's server: a field that is always present on
+/// mastodon.social is a field that is missing on the install this app is actually pointed at, and
+/// one absent string must not cost the reader the whole profile.
+struct InstanceDTO: Decodable, Sendable {
+    let title: String?
+    let description: String?
+    let thumbnail: Thumbnail?
+    let usage: Usage?
+    let registrations: Registrations?
+    let rules: [Rule]?
+
+    struct Thumbnail: Decodable, Sendable {
+        let url: String?
+    }
+
+    struct Usage: Decodable, Sendable {
+        let users: Users?
+
+        struct Users: Decodable, Sendable {
+            /// The only count v2 carries. There is no total here: the registered-account number
+            /// left with v1's `stats` block and did not come back.
+            let activeMonth: Int?
+        }
+    }
+
+    struct Registrations: Decodable, Sendable {
+        let enabled: Bool?
+        let approvalRequired: Bool?
+    }
+
+    /// `id` and `hint` are on the wire and are not read: the first orders a list this app shows
+    /// in the order it arrived, and the second is a second paragraph written for a sign-up form
+    /// this app does not have.
+    struct Rule: Decodable, Sendable {
+        let text: String?
+    }
+
+    func asProfile(host: String) -> SourceProfile {
+        SourceProfile(
+            host: host,
+            kind: .mastodon,
+            title: title,
+            summary: description,
+            // A stranger's address, admitted under the rule every other address in this package
+            // is admitted under.
+            thumbnail: Host.fetchableURL(thumbnail?.url),
+            activeMonth: usage?.users?.activeMonth,
+            registration: Self.registration(registrations),
+            // The rules a server did not send and the rules a server has none of are the same
+            // nothing to draw. See `SourceProfile.rules`.
+            rules: (rules ?? []).compactMap(\.text)
+        )
+    }
+
+    /// Two booleans into the three answers a reader can act on.
+    ///
+    /// **Closed is read off `enabled` alone.** A server with registrations off has said no, and
+    /// whether it would also have required approval is a setting nobody can act on. Where
+    /// `enabled` is absent the server has said nothing, and nothing is what this returns —
+    /// guessing `open` would invite a reader to sign up somewhere that may not take them.
+    private static func registration(_ wire: Registrations?) -> SourceProfile.Registration? {
+        guard let enabled = wire?.enabled else { return nil }
+        guard enabled else { return .closed }
+        return wire?.approvalRequired == true ? .byApproval : .open
     }
 }
 

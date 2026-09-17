@@ -66,6 +66,7 @@ struct DummyItemRow: View {
     @State private var hovering = false
     @State private var resolved = Written()
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.openURL) private var openURL
 
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -137,6 +138,7 @@ struct DummyItemRow: View {
             .contentShape(Rectangle())
             .onTapGesture { onSelect?() }
             .onHover { hovering = $0 }
+            .wayOut(named: item.outwardName, to: item.outwardURL)
             .accessibilityElement(children: .contain)
             .task(id: Asked(item: item, settled: catalogueSettled)) { await resolve() }
     }
@@ -248,6 +250,11 @@ struct DummyItemRow: View {
             headline(written)
                 .accessibilityElement(children: .combine)
                 .accessibilityAddTraits(selected ? .isSelected : [])
+                // **On the headline and not on the row**, for the reason stated three lines up:
+                // the row is a container, and a container is not an element. A custom action put
+                // there is offered to nobody, which is a control that exists in the source and
+                // not on the screen — the exact defect this milestone has shipped three times.
+                .accessibilityActions { outwardAction }
             mainBox(written)
             actions
         }
@@ -910,6 +917,121 @@ struct DummyItemRow: View {
         DummyMarkButton(symbol: symbol, count: nil, labelKey: label,
                         on: on, quiet: !reading, glyph: glyph,
                         countWidth: countBox, touch: touch, action: action)
+    }
+
+    // MARK: - The way out
+
+    /// Leaves the app for the server this row came from.
+    ///
+    /// **A named method and not the closure it used to want to be.** Three controls in this
+    /// milestone were wired inside a `View` body, where no test can call them, and all three
+    /// stayed green while doing the wrong thing — once a `Back` button that went nowhere under
+    /// 405 passing tests. What this does is one line; where it lives is the whole point of it.
+    ///
+    /// **It asks `outwardURL` again rather than being handed an address.** The two callers below
+    /// are the menu item and the VoiceOver action, and a method that took a `URL` would let a
+    /// third be written that passed `item.url` straight through — the check skipped by a caller
+    /// that did not know there was one. Reading the checked address here means the press and the
+    /// decision to offer the press cannot disagree.
+    private func openOutward() {
+        guard let url = item.outwardURL else { return }
+        openURL(url)
+    }
+
+    /// The way out, as a reader using VoiceOver reaches it.
+    ///
+    /// A context menu is a gesture — a secondary click, or a long press — and a reader who makes
+    /// neither would otherwise have no way to this at all. Offered as a named action on the
+    /// headline element, so it is announced with the row rather than hidden behind a press that
+    /// has to be discovered.
+    ///
+    /// **Nothing where there is nowhere to go**, which is the same rule the menu keeps: an action
+    /// announced and then refused is worse than an action never announced.
+    @ViewBuilder
+    private var outwardAction: some View {
+        if item.outwardURL != nil {
+            Button(item.outwardName) { openOutward() }
+        }
+    }
+}
+
+/// The row's way out to the web, on the one gesture that does not take the row's own press.
+///
+/// ## Why a context menu, and why the same one on both platforms
+///
+/// **A press on a row opens the thread, and that stays the primary act.** Anything that shares
+/// the primary press is a race the reader loses some of the time; a context menu is the secondary
+/// press on both platforms this app ships — a right or control click on macOS, a long press on
+/// iOS — so one modifier is the whole of it and neither platform is given a lesser affordance
+/// than the other. macOS is the primary target and iOS shares this view; this is the one shape
+/// where that sharing costs nothing.
+///
+/// **Not a fifth mark in the marks band.** `DummyThreadPane.outward` refused exactly that and its
+/// three reasons are still the reasons: the row is four fixed bands and one height, a control
+/// multiplying in the marks band is the thing this branch keeps writing down that it will not do,
+/// and forty small glyphs under a pointer are forty chances to leave the app by accident. A menu
+/// costs the row no pixels and no height, and cannot be pressed by mistake.
+///
+/// **Not a hover affordance**, which exists on one platform, and which the cover's own note
+/// already calls "a control half the readers of this row cannot find". **Not a swipe**, which
+/// exists on the other platform and is not available here at all: these rows are a `LazyVStack`
+/// inside a `ScrollView`, not a `List`, so `swipeActions` would draw nothing.
+///
+/// ## Absent, not disabled
+///
+/// Where `to` is nothing, no menu is added rather than a menu with a dead item in it — decision
+/// 4's rule on this repo's controls. The condition sits on the modifier instead of inside the
+/// menu's builder because an empty menu builder is still a menu, and a right click that opens an
+/// empty grey rectangle is the disabled control wearing a different hat.
+///
+/// ## Why it takes no action to perform
+///
+/// It used to take an `open` closure beside the address, and QA was right that the pair could
+/// disagree: a caller passing an unchecked address as `to:` while the closure opened a checked
+/// one would draw a menu that did nothing — the same shape of defect as the three controls this
+/// milestone shipped wired to the wrong thing, arriving through a signature instead of through a
+/// closure. There is now one address. What decides whether the menu exists is the value the menu
+/// opens, so the two cannot disagree, and no caller is given the chance to make them.
+extension View {
+    func wayOut(named name: String, to url: URL?) -> some View {
+        modifier(WayOut(name: name, url: url))
+    }
+}
+
+private struct WayOut: ViewModifier {
+    let name: String
+
+    /// **Filtered here, whoever built it.** This modifier is the one door to `openURL` in the
+    /// package, and the check is about what will be handed to the system browser rather than
+    /// about who wrote the address — which is the argument `DummyItem.outwardURL` already makes
+    /// about itself. `ForumReplyRow` handed over a built address that was checked only by
+    /// `DiscuzPost.url(onHost:)` two files away, which is the shape `ShellSession.remove`'s own
+    /// comment names as how a class of bug reached fourteen places. A third way-out surface
+    /// inherits the check rather than having to remember it.
+    let url: URL?
+    private var checked: URL? {
+        guard let url, Host.allowsFetch(url) else { return nil }
+        return url
+    }
+
+    /// Read here rather than taken from the caller. The environment is the one way out of the
+    /// app this package uses, and a modifier that held a caller's closure instead is the
+    /// disagreement this shape exists to make impossible.
+    @Environment(\.openURL) private var openURL
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let url = checked {
+            content.contextMenu {
+                Button {
+                    openURL(url)
+                } label: {
+                    Label(name, systemImage: "arrow.up.forward.app")
+                }
+            }
+        } else {
+            content
+        }
     }
 }
 

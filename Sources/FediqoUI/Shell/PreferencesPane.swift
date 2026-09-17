@@ -149,8 +149,17 @@ struct PreferencesPane: View {
             // collapsed to one element swallows the button's activation, and this branch has
             // shipped that defect twice — announcing a control that does nothing, and leaving a
             // reader with no keyboard no way to act at all.
+            //
+            // **Asks, rather than fires** (decision 29). `prefs.cache.clear` is one word for one
+            // call reached from two questions, so a Clear that confirms on Account and empties
+            // straight away here would be the same word doing two different things two panes
+            // apart. One presenter, on `FediqoRootView`, driven by `session.clearing`.
+            //
+            // This pane already draws `passwordLine`, so a reader here has been told a password is
+            // held before they press. The dialog is not redundant even so: it names the sign-out
+            // as well, and the two entrances must not diverge.
             Button(L10n.t("prefs.cache.clear")) {
-                Task { await session.clear(host: source.host) }
+                session.clearing = source.host
             }
             .accessibilityLabel(
                 Text(String(format: L10n.t("prefs.cache.clear.label"), source.host))

@@ -11,6 +11,10 @@ actor FixtureHTTP: HTTPClient {
         case body(Data, status: Int = 200)
         case text(String, status: Int = 200)
         case fail
+        /// The reader walked away. `URLError(.cancelled)` and **not** `CancellationError`, because
+        /// that is what `URLSessionClient.data(from:)` actually throws — a harness that threw the
+        /// tidy one would be testing a translation the app never has to make.
+        case cancelled
     }
 
     private let routes: [String: Outcome]
@@ -39,6 +43,8 @@ actor FixtureHTTP: HTTPClient {
             return (Data(text.utf8), Self.response(url, status))
         case .fail:
             throw FixtureHTTPError.unreachable
+        case .cancelled:
+            throw URLError(.cancelled)
         }
     }
 

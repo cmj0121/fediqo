@@ -1,10 +1,22 @@
 import FediqoCore
 import Foundation
 
-/// An item in the dummy store. A `note` or a `thread`, never a protocol row.
+/// An item in the dummy store. Somebody's words, a named discussion, or a film — never a
+/// protocol row.
 public enum DummyItemKind: String, Sendable, Hashable {
     case note
     case thread
+    /// **Here so that `DummyItem.kind` is not forced to lie.** Without it a `.video` source has
+    /// to be answered with `.note` or `.thread`, and a film drawn as somebody's words is the
+    /// identical silent wrong answer the no-`default:` rule exists against — arriving through an
+    /// exhaustive switch instead of through a `default:`, which honours the rule in letter and
+    /// breaks it in fact.
+    ///
+    /// **It is an honest answer, not a trap, and the difference matters to whoever adds
+    /// PeerTube.** Nothing in this target switches over `DummyItemKind` — `DummyItem.kind` is
+    /// written and never read — so this case sets no compiler stop anywhere, and adding one more
+    /// would still set none. Provisional and unreachable in this milestone, like `.video` itself.
+    case video
 }
 
 /// Who the author wrote it for, where the dummy said so. Nothing means the shape has no such idea.
@@ -115,6 +127,13 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     public let counts: DummyCounts
     public let marks: DummyMarks
     /// Other hosts that also carried this item. Empty for a single source.
+    ///
+    /// **Filled from `Note.hosts`, which is the only thing that knows.** `source` is a stamp: for
+    /// a Mastodon status, whose id is host-independent, it names whichever joined instance handed
+    /// the row over first and says nothing about the second. Two instances carrying one status are
+    /// one stored row, and a row drawn from it that named one host was under-reporting where the
+    /// reader's timeline came from — decision 9's cost, and the half of it `ItemStore.remove`
+    /// cannot pay.
     public let alsoFrom: [DummySource]
 
     /// Hosts to name on the row, stable and unique. First is drawn; the rest are +n.
@@ -159,11 +178,72 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         switch source.kind {
         case .microblog: .note
         case .forum, .board: .thread
+        // Provisional: an answer that exists so no film is called somebody's words, not a row
+        // anybody has drawn, and nothing reaches it in this milestone. M2's PeerTube unit replaces
+        // it. **It will not be stopped here** — this switch is already exhaustive and nothing
+        // reads what it returns — so the word provisional is the whole of the warning.
+        case .video: .video
         }
     }
 
     public var title: String? { titleKey.map { L10n.t($0) } ?? titleText }
     public var board: String? { boardKey.map { L10n.t($0) } ?? boardText }
+
+    /// Where this row's way out goes, or nothing where there is nowhere to go.
+    ///
+    /// **Both halves of the control are named here, and that is the point of the property.**
+    /// Three times in M1 a control shipped wired to something that did not do what its name said
+    /// and every test stayed green, because what decided it sat in a `View` body no test could
+    /// reach — once a dead `Back` button under 405 of them. *Whether* a row offers the way out
+    /// and *what address* it opens are one question with one answer, and it is answered where
+    /// `DummyItemTests` can ask it.
+    ///
+    /// **`Host.allowsFetch`, at a boundary that is not a fetch.** `DummyThreadPane.outward` wrote
+    /// down why and this is the same reading of the same one function rather than a second rule:
+    /// `URL(string:)` will build `javascript:`, `data:` and `file:///` out of a stranger's JSON,
+    /// and `openURL` would do as it was told with any of them. Core admits `url` at ingestion and
+    /// this admits it again at the door — one function read twice, not one rule written twice,
+    /// which is the difference between belt and braces and the drift this branch warns about.
+    ///
+    /// It applies to all three protocols and not only the lifted one. Discuz! *builds* its
+    /// `viewthread` address in Core out of a parsed host and an integer rather than lifting one
+    /// from the page, and says there why it still does not trust it; a built address reaching
+    /// this property is checked exactly like a lifted one, because the check is about what will
+    /// be handed to the system browser and not about who wrote it.
+    ///
+    /// **Nothing, rather than an address that will not open** — decision 4 on this repo's
+    /// controls. A row whose note named nowhere offers no way out at all, not a greyed one: a
+    /// control the reader cannot press is a question about this app, and nothing is the honest
+    /// answer to "this post named nowhere to go".
+    public var outwardURL: URL? {
+        guard let url, Host.allowsFetch(url) else { return nil }
+        return url
+    }
+
+    /// What the way out is called, wherever it is drawn: the act, and the host it leads to.
+    ///
+    /// **`thread.open` reused, not twinned.** The key is named for the pane that first needed it
+    /// and the sentence it holds — "Open on %@" — is exactly as true of a row. A second key
+    /// saying the same thing in three bundles is one more pair to keep in step and one more
+    /// chance for two surfaces to word one act differently.
+    ///
+    /// **It names the host and not "the browser".** `source.host` is parsed by `Host.parse` and
+    /// never lifted from anybody's markup, so it is the one thing this app knows for certain
+    /// about where an outward link ends up — and where it ends up is the fact a reader checks
+    /// before following one.
+    public var outwardName: String { Self.wayOutName(host: source.host) }
+
+    /// The same sentence, for a surface that has a host but no `DummyItem` — a Discuz! reply,
+    /// which is a `DiscuzPost` and not a `Note`. Shared rather than spelled twice for the reason
+    /// the key is shared: two surfaces wording one act differently is how a reader comes to think
+    /// they are two acts.
+    ///
+    /// `language` resolves the way `shapeWord` above resolves, and is here for the same reason —
+    /// so a test can *ask* for a language rather than assign `L10n.language`, which suites running
+    /// in parallel share.
+    static func wayOutName(host: String, language: DummyLanguage? = nil) -> String {
+        String(format: L10n.t("thread.open", language: language), host)
+    }
 
     /// Not the live stream. Named queries do not read this.
     public static let stored: [DummyItem] = []
@@ -173,7 +253,16 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         DummyConversation(ancestors: [], post: self, descendants: [])
     }
 
-    public init(_ note: Note) {
+    /// One stored note, drawn as a row.
+    ///
+    /// **`among` has no default, for the reason `DummySource.unsigned`'s `kind` has none.** A
+    /// note knows every host it arrived through and none of their protocols, so `alsoFrom` cannot
+    /// be built here without being told what this device reads — and an empty default would be
+    /// the right answer at every test call site and a silent wrong one at the two that reach a
+    /// screen, which is exactly the shape that drew a globe over every joined forum. `[]` is a
+    /// real answer, meaning "nothing else is joined", and it should be written down where it is
+    /// true rather than inherited by omission where it is not.
+    public init(_ note: Note, among sources: [Source]) {
         id = note.id
         source = DummySource.unsigned(note.source.host, kind: Self.shape(of: note.source.kind))
         author = note.author
@@ -200,7 +289,33 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
             favourites: note.counts.favourites
         )
         marks = DummyMarks()
-        alsoFrom = []
+        alsoFrom = Self.others(note, among: sources)
+    }
+
+    /// The hosts this note also arrived through, as sources a row can draw.
+    ///
+    /// **Sorted, because `Note.hosts` is a `Set` and has no order to inherit.** `shownHosts` sorts
+    /// again for what it draws; this sorts so that two `DummyItem`s built from one note are equal,
+    /// which `Hashable` promises and a `Set`'s iteration order does not give.
+    ///
+    /// **A host with no source behind it is left out, and that is not a swallowed case.**
+    /// `ItemStore.remove` strikes a host out of `hosts` at the same moment it takes the source out
+    /// of the list, and `ingest` only ever unions a host that a join had already added — so a host
+    /// in this set with nothing joined under it is a state the store does not produce. What it
+    /// would take to draw one is a protocol name for a server this device is not reading, which is
+    /// a shape nothing here has.
+    private static func others(_ note: Note, among sources: [Source]) -> [DummySource] {
+        // The overwhelmingly common note arrived through one server, and the work below is three
+        // collections and a linear scan per survivor to say so. This whole function is rebuilt
+        // once per timeline build, which is itself per visible row.
+        guard note.hosts.count > 1 else { return [] }
+        return note.hosts
+            .subtracting([note.source.host])
+            .sorted()
+            .compactMap { host in
+                guard let kind = sources.first(where: { $0.host == host })?.kind else { return nil }
+                return DummySource.unsigned(host, kind: Self.shape(of: kind))
+            }
     }
 
     /// Which shape of row a protocol gets. **The protocol stays behind; the timeline sees a
@@ -214,11 +329,23 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// **Both forums, and they are listed rather than defaulted.** Discourse and Discuz! are
     /// different programs — one publishes JSON and one publishes a page — and the difference is
     /// entirely behind this line: by here they are both a title, a board and an answer count,
-    /// which is the whole of what `.forum` means. Adding a forum to `ProtocolKind` and not to
-    /// this switch is a silent failure rather than a build error, because the `default` catches
-    /// it: the source joins, the threads arrive, and every one of them is drawn as somebody's
-    /// words with its title nowhere. `DummyItemTests` pins both.
-    private static func shape(of kind: ProtocolKind) -> DummySourceKind {
+    /// which is the whole of what `.forum` means. That is what the `default:` underneath used to
+    /// swallow: a forum added to `ProtocolKind` and not to this switch still built, the source
+    /// joined, the threads arrived, and every one of them was drawn as somebody's words with its
+    /// title nowhere. `DummyItemTests` pins every protocol, one by one, for the same reason.
+    ///
+    /// **A film is the third shape, and it is answered before anything can ask.** `.peertube`
+    /// maps to `.video` while `.peertube` is still refused at every join door, so no reader sees
+    /// it this milestone. It is here because the alternative is `.microblog` sitting in its place
+    /// as a plausible answer that nothing would break on.
+    ///
+    /// **Never `.board`.** That case is a query inside a source, not a protocol's shape — see
+    /// `DummySourceKind.board`.
+    ///
+    /// Internal rather than private because the source page asks the same question of a `Source`
+    /// it never turned into an item: `AccountPane` hard-coded `.microblog` and drew every joined
+    /// forum — Discourse and Discuz! alike — with the globe icon.
+    static func shape(of kind: ProtocolKind) -> DummySourceKind {
         // **No `default:`, and this one was written down as fixed while it was not.** The rule
         // exists because this exact function once mapped only `.discourse` and drew a whole
         // Discuz! forum as microblog posts with every title missing, and the compiler said
@@ -226,9 +353,35 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         // named, so the next one breaks the build at the place that has to decide.
         switch kind {
         case .discourse, .discuz: .forum
-        case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
+        case .peertube: .video
+        case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .friendica,
              .gotosocial, .unknown:
             .microblog
+        }
+    }
+
+    /// The shape, said in the one word a reader is shown.
+    ///
+    /// **One function, so the same server is described in the same words before and after the
+    /// press.** The preview says "Mastodon · microblog" and the source row says it again; two
+    /// spellings of that is two translations that drift.
+    ///
+    /// **No `default:`**, the rule `shape(of:)` above states. `.board` is unreachable — that
+    /// function never returns it — and is still named rather than swept in, because a case swept
+    /// into somebody else's answer is how this file shipped a forum drawn as microblog posts.
+    /// `.video`'s string ships in M1 although nothing draws it, so unit 8 is not a build break
+    /// waiting on a translator.
+    /// `language` resolves the way `L10n.t(_:language:)` resolves — nothing means the shell's
+    /// current language. It is here so a test can ask for a language instead of **assigning** one:
+    /// `L10n.language` is a `nonisolated(unsafe) static var` that nine suite `init`s write and that
+    /// suites running in parallel share, so a test that sets it mid-test can be read by another
+    /// suite's test between two of its own lines. This file's own `everyShapeHasAWord` was doing
+    /// exactly that, which is the flake this parameter retires.
+    static func shapeWord(_ shape: DummySourceKind, language: DummyLanguage? = nil) -> String {
+        switch shape {
+        case .microblog: L10n.t("source.shape.microblog", language: language)
+        case .forum, .board: L10n.t("source.shape.forum", language: language)
+        case .video: L10n.t("source.shape.video", language: language)
         }
     }
 

@@ -34,10 +34,43 @@ struct ShellPlaceTests {
         #expect(RailView.Metrics.collapsedWidth < RailView.Metrics.expandedWidth)
     }
 
-    @Test("A rail row is the same height open or collapsed")
+    /// **The rail's mark is `well - snug`, which is the row's own rule applied to the rail.**
+    /// `SourceRow.symbolPoints` is `touch - snug`, "leaving `ShellSpace.snug` of the target around
+    /// it"; here it gives 24, which is also `SourceRow.markBase` and `SourceRowView.glyph`'s base.
+    /// One number, three surfaces — and the compositional half of what the user asked for when they
+    /// said the rail's marks looked small beside the buttons.
+    ///
+    /// **The literal reading, glyph = well = 32, is what this test refuses.** It leaves no margin
+    /// inside the plate and it breaks `RailButton.closedMark`, whose strike is `glyph * 1.2`: at 32
+    /// that is 38.4 across a 32pt well, so the closed mark for Timeline and Notices would stick out
+    /// of its own plate on both sides.
+    @Test("A rail row is the same height open or collapsed, and its mark keeps its margin")
     func railRowHeightIsStable() {
         #expect(RailView.Metrics.rowInnerHeight == RailView.Metrics.well)
         #expect(RailView.Metrics.iconSize < RailView.Metrics.well)
+        #expect(RailView.Metrics.iconSize == RailView.Metrics.well - ShellSpace.snug)
+        #expect(RailView.Metrics.iconSize == 24)
+        #expect(RailView.Metrics.iconSize == SourceRow.markBase, """
+            The rail's mark and the source row's stopped being one number. Every mark in this app \
+            is 24pt at the default rung, and that is the whole of why the rail was enlarged.
+            """)
+        // `closedMark`'s strike must stay inside the well it crosses.
+        #expect(RailView.Metrics.iconSize * 1.2 <= RailView.Metrics.well, """
+            The closed mark's strike is wider than the plate it is drawn on, so Timeline and \
+            Notices would strike out past their own wells.
+            """)
+    }
+
+    /// Decision 32. It says several things stacked into one, which is the README's own picture, and
+    /// it frees `person.crop.circle` — which the designer found meaning three different things,
+    /// two of them on the Account page at once. With the row's sign-in now a `key`, that symbol has
+    /// no caller left in `FediqoUI` at all.
+    @Test("Account is drawn as several things stacked into one")
+    func accountIsAStack() {
+        #expect(ShellPlace.account.symbolName == "square.stack.3d.up")
+        for place in ShellPlace.allCases {
+            #expect(place.symbolName != "person.crop.circle", "\(place)")
+        }
     }
 
     @Test("Shell copy comes from the module, not the key")

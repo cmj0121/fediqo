@@ -88,11 +88,11 @@ struct ForumPostsTests {
         let notes = try await DiscuzClient(http: http, host: Self.host).board(34, source: source)
         let first = try #require(notes.first)
 
-        let ref = try #require(ForumThreadRef(DummyItem(first)))
+        let ref = try #require(ForumThreadRef(DummyItem(first, among: [])))
         #expect(ref.host == Self.host)
         #expect(ref.tid == 40125)
         // And the row agrees with the ref, because the row is what asks.
-        #expect(Self.row(DummyItem(first)).thread == ref)
+        #expect(Self.row(DummyItem(first, among: [])).thread == ref)
     }
 
     /// A row that is not a Discuz! thread has no thread behind it, and every one of these would
@@ -658,12 +658,9 @@ struct ForumPostsTests {
         ])
         let categories = try await DiscuzClient(http: http, host: "install-d.example").boards()
         let boards = categories.flatMap(\.boards)
-        let sheet = BoardPickerSheet(
-            choice: BoardChoice(offer: JoinOffer(
-                host: "install-d.example", kind: .discuz, categories: categories
-            )),
-            subscribe: { _ in },
-            cancel: {}
+        let sheet = BoardPickerList(
+            offer: JoinOffer(host: "install-d.example", kind: .discuz, categories: categories),
+            picked: .constant([])
         )
 
         let child = try #require(boards.first { $0.name == "输入法工具" })
@@ -717,6 +714,7 @@ struct ForumPostsTests {
         let session = ShellSession(http: http, store: ItemStore())
         session.hostname = "install-d.example"
         await session.add()
+        await session.confirm()
 
         let offer = try #require(session.choosing?.offer)
         let child = try #require(offer.boards.first { $0.fid == 300 })
@@ -818,7 +816,7 @@ struct ForumPostsTests {
             title: title,
             postedAt: .distantPast,
             origins: [.publicTimeline]
-        ))
+        ), among: [])
     }
 }
 

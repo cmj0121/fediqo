@@ -33,9 +33,11 @@ public struct DiscourseClient: Sendable {
         async let sections: [Int: String] = {
             do {
                 return try await categories()
-            } catch is CancellationError {
-                throw CancellationError()
             } catch {
+                // Lifted out ahead of the swallow, and through `Cancellation.happened`: a reader
+                // who walked away arrives here looking exactly like a forum with no `/site.json`,
+                // and the difference is that one of them is still waiting for a timeline.
+                if Cancellation.happened(error) { throw CancellationError() }
                 return [:]
             }
         }()
@@ -70,6 +72,67 @@ public struct DiscourseClient: Sendable {
             (site.categories ?? []).map { ($0.id, $0.name) },
             uniquingKeysWith: { first, _ in first }
         )
+    }
+
+    /// What this forum says about itself: `/site/basic-info.json`, with `/about.json` beside it.
+    ///
+    /// **`/site/basic-info.json` and not `/site.json`**, which is the document `categories()`
+    /// above reads and the obvious thing to reach for. `/site.json` is the Ember bootstrap
+    /// payload — 285 KB measured, carrying every category, every group and every setting the web
+    /// client needs — and it has neither the forum's title nor its description in it. Basic-info
+    /// is 873 bytes, is in Discourse's own OpenAPI specification with `security: none`, and is
+    /// never gated. Spending a third of a megabyte of somebody's bandwidth to not get the two
+    /// fields the preview exists to show is the trade this comment is here to stop being made
+    /// again.
+    ///
+    /// **The counts are fetched beside it and are allowed to fail**, which is `latest` above, word
+    /// for word and for the same reason: a forum that will not answer `/about.json` — an old
+    /// version, a plugin, a permission — still has a name and a description, and a preview
+    /// missing two numbers is a preview with two fewer lines rather than one nobody can read.
+    ///
+    /// `activeMonth` and `registration` come back nothing and `rules` empty, because Discourse has
+    /// no such idea — see `SourceProfile.activeMonth`.
+    public func profile() async throws -> SourceProfile {
+        async let counts: AboutDTO.Stats? = {
+            do {
+                return try await about()
+            } catch {
+                // **Through `Cancellation.happened` rather than `catch is CancellationError`.**
+                // The second was what `latest` above wrote until unit 1b, and against a real
+                // `URLSession` it never fires: a cancelled transfer arrives as
+                // `URLError(.cancelled)`, falls into the swallow below, and the preview then
+                // returns a profile — for a reader who is no longer there — instead of the
+                // `CancellationError` `SourceProfiles.answer` promises in its signature. The
+                // twin above now reads the same way; the two are deliberately identical.
+                if Cancellation.happened(error) { throw CancellationError() }
+                return nil
+            }
+        }()
+
+        guard let url = Host.httpsURL(host: host, path: "/site/basic-info.json") else {
+            // Nothing was asked, so nothing answered badly. `unreadable` would claim a
+            // server sent something unreadable when no request was ever built.
+            throw ProfileError.unreachable
+        }
+        let (data, response) = try await http.data(from: url)
+        // The status before the body, for the reason `MastodonClient.profile` states: a forum
+        // that does not have this endpoint answers with a page, not with JSON.
+        guard (200..<300).contains(response.statusCode) else {
+            throw ProfileError.of(status: response.statusCode)
+        }
+        let basic = try DiscourseJSON.decoder.decode(BasicInfoDTO.self, from: data)
+        return basic.asProfile(host: host, stats: try await counts)
+    }
+
+    /// The forum's own numbers. Optional in every sense: the document may not answer, and the
+    /// block inside it may not be there.
+    private func about() async throws -> AboutDTO.Stats? {
+        guard let url = Host.httpsURL(host: host, path: "/about.json") else {
+            throw DiscourseRequestError.invalidURL
+        }
+        let (data, response) = try await http.data(from: url)
+        try Self.check(response.statusCode)
+        return try DiscourseJSON.decoder.decode(AboutDTO.self, from: data).about?.stats
     }
 
     /// Turns a status code into the one distinction that changes what a reader should be told.
@@ -236,5 +299,59 @@ struct SiteDTO: Decodable, Sendable {
     struct Category: Decodable, Sendable {
         let id: Int
         let name: String
+    }
+}
+
+/// `/site/basic-info.json` — the small, ungated document a forum publishes about itself.
+struct BasicInfoDTO: Decodable, Sendable {
+    let title: String?
+    let description: String?
+    let logoUrl: String?
+    let faviconUrl: String?
+    /// Whether the forum shows nothing at all to a signed-out reader.
+    let loginRequired: Bool?
+
+    func asProfile(host: String, stats: AboutDTO.Stats?) -> SourceProfile {
+        SourceProfile(
+            host: host,
+            kind: .discourse,
+            title: title,
+            summary: description,
+            // The logo where the forum set one, and the favicon where it did not. Both are
+            // absolute — Discourse builds them through its own `UrlHelper.absolute` — and both go
+            // through the rule this package admits a stranger's addresses under.
+            thumbnail: Host.fetchableURL(logoUrl) ?? Host.fetchableURL(faviconUrl),
+            people: stats?.people,
+            posts: stats?.posts,
+            // Inverted at the boundary rather than at each reader: what a preview has to say is
+            // whether this can be read, and `login_required` is the name of a setting.
+            readsWithoutAccount: loginRequired.map { !$0 }
+        )
+    }
+}
+
+/// `/about.json`, for the two numbers a preview shows.
+struct AboutDTO: Decodable, Sendable {
+    let about: About?
+
+    struct About: Decodable, Sendable {
+        let stats: Stats?
+    }
+
+    /// **Two spellings of each count are read, and that is not belt and braces.** Discourse's
+    /// about payload has carried both the singular `post_count`/`user_count` form and the plural
+    /// `posts_count`/`users_count` form across its versions, and this app holds no capture of a
+    /// running forum to settle which one the installs it meets send (`f421fea`). Getting it wrong
+    /// is invisible: the document is allowed to fail, so a key that never matches looks exactly
+    /// like a forum that did not answer, and the preview quietly shows two fewer lines forever.
+    /// Two Optionals and a `??` cost less than that silence.
+    struct Stats: Decodable, Sendable {
+        let userCount: Int?
+        let usersCount: Int?
+        let postCount: Int?
+        let postsCount: Int?
+
+        var people: Int? { userCount ?? usersCount }
+        var posts: Int? { postCount ?? postsCount }
     }
 }

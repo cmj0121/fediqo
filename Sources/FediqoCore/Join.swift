@@ -19,6 +19,54 @@ public struct MastodonJoin: Sendable {
         return false
     }
 
+    /// One read of a stranger's server, with its failure kept as a value rather than thrown.
+    ///
+    /// The ladder is the one the public timeline has always climbed, moved here so that both
+    /// reads climb it and the decision can be made on the pair. The `JoinError` it hands back is
+    /// the sentence **this read alone** would earn a reader; which sentence the join actually
+    /// throws is `refusal(_:_:)`'s, and that is asked only when both reads failed.
+    ///
+    /// Cancellation is the one failure that is not a value. A reader who walked away is not a
+    /// server that would not answer, and must leave no source behind, so it is rethrown for the
+    /// caller to abandon the join on before anything is added. `Cancellation.happened` and not
+    /// `catch is CancellationError`, because `URLSession` hands a cancelled transfer back as
+    /// `URLError(.cancelled)`, which the tidy spelling never sees.
+    private static func read(
+        _ fetch: @Sendable () async throws -> [Note]
+    ) async throws -> Result<[Note], JoinError> {
+        do {
+            return .success(try await fetch())
+        } catch let error where Cancellation.happened(error) {
+            throw CancellationError()
+        } catch let error as MastodonRequestError where Self.isRefusal(error) {
+            return .failure(.publicTimelineFailed)
+        } catch is DecodingError {
+            // It answered; the answer was not a timeline. A proxy page, a fork with a
+            // schema of its own, a date nobody can parse — the host is reachable and
+            // the reader would waste their time looking at the network.
+            return .failure(.publicTimelineFailed)
+        } catch {
+            // No answer at all: a dropped connection, a TLS failure, a name that does
+            // not resolve. That one is worth checking a network over.
+            return .failure(.unreachable)
+        }
+    }
+
+    /// Neither read came back with anything. Which sentence the reader gets for that.
+    ///
+    /// **The distinction between the two errors is unchanged**, and both are still worth having:
+    /// `publicTimelineFailed` is "it answered, and the answer was not a timeline", and
+    /// `unreachable` is "no answer at all" — the only one worth sending somebody to look at a
+    /// network over. All that a second read changes is where the answer is allowed to come from.
+    /// A server that answered **either** endpoint, with a status or with a body no decoder could
+    /// read, is a server that answered; `unreachable` is kept for a host that said nothing to
+    /// both, which is what a host that is simply not there does.
+    private static func refusal(_ publicRead: JoinError, _ trendingRead: JoinError) -> JoinError {
+        publicRead == .unreachable && trendingRead == .unreachable
+            ? .unreachable
+            : .publicTimelineFailed
+    }
+
     private let http: any HTTPClient
     private let store: ItemStore
     private let catalogues: EmojiCatalogueStore
@@ -40,7 +88,7 @@ public struct MastodonJoin: Sendable {
         let kind: ProtocolKind
         do {
             kind = try await Detector(http: http).detect(raw)
-        } catch is CancellationError {
+        } catch let error where Cancellation.happened(error) {
             throw CancellationError()
         } catch let error as DetectError {
             switch error {
@@ -61,39 +109,37 @@ public struct MastodonJoin: Sendable {
 
     /// Everything after the host is known to speak Mastodon. Separate so that a dispatcher that
     /// has already asked what a host speaks does not ask a stranger's server twice.
+    ///
+    /// **Asked before it is added**, the same ordering `DiscourseJoin` and `DiscuzJoin` carry:
+    /// nothing reaches `store.add` until both reads are in and the decision is made, so a server
+    /// that answers the detector and then shows this reader nothing leaves no source behind.
     func ingest(host: String) async throws {
         let source = Source(host: host, kind: .mastodon)
         let client = MastodonClient(http: http, host: host)
 
-        async let pub = client.publicTimeline(source: source)
-        async let trend: [Note] = {
-            do {
-                return try await client.trending(source: source)
-            } catch is CancellationError {
-                throw CancellationError()
-            } catch {
-                return []
-            }
-        }()
+        // Both started together and **both awaited before anything is decided**. Awaiting one
+        // and throwing on it discarded a read that had already succeeded, unread.
+        async let pub = Self.read { try await client.publicTimeline(source: source) }
+        async let trend = Self.read { try await client.trending(source: source) }
+        let publicRead = try await pub
+        let trendingRead = try await trend
 
-        let publicNotes: [Note]
-        do {
-            publicNotes = try await pub
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch let error as MastodonRequestError where Self.isRefusal(error) {
-            throw JoinError.publicTimelineFailed
-        } catch is DecodingError {
-            // It answered; the answer was not a timeline. A proxy page, a fork with a
-            // schema of its own, a date nobody can parse — the host is reachable and
-            // the reader would waste their time looking at the network.
-            throw JoinError.publicTimelineFailed
-        } catch {
-            // No answer at all: a dropped connection, a TLS failure, a name that does
-            // not resolve. That one is worth checking a network over.
-            throw JoinError.unreachable
+        // **The rule did not change; the reading of it was wrong.** `read before added` says
+        // that something arrived, not that the *public timeline* arrived — and a server that
+        // closes its timeline to a signed-out reader while still answering trends has content to
+        // show, which `ShellSession.hasTrends` gives a tab of its own. Refusing it here was too
+        // strict an implementation of a rule that is not too strict. So the join is refused only
+        // where **both** reads came back with nothing; restoring a throw on the public timeline
+        // alone is not a fix for anything (decision 18).
+        if case .failure(let publicError) = publicRead,
+           case .failure(let trendingError) = trendingRead {
+            throw Self.refusal(publicError, trendingError)
         }
-        let trendingNotes = try await trend
+
+        // Trends are still allowed to fail on their own — a server without them has a timeline —
+        // and now so is the timeline, on a server that has trends.
+        let publicNotes = (try? publicRead.get()) ?? []
+        let trendingNotes = (try? trendingRead.get()) ?? []
 
         await store.add(source)
         await store.ingest(publicNotes + trendingNotes)
@@ -131,7 +177,7 @@ public struct DiscourseJoin: Sendable {
         let topics: [Note]
         do {
             topics = try await client.latest(source: source)
-        } catch is CancellationError {
+        } catch let error where Cancellation.happened(error) {
             throw CancellationError()
         } catch let error as DiscourseRequestError {
             switch error {
@@ -185,7 +231,7 @@ public struct DiscuzJoin: Sendable {
         let threads: [Note]
         do {
             threads = try await client.latest(source: source)
-        } catch is CancellationError {
+        } catch let error where Cancellation.happened(error) {
             throw CancellationError()
         } catch let error as DiscuzRequestError {
             throw Self.refusal(error)
@@ -274,11 +320,64 @@ public struct JoinOffer: Sendable, Hashable {
 /// Two cases and no third, because there are exactly two answers a host can give to "add this":
 /// either it is a thing this app can read straight off — and it has been — or it is a forum, and
 /// the reader has a choice to make first.
+///
+/// **The preview is not a third case, and this is where that was decided.** A reader now looks at
+/// a source before subscribing to it, and the pause that puts in front of the journey is
+/// `SourcePreview` — a separate type, returned by a separate call. Filed here it would make
+/// `.joined` unreachable on a first call for every protocol, and it would put a pause *before* a
+/// journey inside an enum whose whole subject is a pause *inside* one.
 public enum JoinStep: Sendable, Equatable {
     /// The source is added and its timeline is in the store. Nothing more to ask.
     case joined
     /// **Nothing has been added.** These are the boards; call `subscribe` with the reader's pick.
     case chooseBoards(JoinOffer)
+}
+
+/// A source looked at and **nothing added** — the preview stage, as a value.
+///
+/// **This is not a `JoinStep` and must never become one.** `JoinStep` answers *how far adding
+/// got*, and both its cases are answers to that question; this is the stage before adding begins,
+/// and it adds nothing. See the note on `JoinStep` for why a third case there would be wrong.
+///
+/// **It carries no client and no `SourceJoin`, on purpose.** An engine can come into existence
+/// between the look and the press — the reader is offered a sign-in on a refusal and takes it — so
+/// the transport has to be chosen again at `begin`, against what this run holds *then*. A preview
+/// holding the client it was read through would hand the press a client that was never there, and
+/// the reader would watch a sheet clear a challenge and then get the same refusal back.
+///
+/// Identified by host, so one host is one preview: the same rule as `Source` (D26).
+public struct SourcePreview: Identifiable, Sendable, Hashable {
+    public var id: String { host }
+    public let host: String
+    public let kind: ProtocolKind
+    public let profile: ProfileAnswer
+    /// The forum's index, where looking at this host meant reading one — and **empty where it did
+    /// not**, which is every protocol that publishes a document instead, and a forum whose index
+    /// could not be read.
+    ///
+    /// **Carried so the press does not ask a second time.** A Discuz! has no document to describe
+    /// itself, so the look asks its index instead (see `look`) — and `DiscuzClient.boards()`
+    /// throws rather than returning nothing, so a non-empty list here means exactly "the look got
+    /// an index" and an empty one means exactly "it did not". `begin(_:)` reads this and reaches
+    /// for the wire only where it is empty; asking a stranger's forum for the same page twice in
+    /// one errand is the spend `SourceJoin` refuses in as many words.
+    ///
+    /// **This does not contradict the no-client rule above.** That rule is about *transports*,
+    /// which can change between the look and the press when a reader signs in. Parsed categories
+    /// cannot: they are what the forum said, and it does not unsay it.
+    public let boards: [DiscuzCategory]
+
+    public init(
+        host: String,
+        kind: ProtocolKind,
+        profile: ProfileAnswer,
+        boards: [DiscuzCategory] = []
+    ) {
+        self.host = host
+        self.kind = kind
+        self.profile = profile
+        self.boards = boards
+    }
 }
 
 /// A board that was picked and could not be read, and why.
@@ -326,7 +425,7 @@ public struct DiscuzBoardJoin: Sendable {
     func index(host: String) async throws -> [DiscuzCategory] {
         do {
             return try await DiscuzClient(http: http, host: host).boards()
-        } catch is CancellationError {
+        } catch let error where Cancellation.happened(error) {
             throw CancellationError()
         } catch let error as DiscuzRequestError {
             throw DiscuzJoin.refusal(error)
@@ -348,26 +447,90 @@ public struct DiscuzBoardJoin: Sendable {
     /// nothing, nothing is what happens: an empty pick is not a failure, it is a reader who
     /// changed their mind, and there is no error for that because there is nothing wrong.
     ///
+    /// **A reader who leaves part-way through is that same nothing, and the loop stops.** This is
+    /// the paragraph above carried one step further rather than an exception to it: a pick where
+    /// some boards read and the reader then walked away is still a pick they never finished, so
+    /// `CancellationError` leaves and the store is untouched — no source, no subscription, no
+    /// threads. The alternative is the one this method must not do, and did: file the leaving as
+    /// an unreadable board, keep asking the forum for the rest, and then write down a partial
+    /// answer to a question nobody is waiting for.
+    ///
     /// **One board at a time, on purpose.** Eight parallel requests into a stranger's forum for
     /// one button press is the traffic this package already refuses to spend elsewhere — see
     /// `SourceJoin`, "one detection, not one per protocol". A forum's page is not a resource
     /// anybody owes this app.
+    ///
+    /// **`keeping` is what the reader is already subscribed to, and it is correctness before it
+    /// is traffic.** A board named there that is still in `picks` is carried through unchanged and
+    /// never asked for again. Without that, a reader with eight boards who adds a ninth spends
+    /// nine sequential full-HTML fetches — which the paragraph above measures in seconds — and,
+    /// the half that matters, a board that reads perfectly today and happens to time out during
+    /// the ninth pick lands in `unread`, falls out of `subscribed`, and is therefore
+    /// **unsubscribed from a subscription the reader never touched**. Re-reading a board to
+    /// confirm a subscription that already exists is not a check, it is a chance to lose it.
+    ///
+    /// **What is skipped is the fetch, and only the fetch — the name is taken fresh.** A kept
+    /// board still gets its `BoardSubscription` built from the `DiscuzBoard` in `picks`, which
+    /// came from the index read on *this* press, so a board renamed on the forum is stored under
+    /// the name the forum uses now. `Source.boards` states the rule this follows: "the number is
+    /// the subscription and the name is the label", and a moderator renaming a board does not
+    /// change the `fid` it is served at. Keeping a stale label with a fresh one already in hand
+    /// honours neither half of that.
+    ///
+    /// **The mixed row is what settles it.** Appending the *stored* subscription would give a
+    /// newly ticked board the fresh index name and a kept board the old one, so one press could
+    /// leave a row listing the same forum's boards under two generations of naming — and the
+    /// picker, drawn from the index, would disagree with the row, drawn from the store, about a
+    /// board neither of them changed.
+    ///
+    /// **A board in `keeping` and not in `picks` is dropped, and that is the untick.** The final
+    /// list walks `picks`, which is already the forum's own index order, so what comes back is
+    /// what the reader now wants and nothing else. `ItemStore.subscribe(host:to:)` then restates
+    /// the set, which is the act this whole path is.
+    ///
+    /// **No default on `keeping:`.** A caller that means "this is a first join" says `[]` in as
+    /// many words: this repo deleted `DummySource.unsigned`'s default argument after a wrong one
+    /// drew a microblog's globe over every joined forum, and a wrong one here would silently
+    /// re-fetch — or silently drop — a reader's whole subscription.
     @discardableResult
-    func subscribe(host: String, to picks: [DiscuzBoard]) async throws -> JoinOutcome {
+    func subscribe(
+        host: String,
+        to picks: [DiscuzBoard],
+        keeping: [BoardSubscription]
+    ) async throws -> JoinOutcome {
         // **The source stamped into a note carries no subscriptions, and the one in the store
         // does.** A note records which server it came from; it is not a live view of that
         // server's settings, and it would go stale the moment the reader picked a ninth board.
         let stamp = Source(host: host, kind: .discuz)
         let client = DiscuzClient(http: http, host: host)
+        // `fid` and nothing else, because `fid` is the identity — a board renamed between two
+        // reads is the same board, and `DummyTimeline`'s matching by name is written down in this
+        // repo as the thing that is *not* the identity. A set rather than a map of the stored
+        // subscriptions, so there is nothing stale here to reach for by accident.
+        let held = Set(keeping.map(\.fid))
 
         var subscribed: [BoardSubscription] = []
         var unread: [UnreadBoard] = []
         var threads: [Note] = []
         for board in picks {
+            // Already subscribed and still picked: not asked for. Built from the board in hand,
+            // so the subscription that survives carries the forum's current name for it.
+            if held.contains(board.fid) {
+                subscribed.append(BoardSubscription(board))
+                continue
+            }
             do {
                 threads += try await client.threads(board: board, source: stamp)
                 subscribed.append(BoardSubscription(board))
-            } catch is CancellationError {
+            }
+            // **Thrown out of the loop, which is the whole of the fix here.** A reader who walks
+            // away mid-pick is not a board that could not be read: filing them under `unread`
+            // records somebody's working board as broken, and — because this ran on past it —
+            // spent one more request per remaining pick on a reader who had gone, and then wrote
+            // all three of `add`, `subscribe` and `ingest` behind them. Leaving stops the loop
+            // and reaches none of that, which is the same nothing the paragraph above promises
+            // for a pick where nothing read.
+            catch let error where Cancellation.happened(error) {
                 throw CancellationError()
             } catch let error as DiscuzRequestError {
                 unread.append(UnreadBoard(board: board, error: DiscuzJoin.refusal(error)))
@@ -416,23 +579,127 @@ public struct SourceJoin: Sendable {
     /// reader who wants the whole forum is still entitled to it.
     public func join(host raw: String) async throws {
         let (host, kind) = try await self.kind(of: raw)
+        _ = try await begin(host: host, kind: kind, askingBoards: false)
+    }
 
-        // **No `default:`.** A protocol falling through a switch here is a silent wrong answer,
-        // not a safe one — the same shape that once had a Discuz! source drawing every thread as
-        // a microblog post with its title nowhere, and the compiler saying nothing. Every case is
-        // named, so the next protocol added breaks the build here instead.
+    /// Looks, and **adds nothing**. One detection and, where the protocol publishes one, one
+    /// profile request.
+    ///
+    /// This is the first half of what "subscribe" became: the reader sees what the server says
+    /// about itself, and only then presses. Hand the `SourcePreview` it gives back to
+    /// `begin(_:)` — and to a `SourceJoin` built then, not this one; see `SourcePreview` for why
+    /// the preview carries no client.
+    ///
+    /// Throws exactly what `begin(host:)` throws for the same host: `.invalidHost` for a host that
+    /// is not one, `.unreachable` for one that did not answer, `.unsupportedKind` for one that
+    /// speaks something this app does not read, `.refused` where something in front of it turned
+    /// this app away.
+    ///
+    /// **A profile that could not be read is not one of them.** It arrives as
+    /// `ProfileAnswer.unread` and the reader may still subscribe — a Mastodon older than 4.0
+    /// serves no `/api/v2/instance` at all and reads its timeline perfectly. Reporting that as a
+    /// failed look would talk a reader out of a server that works.
+    ///
+    /// **A forum with no document is asked a different question, not left unasked.** Discuz!
+    /// publishes nothing about itself, so what this asks it is not what it *says* but whether it
+    /// will show a signed-out reader anything at all — which is the one fact about it the reader
+    /// needs and the only one it can give. That answer is `readsWithoutAccount`, the field
+    /// Discourse's `login_required` already means, rather than a second field meaning the same
+    /// thing for one protocol.
+    ///
+    /// **No `default:`.** The two groups below are a decision about how a protocol can be asked
+    /// about itself, so the next one added breaks the build here and has to answer it.
+    public func look(host raw: String) async throws -> SourcePreview {
+        let (host, kind) = try await self.kind(of: raw)
+        guard Self.reads(kind) else { throw JoinError.unsupportedKind(kind) }
         switch kind {
-        case .mastodon:
-            try await MastodonJoin(http: http, store: store, catalogues: catalogues)
-                .ingest(host: host)
-        case .discourse:
-            try await DiscourseJoin(http: http, store: store).ingest(host: host)
         case .discuz:
-            try await DiscuzJoin(http: http, store: store).ingest(host: host)
-        case .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial,
-            .unknown:
-            throw JoinError.unsupportedKind(kind)
+            let (profile, categories) = try await lookAtForum(host: host, kind: kind)
+            return SourcePreview(host: host, kind: kind, profile: profile, boards: categories)
+        case .mastodon, .discourse, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube,
+             .friendica, .gotosocial, .unknown:
+            let profile = try await SourceProfiles(http: http).answer(host: host, kind: kind)
+            return SourcePreview(host: host, kind: kind, profile: profile)
         }
+    }
+
+    /// A forum's index, read once, and what it says about the forum.
+    ///
+    /// **The index is the self-description, for a protocol that has no other.** A signed-out
+    /// reader who is shown boards can read this forum; one who is turned away cannot, and that is
+    /// a stated fact rather than a failed request — so it is `.stated` with the one field it can
+    /// fill, and the reader sees the warning *before* the press instead of the refusal after it.
+    ///
+    /// **A refusal here does not throw, and that is the whole point of the ruling.** `look`
+    /// throwing would put the reader back where they were: told no, after a press. The press is
+    /// still allowed to fail, and it still offers the sign-in that can fix it.
+    ///
+    /// **Who said no decides which sentence it is, and the two are not folded.** `.stated` is a
+    /// claim *by the forum about itself*, and `SourceProfile`'s own invariant is that nothing in
+    /// it is there because a request failed. So:
+    ///
+    /// - **The forum answered, about itself** — its notice page, or an index with no board this
+    ///   reader may see. That is its policy, it is what an account would change, and it is
+    ///   `readsWithoutAccount: false`.
+    /// - **Something in front of the forum answered, and the forum said nothing** — a filter's
+    ///   challenge page, or a status that says no the way a filter says it (`DiscuzRequestError`
+    ///   calls that one "in the way a filter says it" in as many words). Recording a doorman as
+    ///   the forum's policy would assert "reading this needs an account" about a forum that may
+    ///   well read perfectly to a signed-out human — and unit 5 caches and draws that claim. It
+    ///   is `.unread(.refused)`, which the preview warns about in its own words.
+    ///
+    /// **Read through `DiscuzClient` rather than `DiscuzBoardJoin.index`**, because `index` maps
+    /// all of these onto `JoinError.refused(403)` — the right answer for *joining*, where the
+    /// reader only needs the sentence and the sign-in, and the wrong one here, where which of
+    /// them it was is the whole question.
+    ///
+    /// The two that are neither: a forum that did not answer at all, and one that answered with
+    /// something that was not an index. Neither is a fact about who may read it.
+    private func lookAtForum(
+        host: String,
+        kind: ProtocolKind
+    ) async throws -> (ProfileAnswer, [DiscuzCategory]) {
+        func stated(_ reads: Bool) -> ProfileAnswer {
+            .stated(SourceProfile(host: host, kind: kind, readsWithoutAccount: reads))
+        }
+        do {
+            return (stated(true), try await DiscuzClient(http: http, host: host).boards())
+        } catch let error where Cancellation.happened(error) {
+            throw CancellationError()
+        } catch let error as DiscuzRequestError {
+            // **No `default:`.** Which of these arrived decides what the reader is told about a
+            // server they have not joined, and a case swept into somebody else's sentence here is
+            // a policy invented for a forum that never stated one.
+            switch error {
+            case .restricted, .noBoards:
+                return (stated(false), [])
+            // 403 because a challenge page is routinely dressed as a 200, and 403 is the number
+            // refusal means in this app — `SourceJoin.kind(of:)` states the same rule.
+            case .challenged:
+                return (.unread(host: host, kind: kind, .refused(403)), [])
+            // Its own number, kept: this one arrived with a status that meant it.
+            case .refused(let status):
+                return (.unread(host: host, kind: kind, .refused(status)), [])
+            case .noThreads, .noPosts, .http, .invalidURL, .undecodable:
+                return (.unread(host: host, kind: kind, .unreadable), [])
+            }
+        } catch {
+            return (.unread(host: host, kind: kind, .unreachable), [])
+        }
+    }
+
+    /// The reader looked and said yes. The second half of the two-stage subscribe.
+    ///
+    /// **Nothing is detected again.** The preview carries what the host turned out to speak, which
+    /// is the same reason `subscribe(_:to:)` reads it off the offer: asking a stranger's server
+    /// what it is twice for one errand is traffic nobody owes this app.
+    public func begin(_ preview: SourcePreview) async throws -> JoinStep {
+        try await begin(
+            host: preview.host,
+            kind: preview.kind,
+            askingBoards: true,
+            index: preview.boards
+        )
     }
 
     /// The paused door — D28, and the first half of what a forum join actually is.
@@ -449,7 +716,27 @@ public struct SourceJoin: Sendable {
     /// it answered with something that was not a forum index.
     public func begin(host raw: String) async throws -> JoinStep {
         let (host, kind) = try await self.kind(of: raw)
+        return try await begin(host: host, kind: kind, askingBoards: true)
+    }
 
+    /// Every door's dispatch, in one place.
+    ///
+    /// **No `default:`.** A protocol falling through a switch here is a silent wrong answer, not a
+    /// safe one — the same shape that once had a Discuz! source drawing every thread as a
+    /// microblog post with its title nowhere, and the compiler saying nothing. Every case is
+    /// named, so the next protocol added breaks the build here instead — and here is now the only
+    /// place it has to, which is what folding three doors into one switch bought.
+    ///
+    /// `askingBoards` is the single difference between the doors, and it is about a forum only:
+    /// `true` is D28's pause, where the index is read and the reader picks; `false` is the one-shot
+    /// `join(host:)`, which takes the whole guide page at once. Everything else answers `.joined`
+    /// either way, because for everything else there is nothing to pause for.
+    private func begin(
+        host: String,
+        kind: ProtocolKind,
+        askingBoards: Bool,
+        index: [DiscuzCategory] = []
+    ) async throws -> JoinStep {
         switch kind {
         case .mastodon:
             try await MastodonJoin(http: http, store: store, catalogues: catalogues)
@@ -459,11 +746,49 @@ public struct SourceJoin: Sendable {
             try await DiscourseJoin(http: http, store: store).ingest(host: host)
             return .joined
         case .discuz:
-            let categories = try await DiscuzBoardJoin(http: http, store: store).index(host: host)
+            guard askingBoards else {
+                try await DiscuzJoin(http: http, store: store).ingest(host: host)
+                return .joined
+            }
+            // **Read at the look and carried here, so the forum is asked once per errand.** Empty
+            // means the look never got an index — it was refused, or it was not one — and then
+            // there is nothing to reuse and the wire is the only place the answer is. That read
+            // is also what produces the reader's sentence and the sign-in it offers.
+            let categories = try index.isEmpty
+                ? await DiscuzBoardJoin(http: http, store: store).index(host: host)
+                : index
             return .chooseBoards(JoinOffer(host: host, kind: kind, categories: categories))
         case .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial,
             .unknown:
             throw JoinError.unsupportedKind(kind)
+        }
+    }
+
+    /// Whether this app can read a source of this kind at all.
+    ///
+    /// **A second exhaustive switch, and what it does and does not guarantee.** The dispatcher
+    /// above answers *who reads this*; this answers *can it be read*, one step earlier and with
+    /// nothing added, so that `look` refuses a protocol at the field rather than showing a reader
+    /// a preview whose Subscribe could only ever fail.
+    ///
+    /// Neither has a `default:`, so a protocol **added** to `ProtocolKind` breaks the build in
+    /// both. That is the whole of the compiler's help, and it is not enough: a protocol **moved
+    /// between the groups here** while the dispatcher still refuses it compiles clean and ships
+    /// the screen this comment used to claim it prevented — a rendered preview whose Subscribe
+    /// can only throw. Moving cases between groups is exactly what unlocking the Mastodon family
+    /// is, five times over. What actually holds the two together is
+    /// `everyProtocolAgreesAboutWhetherItCanBeRead`, which walks `allCases` and asks both.
+    /// **`public` because the browser's first step is this list** — decision 19. The picker
+    /// offers the protocols this app can read, and a second list written in the UI would be a
+    /// second answer to a question this function already owns: it would go on offering a protocol
+    /// the day this one stopped reading it, and the reader would meet the refusal after the press.
+    public static func reads(_ kind: ProtocolKind) -> Bool {
+        switch kind {
+        case .mastodon, .discourse, .discuz:
+            true
+        case .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial,
+            .unknown:
+            false
         }
     }
 
@@ -478,15 +803,56 @@ public struct SourceJoin: Sendable {
     /// each carrying that board's own reason. A pick where some boards read and some did not does
     /// not throw: the ones that read are subscribed and the rest come back in
     /// `JoinOutcome.unread`.
+    ///
+    /// `keeping` is what this host is subscribed to now — `[]` from a join, the source's own
+    /// boards from a restate. See `DiscuzBoardJoin.subscribe` for what it costs to get it wrong,
+    /// and for why it has no default.
     @discardableResult
-    public func subscribe(_ offer: JoinOffer, to picks: [DiscuzBoard]) async throws -> JoinOutcome {
+    public func subscribe(
+        _ offer: JoinOffer,
+        to picks: [DiscuzBoard],
+        keeping: [BoardSubscription]
+    ) async throws -> JoinOutcome {
         switch offer.kind {
         case .discuz:
             return try await DiscuzBoardJoin(http: http, store: store)
-                .subscribe(host: offer.host, to: picks)
+                .subscribe(host: offer.host, to: picks, keeping: keeping)
         case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
             .gotosocial, .discourse, .unknown:
             throw JoinError.unsupportedKind(offer.kind)
+        }
+    }
+
+    /// The boards of a source the reader **already has**, so they can change which of them they
+    /// read.
+    ///
+    /// **Detects nothing, and that is the whole reason this exists rather than a reuse.** This
+    /// host is in the reader's list because it was detected once already, and the kind travelled
+    /// with the `Source`; asking a stranger's forum what it is a second time for an errand that
+    /// begins with knowing is the spend this type refuses in as many words. Every other route in
+    /// is wrong for a reason of its own: `look` refuses a host that is added, `begin(host:)`
+    /// detects, and `begin(_:)` wants a `SourcePreview` — which could only be fabricated here with
+    /// an invented `ProfileAnswer`, and `ShellSession.profiles` is the map the source row draws
+    /// from, so the lie would be drawn.
+    ///
+    /// **Nothing is added and nothing is changed.** This is the index, as a value; the restate
+    /// itself is `subscribe(_:to:keeping:)`, and the reader can still cancel.
+    ///
+    /// **No `default:`.** A protocol with no boards has no answer to this and says so, rather than
+    /// inheriting Discuz!'s — decision 6 leaves open whether Lemmy needs a picker at all, and unit
+    /// 7 has to answer it here rather than find it already answered.
+    ///
+    /// Throws `JoinError.unsupportedKind` for a source whose protocol has no boards, and whatever
+    /// reading the index throws — `.unreachable`, `.refused`, `.publicTimelineFailed`.
+    public func boards(of source: Source) async throws -> JoinOffer {
+        switch source.kind {
+        case .discuz:
+            let categories = try await DiscuzBoardJoin(http: http, store: store)
+                .index(host: source.host)
+            return JoinOffer(host: source.host, kind: source.kind, categories: categories)
+        case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
+            .gotosocial, .discourse, .unknown:
+            throw JoinError.unsupportedKind(source.kind)
         }
     }
 
@@ -501,7 +867,7 @@ public struct SourceJoin: Sendable {
 
         do {
             return (host, try await Detector(http: http).detect(raw))
-        } catch is CancellationError {
+        } catch let error where Cancellation.happened(error) {
             throw CancellationError()
         } catch let error as DetectError {
             switch error {
