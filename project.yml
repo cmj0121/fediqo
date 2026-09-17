@@ -15,7 +15,8 @@ settings:
     SWIFT_STRICT_CONCURRENCY: complete
     # Only what a bare Xcode open reports. Every build that matters is given these on the
     # command line by Apps/Makefile, worked out from the tag and the history by
-    # scripts/version.sh -- 0.0.0 is what "no release has happened" looks like.
+    # scripts/version.sh, from VERSION and the tags. 0.0.0 is what a checkout with no VERSION
+    # file looks like; a real build is stamped on the command line by the release lane.
     MARKETING_VERSION: "0.0.0"
     CURRENT_PROJECT_VERSION: "0"
     ENABLE_USER_SCRIPT_SANDBOXING: YES

@@ -79,15 +79,35 @@ renewed no other way, so this is the way that can never be what a runner uses.
 
 ## What a build calls itself
 
-The marketing version comes from `scripts/version.sh`: the tag on `HEAD` with its `v` removed, or the nearest tag
-with a line saying it had to settle, or `0.0.0` where there has never been a release.
+The marketing version comes from `scripts/version.sh`, which reads `VERSION` and the tags. `VERSION` names the
+**series** this checkout is working towards -- `0.1` -- and the tags say which of that series have already been
+released. The patch is the one after the highest tag in the series, or `.0` where the series has never been
+released at all.
+
+| `VERSION` | tags | a build here is |
+| --- | --- | --- |
+| `0.1` | none | `0.1.0` |
+| `0.1` | `v0.1.0` | `0.1.1` |
+| `0.1` | `v0.1.0`, `v0.1.3` | `0.1.4` |
+| `0.1` | `v0.1.0`, HEAD is `v0.1.0` | `0.1.0`, a rebuild of that release |
+| `0.2` | `v0.1.9` | `0.2.0` |
+| `0.1.7` | anything | `0.1.7`, pinned outright |
+
+**The tag is the last word, and the next commit is past it.** Tag `v0.1.0` and every build after it is `0.1.1`
+without anybody editing a number. `VERSION` is edited only to open a new series, which is the one decision here a
+person should be making. `scripts/version_test.sh` is the whole table above, run by `make test`.
+
+**This is what broke the first publish.** The version used to be read *from* the tag, while this document said to
+tag what was released, afterwards -- so nothing could be built to be released until it had been tagged as
+released. With no tag anywhere the answer was `0.0.0`, which has no release notes and never will, and `make
+publish` stopped there before it built anything.
 
 The build number is the history, stepped past whatever App Store Connect already holds -- the same commit released
 twice counts the same commits twice, and the store will not take a number it has seen. Both platforms take the same
 number, because a release attempt is one attempt however many stores it reaches.
 
-**No tag is required to run this.** A tag is what makes a release happen -- it is what the workflow will fire on --
-but it is not what makes the command work. A laptop publishes whenever somebody types it.
+**No tag is required to run this, and now that is true rather than merely written down.** A laptop publishes
+whenever somebody types the command; the tag is what records afterwards which commit went out.
 
 ## What the store is told
 
@@ -203,14 +223,7 @@ The list of screens is the `SHOTS` array at the top of `scripts/shots.sh` and no
 is deliberately not among them: that screen reads the store, a run launched straight into it has never loaded
 a timeline, and the picture is a column of zeros.
 
-## The tag that runs it
-
-Pushing a tag is the whole of it.
-
-```sh
-git tag v0.1.0
-git push origin v0.1.0
-```
+## The tag that runs nothing
 
 **A tag is a name, and the release is `make publish` on a laptop.** There was a workflow that fired on `v*`
 and it is gone. Not because it was wrong — every step in it was a `brew install` or `make publish`, and it
@@ -230,7 +243,8 @@ git push origin v0.1.0
 make publish
 ```
 
-The tag says which commit the build came from. It starts nothing.
+The tag says which commit the build came from. It starts nothing -- and from the next commit on,
+`scripts/version.sh` reads it as "0.1.0 is spent" and answers `0.1.1`.
 
 ## What a laptop is handed
 

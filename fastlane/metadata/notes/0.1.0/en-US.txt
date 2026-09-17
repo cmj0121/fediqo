@@ -1,0 +1,23 @@
+The first release.
+
+Fediqo reads several servers as one timeline. Add a Mastodon-family server or a
+Discuz! forum by typing its address; the app looks at it and shows you what it
+says about itself -- what it runs, whether it can be read without an account,
+how many people are on it -- before you decide to take it. Nothing is added
+until you say so.
+
+Don't know an address? Browse by protocol and pick from the servers suggested
+for it. The browser reaches nobody until you choose a protocol, so opening it
+to see what this app reads tells no third party anything about you.
+
+Your servers live on one page, a row each: what it is, what it said about
+itself, and what you can do to it -- sign in or out where that means anything,
+change which boards you read, clear what it left on this device, or let it go.
+Letting go takes its posts and its cached pictures with it.
+
+Forums are read as forums. A discussion has a title, a board it was posted in
+and a count of how many have answered. Pick the boards you want, one by one,
+and each becomes its own place in the rail.
+
+English and 繁體中文, light and dark, and every screen works from the keyboard.
+Press ? for the keys.
