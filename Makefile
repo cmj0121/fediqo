@@ -12,6 +12,7 @@ clean: $(SUBDIR)	# clean-up environment
 
 test:				# run test
 	swift test
+	@scripts/version_test.sh
 
 run: $(SUBDIR)		# run in the local environment -- the macOS app
 

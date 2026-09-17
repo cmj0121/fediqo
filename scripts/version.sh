@@ -1,38 +1,107 @@
 #!/usr/bin/env bash
 #
-# What a build calls itself, worked out from git rather than typed by a person.
+# What a build calls itself, worked out from `VERSION` and the tags rather than typed by a person.
 #
 #   scripts/version.sh              # MARKETING_VERSION=0.1.0 CURRENT_PROJECT_VERSION=75
 #   scripts/version.sh --marketing  # 0.1.0
 #   scripts/version.sh --build      # 75
 #
-# The tag names the release and the history counts the attempts: `v0.1.0` on HEAD is release
-# 0.1.0, and the number of commits behind HEAD is the build number, which only ever goes up.
-# With no tag anywhere the answer is 0.0.0 -- there has not been a release, and saying 0.1.0
-# would be inventing one.
+# `VERSION` names the series this checkout is working towards -- `0.1` -- and the tags say which
+# of that series have already been released. The patch number is the one after the highest tag in
+# the series, or `.0` where the series has never been released. So the first TestFlight build of
+# `0.1.0` needs no tag at all, which is what `docs/release.md` has always claimed and what this
+# script did not do.
+#
+# **The circle this breaks.** `release.md` says to tag what was released, afterwards -- the tag
+# names the release rather than causing it. But the marketing version was read *from* the tag, so
+# nothing could be built to be released until it had been tagged as released. With no tag anywhere
+# the answer was `0.0.0`, which has no release notes and never will, and `make publish` stopped on
+# that before it built anything.
+#
+# **The tag is the last word, and the next commit is past it.** Tag `v0.1.0` and this says `0.1.1`
+# from the next build on: the series moves on by itself, and nobody edits a number to make it.
+# `VERSION` is only edited to open a new series -- `0.2` -- which is the one decision a person
+# should be making.
+#
+# **`VERSION` may pin a whole version instead.** Three components (`0.1.7`) are used exactly as
+# written, for the case where a particular number has to be built whatever the tags say. Two
+# components is the ordinary way.
 #
 # App Store Connect can already hold a build number this one would repeat: the same commit
-# released twice counts the same commits twice. Stepping past that means asking the store,
-# which needs its key, so it belongs to the release lane rather than here -- see #32. For the
-# same reason a shallow clone lies to this script: a release checkout wants fetch-depth 0.
+# released twice counts the same commits twice. Stepping past that means asking the store, which
+# needs its key, so it belongs to the release lane rather than here -- see #32. For the same
+# reason a shallow clone lies to this script: a release checkout wants fetch-depth 0.
 
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+VERSION_FILE="VERSION"
 NO_RELEASE_YET="0.0.0"
 
-marketing() {
-    local tag
+# The series, as written down. Blank lines and `#` comments are allowed so the file can say what
+# it is for; anything else has to be a version, because a typo here names the release.
+series() {
+    [ -f "$VERSION_FILE" ] || return 1
 
-    if tag="$(git describe --tags --exact-match --match 'v[0-9]*' 2>/dev/null)"; then
-        echo "${tag#v}"
-    elif tag="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null)"; then
-        echo >&2 "version.sh: no tag on HEAD -- settling for the nearest one, $tag"
-        echo "${tag#v}"
-    else
-        echo >&2 "version.sh: no tag anywhere -- settling for $NO_RELEASE_YET"
+    local said
+    said="$(grep -vE '^[[:space:]]*(#|$)' "$VERSION_FILE" | head -1 | tr -d '[:space:]')"
+    [ -n "$said" ] || return 1
+
+    if ! [[ "$said" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+        echo >&2 "version.sh: $VERSION_FILE says '$said', which is not a version"
+        exit 2
+    fi
+    echo "$said"
+}
+
+# The highest patch already tagged in this series, or nothing where none has been.
+#
+# Sorted numerically on the patch alone rather than with `sort -V`, which is not on every machine
+# this runs on -- and a lexical sort would put `v0.1.10` before `v0.1.9`, so the eleventh release
+# of a series would be named the tenth.
+# `|| true` because no match is the ordinary answer, not a failure: a series that has never been
+# released has no tag, and that is the whole case this script was rewritten for. Without it
+# `grep` exits 1, `pipefail` carries that out of the function, and `set -e` ends the script --
+# so the very first build of 0.1.0 printed nothing at all and the lane read an empty version.
+highest_released() {
+    git tag -l "v$1.*" 2>/dev/null |
+        sed "s|^v$1\.||" |
+        { grep -E '^[0-9]+$' || true; } |
+        sort -n |
+        tail -1
+}
+
+marketing() {
+    local said tag patch
+
+    if ! said="$(series)"; then
+        # No `VERSION` at all: the old answer, which says there has not been a release rather
+        # than inventing one.
+        echo >&2 "version.sh: no $VERSION_FILE -- settling for $NO_RELEASE_YET"
         echo "$NO_RELEASE_YET"
+        return
+    fi
+
+    # Pinned outright.
+    if [[ "$said" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "$said"
+        return
+    fi
+
+    # Sitting exactly on a tag of this series is a rebuild of that release, not the next one.
+    # Checked against the series so that a tag left on HEAD from an older one cannot quietly
+    # answer for a series `VERSION` has already moved past.
+    if tag="$(git describe --tags --exact-match --match "v$said.[0-9]*" 2>/dev/null)"; then
+        echo "${tag#v}"
+        return
+    fi
+
+    patch="$(highest_released "$said")"
+    if [ -n "$patch" ]; then
+        echo "$said.$((patch + 1))"
+    else
+        echo "$said.0"
     fi
 }
 
