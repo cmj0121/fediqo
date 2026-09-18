@@ -47,15 +47,20 @@ public struct Holdings: Equatable, Sendable {
     }
 }
 
-/// The reader's time policy: keep everything (the default), or only the latest months (#7).
+/// The reader's time policy: keep everything (nil, the default), or only the latest months (#7).
 public enum KeepPolicy {
-    /// Keeping forever: nothing is ever dropped by time unless the reader asks.
-    public static let forever = 0
-
     /// The moment before which a note goes, keeping the latest `months` months as of `now` —
-    /// or nothing, where `months` is not a positive count, because that is keeping forever.
-    public static func cutoff(keepingMonths months: Int, from now: Date, calendar: Calendar = .current) -> Date? {
-        guard months > 0 else { return nil }
+    /// or nothing, where `months` is nil or not a positive count, because that is keeping forever.
+    public static func cutoff(keepingMonths months: Int?, from now: Date, calendar: Calendar = .current) -> Date? {
+        guard let months, months > 0 else { return nil }
         return calendar.date(byAdding: .month, value: -months, to: now)
+    }
+
+    /// Whether going from keeping `old` to keeping `new` would drop posts: any window after
+    /// forever, or a narrower one. Widening, or going back to forever, drops nothing.
+    public static func shortens(from old: Int?, to new: Int?) -> Bool {
+        guard let new else { return false }
+        guard let old else { return true }
+        return new < old
     }
 }

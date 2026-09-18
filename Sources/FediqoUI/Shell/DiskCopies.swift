@@ -10,24 +10,22 @@ import Foundation
 /// queue does. Reads go through the same queue, so a read asked for after a Clear never finds
 /// what the Clear was about to delete.
 ///
-/// **Capped (#7).** What is kept is trimmed, oldest written first, down to `cap` bytes: at launch,
-/// and after every `trimEvery` writes rather than after each, because a trim walks every copy.
+/// **Capped (#7).** A running total of what the copies weigh is kept on the queue: measured by
+/// the launch trim, grown by each write, and cut by each drop. The copies are walked only when
+/// that total passes `cap`, and then trimmed oldest written first until they fit.
 final class DiskCopies: Sendable {
     /// What the copies on this device may weigh, all hosts together.
     static let defaultCap = 512 * 1024 * 1024
-    static let defaultTrimEvery = 32
 
     private let copies: any MediaCopies
     private let queue = DispatchQueue(label: "fediqo.pictures.disk", qos: .utility)
     let cap: Int
-    private let trimEvery: Int
-    /// Writes since the last trim. Touched only on `queue`, which is what makes it safe to share.
-    private let written = WriteCount()
+    /// What the copies weigh, or nil where it is not known and the next write measures it.
+    private let tally = Tally()
 
-    init(_ copies: any MediaCopies, cap: Int = DiskCopies.defaultCap, trimEvery: Int = DiskCopies.defaultTrimEvery) {
+    init(_ copies: any MediaCopies, cap: Int = DiskCopies.defaultCap) {
         self.copies = copies
         self.cap = cap
-        self.trimEvery = max(1, trimEvery)
     }
 
     func data(host: String, url: URL) async -> Data? {
@@ -37,34 +35,52 @@ final class DiskCopies: Sendable {
     }
 
     func store(_ data: Data, host: String, url: URL) {
-        queue.async { [copies, written, cap, trimEvery] in
+        queue.async { [copies, tally, cap] in
             try? copies.store(data, host: host, url: url)
-            written.count += 1
-            guard written.count >= trimEvery else { return }
-            written.count = 0
-            copies.trim(toBytes: cap)
+            guard let total = tally.total else {
+                tally.total = copies.trim(toBytes: cap)
+                return
+            }
+            tally.total = total + data.count
+            if total + data.count > cap { tally.total = copies.trim(toBytes: cap) }
         }
     }
 
+    /// Unknown afterwards: one copy's size is not worth a read of its own, so the next write
+    /// measures again.
     func remove(host: String, url: URL) {
-        queue.async { [copies] in copies.remove(host: host, url: url) }
+        queue.async { [copies, tally] in
+            copies.remove(host: host, url: url)
+            tally.total = nil
+        }
     }
 
     func forget(host: String) {
-        queue.async { [copies] in copies.forget(host: host) }
+        queue.async { [copies, tally] in
+            let gone = copies.bytes(host: host)
+            copies.forget(host: host)
+            tally.total = tally.total.map { max(0, $0 - gone) }
+        }
     }
 
     func keepOnly(hosts: [String]) {
-        queue.async { [copies] in copies.keepOnly(hosts: hosts) }
+        queue.async { [copies, tally] in
+            copies.keepOnly(hosts: hosts)
+            tally.total = nil
+        }
     }
 
     /// Every copy of every host: the drop by cache. Rows draw from their hyperlinks afterwards.
     func removeAll() {
-        queue.async { [copies] in copies.removeAll() }
+        queue.async { [copies, tally] in
+            copies.removeAll()
+            tally.total = 0
+        }
     }
 
+    /// Down to the cap, and the running total measured: what the launch does.
     func trim() {
-        queue.async { [copies, cap] in copies.trim(toBytes: cap) }
+        queue.async { [copies, tally, cap] in tally.total = copies.trim(toBytes: cap) }
     }
 
     /// What each host's copies weigh, read off the main actor and after every touch asked before.
@@ -78,13 +94,20 @@ final class DiskCopies: Sendable {
         }
     }
 
+    /// The running total, as the queue has it once everything asked before has run.
+    func total() async -> Int? {
+        await withCheckedContinuation { done in
+            queue.async { [tally] in done.resume(returning: tally.total) }
+        }
+    }
+
     /// Returns once everything asked for before it has run.
     func settled() async {
         await withCheckedContinuation { done in queue.async { done.resume() } }
     }
 }
 
-/// A counter only ever read and written on `DiskCopies.queue`.
-private final class WriteCount: @unchecked Sendable {
-    var count = 0
+/// The running total, only ever read and written on `DiskCopies.queue`.
+private final class Tally: @unchecked Sendable {
+    var total: Int?
 }

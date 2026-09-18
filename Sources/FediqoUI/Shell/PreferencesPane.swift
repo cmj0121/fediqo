@@ -11,11 +11,12 @@ import SwiftUI
 /// the column moving, and one button.
 ///
 /// **The section says what it is, in its header, because the figures under it would otherwise
-/// lie.** "read 3 hours ago" is a true statement about a catalogue that vanishes the moment the
-/// app closes, and it reads as a false one — as though this were a disk cache with a policy —
-/// unless the reader is told the run is the whole of its life. Decision 12 is in the header and
-/// decision 13's fixed day is in the footer, which is where the reader looks once and not on
-/// every row.
+/// lie.** What is held here outlives a relaunch: the posts are in the store on disk, pictures are
+/// kept both in memory and as copies on disk, and emoji names are read again after a day. The
+/// header says it is this device's, the footer says what is re-read and what stays, and the
+/// readout counts posts in total, by source and by week or month, beside pictures in memory and
+/// on disk (#7). Below it are the two drops that are not a row's Clear: by time, as a window kept
+/// from here on, and by cache.
 ///
 /// **Clear empties; it does not remove.** The server stays added and its timeline stays the
 /// reader's; what goes is this device's copy, and the pictures are read again as they are wanted.
@@ -74,25 +75,18 @@ struct PreferencesPane: View {
 
     private var sources: [Source] { session?.sources ?? [] }
 
-    /// Whether the breakdown is by week or by month (#7). Per view, not a preference: it changes
-    /// what is read, not what is kept.
-    @State private var period: HeldPeriod = .month
-
     /// What each source's picture copies weigh on disk, by folded host. Optional for the reason
     /// `catalogues` is: until the first read lands, "nothing on disk" would be a guess.
     @State private var onDisk: [String: Int]?
 
-    /// A drop the reader has pressed and not yet answered for.
-    @State private var dropping: Drop?
+    /// The drop by cache has been pressed and not yet answered for.
+    @State private var droppingCopies = false
 
-    enum Drop: Hashable {
-        /// Every picture copy, from every source; rows stay.
-        case copies
-        /// Posts older than the latest this many months, once.
-        case olderThan(Int)
-    }
+    /// A narrower window the reader picked and not yet confirmed: it would drop posts, so it asks
+    /// first. A wider one, or forever, drops nothing and applies at once.
+    @State private var shortening: Int?
 
-    /// The choices offered for keeping, and for dropping once, in months.
+    /// The windows offered for keeping, in months. Forever, the default, is offered beside them.
     static let monthChoices = [1, 3, 6, 12]
 
     var body: some View {
@@ -122,18 +116,31 @@ struct PreferencesPane: View {
             await readDisk()
         }
         .confirmationDialog(
-            Text(dropping.map(Self.dropTitle) ?? ""),
-            isPresented: Binding(get: { dropping != nil }, set: { if !$0 { dropping = nil } }),
-            titleVisibility: .visible,
-            presenting: dropping
-        ) { drop in
+            Text(L10n.t("prefs.drop.copies.title")),
+            isPresented: $droppingCopies,
+            titleVisibility: .visible
+        ) {
             Button(L10n.t("prefs.drop.confirm"), role: .destructive) {
-                dropping = nil
-                Task { await perform(drop) }
+                session?.dropCopies()
+                Task { await readDisk() }
             }
-            Button(L10n.t("board.choose.cancel"), role: .cancel) { dropping = nil }
-        } message: { drop in
-            Text(Self.dropDetail(drop))
+            Button(L10n.t("board.choose.cancel"), role: .cancel) {}
+        } message: {
+            Text(L10n.t("prefs.drop.copies.detail"))
+        }
+        .confirmationDialog(
+            Text(shortening.map { L10n.count("prefs.keep.shorten.title", $0) } ?? ""),
+            isPresented: Binding(get: { shortening != nil }, set: { if !$0 { shortening = nil } }),
+            titleVisibility: .visible,
+            presenting: shortening
+        ) { months in
+            Button(L10n.t("prefs.drop.confirm"), role: .destructive) {
+                prefs.keepMonths = months
+                shortening = nil
+            }
+            Button(L10n.t("board.choose.cancel"), role: .cancel) { shortening = nil }
+        } message: { _ in
+            Text(L10n.t("prefs.keep.shorten.detail"))
         }
     }
 
@@ -146,11 +153,10 @@ struct PreferencesPane: View {
         // for a reader who genuinely has no sources; "the shell has not handed this pane its
         // session" is not that, and this pane must not guess which it is looking at.
         if let session {
-            let holdings = Holdings(notes: session.notes, per: period)
-            section(session, holdings: holdings)
+            section(session, holdings: session.holdings)
             if !session.sources.isEmpty {
-                breakdown(holdings)
-                drops(session)
+                breakdown(session)
+                drops
             }
         }
     }
@@ -193,9 +199,11 @@ struct PreferencesPane: View {
 
     /// The breakdown by week or month (#7): newest first, one line a stretch that holds a post.
     @ViewBuilder
-    private func breakdown(_ holdings: Holdings) -> some View {
+    private func breakdown(_ session: ShellSession) -> some View {
+        @Bindable var session = session
+        let holdings = session.holdings
         Section {
-            Picker(L10n.t("prefs.held.per"), selection: $period) {
+            Picker(L10n.t("prefs.held.per"), selection: $session.heldPeriod) {
                 Text(L10n.t("prefs.held.per.week")).tag(HeldPeriod.week)
                 Text(L10n.t("prefs.held.per.month")).tag(HeldPeriod.month)
             }
@@ -205,7 +213,7 @@ struct PreferencesPane: View {
             } else {
                 ForEach(holdings.byPeriod.prefix(Self.stretchesShown), id: \.start) { bucket in
                     HStack {
-                        reading(Text(Self.stretchLabel(bucket.start, period: period)))
+                        reading(Text(Self.stretchLabel(bucket.start, period: session.heldPeriod)))
                         Spacer()
                         reading(Text(Self.postsLine(bucket.posts)))
                     }
@@ -220,24 +228,15 @@ struct PreferencesPane: View {
     static let stretchesShown = 12
 
     /// The three ways to drop (#7). By source is each row's Clear, above; these are the other two.
-    @ViewBuilder
-    private func drops(_ session: ShellSession) -> some View {
-        @Bindable var prefs = prefs
+    private var drops: some View {
         Section {
-            Picker(L10n.t("prefs.keep"), selection: $prefs.keepMonths) {
-                Text(L10n.t("prefs.keep.forever")).tag(KeepPolicy.forever)
+            Picker(L10n.t("prefs.keep"), selection: keepSelection) {
+                Text(L10n.t("prefs.keep.forever")).tag(Int?.none)
                 ForEach(Self.monthChoices, id: \.self) { months in
-                    Text(Self.monthsLabel("prefs.keep.months", months)).tag(months)
+                    Text(L10n.count("prefs.keep.months", months)).tag(Int?.some(months))
                 }
             }
-            Menu(L10n.t("prefs.drop.once")) {
-                ForEach(Self.monthChoices, id: \.self) { months in
-                    Button(Self.monthsLabel("prefs.drop.once.months", months)) {
-                        dropping = .olderThan(months)
-                    }
-                }
-            }
-            Button(L10n.t("prefs.drop.copies")) { dropping = .copies }
+            Button(L10n.t("prefs.drop.copies")) { droppingCopies = true }
         } header: {
             Text(L10n.t("prefs.drop"))
         } footer: {
@@ -247,35 +246,23 @@ struct PreferencesPane: View {
         }
     }
 
-    private func perform(_ drop: Drop) async {
-        guard let session else { return }
-        switch drop {
-        case .copies: session.dropCopies()
-        case .olderThan(let months): await session.dropOlderThan(months: months)
-        }
-        await readDisk()
-    }
-
-    static func dropTitle(_ drop: Drop) -> String {
-        switch drop {
-        case .copies: L10n.t("prefs.drop.copies.title")
-        case .olderThan(let months): monthsLabel("prefs.drop.once.title", months)
-        }
-    }
-
-    static func dropDetail(_ drop: Drop) -> String {
-        switch drop {
-        case .copies: L10n.t("prefs.drop.copies.detail")
-        case .olderThan: L10n.t("prefs.drop.once.detail")
-        }
+    /// The Keep picker's binding: a window that would drop posts waits on `shortening`'s question;
+    /// one that drops nothing is written straight through.
+    private var keepSelection: Binding<Int?> {
+        Binding(
+            get: { prefs.keepMonths },
+            set: { months in
+                if KeepPolicy.shortens(from: prefs.keepMonths, to: months) {
+                    shortening = months
+                } else {
+                    prefs.keepMonths = months
+                }
+            }
+        )
     }
 
     static func postsLine(_ count: Int) -> String {
         count == 0 ? L10n.t("prefs.held.posts.none") : L10n.count("prefs.held.posts", count)
-    }
-
-    static func monthsLabel(_ key: String, _ months: Int) -> String {
-        L10n.count(key, months)
     }
 
     /// A week by the day it starts, a month by its name, both in the shell's language.
@@ -401,9 +388,9 @@ struct PreferencesPane: View {
                 reading(Text(L10n.t("prefs.cache.posts.none")))
             } else {
                 reading(
-                    Text(String(format: L10n.t("prefs.cache.posts"), held.count))
+                    Text(L10n.count("prefs.cache.posts", held.count))
                         + Text(verbatim: " · ")
-                        + Text(Int64(held.bytes), format: .byteCount(style: .memory))
+                        + Text(Self.size(held.bytes))
                 )
             }
         }
@@ -452,12 +439,6 @@ struct PreferencesPane: View {
     /// on a host with nothing in flight is not a wait, so this costs nothing in the ordinary
     /// case; and it cannot hang the pane, because the fetch it waits on is the one the join
     /// already started and its failure is dropped rather than thrown.
-    /// Reads what each source's copies weigh on disk, off the main actor (#7).
-    private func readDisk() async {
-        guard let session else { return }
-        onDisk = await session.pictures.diskBytes(hosts: session.sources.map(\.host))
-    }
-
     private func readCatalogues() async {
         guard let session else { return }
         var next: [String: Reading] = [:]
@@ -467,5 +448,11 @@ struct PreferencesPane: View {
             next[source.host] = Reading(fetchedAt: held.fetchedAt, count: held.count)
         }
         catalogues = next
+    }
+
+    /// Reads what each source's copies weigh on disk, off the main actor (#7).
+    private func readDisk() async {
+        guard let session else { return }
+        onDisk = await session.pictures.diskBytes(hosts: session.sources.map(\.host))
     }
 }

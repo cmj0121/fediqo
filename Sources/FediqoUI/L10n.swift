@@ -9,11 +9,13 @@ enum L10n {
         return NSLocalizedString(key, bundle: bundle(for: lang), value: key, comment: "")
     }
 
-    /// A count in a sentence, **singular where the count is one**: `key.one` for one, `key`
-    /// otherwise, each formatted with the count. Every language carries both keys; one without a
-    /// grammatical number (繁體中文) says the same thing in both.
+    /// A count in a sentence, **singular where the count is one**: `key.one` for one where the
+    /// language has it, `key` otherwise, each formatted with the count. A language without a
+    /// grammatical number (繁體中文) carries only `key`.
     static func count(_ key: String, _ value: Int, language: DummyLanguage? = nil) -> String {
-        String(format: t(value == 1 ? key + ".one" : key, language: language), value)
+        let one = key + ".one"
+        let singular = value == 1 ? t(one, language: language) : one
+        return String(format: singular == one ? t(key, language: language) : singular, value)
     }
 
     /// The locale a **number or a date** should be formatted in: the shell's language, resolved by
