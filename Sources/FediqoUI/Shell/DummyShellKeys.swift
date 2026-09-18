@@ -6,7 +6,7 @@ import AppKit
 
 extension View {
     /// Dummy single keys. macOS listens through AppKit so Tab and `?` still work after compose.
-    func dummyShellKeys(handle: @escaping (Character, Bool, Bool) -> Bool) -> some View {
+    func dummyShellKeys(handle: @escaping (Character, Bool, Bool, Bool) -> Bool) -> some View {
         #if os(macOS)
         modifier(DummyKeyMonitor(handle: handle))
         #else
@@ -17,7 +17,7 @@ extension View {
 
 #if os(iOS)
 private struct DummyKeyPresses: ViewModifier {
-    var handle: (Character, Bool, Bool) -> Bool
+    var handle: (Character, Bool, Bool, Bool) -> Bool
     @FocusState private var focused: Bool
 
     func body(content: Content) -> some View {
@@ -33,11 +33,13 @@ private struct DummyKeyPresses: ViewModifier {
                 ],
                 phases: .down
             ) { press in
-                // A ⌘ chord is the platform's, the same way the AppKit monitor below lets it past.
-                guard !press.modifiers.contains(.command) else { return .ignored }
+                // ⌘ chords are the platform's except the one dummy chord `DummyCommand.from`
+                // names (⌘R). Anything this handle refuses is ignored, so ⌘Q and ⌘C still quit
+                // and copy.
                 let shift = press.modifiers.contains(.shift)
                 let control = press.modifiers.contains(.control)
-                return handle(press.key.character, shift, control) ? .handled : .ignored
+                let command = press.modifiers.contains(.command)
+                return handle(press.key.character, shift, control, command) ? .handled : .ignored
             }
     }
 }
@@ -54,7 +56,7 @@ private enum DummyKeyCode {
 }
 
 private struct DummyKeyMonitor: ViewModifier {
-    var handle: (Character, Bool, Bool) -> Bool
+    var handle: (Character, Bool, Bool, Bool) -> Bool
     @State private var monitor: Any?
 
     func body(content: Content) -> some View {
@@ -64,16 +66,16 @@ private struct DummyKeyMonitor: ViewModifier {
                 let handle = handle
                 monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
                     guard event.window?.isSheet != true,
-                          !event.modifierFlags.contains(.command),
                           let character = dummyCharacter(of: event)
                     else { return event }
                     let shift = event.modifierFlags.contains(.shift)
                     let control = event.modifierFlags.contains(.control)
+                    let command = event.modifierFlags.contains(.command)
                     let kept = MainActor.assumeIsolated {
                         // Asked here rather than in the guard above because a responder chain is
                         // main-actor's, and this closure is not on it until this point.
                         guard !dummyWebIsTyping(event.window?.firstResponder) else { return false }
-                        return handle(character, shift, control)
+                        return handle(character, shift, control, command)
                     }
                     return kept ? nil : event
                 }

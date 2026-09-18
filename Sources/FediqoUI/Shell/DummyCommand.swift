@@ -43,7 +43,11 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     case compose
     case showShortcuts
     case dismiss
-    /// The key `r` — play the launch overlay again, from rest, without quitting the process.
+    /// ⌘R — play the launch overlay again, from rest, without quitting the process.
+    ///
+    /// **Not the letter `r`.** That letter is later reblog, and taking it here would make
+    /// the two jobs a collision the day the later one arrives. A ⌘ chord is otherwise the
+    /// platform's — this is the one dummy exception.
     case replayLanding
 
     /// What a press means. Letters are the draft's while composing, except Escape.
@@ -52,9 +56,15 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         _ character: Character,
         shift: Bool = false,
         control: Bool = false,
+        command: Bool = false,
         typing: Bool = false,
         fieldFocused: Bool = false
     ) -> DummyCommand? {
+        if command {
+            // ⌘R only. ⌘Q, ⌘C, ⌘W stay the platform's. Control+⌘ is a different chord.
+            guard !control, character == "r" || character == "R" else { return nil }
+            return .replayLanding
+        }
         if fieldFocused { return nil }
         if character == KeyEquivalent.escape.character {
             return .dismiss
@@ -78,7 +88,6 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         case "s": return .reveal
         case KeyEquivalent.return.character, " ": return .expandPost
         case "q": return .back
-        case "r": return .replayLanding
         default: return nil
         }
     }
@@ -282,6 +291,6 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
         DummyShortcut(group: .app, keys: ["c"], name: "compose", commands: [.compose]),
         DummyShortcut(group: .app, keys: ["?"], name: "list", commands: [.showShortcuts]),
         DummyShortcut(group: .app, keys: ["Escape"], name: "dismiss", commands: [.dismiss]),
-        DummyShortcut(group: .app, keys: ["r"], name: "landing", commands: [.replayLanding]),
+        DummyShortcut(group: .app, keys: ["⌘R"], name: "landing", commands: [.replayLanding]),
     ]
 }

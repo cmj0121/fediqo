@@ -337,8 +337,8 @@ public struct FediqoRootView: View {
                     session.dismissStage()
                 }
             }
-            .dummyShellKeys { character, shift, control in
-                performDummyKey(character, shift: shift, control: control)
+            .dummyShellKeys { character, shift, control, command in
+                performDummyKey(character, shift: shift, control: control, command: command)
             }
             .environment(prefs)
             // **The session, for the panes that are handed no binding.** `PreferencesPane` reads
@@ -372,20 +372,27 @@ public struct FediqoRootView: View {
         return String(format: L10n.t("account.remove.detail.boards"), boards)
     }
 
-    private func performDummyKey(_ character: Character, shift: Bool, control: Bool) -> Bool {
-        // The overlay is not a layer a press can leave, so every key is swallowed until
-        // the flips finish rather than driving the shell underneath.
-        if playsLanding { return true }
-        guard let command = DummyCommand.from(
+    private func performDummyKey(
+        _ character: Character,
+        shift: Bool,
+        control: Bool,
+        command: Bool
+    ) -> Bool {
+        guard let mapped = DummyCommand.from(
             character,
             shift: shift,
             control: control,
+            command: command,
             typing: composing,
             fieldFocused: session.searchFocused
         ) else {
             return false
         }
-        let did = apply(command)
+        // The overlay is not a layer a press can leave, so dummy keys are swallowed until
+        // the flips finish rather than driving the shell underneath. Unmapped chords —
+        // ⌘Q, ⌘C — have already returned false, so a quit still quits.
+        if playsLanding { return true }
+        let did = apply(mapped)
         return DummyCommand.consumes(character, did: did)
     }
 
