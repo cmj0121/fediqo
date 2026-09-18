@@ -45,14 +45,20 @@ public final class MastodonSessions {
     /// than this build asks for, or where a sign-in through it ends with the page closed: a server that
     /// no longer knows the client shows an error page with no way back, and closing it is the
     /// only thing the reader can do there.
+    ///
+    /// **A server that refuses `read:search`** (Decision 32) is asked once more, on a
+    /// registration made without it and kept with the scopes it was made for, so each later
+    /// sign-in reuses it rather than registering again. Only finding an old post again needs
+    /// search; the thread says so and asks for a sign-in again.
     func signIn(host raw: String, through browser: any OAuthBrowser) async -> MastodonSignInError? {
         let host = raw.lowercased()
         let before = signOuts[host, default: 0]
         let oauth = MastodonOAuth(host: host, sender: sender)
         var kept = (try? tokens.app(host: host)) ?? nil
-        // A registration made for other scopes than this build asks for is made again: the
-        // server would refuse the page with `invalid_scope`.
-        if let app = kept, app.scopes != MastodonOAuth.scopes {
+        // A registration made for scopes this build does not ask for is made again: the server
+        // would refuse the page with `invalid_scope`.
+        let asked: Set<String?> = [MastodonOAuth.scopes, MastodonOAuth.scopesWithoutSearch]
+        if let app = kept, !asked.contains(app.scopes) {
             try? tokens.forgetApp(host: host)
             kept = nil
         }
@@ -65,7 +71,15 @@ public final class MastodonSessions {
                 app = try await oauth.register()
                 if signOuts[host, default: 0] == before { try? tokens.save(app) }
             }
-            token = try await oauth.signIn(as: app, through: browser)
+            do {
+                token = try await oauth.signIn(as: app, through: browser)
+            } catch MastodonSignInError.invalidScope where app.scopes == MastodonOAuth.scopes {
+                try? tokens.forgetApp(host: host)
+                kept = nil
+                let narrower = try await oauth.register(scopes: MastodonOAuth.scopesWithoutSearch)
+                if signOuts[host, default: 0] == before { try? tokens.save(narrower) }
+                token = try await oauth.signIn(as: narrower, through: browser)
+            }
         } catch let error as MastodonSignInError {
             if error == .clientRejected || error == .invalidScope || (kept != nil && error == .cancelled) {
                 try? tokens.forgetApp(host: host)
