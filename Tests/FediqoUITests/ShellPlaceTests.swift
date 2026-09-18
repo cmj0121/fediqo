@@ -16,12 +16,6 @@ struct ShellPlaceTests {
         #expect(ShellPlace.launch == .account)
     }
 
-    @Test("Named queries start empty; Work is not shipped")
-    func shippedQueriesAreEmpty() {
-        #expect(DummyTimeline.shipped.isEmpty)
-        #expect(!DummyTimeline.shipped.map(\.id).contains("work"))
-    }
-
     @Test("Every place can say what the action is for")
     func everyPlaceHasASummary() {
         for place in ShellPlace.allCases {
@@ -186,8 +180,8 @@ struct EmptySessionTests {
     @Test("Dummy stored items are not what All would show")
     func allIsEmptyWithoutJoin() {
         #expect(DummyItem.stored.isEmpty)
-        #expect(DummyTimeline(id: "all").emptyKey == "timeline.empty")
-        #expect(DummyTimeline(id: "trends").emptyKey == "timeline.empty.trends")
+        #expect(TimelineQuery.all.emptyKey == "timeline.empty")
+        #expect(TimelineQuery.trends.emptyKey == "timeline.empty.trends")
         #expect(
             L10n.t("timeline.empty.title", language: .english) == "Nothing has arrived"
         )

@@ -114,9 +114,9 @@ struct DeckTests {
 
     @Test("sensitive, or a line to put in front of it, covers the row")
     func whatCoversARow() {
-        #expect(DummyItem(Self.note(sensitive: true), among: []).covered)
-        #expect(DummyItem(Self.note(spoiler: "Blood"), among: []).covered)
-        #expect(DummyItem(Self.note(sensitive: false, spoiler: "Blood"), among: []).covered)
+        #expect(DummyItem(Self.note(sensitive: true)).covered)
+        #expect(DummyItem(Self.note(spoiler: "Blood")).covered)
+        #expect(DummyItem(Self.note(sensitive: false, spoiler: "Blood")).covered)
     }
 
     // `sensitive` has three answers and `note.sensitive ?? false` reads two of them the same.
@@ -124,16 +124,16 @@ struct DeckTests {
     // cover either, or a timeline from a server with no such idea would be covered end to end.
     @Test("Nothing is not false, and neither of them is a cover on its own")
     func silenceIsNotAnAnswer() {
-        let neverSaid = DummyItem(Self.note(), among: [])
+        let neverSaid = DummyItem(Self.note())
         #expect(neverSaid.sensitive == nil)
         #expect(!neverSaid.covered)
 
-        let saidNo = DummyItem(Self.note(sensitive: false), among: [])
+        let saidNo = DummyItem(Self.note(sensitive: false))
         #expect(saidNo.sensitive == false)
         #expect(!saidNo.covered)
 
         #expect(neverSaid.sensitive != saidNo.sensitive)
-        #expect(!DummyItem(Self.note(sensitive: false, spoiler: ""), among: []).covered)
+        #expect(!DummyItem(Self.note(sensitive: false, spoiler: "")).covered)
     }
 
     @Test("A row carries what it needs to draw: the avatar's address, the cover, the stack")
@@ -151,7 +151,7 @@ struct DeckTests {
             sensitive: true,
             spoiler: "Blood"
         )
-        let item = DummyItem(note, among: [])
+        let item = DummyItem(note)
         #expect(item.avatarURL == URL(string: "https://first.example/a.png"))
         #expect(item.hasAvatar)
         #expect(item.spoiler == "Blood")

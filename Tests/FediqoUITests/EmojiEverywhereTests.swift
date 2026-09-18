@@ -42,7 +42,7 @@ struct EmojiEverywhereTests {
             sensitive: sensitive,
             spoiler: spoiler,
             emojis: emojis
-        ), among: [])
+        ))
     }
 
     private static func store(_ catalogue: [CustomEmoji], host: String) async -> EmojiCatalogueStore {
