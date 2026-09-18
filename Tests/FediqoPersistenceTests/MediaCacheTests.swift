@@ -162,7 +162,7 @@ struct MediaCacheTests {
             try cache.store(Data(count: 10), host: hosts[index], url: address)
             try age(cache, host: hosts[index], url: address, by: Double(3 - index) * 100)
         }
-        cache.trim(toBytes: 25)
+        #expect(cache.trim(toBytes: 25) == 20)
         #expect(cache.data(host: "a.example", url: urls[0]) == nil, "the oldest copy survived")
         #expect(cache.data(host: "b.example", url: urls[1]) != nil)
         #expect(cache.data(host: "a.example", url: urls[2]) != nil)
@@ -184,7 +184,7 @@ struct MediaCacheTests {
         defer { try? FileManager.default.removeItem(at: dir) }
         let cache = try MediaCache(directory: dir)
         try cache.store(Data(count: 10), host: "a.example", url: url)
-        cache.trim(toBytes: 10)
+        #expect(cache.trim(toBytes: 10) == 10)
         #expect(cache.bytes(host: "a.example") == 10)
         try MediaCache(directory: scratch()).trim(toBytes: 0)
     }

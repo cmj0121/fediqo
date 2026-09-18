@@ -72,63 +72,49 @@ struct InventoryTests {
 
     // MARK: By time
 
-    @Test("Keeping forever, or a count that is not positive, drops nothing and writes nothing", arguments: [0, -1])
-    func dropOlderThanGuard(months: Int) async throws {
+    @Test("Keeping forever, or a count that is not positive, drops nothing and writes nothing", arguments: [nil, 0, -1] as [Int?])
+    func keepForeverWritesNothing(months: Int?) async throws {
         let session = ShellSession(http: FixtureHTTP(), store: held())
         let saves = Saves()
         try persisting(session, to: scratch(), counting: saves)
         await session.reloadFromStore()
-        await session.dropOlderThan(months: months, from: now)
+        #expect(await session.keep(months: months, from: now) == 0)
         #expect(session.notes.count == 3)
         #expect(saves.count == 0)
     }
 
-    @Test("Dropping once to the latest months holds after a relaunch, and every source stays joined")
-    func dropOlderThanSurvivesRelaunch() async throws {
-        let dir = scratch()
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let session = ShellSession(http: FixtureHTTP(), store: held())
-        let saves = Saves()
-        try persisting(session, to: dir, counting: saves)
-        await session.reloadFromStore()
-
-        await session.dropOlderThan(months: 3, from: now)
-        #expect(session.notes.map(\.id).sorted() == ["1", "2"])
-        #expect(session.sources.map(\.host) == [alpha.host, beta.host])
-        #expect(saves.count == 1)
-
-        let opened = StoreFile.open(at: dir)
-        #expect(opened.notes.map(\.id).sorted() == ["1", "2"])
-        #expect(opened.sources.map(\.host) == [alpha.host, beta.host])
-    }
-
-    @Test("A keep policy binds at launch and every read after, and is written")
-    func keepPolicyAppliesAndPersists() async throws {
+    @Test("Keeping the latest months holds after a relaunch, and every source stays joined")
+    func keepSurvivesRelaunch() async throws {
         let dir = scratch()
         defer { try? FileManager.default.removeItem(at: dir) }
         let store = held()
         let session = ShellSession(http: FixtureHTTP(), store: store)
         let saves = Saves()
         try persisting(session, to: dir, counting: saves)
-        session.keepMonths = 3
         await session.reloadFromStore()
-        #expect(session.notes.map(\.id).sorted() == ["1", "2"], "the policy did not hold at launch")
-        await session.applyKeepPolicy()
-        #expect(saves.count == 1)
-        #expect(StoreFile.open(at: dir).notes.count == 2)
 
-        // Anything read later that is older than the window does not stay.
+        #expect(await session.keep(months: 3, from: now) == 1)
+        #expect(session.notes.map(\.id).sorted() == ["1", "2"])
+        #expect(session.holdings.posts == 2, "the counts were not rebuilt with the rows")
+        #expect(session.sources.map(\.host) == [alpha.host, beta.host])
+        #expect(saves.count == 1)
+        let opened = StoreFile.open(at: dir)
+        #expect(opened.notes.map(\.id).sorted() == ["1", "2"])
+        #expect(opened.sources.map(\.host) == [alpha.host, beta.host])
+
+        // Nothing more to drop: not written again. And anything older read later is not kept.
+        #expect(await session.keep(months: 3, from: now) == 0)
+        #expect(saves.count == 1)
         await store.ingest([note("4", daysAgo: 400, from: beta)])
-        await session.reloadFromStore()
-        #expect(!session.notes.contains { $0.id == "4" })
+        #expect(await !store.all().contains { $0.id == "4" })
     }
 
     @Test("Forever is the default: nothing is dropped by time unless the reader chose it")
     func foreverIsTheDefault() async {
-        let session = ShellSession(http: FixtureHTTP(), store: held())
-        #expect(session.keepMonths == KeepPolicy.forever)
+        let store = held()
+        #expect(await store.retention == nil)
+        let session = ShellSession(http: FixtureHTTP(), store: store)
         await session.reloadFromStore()
-        await session.applyKeepPolicy(from: now)
         #expect(session.notes.count == 3)
     }
 
@@ -195,12 +181,64 @@ struct InventoryTests {
 
     // MARK: The cap
 
+    /// A `MediaCopies` that only counts: how many times it was walked by a trim, and what it
+    /// says it holds. Enough to see the running total decide when a walk happens.
+    private final class Walked: MediaCopies, @unchecked Sendable {
+        var trims = 0
+        var held = 0
+        func store(_ data: Data, host: String, url: URL) throws { held += data.count }
+        func data(host: String, url: URL) -> Data? { nil }
+        func remove(host: String, url: URL) {}
+        func forget(host: String) { held = 0 }
+        func keepOnly(hosts: some Sequence<String>) {}
+        func removeAll() { held = 0 }
+        func bytes(host: String) -> Int { held }
+        func trim(toBytes cap: Int) -> Int {
+            trims += 1
+            held = min(held, cap)
+            return held
+        }
+    }
+
+    @Test("The copies are walked only when the running total passes the cap")
+    func capWalksOnlyWhenOver() async {
+        let walked = Walked()
+        let copies = DiskCopies(walked, cap: 25)
+        copies.trim()
+        await copies.settled()
+        #expect(walked.trims == 1, "the launch trim measures once")
+        #expect(await copies.total() == 0)
+
+        copies.store(Data(count: 10), host: alpha.host, url: address(1))
+        copies.store(Data(count: 10), host: alpha.host, url: address(2))
+        #expect(await copies.total() == 20)
+        #expect(walked.trims == 1, "a write under the cap walked the copies")
+
+        copies.store(Data(count: 10), host: alpha.host, url: address(3))
+        #expect(await copies.total() == 25)
+        #expect(walked.trims == 2)
+
+        copies.forget(host: alpha.host)
+        #expect(await copies.total() == 0)
+        copies.store(Data(count: 1), host: alpha.host, url: address(4))
+        copies.removeAll()
+        #expect(await copies.total() == 0)
+        copies.remove(host: alpha.host, url: address(4))
+        #expect(await copies.total() == nil, "a single removal is not measured")
+        copies.store(Data(count: 1), host: alpha.host, url: address(5))
+        #expect(await copies.total() == 1)
+        #expect(walked.trims == 3, "an unknown total is measured by the next write")
+        copies.keepOnly(hosts: [])
+        #expect(await copies.total() == nil)
+    }
+
     @Test("Past the cap, the oldest copies on disk go first")
     func capTrimsOldest() async throws {
         let dir = scratch()
         defer { try? FileManager.default.removeItem(at: dir) }
         let cache = try MediaCache(directory: dir)
-        let copies = DiskCopies(cache, cap: 15, trimEvery: 1)
+        let copies = DiskCopies(cache, cap: 15)
+        copies.trim()
         for n in 0..<3 {
             copies.store(Data(count: 10), host: alpha.host, url: address(n))
             await copies.settled()
@@ -212,26 +250,10 @@ struct InventoryTests {
         copies.store(Data(count: 1), host: beta.host, url: address(9))
         await copies.settled()
         #expect(cache.data(host: alpha.host, url: address(0)) == nil, "the oldest copy survived the cap")
-        #expect(cache.data(host: alpha.host, url: address(1)) == nil)
         #expect(cache.data(host: alpha.host, url: address(2)) != nil)
         #expect(await copies.bytes(hosts: [alpha.host, beta.host]) == [alpha.host: 10, beta.host: 1])
-
-        copies.removeAll()
-        copies.trim()
-        #expect(await copies.bytes(hosts: [alpha.host]) == [alpha.host: 0])
-    }
-
-    @Test("The cap is only checked every so many writes")
-    func capWaitsForItsTurn() async throws {
-        let dir = scratch()
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let copies = DiskCopies(try MediaCache(directory: dir), cap: 5, trimEvery: 3)
-        copies.store(Data(count: 10), host: alpha.host, url: address(1))
-        copies.store(Data(count: 10), host: alpha.host, url: address(2))
-        #expect(await copies.bytes(hosts: [alpha.host]) == [alpha.host: 20])
-        copies.store(Data(count: 1), host: alpha.host, url: address(3))
-        #expect(await copies.bytes(hosts: [alpha.host])[alpha.host, default: 99] <= 5)
-        #expect(DiskCopies.defaultCap > 0 && DiskCopies.defaultTrimEvery > 0)
+        #expect(await copies.total() == 11)
+        #expect(DiskCopies.defaultCap > 0)
     }
 
     // MARK: The readout
@@ -241,22 +263,21 @@ struct InventoryTests {
         #expect(L10n.count("prefs.held.posts", 1, language: .english) == "1 post")
         #expect(L10n.count("prefs.held.posts", 2, language: .english) == "2 posts")
         #expect(L10n.count("prefs.cache.pictures", 1, language: .english) == "1 picture")
-        #expect(L10n.count("prefs.held.posts", 1, language: .taiwanese) == "1 則貼文")
+        #expect(L10n.count("prefs.held.posts", 1, language: .taiwanese) == "1 則貼文", "no .one key falls back")
+        #expect(L10n.count("prefs.cache.posts", 1, language: .english) == "1 first post")
+        #expect(L10n.count("prefs.keep.shorten.title", 1, language: .english) == "Keep only the latest 1 month?")
         #expect(L10n.count("prefs.keep.months", 1, language: .english) == "Latest 1 month")
     }
 
     @Test("Every key the readout and the drops use is in both languages")
     func keysInBothLanguages() {
         let keys = [
-            "prefs.held.posts", "prefs.held.posts.one", "prefs.held.posts.none",
-            "prefs.cache.pictures", "prefs.cache.pictures.one", "prefs.held.total",
+            "prefs.held.posts", "prefs.held.posts.none", "prefs.cache.pictures", "prefs.held.total",
             "prefs.held.memory", "prefs.held.disk", "prefs.held.breakdown", "prefs.held.per",
             "prefs.held.per.week", "prefs.held.per.month", "prefs.held.week", "prefs.drop",
-            "prefs.keep", "prefs.keep.forever", "prefs.keep.months", "prefs.keep.months.one",
-            "prefs.drop.once", "prefs.drop.once.months", "prefs.drop.once.months.one",
-            "prefs.drop.once.title", "prefs.drop.once.title.one", "prefs.drop.once.detail",
-            "prefs.drop.copies", "prefs.drop.copies.title", "prefs.drop.copies.detail",
-            "prefs.drop.confirm", "prefs.drop.footer",
+            "prefs.keep", "prefs.keep.forever", "prefs.keep.months", "prefs.keep.shorten.title",
+            "prefs.keep.shorten.detail", "prefs.drop.copies", "prefs.drop.copies.title",
+            "prefs.drop.copies.detail", "prefs.drop.confirm", "prefs.drop.footer",
         ]
         for key in keys {
             for language in [DummyLanguage.english, .taiwanese] {
@@ -273,14 +294,19 @@ struct InventoryTests {
         #expect(PreferencesPane.postsLine(0) == "No posts held")
         #expect(PreferencesPane.postsLine(1) == "1 post")
         #expect(PreferencesPane.postsLine(3) == "3 posts")
-        #expect(PreferencesPane.dropTitle(.olderThan(1)) == "Drop posts older than 1 month?")
-        #expect(PreferencesPane.dropTitle(.olderThan(6)) == "Drop posts older than 6 months?")
-        #expect(PreferencesPane.dropTitle(.copies) == L10n.t("prefs.drop.copies.title"))
-        #expect(PreferencesPane.dropDetail(.copies) == L10n.t("prefs.drop.copies.detail"))
-        #expect(PreferencesPane.dropDetail(.olderThan(3)) == L10n.t("prefs.drop.once.detail"))
         #expect(PreferencesPane.stretchLabel(now, period: .week).hasPrefix("Week of "))
         #expect(PreferencesPane.stretchLabel(now, period: .month).contains(String(Calendar.current.component(.year, from: now))))
         #expect(PreferencesPane.monthChoices == [1, 3, 6, 12])
+    }
+
+    @Test("Switching between week and month rebuilds the counts; a redraw does not")
+    func holdingsFollowThePeriod() async {
+        let session = ShellSession(http: FixtureHTTP(), store: held())
+        await session.reloadFromStore()
+        #expect(session.holdings == Holdings(notes: session.notes, per: .month))
+        session.heldPeriod = .week
+        #expect(session.holdings == Holdings(notes: session.notes, per: .week))
+        #expect(session.holdings.bySource == [alpha.host: 2, beta.host: 1])
     }
 
     // MARK: Helpers

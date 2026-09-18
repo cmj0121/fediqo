@@ -97,10 +97,10 @@ struct StoreFileTests {
         let old = note(id: "old")
         let new = Note(
             id: "new", source: mastodon, author: "Ada", handle: "@ada", body: "hello",
-            postedAt: origin.addingTimeInterval(86_400), origins: [.publicTimeline]
+            postedAt: origin.addingTimeInterval(30 * 86_400), origins: [.publicTimeline]
         )
         let store = ItemStore(sources: [mastodon], notes: [old, new])
-        await store.dropPosted(before: origin.addingTimeInterval(60))
+        #expect(await store.setRetention(months: 1, from: origin.addingTimeInterval(40 * 86_400)) == 1)
         let snapshot = await store.snapshot()
         try StoreFile(at: dir).save(sources: snapshot.sources, notes: snapshot.notes)
 
