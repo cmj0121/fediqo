@@ -100,6 +100,24 @@ struct StoreTests {
         }
     }
 
+    /// The rule the store keys its rows by and a drawn row takes its id from, stated once. Folded
+    /// by `Source` and by nothing after it, so a host typed in capitals keys the same row.
+    @Test("A note's key is the host it came through and its id, and two hosts are two keys")
+    func aNoteIsKeyedByHostAndID() {
+        let uri = "https://origin.example/users/ada/statuses/1"
+        let first = note(id: uri, postedAt: origin, origins: [.publicTimeline])
+        let second = note(id: uri, postedAt: origin, origins: [.publicTimeline], from: other)
+        let shouted = note(
+            id: uri, postedAt: origin, origins: [.publicTimeline],
+            from: Source(host: "FIRST.Example", kind: .mastodon)
+        )
+        #expect(first.key == NoteKey(host: "first.example", id: uri))
+        #expect(first.key != second.key)
+        #expect(first.key.rowID != second.key.rowID)
+        #expect(shouted.key == first.key)
+        #expect(first.key.rowID == "first.example\u{1e}\(uri)")
+    }
+
     @Test("Overlapping uri ingest on one host is one row with both origins, and it is a trend")
     func overlappingURIMergesOrigins() async {
         let store = ItemStore()
