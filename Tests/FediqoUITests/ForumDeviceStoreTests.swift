@@ -130,6 +130,22 @@ struct ForumDeviceStoreTests {
         #expect(await eventually { forums.reachedSignIn(host: "later.example") })
     }
 
+    @Test("A sign-in whose cookie is not named *_auth reads signed in until Clear")
+    func witnessedSignInCounts() async {
+        let store = WKWebsiteDataStore.nonPersistent()
+        let forums = ForumSessions(credentials: MemoryCredentials(), dataStore: store)
+        let session = ShellSession(http: FixtureHTTP(), forums: forums)
+        session.sources = [forum("odd.example")]
+        await store.httpCookieStore.setCookie(Self.cookie("member_token", domain: "odd.example"))
+        session.signingIn = ForumSignInRequest(host: "odd.example", stop: .noCredential)
+        session.signInFinished(reached: true, host: "odd.example")
+        await forums.readReached()
+        #expect(forums.reachedSignIn(host: "odd.example"), "a sign-in the page confirmed was dropped by a re-read")
+
+        await session.clear(host: "odd.example")
+        #expect(!forums.reachedSignIn(host: "odd.example"))
+    }
+
     @Test("No forum among the sources, no store opened — not even by a Clear")
     func noForumNoStore() async {
         var built = 0
