@@ -34,17 +34,43 @@ struct StoreTests {
         #expect(await store.all().map(\.id) == ["new"])
     }
 
-    @Test("replace() is what a relaunch loads")
-    func replaceLoadsASnapshot() async {
-        let store = ItemStore()
-        await store.add(source)
-        await store.ingest([note(id: "old", postedAt: origin, origins: [.publicTimeline])])
+    @Test("A relaunch builds the store from a snapshot")
+    func initLoadsASnapshot() async {
         let forum = Source(host: "forum.example", kind: .discuz)
-        let incoming = note(id: "kept", postedAt: origin, origins: [.trending], from: forum)
-        await store.replace(sources: [forum], notes: [incoming])
-        #expect(await store.sources().map(\.host) == ["forum.example"])
+        let kept = note(id: "kept", postedAt: origin, origins: [.trending], from: forum)
+        let store = ItemStore(sources: [forum, source], notes: [kept])
+        #expect(await store.sources().map(\.host) == ["forum.example", "first.example"])
         #expect(await store.all().map(\.id) == ["kept"])
         #expect(await store.trends().map(\.id) == ["kept"])
+    }
+
+    @Test("snapshot() hands back what init took, for a save to write")
+    func snapshotRoundTrips() async {
+        let forum = Source(host: "forum.example", kind: .discuz, boards: [BoardSubscription(fid: 3, name: "x")])
+        let one = note(id: "1", postedAt: origin, origins: [.trending], from: forum)
+        let two = note(id: "2", postedAt: origin.addingTimeInterval(60), origins: [.publicTimeline])
+        let store = ItemStore(sources: [source, forum], notes: [one, two])
+        await store.ingest([note(id: "3", postedAt: origin, origins: [])])
+        await store.remove(host: "forum.example")
+        let snapshot = await store.snapshot()
+        #expect(snapshot.sources == [source])
+        #expect(Set(snapshot.notes.map(\.key)) == Set(["2", "3"].map { NoteKey(host: "first.example", id: $0) }))
+        let reloaded = ItemStore(sources: snapshot.sources, notes: snapshot.notes)
+        #expect(await reloaded.all() == store.all())
+    }
+
+    @Test("A snapshot with duplicates loads instead of trapping")
+    func initToleratesDuplicates() async {
+        let first = note(id: "1", postedAt: origin, origins: [.publicTimeline], body: "first")
+        let second = note(id: "1", postedAt: origin, origins: [.trending], body: "second")
+        let store = ItemStore(
+            sources: [source, Source(host: "First.Example", kind: .pleroma)],
+            notes: [first, second]
+        )
+        #expect(await store.sources() == [source])
+        let all = await store.all()
+        #expect(all.map(\.body) == ["second"])
+        #expect(all.first?.origins == [.trending])
     }
 
     @Test("Adding a host twice keeps the first and insertion order")
@@ -122,6 +148,39 @@ struct StoreTests {
         let sameTime = note(id: "c", postedAt: origin.addingTimeInterval(60), origins: [.publicTimeline])
         await store.ingest([older, newer, sameTime])
         #expect(await store.all().map(\.id) == ["a", "c", "b"])
+    }
+
+    /// Two sources carrying one status are two rows with the same time and the same id, so the
+    /// host is what is left to order them by. Without it their order would be whatever the
+    /// dictionary iterates to, and a timeline would swap the pair between one build and the next.
+    @Test("One item through two hosts sorts by host, whichever arrived first")
+    func sameTimeAndIdSortsByHost() async {
+        let uri = "https://origin.example/users/ada/statuses/1"
+        for firstIn in [source, other] {
+            let store = ItemStore()
+            let secondIn = firstIn == source ? other : source
+            await store.ingest([note(id: uri, postedAt: origin, origins: [.publicTimeline], from: firstIn)])
+            await store.ingest([note(id: uri, postedAt: origin, origins: [.publicTimeline], from: secondIn)])
+            #expect(await store.all().map(\.source.host) == ["first.example", "second.example"])
+        }
+    }
+
+    /// The rule the store keys its rows by and a drawn row takes its id from, stated once. Folded
+    /// by `Source` and by nothing after it, so a host typed in capitals keys the same row.
+    @Test("A note's key is the host it came through and its id, and two hosts are two keys")
+    func aNoteIsKeyedByHostAndID() {
+        let uri = "https://origin.example/users/ada/statuses/1"
+        let first = note(id: uri, postedAt: origin, origins: [.publicTimeline])
+        let second = note(id: uri, postedAt: origin, origins: [.publicTimeline], from: other)
+        let shouted = note(
+            id: uri, postedAt: origin, origins: [.publicTimeline],
+            from: Source(host: "FIRST.Example", kind: .mastodon)
+        )
+        #expect(first.key == NoteKey(host: "first.example", id: uri))
+        #expect(first.key != second.key)
+        #expect(first.key.rowID != second.key.rowID)
+        #expect(shouted.key == first.key)
+        #expect(first.key.rowID == "first.example\u{1e}\(uri)")
     }
 
     @Test("Overlapping uri ingest on one host is one row with both origins, and it is a trend")
@@ -246,7 +305,6 @@ struct StoreTests {
         #expect(Set(left.map(\.id)) == [uri, "only-second"])
         let shared = left.first { $0.id == uri }
         #expect(shared?.source.host == "second.example")
-        #expect(shared?.hosts == ["second.example"])
         #expect(shared?.origins == [.trending])
 
         await store.remove(host: other.host)
@@ -285,20 +343,6 @@ struct StoreTests {
         #expect(
             Set(left.filter { $0.id == "shared-by-two-survivors" }.map(\.source.host))
                 == ["second.example", "third.example"]
-        )
-    }
-
-    /// The set is seeded from the stamp at the wire boundary and is never empty, which is what
-    /// makes "gone when the set empties" a decidable rule rather than a race with construction.
-    @Test("A note names the server it arrived through from the moment it is built")
-    func aNoteAlwaysNamesAtLeastOneHost() async {
-        #expect(note(id: "mine", postedAt: origin, origins: [.publicTimeline]).hosts == ["first.example"])
-        // Folded by `Source`, so the set is comparable to a removal argument by == alone.
-        #expect(
-            note(
-                id: "mine", postedAt: origin, origins: [.publicTimeline],
-                from: Source(host: "SECOND.Example", kind: .mastodon)
-            ).hosts == ["second.example"]
         )
     }
 

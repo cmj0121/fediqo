@@ -254,6 +254,15 @@ struct ForumLoginVerdictTests {
         #expect(!ForumMember.isSignedIn(anonymous), "a signed-out page read as signed in")
     }
 
+    @Test("Only a member's auth cookie is a session; what a guest is handed is not", arguments: [
+        ("x7Kq_2132_auth", true), ("auth", true),
+        ("x7Kq_2132_saltkey", false), ("x7Kq_2132_lastvisit", false), ("x7Kq_2132_sid", false),
+        ("cf_clearance", false), ("author", false), ("oauth", false),
+    ])
+    func sessionCookie(name: String, isSession: Bool) {
+        #expect(ForumMember.isSessionCookie(named: name) == isSession)
+    }
+
     @Test("Nothing at all is unreadable, and unreadable shows the reader the page")
     func silenceIsNotSuccess() {
         // The single most important line in this suite. An empty answer, a dropped connection's

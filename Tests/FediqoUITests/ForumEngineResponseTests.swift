@@ -17,7 +17,7 @@ struct ForumEngineResponseTests {
     // where a lapsed session sends them.
     @Test("A synthesised response carries where the view ended up, not where it was sent")
     func theSynthesisedResponseFollowsTheView() async {
-        let engine = ForumWebEngine(host: "bbs.example")
+        let engine = ForumWebEngine(host: "bbs.example", dataStore: .nonPersistent())
         let asked = URL(string: "https://bbs.example/forum.php?mod=viewthread&tid=1")!
 
         // Nothing loaded: there is nowhere else it could have ended up, so the request stands.
