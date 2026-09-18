@@ -1124,10 +1124,9 @@ final class ShellSession {
 
     /// The tabs, rebuilt from what is actually joined.
     ///
-    /// **A forum is not offered Trends** (D27, and the open item this branch recorded against
-    /// itself): a join used to set the list to `all` and `trends` whatever it had joined, and a
-    /// forum has no trending endpoint at all, so that tab was permanently empty. An empty tab is
-    /// a promise the app cannot keep, and the reader has no way to tell it from a quiet hour.
+    /// **All and Trends are the only two queries of this store.** Boards stay a property of
+    /// the source — what this device fetches next — not a third timeline. A forum is not
+    /// offered Trends: it has no trending read, and an empty tab is a promise the app cannot keep.
     ///
     /// Rebuilt rather than appended to, because a second join changes what the first one's tabs
     /// should be: joining a forum after a microblog must not take Trends away, and the only way
@@ -1141,13 +1140,6 @@ final class ShellSession {
         var made = [DummyTimeline(id: "all")]
         if sources.contains(where: { Self.hasTrends($0.kind) }) {
             made.append(DummyTimeline(id: "trends"))
-        }
-        for source in sources {
-            for board in source.boards {
-                made.append(DummyTimeline(
-                    board: BoardQuery(host: source.host, fid: board.fid, name: board.name)
-                ))
-            }
         }
         queries = made
         if timelineID == nil || !made.contains(where: { $0.id == timelineID }) {
