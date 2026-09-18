@@ -284,6 +284,18 @@ struct MastodonSignInTests {
         #expect(form.contains("token=tok-123"))
     }
 
+    @Test("A token the Keychain would not delete: the row stays signed in, as the Keychain says, and the server is asked to revoke it")
+    func keychainKeepsTheToken() async throws {
+        let tokens = StuckTokens()
+        try tokens.save(token(host))
+        let server = MastodonServer(tokens: MemoryMastodonTokens())
+        let sessions = MastodonSessions(tokens: tokens, sender: server)
+        #expect(sessions.isSignedIn(host: host))
+        await sessions.signOut(host: host)
+        #expect(sessions.isSignedIn(host: host), "not claimed signed out while the token is still kept")
+        #expect(await server.paths == ["/oauth/revoke"])
+    }
+
     @Test("A revoke the server refuses or never hears still signs out", arguments: [false, true])
     func revokeFails(offline: Bool) async throws {
         let (session, _, tokens) = await shell(
@@ -454,4 +466,18 @@ struct MastodonSignInTests {
         }
         #expect(ShellSession.signInFailureKey(.http(503)) == "account.mastodon.failed.unreachable")
     }
+}
+
+/// A token store whose Keychain will not delete a token by host.
+private final class StuckTokens: MastodonTokenStore, @unchecked Sendable {
+    private let held = MemoryMastodonTokens()
+
+    func token(host: String) throws -> MastodonToken? { try held.token(host: host) }
+    func save(_ token: MastodonToken) throws { try held.save(token) }
+    func forget(host: String) throws { throw ForumCredentialError.keychain(-25_308) }
+    func forget(_ token: MastodonToken) throws -> Bool { try held.forget(token) }
+    func signedInHosts() throws -> Set<String> { try held.signedInHosts() }
+    func app(host: String) throws -> MastodonApp? { try held.app(host: host) }
+    func save(_ app: MastodonApp) throws { try held.save(app) }
+    func forgetApp(host: String) throws { try held.forgetApp(host: host) }
 }
