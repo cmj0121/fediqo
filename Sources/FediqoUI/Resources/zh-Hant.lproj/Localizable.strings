@@ -78,10 +78,8 @@
 "timeline.add" = "新增";
 "timeline.add.toast" = "新的 named query 仍是 dummy。";
 "timeline.tab.all" = "全部";
-"timeline.tab.work" = "工作";
 "timeline.tab.trends" = "趨勢";
 "timeline.rule.all" = "時間序，不過濾。";
-"timeline.rule.work" = "這些來源，只留和工作有關的。";
 "timeline.rule.trends" = "趨勢貼文，時間序。";
 "timeline.empty.title" = "還沒有東西進來";
 "timeline.empty.detail" = "你加的來源的公開貼文會落在這裡，新的在上面。";
@@ -160,12 +158,30 @@
 "prefs.fontSize.larger" = "較大";
 "prefs.fontSize.largest" = "最大";
 
-"prefs.cache" = "這台裝置所存";
-"prefs.cache.footer" = "這份 store 留在這台裝置，不跟 Apple account 走。例外是你要求 Fediqo 存起來的密碼：它放在這台裝置的鑰匙圈裡。按「清除」會刪掉該來源在這台裝置上的副本，也會刪掉那份密碼。沒有 Fediqo server。";
-"prefs.cache.empty" = "先到「帳號」加入來源。各來源送來的內容會留在這裡。";
+"prefs.cache" = "存在這台裝置上";
+"prefs.cache.footer" = "這些大多會向各來源重新讀取：表情符號名稱會在一天後自行重新讀取，其他則在你需要時再讀。登入留下的兩樣東西只存在這台裝置上。你登入過的論壇會把登入 Cookie 留在這裡，下次開啟 Fediqo 時你仍是登入狀態；它們不會被備份，也不會跟著你的 Apple 帳號走。你要求 Fediqo 存起來的密碼放在這台裝置的鑰匙圈裡，永遠不會複製到 iCloud。按「清除」時，兩者都會和其他東西一起刪掉。";
+"prefs.cache.empty" = "先到「帳號」加入來源。各來源送來的內容會留在這裡，存在這台裝置上。";
 "prefs.held.posts" = "%d 則貼文";
 "prefs.held.posts.none" = "未存貼文";
-"prefs.held.month" = "本月 %d 則";
+"prefs.held.total" = "所有來源";
+"prefs.held.memory" = "記憶體中 %@";
+"prefs.held.disk" = "磁碟上 %@";
+"prefs.held.breakdown" = "依週或月";
+"prefs.held.per" = "每";
+"prefs.held.per.week" = "週";
+"prefs.held.per.month" = "月";
+"prefs.held.week" = "%@ 起的一週";
+"prefs.drop" = "捨棄";
+"prefs.keep" = "保留貼文";
+"prefs.keep.forever" = "永久";
+"prefs.keep.shorten.title" = "只保留最近 %d 個月？";
+"prefs.keep.shorten.detail" = "比這更舊的貼文會立即從這台裝置上移除，之後讀到的也不會存下。每個來源仍保持加入。改成更長的期間或「永久」則不會捨棄任何內容。";
+"prefs.keep.months" = "最近 %d 個月";
+"prefs.drop.copies" = "捨棄圖片副本";
+"prefs.drop.copies.title" = "捨棄這台裝置上所有的圖片副本？";
+"prefs.drop.copies.detail" = "所有來源存在記憶體與磁碟上的圖片都會移除。每則貼文都會留下並照常顯示；捲動時會從連結重新讀取圖片。";
+"prefs.drop.confirm" = "捨棄";
+"prefs.drop.footer" = "除非你另作選擇，所有內容都會永久保留。「保留貼文」會立即捨棄較舊的貼文，之後讀到的貼文也照同樣的期間保留。上方各來源的「清除」會捨棄該來源的圖片、表情符號名稱與首篇貼文，貼文本身會留下。磁碟上的圖片副本有容量上限，最舊的會先移除。";
 "prefs.cache.catalogue" = "%d 個表情符號名稱 ·";
 "prefs.cache.catalogue.none" = "未存表情符號名稱";
 "prefs.cache.pictures" = "%d 張圖片";
@@ -210,9 +226,6 @@
 "board.unread.refused" = "%1$@ — 這個論壇不讓這個 App 讀它（HTTP %2$d）。";
 "board.unread.unreadable" = "%@ — 這個論壇有回應，但那個版塊上沒有主題列表。";
 "board.unread.network" = "%@ — 連不上那個版塊。";
-"timeline.rule.board" = "%2$@ 的 %1$@，最新的在前。";
-"timeline.empty.board.title" = "這個版塊這裡沒有東西";
-"timeline.empty.board.detail" = "從這個版塊讀到的主題會落在這裡，最新的在前。";
 
 /* Unit F6 — the first posts this device is holding, in the inventory beside Clear. */
 "prefs.cache.posts" = "%d 篇主文";

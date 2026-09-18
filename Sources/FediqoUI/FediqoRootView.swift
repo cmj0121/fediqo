@@ -56,6 +56,18 @@ public struct FediqoRootView: View {
         _session = State(initialValue: session)
     }
 
+    /// Hands the copies of pictures already on this device to the one picture cache every row
+    /// draws from, once, at launch — and first drops the copies of any host not in `hosts`, the
+    /// servers the reader still reads. Queued ahead of every picture a row can ask for, so the
+    /// sweep never races a copy being written for a server just added. What is left is then
+    /// trimmed to the cap (#7), so a cap lowered by a new build holds from its first launch.
+    public static func keepPictures(in copies: any MediaCopies, for hosts: [String]) {
+        let disk = DiskCopies(copies)
+        disk.keepOnly(hosts: hosts)
+        disk.trim()
+        ShellPictures.shared.disk = disk
+    }
+
     private var availability: ShellAvailability { session.availability }
 
     /// Whether the join sheet is up, derived from the stage rather than stored beside it.
@@ -84,7 +96,16 @@ public struct FediqoRootView: View {
 
     public var body: some View {
         layout
-            .task { await session.reloadFromStore() }
+            // The reader's time window is set on the store once at launch, before the store is
+            // adopted, so a window chosen last run binds what was kept and everything read after
+            // (#7). `prefs` is its one owner; a change is handed on, and written only if it dropped.
+            .task {
+                await session.keep(months: prefs.keepMonths)
+                await session.reloadFromStore()
+            }
+            .onChange(of: prefs.keepMonths) { _, months in
+                Task { await session.keep(months: months) }
+            }
             .onChange(of: place) { old, new in
                 let accepted = availability.placing(old, as: new)
                 if accepted != new { place = accepted }
@@ -677,12 +698,9 @@ public struct FediqoRootView: View {
         return true
     }
 
-    /// **Resolved out of the session's list, not rebuilt from the id.** A board query knows which
-    /// board it is by carrying it; an id alone says only that it is one. Reconstructing here
-    /// would give the keys a stream that matched no note, so `j` and `k` would move through
-    /// nothing on exactly the tabs this unit added. See `ShellSession.timeline(for:)`.
+    /// The stream `j` and `k` move through: the current query, All or Trends, over the store.
     private var streamItems: [DummyItem] {
-        session.timeline(for: session.timelineID).items(from: session.notes, among: session.sources)
+        session.currentTimeline.items(from: session.notes)
     }
 
     /// Whichever list is in front: the open conversation, or the stream under it.
@@ -795,10 +813,9 @@ public struct FediqoRootView: View {
     /// Tab only rotates named queries on the timeline. Elsewhere it is the platform's.
     private func rotateTimelineTab(by step: Int) -> Bool {
         guard place == .timeline else { return false }
-        let ids = session.queries.map(\.id)
-        guard !ids.isEmpty else { return false }
-        let current = session.timelineID ?? ids[0]
-        session.timelineID = DummyCommand.advanced(ids, from: current, by: step)
+        let queries = session.queries
+        guard !queries.isEmpty else { return false }
+        session.timelineID = DummyCommand.advanced(queries, from: session.currentTimeline, by: step)
         return true
     }
 

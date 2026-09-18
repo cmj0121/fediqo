@@ -1,4 +1,5 @@
 import Foundation
+import Testing
 @testable import FediqoCore
 
 enum FixtureHTTPError: Error {
@@ -50,5 +51,29 @@ actor FixtureHTTP: HTTPClient {
 
     private static func response(_ url: URL, _ status: Int) -> HTTPURLResponse {
         HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil)!
+    }
+}
+
+/// Opens a gate nobody else will, so a test that lost its synchronisation fails instead of
+/// hanging the suite. Armed before anything awaits and cancelled on the passing path.
+///
+/// **A hang guard, not a clock** — `FediqoUITests`' `hangGuard` for the same reason, copied
+/// because one test target cannot import another's fixtures. A few seconds is a time a loaded
+/// runner can spend before the gated line is even reached, and a guard that opens then lets the
+/// test measure an order it never set up. `after` is past any honest wait and inside the test's
+/// own `.timeLimit`, so the only run that reaches it is one whose gate was never going to open,
+/// and that run says so. Takes the opening as a closure because the gates it guards are private
+/// to their suites.
+func hangGuard(
+    after limit: Duration = .seconds(50),
+    opening open: @escaping @Sendable () async -> Void
+) -> Task<Void, Never> {
+    Task {
+        try? await Task.sleep(for: limit)
+        // `try?` swallows the cancellation, so without this a guard cancelled on the passing path
+        // would still go on to open the gate and record an issue against a test that passed.
+        guard !Task.isCancelled else { return }
+        Issue.record("watchdog opened the gate; the test lost its synchronisation")
+        await open()
     }
 }
