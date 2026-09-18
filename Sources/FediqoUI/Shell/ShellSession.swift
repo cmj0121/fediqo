@@ -139,7 +139,8 @@ final class ShellSession {
         sources.map { source in
             SourceRow(
                 source: source,
-                profile: profiles[source.host] ?? .unasked(host: source.host, kind: source.kind)
+                profile: profiles[source.host] ?? .unasked(host: source.host, kind: source.kind),
+                signedIn: isSignedIn(host: source.host)
             )
         }
     }
@@ -646,7 +647,7 @@ final class ShellSession {
             Task { await loadCatalog() }
         // None of these offers a protocol to press: the server list is a step further in, a
         // preview and a board list are about one server, and a detail is about one the reader has.
-        case .browsingServers, .previewing, .choosingBoards, nil:
+        case .browsingServers, .previewing, .choosingBoards, .choosingLists, nil:
             return
         }
     }
@@ -673,7 +674,8 @@ final class ShellSession {
         guard stage?.surface != .pane else { return }
         switch stage {
         case .choosingBoards(_, .preview): backToPreview()
-        case .choosingBoards(_, .joined), .browsing, .browsingServers, .previewing, nil:
+        case .choosingBoards(_, .joined), .choosingLists, .browsing, .browsingServers, .previewing,
+            nil:
             // **A swipe on the server list is a cancel and not a step back to the protocols.** The
             // reader dismissed the browser, not a step of it; landing them on the protocol list
             // would keep a sheet up that they asked to be rid of. Back is the button for that, and
@@ -1093,7 +1095,7 @@ final class ShellSession {
         // `JoinSheet.leading(for:)` offers this button to none of them, so this is unreachable
         // from the sheet — and it declines by deciding rather than by falling through somebody
         // else's answer.
-        case .browsing, .previewing, .choosingBoards, nil:
+        case .browsing, .previewing, .choosingBoards, .choosingLists, nil:
             return
         }
     }
@@ -1267,6 +1269,8 @@ final class ShellSession {
         // a Clear was pending would otherwise leave that Clear's question standing over a row that
         // has gone.
         clearing = nil
+        // Before the first await: Home posts read before the Clear must not land after it.
+        stopReadingAsYou(host: host)
         await emoji.forget(host: host)
         emojis.forget(host: host)
         pictures.forget(host: host)
@@ -1327,6 +1331,7 @@ final class ShellSession {
     /// A Mastodon's door is `mastodon.signOut`, which `clear` reaches the same way (decision 10).
     func signOut(host: String) async {
         if kind(of: host) == .mastodon {
+            stopReadingAsYou(host: host)
             await mastodon.signOut(host: host)
         } else {
             await forums.forget(host: host.lowercased())
@@ -1351,9 +1356,106 @@ final class ShellSession {
             return
         }
         if rowRefusal?.host == host { rowRefusal = nil }
-        guard let failure = await mastodon.signIn(host: host, through: browser) else { return }
+        guard let failure = await mastodon.signIn(host: host, through: browser) else {
+            if mastodon.isSignedIn(host: host) { await readAsYou(host: host) }
+            return
+        }
         guard isAdded(host) else { return }
         rowRefusal = (host: host, key: Self.signInFailureKey(failure))
+    }
+
+    /// Home and the lists this source reads, read as the reader (#25) — right after a sign-in.
+    ///
+    /// Only through the signed-in door, so a source never signed in to asks nothing here. A read
+    /// that did not all come back is one sentence under the row; a server that ended the sign-in
+    /// is told to `mastodon`, which signs the row out and says so.
+    func readAsYou(host: String) async {
+        guard let door = mastodon.authorized(host: host) else { return }
+        await readingAsYou(host: host, key: "account.mastodon.home.progress") {
+            try await MastodonAccount(door: door, store: self.store).read()
+        }
+    }
+
+    /// The reader wants a different set of lists on a Mastodon they are signed in to — the boards
+    /// restate's shape (`changeBoards`): the server's lists are read, and the picker opens ticked
+    /// from what is chosen, intersected with what the server still has.
+    func changeLists(host raw: String) async {
+        let host = raw.lowercased()
+        guard Self.rowActsLive(at: stage, checking: checking),
+              let source = sources.first(where: { $0.host == host }),
+              SourceRow.canChooseLists(source.kind),
+              let door = mastodon.authorized(host: host)
+        else { return }
+        rowRefusal = nil
+        progressHost = host
+        errand += 1
+        let mine = errand
+        progress = ProgressReport(owner: .row(host: host), key: "account.source.lists.progress")
+        defer { progress = nil }
+        do {
+            let offered = try await MastodonAccount(door: door, store: store).lists()
+            guard mine == errand else { return }
+            let chosen = Set(source.lists.map(\.id)).intersection(offered.map(\.id))
+            stage = .choosingLists(ListChoice(host: host, offered: offered, ticked: chosen))
+        } catch MastodonAuthError.signedOut {
+            mastodon.endedByServer(host: host)
+        } catch let error where Cancellation.happened(error) {
+            progressHost = ""
+        } catch {
+            guard mine == errand else { return }
+            rowRefusal = (host: host, key: "account.source.lists.unread")
+        }
+    }
+
+    /// The reader pressed Done on the lists: `picks` becomes what this source reads, and the lists
+    /// not chosen before are read now. An empty pick is a choice too — Home alone.
+    func chooseLists(_ picks: [ListSubscription]) async {
+        guard case .choosingLists(let choice) = stage, !checking else { return }
+        errand += 1
+        stage = nil
+        guard let door = mastodon.authorized(host: choice.host) else { return }
+        progressHost = choice.host
+        await readingAsYou(host: choice.host, key: "account.source.lists.reading") {
+            try await MastodonAccount(door: door, store: self.store).choose(picks)
+        }
+    }
+
+    /// The reads as the reader in flight, per host — so a sign-out, Clear or Remove can stop them
+    /// before their posts land (`stopReadingAsYou`).
+    @ObservationIgnored private var readsAsYou: [String: Task<Void, Never>] = [:]
+
+    /// One errand of reads as the reader, reported in its row.
+    ///
+    /// **It reports only where nothing else is.** A sign-in can finish while another row's errand
+    /// is on the wire; this read then runs without a line rather than taking that row's line and
+    /// clearing it when it ends.
+    private func readingAsYou(
+        host: String, key: String, _ read: @escaping @MainActor () async throws -> Bool
+    ) async {
+        let report = ProgressReport(owner: .row(host: host), key: key)
+        let reports = progress == nil
+        if reports { progress = report }
+        let task = Task { @MainActor in
+            do {
+                let complete = try await read()
+                await adopt()
+                if !complete { rowRefusal = (host: host, key: "account.mastodon.read.partial") }
+            } catch MastodonAuthError.signedOut {
+                mastodon.endedByServer(host: host)
+            } catch {
+                // Stopped, or a reader walking away: nothing came in and there is nothing to say.
+            }
+        }
+        readsAsYou[host] = task
+        await task.value
+        if readsAsYou[host] == task { readsAsYou[host] = nil }
+        if reports, progress == report { progress = nil }
+    }
+
+    /// Stops the reads as the reader in flight for `host`: signed out, cleared or removed, nothing
+    /// they bring may land afterwards.
+    private func stopReadingAsYou(host: String) {
+        readsAsYou.removeValue(forKey: host.lowercased())?.cancel()
     }
 
     /// The sentence under a Mastodon row whose sign-in did not finish.
@@ -1399,6 +1501,7 @@ final class ShellSession {
         // The question has been answered, so nothing is pending any more — set before the awaits,
         // so no dialog state outlives the decision it was asking about.
         removing = nil
+        stopReadingAsYou(host: host)
         if progressHost.lowercased() == host {
             // **The errand in flight is about the server that just went, so it ends here.** This
             // is the same token `add`, `take` and `subscribe` compare before they write, bumped by

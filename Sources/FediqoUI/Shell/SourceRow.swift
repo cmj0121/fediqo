@@ -23,12 +23,15 @@ struct SourceRow: Identifiable, Hashable {
     /// than a gap where a fact would be.
     let profile: ProfileAnswer
     let canSignIn: Bool
+    /// Whether this device holds a sign-in for this source — what decides whether it offers lists.
+    let signedIn: Bool
 
-    init(source: Source, profile: ProfileAnswer) {
+    init(source: Source, profile: ProfileAnswer, signedIn: Bool = false) {
         self.source = source
         self.shape = DummyItem.shape(of: source.kind)
         self.profile = profile
         self.canSignIn = Self.canSignIn(source.kind)
+        self.signedIn = signedIn
     }
 
     /// Whether this protocol has a sign-in for the reader to be offered.
@@ -148,6 +151,17 @@ struct SourceRow: Identifiable, Hashable {
         }
     }
 
+    /// Whether this protocol has lists a signed-in reader chooses between (#25). **No `default:`**,
+    /// `canChangeBoards`' shape: `MastodonAccount` reads Mastodon's lists and nothing else's.
+    static func canChooseLists(_ kind: ProtocolKind) -> Bool {
+        switch kind {
+        case .mastodon: true
+        case .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial,
+            .discourse, .discuz, .unknown:
+            false
+        }
+    }
+
     /// The sign-in control's spoken label, by what this device last saw.
     ///
     /// **A toggle and not two controls**, because the reader has one relationship with a forum and
@@ -225,6 +239,8 @@ extension SourceRow {
     enum Control: String, CaseIterable, Identifiable {
         case signIn
         case boards
+        /// A signed-in Mastodon's lists (#25) — the boards control's counterpart, never beside it.
+        case lists
         case clear
         case remove
 
@@ -252,6 +268,8 @@ extension SourceRow {
             // the neutral answer for the day a control is added before it.
             case .signIn: ShellSpace.snug
             case .boards: ShellSpace.tight
+            // Bound to Sign in as Boards is, and for its reason: it changes what this device reads.
+            case .lists: ShellSpace.tight
             case .clear: ShellSpace.snug
             case .remove: ShellSpace.snug
             }
@@ -273,11 +291,13 @@ extension SourceRow {
     ///
     /// The result is a filter of `Control.allCases`, so it keeps the declared order and with it the
     /// suffix property `Control` documents.
-    static func controls(of source: Source) -> [Control] {
+    static func controls(of source: Source, signedIn: Bool = false) -> [Control] {
         Control.allCases.filter { control in
             switch control {
             case .signIn: canSignIn(source.kind)
             case .boards: canChangeBoards(source.kind) && !source.boards.isEmpty
+            // Only as you: the lists are the account's, and a signed-out source has none to read.
+            case .lists: canChooseLists(source.kind) && signedIn
             // Every source this device holds can be emptied and let go of.
             case .clear, .remove: true
             }
@@ -298,6 +318,8 @@ extension SourceRow {
             return String(format: L10n.t(signInLabelKey(reached: signedIn)), source.host)
         case .boards:
             return String(format: L10n.t("account.source.boards.change"), source.host)
+        case .lists:
+            return String(format: L10n.t("account.source.lists.change"), source.host)
         // One key, one word, one call — the same Clear as Usage's, because it is one act
         // reached from two questions and not a duplicate of anything.
         case .clear:
@@ -450,7 +472,8 @@ extension SourceRow {
         // a larger gap would make a three-control row wider than a four-control one, and the list
         // would pick the narrower row's threshold and stack nothing. `lazy`, so the intermediate
         // array of control sets is never materialised on the launch screen.
-        rows.lazy.map { controls(of: $0.source) }.max { controlLine($0) < controlLine($1) } ?? []
+        rows.lazy.map { controls(of: $0.source, signedIn: $0.signedIn) }
+            .max { controlLine($0) < controlLine($1) } ?? []
     }
 }
 
@@ -572,6 +595,8 @@ struct SourceRowView: View {
     let clear: () -> Void
     let remove: () -> Void
     let changeBoards: () -> Void
+    /// A signed-in Mastodon's lists control. Defaulted, because only a row that draws it needs it.
+    var chooseLists: () -> Void = {}
     /// The row's own press: it opens what this server says about itself — decision 31.
     let open: () -> Void
 
@@ -623,7 +648,7 @@ struct SourceRowView: View {
     }
 
     /// The controls this row draws — decision 33, and the same list `controlLine` sums.
-    var controls: [SourceRow.Control] { SourceRow.controls(of: row.source) }
+    var controls: [SourceRow.Control] { SourceRow.controls(of: row.source, signedIn: signedIn) }
 
     var body: some View {
         // **Read once.** `regime` is asked twice below and each read runs the whole chain —
@@ -897,6 +922,7 @@ struct SourceRowView: View {
         switch control {
         case .signIn: "key"
         case .boards: "checklist"
+        case .lists: "list.bullet"
         case .clear: "eraser"
         case .remove: "trash"
         }
@@ -925,7 +951,7 @@ struct SourceRowView: View {
         guard actsLive else { return .dimmed }
         switch control {
         case .signIn: return .live(signedInInk)
-        case .boards: return .live(ShellChrome.inkDim(colorScheme))
+        case .boards, .lists: return .live(ShellChrome.inkDim(colorScheme))
         case .clear, .remove: return .live(ShellChrome.alarm(colorScheme))
         }
     }
@@ -983,6 +1009,7 @@ struct SourceRowView: View {
         switch control {
         case .signIn: signIn
         case .boards: changeBoards
+        case .lists: chooseLists
         case .clear: clear
         case .remove: remove
         }

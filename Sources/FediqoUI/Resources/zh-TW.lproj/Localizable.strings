@@ -314,7 +314,7 @@
 "account.sources.detail"         = "這個裝置讀的全部。按一列，看那個來源怎麼說它自己——它的名字、它的規模、它的版塊。移除其中一個，它的版塊和它的文章都會跟著走。";
 "account.sources.held"           = "每一個在這個裝置上還留著什麼，在「用量」裡。";
 /* M1 tail rev 4 — the compact row. What the marks on a row mean, said once for the list. */
-"account.sources.marks"          = "一列只帶它自己那個來源有的標記：登入、換版塊、清除它留在這裡的東西、移除它。";
+"account.sources.marks"          = "一列只帶它自己那個來源有的標記：登入、換版塊或列表、清除它留在這裡的東西、移除它。";
 "account.source.boards"          = "%1$d 個版塊：%2$@";
 "account.source.unread"          = "讀不到它的自我介紹。";
 "account.source.remove.label"    = "移除 %@，連同它留在這裡的東西";
@@ -359,3 +359,17 @@
 "account.mastodon.failed.keychain"    = "這個裝置無法保存 %@ 的登入。";
 "account.mastodon.ended.title"        = "這個來源已將你登出";
 "account.mastodon.ended.detail"       = "%@ 結束了這次登入。它帶進來的內容都還在；到「帳號」再登入一次，就能以你的身分閱讀。";
+
+/* #25 — Home and your lists, read as you, and choosing which lists. */
+"account.mastodon.home.progress"      = "正在讀你在 %@ 的首頁…";
+"account.mastodon.read.partial"       = "現在讀不到你在 %@ 的部分首頁和列表。";
+"account.source.lists.change"         = "選你在 %@ 上讀哪些列表";
+"account.source.lists.progress"       = "正在讀你在 %@ 的列表…";
+"account.source.lists.reading"        = "正在讀你在 %@ 選的列表…";
+"account.source.lists.unread"         = "現在讀不到你在 %@ 的列表。";
+"list.choose.title"                   = "你在 %@ 的列表";
+"list.choose.detail"                  = "挑這個裝置要讀的列表。首頁一定會讀。你挑的會取代你現在讀的。";
+"list.choose.none"                    = "你在這個來源上沒有列表。";
+"list.choose.done"                    = "完成";
+"list.choose.hint.on"                 = "讀這個列表";
+"list.choose.hint.off"                = "不再讀這個列表";

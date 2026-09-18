@@ -558,6 +558,7 @@ struct AccountPane: View {
                         clear: { askClear(row) },
                         remove: { askRemove(row) },
                         changeBoards: { Task { await changeBoards(row) } },
+                        chooseLists: { Task { await changeLists(row) } },
                         open: { openSource(row) }
                     )
                     // **Between rows and not after every one.** A rule under the last row is a
@@ -702,6 +703,12 @@ struct AccountPane: View {
     /// nothing.
     func changeBoards(_ row: SourceRow) async {
         await session.changeBoards(host: row.source.host)
+    }
+
+    /// A signed-in Mastodon row's lists control. **Changes nothing by itself** — it reads the
+    /// account's lists and opens the picker pre-ticked; Cancel loses nothing.
+    func changeLists(_ row: SourceRow) async {
+        await session.changeLists(host: row.source.host)
     }
 
     /// A row's Remove. **Destroys nothing** — it raises the question, and only the dialog's

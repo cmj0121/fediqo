@@ -218,6 +218,10 @@ enum JoinStage: Identifiable, Equatable {
     case previewing(SourcePreview, from: PreviewOrigin, ticked: Set<Int>)
     /// D28's pause: the forum's boards, and what the reader was doing when they got here.
     case choosingBoards(JoinOffer, from: BoardsOrigin)
+    /// A signed-in Mastodon's lists, and which of them this device reads (#25). Always about a
+    /// source the reader already has, so it is the boards restate's shape: Cancel, never Back.
+    /// Its ticks are list ids and live in the choice, not in `ticked`, which is a board's `fid`.
+    case choosingLists(ListChoice)
 
     /// Whether this stage goes away when the reader leaves the window.
     ///
@@ -243,7 +247,7 @@ enum JoinStage: Identifiable, Equatable {
         case .previewing(_, .field, _): false
         // The detail of a source already held is a thing to read, not a question to answer.
         case .previewing(_, .joined, _): false
-        case .choosingBoards: true
+        case .choosingBoards, .choosingLists: true
         }
     }
 
@@ -253,6 +257,7 @@ enum JoinStage: Identifiable, Equatable {
         case .browsingServers(let kind): "browsingServers:\(kind.rawValue)"
         case .previewing(let preview, _, _): "previewing:\(preview.host)"
         case .choosingBoards(let offer, _): "choosingBoards:\(offer.host)"
+        case .choosingLists(let choice): "choosingLists:\(choice.host)"
         }
     }
 
@@ -268,6 +273,8 @@ enum JoinStage: Identifiable, Equatable {
         case .browsing, .browsingServers: []
         case .previewing(_, _, let ticked): ticked
         case .choosingBoards(_, let origin): origin.ticked
+        // Lists are ticked by id, in the choice itself; there is no board here to tick.
+        case .choosingLists: []
         }
     }
 
@@ -282,7 +289,7 @@ enum JoinStage: Identifiable, Equatable {
         // Neither browsing step holds ticks, so both hand themselves back rather than rebuilding
         // a value equal to the one matched. Still exhaustive: a fifth stage breaks the build here
         // exactly as it did before.
-        case .browsing, .browsingServers: self
+        case .browsing, .browsingServers, .choosingLists: self
         case .previewing(let preview, let origin, _):
             .previewing(preview, from: origin, ticked: picked)
         case .choosingBoards(let offer, let origin):
@@ -301,6 +308,7 @@ enum JoinStage: Identifiable, Equatable {
         case .browsing, .browsingServers: nil
         case .previewing(let preview, _, _): preview.host
         case .choosingBoards(let offer, _): offer.host
+        case .choosingLists(let choice): choice.host
         }
     }
 
@@ -322,7 +330,7 @@ enum JoinStage: Identifiable, Equatable {
         // push a screenful in above the list and scroll the reader away from the row they
         // pressed. Decision 31, and `DESIGN-R2` §4.1.
         case .previewing(_, .joined, _): .sheet
-        case .choosingBoards: .sheet
+        case .choosingBoards, .choosingLists: .sheet
         }
     }
 
@@ -343,6 +351,7 @@ enum JoinStage: Identifiable, Equatable {
         case .previewing(_, .joined, _): nil
         case .choosingBoards(_, .preview(let preview, _)): preview
         case .choosingBoards(_, .joined): nil
+        case .choosingLists: nil
         }
     }
 
@@ -368,7 +377,7 @@ enum JoinStage: Identifiable, Equatable {
         case .previewing(_, .field, _): true
         // A detail covers the field: the reader cannot see what a second look would replace.
         case .previewing(_, .joined, _): false
-        case .choosingBoards: false
+        case .choosingBoards, .choosingLists: false
         }
     }
 }
@@ -478,6 +487,11 @@ struct JoinSheet: View {
                     String(format: L10n.t("board.choose.title"), offer.host),
                     L10n.t(Self.detailKey(for: origin))
                 )
+            case .choosingLists(let choice):
+                titled(
+                    String(format: L10n.t("list.choose.title"), choice.host),
+                    L10n.t("list.choose.detail")
+                )
             case nil:
                 EmptyView()
             }
@@ -542,6 +556,8 @@ struct JoinSheet: View {
             ScrollView { SourcePreviewView(preview: preview, surface: .sheet, origin: origin) }
         case .choosingBoards(let offer, _):
             BoardPickerList(offer: offer, picked: picked)
+        case .choosingLists(let choice):
+            ListPickerList(offered: choice.offered, picked: pickedLists)
         case nil:
             EmptyView()
         }
@@ -566,6 +582,21 @@ struct JoinSheet: View {
         Binding(
             get: { session.stage?.ticked ?? [] },
             set: { session.stage = session.stage?.ticking($0) }
+        )
+    }
+
+    /// The lists ticked, by id — read and written straight through to the stage, as `picked` is.
+    private var pickedLists: Binding<Set<String>> {
+        Binding(
+            get: {
+                guard case .choosingLists(let choice) = session.stage else { return [] }
+                return choice.ticked
+            },
+            set: { ticked in
+                guard case .choosingLists(var choice) = session.stage else { return }
+                choice.ticked = ticked
+                session.stage = .choosingLists(choice)
+            }
         )
     }
 
@@ -596,6 +627,12 @@ struct JoinSheet: View {
                 format: L10n.t("board.choose.count"),
                 picked.wrappedValue.count,
                 offer.boards.count
+            ))
+                .font(ShellType.reading)
+                .foregroundStyle(ShellChrome.inkDim(colorScheme))
+        } else if case .choosingLists(let choice) = session.stage {
+            Text(String(
+                format: L10n.t("board.choose.count"), choice.ticked.count, choice.offered.count
             ))
                 .font(ShellType.reading)
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
@@ -658,6 +695,8 @@ struct JoinSheet: View {
         // changes nothing. Split from the case above rather than folded, because the two are
         // different errands and `sheetDismissed()` already tells them apart the same way.
         case .choosingBoards(_, .joined): .cancel
+        // A choice about a source already held, so nothing is behind it: Cancel, as a restate.
+        case .choosingLists: .cancel
         case nil: nil
         }
     }
@@ -725,6 +764,13 @@ struct JoinSheet: View {
             // press that goes through**: that press would be a silent mass-unsubscribe, and the
             // honest route to reading none of a forum is Remove.
             .disabled(picked.wrappedValue.isEmpty)
+        // **Not disabled on an empty pick**, unlike boards: reading none of your lists is a real
+        // choice — Home is still read — and not a mass unsubscribe from the source.
+        case .choosingLists(let choice):
+            Button(L10n.t("list.choose.done")) {
+                Task { await session.chooseLists(choice.picks) }
+            }
+            .keyboardShortcut(.defaultAction)
         case .browsing, .browsingServers, nil:
             EmptyView()
         }
