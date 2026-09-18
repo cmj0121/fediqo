@@ -56,19 +56,13 @@ public struct MediaCache: MediaCopies {
     /// before its Clear reached the disk, or one no build ever cleared, leaves behind.
     public func keepOnly(hosts: some Sequence<String>) {
         let kept = Set(hosts.map(Self.folderName))
-        let folders = (try? FileManager.default.contentsOfDirectory(
-            at: directory, includingPropertiesForKeys: nil
-        )) ?? []
-        for folder in folders where !kept.contains(folder.lastPathComponent) {
+        for folder in hostFolders() where !kept.contains(folder.lastPathComponent) {
             try? FileManager.default.removeItem(at: folder)
         }
     }
 
     public func removeAll() {
-        let folders = (try? FileManager.default.contentsOfDirectory(
-            at: directory, includingPropertiesForKeys: nil
-        )) ?? []
-        for folder in folders { try? FileManager.default.removeItem(at: folder) }
+        keepOnly(hosts: [])
     }
 
     public func bytes(host: String) -> Int {
@@ -76,22 +70,28 @@ public struct MediaCache: MediaCopies {
     }
 
     /// Oldest written first, by modification date, so what goes is what has been kept longest.
-    /// A folder emptied by the trim goes too, so `keepOnly` and `bytes` see no husk of a host.
-    public func trim(toBytes cap: Int) {
-        let folders = (try? FileManager.default.contentsOfDirectory(
-            at: directory, includingPropertiesForKeys: nil
-        )) ?? []
-        let files = folders.flatMap(Self.files(in:))
+    /// A folder the trim emptied goes too, so `keepOnly` and `bytes` see no husk of a host.
+    @discardableResult
+    public func trim(toBytes cap: Int) -> Int {
+        let files = hostFolders().flatMap(Self.files(in:))
         var total = files.reduce(0) { $0 + $1.size }
-        guard total > cap else { return }
+        guard total > cap else { return total }
+        var touched = Set<URL>()
         for file in files.sorted(by: { $0.written < $1.written }) {
             guard total > cap else { break }
             try? FileManager.default.removeItem(at: file.url)
             total -= file.size
+            touched.insert(file.url.deletingLastPathComponent())
         }
-        for folder in folders where Self.files(in: folder).isEmpty {
+        for folder in touched where Self.files(in: folder).isEmpty {
             try? FileManager.default.removeItem(at: folder)
         }
+        return total
+    }
+
+    /// Every host's folder under `directory`.
+    private func hostFolders() -> [URL] {
+        (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
     }
 
     private static func files(in folder: URL) -> [(url: URL, size: Int, written: Date)] {

@@ -96,16 +96,15 @@ public struct FediqoRootView: View {
 
     public var body: some View {
         layout
-            // The reader's time policy holds from launch (#7): read before the store is adopted,
-            // then applied once and saved, so a policy set last run still binds what was kept.
+            // The reader's time window is set on the store once at launch, before the store is
+            // adopted, so a window chosen last run binds what was kept and everything read after
+            // (#7). `prefs` is its one owner; a change is handed on, and written only if it dropped.
             .task {
-                session.keepMonths = prefs.keepMonths
+                await session.keep(months: prefs.keepMonths)
                 await session.reloadFromStore()
-                await session.applyKeepPolicy()
             }
             .onChange(of: prefs.keepMonths) { _, months in
-                session.keepMonths = months
-                Task { await session.applyKeepPolicy() }
+                Task { await session.keep(months: months) }
             }
             .onChange(of: place) { old, new in
                 let accepted = availability.placing(old, as: new)

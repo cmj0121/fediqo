@@ -178,19 +178,16 @@
 "prefs.drop" = "Drop";
 "prefs.keep" = "Keep posts";
 "prefs.keep.forever" = "Forever";
+"prefs.keep.shorten.title" = "Keep only the latest %d months?";
+"prefs.keep.shorten.title.one" = "Keep only the latest %d month?";
+"prefs.keep.shorten.detail" = "Posts older than that go from this device now, and any read later are not kept. Every source stays joined. A longer window, or Forever, drops nothing.";
 "prefs.keep.months" = "Latest %d months";
 "prefs.keep.months.one" = "Latest %d month";
-"prefs.drop.once" = "Drop older posts now";
-"prefs.drop.once.months" = "Older than %d months";
-"prefs.drop.once.months.one" = "Older than %d month";
-"prefs.drop.once.title" = "Drop posts older than %d months?";
-"prefs.drop.once.title.one" = "Drop posts older than %d month?";
-"prefs.drop.once.detail" = "They go from this device now. Every source stays joined, and a post a source sends again is held again. Keep posts, above, does not change.";
 "prefs.drop.copies" = "Drop picture copies";
 "prefs.drop.copies.title" = "Drop every picture copy on this device?";
 "prefs.drop.copies.detail" = "The pictures held in memory and on disk go, from every source. Every post stays and still draws; its pictures are read again from their links as you scroll.";
 "prefs.drop.confirm" = "Drop";
-"prefs.drop.footer" = "Everything is kept forever unless you choose otherwise. Keep posts drops what is older now, and again every time Fediqo opens. Clear, on each source above, drops that source's pictures, emoji names and first posts; its posts stay. Picture copies on disk are capped, and the oldest go first.";
+"prefs.drop.footer" = "Everything is kept forever unless you choose otherwise. Keep posts drops what is older now, and holds everything read later to the same window. Clear, on each source above, drops that source's pictures, emoji names and first posts; its posts stay. Picture copies on disk are capped, and the oldest go first.";
 "prefs.cache.catalogue" = "%d emoji names, read";
 "prefs.cache.catalogue.none" = "No emoji names held";
 "prefs.cache.pictures" = "%d pictures";
@@ -241,6 +238,7 @@
 
 /* Unit F6 — the first posts this device is holding, in the inventory beside Clear. */
 "prefs.cache.posts" = "%d first posts";
+"prefs.cache.posts.one" = "%d first post";
 "prefs.cache.posts.none" = "No first posts held";
 
 /* Unit F6 — the boards under boards, drawn. */

@@ -172,7 +172,18 @@ final class ShellSession {
     var sources: [Source] = [] {
         didSet { forums.watch(forums: sources.filter { $0.kind == .discuz }.map(\.host)) }
     }
-    var notes: [Note] = []
+    var notes: [Note] = [] {
+        didSet { holdings = Holdings(notes: notes, per: heldPeriod) }
+    }
+
+    /// What `notes` holds, counted (#7) — rebuilt where `notes` is assigned or the breakdown
+    /// switches between week and month, never on a redraw.
+    private(set) var holdings = Holdings(notes: [], per: .month)
+
+    /// Whether the breakdown is by week or by month.
+    var heldPeriod: HeldPeriod = .month {
+        didSet { holdings = Holdings(notes: notes, per: heldPeriod) }
+    }
 
     /// How many times the reader has cleared a server — decision 14's press, counted.
     ///
@@ -1121,9 +1132,6 @@ final class ShellSession {
 
     /// What the store now holds, and the queries that draw it.
     private func adopt() async {
-        if let cutoff = KeepPolicy.cutoff(keepingMonths: keepMonths, from: Date()) {
-            await store.dropPosted(before: cutoff)
-        }
         sources = await store.sources()
         notes = await store.all()
         rebuildQueries()
@@ -1294,37 +1302,31 @@ final class ShellSession {
         cleared += 1
     }
 
-    /// Drops every picture copy this device holds, from every source — the drop by cache (#7).
-    ///
-    /// Memory and disk both, through the two picture caches; the rows and the index are left
-    /// alone, so every row still draws and reads its pictures from their hyperlinks again. What
-    /// is dropped is gone from disk the moment the queue reaches it, so it stays dropped after a
-    /// relaunch without a save. Bumps `cleared` for the emoji lines, as a Clear does.
+    /// The drop by cache (#7), and exactly one set: the pictures held in memory and on disk
+    /// (`ShellPictures`) and the emoji pictures held in memory (`EmojiCache`, which keeps none on
+    /// disk). Emoji names, first posts, sign-ins and the rows themselves are not in it: every row
+    /// still draws and reads its pictures from their hyperlinks again. The disk half is gone once
+    /// the queue reaches it, so it stays dropped after a relaunch without a save. Bumps `cleared`
+    /// for the emoji lines, as a Clear does.
     func dropCopies() {
         pictures.forgetAll()
         emojis.clear()
         cleared += 1
     }
 
-    /// How many months of posts the reader keeps, or `KeepPolicy.forever` (the default) — the
-    /// policy half of the drop by time (#7). Set from `DummyPrefs.keepMonths` at launch and on
-    /// every change; `adopt()` holds every read to it, so a join cannot bring older posts back.
-    var keepMonths = KeepPolicy.forever
-
-    /// Holds the store to `keepMonths`, and saves: what the app does at launch and when the
-    /// reader changes the policy. Keeping forever drops nothing.
-    func applyKeepPolicy(from now: Date = Date()) async {
-        await dropOlderThan(months: keepMonths, from: now)
-    }
-
-    /// Drops posts older than the latest `months` months, once, and saves so the drop holds after
-    /// a relaunch — the drop by time (#7). A `months` that is not a positive count is keeping
-    /// forever and drops nothing, and does not write.
-    func dropOlderThan(months: Int, from now: Date = Date()) async {
-        guard let cutoff = KeepPolicy.cutoff(keepingMonths: months, from: now) else { return }
-        await store.dropPosted(before: cutoff)
+    /// Keeps only the latest `months` months, or everything where nil — the drop by time (#7).
+    ///
+    /// The window is the store's, so every note read after this obeys it too. Where it dropped
+    /// something, the rows are read again and the store is written, so the drop holds after a
+    /// relaunch; where it dropped nothing — forever, a wider window, a launch with nothing old —
+    /// neither happens. Returns how many notes went.
+    @discardableResult
+    func keep(months: Int?, from now: Date = Date()) async -> Int {
+        let dropped = await store.setRetention(months: months, from: now)
+        guard dropped > 0 else { return 0 }
         notes = await store.all()
         await persist?()
+        return dropped
     }
 
     /// The reader is done being signed in to one forum, and nothing else about it changes.
