@@ -62,8 +62,8 @@ public struct BoardSubscription: Identifiable, Hashable, Sendable {
 /// (D26). Everything per-server in this app is keyed by host: the picture cache's tags, the emoji
 /// catalogue, `Clear`, the join list. A reader subscribing to eight boards would otherwise become
 /// eight servers in every one of them, and pressing Clear on one of the eight would mean
-/// something nobody could predict. A board is a *query within* a source — which is the thing the
-/// rail already draws (D27) — so `id` stays the host and the subscriptions ride along.
+/// something nobody could predict. A board only chooses what a source fetches — the timelines
+/// are All and Trends, not one per board — so `id` stays the host and the subscriptions ride along.
 ///
 /// **A note's copy of this is a stamp, not a live view.** `Note.source` records which server the
 /// note came from; the subscription list that matters is the one on the source in the store,

@@ -25,9 +25,8 @@ struct TimelinePane: View {
     @State private var toastTick = 0
     @Environment(\.colorScheme) private var colorScheme
 
-    /// **Asked of the session rather than rebuilt from the id.** A board query carries which
-    /// board it is; an id carries only that it is one — see `ShellSession.timeline(for:)`.
-    private var timeline: DummyTimeline { session.timeline(for: session.timelineID) }
+    /// The current query. An id is all a query is, so it is rebuilt from the one selected.
+    private var timeline: DummyTimeline { DummyTimeline(id: session.timelineID ?? "") }
 
     private var items: [DummyItem] { timeline.items(from: session.notes, among: session.sources) }
 
