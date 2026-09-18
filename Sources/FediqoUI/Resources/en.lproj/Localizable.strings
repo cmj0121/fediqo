@@ -78,10 +78,8 @@
 "timeline.add" = "Add";
 "timeline.add.toast" = "A new named query stays dummy.";
 "timeline.tab.all" = "All";
-"timeline.tab.work" = "Work";
 "timeline.tab.trends" = "Trends";
 "timeline.rule.all" = "In time order, nothing filtered.";
-"timeline.rule.work" = "These sources, only work-related items.";
 "timeline.rule.trends" = "Trending notes, in time order.";
 "timeline.empty.title" = "Nothing has arrived";
 "timeline.empty.detail" = "Public notes from the sources you added land here, newest first.";
@@ -232,9 +230,6 @@
 "board.unread.refused" = "%1$@ — this forum would not let this app read it (HTTP %2$d).";
 "board.unread.unreadable" = "%@ — this forum answered, but there was no thread list on that board.";
 "board.unread.network" = "%@ — that board could not be reached.";
-"timeline.rule.board" = "%1$@ on %2$@, newest first.";
-"timeline.empty.board.title" = "This board has nothing here";
-"timeline.empty.board.detail" = "Threads read from this board land here, newest first.";
 
 /* Unit F6 — the first posts this device is holding, in the inventory beside Clear. */
 "prefs.cache.posts" = "%d first posts";

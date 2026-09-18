@@ -62,8 +62,8 @@ public struct BoardSubscription: Identifiable, Hashable, Sendable {
 /// (D26). Everything per-server in this app is keyed by host: the picture cache's tags, the emoji
 /// catalogue, `Clear`, the join list. A reader subscribing to eight boards would otherwise become
 /// eight servers in every one of them, and pressing Clear on one of the eight would mean
-/// something nobody could predict. A board is a *query within* a source — which is the thing the
-/// rail already draws (D27) — so `id` stays the host and the subscriptions ride along.
+/// something nobody could predict. A board only chooses what a source fetches — the timelines
+/// are All and Trends, not one per board — so `id` stays the host and the subscriptions ride along.
 ///
 /// **A note's copy of this is a stamp, not a live view.** `Note.source` records which server the
 /// note came from; the subscription list that matters is the one on the source in the store,
@@ -234,12 +234,11 @@ public struct Note: Identifiable, Hashable, Sendable {
     public let board: String?
     /// What the source calls that section, as against what it *shows* the reader.
     ///
-    /// **A name is not an identity and must not be used as one.** A board's heading on its own
-    /// page and its name in the forum's index are written by hand and are free to differ — they
-    /// were byte-identical on all twenty-two boards measured, which is exactly the kind of fact
-    /// that is true until it is not. Matching a subscription to its threads by name turns any
-    /// such difference, or an administrator renaming a board between two reads, into a tab that
-    /// silently draws nothing: visibly wrong, but wrong with no error anywhere to explain it.
+    /// **Kept as data, and persisted, for a later per-board filter.** Nothing draws a board on
+    /// its own today — the timelines are All and Trends — but a filter that does will need the
+    /// section's identity, and a name is not one: a board's heading on its own page and its name
+    /// in the forum's index are written by hand and are free to differ, and an administrator can
+    /// rename a board between two reads.
     ///
     /// A `String` rather than the number Discuz! uses, because a section id is whatever the
     /// source says it is and Discourse's is its own; this is the identity, not the format.

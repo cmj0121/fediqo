@@ -698,12 +698,9 @@ public struct FediqoRootView: View {
         return true
     }
 
-    /// **Resolved out of the session's list, not rebuilt from the id.** A board query knows which
-    /// board it is by carrying it; an id alone says only that it is one. Reconstructing here
-    /// would give the keys a stream that matched no note, so `j` and `k` would move through
-    /// nothing on exactly the tabs this unit added. See `ShellSession.timeline(for:)`.
+    /// The stream `j` and `k` move through: the current query, All or Trends, over the store.
     private var streamItems: [DummyItem] {
-        session.timeline(for: session.timelineID).items(from: session.notes, among: session.sources)
+        session.currentTimeline.items(from: session.notes)
     }
 
     /// Whichever list is in front: the open conversation, or the stream under it.
@@ -816,10 +813,9 @@ public struct FediqoRootView: View {
     /// Tab only rotates named queries on the timeline. Elsewhere it is the platform's.
     private func rotateTimelineTab(by step: Int) -> Bool {
         guard place == .timeline else { return false }
-        let ids = session.queries.map(\.id)
-        guard !ids.isEmpty else { return false }
-        let current = session.timelineID ?? ids[0]
-        session.timelineID = DummyCommand.advanced(ids, from: current, by: step)
+        let queries = session.queries
+        guard !queries.isEmpty else { return false }
+        session.timelineID = DummyCommand.advanced(queries, from: session.currentTimeline, by: step)
         return true
     }
 

@@ -25,11 +25,9 @@ struct TimelinePane: View {
     @State private var toastTick = 0
     @Environment(\.colorScheme) private var colorScheme
 
-    /// **Asked of the session rather than rebuilt from the id.** A board query carries which
-    /// board it is; an id carries only that it is one — see `ShellSession.timeline(for:)`.
-    private var timeline: DummyTimeline { session.timeline(for: session.timelineID) }
+    private var timeline: TimelineQuery { session.currentTimeline }
 
-    private var items: [DummyItem] { timeline.items(from: session.notes, among: session.sources) }
+    private var items: [DummyItem] { timeline.items(from: session.notes) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -235,12 +233,8 @@ struct TimelinePane: View {
 
     /// The title, the queries, and the rule the current one is under.
     ///
-    /// **The pills scroll, because there can now be thirty-five of them.** Two queries fit beside
-    /// a title; `all` plus the 33 boards of `install-a.example` does not, and an `HStack` asked to
-    /// hold them squeezes every pill until none of the names can be read — at phone width it
-    /// squeezes them out of the window entirely. So the row scrolls sideways and the rule moves
-    /// below it, where it has the full width a sentence wants rather than whatever a row of
-    /// thirty-five pills left over.
+    /// The pills are All and Trends. The row scrolls so a narrow window or a larger text size
+    /// does not squeeze the names, and the rule sits below them at full width.
     private var header: some View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
             HStack(alignment: .center, spacing: ShellSpace.step) {
@@ -270,14 +264,12 @@ struct TimelinePane: View {
         .accessibilityElement(children: .contain)
     }
 
-    private func queryPill(_ query: DummyTimeline) -> some View {
-        let selected = query.id == session.timelineID
+    private func queryPill(_ query: TimelineQuery) -> some View {
+        let selected = query == session.timelineID
         return Button {
-            session.timelineID = query.id
+            session.timelineID = query
         } label: {
-            // A board's name is whatever the forum called it, and some of them are long —
-            // `路由器讨论区（网络与网络设备讨论）` is a real one. One line, at its own width, and
-            // the row it sits in scrolls.
+            // One line at its own width; the row it sits in scrolls rather than squeezing it.
             Text(query.name)
                 .lineLimit(1)
                 .fixedSize()

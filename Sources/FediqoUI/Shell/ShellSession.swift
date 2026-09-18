@@ -165,8 +165,12 @@ final class ShellSession {
     /// reader with a sentence naming none of what they chose.
     var unreadAll = 0
 
-    var queries: [DummyTimeline] = DummyTimeline.shipped
-    var timelineID: String?
+    var queries: [TimelineQuery] = []
+    /// The query in front. Nothing only while nothing is joined; not persisted.
+    var timelineID: TimelineQuery?
+
+    /// The query the timeline draws: the one selected, or All.
+    var currentTimeline: TimelineQuery { timelineID ?? .all }
     /// Every change is handed on to `forums`, which is the one place that knows which of them
     /// are forums a sign-in can be held for.
     var sources: [Source] = [] {
@@ -1139,10 +1143,9 @@ final class ShellSession {
 
     /// The tabs, rebuilt from what is actually joined.
     ///
-    /// **A forum is not offered Trends** (D27, and the open item this branch recorded against
-    /// itself): a join used to set the list to `all` and `trends` whatever it had joined, and a
-    /// forum has no trending endpoint at all, so that tab was permanently empty. An empty tab is
-    /// a promise the app cannot keep, and the reader has no way to tell it from a quiet hour.
+    /// **All and Trends are the only two queries of this store.** Boards stay a property of
+    /// the source — what this device fetches next — not a third timeline. A forum is not
+    /// offered Trends: it has no trending read, and an empty tab is a promise the app cannot keep.
     ///
     /// Rebuilt rather than appended to, because a second join changes what the first one's tabs
     /// should be: joining a forum after a microblog must not take Trends away, and the only way
@@ -1153,20 +1156,9 @@ final class ShellSession {
             timelineID = nil
             return
         }
-        var made = [DummyTimeline(id: "all")]
-        if sources.contains(where: { Self.hasTrends($0.kind) }) {
-            made.append(DummyTimeline(id: "trends"))
-        }
-        for source in sources {
-            for board in source.boards {
-                made.append(DummyTimeline(
-                    board: BoardQuery(host: source.host, fid: board.fid, name: board.name)
-                ))
-            }
-        }
-        queries = made
-        if timelineID == nil || !made.contains(where: { $0.id == timelineID }) {
-            timelineID = made.first?.id
+        queries = sources.contains(where: { Self.hasTrends($0.kind) }) ? [.all, .trends] : [.all]
+        if !queries.contains(where: { $0 == timelineID }) {
+            timelineID = .all
         }
     }
 
@@ -1181,20 +1173,10 @@ final class ShellSession {
             .gotosocial:
             true
         // Neither forum has one. Discourse publishes no trending read this app takes, and
-        // Discuz! publishes a page; what a forum has instead is boards, and those are the tabs.
+        // Discuz! publishes a page. A forum's boards choose what is fetched; they are not tabs.
         case .discourse, .discuz, .unknown:
             false
         }
-    }
-
-    /// The query a timeline id names, resolved out of the list that knows the names.
-    ///
-    /// A board's tab cannot be rebuilt from its id — see `DummyTimeline.board` — so a view that
-    /// reconstructed one would draw a tab that matched no note. Falls back to a plain query for
-    /// `all`, `trends`, and for nothing selected at all.
-    func timeline(for id: String?) -> DummyTimeline {
-        guard let id else { return DummyTimeline(id: "") }
-        return queries.first { $0.id == id } ?? DummyTimeline(id: id)
     }
 
     /// The client a join of this host should go through.
