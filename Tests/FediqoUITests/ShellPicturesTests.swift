@@ -7,6 +7,7 @@ import Testing
 import UniformTypeIdentifiers
 
 @testable import FediqoUI
+import FediqoPersistence
 
 /// What the cache decides without a screen: which key a picture is filed under, how much of one
 /// it will decode, what it throws away, what it declines outright, and which kinds of nothing it
@@ -1453,6 +1454,171 @@ struct ShellPicturesTests {
 
         #expect(cache.picture(address(1), scale: 2, tier: .deck, host: beta) != nil)
         #expect(cache.sources[key(1)] == [beta])
+    }
+
+    // MARK: Copies on this device
+
+    private func scratch() -> URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    }
+
+    /// Issue #4: "a copy already on this device". A picture fetched once is kept on disk, and a
+    /// later launch — a new cache, the same folder — draws it without asking the network at all.
+    @Test("A picture fetched once is drawn from this device after a relaunch, without the network")
+    func diskCopySurvivesRelaunch() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let png = try picture(width: 32, height: 32, bits: 8)
+        let online = Counting(png: png)
+        let first = ShellPictures(http: online, disk: try MediaCache(directory: dir))
+        await first.fetch(address(1), scale: 2, tier: .deck, host: alpha)
+        await first.diskSettled()
+        #expect(await online.requests == 1)
+        #expect(try MediaCache(directory: dir).data(host: alpha, url: address(1)) == png)
+
+        let offline = Counting(png: Data())
+        let relaunched = ShellPictures(http: offline, disk: try MediaCache(directory: dir))
+        await relaunched.fetch(address(1), scale: 2, tier: .deck, host: alpha)
+        #expect(await offline.requests == 0, "a copy on this device went to the network anyway")
+        #expect(relaunched.picture(address(1), scale: 2, tier: .deck, host: alpha) != nil)
+    }
+
+    @Test("A copy kept under one host is not drawn for another")
+    func diskCopyIsPerHost() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let png = try picture(width: 32, height: 32, bits: 8)
+        let disk = try MediaCache(directory: dir)
+        try disk.store(png, host: alpha, url: address(1))
+        let http = Counting(png: png)
+        let cache = ShellPictures(http: http, disk: disk)
+        await cache.fetch(address(1), scale: 2, tier: .deck, host: beta)
+        await cache.diskSettled()
+        #expect(await http.requests == 1)
+        #expect(disk.data(host: beta, url: address(1)) == png)
+    }
+
+    @Test("A copy that will not decode is fetched again, and replaced")
+    func brokenDiskCopy() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let png = try picture(width: 32, height: 32, bits: 8)
+        let disk = try MediaCache(directory: dir)
+        try disk.store(Data("not a picture".utf8), host: alpha, url: address(1))
+        let http = Counting(png: png)
+        let cache = ShellPictures(http: http, disk: disk)
+        await cache.fetch(address(1), scale: 2, tier: .deck, host: alpha)
+        await cache.diskSettled()
+        #expect(await http.requests == 1)
+        #expect(cache.picture(address(1), scale: 2, tier: .deck, host: alpha) != nil)
+        #expect(disk.data(host: alpha, url: address(1)) == png)
+    }
+
+    @Test("A copy that will not decode is deleted, even when the network cannot replace it")
+    func brokenDiskCopyDeleted() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let disk = try MediaCache(directory: dir)
+        try disk.store(Data("not a picture".utf8), host: alpha, url: address(1))
+        let cache = ShellPictures(http: Offline(code: .notConnectedToInternet), disk: disk)
+        await cache.fetch(address(1), scale: 2, tier: .deck, host: alpha)
+        await cache.diskSettled()
+        #expect(disk.data(host: alpha, url: address(1)) == nil)
+    }
+
+    /// The launch sweep: copies of a server no longer read go before any picture is asked for,
+    /// and the ones still read stay and are drawn.
+    @Test("At launch the copies of servers no longer read are dropped, the rest drawn")
+    func launchKeepsOnlyReadServers() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let png = try picture(width: 32, height: 32, bits: 8)
+        let disk = try MediaCache(directory: dir)
+        try disk.store(png, host: alpha, url: address(1))
+        try disk.store(png, host: beta, url: address(2))
+        let copies = DiskCopies(disk)
+        copies.keepOnly(hosts: [alpha])
+        let cache = ShellPictures(http: Offline(code: .notConnectedToInternet))
+        cache.disk = copies
+        await cache.fetch(address(1), scale: 2, tier: .deck, host: alpha)
+        await cache.diskSettled()
+        #expect(cache.picture(address(1), scale: 2, tier: .deck, host: alpha) != nil)
+        #expect(disk.data(host: beta, url: address(2)) == nil)
+    }
+
+    @Test("Clear forgets the copies on this device, for that host only")
+    func clearForgetsDiskCopies() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let png = try picture(width: 32, height: 32, bits: 8)
+        let cache = ShellPictures(http: Counting(png: png), disk: try MediaCache(directory: dir))
+        let session = ShellSession(http: FixtureHTTP(), store: ItemStore(), pictures: cache)
+        await cache.fetch(address(1), scale: 2, tier: .deck, host: alpha)
+        await cache.fetch(address(2), scale: 2, tier: .deck, host: beta)
+
+        await session.clear(host: alpha)
+        await cache.diskSettled()
+
+        let disk = try MediaCache(directory: dir)
+        #expect(disk.data(host: alpha, url: address(1)) == nil, "Clear left a copy on disk")
+        #expect(disk.data(host: beta, url: address(2)) == png)
+    }
+
+    /// The guard that stops a Clear being undone by work already in the air, on its disk half:
+    /// bytes that land after every host was struck off are not written back under the one cleared.
+    @Test("A fetch that lands after its host was cleared keeps nothing on disk", .timeLimit(.minutes(1)))
+    func clearedInFlightKeepsNothing() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let gate = Gate()
+        let http = Holding(png: try picture(width: 32, height: 32, bits: 8), gate: gate)
+        let cache = ShellPictures(http: http, disk: try MediaCache(directory: dir))
+        let rescued = Signal()
+        let watchdog = Task { await Self.watchdog(gate, rescued: rescued) }
+
+        let running = Task { @MainActor in
+            await cache.fetch(address(1), scale: 2, tier: .deck, host: alpha)
+        }
+        await http.whenHolding(1)
+        cache.forget(host: alpha)
+        await gate.open()
+        await running.value
+        watchdog.cancel()
+        #expect(!rescued.fired, "the watchdog opened the gate; the test never got there itself")
+
+        await cache.diskSettled()
+        #expect(try MediaCache(directory: dir).data(host: alpha, url: address(1)) == nil)
+    }
+
+    @Test("A fetch the asker cleared is kept on disk under the source still waiting", .timeLimit(.minutes(1)))
+    func clearedAskerKeepsUnderJoiner() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let gate = Gate()
+        let http = Holding(png: try picture(width: 32, height: 32, bits: 8), gate: gate)
+        let cache = ShellPictures(http: http, disk: try MediaCache(directory: dir))
+        let rescued = Signal()
+        let watchdog = Task { await Self.watchdog(gate, rescued: rescued) }
+
+        let first = Task { @MainActor in
+            await cache.fetch(address(1), scale: 2, tier: .deck, host: alpha)
+        }
+        await http.whenHolding(1)
+        let second = Task { @MainActor in
+            await cache.fetch(address(1), scale: 2, tier: .deck, host: beta)
+        }
+        await spin(until: { cache.inFlight[self.key(1)]?.hosts.count == 2 })
+        cache.forget(host: alpha)
+        await gate.open()
+        await first.value
+        await second.value
+        watchdog.cancel()
+        #expect(!rescued.fired, "the watchdog opened the gate; the test never got there itself")
+
+        await cache.diskSettled()
+        let disk = try MediaCache(directory: dir)
+        #expect(disk.data(host: alpha, url: address(1)) == nil)
+        #expect(disk.data(host: beta, url: address(1)) != nil)
     }
 
     // MARK: Helpers

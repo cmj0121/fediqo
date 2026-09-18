@@ -36,15 +36,12 @@ struct SourcePageTests {
     }
 
     /// Starts a look and returns once it is **provably** parked on the wire, with the task to
-    /// await after the gate opens. The 5s watchdog is the standing pattern: `.timeLimit` does not
+    /// await after the gate opens. `hangGuard` is the standing pattern: `.timeLimit` does not
     /// rescue a task parked on a continuation.
     private func heldLook(
         _ session: ShellSession, _ http: GatedHTTP, host: String
     ) async -> (Task<Void, Never>, Task<Void, Never>) {
-        let watchdog = Task {
-            try? await Task.sleep(for: .seconds(5))
-            await http.gate.open()
-        }
+        let watchdog = hangGuard(http.gate)
         session.hostname = host
         let look = Task { await session.add() }
         #expect(await spun { session.checking }, "the look never reached the wire")
