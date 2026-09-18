@@ -89,6 +89,15 @@ struct StoreFileTests {
         #expect(loaded.sources.first?.kind == .discuz)
     }
 
+    @Test("A note seen in no list comes back seen in no list")
+    func emptyOrigins() throws {
+        let file = try StoreFile(database: DatabaseQueue())
+        let source = Source(host: "first.example", kind: .mastodon)
+        let note = Note(id: "1", source: source, author: "Ada", handle: "", body: "b", postedAt: origin, origins: [])
+        try file.save(sources: [source], notes: [note])
+        #expect(try file.load().notes.first?.origins == [])
+    }
+
     @Test("A second StoreFile on the same directory reads what the first saved")
     func reopenSameDirectory() throws {
         let dir = scratch()
