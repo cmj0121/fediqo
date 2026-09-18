@@ -28,9 +28,9 @@ struct PressTests {
     }
 
     private static let list = [item("a", attachments: 3), item("b", spoiler: "Blood"), item("c")]
-    private static let a = DummyItem.rowID(host: "first.example", note: "a")
-    private static let b = DummyItem.rowID(host: "first.example", note: "b")
-    private static let c = DummyItem.rowID(host: "first.example", note: "c")
+    private static let a = NoteKey(host: "first.example", id: "a").rowID
+    private static let b = NoteKey(host: "first.example", id: "b").rowID
+    private static let c = NoteKey(host: "first.example", id: "c").rowID
 
     @Test("Where a press lands, in all five cases")
     func whereAPressLands() {

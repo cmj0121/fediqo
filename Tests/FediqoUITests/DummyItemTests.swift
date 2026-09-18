@@ -196,6 +196,31 @@ struct DummyItemTests {
         }
     }
 
+    /// One status two instances carry is two rows (#10), and SwiftUI tells rows apart by `id` — so
+    /// the two must not share one, or the list draws a single row twice and loses the other. The
+    /// note's own spelling stays on `noteID`, which is what a thread and a board query read back.
+    @Test("One note through two hosts is two row ids and one note id")
+    func twoHostsGiveTwoRowIDs() {
+        let uri = "https://origin.example/users/ada/statuses/1"
+        func row(_ host: String) -> DummyItem {
+            DummyItem(Note(
+                id: uri,
+                source: Source(host: host, kind: .mastodon),
+                author: "ada",
+                handle: "@ada@origin.example",
+                body: "",
+                postedAt: .distantPast,
+                origins: [.publicTimeline]
+            ), among: [])
+        }
+        let first = row("first.example")
+        let second = row("second.example")
+        #expect(first.id != second.id)
+        #expect(first.noteID == uri)
+        #expect(second.noteID == uri)
+        #expect(first.id == NoteKey(host: "first.example", id: uri).rowID)
+    }
+
     /// **One sentence for both surfaces that draw a way out.**
     ///
     /// A timeline row builds its name from a `DummyItem`; a Discuz! reply has no `DummyItem` to
