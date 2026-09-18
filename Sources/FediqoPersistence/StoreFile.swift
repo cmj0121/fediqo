@@ -69,6 +69,17 @@ private var migrator: DatabaseMigrator {
             t.column("origins", .text).notNull()
         }
     }
+    migrator.registerMigration("v2-row-facts") { db in
+        try db.alter(table: "note") { t in
+            t.add(column: "handle", .text).notNull().defaults(to: "")
+            t.add(column: "board", .text)
+            t.add(column: "board_id", .text)
+            t.add(column: "reply_handle", .text)
+            t.add(column: "boosted_by", .text)
+            t.add(column: "spoiler", .text)
+            t.add(column: "sensitive", .boolean)
+        }
+    }
     return migrator
 }
 
@@ -108,8 +119,15 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
     var id: String
     var kind: String
     var author: String
+    var handle: String
     var body: String
     var title: String?
+    var board: String?
+    var board_id: String?
+    var reply_handle: String?
+    var boosted_by: String?
+    var spoiler: String?
+    var sensitive: Bool?
     var posted_at: Date
     var origins: String
 
@@ -118,8 +136,15 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
         id = note.id
         kind = note.source.kind.rawValue
         author = note.author
+        handle = note.handle
         body = note.body
         title = note.title
+        board = note.board
+        board_id = note.boardID
+        reply_handle = note.reply?.handle
+        boosted_by = note.boostedBy
+        spoiler = note.spoiler
+        sensitive = note.sensitive
         posted_at = note.postedAt
         origins = note.origins.map(\.rawValue).sorted().joined(separator: ",")
     }
@@ -132,11 +157,17 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             id: id,
             source: Source(host: host, kind: ProtocolKind(rawValue: kind) ?? .unknown),
             author: author,
-            handle: "",
+            handle: handle,
             body: body,
             title: title,
+            board: board,
+            boardID: board_id,
             postedAt: posted_at,
-            origins: originSet.isEmpty ? [.publicTimeline] : originSet
+            origins: originSet.isEmpty ? [.publicTimeline] : originSet,
+            reply: reply_handle.map { Reply(handle: $0) },
+            boostedBy: boosted_by,
+            sensitive: sensitive,
+            spoiler: spoiler
         )
     }
 }
