@@ -78,14 +78,12 @@ public struct DummyMarks: Hashable, Sendable {
 }
 
 public struct DummyItem: Identifiable, Hashable, Sendable {
-    /// Unique across sources: two hosts carrying one URI are two rows (#10).
+    /// Unique across sources: two hosts carrying one URI are two rows (#10). Core's `NoteKey`,
+    /// spelled as a string, so the list and the store tell rows apart by one rule.
     public let id: String
     /// The item's id as the source sent it.
     public let noteID: String
 
-    public static func rowID(host: String, note: String) -> String {
-        "\(host.lowercased())\u{1e}\(note)"
-    }
     public let source: DummySource
     public let author: String
     public let handle: String?
@@ -250,7 +248,7 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// it is a signature change and nothing else.
     public init(_ note: Note, among sources: [Source]) {
         noteID = note.id
-        id = Self.rowID(host: note.source.host, note: note.id)
+        id = note.key.rowID
         source = DummySource.unsigned(note.source.host, kind: Self.shape(of: note.source.kind))
         author = note.author
         handle = note.handle

@@ -2,20 +2,11 @@ import Foundation
 
 /// Notes this device is holding, until it forgets them.
 public actor ItemStore {
-    /// One row per source and item. Two hosts carrying the same Mastodon URI are two rows (#10).
-    private struct NoteKey: Hashable, Sendable {
-        let host: String
-        let id: String
-    }
-
     private var sourceList: [Source] = []
+    /// One row per `NoteKey`: two hosts carrying the same Mastodon URI are two rows (#10).
     private var notes: [NoteKey: Note] = [:]
 
     public init() {}
-
-    private static func key(of note: Note) -> NoteKey {
-        NoteKey(host: note.source.host, id: note.id)
-    }
 
     public func add(_ source: Source) {
         if sourceList.contains(where: { $0.host == source.host }) { return }
@@ -46,7 +37,7 @@ public actor ItemStore {
     /// is two rows (#10). Merging those into one thread is later.
     public func ingest(_ incoming: [Note]) {
         for note in incoming {
-            let key = Self.key(of: note)
+            let key = note.key
             if var existing = notes[key] {
                 existing.origins.formUnion(note.origins)
                 notes[key] = existing
