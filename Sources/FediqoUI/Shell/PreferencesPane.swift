@@ -140,6 +140,7 @@ struct PreferencesPane: View {
                     .font(ShellType.name)
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                 catalogueLine(for: source)
+                heldLine(source, in: session)
                 pictureLine(source, in: session)
                 postLine(source, in: session)
                 passwordLine(source, in: session)
@@ -183,6 +184,24 @@ struct PreferencesPane: View {
             } else {
                 reading(Text(L10n.t("prefs.cache.catalogue.none")))
             }
+        }
+    }
+
+    @ViewBuilder
+    private func heldLine(_ source: Source, in session: ShellSession) -> some View {
+        let held = session.notes.filter { $0.source.host == source.host }
+        if held.isEmpty {
+            reading(Text(L10n.t("prefs.held.posts.none")))
+        } else {
+            let now = Date()
+            let month = held.filter {
+                Calendar.current.isDate($0.postedAt, equalTo: now, toGranularity: .month)
+            }.count
+            reading(
+                Text(String(format: L10n.t("prefs.held.posts"), held.count))
+                    + Text(verbatim: " · ")
+                    + Text(String(format: L10n.t("prefs.held.month"), month))
+            )
         }
     }
 

@@ -48,9 +48,12 @@ public struct FediqoRootView: View {
     public init(
         http: any HTTPClient = URLSessionClient(),
         store: ItemStore = ItemStore(),
-        forums: ForumSessions = ForumSessions()
+        forums: ForumSessions = ForumSessions(),
+        persist: (@MainActor () async -> Void)? = nil
     ) {
-        _session = State(initialValue: ShellSession(http: http, store: store, forums: forums))
+        let session = ShellSession(http: http, store: store, forums: forums)
+        session.persist = persist
+        _session = State(initialValue: session)
     }
 
     private var availability: ShellAvailability { session.availability }

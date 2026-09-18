@@ -22,7 +22,7 @@ struct FediqoApp: App {
 
     var body: some Scene {
         WindowGroup {
-            FediqoRootView(store: store, forums: forums)
+            FediqoRootView(store: store, forums: forums, persist: save)
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .background {
                         Task { await save() }

@@ -207,6 +207,9 @@ final class ShellSession {
     /// The Account search field is first responder; dummy keys must not steal its typing.
     var searchFocused = false
 
+    /// Writes the store to disk. Set by the app so Clear and time-drop survive a relaunch.
+    @ObservationIgnored var persist: (@MainActor () async -> Void)?
+
     init(
         http: any HTTPClient,
         store: ItemStore = ItemStore(),
@@ -1276,7 +1279,18 @@ final class ShellSession {
         // pictures and left the posts would empty half of what the reader was looking at.
         posts.forget(host: host)
         await forums.forget(host: host)
+        await store.dropNotes(host: host)
+        await adopt()
         cleared += 1
+        await persist?()
+    }
+
+    /// Keeps only notes posted in the last `months` months. Forever is the default elsewhere.
+    func dropOlderThan(months: Int, from now: Date = Date()) async {
+        guard months > 0, let start = Calendar.current.date(byAdding: .month, value: -months, to: now) else { return }
+        await store.dropPosted(before: start)
+        await adopt()
+        await persist?()
     }
 
     /// The reader is done being signed in to one forum, and nothing else about it changes.
