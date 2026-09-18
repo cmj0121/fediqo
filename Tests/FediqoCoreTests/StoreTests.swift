@@ -18,6 +18,20 @@ struct StoreTests {
         #expect(await store.trends().map(\.id) == ["kept"])
     }
 
+    @Test("A snapshot with duplicates loads instead of trapping")
+    func initToleratesDuplicates() async {
+        let first = note(id: "1", postedAt: origin, origins: [.publicTimeline], body: "first")
+        let second = note(id: "1", postedAt: origin, origins: [.trending], body: "second")
+        let store = ItemStore(
+            sources: [source, Source(host: "First.Example", kind: .pleroma)],
+            notes: [first, second]
+        )
+        #expect(await store.sources() == [source])
+        let all = await store.all()
+        #expect(all.map(\.body) == ["second"])
+        #expect(all.first?.origins == [.trending])
+    }
+
     @Test("Adding a host twice keeps the first and insertion order")
     func addIsIdempotentByHost() async {
         let store = ItemStore()
