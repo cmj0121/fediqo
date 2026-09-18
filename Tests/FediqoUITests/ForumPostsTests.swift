@@ -124,6 +124,19 @@ struct ForumPostsTests {
         #expect(ref("discuz:Install-C.EXAMPLE:7")?.host == "install-c.example")
     }
 
+    /// The row's `id` names its source as well as its note (#10), so it is no longer the Discuz!
+    /// spelling this reads back. A ref read off `id` instead of `noteID` would find no thread
+    /// behind any row, and every forum post would open to nothing.
+    @Test("A thread is still found when the row's id carries its host")
+    func aHostPrefixedRowStillHasItsThread() throws {
+        let item = Self.item(id: "discuz:\(Self.host):\(Self.tid)", kind: .discuz)
+        #expect(item.id == DummyItem.rowID(host: Self.host, note: item.noteID))
+        #expect(item.id != item.noteID)
+        let ref = try #require(ForumThreadRef(item))
+        #expect(ref.host == Self.host)
+        #expect(ref.tid == Self.tid)
+    }
+
     // MARK: - What a post is worth to a row
 
     /// **Withheld is asked before empty, and that ordering is the whole of this function.**
