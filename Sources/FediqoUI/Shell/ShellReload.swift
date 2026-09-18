@@ -208,6 +208,9 @@ final class ShellReload {
             case .mastodon:
                 return try await againOnMastodon(held, stamp: stamp, in: session)
             case .discourse:
+                // The topic's own page brings its whole opening post, where `/latest` gave only an
+                // excerpt, so the refreshed row's body is longer than the one it replaces — and a
+                // keyword rule, which reads the body, may now match it or stop matching it.
                 guard let topic = held.id.split(separator: ":").last.flatMap({ Int($0) }) else {
                     return .failed
                 }
