@@ -37,7 +37,9 @@ final class ShellSearch {
 
     private struct Key: Equatable {
         let pattern: String
-        let notes: [Note]
+        /// `ShellSession.notesRevision`: bumped whenever the notes are replaced, so comparing it
+        /// costs nothing however many notes there are.
+        let revision: Int
         let sources: [Source]
         let latest: LatestDate?
     }
@@ -54,7 +56,8 @@ final class ShellSearch {
         }
     }()
 
-    var isSearching: Bool { isOpen && !pattern.isEmpty }
+    /// A pattern is being searched: something other than spaces has settled in the field.
+    var isSearching: Bool { isOpen && !pattern.allSatisfy(\.isWhitespace) }
 
     /// Opens an empty search, keeping the timeline's selection to give back, and starts folding
     /// `notes` for it. The last index is reused, so notes that did not change are not folded again.
@@ -83,14 +86,25 @@ final class ShellSearch {
         focusTick += 1
     }
 
-    /// Closes it and hands back the selection the timeline had when it opened.
+    /// Closes it and hands back the selection the timeline had when it opened. An index still
+    /// being folded for it is not wanted any more.
     func close() -> String? {
+        indexing?.cancel()
+        indexing = nil
         let selection = selectionBefore
         isOpen = false
         text = ""
         fieldFocused = false
         selectionBefore = nil
         return selection
+    }
+
+    /// The field emptied: `restore` is handed the selection to give back — but only while the
+    /// search is open. Closing empties the field too, and the selection close gave back must not
+    /// be taken away again by the emptying it caused.
+    func cleared(_ restore: (String?) -> Void) {
+        guard isOpen else { return }
+        restore(selectionBefore)
     }
 
     /// Whether moving to `place` closes the search. It belongs to the timeline, and one left
@@ -107,17 +121,20 @@ final class ShellSearch {
     /// The posts found, newest first, cut at the latest date as every timeline is (#22) — or
     /// nothing while there is no search, so the timeline is drawn as it was.
     ///
-    /// Nothing, too, until the index has landed: the pause before a pattern settles is about as
-    /// long as folding takes, and folding here would stall the typing it is meant to spare. Notes
-    /// that arrive while the search is open are folded as they are read (`SearchIndex.entry`).
+    /// Found nothing yet, too, until the index has landed — the list stands empty and says it is
+    /// searching, rather than showing the timeline the pattern has not been matched against. The
+    /// pause before a pattern settles is about as long as folding takes, and folding here would
+    /// stall the typing it is meant to spare. Notes that arrive while the search is open are
+    /// folded as they are read (`SearchIndex.entry`).
     ///
-    /// Asked on every body pass, so the answer is kept until the pattern, the notes, the sources
-    /// or the date change. Comparing the notes costs nothing while they are the same array.
-    func items(from notes: [Note], sources: [Source], latest: LatestDate?) -> [DummyItem]? {
-        guard isOpen, isIndexed, let search = NoteSearch(pattern, sources: sources, labels: Self.labels) else {
+    /// Asked on every body pass, so the answer is kept until the pattern, the notes — as
+    /// `revision` counts them — the sources or the date change.
+    func items(from notes: [Note], revision: Int, sources: [Source], latest: LatestDate?) -> [DummyItem]? {
+        guard isOpen, let search = NoteSearch(pattern, sources: sources, labels: Self.labels) else {
             return nil
         }
-        let key = Key(pattern: pattern, notes: notes, sources: sources, latest: latest)
+        guard isIndexed else { return [] }
+        let key = Key(pattern: pattern, revision: revision, sources: sources, latest: latest)
         if let cached, cached.key == key { return cached.items }
         let found = search.found(notes, index)
         let items = (latest?.shown(found) ?? found).map { DummyItem($0) }

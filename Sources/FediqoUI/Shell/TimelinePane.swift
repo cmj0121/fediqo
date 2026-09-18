@@ -31,7 +31,9 @@ struct TimelinePane: View {
     private var timeline: TimelineQuery { session.currentTimeline }
 
     private var items: [DummyItem] {
-        search?.items(from: session.notes, sources: session.sources, latest: prefs.latestDate)
+        search?.items(
+            from: session.notes, revision: session.notesRevision, sources: session.sources, latest: prefs.latestDate
+        )
             ?? session.timelineItems(latest: prefs.latestDate)
     }
 
@@ -375,7 +377,13 @@ struct TimelinePane: View {
 
     @ViewBuilder
     private var empty: some View {
-        if search?.isSearching == true {
+        if let search, search.isSearching, !search.isIndexed {
+            ShellNotice(
+                symbol: "magnifyingglass",
+                title: L10n.t("search.indexing.title"),
+                detail: L10n.t("search.indexing.detail")
+            )
+        } else if search?.isSearching == true {
             ShellNotice(
                 symbol: "magnifyingglass",
                 title: L10n.t("search.empty.title"),

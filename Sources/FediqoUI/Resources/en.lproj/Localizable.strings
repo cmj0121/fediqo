@@ -169,6 +169,8 @@
 "search.found" = "%d found";
 "search.empty.title" = "Nothing held matches";
 "search.empty.detail" = "Only posts already on this device are searched. Try fewer characters, or * for any run of them.";
+"search.indexing.title" = "Searching…";
+"search.indexing.detail" = "Reading the posts this device holds, once, so each key only matches.";
 
 "item.replies" = "replies";
 "item.board.dev" = "dev";
