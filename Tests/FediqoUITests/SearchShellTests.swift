@@ -1,0 +1,254 @@
+import Foundation
+import FediqoCore
+import Testing
+@testable import FediqoUI
+
+/// #32: `/` opens a search over what this device holds, and Escape gives the timeline back.
+@Suite("Searching from the timeline")
+@MainActor
+struct SearchShellTests {
+    private let one = Source(host: "one.example", kind: .mastodon)
+
+    private func note(
+        _ id: String, _ body: String, at postedAt: Date = Date(timeIntervalSince1970: 0),
+        _ categories: Set<FediqoCore.Category> = [.public]
+    ) -> Note {
+        Note(id: id, source: one, author: "Ada", handle: "@ada@one.example", body: body,
+             postedAt: postedAt, categories: categories)
+    }
+
+    private func ids(_ items: [DummyItem]?) -> [String]? {
+        items?.map(\.noteID)
+    }
+
+    /// An open search over `notes`, its index landed, searching `pattern`.
+    private func searching(_ pattern: String, over notes: [Note], from selection: String? = nil) async -> ShellSearch {
+        let search = ShellSearch()
+        search.open(from: selection, over: notes)
+        await search.indexed()
+        search.text = pattern
+        search.settle(pattern)
+        return search
+    }
+
+    // MARK: Keys
+
+    @Test("`/` searches and `?` shows the keys list")
+    func slashAndQuestion() {
+        #expect(DummyCommand.from("/") == .search)
+        #expect(DummyCommand.from("?") == .showShortcuts)
+        #expect(DummyCommand.from("?", shift: true) == .showShortcuts)
+        // A field with the keys owns `/`, and so does a draft.
+        #expect(DummyCommand.from("/", fieldFocused: true) == nil)
+        #expect(DummyCommand.from("/", typing: true) == nil)
+        #expect(DummyCommand.from("/", command: true) == nil)
+    }
+
+    @Test("Shift-/ is the keys list on the ANSI slash key, and search where the layout shifts its /")
+    func shiftedSlash() {
+        // US: the `/` key with Shift, reported as `/` with Shift held, is asking for `?`.
+        let ansi = DummyCommand.typed("/", shift: true, onSlashKey: true)
+        #expect(DummyCommand.from(ansi, shift: true) == .showShortcuts)
+        // German and Nordic Shift-7, AZERTY Shift-:: the `/` the reader typed.
+        let shifted = DummyCommand.typed("/", shift: true, onSlashKey: false)
+        #expect(DummyCommand.from(shifted, shift: true) == .search)
+        // Without Shift the slash key is `/` on any layout; other keys are left as they are.
+        #expect(DummyCommand.typed("/", shift: false, onSlashKey: true) == "/")
+        #expect(DummyCommand.typed("?", shift: true, onSlashKey: false) == "?")
+        #expect(DummyCommand.typed("j", shift: true, onSlashKey: true) == "j")
+    }
+
+    @Test("The keys list names `/` under Timeline, in both languages")
+    func keysList() throws {
+        let line = try #require(DummyShortcut.all.first { $0.commands == [.search] })
+        #expect(line.group == .timeline)
+        #expect(line.keys == ["/"])
+        for language in [DummyLanguage.english, .taiwanese] {
+            for key in ["shortcut.search", "search.placeholder", "search.label", "search.empty.title",
+                        "search.empty.detail"] {
+                #expect(L10n.t(key, language: language) != key, "\(key) \(language)")
+            }
+            #expect(L10n.t("search.found", language: language).contains("%d"))
+        }
+    }
+
+    @Test("The two Chinese string files are the same bytes")
+    func chineseFilesAgree() throws {
+        let resources = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/FediqoUI/Resources")
+        let tw = try Data(contentsOf: resources.appendingPathComponent("zh-TW.lproj/Localizable.strings"))
+        let hant = try Data(contentsOf: resources.appendingPathComponent("zh-Hant.lproj/Localizable.strings"))
+        #expect(tw == hant)
+    }
+
+    // MARK: Layers
+
+    @Test("Escape leaves a thread opened from a result first, then the search, then the selection")
+    func escapeOrder() {
+        #expect(DummyCommand.outermost(of: [.search, .selection]) == .search)
+        #expect(DummyCommand.outermost(of: [.thread, .search, .selection]) == .thread)
+        #expect(DummyCommand.canOpen(.search, whenOpen: [.selection]))
+        #expect(!DummyCommand.canOpen(.search, whenOpen: [.thread]))
+        #expect(!DummyCommand.canOpen(.search, whenOpen: [.viewer]))
+        #expect(!DummyCommand.canOpen(.search, whenOpen: [.shortcuts]))
+        #expect(DummyCommand.canOpen(.thread, whenOpen: [.search, .selection]))
+    }
+
+    @Test("Closing the search gives back the timeline and the post selected before it")
+    func escapeRestores() async {
+        let notes = [note("a", "swift"), note("b", "other")]
+        #expect(ShellSearch().items(from: notes, sources: [one], latest: nil) == nil)
+
+        let search = await searching("swift", over: notes, from: "row-b")
+        #expect(ids(search.items(from: notes, sources: [one], latest: nil)) == ["a"])
+
+        #expect(search.close() == "row-b")
+        #expect(!search.isOpen)
+        #expect(search.text.isEmpty)
+        // Nothing to stand in for the timeline any more: it is drawn as it was.
+        #expect(search.items(from: notes, sources: [one], latest: nil) == nil)
+        // A second close has nothing to give back.
+        #expect(search.close() == nil)
+    }
+
+    @Test("Emptying the field gives back the timeline and its selection at once, and keeps the search open")
+    func clearingRestores() async {
+        let notes = [note("a", "swift"), note("b", "other")]
+        let search = await searching("swift", over: notes, from: "row-b")
+        #expect(ids(search.items(from: notes, sources: [one], latest: nil)) == ["a"])
+
+        search.text = ""
+        // No pause to wait for: the timeline is back on the next draw.
+        #expect(search.items(from: notes, sources: [one], latest: nil) == nil)
+        #expect(search.selectionBefore == "row-b")
+        #expect(search.isOpen)
+        // Typing again searches again, and the selection to give back is still the first one.
+        search.text = "other"
+        search.settle("other")
+        #expect(ids(search.items(from: notes, sources: [one], latest: nil)) == ["b"])
+        #expect(search.close() == "row-b")
+    }
+
+    @Test("Leaving the Timeline page closes the search")
+    func leavingCloses() async {
+        let search = await searching("swift", over: [note("a", "swift")])
+        #expect(!search.closes(leavingFor: .timeline))
+        for place in ShellPlace.allCases where place != .timeline {
+            #expect(search.closes(leavingFor: place), "\(place)")
+        }
+        _ = search.close()
+        #expect(!search.closes(leavingFor: .account))
+    }
+
+    @Test("The notes are folded when the search opens, not while typing")
+    func indexedOnOpen() async {
+        let notes = [note("a", "swift"), note("b", "swiftui")]
+        let search = ShellSearch()
+        search.open(from: nil, over: notes)
+        await search.indexed()
+        #expect(search.isIndexed)
+        search.text = "swift"
+        search.settle("swift")
+        #expect(ids(search.items(from: notes, sources: [one], latest: nil)) == ["a", "b"])
+        // A note that arrived after the search opened is still found.
+        let more = notes + [note("c", "Swift too")]
+        #expect(ids(search.items(from: more, sources: [one], latest: nil)) == ["a", "b", "c"])
+    }
+
+    @Test("An open search with nothing typed shows the timeline, and a stale pause searches nothing")
+    func typing() async {
+        let notes = [note("a", "swift"), note("b", "swiftui")]
+        let search = await searching("", over: notes)
+        #expect(!search.isSearching)
+        #expect(search.items(from: notes, sources: [one], latest: nil) == nil)
+
+        search.text = "swift"
+        // The pause for "swif" ended after "swift" was typed: it is not what the field says.
+        search.settle("swif")
+        #expect(search.items(from: notes, sources: [one], latest: nil) == nil)
+        search.settle("swift")
+        #expect(ids(search.items(from: notes, sources: [one], latest: nil)) == ["a", "b"])
+        search.text = "swift?"
+        search.settle("swift?")
+        #expect(ids(search.items(from: notes, sources: [one], latest: nil)) == ["b"])
+    }
+
+    // MARK: What is found
+
+    @Test("Public, trends and home are found by their English words and by their labels in both languages")
+    func categoryLabels() async {
+        let notes = [
+            note("public", "x", [.public]), note("trends", "x", [.trends]), note("home", "x", [.home]),
+        ]
+        for (pattern, expected) in [
+            ("trends", "trends"), ("Trends", "trends"), ("趨勢", "trends"),
+            ("public", "public"), ("公開", "public"),
+            ("home", "home"), ("首頁", "home"),
+        ] {
+            let search = await searching(pattern, over: notes)
+            #expect(ids(search.items(from: notes, sources: [one], latest: nil)) == [expected], "\(pattern)")
+        }
+    }
+
+    @Test("A list is found by its name")
+    func listName() async {
+        let source = Source(host: "one.example", kind: .mastodon, lists: [ListSubscription(id: "9", name: "Friends")])
+        let post = Note(id: "l", source: source, author: "Ada", handle: "@ada@one.example", body: "x",
+                        postedAt: Date(timeIntervalSince1970: 0), categories: [.list(id: "9")])
+        let search = await searching("friend", over: [post])
+        #expect(ids(search.items(from: [post], sources: [source], latest: nil)) == ["l"])
+    }
+
+    @Test("Results are in time order and stop at the latest date")
+    func latestDate() async {
+        let latest = LatestDate("2026-09-01")!
+        let end = latest.end()
+        let notes = [
+            note("after", "swift", at: end),
+            note("last", "swift", at: end.addingTimeInterval(-1)),
+            note("older", "Swift", at: end.addingTimeInterval(-60)),
+        ]
+        let search = await searching("swift", over: notes)
+        #expect(ids(search.items(from: notes, sources: [one], latest: latest)) == ["last", "older"])
+        #expect(ids(search.items(from: notes, sources: [one], latest: nil)) == ["after", "last", "older"])
+    }
+
+    @Test("Searching sends no request to any source")
+    func noRequest() async {
+        L10n.language = .english
+        let http = FixtureHTTP([
+            "/": .text(#"<html><head><meta name="application-name" content="Mastodon"></head></html>"#),
+            "/api/v2/instance": .text(#"{"domain": "first.example", "title": "First"}"#),
+            "/api/v1/timelines/public": .text(#"""
+            [
+              {"id": "1", "uri": "https://first.example/s/one", "created_at": "2024-01-01T00:00:00.000Z",
+               "content": "<p>Football tonight #sport</p>", "visibility": "public",
+               "account": {"username": "ada", "acct": "ada", "display_name": "Ada"}},
+              {"id": "2", "uri": "https://first.example/s/two", "created_at": "2024-12-01T00:00:00.000Z",
+               "content": "<p>Tea</p>", "visibility": "public",
+               "account": {"username": "bo", "acct": "bo", "display_name": "Bo"}}
+            ]
+            """#),
+        ])
+        let session = ShellSession(http: http)
+        session.hostname = "first.example"
+        await session.add()
+        await session.confirm()
+        let asked = await http.requested.count
+
+        let search = await searching("", over: session.notes)
+        for pattern in ["football", "#sp*", "*", "nothing", "first.example", "public", "b?"] {
+            search.text = pattern
+            search.settle(pattern)
+            _ = search.items(from: session.notes, sources: session.sources, latest: nil)
+        }
+        search.text = "FOOT"
+        search.settle("FOOT")
+        #expect(ids(search.items(from: session.notes, sources: session.sources, latest: nil)) == [
+            "https://first.example/s/one",
+        ])
+        _ = search.close()
+        #expect(await http.requested.count == asked)
+    }
+}

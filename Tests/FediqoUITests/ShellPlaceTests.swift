@@ -206,7 +206,11 @@ struct DummyCommandTests {
     @Test("Question mark opens the guide")
     func questionMarkShowsTheGuide() {
         #expect(DummyCommand.from("?", shift: true) == .showShortcuts)
-        #expect(DummyCommand.from("/") == nil)
+        // A bare `/` is search since #32. Shift-/ is the guide on the ANSI slash key, and the
+        // `/` the reader typed where a layout shifts it (German Shift-7, AZERTY Shift-:).
+        #expect(DummyCommand.from("/") == .search)
+        #expect(DummyCommand.from(DummyCommand.typed("/", shift: true, onSlashKey: true), shift: true) == .showShortcuts)
+        #expect(DummyCommand.from(DummyCommand.typed("/", shift: true, onSlashKey: false), shift: true) == .search)
         #expect(DummyCommand.from("?", typing: true) == nil)
     }
 
