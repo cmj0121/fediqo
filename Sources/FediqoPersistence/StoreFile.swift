@@ -177,7 +177,83 @@ private var migrator: DatabaseMigrator {
             t.column("facts", .text).notNull()
         }
     }
+    // The one 0.2.0 schema change (#25, #31): `origins` becomes `categories`, and every row
+    // already held is carried forward in place, in this migration's transaction — a throw rolls
+    // it all back and `open` sets the untouched file aside. Nothing is fetched to do it.
+    //
+    // **Frozen code.** It reads raw rows and writes JSON it spells itself rather than going
+    // through `NoteRecord`, so a later change to the live record cannot change what this step
+    // did to a 0.1.0 store.
+    migrator.registerMigration("v2-categories") { db in
+        struct V1Facts: Decodable { var boardID: String? }
+        struct V2Category: Encodable { var kind: String; var id: String? }
+        try db.alter(table: "note") { t in t.rename(column: "origins", to: "categories") }
+        let rows = try Row.fetchAll(db, sql: """
+            SELECT note.rowid AS rowid, note.categories AS origins, note.facts AS facts,
+                   source.kind AS kind
+            FROM note LEFT JOIN source USING (host)
+            """)
+        let decoder = JSONDecoder()
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        for row in rows {
+            let rowid: Int64 = row["rowid"]
+            let origins = try decoder.decode([String].self, from: Data((row["origins"] as String).utf8))
+            let kind: String? = row["kind"]
+            var categories: [V2Category] = []
+            if kind == "discuz" || kind == "discourse" {
+                // A forum's 0.1.0 `publicTimeline` meant only "read from its front page"; its
+                // categories are its boards, and only a board's own page recorded one.
+                let facts = try decoder.decode(V1Facts.self, from: Data((row["facts"] as String).utf8))
+                if let id = facts.boardID { categories = [V2Category(kind: "board", id: id)] }
+            } else {
+                if origins.contains("publicTimeline") { categories.append(V2Category(kind: "public")) }
+                if origins.contains("trending") { categories.append(V2Category(kind: "trends")) }
+            }
+            let json = String(decoding: try encoder.encode(categories), as: UTF8.self)
+            try db.execute(sql: "UPDATE note SET categories = ? WHERE rowid = ?", arguments: [json, rowid])
+        }
+    }
     return migrator
+}
+
+/// One category as it is written into `note.categories`, a JSON array of these sorted by kind
+/// then id, so one set is always written one way. Core's `Category` stays free of a storage
+/// format; this is the storage format.
+///
+/// **A new kind is a new migration.** `category` drops a kind it does not know, and the next
+/// save would then lose it for good; the `v2-categories` migration id is what makes a build
+/// that knows fewer kinds refuse the store instead. So a kind added after a release must also
+/// register a new migration id, even an empty one.
+private struct CategoryRow: Codable, Comparable {
+    var kind: String
+    var id: String?
+
+    init(_ category: FediqoCore.Category) {
+        switch category {
+        case .public: kind = "public"
+        case .trends: kind = "trends"
+        case .home: kind = "home"
+        case .list(let list): kind = "list"; id = list
+        case .board(let board): kind = "board"; id = board
+        }
+    }
+
+    /// Nothing for a kind this build does not know, so an unknown one is dropped, not guessed.
+    var category: FediqoCore.Category? {
+        switch (kind, id) {
+        case ("public", _): .public
+        case ("trends", _): .trends
+        case ("home", _): .home
+        case ("list", let id?): .list(id: id)
+        case ("board", let id?): .board(id: id)
+        default: nil
+        }
+    }
+
+    static func < (a: Self, b: Self) -> Bool {
+        (a.kind, a.id ?? "") < (b.kind, b.id ?? "")
+    }
 }
 
 /// One board subscription as it is written into `source.boards`, a JSON array of these that
@@ -220,7 +296,6 @@ private struct NoteFacts: Codable {
     var body: String
     var title: String?
     var board: String?
-    var boardID: String?
     /// `nil` is not a reply; a `ReplyRow` with no handle is a reply whose parent was never named.
     var reply: ReplyRow?
     var boostedBy: String?
@@ -287,8 +362,9 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
     var host: String
     var id: String
     var posted_at: Date
-    /// A JSON array of `FetchOrigin` raw values, sorted so one set is always written one way.
-    var origins: [String]
+    /// A JSON array of `CategoryRow`. Not JSON throws when the row is fetched, so the load fails
+    /// closed.
+    var categories: [CategoryRow]
     /// A `facts` that is not JSON throws when the row is fetched, so the load fails closed.
     var facts: NoteFacts
 
@@ -296,14 +372,13 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
         host = note.source.host
         id = note.id
         posted_at = note.postedAt
-        origins = note.origins.map(\.rawValue).sorted()
+        categories = note.categories.map(CategoryRow.init).sorted()
         facts = NoteFacts(
             author: note.author,
             handle: note.handle,
             body: note.body,
             title: note.title,
             board: note.board,
-            boardID: note.boardID,
             reply: note.reply.map { ReplyRow(handle: $0.handle) },
             boostedBy: note.boostedBy,
             sensitive: note.sensitive,
@@ -319,9 +394,9 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
     /// The note table keeps no copy of a source; `load()` drops a note whose host has no source
     /// row, since a note from a server nobody follows is one nothing should draw.
     ///
-    /// Origins come back as they went in, an empty set included: which lists a note was seen in
-    /// is a fact about it, and filling in `.publicTimeline` for none would put it in a list it
-    /// was never read from.
+    /// Categories come back as they went in, an empty set included: what a note arrived through
+    /// is a fact about it, and filling in `.public` for none would put it somewhere it was never
+    /// read from.
     func note(from source: Source) -> Note {
         Note(
             id: id,
@@ -331,9 +406,8 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             body: facts.body,
             title: facts.title,
             board: facts.board,
-            boardID: facts.boardID,
             postedAt: posted_at,
-            origins: Set(origins.compactMap(FetchOrigin.init(rawValue:))),
+            categories: Set(categories.compactMap(\.category)),
             reply: facts.reply.map { Reply(handle: $0.handle) },
             boostedBy: facts.boostedBy,
             avatarURL: facts.avatarURL,
