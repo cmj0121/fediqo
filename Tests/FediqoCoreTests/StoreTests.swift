@@ -71,6 +71,33 @@ struct StoreTests {
         #expect(await reloaded.all() == store.all())
     }
 
+    @Test("Every change moves the revision a save reads; a call that changes nothing does not")
+    func revisionCountsChanges() async {
+        let store = ItemStore(sources: [source], notes: [])
+        var last = await store.snapshot().revision
+        func moved() async -> Bool {
+            let now = await store.snapshot().revision
+            defer { last = now }
+            return now != last
+        }
+        await store.add(source)
+        #expect(await !moved(), "adding a host already here changed nothing")
+        await store.ingest([])
+        #expect(await !moved())
+        await store.add(other)
+        #expect(await moved())
+        await store.subscribe(host: other.host, to: [BoardSubscription(fid: 1, name: "b")])
+        #expect(await moved())
+        await store.ingest([note(id: "old", postedAt: origin, origins: [.publicTimeline])])
+        #expect(await moved())
+        await store.setRetention(months: 1, from: origin.addingTimeInterval(400 * 86_400))
+        #expect(await moved())
+        await store.setRetention(months: nil)
+        #expect(await !moved(), "widening the window drops nothing")
+        await store.remove(host: other.host)
+        #expect(await moved())
+    }
+
     @Test("A snapshot with duplicates loads instead of trapping")
     func initToleratesDuplicates() async {
         let first = note(id: "1", postedAt: origin, origins: [.publicTimeline], body: "first")

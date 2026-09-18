@@ -1,6 +1,6 @@
 import FediqoCore
 import Foundation
-import GRDB
+import Synchronization
 import Testing
 @testable import FediqoPersistence
 
@@ -23,83 +23,120 @@ struct StoreSaverTests {
 
     private struct Refused: Error {}
 
-    /// Writes into a real `StoreFile`, holding the first write back for `firstDelay` before it
-    /// lands and recording which notes each write carried, in the order they landed.
-    private actor Slow: IndexWriter {
-        let file: StoreFile
-        let firstDelay: Duration
-        var landed: [[String]] = []
-        private var calls = 0
+    /// A door a test holds shut until it chooses to open it: no sleeps, so what runs first is
+    /// what the test said runs first.
+    private actor Gate {
+        private var isOpen = false
+        private var waiters: [CheckedContinuation<Void, Never>] = []
 
-        init(file: StoreFile, firstDelay: Duration) {
-            self.file = file
-            self.firstDelay = firstDelay
+        func wait() async {
+            if isOpen { return }
+            await withCheckedContinuation { waiters.append($0) }
         }
 
-        func write(sources: [Source], notes: [Note]) async throws {
-            calls += 1
-            if calls == 1 { try await Task.sleep(for: firstDelay) }
-            try await file.write(sources: sources, notes: notes)
-            landed.append(notes.map(\.id).sorted())
+        func open() {
+            isOpen = true
+            waiters.forEach { $0.resume() }
+            waiters = []
         }
     }
 
-    private struct Failing: IndexWriter {
-        func write(sources: [Source], notes: [Note]) async throws { throw Refused() }
+    /// Which notes each write carried, in the order the writes landed.
+    private actor Landed {
+        var writes: [[String]] = []
+        func record(_ notes: [Note]) -> Int {
+            writes.append(notes.map(\.id).sorted())
+            return writes.count
+        }
     }
 
-    @Test("A slow save and a fast one after it: the file holds the later store")
+    @Test("A held first save and a quick one after it: the file holds the later store")
     func savesAreSerialized() async throws {
         let dir = scratch()
         defer { try? FileManager.default.removeItem(at: dir) }
+        let file = try StoreFile(at: dir)
         let store = ItemStore(sources: [alpha], notes: [note("1", from: alpha)])
-        let writer = Slow(file: try StoreFile(at: dir), firstDelay: .milliseconds(100))
-        let saver = StoreSaver(store: store, index: writer)
+        let entered = Gate()
+        let release = Gate()
+        let landed = Landed()
+        let calls = Mutexed()
+        let saver = StoreSaver(store: store) { sources, notes in
+            if calls.next() == 1 {
+                await entered.open()
+                await release.wait()
+            }
+            try await file.save(sources: sources, notes: notes)
+            _ = await landed.record(notes)
+        }
 
         let first = Task { try await saver.save() }
-        // Let the first save start and stall inside its write before the store changes.
-        try await Task.sleep(for: .milliseconds(20))
+        await entered.wait()
+        await store.ingest([note("2", from: alpha)])
+        let second = Task { try await saver.save() }
+        await release.open()
+        try await first.value
+        try await second.value
+
+        #expect(await landed.writes.last == ["1", "2"])
+        #expect(StoreFile.open(at: dir).notes.map(\.id).sorted() == ["1", "2"])
+    }
+
+    @Test("Two saves with nothing changed between them write once")
+    func unchangedIsNotWrittenAgain() async throws {
+        let landed = Landed()
+        let store = ItemStore(sources: [alpha], notes: [note("1", from: alpha)])
+        let saver = StoreSaver(store: store) { _, notes in _ = await landed.record(notes) }
+        try await saver.save()
+        try await saver.save()
+        #expect(await landed.writes.count == 1)
+
         await store.ingest([note("2", from: alpha)])
         try await saver.save()
-        try await first.value
+        #expect(await landed.writes == [["1"], ["1", "2"]])
+    }
 
-        #expect(await writer.landed.last == ["1", "2"])
-        #expect(StoreFile.open(at: dir).notes.map(\.id).sorted() == ["1", "2"])
+    @Test("Saves asked for while one is held run after it, and write what the store holds then")
+    func savesWhileOneIsHeld() async throws {
+        let entered = Gate()
+        let release = Gate()
+        let landed = Landed()
+        let calls = Mutexed()
+        let store = ItemStore(sources: [alpha], notes: [note("1", from: alpha)])
+        let saver = StoreSaver(store: store) { _, notes in
+            if calls.next() == 1 {
+                await entered.open()
+                await release.wait()
+            }
+            _ = await landed.record(notes)
+        }
+        let first = Task { try await saver.save() }
+        await entered.wait()
+        await store.ingest([note("2", from: alpha)])
+        let waiting = (0..<3).map { _ in Task { try await saver.save() } }
+        await release.open()
+        try await first.value
+        for task in waiting { try await task.value }
+        #expect(await landed.writes == [["1"], ["1", "2"]])
     }
 
     @Test("A write that fails is thrown to the caller, and the next save still lands")
     func failureIsReported() async throws {
-        let store = ItemStore(sources: [alpha], notes: [note("1", from: alpha)])
-        let saver = StoreSaver(store: store, index: Failing())
-        await #expect(throws: Refused.self) { try await saver.save() }
-
-        let dir = scratch()
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let recovering = StoreSaver(store: store, index: try StoreFile(at: dir))
-        try await recovering.save()
-        #expect(StoreFile.open(at: dir).notes.map(\.id) == ["1"])
-    }
-
-    @Test("A save that fails does not stop the save queued after it")
-    func failureDoesNotJamTheQueue() async throws {
-        actor FailOnce: IndexWriter {
-            var calls = 0
-            func write(sources: [Source], notes: [Note]) async throws {
-                calls += 1
-                if calls == 1 { throw Refused() }
-            }
+        let landed = Landed()
+        let calls = Mutexed()
+        let saver = StoreSaver(store: ItemStore(sources: [alpha], notes: [note("1", from: alpha)])) { _, notes in
+            if calls.next() == 1 { throw Refused() }
+            _ = await landed.record(notes)
         }
-        let writer = FailOnce()
-        let saver = StoreSaver(store: ItemStore(), index: writer)
         await #expect(throws: Refused.self) { try await saver.save() }
         try await saver.save()
-        #expect(await writer.calls == 2)
+        #expect(await landed.writes == [["1"]])
     }
 
     @Test("With no index this run, a save writes nothing and does not fail")
     func noIndexSavesNothing() async throws {
-        let saver = StoreSaver(store: ItemStore(sources: [alpha], notes: []), index: nil)
+        let saver = StoreSaver(store: ItemStore(sources: [alpha], notes: []), file: nil)
         try await saver.save()
+        #expect(await saver.flush() == .saved)
     }
 
     @Test("What a save wrote is what the next launch opens: the store before the quit")
@@ -107,13 +144,53 @@ struct StoreSaverTests {
         let dir = scratch()
         defer { try? FileManager.default.removeItem(at: dir) }
         let store = ItemStore(sources: [alpha, beta], notes: [note("1", from: alpha), note("2", from: beta)])
-        let saver = StoreSaver(store: store, index: StoreFile.open(at: dir).file)
-        try await saver.save()
+        let saver = StoreSaver(store: store, file: StoreFile.open(at: dir).file)
+        #expect(await saver.flush() == .saved)
 
         let before = await store.snapshot()
         let opened = StoreFile.open(at: dir)
         #expect(opened.setAside == nil)
         #expect(opened.sources == before.sources)
         #expect(opened.notes.sorted { $0.id < $1.id } == before.notes.sorted { $0.id < $1.id })
+    }
+
+    // MARK: Flush, the quit's save
+
+    @Test("A flush answers only once the write has landed")
+    func flushWaitsForTheWrite() async {
+        let release = Gate()
+        let landed = Landed()
+        let saver = StoreSaver(store: ItemStore(sources: [alpha], notes: [note("1", from: alpha)])) { _, notes in
+            await release.wait()
+            _ = await landed.record(notes)
+        }
+        let flush = Task { await saver.flush(deadline: .seconds(60)) }
+        await release.open()
+        #expect(await flush.value == .saved)
+        #expect(await landed.writes == [["1"]])
+    }
+
+    @Test("A write that hangs does not hold a flush past the deadline")
+    func flushTimesOut() async {
+        let never = Gate()
+        let saver = StoreSaver(store: ItemStore(sources: [alpha], notes: [])) { _, _ in await never.wait() }
+        let started = ContinuousClock.now
+        #expect(await saver.flush(deadline: .milliseconds(50)) == .timedOut)
+        #expect(ContinuousClock.now - started < .seconds(5))
+        await never.open()
+    }
+
+    @Test("A write that fails still lets a flush answer, and says so")
+    func flushReportsFailure() async {
+        let saver = StoreSaver(store: ItemStore(sources: [alpha], notes: [])) { _, _ in throw Refused() }
+        #expect(await saver.flush(deadline: .seconds(60)) == .failed)
+    }
+}
+
+/// Numbers calls from inside a `@Sendable` write, without a hop.
+private final class Mutexed: Sendable {
+    private let count = Mutex(0)
+    func next() -> Int {
+        count.withLock { $0 += 1; return $0 }
     }
 }
