@@ -17,6 +17,8 @@ struct TimelinePane: View {
     var onPlayRow: (DummyItem) -> Void
     var jumpToTop: Int
     var onPopThread: () -> Void
+    /// While open, its results are the list and the timeline waits under it (#32).
+    var search: ShellSearch?
     @State private var marks: [String: DummyMarks] = [:]
     /// Bumped once each server's emoji catalogue has landed, so the rows already on screen ask
     /// again. Per host and not one counter for the pane: see `waitForCatalogues`.
@@ -28,7 +30,10 @@ struct TimelinePane: View {
 
     private var timeline: TimelineQuery { session.currentTimeline }
 
-    private var items: [DummyItem] { session.timelineItems(latest: prefs.latestDate) }
+    private var items: [DummyItem] {
+        search?.items(from: session.notes, sources: session.sources, latest: prefs.latestDate)
+            ?? session.timelineItems(latest: prefs.latestDate)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -356,7 +361,20 @@ struct TimelinePane: View {
         .accessibilityAddTraits(focused ? .isSelected : [])
     }
 
+    @ViewBuilder
     private var empty: some View {
+        if search?.isSearching == true {
+            ShellNotice(
+                symbol: "magnifyingglass",
+                title: L10n.t("search.empty.title"),
+                detail: L10n.t("search.empty.detail")
+            )
+        } else {
+            timelineEmpty
+        }
+    }
+
+    private var timelineEmpty: some View {
         ShellNotice(
             symbol: "list.bullet.rectangle",
             title: L10n.t("\(timeline.emptyKey).title"),
