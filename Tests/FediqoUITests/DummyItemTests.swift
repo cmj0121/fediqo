@@ -218,7 +218,7 @@ struct DummyItemTests {
         #expect(first.id != second.id)
         #expect(first.noteID == uri)
         #expect(second.noteID == uri)
-        #expect(first.id == DummyItem.rowID(host: "first.example", note: uri))
+        #expect(first.id == NoteKey(host: "first.example", id: uri).rowID)
     }
 
     /// **One sentence for both surfaces that draw a way out.**

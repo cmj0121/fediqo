@@ -130,7 +130,7 @@ struct ForumPostsTests {
     @Test("A thread is still found when the row's id carries its host")
     func aHostPrefixedRowStillHasItsThread() throws {
         let item = Self.item(id: "discuz:\(Self.host):\(Self.tid)", kind: .discuz)
-        #expect(item.id == DummyItem.rowID(host: Self.host, note: item.noteID))
+        #expect(item.id == NoteKey(host: Self.host, id: item.noteID).rowID)
         #expect(item.id != item.noteID)
         let ref = try #require(ForumThreadRef(item))
         #expect(ref.host == Self.host)
