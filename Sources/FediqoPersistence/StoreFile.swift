@@ -7,11 +7,7 @@ public struct StoreFile: Sendable {
     let db: DatabaseQueue
 
     public init(at directory: URL) throws {
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        var excluded = URLResourceValues()
-        excluded.isExcludedFromBackup = true
-        var marked = directory
-        try marked.setResourceValues(excluded)
+        try makeExcludedFromBackup(directory)
         try self.init(database: DatabaseQueue(path: directory.appendingPathComponent(Self.indexName).path))
     }
 
