@@ -43,18 +43,17 @@ struct InventoryTests {
         ])
     }
 
-    /// Counts saves, and writes them where a relaunch will look, as the app's `save` does.
+    /// Counts saves, and writes them where a relaunch will look through a `StoreSaver`, as the
+    /// app's `save` does.
     private final class Saves {
         var count = 0
     }
 
     private func persisting(_ session: ShellSession, to dir: URL, counting saves: Saves) throws {
-        let file = try StoreFile(at: dir)
-        let store = session.store
+        let saver = StoreSaver(store: session.store, index: try StoreFile(at: dir))
         session.persist = {
             saves.count += 1
-            let snapshot = await store.snapshot()
-            try? file.save(sources: snapshot.sources, notes: snapshot.notes)
+            try? await saver.save()
         }
     }
 
@@ -307,6 +306,17 @@ struct InventoryTests {
         session.heldPeriod = .week
         #expect(session.holdings == Holdings(notes: session.notes, per: .week))
         #expect(session.holdings.bySource == [alpha.host: 2, beta.host: 1])
+    }
+
+    @Test("A store loaded at launch is visible after reload")
+    func reloadFromStoreAdoptsTheIndex() async {
+        let first = note("1", daysAgo: 1, from: alpha)
+        let session = ShellSession(http: FixtureHTTP(), store: ItemStore(sources: [alpha], notes: [first]))
+        #expect(session.sources.isEmpty)
+        await session.reloadFromStore()
+        #expect(session.sources.map(\.host) == [alpha.host])
+        #expect(session.notes.map(\.id) == [first.id])
+        #expect(session.queries.map(\.id) == ["all", "trends"])
     }
 
     // MARK: Helpers
