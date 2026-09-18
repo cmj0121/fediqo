@@ -38,6 +38,10 @@ final class ShellSession {
     /// `.shared` at a call site is an agreement that a test or a preview breaks in silence.
     let forums: ForumSessions
 
+    /// Every Mastodon this device is signed in to. Shared across windows like `forums`, so a
+    /// sign-out in one is a sign-out in all.
+    let mastodon: MastodonSessions
+
     /// One thread's opening post, fetched when its row is scrolled to — D30 — and the rest of
     /// the topic on request — D31.
     ///
@@ -235,6 +239,7 @@ final class ShellSession {
         pictures: ShellPictures = .shared,
         emojis: EmojiCache = .shared,
         forums: ForumSessions = ForumSessions(),
+        mastodon: MastodonSessions = MastodonSessions(),
         posts: ForumPosts? = nil
     ) {
         self.http = http
@@ -242,6 +247,7 @@ final class ShellSession {
         self.pictures = pictures
         self.emojis = emojis
         self.forums = forums
+        self.mastodon = mastodon
         // Built with this session's forum browsers, so a thread on a forum the reader signed in
         // to is read through the engine that holds the cookies rather than around it.
         //
@@ -714,7 +720,7 @@ final class ShellSession {
         guard !picks.isEmpty else { return }
         refuse = nil
         offerSignIn = nil
-        boardsRefusal = nil
+        rowRefusal = nil
         unread = []
         unreadAll = 0
         progressHost = offer.host
@@ -792,7 +798,7 @@ final class ShellSession {
 
     /// Every board the reader picked failed. Which surface is told, and in what colour.
     ///
-    /// **The same rule `boardsRefusal` was built for, applied to the other half of the errand.** A
+    /// **The same rule `rowRefusal` was built for, applied to the other half of the errand.** A
     /// join that fails has not added a host, so its sentence belongs under the field, in `alarm`,
     /// beside the offer of a sign-in that might fix it. A **restate** that fails is about a host
     /// the reader added weeks ago and is still reading: nothing was undone, nothing is missing
@@ -820,7 +826,7 @@ final class ShellSession {
         // is exactly the argument that did not save the other site.
         switch owner {
         case .row:
-            boardsRefusal = (host: offer.host, key: "account.source.boards.unread")
+            rowRefusal = (host: offer.host, key: "account.source.boards.unread")
             return
         // A join, pressed at the field or in the block, and reported under the field either way.
         case .page, .block:
@@ -976,7 +982,8 @@ final class ShellSession {
         #endif
     }
 
-    /// A row's boards control was pressed and the forum's index could not be read.
+    /// A row's own press did not finish — the forum's index could not be read for its boards
+    /// control, or a Mastodon's sign-in failed — and the sentence that says so.
     ///
     /// **Drawn by the row whose host matches, and by nothing else.** The refusal sentence every
     /// other errand on this page writes is `refuse`, which `AccountPane` draws under the field —
@@ -985,7 +992,7 @@ final class ShellSession {
     ///
     /// **Not `alarm`, and the row says why**: that colour is spent on the line that says a host
     /// was *not added* and why, and this host was added weeks ago. Nothing changed here.
-    var boardsRefusal: (host: String, key: String)?
+    var rowRefusal: (host: String, key: String)?
 
     /// The reader wants a different set of boards on a forum they already read.
     ///
@@ -1020,7 +1027,7 @@ final class ShellSession {
               // this whole entrance is built on.
               SourceRow.canChangeBoards(source.kind)
         else { return }
-        boardsRefusal = nil
+        rowRefusal = nil
         refuse = nil
         unread = []
         unreadAll = 0
@@ -1050,7 +1057,7 @@ final class ShellSession {
             // One sentence, in the row the reader pressed. Which failure it was does not change
             // what they can do about it — press again — so it does not change what they are told.
             guard mine == errand else { return }
-            boardsRefusal = (host: host, key: "account.source.boards.unread")
+            rowRefusal = (host: host, key: "account.source.boards.unread")
         }
     }
 
@@ -1276,6 +1283,10 @@ final class ShellSession {
         // pictures and left the posts would empty half of what the reader was looking at.
         posts.forget(host: host)
         await forums.forget(host: host)
+        // Decision 10: a Mastodon's sign-in goes with a Clear as a forum's does. Signing out
+        // drops nothing that Home or a list brought in.
+        // The app registration goes with it, so nothing of the sign-in is left.
+        await mastodon.signOut(host: host, forgettingApp: true)
         // **The rows stay (#7).** Clear drops this source's copies — pictures in memory and on
         // disk, emoji, first posts, the sign-in — and not its place in the index: every row still
         // draws, reading its pictures from their hyperlinks again. Nothing in this app reads a
@@ -1321,8 +1332,51 @@ final class ShellSession {
     ///
     /// Through `forums.forget` and not through anything of its own, which is what makes `Clear` and
     /// `Remove` clear the sign-in too: there is one door and all three go through it (decision 13).
+    /// A Mastodon's door is `mastodon.signOut`, which `clear` reaches the same way (decision 10).
     func signOut(host: String) async {
-        await forums.forget(host: host.lowercased())
+        if kind(of: host) == .mastodon {
+            await mastodon.signOut(host: host)
+        } else {
+            await forums.forget(host: host.lowercased())
+        }
+    }
+
+    /// Whether this device holds a sign-in for that source, whichever protocol it is.
+    func isSignedIn(host: String) -> Bool {
+        forums.reachedSignIn(host: host) || mastodon.isSignedIn(host: host)
+    }
+
+    /// A row's Sign in. A Mastodon signs in on its own page through `browser`; anything else is a
+    /// forum, and takes `signIn(host:)`'s path.
+    ///
+    /// Closing the page, or saying no on it, says nothing. Any other failure is one sentence under
+    /// the row, through `rowRefusal`, the row's one slot for a sentence about its own press.
+    /// A source removed while its page is up is not signed in to.
+    func signIn(host raw: String, through browser: any OAuthBrowser) async {
+        guard let host = try? Host.parse(raw) else { return }
+        guard kind(of: host) == .mastodon else {
+            await signIn(host: host)
+            return
+        }
+        if rowRefusal?.host == host { rowRefusal = nil }
+        guard let failure = await mastodon.signIn(host: host, through: browser) else { return }
+        guard isAdded(host) else { return }
+        rowRefusal = (host: host, key: Self.signInFailureKey(failure))
+    }
+
+    /// The sentence under a Mastodon row whose sign-in did not finish.
+    static func signInFailureKey(_ failure: MastodonSignInError) -> String {
+        switch failure {
+        case .unreachable, .http: "account.mastodon.failed.unreachable"
+        case .keychain: "account.mastodon.failed.keychain"
+        case .cancelled, .denied, .stateMismatch, .unreadable, .clientRejected:
+            "account.mastodon.failed"
+        }
+    }
+
+    private func kind(of host: String) -> ProtocolKind? {
+        let host = host.lowercased()
+        return sources.first { $0.host == host }?.kind
     }
 
     /// The reader has stopped reading a server: it goes, and everything it left here goes with it.
@@ -1388,7 +1442,7 @@ final class ShellSession {
         if offerSignIn?.lowercased() == host { offerSignIn = nil }
         // A sentence drawn by a row that has gone. Its own host and not `progressHost`, because a
         // refusal outlives the errand that produced it — that is the whole of what it is for.
-        if boardsRefusal?.host == host { boardsRefusal = nil }
+        if rowRefusal?.host == host { rowRefusal = nil }
         // The sheet holding somebody else's login page, where it is that server's. A race rather
         // than a click today, because `signIn` sets this *after* `await forums.signIn(host:)` and
         // that await is exactly the window a Remove is pressable in — and properly reachable once

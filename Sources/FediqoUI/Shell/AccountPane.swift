@@ -15,6 +15,8 @@ struct AccountPane: View {
     /// narrow row.
     @State private var rowWidth: CGFloat = 0
     @Environment(\.colorScheme) private var colorScheme
+    /// The system's sign-in sheet, which a Mastodon row's Sign in opens on the server's own page.
+    @Environment(\.webAuthenticationSession) private var webAuthenticationSession
 
     private enum Metrics {
         /// The mark, at the size the mark is drawn rather than the size of an icon.
@@ -238,7 +240,7 @@ struct AccountPane: View {
     var glance: [SourceMarkRow.Mark]? {
         guard SourceMarkRow.drawn(sources: session.sources.count) else { return nil }
         return session.rows.map {
-            Self.mark($0, signedIn: session.forums.reachedSignIn(host: $0.source.host))
+            Self.mark($0, signedIn: session.isSignedIn(host: $0.source.host))
         }
     }
 
@@ -532,7 +534,7 @@ struct AccountPane: View {
                 ForEach(rows) { row in
                     SourceRowView(
                         row: row,
-                        signedIn: session.forums.reachedSignIn(host: row.source.host),
+                        signedIn: session.isSignedIn(host: row.source.host),
                         width: rowWidth,
                         // **Handed down, never derived per row.** Decision 33 made the control
                         // count per-protocol, so the widest row is a property of the list; a row
@@ -551,7 +553,7 @@ struct AccountPane: View {
                         waiting: SourceRow.waitingLine(
                             session.progress, drawnAs: session.stage, host: row.source.host
                         ),
-                        refusal: session.boardsRefusal,
+                        refusal: session.rowRefusal,
                         signIn: { Task { await press(row) } },
                         clear: { askClear(row) },
                         remove: { askRemove(row) },
@@ -677,10 +679,12 @@ struct AccountPane: View {
     /// **Which way it goes is `reachedSignIn`'s answer and not this view's** — see its doc comment
     /// for why "signed in" here can only ever mean as far as this device last saw.
     func press(_ row: SourceRow) async {
-        if session.forums.reachedSignIn(host: row.source.host) {
+        if session.isSignedIn(host: row.source.host) {
             await session.signOut(host: row.source.host)
         } else {
-            await session.signIn(host: row.source.host)
+            await session.signIn(
+                host: row.source.host, through: WebAuthBrowser(session: webAuthenticationSession)
+            )
         }
     }
 

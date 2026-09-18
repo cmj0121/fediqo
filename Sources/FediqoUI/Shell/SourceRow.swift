@@ -43,12 +43,14 @@ struct SourceRow: Identifiable, Hashable {
     /// view: the check belongs to the kind and never to a `kind == .discuz` at a call site.
     static func canSignIn(_ kind: ProtocolKind) -> Bool {
         switch kind {
-        // The one protocol this app signs in to. A Discuz! behind a login wall is the case the
-        // whole sign-in path was built for, and F2's engine is the only transport that reaches it.
+        // A Discuz! behind a login wall is the case the forum sign-in path was built for, and
+        // F2's engine is the only transport that reaches it.
         case .discuz: true
-        // Every other protocol this app reads is read signed-out. `HTTPClient` is GET-only until
-        // M4, so there is nothing to offer here that would not be a button that cannot work.
-        case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
+        // Signed in on the server's own page, read-only (#24). Accepted on Mastodon alone.
+        case .mastodon: true
+        // Every other protocol this app reads is read signed-out. Pleroma, Akkoma and GoToSocial
+        // speak Mastodon's API but are not accepted for its sign-in yet.
+        case .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
             .gotosocial, .discourse, .unknown:
             false
         }

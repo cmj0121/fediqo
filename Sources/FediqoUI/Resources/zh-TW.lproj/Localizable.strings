@@ -330,7 +330,7 @@
 /* Decision 29: Clear asks first, and says what actually goes. */
 "account.clear.title"             = "清除 %@ 留在這裡的東西？";
 "account.clear.detail"            = "這個裝置為它存的圖片、表情名稱和第一篇文章都會清掉。你再讀它的時候會回來，它也還留在你的來源裡，版塊和文章都在。";
-"account.clear.detail.signedout"  = "這個裝置為它存的圖片、表情名稱和第一篇文章都會清掉，你也會從這個論壇登出。它們會在你再讀的時候回來，它也還留在你的來源裡，版塊和文章都在。";
+"account.clear.detail.signedout"  = "這個裝置為它存的圖片、表情名稱和第一篇文章都會清掉，你也會從這個來源登出。它們會在你再讀的時候回來，它也還留在你的來源裡，版塊和文章都在。";
 "account.clear.detail.password"   = "這個裝置為它存的圖片、表情名稱和第一篇文章都會清掉，你會從這個論壇登出，為它存的密碼也會刪掉。只有密碼不會回來：下次要再打一次。它還留在你的來源裡，版塊和文章都在。";
 "account.clear.confirm"           = "清除";
 
@@ -353,3 +353,9 @@
 
 /* The longest wait in the app, said correctly: it detects nothing. */
 "account.join.boards.progress"    = "正在讀你在 %@ 上挑的版塊…";
+
+"account.mastodon.failed"             = "%@ 沒有完成登入。請再試一次。";
+"account.mastodon.failed.unreachable" = "現在連不上 %@，無法登入。";
+"account.mastodon.failed.keychain"    = "這個裝置無法保存 %@ 的登入。";
+"account.mastodon.ended.title"        = "這個來源已將你登出";
+"account.mastodon.ended.detail"       = "%@ 結束了這次登入。它帶進來的內容都還在；到「帳號」再登入一次，就能以你的身分閱讀。";

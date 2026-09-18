@@ -63,11 +63,12 @@ public struct FediqoRootView: View {
         http: any HTTPClient = URLSessionClient(),
         store: ItemStore = ItemStore(),
         forums: ForumSessions = ForumSessions(),
+        mastodon: MastodonSessions = MastodonSessions(),
         persist: (@MainActor () async -> Void)? = nil,
         storeIsNewer: Bool = false,
         storeNoticeSeen: (@MainActor () -> Void)? = nil
     ) {
-        let session = ShellSession(http: http, store: store, forums: forums)
+        let session = ShellSession(http: http, store: store, forums: forums, mastodon: mastodon)
         session.persist = persist
         _session = State(initialValue: session)
         _storeIsNewer = State(initialValue: storeIsNewer)
@@ -296,8 +297,24 @@ public struct FediqoRootView: View {
             } message: { host in
                 Text(L10n.t(SourceRow.clearDetailKey(
                     hasPassword: session.forums.hasPassword(host: host),
-                    reachedSignIn: session.forums.reachedSignIn(host: host)
+                    reachedSignIn: session.isSignedIn(host: host)
                 )))
+            }
+            // A server ended a sign-in on its own side: the row already reads signed out, and this
+            // says why rather than leaving a timeline to go quiet.
+            .alert(
+                Text(L10n.t("account.mastodon.ended.title")),
+                isPresented: Binding(
+                    get: { !session.mastodon.ended.isEmpty },
+                    set: { if !$0 { session.mastodon.endedSeen() } }
+                )
+            ) {
+                Button(L10n.t("store.newer.ok"), role: .cancel) { session.mastodon.endedSeen() }
+            } message: {
+                Text(String(
+                    format: L10n.t("account.mastodon.ended.detail"),
+                    session.mastodon.ended.joined(separator: ", ")
+                ))
             }
             .alert(Text(L10n.t("store.newer.title")), isPresented: $storeIsNewer) {
                 Button(L10n.t("store.newer.ok"), role: .cancel) { storeNoticeSeen?() }
@@ -342,6 +359,9 @@ public struct FediqoRootView: View {
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active {
                     wakeTheCaches()
+                    // A Keychain read at launch on a locked device finds no token; the sign-in
+                    // is read again once the reader is here.
+                    session.mastodon.refresh()
                 } else if ShellSession.windowLeft(phase),
                           session.stage?.closesWhenTheWindowLeaves == true {
                     // **The selectors only**, and the stage is what says so. The editor and a new
