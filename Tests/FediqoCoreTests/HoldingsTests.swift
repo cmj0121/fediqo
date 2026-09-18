@@ -67,14 +67,23 @@ struct HoldingsTests {
         #expect(held.byPeriod.isEmpty)
     }
 
-    @Test("Keeping forever, or a count that is not positive, has no cutoff", arguments: [0, -1, -12])
-    func foreverHasNoCutoff(months: Int) {
+    @Test("Keeping forever, or a count that is not positive, has no cutoff", arguments: [nil, 0, -1, -12] as [Int?])
+    func foreverHasNoCutoff(months: Int?) {
         #expect(KeepPolicy.cutoff(keepingMonths: months, from: day(2026, 9, 18), calendar: calendar) == nil)
-        #expect(KeepPolicy.forever == 0)
     }
 
     @Test("Keeping the latest months cuts that many months back")
     func cutoff() {
         #expect(KeepPolicy.cutoff(keepingMonths: 3, from: day(2026, 9, 18), calendar: calendar) == day(2026, 6, 18))
+    }
+
+    @Test("Only a narrower window shortens; a wider one or forever drops nothing")
+    func shortens() {
+        #expect(KeepPolicy.shortens(from: nil, to: 12))
+        #expect(KeepPolicy.shortens(from: 6, to: 3))
+        #expect(!KeepPolicy.shortens(from: 3, to: 6))
+        #expect(!KeepPolicy.shortens(from: 3, to: 3))
+        #expect(!KeepPolicy.shortens(from: 3, to: nil))
+        #expect(!KeepPolicy.shortens(from: nil, to: nil))
     }
 }

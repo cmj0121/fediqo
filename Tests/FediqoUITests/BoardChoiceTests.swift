@@ -751,7 +751,10 @@ struct BoardChoiceTests {
         #expect(english.contains("board.choose.title"), "the F4 strings are not in the bundle")
         for lproj in ["zh-Hant", "zh-TW"] {
             let translated = try Self.keys(in: lproj)
-            let missing = english.subtracting(translated).sorted()
+            // A `.one` key is English's singular, read only through `L10n.count`, which falls
+            // back to the plain key where a language has no grammatical number — so a raw key
+            // can never reach the screen through one, and 繁體中文 carries none.
+            let missing = english.subtracting(translated).filter { !$0.hasSuffix(".one") }.sorted()
             #expect(missing.isEmpty, "\(lproj) is missing: \(missing.joined(separator: ", "))")
             let extra = translated.subtracting(english).sorted()
             #expect(extra.isEmpty, "\(lproj) has strings en does not: \(extra.joined(separator: ", "))")
