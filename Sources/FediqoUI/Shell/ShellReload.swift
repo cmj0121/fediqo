@@ -35,6 +35,9 @@ final class ShellReload {
     /// The running reload's work, and its waiter — resumed when the work ends or is stopped.
     @ObservationIgnored private var work: Task<Void, Never>?
     @ObservationIgnored private var waiter: CheckedContinuation<Void, Never>?
+    /// Which run `work` and `waiter` belong to. A stopped run's work goes on until it notices;
+    /// when it ends it must not end whichever run started after it.
+    @ObservationIgnored private var generation = 0
     /// Work read as the reader, per host, so `stop(host:)` can end it.
     @ObservationIgnored private var asYou: [String: [UUID: () -> Void]] = [:]
 
@@ -102,7 +105,7 @@ final class ShellReload {
         guard !running, session.editing == nil else { return }
         await run {
             if let ref = ForumThreadRef(item) {
-                let read = await session.posts.reload(ref)
+                let read = await session.posts.reload(ref, within: self.deadline)
                 if !read, !Task.isCancelled { self.failed = [ref.host] }
                 return
             }
@@ -117,13 +120,26 @@ final class ShellReload {
         }
     }
 
-    /// Stops the running reload — Esc, or `r` again. What it had not landed does not land.
+    /// `r`: a reload of `thread` where one is open, or else of `query` — unless one is running,
+    /// which a second press leaves alone: it starts nothing and stops nothing (#29). Esc stops it.
+    func press(thread: DummyItem?, timeline query: TimelineQuery, in session: ShellSession) {
+        guard !running else { return }
+        Task {
+            if let thread {
+                await self.thread(thread, in: session)
+            } else {
+                await self.timeline(query, in: session)
+            }
+        }
+    }
+
+    /// Stops the running reload — Esc. What it had not landed does not land.
     @discardableResult
     func stop() -> Bool {
         guard running, let work else { return false }
         work.cancel()
         stopped = true
-        finish()
+        finish(generation)
         return true
     }
 
@@ -135,6 +151,8 @@ final class ShellReload {
 
     /// One reload: its state set, its work started, and this waiting until it ends or is stopped.
     private func run(_ body: @escaping @MainActor () async -> Void) async {
+        generation += 1
+        let mine = generation
         running = true
         failed = []
         unfindable = nil
@@ -143,17 +161,19 @@ final class ShellReload {
             waiter = continuation
             work = Task { @MainActor in
                 await body()
-                self.finish()
+                self.finish(mine)
             }
         }
+    }
+
+    /// Ends run `run`, once, and only while it is still the current one.
+    private func finish(_ run: Int) {
+        guard run == generation, let waiter else { return }
+        self.waiter = nil
         work = nil
         running = false
         landed += 1
-    }
-
-    private func finish() {
-        waiter?.resume()
-        waiter = nil
+        waiter.resume()
     }
 
     /// Work read as the reader on `host`, registered so `stop(host:)` can end it, and ended too

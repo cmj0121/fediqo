@@ -936,22 +936,18 @@ public struct FediqoRootView: View {
 
     /// `r`: the open thread, or else the selected timeline — and only on what the reader can see,
     /// so not under the viewer, the keys list or the timeline editor. A second press while one
-    /// runs stops it and starts nothing.
+    /// runs is taken and does nothing; Esc is what stops it.
     private func reload() -> Bool {
         guard place == .timeline, session.editing == nil, !session.sources.isEmpty else { return false }
-        // `r` again while one runs stops it rather than starting a second.
-        if session.reload.stop() { return true }
+        if session.reload.running { return true }
         switch DummyCommand.outermost(of: openLayers) {
         // A search's results are what this device holds, found without asking anybody.
         case .viewer, .shortcuts, .search: return false
         case .thread, .selection, nil: break
         }
         // The thread as `TimelinePane` draws it: one it cannot find draws the timeline instead.
-        if let opened = threadStack.last, let item = streamItems.first(where: { $0.id == opened }) {
-            Task { await session.reload.thread(item, in: session) }
-        } else {
-            Task { await session.reload.timeline(session.currentTimeline, in: session) }
-        }
+        let opened = threadStack.last.flatMap { opened in streamItems.first { $0.id == opened } }
+        session.reload.press(thread: opened, timeline: session.currentTimeline, in: session)
         return true
     }
 

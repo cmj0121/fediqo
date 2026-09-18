@@ -141,7 +141,7 @@ A forum sign-in works as before: its cookies stay on this device, and Clear take
 asks the sources that have trends, for their trends; a timeline you wrote asks the sources
 and categories its rules name, and a rule for every source asks every source. With a post
 open, `r` reloads that post and its thread, from any source, and not the timeline under it.
-Pressing `r` again while a reload runs does not start a second one. A source that fails says
+Pressing `r` again while a reload runs does not start a second one; Esc stops it. A source that fails says
 so, and the others still land. The selected post stays selected.
 
 `/` opens one search field. Its pattern is matched anywhere in every field a post is known by:

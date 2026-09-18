@@ -384,14 +384,34 @@ final class ForumPosts {
     /// `r` on an open thread (#29): its opening post asked again, and the rest of the topic too
     /// where the reader had asked for it. What is held stays drawn until the answer replaces it.
     ///
+    /// Every page it asks for itself ends within `limit`. Cancelled — the reader stopped it — its
+    /// own pages are cancelled and nothing they bring lands: what was held, and why a part was
+    /// missing, stay as they were. A page some row was already fetching is waited on, not
+    /// cancelled, for it was not the reload's to stop.
+    ///
     /// Returns whether every part asked came back.
-    func reload(_ ref: ForumThreadRef) async -> Bool {
+    func reload(_ ref: ForumThreadRef, within limit: Duration) async -> Bool {
         let keys = Part.allCases.map { Key(ref, $0) }.filter { key in
             key.part == .opening || entries[key] != nil || missing[key] != nil || inFlight[key] != nil
         }
-        for key in keys { missing.removeValue(forKey: key) }
-        for key in keys { await work(for: key).value }
-        return keys.allSatisfy { missing[$0] == nil }
+        var waits: [Task<Void, Never>] = []
+        var own: [Task<Void, Never>] = []
+        for key in keys {
+            if let running = inFlight[key] {
+                waits.append(running)
+            } else {
+                let started = work(for: key, within: limit)
+                waits.append(started)
+                own.append(started)
+            }
+        }
+        let landedWhole = await withTaskCancellationHandler {
+            for wait in waits { await wait.value }
+            return keys.allSatisfy { missing[$0] == nil }
+        } onCancel: {
+            for task in own { task.cancel() }
+        }
+        return landedWhole && !Task.isCancelled
     }
 
     private func fetch(_ ref: ForumThreadRef, part: Part) async {
@@ -402,9 +422,10 @@ final class ForumPosts {
 
     // MARK: - The wire
 
-    private func work(for key: Key) -> Task<Void, Never> {
+    /// The fetch of one part, started unless one is running. `limit` bounds each request of it.
+    private func work(for key: Key, within limit: Duration? = nil) -> Task<Void, Never> {
         if let running = inFlight[key] { return running }
-        let client = self.client(for: key.host)
+        let client = self.client(for: key.host, within: limit)
         let tid = key.tid
         let part = key.part
         // Unstructured on purpose, and the reason is `ShellPictures.work`'s: the caller is a
@@ -434,6 +455,9 @@ final class ForumPosts {
                 self.inFlight[key] = nil
                 self.cleared.remove(key)
             }
+            // Stopped: neither the page nor a mark for it lands. Only a reload's own fetch is
+            // ever cancelled.
+            guard !Task.isCancelled else { return }
 
             // **The guard that stops a `forget` being undone by work already running.** This
             // exact bug has been through this project twice already — `EmojiCatalogueStore` had
@@ -474,11 +498,12 @@ final class ForumPosts {
     /// signed in to comes back withheld — or as a login page — if it is fetched any other way.
     /// `hasEngine` rather than `transport`, because `transport(host:)` would *build* one and this
     /// app does not start a web process for a host that never needed it.
-    private func client(for host: String) -> DiscuzClient {
+    private func client(for host: String, within limit: Duration?) -> DiscuzClient {
         var transport = http
         if let forums, forums.hasEngine(host: host) {
             transport = ForumJoinTransport(forums.transport(host: host))
         }
+        if let limit { transport = Deadline(transport, within: limit) }
         return DiscuzClient(http: transport, host: host)
     }
 
