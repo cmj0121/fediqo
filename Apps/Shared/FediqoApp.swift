@@ -10,11 +10,12 @@ struct FediqoApp: App {
     private let file: StoreFile?
     @Environment(\.scenePhase) private var scenePhase
 
+    /// `file` is `nil` when the index could not be read and could not be set aside either:
+    /// this run then saves nothing, so what is on disk survives it (`StoreFile.open(at:now:)`).
     init() {
-        let file = try? StoreFile.applicationSupport()
-        let snapshot = (try? file?.load()) ?? (sources: [], notes: [])
-        self.file = file
-        self.store = ItemStore(sources: snapshot.sources, notes: snapshot.notes)
+        let opened = StoreFile.openApplicationSupport()
+        self.file = opened.file
+        self.store = ItemStore(sources: opened.sources, notes: opened.notes)
     }
 
     var body: some Scene {

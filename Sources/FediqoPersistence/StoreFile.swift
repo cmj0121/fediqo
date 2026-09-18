@@ -12,7 +12,7 @@ public struct StoreFile: Sendable {
         excluded.isExcludedFromBackup = true
         var directory = directory
         try directory.setResourceValues(excluded)
-        let url = directory.appendingPathComponent("index.sqlite")
+        let url = directory.appendingPathComponent(Self.indexName)
         db = try DatabaseQueue(path: url.path)
         try migrator.migrate(db)
     }
@@ -22,10 +22,78 @@ public struct StoreFile: Sendable {
         try migrator.migrate(db)
     }
 
-    public static func applicationSupport() throws -> StoreFile {
-        let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return try StoreFile(at: root.appendingPathComponent("Fediqo", isDirectory: true))
+    /// What a launch found on disk: the file to write back to, if there is one to trust, and
+    /// what it held.
+    public struct Opened: Sendable {
+        /// Where saves go. `nil` means this run must not write at all — see `open(at:now:)`.
+        public let file: StoreFile?
+        public let sources: [Source]
+        public let notes: [Note]
+        /// Where an unreadable index was moved, when one was. It is left there for a person, or a
+        /// later version of this code, to look at; nothing in the app reads it again.
+        public let setAside: URL?
     }
+
+    /// Opens the index in `directory` and reads it, failing closed.
+    ///
+    /// **An index that cannot be read is never written over.** `save` begins by emptying both
+    /// tables, so a launch that shrugged off a failed read — a corrupt page, a migration this
+    /// build cannot run, a row it cannot decode — and started empty would, at the first save,
+    /// turn one bad launch into everything the reader had, gone. So a failure here moves the
+    /// file aside under a timestamped name before a fresh one is made in its place, and when it
+    /// cannot even do that the run gets no file at all: it reads nothing and saves nothing, and
+    /// whatever is on disk is still there next launch.
+    ///
+    /// The decision lives here rather than in the app so it can be tested against a real file.
+    public static func open(at directory: URL, now: Date = Date()) -> Opened {
+        do {
+            let file = try StoreFile(at: directory)
+            let snapshot = try file.load()
+            return Opened(file: file, sources: snapshot.sources, notes: snapshot.notes, setAside: nil)
+        } catch {
+            guard let aside = try? setAside(in: directory, now: now),
+                  let fresh = try? StoreFile(at: directory)
+            else {
+                return Opened(file: nil, sources: [], notes: [], setAside: nil)
+            }
+            return Opened(file: fresh, sources: [], notes: [], setAside: aside)
+        }
+    }
+
+    /// `open(at:now:)` on the index this app keeps in Application Support.
+    public static func openApplicationSupport() -> Opened {
+        let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return open(at: root.appendingPathComponent("Fediqo", isDirectory: true))
+    }
+
+    /// Moves `index.sqlite` and any journal SQLite left beside it to `index-unreadable-<time>`.
+    /// Throws when there is no index to move, which is the case where the directory itself could
+    /// not be made: then there is nothing to protect by moving, and nowhere safe to write either.
+    private static func setAside(in directory: URL, now: Date) throws -> URL {
+        let manager = FileManager.default
+        let index = directory.appendingPathComponent(indexName)
+        guard manager.fileExists(atPath: index.path) else { throw CocoaError(.fileNoSuchFile) }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withYear, .withMonth, .withDay, .withTime, .withTimeZone]
+        let stamp = formatter.string(from: now)
+        var base = "index-unreadable-\(stamp)"
+        var attempt = 1
+        while manager.fileExists(atPath: directory.appendingPathComponent(base + ".sqlite").path) {
+            attempt += 1
+            base = "index-unreadable-\(stamp)-\(attempt)"
+        }
+        let aside = directory.appendingPathComponent(base + ".sqlite")
+        try manager.moveItem(at: index, to: aside)
+        for suffix in ["-journal", "-wal", "-shm"] {
+            let sidecar = directory.appendingPathComponent(indexName + suffix)
+            if manager.fileExists(atPath: sidecar.path) {
+                try manager.moveItem(at: sidecar, to: directory.appendingPathComponent(base + ".sqlite" + suffix))
+            }
+        }
+        return aside
+    }
+
+    private static let indexName = "index.sqlite"
 
     public func load() throws -> (sources: [Source], notes: [Note]) {
         try db.read { db in
