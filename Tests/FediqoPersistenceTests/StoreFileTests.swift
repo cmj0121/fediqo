@@ -66,4 +66,45 @@ struct StoreFileTests {
         let values = try dir.resourceValues(forKeys: [.isExcludedFromBackupKey])
         #expect(values.isExcludedFromBackup == true)
     }
+
+    @Test("An empty index loads as nothing")
+    func emptyLoad() throws {
+        let loaded = try StoreFile(database: DatabaseQueue()).load()
+        #expect(loaded.sources.isEmpty)
+        #expect(loaded.notes.isEmpty)
+    }
+
+    @Test("A title and the source's kind come back")
+    func titleAndKind() throws {
+        let file = try StoreFile(database: DatabaseQueue())
+        let forum = Source(host: "forum.example", kind: .discuz)
+        let note = Note(
+            id: "tid-7", source: forum, author: "Ada", handle: "", body: "b",
+            title: "A thread", postedAt: origin, origins: [.trending]
+        )
+        try file.save(sources: [forum], notes: [note])
+        let loaded = try file.load()
+        #expect(loaded.notes.first?.title == "A thread")
+        #expect(loaded.notes.first?.source.kind == .discuz)
+        #expect(loaded.sources.first?.kind == .discuz)
+    }
+
+    @Test("A second StoreFile on the same directory reads what the first saved")
+    func reopenSameDirectory() throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let source = Source(host: "forum.example", kind: .discuz, boards: [BoardSubscription(fid: 3, name: "x")])
+        let note = Note(id: "1", source: source, author: "Ada", handle: "", body: "b", postedAt: origin, origins: [.trending])
+        try StoreFile(at: dir).save(sources: [source], notes: [note])
+        let again = try StoreFile(at: dir)
+        let loaded = try again.load()
+        #expect(loaded.sources == [source])
+        #expect(loaded.notes.map(\.key) == [note.key])
+        try again.save(sources: [], notes: [])
+        #expect(try StoreFile(at: dir).load().sources.isEmpty)
+    }
+
+    private func scratch() -> URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    }
 }
