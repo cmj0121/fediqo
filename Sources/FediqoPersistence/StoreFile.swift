@@ -299,6 +299,9 @@ private struct NoteFacts: Codable {
     /// `nil` is not a reply; a `ReplyRow` with no handle is a reply whose parent was never named.
     var reply: ReplyRow?
     var boostedBy: String?
+    /// Absent in a row written before 0.2.0 learned it, which reads as no booster. See
+    /// `Note.boosterHandle`.
+    var boosterHandle: String?
     var sensitive: Bool?
     var spoiler: String?
     var avatarURL: URL?
@@ -381,6 +384,7 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             board: note.board,
             reply: note.reply.map { ReplyRow(handle: $0.handle) },
             boostedBy: note.boostedBy,
+            boosterHandle: note.boosterHandle,
             sensitive: note.sensitive,
             spoiler: note.spoiler,
             avatarURL: note.avatarURL,
@@ -410,6 +414,7 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             categories: Set(categories.compactMap(\.category)),
             reply: facts.reply.map { Reply(handle: $0.handle) },
             boostedBy: facts.boostedBy,
+            boosterHandle: facts.boosterHandle,
             avatarURL: facts.avatarURL,
             attachments: facts.attachments.map(\.attachment),
             sensitive: facts.sensitive,
