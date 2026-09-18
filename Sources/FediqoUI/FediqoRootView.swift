@@ -10,6 +10,9 @@ public struct FediqoRootView: View {
     @State private var jumpToTop = 0
     @State private var composing = false
     @State private var showingShortcuts = false
+    /// The launch overlay. Starts true; `LandingView` clears it after the flips, and
+    /// `playsLanding` is false from the first frame when reduce motion is on.
+    @State private var showingLanding = true
     #if os(macOS)
     /// Owns the sign-in window so that it outlives the body that opened it — a window held only
     /// by a view's local is a window that closes the next time SwiftUI rebuilds.
@@ -32,6 +35,7 @@ public struct FediqoRootView: View {
     @State private var prefs = DummyPrefs()
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The same scale every `RemoteImage` on this screen reads, so a wake asks for the keys the
     /// screen actually holds rather than for a second decode of each of them.
     @Environment(\.displayScale) private var displayScale
@@ -69,6 +73,10 @@ public struct FediqoRootView: View {
     }
 
     private var availability: ShellAvailability { session.availability }
+
+    /// Reduce motion never mounts the overlay, so a reader who asked for stillness does not
+    /// get one frame of a flip and then a skip.
+    private var playsLanding: Bool { showingLanding && !reduceMotion }
 
     /// Whether the join sheet is up, derived from the stage rather than stored beside it.
     ///
@@ -293,8 +301,14 @@ public struct FediqoRootView: View {
             // film behind a ground they can neither see through nor stop — the exact fault
             // `openViewer` stops playback to avoid, arriving by another route. Applied here so it
             // covers the guide as well, which the viewer is also allowed to open over.
-            .accessibilityHidden(viewedItem != nil)
+            .accessibilityHidden(viewedItem != nil || playsLanding)
             .overlay { viewer }
+            // After the viewer, so the mascot is the first thing a launch draws over.
+            .overlay {
+                if playsLanding {
+                    LandingView { showingLanding = false }
+                }
+            }
             .animation(.easeInOut(duration: 0.18), value: showingShortcuts)
             .animation(.easeInOut(duration: 0.18), value: viewing)
             // A viewer whose post the last refresh took away is not a layer any more, and the id
@@ -354,6 +368,9 @@ public struct FediqoRootView: View {
     }
 
     private func performDummyKey(_ character: Character, shift: Bool, control: Bool) -> Bool {
+        // The overlay is not a layer a press can leave, so every key is swallowed until
+        // the flips finish rather than driving the shell underneath.
+        if playsLanding { return true }
         guard let command = DummyCommand.from(
             character,
             shift: shift,
