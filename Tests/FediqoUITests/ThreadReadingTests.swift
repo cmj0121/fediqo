@@ -324,8 +324,7 @@ struct ThreadReadingTests {
         // A letter belongs to the draft while composing, and to a focused field always.
         #expect(DummyCommand.from("s", typing: true) == nil)
         #expect(DummyCommand.from("s", fieldFocused: true) == nil)
-        // Nothing that already meant something changed meaning. `r` is later reblog, and
-        // the launch is ⌘R so the letter stays free.
+        // Nothing that already meant something changed meaning. `r` reloads (#29).
         #expect(DummyCommand.from("v") == .viewAttachment)
         #expect(DummyCommand.from("a") == .playAttachment)
         #expect(DummyCommand.from("m") == .nextAttachment)
@@ -333,7 +332,8 @@ struct ThreadReadingTests {
         #expect(DummyCommand.from("q") == .back)
         // `e` is the timeline editor's (#27, Decision 18).
         #expect(DummyCommand.from("e") == .editTimeline)
-        for free in ["l", "r", "o", "h"] {
+        #expect(DummyCommand.from("r") == .reload)
+        for free in ["l", "o", "h"] {
             #expect(DummyCommand.from(Character(free)) == nil, "\(free) is no longer free")
         }
     }
