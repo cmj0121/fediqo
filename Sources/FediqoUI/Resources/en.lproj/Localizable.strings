@@ -160,9 +160,12 @@
 "prefs.fontSize.larger" = "Larger";
 "prefs.fontSize.largest" = "Largest";
 
-"prefs.cache" = "Held for this run";
-"prefs.cache.footer" = "None of this is written to disk, with one exception. Every server is read again from scratch the next time Fediqo opens, and a server's emoji names are read again by themselves after a day. The exception is a password you asked Fediqo to save: that is kept in this device's Keychain, and Clear deletes it along with everything else.";
-"prefs.cache.empty" = "Add a source on Account. What each one sends is held here until you close Fediqo.";
+"prefs.cache" = "Held on this device";
+"prefs.cache.footer" = "This store stays on this device. It does not follow the Apple account. A password you asked Fediqo to save is kept in this device's Keychain — the exception — and Clear deletes it along with this source's copy. There is no Fediqo server.";
+"prefs.cache.empty" = "Add a source on Account. What each one sends is held here.";
+"prefs.held.posts" = "%d posts";
+"prefs.held.posts.none" = "No posts held";
+"prefs.held.month" = "%d this month";
 "prefs.cache.catalogue" = "%d emoji names, read";
 "prefs.cache.catalogue.none" = "No emoji names held";
 "prefs.cache.pictures" = "%d pictures";
