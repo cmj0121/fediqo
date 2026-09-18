@@ -779,7 +779,7 @@ public struct FediqoRootView: View {
 
     /// The stream `j` and `k` move through: the current query, All or Trends, over the store.
     private var streamItems: [DummyItem] {
-        session.currentTimeline.items(from: session.notes)
+        session.currentTimeline.items(from: session.notes, latest: prefs.latestDate)
     }
 
     /// Whichever list is in front: the open conversation, or the stream under it.

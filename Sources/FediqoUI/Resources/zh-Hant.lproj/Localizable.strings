@@ -81,6 +81,8 @@
 "timeline.tab.trends" = "趨勢";
 "timeline.rule.all" = "時間序，不過濾。";
 "timeline.rule.trends" = "趨勢貼文，時間序。";
+"timeline.latest" = "只到 %@";
+"timeline.latest.label" = "只顯示 %@ 以前的貼文，較新的貼文已隱藏";
 "timeline.empty.title" = "還沒有東西進來";
 "timeline.empty.detail" = "你加的來源的公開貼文會落在這裡，新的在上面。";
 "timeline.empty.trends.title" = "目前沒有趨勢";
@@ -163,6 +165,9 @@
 "prefs.fontSize.default" = "預設";
 "prefs.fontSize.larger" = "較大";
 "prefs.fontSize.largest" = "最大";
+"prefs.latest" = "只看到某一天為止";
+"prefs.latest.date" = "最晚日期";
+"prefs.latest.footer" = "每個時間軸都不顯示這一天結束後（依這台裝置的時區）發佈的貼文。較新的貼文仍留在這台裝置上；關掉這項就會再看到。";
 
 "prefs.cache" = "存在這台裝置上";
 "prefs.cache.footer" = "這些大多會向各來源重新讀取：表情符號名稱會在一天後自行重新讀取，其他則在你需要時再讀。登入留下的兩樣東西只存在這台裝置上。你登入過的論壇會把登入 Cookie 留在這裡，下次開啟 Fediqo 時你仍是登入狀態；它們不會被備份，也不會跟著你的 Apple 帳號走。你要求 Fediqo 存起來的密碼放在這台裝置的鑰匙圈裡，永遠不會複製到 iCloud。按「清除」時，兩者都會和其他東西一起刪掉。";
