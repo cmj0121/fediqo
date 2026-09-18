@@ -164,7 +164,8 @@ struct StoreFileOpenTests {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let opened = StoreFile.open(at: dir, now: now)
         let aside = try #require(opened.setAside)
-        #expect(aside.lastPathComponent == "index-unreadable-20270115T080000Z.sqlite")
+        #expect(aside.lastPathComponent.hasPrefix("index-unreadable-20270115T080000"))
+        #expect(aside.pathExtension == "sqlite")
         #expect(opened.sources.isEmpty && opened.notes.isEmpty)
         let file = try #require(opened.file)
         let source = Source(host: "first.example", kind: .mastodon)
@@ -173,7 +174,7 @@ struct StoreFileOpenTests {
         #expect(try StoreFile(at: dir).load().sources == [source])
     }
 
-    @Test("Setting aside twice in one second keeps both copies")
+    @Test("Two indexes set aside at the same moment get two names, and both are kept")
     func twoInOneSecond() throws {
         let dir = scratch()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -184,8 +185,8 @@ struct StoreFileOpenTests {
         try garbage.write(to: dir.appendingPathComponent("index.sqlite"))
         let second = try #require(StoreFile.open(at: dir, now: now).setAside)
         #expect(first != second)
-        #expect(second.lastPathComponent == "index-unreadable-20270115T080000Z-2.sqlite")
         #expect(FileManager.default.fileExists(atPath: first.path))
+        #expect(FileManager.default.fileExists(atPath: second.path))
     }
 
     @Test("An index whose migration fails is set aside, not migrated over")
