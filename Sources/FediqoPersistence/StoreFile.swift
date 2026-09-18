@@ -29,7 +29,7 @@ public struct StoreFile: Sendable {
 
     public func load() throws -> (sources: [Source], notes: [Note]) {
         try db.read { db in
-            let sources = try SourceRecord.fetchAll(db).map(\.source)
+            let sources = try SourceRecord.fetchAll(db).map { try $0.source() }
             let notes = try NoteRecord.fetchAll(db).map(\.note)
             return (sources, notes)
         }
@@ -49,7 +49,8 @@ public struct StoreFile: Sendable {
     }
 }
 
-private var migrator: DatabaseMigrator {
+/// Internal rather than private so a test can stop it part-way and write what an older build left.
+var migrator: DatabaseMigrator {
     var migrator = DatabaseMigrator()
     migrator.registerMigration("v1-index") { db in
         try db.create(table: "source") { t in
@@ -69,7 +70,41 @@ private var migrator: DatabaseMigrator {
             t.column("origins", .text).notNull()
         }
     }
+    // The board list was a hand-rolled `fid<US>name<RS>…` string, which a board name holding
+    // either separator broke without a word. It is JSON now; this rewrites what the old form
+    // left, reading it the way the old code did.
+    migrator.registerMigration("v2-boards-json") { db in
+        let rows = try Row.fetchAll(db, sql: "SELECT host, boards FROM source")
+        for row in rows {
+            let host: String = row["host"]
+            let raw: String = row["boards"]
+            let boards: [BoardRow] = raw.isEmpty ? [] : raw.split(separator: "\u{1e}").compactMap { part in
+                let bits = part.split(separator: "\u{1f}", maxSplits: 1)
+                guard bits.count == 2, let fid = Int(bits[0]) else { return nil }
+                return BoardRow(fid: fid, name: String(bits[1]))
+            }
+            try db.execute(
+                sql: "UPDATE source SET boards = ? WHERE host = ?",
+                arguments: [try BoardRow.encode(boards), host]
+            )
+        }
+    }
     return migrator
+}
+
+/// One board subscription as it is written into `source.boards`, a JSON array of these.
+/// Core's `BoardSubscription` stays free of a storage format; this is the storage format.
+private struct BoardRow: Codable {
+    var fid: Int
+    var name: String
+
+    static func encode(_ boards: [BoardRow]) throws -> String {
+        String(decoding: try JSONEncoder().encode(boards), as: UTF8.self)
+    }
+
+    static func decode(_ text: String) throws -> [BoardRow] {
+        try JSONDecoder().decode([BoardRow].self, from: Data(text.utf8))
+    }
 }
 
 private struct SourceRecord: Codable, FetchableRecord, PersistableRecord {
@@ -78,27 +113,20 @@ private struct SourceRecord: Codable, FetchableRecord, PersistableRecord {
     var kind: String
     var boards: String
 
-    init(_ source: Source) {
+    init(_ source: Source) throws {
         host = source.host
         kind = source.kind.rawValue
-        boards = SourceRecord.encodeBoards(source.boards)
+        boards = try BoardRow.encode(source.boards.map { BoardRow(fid: $0.fid, name: $0.name) })
     }
 
-    var source: Source {
-        Source(host: host, kind: ProtocolKind(rawValue: kind) ?? .unknown, boards: SourceRecord.decodeBoards(boards))
-    }
-
-    private static func encodeBoards(_ boards: [BoardSubscription]) -> String {
-        boards.map { "\($0.fid)\u{1f}\($0.name)" }.joined(separator: "\u{1e}")
-    }
-
-    private static func decodeBoards(_ raw: String) -> [BoardSubscription] {
-        guard !raw.isEmpty else { return [] }
-        return raw.split(separator: "\u{1e}").compactMap { part in
-            let bits = part.split(separator: "\u{1f}", maxSplits: 1)
-            guard bits.count == 2, let fid = Int(bits[0]) else { return nil }
-            return BoardSubscription(fid: fid, name: String(bits[1]))
-        }
+    /// Throws on a board list that is not JSON, so a damaged row fails the load — and the load
+    /// fails closed — rather than coming back as a source with no boards.
+    func source() throws -> Source {
+        Source(
+            host: host,
+            kind: ProtocolKind(rawValue: kind) ?? .unknown,
+            boards: try BoardRow.decode(boards).map { BoardSubscription(fid: $0.fid, name: $0.name) }
+        )
     }
 }
 
