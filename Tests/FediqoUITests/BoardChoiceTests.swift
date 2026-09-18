@@ -9,7 +9,7 @@ import Testing
 ///
 /// What is pinned here is the **flow**, because that is what this unit is: `begin` stopping with
 /// nothing added, the sheet the reader answers it in, every way out of it leaving nothing behind,
-/// and the boards they kept turning into tabs. `DiscuzBoardJoin` has its own suite for what the
+/// and the boards they kept as a property of the source. `DiscuzBoardJoin` has its own suite for what the
 /// two Core calls do; this one is about who calls them and what the reader is left holding.
 @MainActor
 @Suite("Choosing boards")
@@ -286,11 +286,8 @@ struct BoardChoiceTests {
         #expect(session.sources.first?.boards.map(\.fid) == [33, 41])
         #expect(!session.notes.isEmpty)
 
-        // D27: a board is a query in the rail the way `all` is for a microblog.
-        let ids = session.queries.map(\.id)
-        #expect(ids.first == "all")
-        #expect(ids.contains("board:\(Self.host):33"))
-        #expect(ids.contains("board:\(Self.host):41"))
+        // All and Trends are the only timeline queries. Boards stay on the source.
+        #expect(session.queries.map(\.id) == ["all"])
         #expect(session.availability.allows(.timeline))
         #expect(session.choosing == nil)
         #expect(session.refuse == nil)
@@ -403,14 +400,9 @@ struct BoardChoiceTests {
         }
         await session.subscribe(offer.boards.filter { $0.fid == 33 })
 
-        let id = "board:\(Self.host):33"
-        session.timelineID = id
-        let resolved = session.timeline(for: id)
-        #expect(resolved.board?.fid == 33)
-        #expect(!resolved.items(from: session.notes, among: []).isEmpty)
-        // The same id, rebuilt rather than resolved, is the failure this guards against.
-        #expect(DummyTimeline(id: id).board == nil)
-        #expect(DummyTimeline(id: id).items(from: session.notes, among: []).isEmpty)
+        #expect(session.queries.map(\.id) == ["all"])
+        #expect(session.timelineID == "all")
+        #expect(!DummyTimeline(id: "all").items(from: session.notes, among: []).isEmpty)
     }
 
     // MARK: - Saying what did not work
@@ -709,9 +701,9 @@ struct BoardChoiceTests {
 
         await session.clear(host: Self.host)
 
-        // The server stays added, its boards stay chosen, and its tab stays in the rail.
+        // The server stays added and its boards stay chosen. The rail is still All.
         #expect(session.sources.first?.boards.map(\.fid) == [33])
-        #expect(session.queries.contains { $0.id == "board:\(Self.host):33" })
+        #expect(session.queries.map(\.id) == ["all"])
         #expect(session.cleared == 1)
     }
 
@@ -895,7 +887,7 @@ struct BoardChoiceTests {
         await session.subscribe(offer.boards.filter { [33, 37].contains($0.fid) })
 
         #expect(session.sources.first?.boards.map(\.fid) == [33, 37])
-        #expect(!session.queries.contains { $0.id.contains("40") }, "the unticked board kept a tab")
+        #expect(session.queries.map(\.id) == ["all"])
         #expect(session.notes.count == held, """
             Unticking a board deleted the notes it had already brought. Decision 22: this device \
             stops fetching it, it does not forget what it holds.
