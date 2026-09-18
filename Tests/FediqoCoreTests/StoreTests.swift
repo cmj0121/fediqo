@@ -8,6 +8,19 @@ struct StoreTests {
     private let other = Source(host: "second.example", kind: .mastodon)
     private let origin = Date(timeIntervalSince1970: 1_700_000_000)
 
+    @Test("replace() is what a relaunch loads")
+    func replaceLoadsASnapshot() async {
+        let store = ItemStore()
+        await store.add(source)
+        await store.ingest([note(id: "old", postedAt: origin, origins: [.publicTimeline])])
+        let forum = Source(host: "forum.example", kind: .discuz)
+        let incoming = note(id: "kept", postedAt: origin, origins: [.trending], from: forum)
+        await store.replace(sources: [forum], notes: [incoming])
+        #expect(await store.sources().map(\.host) == ["forum.example"])
+        #expect(await store.all().map(\.id) == ["kept"])
+        #expect(await store.trends().map(\.id) == ["kept"])
+    }
+
     @Test("Adding a host twice keeps the first and insertion order")
     func addIsIdempotentByHost() async {
         let store = ItemStore()
