@@ -50,10 +50,8 @@ public enum ForumTransportError: Error, Equatable, Sendable {
 /// misses" is one of the two conventions it earned. A second web view here would be consumer
 /// N+1, and the symptom would be a reader who signs in successfully and still cannot read.
 ///
-/// **The data store is non-persistent, deliberately.** Nothing this holds outlives the run, which
-/// is the promise the Preferences footer already makes in three languages — and it means a Clear
-/// cannot leave a cookie behind on disk for somebody to find later. The cost is a sign-in per
-/// launch, which is precisely what the saved password (D23) is for.
+/// Cookies may persist on this device (#5). Tests keep a non-persistent store. Clear still
+/// drops the host's cookies through `forget`.
 @MainActor
 final class ForumWebEngine: NSObject, WKNavigationDelegate {
     /// How long one navigation may take before the transport gives up on it.
@@ -90,11 +88,10 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
     private var running = false
     private var waiting: [CheckedContinuation<Void, Never>] = []
 
-    init(host: String) {
+    init(host: String, dataStore: WKWebsiteDataStore = .nonPersistent()) {
         self.host = host.lowercased()
         let configuration = WKWebViewConfiguration()
-        // Nothing survives the run. See the type's note.
-        configuration.websiteDataStore = .nonPersistent()
+        configuration.websiteDataStore = dataStore
         // **What this calls itself, and what it does not.** WebKit composes an agent naming
         // itself and the platform; this appends the app's name to it, so an administrator
         // reading a log can see which client this is — the same courtesy `Fediqo.userAgent`

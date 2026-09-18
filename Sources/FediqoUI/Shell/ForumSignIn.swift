@@ -1,6 +1,7 @@
 import FediqoCore
 import Foundation
 import Observation
+import WebKit
 
 /// Why an automatic sign-in stopped and handed the reader the forum's own page.
 ///
@@ -86,12 +87,13 @@ struct ForumSignInRequest: Identifiable, Equatable {
 /// wrong password to the wrong site.
 @MainActor
 @Observable
-final class ForumSessions {
+public final class ForumSessions {
     /// Where a saved password lives. Injected so that a test never touches the real Keychain —
     /// see `ForumCredentialStore`.
     @ObservationIgnored let credentials: any ForumCredentialStore
 
     @ObservationIgnored private var engines: [String: ForumWebEngine] = [:]
+    @ObservationIgnored private let dataStore: WKWebsiteDataStore
 
     /// Which hosts have a password saved, as a fact a view body may read.
     ///
@@ -116,17 +118,28 @@ final class ForumSessions {
     /// having saved nothing, and can have a password saved while signed out. `hasEngine(host:)` is
     /// about what this run built: an engine exists the moment the reader is *offered* a sign-in,
     /// including the case where they looked at the forum's page and gave up.
-    private(set) var reachedHosts: Set<String> = []
+    public private(set) var reachedHosts: Set<String> = []
 
-    init(credentials: any ForumCredentialStore = KeychainCredentials()) {
+    public init(
+        credentials: any ForumCredentialStore = KeychainCredentials(),
+        persistentCookies: Bool = false,
+        reached: Set<String> = []
+    ) {
         self.credentials = credentials
+        self.dataStore = persistentCookies
+            ? WKWebsiteDataStore(forIdentifier: Self.storeID)
+            : .nonPersistent()
+        self.reachedHosts = reached
         refreshSavedHosts()
     }
+
+    /// Stable id for this app's cookie store on this device.
+    private static let storeID = UUID(uuidString: "66656469-7171-4000-8000-000000000005")!
 
     func engine(host: String) -> ForumWebEngine {
         let host = host.lowercased()
         if let held = engines[host] { return held }
-        let made = ForumWebEngine(host: host)
+        let made = ForumWebEngine(host: host, dataStore: dataStore)
         engines[host] = made
         return made
     }
