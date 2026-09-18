@@ -325,3 +325,49 @@ struct BackFromThreadTests {
         #expect(DummyCommand.centredOnAppear(selected: nil) == nil)
     }
 }
+
+/// Decision 17: All and Trends are two fixed timelines evaluated by the rule engine, and a written
+/// timeline is named by an id the shell can hold before #27 gives it a tab.
+@Suite("Queries as timelines")
+@MainActor
+struct TimelineQueryDefinitionTests {
+    private let one = Source(host: "one.example", kind: .mastodon)
+
+    private func note(_ id: String, _ categories: Set<FediqoCore.Category>, _ body: String = "hello") -> Note {
+        Note(id: id, source: one, author: "Ada", handle: "@ada@one.example", body: body,
+             postedAt: Date(timeIntervalSince1970: 0), categories: categories)
+    }
+
+    @Test("All and Trends resolve to the built-in definitions and draw what they drew before")
+    func builtInsUnchanged() {
+        let notes = [note("1", [.public]), note("2", [.trends]), note("3", [.public, .trends]), note("4", [])]
+        #expect(TimelineQuery.all.definition(among: []) == .all)
+        #expect(TimelineQuery.trends.definition(among: []) == .trends)
+        #expect(TimelineQuery.all.items(from: notes).map(\.noteID) == ["1", "2", "3", "4"])
+        #expect(TimelineQuery.trends.items(from: notes).map(\.noteID) == ["2", "3"])
+    }
+
+    @Test("A written timeline's id round-trips, draws its rules, and a deleted one is All")
+    func writtenTimeline() throws {
+        let swift = try #require(Rule.keyword("swift", in: .every))
+        let written = TimelineDefinition(name: "Swift", rules: [swift])
+        let query = TimelineQuery.written(written.id)
+        #expect(TimelineQuery(id: query.id) == query)
+        #expect(TimelineQuery(id: "written:not-a-uuid") == .all)
+
+        let notes = [note("1", [.public], "Swift news"), note("2", [.public], "other")]
+        #expect(query.definition(among: [written]) == written)
+        #expect(query.items(from: notes, among: [written]).map(\.noteID) == ["1"])
+        #expect(query.definition(among: []) == .all)
+        #expect(query.items(from: notes).map(\.noteID) == ["1", "2"])
+    }
+
+    @Test("The Trends tab is offered exactly where the Trends timeline's rule can reach")
+    func trendsTabAgreesWithRule() {
+        for kind in ProtocolKind.allCases {
+            let source = Source(host: "x.example", kind: kind)
+            let asked = CompiledTimeline(.trends, sources: [source]).sourcesToAsk()
+            #expect(ShellSession.hasTrends(kind) == !asked.isEmpty, "\(kind)")
+        }
+    }
+}
