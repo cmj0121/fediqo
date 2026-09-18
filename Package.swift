@@ -67,7 +67,9 @@ let package = Package(
         ),
         .testTarget(
             name: "FediqoUITests",
-            dependencies: ["FediqoUI", "FediqoCore"],
+            // Persistence for the real `MediaCache`, so a relaunch is tested against a folder on
+            // disk rather than a fake that agrees with itself.
+            dependencies: ["FediqoUI", "FediqoCore", "FediqoPersistence"],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
     ]
