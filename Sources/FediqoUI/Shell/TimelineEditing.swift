@@ -165,7 +165,7 @@ extension ShellSession {
             showToast(L10n.t("timeline.edit.fixed"))
             return true
         }
-        editing = TimelineDraft(editing: written[index], at: index, of: written.count)
+        edit(TimelineDraft(editing: written[index], at: index, of: written.count))
         return true
     }
 
@@ -181,7 +181,14 @@ extension ShellSession {
             showToast(L10n.t("timeline.unreadable"))
             return
         }
-        editing = TimelineDraft(new: written.count + 1)
+        edit(TimelineDraft(new: written.count + 1))
+    }
+
+    /// The editor up over `draft`. It owns the keys, so a running reload — which Esc could no
+    /// longer reach — is stopped.
+    private func edit(_ draft: TimelineDraft) {
+        reload.stop()
+        editing = draft
     }
 
     /// Done. The draft replaces its timeline, or joins the reader's, at its place; the tabs follow

@@ -539,11 +539,7 @@ public struct FediqoRootView: View {
             showingLanding = true
             return true
         case .editTimeline:
-            // Only over the timeline itself: inside a thread the timeline underneath is not what
-            // the reader is looking at.
-            guard place == .timeline, viewedItem == nil, !showingShortcuts, threadStack.isEmpty else {
-                return false
-            }
+            guard place == .timeline, DummyCommand.canEditTimeline(whenOpen: openLayers) else { return false }
             return session.editCurrentTimeline()
         case .dismiss:
             // A running reload is the first thing Escape stops (#29); the next one leaves.
