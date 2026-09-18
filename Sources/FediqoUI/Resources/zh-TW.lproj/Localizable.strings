@@ -150,6 +150,7 @@
 "rule.kind.category" = "分類";
 "rule.keyword.placeholder" = "一個字詞";
 "rule.keyword.hint" = "#swift 只找標籤；swift 兩者都找。";
+"editor.keys.name" = "改名";
 "editor.keys.move" = "移動";
 "editor.keys.add" = "新規則";
 "editor.keys.rule" = "規則";

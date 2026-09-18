@@ -243,12 +243,18 @@ struct RuleDraft: Equatable {
         target.flatMap { RuleBuilder.rule($0, scope: scope, effect: effect, sources: sources) }
     }
 
-    /// Picks a target, keeping the scope where it is still one of its choices.
+    /// Picks a target, keeping the scope where it is still one of its choices. A category is
+    /// picked under one source's heading, so it is that source's to begin with — public, trends
+    /// and home too, which every Mastodon offers; `o` widens it.
     mutating func pick(_ picked: RuleTarget, sources: [Source]) {
         target = picked
         if case .author(let handle) = picked { typed = handle }
         let choices = RuleBuilder.scopes(for: picked, sources: sources)
-        if !choices.contains(scope) { scope = choices.first ?? .every }
+        if case .category(_, let host) = picked, choices.contains(.source(host: host)) {
+            scope = .source(host: host)
+        } else if !choices.contains(scope) {
+            scope = choices.first ?? .every
+        }
     }
 
     mutating func type(_ text: String, sources: [Source]) {
@@ -297,6 +303,8 @@ enum EditorAction: Equatable {
     case toggleRule
     case removeRule
     case removeTimeline
+    /// The name field, to rename the timeline.
+    case focusName
     case pickKind(RuleKind.Tag)
     case nextChoice
     case previousChoice
@@ -304,13 +312,31 @@ enum EditorAction: Equatable {
     case nextScope
     case confirmRule
 
-    /// **A focused field owns every letter**; only Escape goes past it. Escape steps back one
-    /// stage, and on the rules it cancels the whole edit.
+    /// Escape: one stage back, and on the rules the whole edit cancelled.
+    static func escape(at stage: EditorStage) -> EditorAction {
+        stage == .rules ? .cancel : .back
+    }
+
+    /// Whether Escape reaches the editor as the exit command rather than as a key press. On
+    /// macOS a focused field sends the exit command for Escape, so the key press leaves Escape
+    /// alone there and every Escape is one step back, never two.
+    static let escapeIsExitCommand: Bool = {
+        #if os(macOS)
+        true
+        #else
+        false
+        #endif
+    }()
+
+    /// **A focused field owns every letter**; only Escape and ⌥O go past it — ⌥O so a rule's
+    /// scope can be changed while its author or keyword is still being typed. With ⌥ held the
+    /// key may arrive as the letter it composes, `ø`.
     static func from(
-        _ key: Character, command: Bool = false, stage: EditorStage, fieldFocused: Bool
+        _ key: Character, command: Bool = false, option: Bool = false, stage: EditorStage, fieldFocused: Bool
     ) -> EditorAction? {
-        if key == KeyEquivalent.escape.character { return stage == .rules ? .cancel : .back }
-        if fieldFocused { return nil }
+        if key == KeyEquivalent.escape.character { return escapeIsExitCommand ? nil : escape(at: stage) }
+        if option, !command, case .form = stage, key == "o" || key == "ø" { return .nextScope }
+        if fieldFocused || option { return nil }
         if command {
             return stage == .rules && key == KeyEquivalent.delete.character ? .removeTimeline : nil
         }
@@ -322,6 +348,7 @@ enum EditorAction: Equatable {
             case "[": return .earlier
             case "]": return .later
             case "n": return .addRule
+            case "m": return .focusName
             case "x": return .toggleRule
             case KeyEquivalent.delete.character: return .removeRule
             default: return down ? .nextRule : up ? .previousRule : nil
@@ -345,13 +372,13 @@ enum EditorAction: Equatable {
     static func strip(for stage: EditorStage) -> [(caps: String, key: String)] {
         switch stage {
         case .rules:
-            [("[ ]", "editor.keys.move"), ("n", "editor.keys.add"), ("j k", "editor.keys.rule"),
+            [("m", "editor.keys.name"), ("[ ]", "editor.keys.move"), ("n", "editor.keys.add"), ("j k", "editor.keys.rule"),
              ("x", "editor.keys.effect"), ("⌫", "editor.keys.remove"), ("⌘⌫", "editor.keys.removeTimeline"),
              ("⌘↩", "editor.keys.done"), ("esc", "editor.keys.cancel")]
         case .kinds:
             [("1–4", "editor.keys.kind"), ("esc", "editor.keys.back")]
         case .form:
-            [("j k", "editor.keys.pick"), ("x", "editor.keys.effect"), ("o", "editor.keys.scope"),
+            [("j k", "editor.keys.pick"), ("x", "editor.keys.effect"), ("o ⌥O", "editor.keys.scope"),
              ("↩", "editor.keys.confirm"), ("esc", "editor.keys.back")]
         }
     }

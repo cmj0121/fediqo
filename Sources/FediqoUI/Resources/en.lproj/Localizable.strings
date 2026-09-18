@@ -151,6 +151,7 @@
 "rule.kind.category" = "Category";
 "rule.keyword.placeholder" = "A word";
 "rule.keyword.hint" = "#swift finds the hashtag only; swift finds both.";
+"editor.keys.name" = "rename";
 "editor.keys.move" = "move";
 "editor.keys.add" = "new rule";
 "editor.keys.rule" = "rule";
