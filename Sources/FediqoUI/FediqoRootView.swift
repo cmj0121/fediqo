@@ -68,7 +68,10 @@ public struct FediqoRootView: View {
         storeIsNewer: Bool = false,
         storeNoticeSeen: (@MainActor () -> Void)? = nil
     ) {
-        let session = ShellSession(http: http, store: store, forums: forums, mastodon: mastodon)
+        let session = ShellSession(
+            http: http, store: store, forums: forums, mastodon: mastodon,
+            timelines: WrittenTimelineStore(defaults: .standard)
+        )
         session.persist = persist
         _session = State(initialValue: session)
         _storeIsNewer = State(initialValue: storeIsNewer)
@@ -232,6 +235,11 @@ public struct FediqoRootView: View {
             // reads `session.stage` inside its own body and switches there, which is a redraw.
             .sheet(isPresented: stagePresented) {
                 JoinSheet(session: session)
+            }
+            // The timeline editor (#27), on the root beside the other presenters for their reason.
+            // Dismissed by any route it is Cancel: the draft is dropped (Decision 21).
+            .sheet(item: $session.editing) { draft in
+                TimelineEditor(session: session, draft: draft)
             }
             // **The Remove question, on the root beside the other three presenters**, and for the
             // same documented reason: one presenter driven by one piece of session state survives
@@ -427,6 +435,8 @@ public struct FediqoRootView: View {
         // the flips finish rather than driving the shell underneath. Unmapped chords —
         // ⌘Q, ⌘C — have already returned false, so a quit still quits.
         if playsLanding { return true }
+        // The editor is a sheet and owns its keys; nothing under it moves.
+        if session.editing != nil { return false }
         let did = apply(mapped)
         return DummyCommand.consumes(character, did: did)
     }
@@ -521,6 +531,13 @@ public struct FediqoRootView: View {
             landingTick += 1
             showingLanding = true
             return true
+        case .editTimeline:
+            // Only over the timeline itself: inside a thread the timeline underneath is not what
+            // the reader is looking at.
+            guard place == .timeline, viewedItem == nil, !showingShortcuts, threadStack.isEmpty else {
+                return false
+            }
+            return session.editCurrentTimeline()
         case .dismiss:
             switch DummyCommand.outermost(of: openLayers) {
             case .viewer: return closeViewer()
@@ -779,7 +796,7 @@ public struct FediqoRootView: View {
 
     /// The stream `j` and `k` move through: the current query, All or Trends, over the store.
     private var streamItems: [DummyItem] {
-        session.currentTimeline.items(from: session.notes, latest: prefs.latestDate)
+        session.timelineItems(latest: prefs.latestDate)
     }
 
     /// Whichever list is in front: the open conversation, or the stream under it.
@@ -890,13 +907,10 @@ public struct FediqoRootView: View {
         )
     }
 
-    /// Tab only rotates named queries on the timeline. Elsewhere it is the platform's.
+    /// Tab only rotates named queries, then `[+]`, on the timeline. Elsewhere it is the platform's.
     private func rotateTimelineTab(by step: Int) -> Bool {
         guard place == .timeline else { return false }
-        let queries = session.queries
-        guard !queries.isEmpty else { return false }
-        session.timelineID = DummyCommand.advanced(queries, from: session.currentTimeline, by: step)
-        return true
+        return session.rotateTab(by: step)
     }
 
     @ViewBuilder

@@ -49,6 +49,9 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     /// the two jobs a collision the day the later one arrives. A ⌘ chord is otherwise the
     /// platform's — this is the one dummy exception.
     case replayLanding
+    /// `e` — open the editor on the timeline in front, or a new one from the `[+]` pill (#27).
+    /// All and Trends are not edited: the press says so and how to add one (Decision 19).
+    case editTimeline
 
     /// What a press means. Letters are the draft's while composing, except Escape.
     /// A focused text field owns every key, including Escape.
@@ -88,6 +91,7 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         case "s": return .reveal
         case KeyEquivalent.return.character, " ": return .expandPost
         case "q": return .back
+        case "e": return .editTimeline
         default: return nil
         }
     }
@@ -303,6 +307,7 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
         DummyShortcut(group: .timeline, keys: ["m"], name: "turn", commands: [.nextAttachment]),
         DummyShortcut(group: .timeline, keys: ["s"], name: "reveal", commands: [.reveal]),
         DummyShortcut(group: .timeline, keys: ["q"], name: "back", commands: [.back]),
+        DummyShortcut(group: .timeline, keys: ["e"], name: "edit", commands: [.editTimeline]),
         DummyShortcut(group: .app, keys: ["⌃Tab", "⌃⇧Tab"], name: "pages",
                       commands: [.nextPage, .previousPage]),
         DummyShortcut(group: .app, keys: ["c"], name: "compose", commands: [.compose]),
