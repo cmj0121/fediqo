@@ -202,6 +202,14 @@ final class ShellSession {
     }
     @ObservationIgnored private var builtTextIndex: TextIndex?
     @ObservationIgnored private(set) var textIndexIsCurrent = false
+    /// Bumped each time `notes` is assigned. Observed, so a view that read a cached timeline
+    /// still redraws when the notes under it change.
+    private(set) var notesRevision = 0
+    /// The last timeline drawn and what it was drawn from, so a redraw that reads it several
+    /// times evaluates the rules once.
+    @ObservationIgnored var drawnTimeline: DrawnTimeline?
+    /// How many times the rules ran for the stream: the test's window on `drawnTimeline`.
+    @ObservationIgnored var timelineEvaluations = 0
 
     /// The query the timeline draws: the one selected, or All.
     var currentTimeline: TimelineQuery { timelineID ?? .all }
@@ -214,6 +222,7 @@ final class ShellSession {
         didSet {
             holdings = Holdings(notes: notes, per: heldPeriod)
             textIndexIsCurrent = false
+            notesRevision += 1
         }
     }
 
