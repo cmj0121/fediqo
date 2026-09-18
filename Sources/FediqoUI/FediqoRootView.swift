@@ -45,8 +45,8 @@ public struct FediqoRootView: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
 
-    public init(http: any HTTPClient = URLSessionClient()) {
-        _session = State(initialValue: ShellSession(http: http))
+    public init(http: any HTTPClient = URLSessionClient(), store: ItemStore = ItemStore()) {
+        _session = State(initialValue: ShellSession(http: http, store: store))
     }
 
     private var availability: ShellAvailability { session.availability }
@@ -77,6 +77,7 @@ public struct FediqoRootView: View {
 
     public var body: some View {
         layout
+            .task { await session.reloadFromStore() }
             .onChange(of: place) { old, new in
                 let accepted = availability.placing(old, as: new)
                 if accepted != new { place = accepted }

@@ -13,6 +13,11 @@ public actor ItemStore {
 
     public init() {}
 
+    public init(sources: [Source], notes incoming: [Note]) {
+        sourceList = sources
+        notes = Dictionary(uniqueKeysWithValues: incoming.map { (Self.key(of: $0), $0) })
+    }
+
     private static func key(of note: Note) -> NoteKey {
         NoteKey(host: note.source.host, id: note.id)
     }
@@ -70,6 +75,12 @@ public actor ItemStore {
 
     public func sources() -> [Source] {
         sourceList
+    }
+
+    /// Replaces what this device holds. Used to load a snapshot after a relaunch.
+    public func replace(sources: [Source], notes incoming: [Note]) {
+        sourceList = sources
+        notes = Dictionary(uniqueKeysWithValues: incoming.map { (Self.key(of: $0), $0) })
     }
 
     public func all() -> [Note] {
