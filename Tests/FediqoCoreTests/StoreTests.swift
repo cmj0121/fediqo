@@ -18,6 +18,21 @@ struct StoreTests {
         #expect(await store.trends().map(\.id) == ["kept"])
     }
 
+    @Test("snapshot() hands back what init took, for a save to write")
+    func snapshotRoundTrips() async {
+        let forum = Source(host: "forum.example", kind: .discuz, boards: [BoardSubscription(fid: 3, name: "x")])
+        let one = note(id: "1", postedAt: origin, origins: [.trending], from: forum)
+        let two = note(id: "2", postedAt: origin.addingTimeInterval(60), origins: [.publicTimeline])
+        let store = ItemStore(sources: [source, forum], notes: [one, two])
+        await store.ingest([note(id: "3", postedAt: origin, origins: [])])
+        await store.remove(host: "forum.example")
+        let snapshot = await store.snapshot()
+        #expect(snapshot.sources == [source])
+        #expect(Set(snapshot.notes.map(\.key)) == Set(["2", "3"].map { NoteKey(host: "first.example", id: $0) }))
+        let reloaded = ItemStore(sources: snapshot.sources, notes: snapshot.notes)
+        #expect(await reloaded.all() == store.all())
+    }
+
     @Test("A snapshot with duplicates loads instead of trapping")
     func initToleratesDuplicates() async {
         let first = note(id: "1", postedAt: origin, origins: [.publicTimeline], body: "first")
