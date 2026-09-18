@@ -7,84 +7,64 @@ import Testing
 @Suite("The on-device index")
 struct StoreFileTests {
     private let origin = Date(timeIntervalSince1970: 1_700_000_000)
+    private let mastodon = Source(host: "first.example", kind: .mastodon)
+
+    private func note(
+        id: String = "1",
+        source: Source? = nil,
+        handle: String = "@ada",
+        title: String? = nil,
+        board: String? = nil,
+        boardID: String? = nil,
+        origins: Set<FetchOrigin> = [.publicTimeline],
+        reply: Reply? = nil,
+        boostedBy: String? = nil,
+        avatarURL: URL? = nil,
+        attachments: [FediqoCore.Attachment] = [],
+        sensitive: Bool? = nil,
+        spoiler: String? = nil
+    ) -> Note {
+        Note(
+            id: id, source: source ?? mastodon, author: "Ada", handle: handle, body: "hello",
+            title: title, board: board, boardID: boardID, postedAt: origin, origins: origins,
+            reply: reply, boostedBy: boostedBy, avatarURL: avatarURL, attachments: attachments,
+            sensitive: sensitive, spoiler: spoiler
+        )
+    }
 
     @Test("Sources and slim notes survive a save and load")
     func roundTrip() throws {
         let file = try StoreFile(database: DatabaseQueue())
-        let source = Source(host: "first.example", kind: .mastodon)
-        let forum = Source(
-            host: "forum.example",
-            kind: .discuz,
-            boards: [BoardSubscription(fid: 33, name: "a")]
-        )
-        let note = Note(
-            id: "https://first.example/users/ada/statuses/1",
-            source: source,
-            author: "Ada",
-            handle: "@ada@first.example",
-            body: "hello",
-            title: nil,
-            postedAt: origin,
-            origins: [.publicTimeline, .trending]
-        )
-        try file.save(sources: [source, forum], notes: [note])
+        let forum = Source(host: "forum.example", kind: .discuz, boards: [BoardSubscription(fid: 33, name: "a")])
+        let saved = note(id: "https://first.example/users/ada/statuses/1", origins: [.publicTimeline, .trending])
+        try file.save(sources: [mastodon, forum], notes: [saved])
         let loaded = try file.load()
-        #expect(loaded.sources.map(\.host) == ["first.example", "forum.example"])
-        #expect(loaded.sources.last?.boards.map(\.fid) == [33])
-        #expect(loaded.notes.count == 1)
-        #expect(loaded.notes[0].id == note.id)
-        #expect(loaded.notes[0].source.host == "first.example")
-        #expect(loaded.notes[0].author == "Ada")
-        #expect(loaded.notes[0].body == "hello")
-        #expect(loaded.notes[0].origins == [.publicTimeline, .trending])
-        #expect(loaded.notes[0].postedAt == origin)
-        #expect(loaded.notes[0].handle == "@ada@first.example")
+        #expect(loaded.sources == [mastodon, forum])
+        #expect(loaded.notes == [saved])
     }
 
-    @Test("Handle, board, boost, reply, and cover survive a save and load")
-    func rowFactsRoundTrip() throws {
+    @Test("A loaded note has every row fact and no multimedia")
+    func rowFactsWithoutMultimedia() throws {
         let file = try StoreFile(database: DatabaseQueue())
-        let source = Source(host: "forum.example", kind: .discuz)
-        let note = Note(
-            id: "discuz:forum.example:1",
-            source: source,
-            author: "Ada",
-            handle: "@ada",
-            body: "hello",
-            title: "tool",
-            board: "tools",
-            boardID: "33",
-            postedAt: origin,
-            origins: [.publicTimeline],
-            reply: Reply(handle: "@bob"),
-            boostedBy: "Carol",
-            sensitive: true,
-            spoiler: "cover"
-        )
-        try file.save(sources: [source], notes: [note])
-        let loaded = try file.load().notes[0]
-        #expect(loaded.handle == "@ada")
-        #expect(loaded.board == "tools")
-        #expect(loaded.boardID == "33")
-        #expect(loaded.reply?.handle == "@bob")
-        #expect(loaded.boostedBy == "Carol")
-        #expect(loaded.spoiler == "cover")
-        #expect(loaded.sensitive == true)
+        let forum = Source(host: "forum.example", kind: .discuz)
+        let facts = { (avatar: URL?, attachments: [FediqoCore.Attachment]) in
+            note(
+                source: forum, title: "tool", board: "tools", boardID: "33",
+                reply: Reply(handle: "@bob"), boostedBy: "Carol",
+                avatarURL: avatar, attachments: attachments, sensitive: true, spoiler: "cover"
+            )
+        }
+        let picture = URL(string: "https://forum.example/a.png")
+        try file.save(sources: [forum], notes: [facts(picture, [FediqoCore.Attachment(kind: .image, url: picture)])])
+        #expect(try file.load().notes == [facts(nil, [])])
     }
 
     @Test("A reply whose parent's handle is unknown comes back a reply")
     func replyWithoutHandle() throws {
         let file = try StoreFile(database: DatabaseQueue())
-        let source = Source(host: "first.example", kind: .mastodon)
-        let reply = Note(
-            id: "1", source: source, author: "Ada", handle: "@ada", body: "b",
-            postedAt: origin, origins: [.publicTimeline], reply: Reply(handle: nil)
-        )
-        let plain = Note(id: "2", source: source, author: "Ada", handle: "@ada", body: "b", postedAt: origin, origins: [.publicTimeline])
-        try file.save(sources: [source], notes: [reply, plain])
-        let loaded = Dictionary(uniqueKeysWithValues: try file.load().notes.map { ($0.id, $0) })
-        #expect(loaded["1"]?.reply == Reply(handle: nil))
-        #expect(loaded["2"]?.reply == nil)
+        let saved = [note(id: "1", reply: Reply(handle: nil)), note(id: "2")]
+        try file.save(sources: [mastodon], notes: saved)
+        #expect(Set(try file.load().notes) == Set(saved))
     }
 
     @Test("Unset sensitive and spoiler stay unset, apart from false and empty", arguments: [
@@ -92,63 +72,37 @@ struct StoreFileTests {
     ])
     func unsetStaysUnset(sensitive: Bool?, spoiler: String?) throws {
         let file = try StoreFile(database: DatabaseQueue())
-        let source = Source(host: "first.example", kind: .mastodon)
-        let note = Note(
-            id: "1", source: source, author: "Ada", handle: "", body: "b", postedAt: origin,
-            origins: [.publicTimeline], sensitive: sensitive, spoiler: spoiler
-        )
-        try file.save(sources: [source], notes: [note])
-        let loaded = try #require(try file.load().notes.first)
-        #expect(loaded.sensitive == sensitive)
-        #expect(loaded.spoiler == spoiler)
-    }
-
-    @Test("A loaded note carries every row fact but no multimedia")
-    func rowFactsWithoutMultimedia() throws {
-        let file = try StoreFile(database: DatabaseQueue())
-        let source = Source(host: "first.example", kind: .mastodon)
-        let note = Note(
-            id: "1", source: source, author: "Ada", handle: "@ada", body: "b",
-            board: "tools", boardID: "33", postedAt: origin, origins: [.publicTimeline],
-            reply: Reply(handle: "@bob"), boostedBy: "Carol",
-            avatarURL: URL(string: "https://first.example/ada.png"),
-            attachments: [Attachment(kind: .image, url: URL(string: "https://first.example/a.png"))],
-            sensitive: false, spoiler: "cover"
-        )
-        try file.save(sources: [source], notes: [note])
-        let loaded = try #require(try file.load().notes.first)
-        #expect(loaded.avatarURL == nil)
-        #expect(loaded.attachments.isEmpty)
-        #expect(loaded.handle == "@ada")
-        #expect(loaded.board == "tools")
-        #expect(loaded.boardID == "33")
-        #expect(loaded.reply == Reply(handle: "@bob"))
-        #expect(loaded.boostedBy == "Carol")
-        #expect(loaded.sensitive == false)
-        #expect(loaded.spoiler == "cover")
+        let saved = note(sensitive: sensitive, spoiler: spoiler)
+        try file.save(sources: [mastodon], notes: [saved])
+        #expect(try file.load().notes == [saved])
     }
 
     @Test("Row facts survive a relaunch on the same directory")
     func rowFactsSurviveRelaunch() throws {
         let dir = scratch()
         defer { try? FileManager.default.removeItem(at: dir) }
-        let source = Source(host: "first.example", kind: .mastodon)
-        let note = Note(
-            id: "1", source: source, author: "Ada", handle: "@ada", body: "b",
-            board: "tools", boardID: "33", postedAt: origin, origins: [.publicTimeline],
-            reply: Reply(handle: nil), boostedBy: "Carol", sensitive: true, spoiler: ""
-        )
-        try StoreFile(at: dir).save(sources: [source], notes: [note])
+        let saved = note(board: "tools", boardID: "33", reply: Reply(handle: nil), boostedBy: "Carol", sensitive: true, spoiler: "")
+        try StoreFile(at: dir).save(sources: [mastodon], notes: [saved])
         let opened = StoreFile.open(at: dir)
         #expect(opened.setAside == nil)
-        let loaded = try #require(opened.notes.first)
-        #expect(loaded.handle == "@ada")
-        #expect(loaded.board == "tools")
-        #expect(loaded.boardID == "33")
-        #expect(loaded.reply == Reply(handle: nil))
-        #expect(loaded.boostedBy == "Carol")
-        #expect(loaded.sensitive == true)
-        #expect(loaded.spoiler == "")
+        #expect(opened.notes == [saved])
+    }
+
+    @Test("A note whose host has no source row is dropped on load")
+    func orphanDropped() throws {
+        let file = try StoreFile(database: DatabaseQueue())
+        let kept = note(id: "1")
+        let orphan = note(id: "2", source: Source(host: "gone.example", kind: .mastodon))
+        try file.save(sources: [mastodon], notes: [kept, orphan])
+        #expect(try file.load().notes == [kept])
+    }
+
+    @Test("A note takes its source, boards and all, from the source row")
+    func sourceFromRow() throws {
+        let file = try StoreFile(database: DatabaseQueue())
+        let forum = Source(host: "forum.example", kind: .discuz, boards: [BoardSubscription(fid: 3, name: "x")])
+        try file.save(sources: [forum], notes: [note(source: Source(host: "forum.example", kind: .discuz))])
+        #expect(try file.load().notes.first?.source == forum)
     }
 
     @Test("Two sources carrying the same id stay two rows")
@@ -157,21 +111,14 @@ struct StoreFileTests {
         let one = Source(host: "a.example", kind: .mastodon)
         let two = Source(host: "b.example", kind: .mastodon)
         let uri = "https://origin.example/users/ada/statuses/1"
-        try file.save(
-            sources: [one, two],
-            notes: [
-                Note(id: uri, source: one, author: "Ada", handle: "", body: "a", postedAt: origin, origins: [.publicTimeline]),
-                Note(id: uri, source: two, author: "Ada", handle: "", body: "b", postedAt: origin, origins: [.trending]),
-            ]
-        )
-        let loaded = try file.load()
-        #expect(loaded.notes.count == 2)
-        #expect(Set(loaded.notes.map(\.source.host)) == ["a.example", "b.example"])
+        let saved = [note(id: uri, source: one), note(id: uri, source: two, origins: [.trending])]
+        try file.save(sources: [one, two], notes: saved)
+        #expect(Set(try file.load().notes) == Set(saved))
     }
 
     @Test("A directory is excluded from backup")
     func excludedFromBackup() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let dir = scratch()
         defer { try? FileManager.default.removeItem(at: dir) }
         _ = try StoreFile(at: dir)
         let values = try dir.resourceValues(forKeys: [.isExcludedFromBackupKey])
@@ -189,23 +136,17 @@ struct StoreFileTests {
     func titleAndKind() throws {
         let file = try StoreFile(database: DatabaseQueue())
         let forum = Source(host: "forum.example", kind: .discuz)
-        let note = Note(
-            id: "tid-7", source: forum, author: "Ada", handle: "", body: "b",
-            title: "A thread", postedAt: origin, origins: [.trending]
-        )
-        try file.save(sources: [forum], notes: [note])
+        let saved = note(id: "tid-7", source: forum, title: "A thread", origins: [.trending])
+        try file.save(sources: [forum], notes: [saved])
         let loaded = try file.load()
-        #expect(loaded.notes.first?.title == "A thread")
-        #expect(loaded.notes.first?.source.kind == .discuz)
+        #expect(loaded.notes == [saved])
         #expect(loaded.sources.first?.kind == .discuz)
     }
 
     @Test("A note seen in no list comes back seen in no list")
     func emptyOrigins() throws {
         let file = try StoreFile(database: DatabaseQueue())
-        let source = Source(host: "first.example", kind: .mastodon)
-        let note = Note(id: "1", source: source, author: "Ada", handle: "", body: "b", postedAt: origin, origins: [])
-        try file.save(sources: [source], notes: [note])
+        try file.save(sources: [mastodon], notes: [note(origins: [])])
         #expect(try file.load().notes.first?.origins == [])
     }
 
@@ -224,12 +165,12 @@ struct StoreFileTests {
         let dir = scratch()
         defer { try? FileManager.default.removeItem(at: dir) }
         let source = Source(host: "forum.example", kind: .discuz, boards: [BoardSubscription(fid: 3, name: "x")])
-        let note = Note(id: "1", source: source, author: "Ada", handle: "", body: "b", postedAt: origin, origins: [.trending])
-        try StoreFile(at: dir).save(sources: [source], notes: [note])
+        let saved = note(source: source, origins: [.trending])
+        try StoreFile(at: dir).save(sources: [source], notes: [saved])
         let again = try StoreFile(at: dir)
         let loaded = try again.load()
         #expect(loaded.sources == [source])
-        #expect(loaded.notes.map(\.key) == [note.key])
+        #expect(loaded.notes == [saved])
         try again.save(sources: [], notes: [])
         #expect(try StoreFile(at: dir).load().sources.isEmpty)
     }
