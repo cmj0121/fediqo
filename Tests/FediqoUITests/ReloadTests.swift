@@ -236,6 +236,24 @@ struct ReloadTests {
         #expect(await !http.requested.isEmpty, "with the editor gone, r reloads again")
     }
 
+    @Test("Opening the timeline editor stops a running reload, which Esc could no longer reach")
+    func editorStopsTheReload() async {
+        let gated = GatedHTTP(Self.everything, holding: "/api/v1/trends/statuses")
+        let guardTask = hangGuard(gated.gate)
+        defer { guardTask.cancel() }
+        let (session, _) = await shell(http: gated)
+        let running = Task { await session.reload.timeline(.trends, in: session) }
+        #expect(await spun { await gated.asks == 2 })
+        session.newTimeline()
+        #expect(session.editing != nil)
+        #expect(!session.reload.running)
+        #expect(session.reload.stopped)
+        await running.value
+        await gated.gate.open()
+        for _ in 0..<2_000 { await Task.yield() }
+        #expect(await session.store.all().isEmpty, "what it had not landed did not land")
+    }
+
     @Test("A server that ends the sign-in on a reload signs the row out and says the source failed")
     func signedOutOnReload() async throws {
         let tokens = MemoryMastodonTokens()

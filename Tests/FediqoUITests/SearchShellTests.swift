@@ -95,6 +95,17 @@ struct SearchShellTests {
         #expect(DummyCommand.canOpen(.thread, whenOpen: [.search, .selection]))
     }
 
+    @Test("e opens the editor only over the timeline itself, with at most a post selected")
+    func editOnlyOverTheTimeline() {
+        #expect(DummyCommand.canEditTimeline(whenOpen: []))
+        #expect(DummyCommand.canEditTimeline(whenOpen: [.selection]))
+        #expect(!DummyCommand.canEditTimeline(whenOpen: [.search]))
+        #expect(!DummyCommand.canEditTimeline(whenOpen: [.search, .selection]))
+        #expect(!DummyCommand.canEditTimeline(whenOpen: [.thread, .selection]))
+        #expect(!DummyCommand.canEditTimeline(whenOpen: [.viewer]))
+        #expect(!DummyCommand.canEditTimeline(whenOpen: [.shortcuts]))
+    }
+
     @Test("Closing the search gives back the timeline and the post selected before it")
     func escapeRestores() async {
         let notes = [note("a", "swift"), note("b", "other")]
