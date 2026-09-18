@@ -1305,10 +1305,12 @@ final class ShellSession {
     /// re-fetch. Nothing in the code says this; it is why the two awaits are in this order and not
     /// the other.
     ///
-    /// Then what is left over of the reader's last errand, where that errand was about this host.
-    /// `progressHost` is the one field that records which host `add` and `subscribe` were about, so
-    /// it is what the refusal sentence, the unread boards and their count are gated on — clearing
-    /// them unconditionally would take away a sentence owed about a different server.
+    /// **Before either, what is left over of the reader's last errand**, where that errand was
+    /// about this host — ended ahead of the first await, so no errand can land in the gaps between
+    /// them. `progressHost` is the one field that records which host `add` and `subscribe` were
+    /// about, so it is what the token, the refusal sentence, the unread boards and their count are
+    /// gated on — clearing them unconditionally would take away a sentence owed about a different
+    /// server.
     func remove(host raw: String) async {
         let host = raw.lowercased()
         // The question has been answered, so nothing is pending any more — set before the awaits,
