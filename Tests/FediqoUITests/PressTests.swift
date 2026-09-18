@@ -28,18 +28,21 @@ struct PressTests {
     }
 
     private static let list = [item("a", attachments: 3), item("b", spoiler: "Blood"), item("c")]
+    private static let a = NoteKey(host: "first.example", id: "a").rowID
+    private static let b = NoteKey(host: "first.example", id: "b").rowID
+    private static let c = NoteKey(host: "first.example", id: "c").rowID
 
     @Test("Where a press lands, in all five cases")
     func whereAPressLands() {
         #expect(DummyCommand.focused(in: [], selected: nil) == .nothing)
         // An empty list stays empty however sure the selection is that it is on something.
-        #expect(DummyCommand.focused(in: [], selected: "a") == .nothing)
+        #expect(DummyCommand.focused(in: [], selected: Self.a) == .nothing)
         // Nothing focused: the press puts the reader on the first row, the way `j` does, and
         // stops there rather than acting on a post they have not seen yet.
-        #expect(DummyCommand.focused(in: Self.list, selected: nil) == .first("a"))
+        #expect(DummyCommand.focused(in: Self.list, selected: nil) == .first(Self.a))
         // A selection the last refresh took away is no selection at all.
-        #expect(DummyCommand.focused(in: Self.list, selected: "gone") == .first("a"))
-        #expect(DummyCommand.focused(in: Self.list, selected: "b") == .post(Self.list[1]))
+        #expect(DummyCommand.focused(in: Self.list, selected: "gone") == .first(Self.a))
+        #expect(DummyCommand.focused(in: Self.list, selected: Self.b) == .post(Self.list[1]))
     }
 
     /// The view's own switch, so that what is asserted below is the behaviour a reader gets
@@ -90,38 +93,38 @@ struct PressTests {
 
     @Test("m turns the focused row's deck and leaves every other row where it was")
     func turningTheFocusedRow() {
-        var selected: String? = "a"
+        var selected: String? = Self.a
         var decks = ShellDecks()
         #expect(press(.nextAttachment, items: Self.list, selected: &selected, decks: &decks))
-        #expect(decks.top(of: "a", of: 3) == 1)
-        #expect(decks.top(of: "b", of: 1) == 0)
-        #expect(selected == "a")
+        #expect(decks.top(of: Self.a, of: 3) == 1)
+        #expect(decks.top(of: Self.b, of: 1) == 0)
+        #expect(selected == Self.a)
     }
 
     @Test("m on a post with nothing to turn does nothing")
     func turningWhatCannotTurn() {
-        var selected: String? = "c"
+        var selected: String? = Self.c
         var decks = ShellDecks()
         #expect(!press(.nextAttachment, items: Self.list, selected: &selected, decks: &decks))
-        #expect(decks.top(of: "c", of: 0) == 0)
+        #expect(decks.top(of: Self.c, of: 0) == 0)
     }
 
     @Test("s uncovers the focused row, and covers it again")
     func coveringTheFocusedRow() {
-        var selected: String? = "b"
+        var selected: String? = Self.b
         var decks = ShellDecks()
         #expect(press(.reveal, items: Self.list, selected: &selected, decks: &decks))
-        #expect(decks.isLifted("b"))
+        #expect(decks.isLifted(Self.b))
         #expect(press(.reveal, items: Self.list, selected: &selected, decks: &decks))
-        #expect(!decks.isLifted("b"))
+        #expect(!decks.isLifted(Self.b))
     }
 
     @Test("s on a row nobody covered, with nothing to load, does nothing")
     func coveringWhatIsNotCovered() {
-        var selected: String? = "c"
+        var selected: String? = Self.c
         var decks = ShellDecks()
         #expect(!press(.reveal, items: Self.list, selected: &selected, decks: &decks))
-        #expect(!decks.isLifted("c"))
+        #expect(!decks.isLifted(Self.c))
     }
 
     /// **Both directions of `s`'s one rule, and the order between them.**
@@ -134,25 +137,25 @@ struct PressTests {
     @Test("The cover wins where there is one, and the replies where there is not")
     func theCoverWinsAndThenTheRepliesDo() {
         // Uncovered, with a topic behind it: the press acts, and takes nothing off any cover.
-        var selected: String? = "c"
+        var selected: String? = Self.c
         var decks = ShellDecks()
         #expect(press(.reveal, items: Self.list, selected: &selected,
                       decks: &decks, repliesWanted: true))
-        #expect(!decks.isLifted("c"))
+        #expect(!decks.isLifted(Self.c))
 
         // Covered, with a topic behind it: the cover, and **not** a page fetched behind a blur
         // the reader has not lifted.
-        selected = "b"
+        selected = Self.b
         decks = ShellDecks()
         #expect(press(.reveal, items: Self.list, selected: &selected,
                       decks: &decks, repliesWanted: true))
-        #expect(decks.isLifted("b"), "the replies took a press that belonged to the cover")
+        #expect(decks.isLifted(Self.b), "the replies took a press that belonged to the cover")
 
         // And it degrades honestly: lifted, `s` is still the cover — because a lifted cover is
         // still a cover, and `s` is how it goes back.
         #expect(press(.reveal, items: Self.list, selected: &selected,
                       decks: &decks, repliesWanted: true))
-        #expect(!decks.isLifted("b"))
+        #expect(!decks.isLifted(Self.b))
     }
 
     /// The rule itself, over all four combinations of the two facts it reads. No case is left to
@@ -176,10 +179,10 @@ struct PressTests {
             var selected: String?
             var decks = ShellDecks()
             #expect(press(command, items: Self.list, selected: &selected, decks: &decks))
-            #expect(selected == "a")
+            #expect(selected == Self.a)
             // And nothing else happened: focusing is the whole of that press.
-            #expect(decks.top(of: "a", of: 3) == 0)
-            #expect(!decks.isLifted("a"))
+            #expect(decks.top(of: Self.a, of: 3) == 0)
+            #expect(!decks.isLifted(Self.a))
         }
     }
 

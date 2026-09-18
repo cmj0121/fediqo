@@ -5,10 +5,10 @@ import SwiftUI
 
 /// A thread this device can go and read, as a row knows it.
 ///
-/// **The id is the only carrier, and this is the one place it is read back.** A Discuz! thread
+/// **`noteID` is the carrier, and this is the one place it is read back.** A Discuz! thread
 /// becomes a `Note` with `id = "discuz:<host>:<tid>"` — host-qualified and prefixed because a
 /// forum's thread numbers, another forum's thread numbers and a microblog's status ids all share
-/// one store. By the time a row has it, it is a `DummyItem` and the number is inside a string.
+/// one store. The row's own `id` also names the source (#10); the spelling lives on `noteID`.
 ///
 /// Reading it back here rather than at each call site is this branch's second convention: a rule
 /// enforced at each consumer is a rule consumer N+1 misses. There is exactly one reader of that
@@ -29,7 +29,7 @@ struct ForumThreadRef: Hashable, Sendable {
     /// thread number is a positive integer and everything else is somebody's markup or somebody's
     /// fixture, neither of which there is a page to fetch for.
     init?(_ item: DummyItem) {
-        let parts = item.id.split(separator: ":", omittingEmptySubsequences: false)
+        let parts = item.noteID.split(separator: ":", omittingEmptySubsequences: false)
         guard parts.count == 3, parts[0] == "discuz" else { return nil }
         guard let tid = Int(parts[2]), tid > 0, !parts[1].isEmpty else { return nil }
         self.host = String(parts[1]).lowercased()

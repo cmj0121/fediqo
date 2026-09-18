@@ -85,7 +85,40 @@ struct StoreTests {
         #expect(await store.all().map(\.id) == ["a", "c", "b"])
     }
 
-    @Test("Overlapping uri ingest is one row with both origins, and it is a trend")
+    /// Two sources carrying one status are two rows with the same time and the same id, so the
+    /// host is what is left to order them by. Without it their order would be whatever the
+    /// dictionary iterates to, and a timeline would swap the pair between one build and the next.
+    @Test("One item through two hosts sorts by host, whichever arrived first")
+    func sameTimeAndIdSortsByHost() async {
+        let uri = "https://origin.example/users/ada/statuses/1"
+        for firstIn in [source, other] {
+            let store = ItemStore()
+            let secondIn = firstIn == source ? other : source
+            await store.ingest([note(id: uri, postedAt: origin, origins: [.publicTimeline], from: firstIn)])
+            await store.ingest([note(id: uri, postedAt: origin, origins: [.publicTimeline], from: secondIn)])
+            #expect(await store.all().map(\.source.host) == ["first.example", "second.example"])
+        }
+    }
+
+    /// The rule the store keys its rows by and a drawn row takes its id from, stated once. Folded
+    /// by `Source` and by nothing after it, so a host typed in capitals keys the same row.
+    @Test("A note's key is the host it came through and its id, and two hosts are two keys")
+    func aNoteIsKeyedByHostAndID() {
+        let uri = "https://origin.example/users/ada/statuses/1"
+        let first = note(id: uri, postedAt: origin, origins: [.publicTimeline])
+        let second = note(id: uri, postedAt: origin, origins: [.publicTimeline], from: other)
+        let shouted = note(
+            id: uri, postedAt: origin, origins: [.publicTimeline],
+            from: Source(host: "FIRST.Example", kind: .mastodon)
+        )
+        #expect(first.key == NoteKey(host: "first.example", id: uri))
+        #expect(first.key != second.key)
+        #expect(first.key.rowID != second.key.rowID)
+        #expect(shouted.key == first.key)
+        #expect(first.key.rowID == "first.example\u{1e}\(uri)")
+    }
+
+    @Test("Overlapping uri ingest on one host is one row with both origins, and it is a trend")
     func overlappingURIMergesOrigins() async {
         let store = ItemStore()
         let publicNote = note(
@@ -184,68 +217,39 @@ struct StoreTests {
         #expect(await store.all().map(\.id) == ["mine"])
     }
 
-    /// **Decision 9, which is the whole reason a note carries a set of hosts.**
-    ///
-    /// A Mastodon status's id is its canonical URI and is host-independent, so two joined
-    /// instances that both carry one status are one stored row — stamped, by `ingest`'s
-    /// first-wins rule, with whichever of them joined first. Removing by that stamp does two
-    /// wrong things at once, and this pins both: the row the remaining instance is still showing
-    /// would vanish, and the rows the removed instance was the only route to would stay.
-    @Test("A note two servers carry survives the first Remove and goes with the second")
-    func aSharedNoteGoesOnlyWhenItsLastHostDoes() async {
+    /// #10: two sources, two rows. The same URI through two hosts is two notes. Removing one
+    /// host takes only that host's row.
+    @Test("The same content from two sources is two rows, and Remove takes only that source's row")
+    func twoSourcesGiveTwoRows() async {
         let store = ItemStore()
         let uri = "https://origin.example/users/ada/statuses/1"
         await store.add(source)
         await store.add(other)
-        // The same status, read through two instances. The stamp is `first.example` because it
-        // ingested first — which is an accident of join order and not a route to anything.
         await store.ingest([note(id: uri, postedAt: origin, origins: [.publicTimeline])])
         await store.ingest([
             note(id: uri, postedAt: origin, origins: [.trending], from: other),
             note(id: "only-second", postedAt: origin, origins: [.publicTimeline], from: other),
         ])
         let both = await store.all()
-        #expect(both.first { $0.id == uri }?.hosts == ["first.example", "second.example"])
+        #expect(both.filter { $0.id == uri }.count == 2)
+        #expect(Set(both.filter { $0.id == uri }.map(\.source.host)) == ["first.example", "second.example"])
 
         await store.remove(host: source.host)
 
         let left = await store.all()
-        #expect(
-            Set(left.map(\.id)) == [uri, "only-second"],
-            "the shared row went with the stamp, and second.example is still showing it"
-        )
+        #expect(Set(left.map(\.id)) == [uri, "only-second"])
         let shared = left.first { $0.id == uri }
-        #expect(shared?.hosts == ["second.example"], "the removed host is still named as a route")
-        // **The stamp moves to a server that remains — decision 16, and the reversal of what this
-        // line asserted at `8161bf9`.** It used to read `first.example` on the argument that the
-        // stamp records how this copy was parsed and rewriting it would invent a reading nobody
-        // made. The half that argument missed is that the stamp is also read as *fetch*
-        // provenance: `DummyItemRow` and `FediqoRootView` tag avatar and emoji requests with it,
-        // so leaving it here kept this device asking a removed server for pictures. What the old
-        // argument was protecting — the handle, the reply and the emoji resolved against
-        // `first.example` — are values that were read long ago and are untouched by this.
         #expect(shared?.source.host == "second.example")
-        #expect(shared?.source.kind == .mastodon)
-        #expect(shared?.origins == [.publicTimeline, .trending])
+        #expect(shared?.origins == [.trending])
 
         await store.remove(host: other.host)
 
-        #expect(await store.all().isEmpty, "nobody is left reading it and it stayed")
+        #expect(await store.all().isEmpty)
         #expect(await store.sources().isEmpty)
     }
 
-    /// **Decision 16, from the side the reader can feel: a removed server stops being fetched
-    /// from.** Every avatar and emoji request this app makes for a row is tagged with
-    /// `note.source.host` — `DummyItemRow` and `FediqoRootView` both do it — so the stamp is not
-    /// only a record of parsing, and a stale one is this device talking to a server nobody chose.
-    ///
-    /// Three facts, because only the first is obvious. A note stamped with the host going away is
-    /// re-stamped. A note stamped with a host that stays is **left alone**, because there is
-    /// nothing wrong with it and rewriting it would churn the reading for no one. And the kind
-    /// travels with the host, so whatever reads the stamp gets a whole source rather than a
-    /// hostname with somebody else's protocol behind it.
-    @Test("Removing a server re-stamps the rows it was the stamp for, so nothing is fetched from it")
-    func removingReStampsWhatWouldStillBeFetched() async {
+    @Test("Removing a server drops only that server's rows")
+    func removingDropsOnlyThatServersRows() async {
         let store = ItemStore()
         let third = Source(host: "third.example", kind: .pleroma)
         let uri = "https://origin.example/users/ada/statuses/1"
@@ -268,31 +272,12 @@ struct StoreTests {
         await store.remove(host: source.host)
 
         let left = await store.all()
+        #expect(left.allSatisfy { $0.source.host != "first.example" })
+        #expect(left.filter { $0.id == uri }.map(\.source.host) == ["third.example"])
+        #expect(left.map(\.id).contains(onlyFirst) == false)
         #expect(
-            left.allSatisfy { $0.source.host != "first.example" },
-            "a fetch tagged with the removed host is a fetch this device still makes to it"
-        )
-        #expect(left.first { $0.id == uri }?.source.host == "third.example")
-        #expect(left.first { $0.id == uri }?.source.kind == .pleroma)
-        #expect(left.map(\.id).contains(onlyFirst) == false, "nobody was left reading it")
-
-        // Untouched, because its stamp names a server that is still joined. Re-stamping it would
-        // be movement with no fault behind it.
-        let untouched = left.first { $0.id == "shared-by-two-survivors" }
-        #expect(untouched?.source.host == "second.example")
-    }
-
-    /// The set is seeded from the stamp at the wire boundary and is never empty, which is what
-    /// makes "gone when the set empties" a decidable rule rather than a race with construction.
-    @Test("A note names the server it arrived through from the moment it is built")
-    func aNoteAlwaysNamesAtLeastOneHost() async {
-        #expect(note(id: "mine", postedAt: origin, origins: [.publicTimeline]).hosts == ["first.example"])
-        // Folded by `Source`, so the set is comparable to a removal argument by == alone.
-        #expect(
-            note(
-                id: "mine", postedAt: origin, origins: [.publicTimeline],
-                from: Source(host: "SECOND.Example", kind: .mastodon)
-            ).hosts == ["second.example"]
+            Set(left.filter { $0.id == "shared-by-two-survivors" }.map(\.source.host))
+                == ["second.example", "third.example"]
         )
     }
 

@@ -28,17 +28,8 @@ struct JoinTests {
         #expect(await store.sources().map(\.host) == ["first.example"])
     }
 
-    /// **Decision 9 on the real path, which is where it stops being a hypothesis.**
-    ///
-    /// Two instances, both carrying the same statuses — the ordinary case on a federated network,
-    /// and the one a path-keyed fixture reproduces exactly, because a canonical URI is the same
-    /// string whichever server hands it over. Every row is therefore stored once and stamped with
-    /// `first.example`, the instance that joined first.
-    ///
-    /// A Remove that went by that stamp would empty the timeline of a reader who removed one of
-    /// two instances and is still reading the other. What makes the failure quiet rather than
-    /// loud is that the source list would be right: one server left, and nothing under it.
-    @Test("Removing one of two instances carrying the same statuses leaves the timeline standing")
+    /// #10: two instances, two copies of each status. Removing one host leaves the other's rows.
+    @Test("Removing one of two instances carrying the same statuses leaves the other standing")
     func removingOneOfTwoInstancesKeepsWhatTheOtherCarries() async throws {
         let store = ItemStore()
         let http = Self.joinHTTP()
@@ -47,21 +38,20 @@ struct JoinTests {
                 .join(host: host)
         }
         let before = await store.all()
-        #expect(before.count == 4)
-        #expect(before.allSatisfy { $0.source.host == "first.example" }, "the premise: one stamp")
-        #expect(before.allSatisfy { $0.hosts == ["first.example", "second.example"] })
+        #expect(before.count == 8)
+        #expect(Set(before.map(\.source.host)) == ["first.example", "second.example"])
 
         await store.remove(host: "first.example")
 
         #expect(await store.sources().map(\.host) == ["second.example"])
         let after = await store.all()
-        #expect(after.map(\.id) == before.map(\.id), "rows second.example still serves were deleted")
-        #expect(after.allSatisfy { $0.hosts == ["second.example"] })
-        #expect(await store.trends().count == 2, "Trends went with the stamp too")
+        #expect(after.count == 4)
+        #expect(after.allSatisfy { $0.source.host == "second.example" })
+        #expect(await store.trends().count == 2)
 
         await store.remove(host: "second.example")
 
-        #expect(await store.all().isEmpty, "rows nobody is left reading were stranded")
+        #expect(await store.all().isEmpty)
         #expect(await store.sources().isEmpty)
     }
 
