@@ -287,6 +287,10 @@ public struct CompiledTimeline: Sendable {
         if case .category(.board(let id), _) = rule.kind, !source.boards.contains(where: { String($0.fid) == id }) {
             return .missingCategory
         }
+        // A list no longer chosen on this device, or no longer the account's (#25).
+        if case .category(.list(let id), _) = rule.kind, !source.lists.contains(where: { $0.id == id }) {
+            return .missingCategory
+        }
         return .present
     }
 

@@ -76,6 +76,20 @@ public struct BoardSubscription: Identifiable, Hashable, Sendable {
     }
 }
 
+/// One Mastodon list the reader chose to read (#25), the way a board is chosen.
+///
+/// **The id is the subscription and the name is the label**, as with a board: a list renamed on
+/// the server is still this list, and only `name` changes.
+public struct ListSubscription: Identifiable, Hashable, Sendable {
+    public let id: String
+    public let name: String
+
+    public init(id: String, name: String) {
+        self.id = id
+        self.name = name
+    }
+}
+
 /// A server this device reads. Unsigned: the host is the source.
 ///
 /// **One source per host, carrying the boards the reader chose — never one source per board**
@@ -101,12 +115,22 @@ public struct Source: Identifiable, Hashable, Sendable {
     /// forum that renamed a board between two reads would otherwise give a reader two
     /// subscriptions to one board, with two names, and no way to tell which.
     public let boards: [BoardSubscription]
+    /// The Mastodon lists chosen to be read, in the order they were picked; at most one per id.
+    /// Empty for every source that is not a signed-in Mastodon, and kept through a sign-out.
+    public let lists: [ListSubscription]
 
-    public init(host: String, kind: ProtocolKind, boards: [BoardSubscription] = []) {
+    public init(
+        host: String,
+        kind: ProtocolKind,
+        boards: [BoardSubscription] = [],
+        lists: [ListSubscription] = []
+    ) {
         self.host = host.lowercased()
         self.kind = kind
         var seen: Set<Int> = []
         self.boards = boards.filter { seen.insert($0.fid).inserted }
+        var seenLists: Set<String> = []
+        self.lists = lists.filter { seenLists.insert($0.id).inserted }
     }
 
     public func subscribes(to fid: Int) -> Bool {
@@ -116,14 +140,14 @@ public struct Source: Identifiable, Hashable, Sendable {
 
 /// How the source itself divides what it serves, and what a post arrived through (#25).
 ///
-/// **Known by id; a name is only a label** and lives on the source (`Source.boards`), never on
-/// the note — a board renamed on the server is still the same category. A category means
+/// **Known by id; a name is only a label** and lives on the source (`boards`, `lists`), never on
+/// the note — a board or list renamed on the server is still the same category. A category means
 /// nothing without its note's `source.host`: a board id is one forum's, while public and trends
 /// mean the same thing on every Mastodon source.
 ///
-/// **Every kind 0.2.0 knows is here from the first 0.2.0 store on.** Home and lists are not
-/// fetched yet, but a store must never hold a kind the build reading it cannot name: that build
-/// would drop it on load and lose it at the next save. A kind added after a release must also
+/// **Every kind 0.2.0 knows is here from the first 0.2.0 store on.** A store must never hold a
+/// kind the build reading it cannot name: that build would drop it on load and lose it at the
+/// next save. A kind added after a release must also
 /// register a new store migration — an empty one will do — so an older build refuses the store
 /// rather than silently dropping what it cannot read.
 public enum Category: Hashable, Sendable {
