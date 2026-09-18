@@ -346,33 +346,40 @@ struct BoardChoiceTests {
         }
     }
 
-    @Test("A board tab draws that board's threads and no other source's")
-    func aBoardQueryDrawsItsOwnThreads() {
-        let forum = Source(host: "forum.example", kind: .discuz)
-        let other = Source(host: "other.example", kind: .discuz)
-        let notes = [
-            Self.note("a", forum, board: "启动盘工具"),
-            Self.note("b", forum, board: "闲话区"),
-            // Same board name, different forum. The host is half the identity for exactly this.
-            Self.note("c", other, board: "启动盘工具"),
-            Self.note("d", forum, board: nil),
-        ]
-        let query = DummyTimeline(
-            board: BoardQuery(host: "forum.example", fid: 39, name: "启动盘工具")
+    /// **All and Trends are the only two queries of the store.** A forum is offered All alone —
+    /// it has no trending read — and a microblog beside it brings Trends back. Boards add
+    /// nothing to this list: they choose what a source fetches, not what the rail draws.
+    @Test("The queries are All, and Trends only where a source has one")
+    func queriesAreAllAndTrends() {
+        let session = Self.session(Self.forumHTTP(index: .fail))
+        let forum = Source(
+            host: "forum.example", kind: .discuz,
+            boards: [BoardSubscription(fid: 33, name: "启动盘工具")]
         )
-        #expect(query.items(from: notes, among: []).map(\.noteID) == ["a"])
-        #expect(query.id == "board:forum.example:39")
-        #expect(query.name == "启动盘工具")
-        #expect(query.emptyKey == "timeline.empty.board")
-        // All still means all of it, boards included.
-        #expect(DummyTimeline(id: "all").items(from: notes, among: []).count == 4)
+        session.sources = [forum]
+        session.rebuildQueries()
+        #expect(session.queries.map(\.id) == ["all"])
+
+        session.sources = [forum, Source(host: "mastodon.example", kind: .mastodon)]
+        session.rebuildQueries()
+        #expect(session.queries.map(\.id) == ["all", "trends"])
     }
 
-    /// A board query rebuilt from its id alone knows it is a board and not **which** board, so
-    /// the shell resolves one out of the list that holds the names. A view that reconstructed it
-    /// would draw a tab matching no note — silently, and only on the tabs this unit added.
-    @Test("A board query is resolved from the session, not rebuilt from its id")
-    func aBoardQueryIsResolvedNotRebuilt() async {
+    /// A saved selection from when a board was a tab names a query that no longer exists, and
+    /// falls back to All rather than to a tab that draws nothing.
+    @Test("A saved board timeline falls back to All")
+    func aSavedBoardTimelineFallsBackToAll() {
+        let session = Self.session(Self.forumHTTP(index: .fail))
+        session.timelineID = "board:forum.example:33"
+        session.sources = [Source(host: "forum.example", kind: .discuz)]
+        session.rebuildQueries()
+        #expect(session.timelineID == "all")
+    }
+
+    /// Subscribing to a board fetches its threads into the store and adds no tab: they are
+    /// drawn under All.
+    @Test("A subscribed board's threads land under All")
+    func aSubscribedBoardLandsUnderAll() async {
         let session = Self.session(Self.forumHTTP(
             index: .text(#"""
             <html><head><meta name="generator" content="Discuz! X5.0" /></head><body>
@@ -453,7 +460,7 @@ struct BoardChoiceTests {
         // The one that read is subscribed; the one that did not is **not** — a board in the rail
         // whose timeline can never load is the same failure as a source that can never load.
         #expect(session.sources.first?.boards.map(\.fid) == [33])
-        #expect(!session.queries.contains { $0.id == "board:\(Self.host):41" })
+        #expect(session.queries.map(\.id) == ["all"])
 
         // And the reader is owed a sentence, because they picked it off a list this app drew.
         #expect(session.unread.map(\.board.fid) == [41])
@@ -1405,60 +1412,6 @@ struct BoardChoiceTests {
                 #expect(!value.isEmpty)
             }
         }
-    }
-
-    private static func note(_ id: String, _ source: Source, board: String?) -> Note {
-        Note(
-            id: id,
-            source: source,
-            author: "somebody",
-            handle: "@somebody",
-            body: "words",
-            title: "a thread",
-            board: board,
-            postedAt: Date(timeIntervalSince1970: 1_700_000_000),
-            origins: [.publicTimeline]
-        )
-    }
-
-    // The defect this closes, and it is the one the fixtures themselves demonstrated: the board
-    // page's heading and the index's name are two hand-written strings, and matching a
-    // subscription to its threads by name turned any difference between them — or an
-    // administrator renaming a board between two reads — into a tab that silently drew nothing.
-    @Test("A board's threads are found by its number, even when the two names disagree")
-    func aBoardIsFoundByNumberNotName() {
-        let source = Source(host: "forum.example", kind: .discuz)
-        let onTheBoardPage = Note(
-            id: "a", source: source, author: "", handle: "", body: "",
-            title: "one", board: "What the board page calls itself", boardID: "39",
-            postedAt: .distantPast, origins: [.publicTimeline]
-        )
-        // Same board, read through a cross-board listing, which names a section per row and
-        // carries no number — so the name is all there is and the fallback has to hold.
-        let fromAListing = Note(
-            id: "b", source: source, author: "", handle: "", body: "",
-            title: "two", board: "What the index calls it",
-            postedAt: .distantPast, origins: [.publicTimeline]
-        )
-        let elsewhere = Note(
-            id: "c", source: source, author: "", handle: "", body: "",
-            title: "three", board: "Another board", boardID: "40",
-            postedAt: .distantPast, origins: [.publicTimeline]
-        )
-
-        let query = DummyTimeline(
-            board: BoardQuery(host: "forum.example", fid: 39, name: "What the index calls it")
-        )
-        #expect(query.items(from: [onTheBoardPage, fromAListing, elsewhere], among: []).map(\.noteID) == ["a", "b"])
-
-        // And the number is not a name: a board whose id says 40 is not this tab, whatever it is
-        // called. Without this the fallback would quietly re-admit everything it was added for.
-        let renamedToMatch = Note(
-            id: "d", source: source, author: "", handle: "", body: "",
-            title: "four", board: "What the index calls it", boardID: "40",
-            postedAt: .distantPast, origins: [.publicTimeline]
-        )
-        #expect(query.items(from: [renamedToMatch], among: []).isEmpty)
     }
 
     // MARK: - The longest wait in the app, said correctly
