@@ -59,10 +59,12 @@ public struct FediqoRootView: View {
     /// Hands the copies of pictures already on this device to the one picture cache every row
     /// draws from, once, at launch — and first drops the copies of any host not in `hosts`, the
     /// servers the reader still reads. Queued ahead of every picture a row can ask for, so the
-    /// sweep never races a copy being written for a server just added.
+    /// sweep never races a copy being written for a server just added. What is left is then
+    /// trimmed to the cap (#7), so a cap lowered by a new build holds from its first launch.
     public static func keepPictures(in copies: any MediaCopies, for hosts: [String]) {
         let disk = DiskCopies(copies)
         disk.keepOnly(hosts: hosts)
+        disk.trim()
         ShellPictures.shared.disk = disk
     }
 
@@ -94,7 +96,17 @@ public struct FediqoRootView: View {
 
     public var body: some View {
         layout
-            .task { await session.reloadFromStore() }
+            // The reader's time policy holds from launch (#7): read before the store is adopted,
+            // then applied once and saved, so a policy set last run still binds what was kept.
+            .task {
+                session.keepMonths = prefs.keepMonths
+                await session.reloadFromStore()
+                await session.applyKeepPolicy()
+            }
+            .onChange(of: prefs.keepMonths) { _, months in
+                session.keepMonths = months
+                Task { await session.applyKeepPolicy() }
+            }
             .onChange(of: place) { old, new in
                 let accepted = availability.placing(old, as: new)
                 if accepted != new { place = accepted }

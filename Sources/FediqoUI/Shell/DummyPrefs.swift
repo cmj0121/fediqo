@@ -1,3 +1,4 @@
+import FediqoCore
 import Foundation
 import SwiftUI
 
@@ -92,7 +93,13 @@ final class DummyPrefs {
         didSet { Self.write("fontSize", fontSize.rawValue) }
     }
 
+    /// How many months of posts to keep; `KeepPolicy.forever` (0), the default, keeps them all.
+    var keepMonths: Int {
+        didSet { Self.write("keepMonths", String(keepMonths)) }
+    }
+
     init() {
+        keepMonths = Int(Self.read("keepMonths") ?? "").map { max($0, KeepPolicy.forever) } ?? KeepPolicy.forever
         language = DummyLanguage(rawValue: Self.read("language") ?? "") ?? .system
         theme = DummyTheme(rawValue: Self.read("theme") ?? "") ?? .system
         fontSize = DummyFontSize(rawValue: Self.read("fontSize") ?? "") ?? .standard

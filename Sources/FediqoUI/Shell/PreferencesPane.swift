@@ -74,6 +74,27 @@ struct PreferencesPane: View {
 
     private var sources: [Source] { session?.sources ?? [] }
 
+    /// Whether the breakdown is by week or by month (#7). Per view, not a preference: it changes
+    /// what is read, not what is kept.
+    @State private var period: HeldPeriod = .month
+
+    /// What each source's picture copies weigh on disk, by folded host. Optional for the reason
+    /// `catalogues` is: until the first read lands, "nothing on disk" would be a guess.
+    @State private var onDisk: [String: Int]?
+
+    /// A drop the reader has pressed and not yet answered for.
+    @State private var dropping: Drop?
+
+    enum Drop: Hashable {
+        /// Every picture copy, from every source; rows stay.
+        case copies
+        /// Posts older than the latest this many months, once.
+        case olderThan(Int)
+    }
+
+    /// The choices offered for keeping, and for dropping once, in months.
+    static let monthChoices = [1, 3, 6, 12]
+
     var body: some View {
         @Bindable var prefs = prefs
         Form {
@@ -98,6 +119,21 @@ struct PreferencesPane: View {
         .padding(ShellSpace.snug)
         .task(id: Probe(hosts: sources.map(\.host), cleared: session?.cleared ?? 0)) {
             await readCatalogues()
+            await readDisk()
+        }
+        .confirmationDialog(
+            Text(dropping.map(Self.dropTitle) ?? ""),
+            isPresented: Binding(get: { dropping != nil }, set: { if !$0 { dropping = nil } }),
+            titleVisibility: .visible,
+            presenting: dropping
+        ) { drop in
+            Button(L10n.t("prefs.drop.confirm"), role: .destructive) {
+                dropping = nil
+                Task { await perform(drop) }
+            }
+            Button(L10n.t("board.choose.cancel"), role: .cancel) { dropping = nil }
+        } message: { drop in
+            Text(Self.dropDetail(drop))
         }
     }
 
@@ -109,20 +145,28 @@ struct PreferencesPane: View {
         // server left behind, and with the rail summary pointing them at it. The empty state is
         // for a reader who genuinely has no sources; "the shell has not handed this pane its
         // session" is not that, and this pane must not guess which it is looking at.
-        if let session { section(session) }
+        if let session {
+            let holdings = Holdings(notes: session.notes, per: period)
+            section(session, holdings: holdings)
+            if !session.sources.isEmpty {
+                breakdown(holdings)
+                drops(session)
+            }
+        }
     }
 
     /// Takes the session rather than reading the optional again, so that everything below it is
     /// written against a session that exists. The nil case is decided once, above.
     @ViewBuilder
-    private func section(_ session: ShellSession) -> some View {
+    private func section(_ session: ShellSession, holdings: Holdings) -> some View {
         Section {
             if session.sources.isEmpty {
                 Text(L10n.t("prefs.cache.empty"))
                     .font(ShellType.meta)
                     .foregroundStyle(ShellChrome.inkFaint(colorScheme))
             } else {
-                ForEach(session.sources) { source in row(source, in: session) }
+                totals(session, holdings: holdings)
+                ForEach(session.sources) { source in row(source, in: session, holdings: holdings) }
             }
         } header: {
             Text(L10n.t("prefs.cache"))
@@ -133,14 +177,153 @@ struct PreferencesPane: View {
         }
     }
 
-    private func row(_ source: Source, in session: ShellSession) -> some View {
+    /// Everything held, all sources together: posts, and pictures in memory and on disk.
+    private func totals(_ session: ShellSession, holdings: Holdings) -> some View {
+        let memory = Self.memory(session.sources.map(\.host), in: session)
+        let disk = onDisk.map { $0.values.reduce(0, +) }
+        return VStack(alignment: .leading, spacing: ShellSpace.tight) {
+            Text(L10n.t("prefs.held.total"))
+                .font(ShellType.name)
+                .foregroundStyle(ShellChrome.ink(colorScheme))
+            reading(Text(Self.postsLine(holdings.posts)))
+            reading(Self.picturesText(count: memory.count, bytes: memory.bytes, disk: disk))
+        }
+        .padding(.vertical, ShellSpace.tight)
+    }
+
+    /// The breakdown by week or month (#7): newest first, one line a stretch that holds a post.
+    @ViewBuilder
+    private func breakdown(_ holdings: Holdings) -> some View {
+        Section {
+            Picker(L10n.t("prefs.held.per"), selection: $period) {
+                Text(L10n.t("prefs.held.per.week")).tag(HeldPeriod.week)
+                Text(L10n.t("prefs.held.per.month")).tag(HeldPeriod.month)
+            }
+            .pickerStyle(.segmented)
+            if holdings.byPeriod.isEmpty {
+                reading(Text(L10n.t("prefs.held.posts.none")))
+            } else {
+                ForEach(holdings.byPeriod.prefix(Self.stretchesShown), id: \.start) { bucket in
+                    HStack {
+                        reading(Text(Self.stretchLabel(bucket.start, period: period)))
+                        Spacer()
+                        reading(Text(Self.postsLine(bucket.posts)))
+                    }
+                }
+            }
+        } header: {
+            Text(L10n.t("prefs.held.breakdown"))
+        }
+    }
+
+    /// How many weeks or months the breakdown lists before it stops.
+    static let stretchesShown = 12
+
+    /// The three ways to drop (#7). By source is each row's Clear, above; these are the other two.
+    @ViewBuilder
+    private func drops(_ session: ShellSession) -> some View {
+        @Bindable var prefs = prefs
+        Section {
+            Picker(L10n.t("prefs.keep"), selection: $prefs.keepMonths) {
+                Text(L10n.t("prefs.keep.forever")).tag(KeepPolicy.forever)
+                ForEach(Self.monthChoices, id: \.self) { months in
+                    Text(Self.monthsLabel("prefs.keep.months", months)).tag(months)
+                }
+            }
+            Menu(L10n.t("prefs.drop.once")) {
+                ForEach(Self.monthChoices, id: \.self) { months in
+                    Button(Self.monthsLabel("prefs.drop.once.months", months)) {
+                        dropping = .olderThan(months)
+                    }
+                }
+            }
+            Button(L10n.t("prefs.drop.copies")) { dropping = .copies }
+        } header: {
+            Text(L10n.t("prefs.drop"))
+        } footer: {
+            Text(L10n.t("prefs.drop.footer"))
+                .font(ShellType.mark)
+                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+        }
+    }
+
+    private func perform(_ drop: Drop) async {
+        guard let session else { return }
+        switch drop {
+        case .copies: session.dropCopies()
+        case .olderThan(let months): await session.dropOlderThan(months: months)
+        }
+        await readDisk()
+    }
+
+    static func dropTitle(_ drop: Drop) -> String {
+        switch drop {
+        case .copies: L10n.t("prefs.drop.copies.title")
+        case .olderThan(let months): monthsLabel("prefs.drop.once.title", months)
+        }
+    }
+
+    static func dropDetail(_ drop: Drop) -> String {
+        switch drop {
+        case .copies: L10n.t("prefs.drop.copies.detail")
+        case .olderThan: L10n.t("prefs.drop.once.detail")
+        }
+    }
+
+    static func postsLine(_ count: Int) -> String {
+        count == 0 ? L10n.t("prefs.held.posts.none") : L10n.count("prefs.held.posts", count)
+    }
+
+    static func monthsLabel(_ key: String, _ months: Int) -> String {
+        L10n.count(key, months)
+    }
+
+    /// A week by the day it starts, a month by its name, both in the shell's language.
+    static func stretchLabel(_ start: Date, period: HeldPeriod) -> String {
+        switch period {
+        case .week:
+            String(format: L10n.t("prefs.held.week"),
+                   start.formatted(.dateTime.year().month(.abbreviated).day().locale(L10n.locale())))
+        case .month:
+            start.formatted(.dateTime.year().month(.wide).locale(L10n.locale()))
+        }
+    }
+
+    /// Pictures in memory, both caches, over `hosts`.
+    static func memory(_ hosts: [String], in session: ShellSession) -> (count: Int, bytes: Int) {
+        hosts.reduce((0, 0)) { sum, host in
+            let shell = session.pictures.holding(host: host)
+            let emoji = session.emojis.holding(host: host)
+            return (sum.0 + shell.count + emoji.count, sum.1 + shell.bytes + emoji.bytes)
+        }
+    }
+
+    /// "3 pictures · 1.2 MB in memory · 40 MB on disk", with the disk half left off until it has
+    /// been read, and a line of its own where nothing is held in memory.
+    static func picturesText(count: Int, bytes: Int, disk: Int?) -> Text {
+        var text = count == 0
+            ? Text(L10n.t("prefs.cache.pictures.none"))
+            : Text(L10n.count("prefs.cache.pictures", count))
+                + Text(verbatim: " · ")
+                + Text(String(format: L10n.t("prefs.held.memory"), Self.size(bytes)))
+        if let disk {
+            text = text + Text(verbatim: " · ") + Text(String(format: L10n.t("prefs.held.disk"), Self.size(disk)))
+        }
+        return text
+    }
+
+    static func size(_ bytes: Int) -> String {
+        Int64(bytes).formatted(.byteCount(style: .file).locale(L10n.locale()))
+    }
+
+    private func row(_ source: Source, in session: ShellSession, holdings: Holdings) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: ShellSpace.step) {
             VStack(alignment: .leading, spacing: ShellSpace.tight) {
                 Text(source.host)
                     .font(ShellType.name)
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                 catalogueLine(for: source)
-                heldLine(source, in: session)
+                reading(Text(Self.postsLine(holdings.posts(host: source.host))))
                 pictureLine(source, in: session)
                 postLine(source, in: session)
                 passwordLine(source, in: session)
@@ -187,45 +370,17 @@ struct PreferencesPane: View {
         }
     }
 
-    @ViewBuilder
-    private func heldLine(_ source: Source, in session: ShellSession) -> some View {
-        let held = session.notes.filter { $0.source.host == source.host }
-        if held.isEmpty {
-            reading(Text(L10n.t("prefs.held.posts.none")))
-        } else {
-            let now = Date()
-            let month = held.filter {
-                Calendar.current.isDate($0.postedAt, equalTo: now, toGranularity: .month)
-            }.count
-            reading(
-                Text(String(format: L10n.t("prefs.held.posts"), held.count))
-                    + Text(verbatim: " · ")
-                    + Text(String(format: L10n.t("prefs.held.month"), month))
-            )
-        }
-    }
-
     /// Both picture caches in one figure, because the reader was promised one thing: the pictures
     /// this server's posts are drawn with. Which cache an avatar and a `:blobcat:` happen to live
     /// in is this app's business and not theirs.
     ///
     /// Read off **this session's** caches rather than off `.shared`, so the figures and the
     /// button beside them are answers about the same two objects — see `ShellSession.pictures`.
-    @ViewBuilder
     private func pictureLine(_ source: Source, in session: ShellSession) -> some View {
-        let shell = session.pictures.holding(host: source.host)
-        let emoji = session.emojis.holding(host: source.host)
-        let count = shell.count + emoji.count
-        let bytes = Int64(shell.bytes + emoji.bytes)
-        if count == 0 {
-            reading(Text(L10n.t("prefs.cache.pictures.none")))
-        } else {
-            reading(
-                Text(String(format: L10n.t("prefs.cache.pictures"), count))
-                    + Text(verbatim: " · ")
-                    + Text(bytes, format: .byteCount(style: .memory))
-            )
-        }
+        let memory = Self.memory([source.host], in: session)
+        return reading(Self.picturesText(
+            count: memory.count, bytes: memory.bytes, disk: onDisk.map { $0[source.host.lowercased()] ?? 0 }
+        ))
     }
 
     /// The forum posts this device is holding from this server — D30's cache, in the inventory.
@@ -297,6 +452,12 @@ struct PreferencesPane: View {
     /// on a host with nothing in flight is not a wait, so this costs nothing in the ordinary
     /// case; and it cannot hang the pane, because the fetch it waits on is the one the join
     /// already started and its failure is dropped rather than thrown.
+    /// Reads what each source's copies weigh on disk, off the main actor (#7).
+    private func readDisk() async {
+        guard let session else { return }
+        onDisk = await session.pictures.diskBytes(hosts: session.sources.map(\.host))
+    }
+
     private func readCatalogues() async {
         guard let session else { return }
         var next: [String: Reading] = [:]
