@@ -330,7 +330,7 @@ struct BoardChoiceTests {
         // And the place is still open, which is the half that would have broken quietly: the
         // gate used to want both ids.
         #expect(session.availability.allows(.timeline))
-        #expect(session.timelineID == "all")
+        #expect(session.timelineID == .all)
     }
 
     @Test("Every protocol is asked whether it has trends, and the two forums say no")
@@ -365,15 +365,21 @@ struct BoardChoiceTests {
         #expect(session.queries.map(\.id) == ["all", "trends"])
     }
 
-    /// A saved selection from when a board was a tab names a query that no longer exists, and
-    /// falls back to All rather than to a tab that draws nothing.
-    @Test("A saved board timeline falls back to All")
-    func aSavedBoardTimelineFallsBackToAll() {
+    /// The selection is not persisted, so the only ids that reach a query are ones this build
+    /// knows — but an unknown one, such as an old board tab's, names All rather than nothing.
+    /// And a selection whose query goes away falls back to All too.
+    @Test("An unknown timeline id, or a query that went away, falls back to All")
+    func anUnknownTimelineFallsBackToAll() {
+        #expect(TimelineQuery(id: "board:forum.example:33") == .all)
+        #expect(TimelineQuery(id: "trends") == .trends)
+
         let session = Self.session(Self.forumHTTP(index: .fail))
-        session.timelineID = "board:forum.example:33"
+        session.sources = [Source(host: "mastodon.example", kind: .mastodon)]
+        session.rebuildQueries()
+        session.timelineID = .trends
         session.sources = [Source(host: "forum.example", kind: .discuz)]
         session.rebuildQueries()
-        #expect(session.timelineID == "all")
+        #expect(session.timelineID == .all)
     }
 
     /// Subscribing to a board fetches its threads into the store and adds no tab: they are
@@ -408,8 +414,8 @@ struct BoardChoiceTests {
         await session.subscribe(offer.boards.filter { $0.fid == 33 })
 
         #expect(session.queries.map(\.id) == ["all"])
-        #expect(session.timelineID == "all")
-        #expect(!DummyTimeline(id: "all").items(from: session.notes, among: []).isEmpty)
+        #expect(session.timelineID == .all)
+        #expect(!TimelineQuery.all.items(from: session.notes).isEmpty)
     }
 
     // MARK: - Saying what did not work
