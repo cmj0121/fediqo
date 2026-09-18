@@ -293,6 +293,8 @@ struct StoreFileOpenTests {
         #expect(opened.file != nil)
         #expect(opened.sources.isEmpty && opened.notes.isEmpty)
         #expect(opened.setAside == nil)
+        #expect(!opened.storeIsNewer)
+        #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("index.sqlite").path))
     }
 
     @Test("A corrupt index is moved aside, byte for byte, and a save does not touch it")
@@ -360,6 +362,47 @@ struct StoreFileOpenTests {
         let opened = StoreFile.open(at: dir)
         #expect(opened.setAside != nil)
         #expect(opened.sources.isEmpty)
+    }
+
+    @Test("An index from a newer build is left alone: no file, not set aside, bytes unchanged")
+    func newerStoreIsLeftAlone() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        do {
+            let file = try StoreFile(at: dir)
+            try await file.save(sources: [Source(host: "first.example", kind: .mastodon)], notes: [])
+            // What a newer build leaves behind: a migration this one has never heard of.
+            try await file.db.write { db in
+                try db.execute(sql: "INSERT INTO grdb_migrations (identifier) VALUES ('v9-from-a-newer-build')")
+            }
+        }
+        let index = dir.appendingPathComponent("index.sqlite")
+        let before = try Data(contentsOf: index)
+        let touched = try FileManager.default.attributesOfItem(atPath: index.path)[.modificationDate] as? Date
+        let listed = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+
+        let opened = StoreFile.open(at: dir)
+        let again = StoreFile.open(at: dir)
+
+        #expect(opened.file == nil)
+        #expect(again.file == nil && again.storeIsNewer)
+        #expect(opened.storeIsNewer)
+        #expect(opened.setAside == nil)
+        #expect(opened.sources.isEmpty && opened.notes.isEmpty)
+        #expect(try Data(contentsOf: index) == before)
+        #expect(try FileManager.default.attributesOfItem(atPath: index.path)[.modificationDate] as? Date == touched)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: dir.path).sorted() == listed.sorted())
+    }
+
+    @Test("An unreadable index is not mistaken for a newer one")
+    func unreadableIsNotNewer() throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try garbage.write(to: dir.appendingPathComponent("index.sqlite"))
+        let opened = StoreFile.open(at: dir)
+        #expect(!opened.storeIsNewer)
+        #expect(opened.setAside != nil)
     }
 
     @Test("When the directory cannot be made, the run gets no file to save to")
