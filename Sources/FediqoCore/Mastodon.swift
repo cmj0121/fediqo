@@ -339,6 +339,7 @@ struct StatusDTO: Decodable, Sendable {
             categories: [category],
             reply: Self.reply(inReplyToId: subject.inReplyToId, mentions: subject.mentions, host: host),
             boostedBy: booster?.name,
+            boosterHandle: booster.map { Self.handle($0.acct, host: host) },
             audience: Self.audience(subject.visibility),
             avatarURL: Host.fetchableURL(subject.account.avatar),
             attachments: subject.mediaAttachments?.compactMap { $0.asAttachment } ?? [],

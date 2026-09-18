@@ -38,6 +38,26 @@ public enum ProtocolKind: String, Sendable, Hashable, CaseIterable {
         case .unknown: "unknown protocol"
         }
     }
+
+    /// Whether a source of this kind has the timelines every Mastodon-shaped server shares —
+    /// public, trends, home — so that a category naming one of them can mean this source.
+    ///
+    /// **The one list**, read by the Trends tab and by a timeline's rules alike: a second list
+    /// is how the tab and the rule come to disagree about a server. No `default:`, so a kind
+    /// added later has to be answered here rather than inheriting somebody else's answer.
+    public var hasTimelines: Bool {
+        switch self {
+        case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
+            .gotosocial:
+            true
+        // Neither forum has one. A forum's categories are its boards.
+        case .discourse, .discuz, .unknown:
+            false
+        }
+    }
+
+    /// Whether this is a forum, whose authors are that forum's and nobody else's.
+    public var isForum: Bool { self == .discourse || self == .discuz }
 }
 
 /// One board of a forum the reader subscribed to.
@@ -258,7 +278,15 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// front page — which a source rule still reaches.
     public var categories: Set<Category>
     public let reply: Reply?
+    /// The name of whoever boosted this copy, as drawn.
     public let boostedBy: String?
+    /// Who boosted this copy, as `@user@instance`, so an author rule can match the booster (#26).
+    ///
+    /// **Only as good as the first copy.** A boost and its original share one row per host, and
+    /// the first copy to arrive is the one kept, so a boost that arrives after its original
+    /// leaves no booster here and matches on its author alone. Nothing fills it in afterwards,
+    /// and a note stored before this existed has none.
+    public let boosterHandle: String?
     public let audience: Audience?
     public let avatarURL: URL?
     /// What came attached, in the order the server listed it. Empty is a post that brought
@@ -289,6 +317,7 @@ public struct Note: Identifiable, Hashable, Sendable {
         categories: Set<Category>,
         reply: Reply? = nil,
         boostedBy: String? = nil,
+        boosterHandle: String? = nil,
         audience: Audience? = nil,
         avatarURL: URL? = nil,
         attachments: [Attachment] = [],
@@ -309,6 +338,7 @@ public struct Note: Identifiable, Hashable, Sendable {
         self.categories = categories
         self.reply = reply
         self.boostedBy = boostedBy
+        self.boosterHandle = boosterHandle
         self.audience = audience
         self.avatarURL = avatarURL
         self.attachments = attachments
