@@ -109,16 +109,16 @@ struct SearchShellTests {
     @Test("Closing the search gives back the timeline and the post selected before it")
     func escapeRestores() async {
         let notes = [note("a", "swift"), note("b", "other")]
-        #expect(ShellSearch().items(from: notes, sources: [one], latest: nil) == nil)
+        #expect(ShellSearch().items(from: notes, revision: 0, sources: [one], latest: nil) == nil)
 
         let search = await searching("swift", over: notes, from: "row-b")
-        #expect(ids(search.items(from: notes, sources: [one], latest: nil)) == ["a"])
+        #expect(ids(search.items(from: notes, revision: 0, sources: [one], latest: nil)) == ["a"])
 
         #expect(search.close() == "row-b")
         #expect(!search.isOpen)
         #expect(search.text.isEmpty)
         // Nothing to stand in for the timeline any more: it is drawn as it was.
-        #expect(search.items(from: notes, sources: [one], latest: nil) == nil)
+        #expect(search.items(from: notes, revision: 0, sources: [one], latest: nil) == nil)
         // A second close has nothing to give back.
         #expect(search.close() == nil)
     }
@@ -127,17 +127,17 @@ struct SearchShellTests {
     func clearingRestores() async {
         let notes = [note("a", "swift"), note("b", "other")]
         let search = await searching("swift", over: notes, from: "row-b")
-        #expect(ids(search.items(from: notes, sources: [one], latest: nil)) == ["a"])
+        #expect(ids(search.items(from: notes, revision: 0, sources: [one], latest: nil)) == ["a"])
 
         search.text = ""
         // No pause to wait for: the timeline is back on the next draw.
-        #expect(search.items(from: notes, sources: [one], latest: nil) == nil)
+        #expect(search.items(from: notes, revision: 0, sources: [one], latest: nil) == nil)
         #expect(search.selectionBefore == "row-b")
         #expect(search.isOpen)
         // Typing again searches again, and the selection to give back is still the first one.
         search.text = "other"
         search.settle("other")
-        #expect(ids(search.items(from: notes, sources: [one], latest: nil)) == ["b"])
+        #expect(ids(search.items(from: notes, revision: 0, sources: [one], latest: nil)) == ["b"])
         #expect(search.close() == "row-b")
     }
 
@@ -161,10 +161,69 @@ struct SearchShellTests {
         #expect(search.isIndexed)
         search.text = "swift"
         search.settle("swift")
-        #expect(ids(search.items(from: notes, sources: [one], latest: nil)) == ["a", "b"])
+        #expect(ids(search.items(from: notes, revision: 0, sources: [one], latest: nil)) == ["a", "b"])
         // A note that arrived after the search opened is still found.
         let more = notes + [note("c", "Swift too")]
-        #expect(ids(search.items(from: more, sources: [one], latest: nil)) == ["a", "b", "c"])
+        #expect(ids(search.items(from: more, revision: 1, sources: [one], latest: nil)) == ["a", "b", "c"])
+    }
+
+    @Test("While the index is still being folded, a pattern shows an empty list that says it is searching")
+    func searchingWhileIndexing() async {
+        let notes = [note("a", "swift"), note("b", "other")]
+        let search = ShellSearch()
+        search.open(from: nil, over: notes)
+        search.text = "swift"
+        search.settle("swift")
+        #expect(!search.isIndexed)
+        #expect(search.isSearching)
+        #expect(search.items(from: notes, revision: 0, sources: [one], latest: nil) == [], "not the timeline")
+        await search.indexed()
+        #expect(ids(search.items(from: notes, revision: 0, sources: [one], latest: nil)) == ["a"])
+        for key in ["search.indexing.title", "search.indexing.detail"] {
+            for language in [DummyLanguage.english, .taiwanese] {
+                #expect(L10n.t(key, language: language) != key, "\(key) is missing in \(language)")
+            }
+        }
+    }
+
+    @Test("A pattern of spaces alone is no search: the timeline stays")
+    func spacesAlone() async {
+        let notes = [note("a", "foot ball")]
+        let search = await searching("   ", over: notes)
+        #expect(!search.isSearching)
+        #expect(search.items(from: notes, revision: 0, sources: [one], latest: nil) == nil)
+    }
+
+    @Test("Closing the search stops folding its index")
+    func closeCancelsTheIndex() async {
+        let search = ShellSearch()
+        search.open(from: nil, over: [note("a", "swift")])
+        _ = search.close()
+        await search.indexed()
+        for _ in 0..<2_000 { await Task.yield() }
+        #expect(!search.isIndexed, "the fold for a closed search did not land")
+    }
+
+    @Test("The results are kept per notes revision, not by comparing every note")
+    func cachedPerRevision() async {
+        let notes = [note("a", "swift"), note("b", "swiftui")]
+        let search = await searching("swift", over: notes)
+        #expect(ids(search.items(from: notes, revision: 3, sources: [one], latest: nil)) == ["a", "b"])
+        let more = notes + [note("c", "swift too")]
+        #expect(ids(search.items(from: more, revision: 3, sources: [one], latest: nil)) == ["a", "b"],
+                "same revision: the kept answer")
+        #expect(ids(search.items(from: more, revision: 4, sources: [one], latest: nil)) == ["a", "b", "c"])
+    }
+
+    @Test("Emptying the field gives the selection back only while the search is open")
+    func clearedOnlyWhileOpen() async {
+        let search = await searching("swift", over: [note("a", "swift")], from: "row-b")
+        var restored: [String?] = []
+        search.cleared { restored.append($0) }
+        #expect(restored == ["row-b"])
+        #expect(search.close() == "row-b")
+        search.cleared { restored.append($0) }
+        #expect(restored == ["row-b"], "closing's own emptying does not take the selection away again")
     }
 
     @Test("An open search with nothing typed shows the timeline, and a stale pause searches nothing")
@@ -172,17 +231,17 @@ struct SearchShellTests {
         let notes = [note("a", "swift"), note("b", "swiftui")]
         let search = await searching("", over: notes)
         #expect(!search.isSearching)
-        #expect(search.items(from: notes, sources: [one], latest: nil) == nil)
+        #expect(search.items(from: notes, revision: 0, sources: [one], latest: nil) == nil)
 
         search.text = "swift"
         // The pause for "swif" ended after "swift" was typed: it is not what the field says.
         search.settle("swif")
-        #expect(search.items(from: notes, sources: [one], latest: nil) == nil)
+        #expect(search.items(from: notes, revision: 0, sources: [one], latest: nil) == nil)
         search.settle("swift")
-        #expect(ids(search.items(from: notes, sources: [one], latest: nil)) == ["a", "b"])
+        #expect(ids(search.items(from: notes, revision: 0, sources: [one], latest: nil)) == ["a", "b"])
         search.text = "swift?"
         search.settle("swift?")
-        #expect(ids(search.items(from: notes, sources: [one], latest: nil)) == ["b"])
+        #expect(ids(search.items(from: notes, revision: 0, sources: [one], latest: nil)) == ["b"])
     }
 
     // MARK: What is found
@@ -198,7 +257,7 @@ struct SearchShellTests {
             ("home", "home"), ("首頁", "home"),
         ] {
             let search = await searching(pattern, over: notes)
-            #expect(ids(search.items(from: notes, sources: [one], latest: nil)) == [expected], "\(pattern)")
+            #expect(ids(search.items(from: notes, revision: 0, sources: [one], latest: nil)) == [expected], "\(pattern)")
         }
     }
 
@@ -208,7 +267,7 @@ struct SearchShellTests {
         let post = Note(id: "l", source: source, author: "Ada", handle: "@ada@one.example", body: "x",
                         postedAt: Date(timeIntervalSince1970: 0), categories: [.list(id: "9")])
         let search = await searching("friend", over: [post])
-        #expect(ids(search.items(from: [post], sources: [source], latest: nil)) == ["l"])
+        #expect(ids(search.items(from: [post], revision: 0, sources: [source], latest: nil)) == ["l"])
     }
 
     @Test("Results are in time order and stop at the latest date")
@@ -221,8 +280,8 @@ struct SearchShellTests {
             note("older", "Swift", at: end.addingTimeInterval(-60)),
         ]
         let search = await searching("swift", over: notes)
-        #expect(ids(search.items(from: notes, sources: [one], latest: latest)) == ["last", "older"])
-        #expect(ids(search.items(from: notes, sources: [one], latest: nil)) == ["after", "last", "older"])
+        #expect(ids(search.items(from: notes, revision: 0, sources: [one], latest: latest)) == ["last", "older"])
+        #expect(ids(search.items(from: notes, revision: 0, sources: [one], latest: nil)) == ["after", "last", "older"])
     }
 
     @Test("Searching sends no request to any source")
@@ -252,11 +311,11 @@ struct SearchShellTests {
         for pattern in ["football", "#sp*", "*", "nothing", "first.example", "public", "b?"] {
             search.text = pattern
             search.settle(pattern)
-            _ = search.items(from: session.notes, sources: session.sources, latest: nil)
+            _ = search.items(from: session.notes, revision: session.notesRevision, sources: session.sources, latest: nil)
         }
         search.text = "FOOT"
         search.settle("FOOT")
-        #expect(ids(search.items(from: session.notes, sources: session.sources, latest: nil)) == [
+        #expect(ids(search.items(from: session.notes, revision: session.notesRevision, sources: session.sources, latest: nil)) == [
             "https://first.example/s/one",
         ])
         _ = search.close()
