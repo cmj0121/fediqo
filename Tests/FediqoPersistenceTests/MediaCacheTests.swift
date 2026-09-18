@@ -134,4 +134,65 @@ struct MediaCacheTests {
         #expect(cache.data(host: "a.example", url: url) == Data("other".utf8))
         #expect(cache.data(host: host, url: url) == nil)
     }
+
+    @Test("Dropping every copy reaches every host, and holds for a cache opened again")
+    func removeAllHoldsAfterRelaunch() throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let cache = try MediaCache(directory: dir)
+        try cache.store(Data("pic".utf8), host: "a.example", url: url)
+        try cache.store(Data("other".utf8), host: "b.example", url: url)
+        cache.removeAll()
+        let reopened = try MediaCache(directory: dir)
+        #expect(reopened.data(host: "a.example", url: url) == nil)
+        #expect(reopened.data(host: "b.example", url: url) == nil)
+        #expect(reopened.bytes(host: "a.example") + reopened.bytes(host: "b.example") == 0)
+        try reopened.store(Data("again".utf8), host: "a.example", url: url)
+        #expect(reopened.data(host: "a.example", url: url) == Data("again".utf8))
+    }
+
+    @Test("Over the cap, the oldest copies go first, across hosts, until it fits")
+    func trimDropsOldestFirst() throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let cache = try MediaCache(directory: dir)
+        let urls = (0..<3).map { URL(string: "https://cdn.example/\($0).jpg")! }
+        let hosts = ["a.example", "b.example", "a.example"]
+        for (index, address) in urls.enumerated() {
+            try cache.store(Data(count: 10), host: hosts[index], url: address)
+            try age(cache, host: hosts[index], url: address, by: Double(3 - index) * 100)
+        }
+        cache.trim(toBytes: 25)
+        #expect(cache.data(host: "a.example", url: urls[0]) == nil, "the oldest copy survived")
+        #expect(cache.data(host: "b.example", url: urls[1]) != nil)
+        #expect(cache.data(host: "a.example", url: urls[2]) != nil)
+
+        cache.trim(toBytes: 10)
+        #expect(cache.data(host: "b.example", url: urls[1]) == nil)
+        #expect(cache.bytes(host: "b.example") == 0)
+        #expect(cache.data(host: "a.example", url: urls[2]) != nil)
+        let folders = try FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
+        #expect(folders.count == 1, "a host emptied by the trim left its folder behind")
+
+        let reopened = try MediaCache(directory: dir)
+        #expect(reopened.bytes(host: "a.example") == 10)
+    }
+
+    @Test("Under the cap, the trim drops nothing")
+    func trimUnderCap() throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let cache = try MediaCache(directory: dir)
+        try cache.store(Data(count: 10), host: "a.example", url: url)
+        cache.trim(toBytes: 10)
+        #expect(cache.bytes(host: "a.example") == 10)
+        try MediaCache(directory: scratch()).trim(toBytes: 0)
+    }
+
+    /// Backdates one copy, so "oldest" is what the test says and not what the clock managed.
+    private func age(_ cache: MediaCache, host: String, url: URL, by seconds: TimeInterval) throws {
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSinceNow: -seconds)], ofItemAtPath: cache.file(host: host, url: url).path
+        )
+    }
 }

@@ -8,20 +8,6 @@ struct StoreTests {
     private let other = Source(host: "second.example", kind: .mastodon)
     private let origin = Date(timeIntervalSince1970: 1_700_000_000)
 
-    @Test("Dropping a source's notes keeps the source")
-    func dropNotesKeepsTheSource() async {
-        let store = ItemStore()
-        await store.add(source)
-        await store.add(other)
-        await store.ingest([
-            note(id: "mine", postedAt: origin, origins: [.publicTimeline]),
-            note(id: "theirs", postedAt: origin, origins: [.publicTimeline], from: other),
-        ])
-        await store.dropNotes(host: source.host)
-        #expect(await store.sources().map(\.host) == ["first.example", "second.example"])
-        #expect(await store.all().map(\.id) == ["theirs"])
-    }
-
     @Test("Dropping by time keeps the latest notes")
     func dropPostedBeforeKeepsNewer() async {
         let store = ItemStore()
@@ -31,6 +17,20 @@ struct StoreTests {
             note(id: "new", postedAt: origin.addingTimeInterval(86_400), origins: [.publicTimeline]),
         ])
         await store.dropPosted(before: origin.addingTimeInterval(60))
+        #expect(await store.all().map(\.id) == ["new"])
+    }
+
+    @Test("Dropping by time keeps every source joined, even one left with nothing")
+    func dropPostedKeepsSources() async {
+        let store = ItemStore()
+        await store.add(source)
+        await store.add(other)
+        await store.ingest([
+            note(id: "old", postedAt: origin, origins: [.publicTimeline], from: other),
+            note(id: "new", postedAt: origin.addingTimeInterval(86_400), origins: [.publicTimeline]),
+        ])
+        await store.dropPosted(before: origin.addingTimeInterval(60))
+        #expect(await store.sources().map(\.host) == ["first.example", "second.example"])
         #expect(await store.all().map(\.id) == ["new"])
     }
 
