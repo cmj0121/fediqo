@@ -51,7 +51,7 @@ public enum ForumTransportError: Error, Equatable, Sendable {
 /// N+1, and the symptom would be a reader who signs in successfully and still cannot read.
 ///
 /// **The store is `ForumSessions`' and may persist (#5).** The app hands every engine the one
-/// store kept on this device and out of its backups (`ForumSessions.deviceDataStore()`), so a
+/// store kept on this device and out of its backups (`ForumWebsiteData.onDevice()`), so a
 /// sign-in outlives a relaunch; tests hand a non-persistent one. Clear drops the host's records
 /// from that store directly (`forget(host:in:)`), whether or not this run built an engine.
 @MainActor
@@ -90,7 +90,7 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
     private var running = false
     private var waiting: [CheckedContinuation<Void, Never>] = []
 
-    init(host: String, dataStore: WKWebsiteDataStore = .nonPersistent()) {
+    init(host: String, dataStore: WKWebsiteDataStore) {
         self.host = host.lowercased()
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = dataStore
@@ -259,14 +259,10 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
 
     // MARK: - Clearing
 
-    /// Stops this view and drops everything its host left in the store — D25's half of decision
-    /// 14, for a reader who presses Clear while the view is still open. The dropping itself is
-    /// `ForumWebEngine.forget(host:in:)`, which `ForumSessions` also calls when no engine was
-    /// built this run: the store persists, so a host signed in last week still holds cookies
-    /// today whether or not anything has asked for its page yet.
-    func forget() async {
+    /// Stops this view and leaves it on a blank page, for a Clear pressed while it is still
+    /// open. What the host left in the store is dropped by `forget(host:in:)`.
+    func stopAndBlank() {
         view.stopLoading()
-        await Self.forget(host: host, in: view.configuration.websiteDataStore)
         view.load(URLRequest(url: URL(string: "about:blank")!))
     }
 
@@ -278,7 +274,6 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
     /// one clears both. The alternative — keeping records a Clear should have dropped — is the
     /// worse error.
     static func forget(host: String, in store: WKWebsiteDataStore) async {
-        let host = host.lowercased()
         let types = WKWebsiteDataStore.allWebsiteDataTypes()
         let records = await store.dataRecords(ofTypes: types)
         let mine = records.filter { holds($0.displayName, for: host) }

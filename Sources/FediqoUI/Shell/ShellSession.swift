@@ -167,7 +167,11 @@ final class ShellSession {
 
     var queries: [DummyTimeline] = DummyTimeline.shipped
     var timelineID: String?
-    var sources: [Source] = []
+    /// Every change is handed on to `forums`, which is the one place that knows which of them
+    /// are forums a sign-in can be held for.
+    var sources: [Source] = [] {
+        didSet { forums.watch(forums: sources.filter { $0.kind == .discuz }.map(\.host)) }
+    }
     var notes: [Note] = []
 
     /// How many times the reader has cleared a server — decision 14's press, counted.
@@ -1380,9 +1384,9 @@ final class ShellSession {
         guard let host = try? Host.parse(raw) else { return }
         switch await forums.signIn(host: host) {
         case .signedIn:
-            // The automatic path, and one of the two things that can witness a sign-in being
-            // reached — decision 13. The other is the reader closing the forum's own page below.
-            forums.recordSignIn(host: host)
+            // The automatic path. The row learns of it from the cookie the forum just set,
+            // read here rather than left to the store's notification so it is in place now.
+            await forums.readReached()
             signingIn = nil
             offerSignIn = nil
         case .handOver(let stop):
@@ -1403,8 +1407,8 @@ final class ShellSession {
     ///
     /// *A host that is already a source.* This is the row's toggle (decision 13), and there is
     /// nothing to resume: the server is read, its boards are picked, and **the sign-in was the
-    /// whole errand**. So this says no. It is quiet and it is not silent — `recordSignIn` above
-    /// has already run, `ForumSessions` is observed, and the row's toggle is drawn from
+    /// whole errand**. So this says no. It is quiet and it is not silent — the forum's session
+    /// cookie is in the store, `ForumSessions` reads it from there and is observed, and the row's toggle is drawn from
     /// `reachedSignIn`, so it reads Sign out by the time the sheet is gone. That is the reader's
     /// answer, and it is why no sentence is needed under the field for a press that was not made
     /// there.
@@ -1432,11 +1436,10 @@ final class ShellSession {
         signingIn = nil
         guard reached else { return false }
         offerSignIn = nil
-        // The other witness — decision 13. A reader who closed the forum's own page having got
-        // there is the only evidence this device will ever have of a sign-in it did not perform.
-        if let was { forums.recordSignIn(host: was) }
-        // The row's errand, and it is finished: recorded on the line above, and drawn by the
-        // toggle that reads it. Asked before the field is written, because writing the field is
+        // The forum's own page set its session cookie; the row reads it off the store, which
+        // says so itself — this only asks sooner.
+        Task { [forums] in await forums.readReached() }
+        // The row's errand, and it is finished: drawn by the toggle that reads the store. Asked before the field is written, because writing the field is
         // the other errand's business and not this one's.
         if let was, isAdded(was) { return false }
         // What they typed, restored from the host they signed in to — the field may have been

@@ -15,14 +15,10 @@ struct FediqoApp: App {
     /// this run then saves nothing, so what is on disk survives it (`StoreFile.open(at:now:)`).
     init() {
         let opened = StoreFile.openApplicationSupport()
-        let forums = ForumSessions(dataStore: ForumSessions.deviceDataStore())
         self.file = opened.file
         self.store = ItemStore(sources: opened.sources, notes: opened.notes)
-        self.forums = forums
-        // Which forums are still signed in is read off the cookies this device kept, not off
-        // the index: the index is not where a secret lives (#5).
-        let forumHosts = opened.sources.filter { $0.kind == .discuz }.map(\.host)
-        Task { await forums.restoreSignIns(among: forumHosts) }
+        // Built on first use only: a reader with no forum never opens the WebKit store.
+        self.forums = ForumSessions(dataStore: ForumWebsiteData.onDevice())
         // Where Caches cannot be made, pictures are read from their hyperlinks only.
         if let media = try? MediaCache.caches() {
             FediqoRootView.keepPictures(in: media, for: opened.sources.map(\.host))
