@@ -290,12 +290,53 @@ struct InventoryTests {
         let saved = L10n.language
         L10n.language = .english
         defer { L10n.language = saved }
-        #expect(PreferencesPane.postsLine(0) == "No posts held")
-        #expect(PreferencesPane.postsLine(1) == "1 post")
-        #expect(PreferencesPane.postsLine(3) == "3 posts")
-        #expect(PreferencesPane.stretchLabel(now, period: .week).hasPrefix("Week of "))
-        #expect(PreferencesPane.stretchLabel(now, period: .month).contains(String(Calendar.current.component(.year, from: now))))
-        #expect(PreferencesPane.monthChoices == [1, 3, 6, 12])
+        #expect(UsagePane.postsLine(0) == "No posts held")
+        #expect(UsagePane.postsLine(1) == "1 post")
+        #expect(UsagePane.postsLine(3) == "3 posts")
+        #expect(UsagePane.stretchLabel(now, period: .week).hasPrefix("Week of "))
+        #expect(UsagePane.stretchLabel(now, period: .month).contains(String(Calendar.current.component(.year, from: now))))
+        #expect(UsagePane.monthChoices == [1, 3, 6, 12])
+    }
+
+    /// #21. No view inspector here, so the pages are pinned by the keys their files draw: every
+    /// figure and every Clear is on Usage, and Preferences draws none of them.
+    @Test("The storage this device uses is on Usage, and Preferences no longer shows it")
+    func theFiguresLiveOnUsage() throws {
+        let usage = try Self.source("UsagePane")
+        let preferences = try Self.source("PreferencesPane")
+        for key in [
+            "prefs.cache", "prefs.cache.footer", "prefs.held.total", "prefs.held.disk",
+            "prefs.held.breakdown", "prefs.cache.clear", "prefs.password.forget",
+            "prefs.keep", "prefs.drop.copies",
+        ] {
+            #expect(usage.contains("\"\(key)\""), "Usage does not draw \(key)")
+        }
+        for stem in ["prefs.cache", "prefs.held", "prefs.drop", "prefs.keep", "prefs.password"] {
+            #expect(!preferences.contains("\"\(stem)"), "Preferences still draws \(stem)")
+        }
+        #expect(usage.contains("session.clearing = source.host"), "a row's Clear no longer asks the same question")
+
+        for language in [DummyLanguage.english, .taiwanese] {
+            let usageTitle = L10n.t("shell.usage.title", language: language)
+            let preferencesTitle = L10n.t("shell.preferences.title", language: language)
+            for key in ["account.sources.held", "forum.signin.save.on"] {
+                let line = L10n.t(key, language: language)
+                #expect(line.contains(usageTitle), "\(key) does not send the reader to Usage")
+                #expect(!line.contains(preferencesTitle), "\(key) still sends the reader to Preferences")
+            }
+        }
+        #expect(!L10n.t("shell.preferences.summary", language: .english).contains("held"))
+    }
+
+    private static func source(_ name: String) throws -> String {
+        try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appendingPathComponent("Sources/FediqoUI/Shell/\(name).swift"),
+            encoding: .utf8
+        )
     }
 
     @Test("Switching between week and month rebuilds the counts; a redraw does not")
