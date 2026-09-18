@@ -117,13 +117,14 @@ public struct StoreFile: Sendable {
     }
 }
 
-/// Internal rather than private so a test can stop it part-way and write what an older build left.
-var migrator: DatabaseMigrator {
+private var migrator: DatabaseMigrator {
     var migrator = DatabaseMigrator()
     migrator.registerMigration("v1-index") { db in
         try db.create(table: "source") { t in
             t.primaryKey("host", .text)
             t.column("kind", .text).notNull()
+            // A JSON array of `BoardRow`: a board name can hold any character, so no separator
+            // chosen here could be trusted to stay one.
             t.column("boards", .text).notNull()
         }
         try db.create(table: "note") { t in
@@ -136,25 +137,6 @@ var migrator: DatabaseMigrator {
             t.column("title", .text)
             t.column("posted_at", .datetime).notNull()
             t.column("origins", .text).notNull()
-        }
-    }
-    // The board list was a hand-rolled `fid<US>name<RS>…` string, which a board name holding
-    // either separator broke without a word. It is JSON now; this rewrites what the old form
-    // left, reading it the way the old code did.
-    migrator.registerMigration("v2-boards-json") { db in
-        let rows = try Row.fetchAll(db, sql: "SELECT host, boards FROM source")
-        for row in rows {
-            let host: String = row["host"]
-            let raw: String = row["boards"]
-            let boards: [BoardRow] = raw.isEmpty ? [] : raw.split(separator: "\u{1e}").compactMap { part in
-                let bits = part.split(separator: "\u{1f}", maxSplits: 1)
-                guard bits.count == 2, let fid = Int(bits[0]) else { return nil }
-                return BoardRow(fid: fid, name: String(bits[1]))
-            }
-            try db.execute(
-                sql: "UPDATE source SET boards = ? WHERE host = ?",
-                arguments: [try BoardRow.encode(boards), host]
-            )
         }
     }
     return migrator
