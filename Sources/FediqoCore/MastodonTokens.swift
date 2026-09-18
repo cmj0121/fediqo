@@ -39,11 +39,15 @@ public struct MastodonApp: Sendable, Equatable, CustomStringConvertible,
     public let host: String
     public let clientID: String
     public let clientSecret: String
+    /// The scopes it was registered for, or nothing for one kept before they were recorded. A
+    /// registration whose scopes are not `MastodonOAuth.scopes` is registered again.
+    public let scopes: String?
 
-    public init(host: String, clientID: String, clientSecret: String) {
+    public init(host: String, clientID: String, clientSecret: String, scopes: String? = nil) {
         self.host = host.lowercased()
         self.clientID = clientID
         self.clientSecret = clientSecret
+        self.scopes = scopes
     }
 
     public var description: String { "MastodonApp(host: \(host))" }
@@ -141,6 +145,8 @@ public enum MastodonKeychain {
         private struct App: Codable {
             var clientID: String
             var clientSecret: String
+            /// Absent in an item kept before the scopes were recorded.
+            var scopes: String?
         }
 
         static func encode(_ token: MastodonToken) -> Data {
@@ -152,7 +158,7 @@ public enum MastodonKeychain {
         }
 
         static func encode(_ app: MastodonApp) -> Data {
-            let value = App(clientID: app.clientID, clientSecret: app.clientSecret)
+            let value = App(clientID: app.clientID, clientSecret: app.clientSecret, scopes: app.scopes)
             return (try? JSONEncoder().encode(value)) ?? Data()
         }
 
@@ -170,7 +176,9 @@ public enum MastodonKeychain {
             guard let value = try? JSONDecoder().decode(App.self, from: data),
                   !value.clientID.isEmpty
             else { return nil }
-            return MastodonApp(host: host, clientID: value.clientID, clientSecret: value.clientSecret)
+            return MastodonApp(
+                host: host, clientID: value.clientID, clientSecret: value.clientSecret, scopes: value.scopes
+            )
         }
     }
 }

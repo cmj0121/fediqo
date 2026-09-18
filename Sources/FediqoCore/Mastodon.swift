@@ -324,6 +324,10 @@ struct StatusDTO: Decodable, Sendable {
     }
 
     func asNote(source: Source, category: Category) -> Note {
+        asNote(source: source, categories: [category])
+    }
+
+    func asNote(source: Source, categories: Set<Category>) -> Note {
         let subject = reblog?.value ?? self
         // Named once, so the name the row draws and the pictures that name is written in
         // cannot come to disagree about whether there is a booster at all.
@@ -336,7 +340,7 @@ struct StatusDTO: Decodable, Sendable {
             handle: Self.handle(subject.account.acct, host: host),
             body: HTMLText.plain(subject.content),
             postedAt: subject.createdAt,
-            categories: [category],
+            categories: categories,
             reply: Self.reply(inReplyToId: subject.inReplyToId, mentions: subject.mentions, host: host),
             boostedBy: booster?.name,
             boosterHandle: booster.map { Self.handle($0.acct, host: host) },
@@ -359,7 +363,9 @@ struct StatusDTO: Decodable, Sendable {
                 replies: subject.repliesCount,
                 reblogs: subject.reblogsCount,
                 favourites: subject.favouritesCount
-            )
+            ),
+            // The post's own id on this server, the boosted one's on a boost: what the row is.
+            statusID: subject.id
         )
     }
 

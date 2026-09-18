@@ -84,12 +84,25 @@ public enum Host {
         return url
     }
 
+    /// A query value percent-encoded, `+`, `&` and `=` included.
+    private static func queryValue(_ value: String) -> String {
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "+&=")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+    }
+
     static func httpsURL(host: String, path: String, query: [URLQueryItem] = []) -> URL? {
         var components = URLComponents()
         components.scheme = "https"
         components.host = host
         components.path = path
-        if !query.isEmpty { components.queryItems = query }
+        if !query.isEmpty {
+            // `URLComponents` leaves `+` bare in a value, and a server reading the query as a form
+            // takes it for a space — a post address with `+` in it would search for another (#29).
+            components.percentEncodedQueryItems = query.map {
+                URLQueryItem(name: $0.name, value: $0.value.map(Self.queryValue))
+            }
+        }
         return components.url
     }
 }
