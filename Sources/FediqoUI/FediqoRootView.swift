@@ -252,7 +252,7 @@ public struct FediqoRootView: View {
             }
             // **The Clear question, beside Remove's and driven the same way** (decision 29). One
             // presenter, one piece of session state, two entrances: a source row and
-            // `PreferencesPane`'s row, which press the same key for the same call and must
+            // `UsagePane`'s row, which press the same key for the same call and must
             // therefore ask the same question.
             //
             // **It exists because Clear is not reversible, whatever the row looks like.** It drops
@@ -341,7 +341,7 @@ public struct FediqoRootView: View {
                 performDummyKey(character, shift: shift, control: control, command: command)
             }
             .environment(prefs)
-            // **The session, for the panes that are handed no binding.** `PreferencesPane` reads
+            // **The session, for the panes that are handed no binding.** `UsagePane` reads
             // it out of the environment, and without this it is nil on every real launch — so the
             // pane draws its empty state and tells a reader who has already joined a server to go
             // and add one. A pane whose whole purpose is not to say a false thing, saying one.

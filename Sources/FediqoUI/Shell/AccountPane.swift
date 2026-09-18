@@ -54,7 +54,7 @@ struct AccountPane: View {
                 // not an empty state. The hero above already says what the app is for and names
                 // the next act, and Browse is beside the field; a second invitation under a rule
                 // would be two of them on one screen, with the mascot arguing against the other.
-                // `PreferencesPane` draws its empty state and is right to, because it has no
+                // `UsagePane` draws its empty state and is right to, because it has no
                 // hero to be contradicted by.
                 if !session.sources.isEmpty {
                     ShellRule()
@@ -476,7 +476,7 @@ struct AccountPane: View {
 
     /// The sources this device reads, one row each.
     ///
-    /// **This list and `PreferencesPane`'s answer different questions and are kept visibly apart.**
+    /// **This list and `UsagePane`'s answer different questions and are kept visibly apart.**
     /// This one is *what am I reading* — a mark, a hostname, and what can be done about it. That
     /// one is *what is this device holding* — an inventory, every line of it with a byte count or a
     /// date. So **no byte figure and no date appears on a row here, ever**, and the footnote below
@@ -687,7 +687,7 @@ struct AccountPane: View {
     /// A row's Clear. **Empties nothing** — it raises the question, and only the dialog's confirm
     /// reaches `clear(host:)`. Decision 29, and `askRemove`'s shape for its reason.
     ///
-    /// The same act, and the same key, as the one on Preferences — which now asks the same
+    /// The same act, and the same key, as the one on Usage — which now asks the same
     /// question through the same presenter, or one word would do two things two panes apart.
     func askClear(_ row: SourceRow) {
         session.clearing = row.source.host

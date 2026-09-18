@@ -45,7 +45,7 @@ public enum ForumTransportError: Error, Equatable, Sendable {
 /// **One view per host, for both jobs.** The same object serves the reader's sign-in and the
 /// app's fetches, so the cookies the sign-in earned and the cookies the fetch sends are the same
 /// jar *by construction* rather than by two objects agreeing. This branch has already written
-/// that lesson down twice — `ShellSession.pictures` holds the caches Preferences reads for
+/// that lesson down twice — `ShellSession.pictures` holds the caches Usage reads for
 /// exactly this reason, and "a rule enforced at each consumer's door is a rule consumer N+1
 /// misses" is one of the two conventions it earned. A second web view here would be consumer
 /// N+1, and the symptom would be a reader who signs in successfully and still cannot read.

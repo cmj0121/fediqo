@@ -7,7 +7,7 @@
 "shell.usage.title" = "Usage";
 "shell.usage.summary" = "What this device is keeping";
 "shell.preferences.title" = "Preferences";
-"shell.preferences.summary" = "Language, theme, type, and what is held";
+"shell.preferences.summary" = "Language, theme, and type";
 "shell.timeline.disabled" = "Add a source on Account first";
 "shell.notices.disabled" = "Notices need a signed-in source";
 "account.rail.empty" = "Add a source";
@@ -160,7 +160,6 @@
 
 "prefs.cache" = "Held on this device";
 "prefs.cache.footer" = "Most of this is read again from each server: its emoji names by themselves after a day, and the rest when you ask for it. Two things a sign-in leaves are kept on this device and nowhere else. A forum you signed in to keeps its session cookies here, so you are still signed in the next time Fediqo opens; they are not backed up and do not follow your Apple account. A password you asked Fediqo to save is kept in this device's Keychain and is never copied to iCloud. Clear deletes both along with everything else.";
-"prefs.cache.empty" = "Add a source on Account. What each one sends is held here, on this device.";
 "prefs.held.posts" = "%d posts";
 "prefs.held.posts.none" = "No posts held";
 "prefs.held.posts.one" = "%d post";
@@ -200,7 +199,7 @@
 "forum.signin.web.label" = "%@'s own page";
 "forum.signin.save" = "Save my username and password on this device";
 "forum.signin.save.off" = "This app never sees your password. You are typing into this forum's own page, and nothing here reads what you type.";
-"forum.signin.save.on" = "This app will see your password, because signing you in by itself means holding it. It goes into this device's Keychain, is sent to nowhere but this forum, and is never copied to iCloud. Clearing this server, or forgetting it on Preferences, deletes it.";
+"forum.signin.save.on" = "This app will see your password, because signing you in by itself means holding it. It goes into this device's Keychain, is sent to nowhere but this forum, and is never copied to iCloud. Clearing this server, or forgetting it on Usage, deletes it.";
 "forum.signin.cancel" = "Cancel";
 "forum.signin.done" = "Done";
 "forum.stop.first" = "The first sign-in is yours. Type into this forum's own page below.";
@@ -314,7 +313,7 @@
 /* Unit 5 — one row per server, and what it is. */
 "account.sources.title"          = "Sources";
 "account.sources.detail"         = "Everything this device reads. Press a row for what that server says about itself — its name, its size, its boards. Removing one takes its boards and its posts with it.";
-"account.sources.held"           = "What each one has left on this device is on Preferences.";
+"account.sources.held"           = "What each one has left on this device is on Usage.";
 /* M1 tail rev 4 — the compact row. What the marks on a row mean, said once for the list. */
 "account.sources.marks"          = "A row carries only the marks its own server has: sign in, change boards, clear what it left here, and remove it.";
 "account.source.boards"          = "%1$d boards: %2$@";

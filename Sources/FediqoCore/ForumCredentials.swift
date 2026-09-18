@@ -53,7 +53,7 @@ public protocol ForumCredentialStore: Sendable {
     func credential(host: String) throws -> ForumCredential?
     func save(_ credential: ForumCredential) throws
     func forget(host: String) throws
-    /// Which hosts have something saved, **without reading a single password**. The Preferences
+    /// Which hosts have something saved, **without reading a single password**. The Usage
     /// pane needs to draw "there is a password here" beside a server and must never have the
     /// password in order to do it.
     func savedHosts() throws -> Set<String>

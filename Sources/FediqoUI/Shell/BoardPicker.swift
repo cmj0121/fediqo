@@ -260,7 +260,7 @@ struct BoardPickerList: View {
 
     /// The stated figures, joined. `Text` concatenation rather than a formatted `String` so the
     /// numbers and the date follow the language the shell is set to, which is the reader's
-    /// preference and not the device's — `PreferencesPane.catalogueLine` states the same rule.
+    /// preference and not the device's — `UsagePane.catalogueLine` states the same rule.
     private func stated(_ board: DiscuzBoard) -> Text {
         var line = Text(verbatim: "")
         var first = true

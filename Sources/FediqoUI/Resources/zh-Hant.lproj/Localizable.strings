@@ -7,7 +7,7 @@
 "shell.usage.title" = "用量";
 "shell.usage.summary" = "這台機器上留了什麼";
 "shell.preferences.title" = "偏好";
-"shell.preferences.summary" = "語言、主題、字級與已存內容";
+"shell.preferences.summary" = "語言、主題與字級";
 "shell.timeline.disabled" = "先到帳號頁新增來源";
 "shell.notices.disabled" = "通知需要已登入的來源";
 "account.rail.empty" = "新增來源";
@@ -160,7 +160,6 @@
 
 "prefs.cache" = "存在這台裝置上";
 "prefs.cache.footer" = "這些大多會向各來源重新讀取：表情符號名稱會在一天後自行重新讀取，其他則在你需要時再讀。登入留下的兩樣東西只存在這台裝置上。你登入過的論壇會把登入 Cookie 留在這裡，下次開啟 Fediqo 時你仍是登入狀態；它們不會被備份，也不會跟著你的 Apple 帳號走。你要求 Fediqo 存起來的密碼放在這台裝置的鑰匙圈裡，永遠不會複製到 iCloud。按「清除」時，兩者都會和其他東西一起刪掉。";
-"prefs.cache.empty" = "先到「帳號」加入來源。各來源送來的內容會留在這裡，存在這台裝置上。";
 "prefs.held.posts" = "%d 則貼文";
 "prefs.held.posts.none" = "未存貼文";
 "prefs.held.total" = "所有來源";
@@ -196,7 +195,7 @@
 "forum.signin.web.label" = "%@ 自己的頁面";
 "forum.signin.save" = "把我的帳號與密碼存在這台裝置上";
 "forum.signin.save.off" = "這個程式看不到你的密碼。你是在這個論壇自己的頁面上輸入，這裡不會去讀你打了什麼。";
-"forum.signin.save.on" = "這個程式會看到你的密碼，因為要自己幫你登入就得握著它。密碼會存進這台裝置的鑰匙圈，只會送往這個論壇，也絕不會複製到 iCloud。清除這個來源、或在「偏好設定」按「忘掉」，都會把它刪掉。";
+"forum.signin.save.on" = "這個程式會看到你的密碼，因為要自己幫你登入就得握著它。密碼會存進這台裝置的鑰匙圈，只會送往這個論壇，也絕不會複製到 iCloud。清除這個來源、或在「用量」按「忘掉」，都會把它刪掉。";
 "forum.signin.cancel" = "取消";
 "forum.signin.done" = "完成";
 "forum.stop.first" = "第一次登入是你自己來。請在下面這個論壇自己的頁面上輸入。";
@@ -307,7 +306,7 @@
 /* Unit 5 — one row per server, and what it is. */
 "account.sources.title"          = "來源";
 "account.sources.detail"         = "這個裝置讀的全部。按一列，看那個來源怎麼說它自己——它的名字、它的規模、它的版塊。移除其中一個，它的版塊和它的文章都會跟著走。";
-"account.sources.held"           = "每一個在這個裝置上還留著什麼，在偏好設定裡。";
+"account.sources.held"           = "每一個在這個裝置上還留著什麼，在「用量」裡。";
 /* M1 tail rev 4 — the compact row. What the marks on a row mean, said once for the list. */
 "account.sources.marks"          = "一列只帶它自己那個來源有的標記：登入、換版塊、清除它留在這裡的東西、移除它。";
 "account.source.boards"          = "%1$d 個版塊：%2$@";

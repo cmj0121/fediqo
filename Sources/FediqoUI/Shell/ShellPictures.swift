@@ -67,7 +67,7 @@ import SwiftUI
 /// **I9 — `.crowded` is terminal until the reader says otherwise**, and is the backstop for I5
 /// being violated. It is **not** a backstop for I8: when I8 is broken the branch that writes it
 /// never runs. Relief must come from an event the crowded cohort cannot itself cause, and there
-/// is exactly one: `forget(host:)`, driven by a press in Preferences. Nothing automatic has ever
+/// is exactly one: `forget(host:)`, driven by a press on Usage. Nothing automatic has ever
 /// passed that test — see `Absence.crowded`.
 ///
 /// The second face of that trade: a row which genuinely **scrolls away while its fetch is in the
@@ -143,7 +143,7 @@ import SwiftUI
 /// ## What Clear means
 ///
 /// **Clear drops the cache; it does not forget the server.** The reader is still reading that
-/// server — its row is still in Preferences, its timeline still theirs — so what the button
+/// server — its row is still on Usage, its timeline still theirs — so what the button
 /// empties is what this device happens to be holding, and the pictures are read again as they
 /// are wanted. The other reading, where the rows go too, is a much larger action than the word
 /// says and belongs to a Remove button nobody has asked for.
@@ -159,11 +159,11 @@ import SwiftUI
 /// the set was chosen for.
 ///
 /// **What keeps the button from appearing to do nothing** is navigation rather than anything
-/// here: Preferences is a *place*, so on macOS the timeline is not in the view tree while the
+/// here: Usage is a *place*, so on macOS the timeline is not in the view tree while the
 /// reader is pressing Clear, nothing re-tags, and the readout beside the button falls to zero
 /// where they can see it. On iOS compact the pages are tabs and the timeline's tree is alive
 /// behind, so the same press frees less and the number recovers. **If a later unit makes
-/// Preferences a sheet over the timeline, Clear stops freeing and starts refetching on every
+/// Usage a sheet over the timeline, Clear stops freeing and starts refetching on every
 /// platform** — the behaviour is still correct and the screen stops being able to show it.
 @MainActor
 @Observable
@@ -228,8 +228,8 @@ final class ShellPictures {
         /// from background. It is the same rule as the generation split: bulk, deliberate
         /// invalidations bump; anything the cache can reach on its own does not.
         ///
-        /// **There is exactly one such relief, and it is the reader's Clear button.** A press in
-        /// Preferences is the permitted class by construction: a crowded cohort cannot reach a
+        /// **There is exactly one such relief, and it is the reader's Clear button.** A press on
+        /// Usage is the permitted class by construction: a crowded cohort cannot reach a
         /// button, so the signal is outside the loop it ends rather than inside it, which is what
         /// every rejected automatic relief got wrong. `forget(host:)` lifts this mark for the
         /// source it was noted under, alongside `.refused` and `.unreachable` and by the same
@@ -659,7 +659,7 @@ final class ShellPictures {
         // `Absence.crowded` — and that is the revisit this comment used to ask for. It does not
         // retire the tripwire. Relief a **reader** has to find and press is not relief the app
         // provides: a row stranded by unit 7 drawing more at once than the contract allows is
-        // still stranded for every reader who never opens Preferences, and "press Clear" is not
+        // still stranded for every reader who never opens Usage, and "press Clear" is not
         // an answer anybody would arrive at from a `photo` glyph. What the relief changes is the
         // consequence of being wrong, from permanent to recoverable; what it does not change is
         // that being wrong is a defect.

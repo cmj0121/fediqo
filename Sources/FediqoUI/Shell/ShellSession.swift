@@ -23,7 +23,7 @@ final class ShellSession {
     /// The two picture caches this session's Clear button empties.
     ///
     /// Held here rather than reached for as `.shared` at each call site, so that **the figures
-    /// Preferences draws and the caches its button presses are the same objects by
+    /// Usage draws and the caches its button presses are the same objects by
     /// construction**. They used to agree by convention — the pane read `.shared` while `clear`
     /// took parameters — which is an agreement a preview or a test wired to fixture caches
     /// breaks silently: it would press the fixtures and draw the live figures, and the reading
@@ -34,7 +34,7 @@ final class ShellSession {
     /// Every forum this run signs in to, one browser each — unit F2's transport.
     ///
     /// On the session for the same reason the two picture caches are: **what Clear presses and
-    /// what Preferences draws have to be the same object**, and a second one reached for as
+    /// what Usage draws have to be the same object**, and a second one reached for as
     /// `.shared` at a call site is an agreement that a test or a preview breaks in silence.
     let forums: ForumSessions
 
@@ -42,7 +42,7 @@ final class ShellSession {
     /// the topic on request — D31.
     ///
     /// On the session for the reason the two picture caches and `forums` are: **what Clear
-    /// presses and what Preferences draws have to be the same object**. It is built here rather
+    /// presses and what Usage draws have to be the same object**. It is built here rather
     /// than passed in because it needs two things only the session has — this session's transport
     /// and this session's forum browsers, without which a thread on a forum the reader signed in
     /// to comes back withheld.
@@ -76,14 +76,14 @@ final class ShellSession {
     /// real hole. `clear(host:)` reaches `ForumSessions.forget(host:)`, which drops the forum's
     /// cookies **and deletes the saved password from the Keychain** — and `forget`'s own doc makes
     /// the fairness of that conditional on one thing: *"the row says a password is held before the
-    /// button is pressed"*. `PreferencesPane` draws `passwordLine` and meets it. An Account row
+    /// button is pressed"*. `UsagePane` draws `passwordLine` and meets it. An Account row
     /// draws no inventory line at all, by `DESIGN.md` §3.6's own rule, so until now this device
     /// deleted a password with nothing on screen having said one was held — and signed the reader
     /// out of a forum, changing the state of the icon beside the one they pressed.
     ///
     /// **One presenter, both entrances.** `prefs.cache.clear` is one word for one call, so a Clear
-    /// that confirms on Account and fires straight on Preferences would be the same word doing two
-    /// different things two panes apart. `PreferencesPane` sets this too.
+    /// that confirms on Account and fires straight on Usage would be the same word doing two
+    /// different things two panes apart. `UsagePane` sets this too.
     var clearing: String?
 
     /// Which stage of adding a source the reader is being shown, or nothing.
@@ -684,7 +684,7 @@ final class ShellSession {
     /// and its `.chooseBoards` must not spring this sheet back open behind them.
     ///
     /// **A preview backed out of forgets the picture it pulled.** `ShellPictures` tags an entry
-    /// by host, and `PreferencesPane` lists the hosts in `sources` — so a thumbnail fetched for a
+    /// by host, and `UsagePane` lists the hosts in `sources` — so a thumbnail fetched for a
     /// server the reader looked at and did not take would be held for the run and appear in no
     /// inventory. Only where it is not a source: a host they did join keeps its pictures.
     func dismissStage() {
@@ -1226,7 +1226,7 @@ final class ShellSession {
     /// makes it safe for a row still on screen to ask again immediately — see `ShellPictures`,
     /// "What Clear means".
     ///
-    /// Presses this session's own caches — the ones `PreferencesPane` reads its figures off — so
+    /// Presses this session's own caches — the ones `UsagePane` reads its figures off — so
     /// that what the button empties and what the screen reports cannot come apart.
     ///
     /// Four kinds became six. Cookies and a saved password are things a signed-in forum left

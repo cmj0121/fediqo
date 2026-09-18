@@ -161,7 +161,7 @@ enum SourceMark {
 /// the edge and nothing said so. And it said nothing the row does not.
 ///
 /// **`.accessibilityElement(children: .ignore)` is permitted here, and only here.** `DESIGN.md`
-/// §0's eighth rule bans it on a row *containing a button*, which is the defect `PreferencesPane`
+/// §0's eighth rule bans it on a row *containing a button*, which is the defect `UsagePane`
 /// records shipping twice: a container collapsed to one element swallows its buttons' activation.
 /// There is no button in this one. What it collapses is a glyph line and the sentence that already
 /// says what the glyphs say, and collapsing them is what stops a reader hearing six unlabelled
