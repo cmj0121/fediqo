@@ -1472,6 +1472,7 @@ struct ShellPicturesTests {
         let online = Counting(png: png)
         let first = ShellPictures(http: online, disk: try MediaCache(directory: dir))
         await first.fetch(address(1), scale: 2, tier: .deck, host: alpha)
+        await first.diskSettled()
         #expect(await online.requests == 1)
         #expect(try MediaCache(directory: dir).data(host: alpha, url: address(1)) == png)
 
@@ -1492,6 +1493,7 @@ struct ShellPicturesTests {
         let http = Counting(png: png)
         let cache = ShellPictures(http: http, disk: disk)
         await cache.fetch(address(1), scale: 2, tier: .deck, host: beta)
+        await cache.diskSettled()
         #expect(await http.requests == 1)
         #expect(disk.data(host: beta, url: address(1)) == png)
     }
@@ -1506,9 +1508,42 @@ struct ShellPicturesTests {
         let http = Counting(png: png)
         let cache = ShellPictures(http: http, disk: disk)
         await cache.fetch(address(1), scale: 2, tier: .deck, host: alpha)
+        await cache.diskSettled()
         #expect(await http.requests == 1)
         #expect(cache.picture(address(1), scale: 2, tier: .deck, host: alpha) != nil)
         #expect(disk.data(host: alpha, url: address(1)) == png)
+    }
+
+    @Test("A copy that will not decode is deleted, even when the network cannot replace it")
+    func brokenDiskCopyDeleted() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let disk = try MediaCache(directory: dir)
+        try disk.store(Data("not a picture".utf8), host: alpha, url: address(1))
+        let cache = ShellPictures(http: Offline(code: .notConnectedToInternet), disk: disk)
+        await cache.fetch(address(1), scale: 2, tier: .deck, host: alpha)
+        await cache.diskSettled()
+        #expect(disk.data(host: alpha, url: address(1)) == nil)
+    }
+
+    /// The launch sweep: copies of a server no longer read go before any picture is asked for,
+    /// and the ones still read stay and are drawn.
+    @Test("At launch the copies of servers no longer read are dropped, the rest drawn")
+    func launchKeepsOnlyReadServers() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let png = try picture(width: 32, height: 32, bits: 8)
+        let disk = try MediaCache(directory: dir)
+        try disk.store(png, host: alpha, url: address(1))
+        try disk.store(png, host: beta, url: address(2))
+        let copies = DiskCopies(disk)
+        copies.keepOnly(hosts: [alpha])
+        let cache = ShellPictures(http: Offline(code: .notConnectedToInternet))
+        cache.disk = copies
+        await cache.fetch(address(1), scale: 2, tier: .deck, host: alpha)
+        await cache.diskSettled()
+        #expect(cache.picture(address(1), scale: 2, tier: .deck, host: alpha) != nil)
+        #expect(disk.data(host: beta, url: address(2)) == nil)
     }
 
     @Test("Clear forgets the copies on this device, for that host only")
@@ -1522,6 +1557,7 @@ struct ShellPicturesTests {
         await cache.fetch(address(2), scale: 2, tier: .deck, host: beta)
 
         await session.clear(host: alpha)
+        await cache.diskSettled()
 
         let disk = try MediaCache(directory: dir)
         #expect(disk.data(host: alpha, url: address(1)) == nil, "Clear left a copy on disk")
@@ -1550,6 +1586,7 @@ struct ShellPicturesTests {
         watchdog.cancel()
         #expect(!rescued.fired, "the watchdog opened the gate; the test never got there itself")
 
+        await cache.diskSettled()
         #expect(try MediaCache(directory: dir).data(host: alpha, url: address(1)) == nil)
     }
 
@@ -1578,6 +1615,7 @@ struct ShellPicturesTests {
         watchdog.cancel()
         #expect(!rescued.fired, "the watchdog opened the gate; the test never got there itself")
 
+        await cache.diskSettled()
         let disk = try MediaCache(directory: dir)
         #expect(disk.data(host: alpha, url: address(1)) == nil)
         #expect(disk.data(host: beta, url: address(1)) != nil)

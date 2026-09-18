@@ -19,7 +19,7 @@ struct MediaCacheTests {
         try cache.store(Data("other".utf8), host: "b.example", url: url)
         #expect(cache.data(host: "a.example", url: url) == Data("pic".utf8))
         #expect(cache.bytes(host: "a.example") == 3)
-        try cache.forget(host: "a.example")
+        cache.forget(host: "a.example")
         #expect(cache.data(host: "a.example", url: url) == nil)
         #expect(cache.bytes(host: "a.example") == 0)
         #expect(cache.data(host: "b.example", url: url) == Data("other".utf8))
@@ -33,7 +33,46 @@ struct MediaCacheTests {
         try cache.store(Data("pic".utf8), host: "a.example", url: url)
         #expect(cache.data(host: "a.example", url: URL(string: "https://cdn.example/other.jpg")!) == nil)
         #expect(cache.data(host: "b.example", url: url) == nil)
-        try cache.forget(host: "never.example")
+        cache.forget(host: "never.example")
+    }
+
+    @Test("A copy too large for any picture is not read back")
+    func tooLarge() throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let cache = try MediaCache(directory: dir)
+        try cache.store(Data(count: MediaCache.maxBytes + 1), host: "a.example", url: url)
+        #expect(cache.data(host: "a.example", url: url) == nil)
+    }
+
+    @Test("Remove drops one copy and leaves the rest")
+    func removeOne() throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let cache = try MediaCache(directory: dir)
+        let other = URL(string: "https://cdn.example/other.jpg")!
+        try cache.store(Data("pic".utf8), host: "a.example", url: url)
+        try cache.store(Data("other".utf8), host: "a.example", url: other)
+        cache.remove(host: "a.example", url: url)
+        cache.remove(host: "a.example", url: url)
+        #expect(cache.data(host: "a.example", url: url) == nil)
+        #expect(cache.data(host: "a.example", url: other) == Data("other".utf8))
+    }
+
+    @Test("Keep-only drops every host not named, whatever its spelling")
+    func keepOnly() throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let cache = try MediaCache(directory: dir)
+        for host in ["a.example", "b.example", "c.example"] {
+            try cache.store(Data(host.utf8), host: host, url: url)
+        }
+        cache.keepOnly(hosts: ["A.example", "c.example"])
+        #expect(cache.data(host: "a.example", url: url) == Data("a.example".utf8))
+        #expect(cache.data(host: "b.example", url: url) == nil)
+        #expect(cache.data(host: "c.example", url: url) == Data("c.example".utf8))
+        cache.keepOnly(hosts: [])
+        #expect(try FileManager.default.contentsOfDirectory(atPath: dir.path).isEmpty)
     }
 
     @Test("Two spellings of one host are one folder")
@@ -87,7 +126,7 @@ struct MediaCacheTests {
         #expect(cache.folder(for: host).deletingLastPathComponent().standardizedFileURL == dir.standardizedFileURL)
         try cache.store(Data("pic".utf8), host: host, url: url)
         #expect(cache.data(host: host, url: url) == Data("pic".utf8))
-        try cache.forget(host: host)
+        cache.forget(host: host)
 
         #expect(FileManager.default.fileExists(atPath: dir.path))
         #expect(FileManager.default.fileExists(atPath: sibling.path))
