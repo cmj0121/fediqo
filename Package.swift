@@ -11,6 +11,10 @@ let package = Package(
     products: [
         .library(name: "FediqoCore", targets: ["FediqoCore"]),
         .library(name: "FediqoUI", targets: ["FediqoUI"]),
+        .library(name: "FediqoPersistence", targets: ["FediqoPersistence"]),
+    ],
+    dependencies: [
+        .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.11.1"),
     ],
     targets: [
         .target(
@@ -43,9 +47,22 @@ let package = Package(
         // that carries the one property it pins. A `resources:` line naming a directory that is
         // not there is not a soft failure — SwiftPM warns at manifest time and then fails the
         // build outright when it tries to copy it — so the declaration goes with the directory.
+        .target(
+            name: "FediqoPersistence",
+            dependencies: [
+                "FediqoCore",
+                .product(name: "GRDB", package: "GRDB.swift"),
+            ],
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
         .testTarget(
             name: "FediqoCoreTests",
             dependencies: ["FediqoCore"],
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .testTarget(
+            name: "FediqoPersistenceTests",
+            dependencies: ["FediqoPersistence", "FediqoCore"],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
