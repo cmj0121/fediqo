@@ -150,6 +150,29 @@ struct MastodonTests {
         #expect(note.postedAt == MastodonJSON.date(from: "2024-01-15T12:00:00Z"))
     }
 
+    @Test("A boost keeps who boosted it as user@instance, and a status that is not a boost has nobody")
+    func boosterHandle() throws {
+        let boost = try Self.note("""
+        {
+          "id": "9",
+          "uri": "https://first.example/users/bob/statuses/boost",
+          "created_at": "2024-08-01T00:00:00.000Z",
+          "content": "",
+          "account": { "username": "bob", "acct": "bob", "display_name": "Bob" },
+          "reblog": {
+            "id": "1",
+            "uri": "https://second.example/users/ada/statuses/1",
+            "created_at": "2024-01-15T12:00:00Z",
+            "content": "<p>Original</p>",
+            "account": { "username": "ada", "acct": "ada@second.example", "display_name": "Ada" }
+          }
+        }
+        """)
+        #expect(boost.boosterHandle == "@bob@first.example")
+        #expect(boost.handle == "@ada@second.example")
+        #expect(try Self.note(Self.status()).boosterHandle == nil)
+    }
+
     @Test("A reply names the first mention, or is unnamed")
     func replyHandleOrUnnamed() throws {
         let named = try Self.note("""
