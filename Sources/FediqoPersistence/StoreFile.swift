@@ -8,12 +8,36 @@ public struct StoreFile: Sendable {
 
     public init(at directory: URL) throws {
         try makeExcludedFromBackup(directory)
-        try self.init(database: DatabaseQueue(path: directory.appendingPathComponent(Self.indexName).path))
+        let path = directory.appendingPathComponent(Self.indexName).path
+        if Self.isNewer(at: path) { throw Newer() }
+        try self.init(database: DatabaseQueue(path: path))
     }
 
     public init(database: DatabaseQueue) throws {
+        // Asked before `migrate`: GRDB migrates a superseded store without complaint, and the
+        // first save would then empty tables this build only half understands.
+        if try database.read(migrator.hasBeenSuperseded) { throw Newer() }
         db = database
         try migrator.migrate(db)
+    }
+
+    /// The index records a migration this build does not know: a newer build wrote it.
+    struct Newer: Error {}
+
+    /// Whether the index at `path` was written by a newer build, asked on a read-only connection
+    /// so that asking changes nothing on disk.
+    ///
+    /// The index is a rollback-journal `DatabaseQueue`, never WAL: a read-only connection to it
+    /// makes no `-wal` or `-shm` file and has no log to checkpoint, which is what lets this probe
+    /// leave a newer build's store byte for byte as it found it. A probe that cannot answer — no
+    /// file yet, or a hot journal only a writer can roll back — is not the newer-store case; it
+    /// falls through to the read-write open, whose own check still stands behind it.
+    private static func isNewer(at path: String) -> Bool {
+        guard FileManager.default.fileExists(atPath: path) else { return false }
+        var readOnly = Configuration()
+        readOnly.readonly = true
+        guard let probe = try? DatabaseQueue(path: path, configuration: readOnly) else { return false }
+        return (try? probe.read(migrator.hasBeenSuperseded)) ?? false
     }
 
     /// What a launch found on disk: the file to write back to, if there is one to trust, and
@@ -26,12 +50,19 @@ public struct StoreFile: Sendable {
         /// Where an unreadable index was moved, when one was. It is left there for a person, or a
         /// later version of this code, to look at; nothing in the app reads it again.
         public let setAside: URL?
+        /// The index was written by a newer build. It was left exactly as found — not read, not
+        /// set aside — and `file` is `nil`, so this run does not write over it either.
+        public let storeIsNewer: Bool
 
-        init(file: StoreFile?, sources: [Source] = [], notes: [Note] = [], setAside: URL? = nil) {
+        init(
+            file: StoreFile?, sources: [Source] = [], notes: [Note] = [], setAside: URL? = nil,
+            storeIsNewer: Bool = false
+        ) {
             self.file = file
             self.sources = sources
             self.notes = notes
             self.setAside = setAside
+            self.storeIsNewer = storeIsNewer
         }
     }
 
@@ -45,12 +76,18 @@ public struct StoreFile: Sendable {
     /// cannot even do that the run gets no file at all: it reads nothing and saves nothing, and
     /// whatever is on disk is still there next launch.
     ///
+    /// **An index from a newer build is not unreadable, and is not set aside.** It is left where
+    /// it is, byte for byte, and the run gets no file and `storeIsNewer`, so the newer build finds
+    /// it as it left it.
+    ///
     /// The decision lives here rather than in the app so it can be tested against a real file.
     public static func open(at directory: URL, now: Date = Date()) -> Opened {
         do {
             let file = try StoreFile(at: directory)
             let snapshot = try file.load()
             return Opened(file: file, sources: snapshot.sources, notes: snapshot.notes)
+        } catch is Newer {
+            return Opened(file: nil, storeIsNewer: true)
         } catch {
             guard let aside = try? setAside(in: directory, now: now),
                   let fresh = try? StoreFile(at: directory)

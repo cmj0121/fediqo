@@ -37,6 +37,12 @@ public struct FediqoRootView: View {
     /// What is playing, and the one `AVPlayer` in the app. See `ShellPlayback`.
     @State private var playback = ShellPlayback()
     @State private var prefs = DummyPrefs()
+    /// Up once at launch when the index on disk was written by a newer build and this run left it
+    /// alone: without it the reader sees an empty app and nothing to say why.
+    @State private var storeIsNewer: Bool
+    /// Told when the reader dismisses that notice, so a window opened later does not raise it
+    /// again: each window is its own root view with its own state.
+    private let storeNoticeSeen: (@MainActor () -> Void)?
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -57,11 +63,15 @@ public struct FediqoRootView: View {
         http: any HTTPClient = URLSessionClient(),
         store: ItemStore = ItemStore(),
         forums: ForumSessions = ForumSessions(),
-        persist: (@MainActor () async -> Void)? = nil
+        persist: (@MainActor () async -> Void)? = nil,
+        storeIsNewer: Bool = false,
+        storeNoticeSeen: (@MainActor () -> Void)? = nil
     ) {
         let session = ShellSession(http: http, store: store, forums: forums)
         session.persist = persist
         _session = State(initialValue: session)
+        _storeIsNewer = State(initialValue: storeIsNewer)
+        self.storeNoticeSeen = storeNoticeSeen
     }
 
     /// Hands the copies of pictures already on this device to the one picture cache every row
@@ -288,6 +298,11 @@ public struct FediqoRootView: View {
                     hasPassword: session.forums.hasPassword(host: host),
                     reachedSignIn: session.forums.reachedSignIn(host: host)
                 )))
+            }
+            .alert(Text(L10n.t("store.newer.title")), isPresented: $storeIsNewer) {
+                Button(L10n.t("store.newer.ok"), role: .cancel) { storeNoticeSeen?() }
+            } message: {
+                Text(L10n.t("store.newer.detail"))
             }
             .overlay {
                 if showingShortcuts {
