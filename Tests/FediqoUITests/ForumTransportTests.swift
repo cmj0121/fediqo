@@ -104,6 +104,17 @@ struct ForumTransportTests {
             }
             let denial = language == .english ? "None of this is written to disk" : "不會寫進磁碟"
             #expect(!footer.contains(denial), "the \(language.labelKey) footer still denies keeping anything")
+            // The header and the empty line sit on the same section and must not say the
+            // opposite: what is kept outlives the run, so neither may say it ends with it.
+            let header = L10n.t("prefs.cache", language: language)
+            let empty = L10n.t("prefs.cache.empty", language: language)
+            let perRun = language == .english ? ["this run", "until you close"] : ["這次執行", "直到你關閉"]
+            for line in [header, empty] {
+                #expect(line != "prefs.cache" && line != "prefs.cache.empty")
+                for phrase in perRun {
+                    #expect(!line.contains(phrase), "the \(language.labelKey) section still says it lasts one run: \(line)")
+                }
+            }
         }
     }
 
@@ -293,7 +304,10 @@ struct ForumTransportTests {
         #expect(!forums.reachedSignIn(host: "gaveup.example"))
 
         // And the reader who did get there, with nothing saved — the case `hasPassword` misses.
+        // The forum's page set its session cookie; that is what the predicate reads.
+        session.sources = [Source(host: "cookie.example", kind: .discuz)]
         session.signingIn = ForumSignInRequest(host: "cookie.example", stop: .noCredential)
+        await forums.plantSession(host: "cookie.example")
         session.signInFinished(reached: true, host: "cookie.example")
         #expect(forums.reachedSignIn(host: "cookie.example"))
         #expect(!forums.hasPassword(host: "cookie.example"), "the case that makes the two differ")
@@ -307,8 +321,9 @@ struct ForumTransportTests {
     func clearAndRemoveTakeTheSignIn() async {
         let forums = ForumSessions(credentials: MemoryCredentials())
         let session = ShellSession(http: FixtureHTTP(), forums: forums)
-        forums.recordSignIn(host: "one.example")
-        forums.recordSignIn(host: "two.example")
+        session.sources = [Source(host: "one.example", kind: .discuz), Source(host: "two.example", kind: .discuz)]
+        await forums.plantSession(host: "one.example")
+        await forums.plantSession(host: "two.example")
 
         await session.clear(host: "one.example")
         #expect(!forums.reachedSignIn(host: "one.example"))
@@ -326,7 +341,7 @@ struct ForumTransportTests {
         let session = ShellSession(http: FixtureHTTP(), forums: forums)
         await session.store.add(Source(host: "bbs.example.org", kind: .discuz))
         session.sources = await session.store.sources()
-        forums.recordSignIn(host: "bbs.example.org")
+        await forums.plantSession(host: "bbs.example.org")
 
         await session.signOut(host: "BBS.Example.ORG")
 

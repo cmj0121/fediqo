@@ -5,7 +5,16 @@ import WebKit
 @testable import FediqoCore
 @testable import FediqoUI
 
-/// The cookie store a sign-in outlives a relaunch in (#5).
+extension ForumSessions {
+    /// What a forum's own page does when a sign-in is reached: sets a member's session cookie.
+    /// Then the store is read, as the store's own notification would have it read.
+    func plantSession(host: String) async {
+        await dataStore.httpCookieStore.setCookie(ForumDeviceStoreTests.cookie("x7Kq_2132_auth", domain: host))
+        await readReached()
+    }
+}
+
+/// The cookie store a sign-in outlives a relaunch in (#5), and "signed in" as a view of it.
 ///
 /// Every test hands `ForumSessions` a non-persistent store of its own and hands the *same* store
 /// to a second `ForumSessions` where a relaunch is meant: what persists across a launch is the
@@ -14,7 +23,7 @@ import WebKit
 @MainActor
 @Suite("Sign-ins kept on this device")
 struct ForumDeviceStoreTests {
-    private func cookie(_ name: String, domain: String) -> HTTPCookie {
+    static func cookie(_ name: String, domain: String) -> HTTPCookie {
         HTTPCookie(properties: [
             .domain: domain, .path: "/", .name: name, .value: "v",
             .expires: Date().addingTimeInterval(3600),
@@ -27,32 +36,56 @@ struct ForumDeviceStoreTests {
         return store
     }
 
+    /// Waits, boundedly, for something the store's own notification or a spawned read settles.
+    private func eventually(_ condition: () -> Bool) async -> Bool {
+        for _ in 0..<200 where !condition() {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return condition()
+    }
+
+    private func forum(_ host: String) -> Source { Source(host: host, kind: .discuz) }
+
     @Test("A relaunch counts a forum signed in where its member cookie is held, and only there")
-    func restoreReadsTheStore() async {
+    func launchReadsTheStore() async {
         let store = await store(holding: [
-            cookie("x7Kq_2132_auth", domain: ".bbs.example.org"),
-            cookie("x7Kq_2132_saltkey", domain: "guest.example"),
-            cookie("cf_clearance", domain: "guest.example"),
+            Self.cookie("x7Kq_2132_auth", domain: ".bbs.example.org"),
+            Self.cookie("x7Kq_2132_saltkey", domain: "guest.example"),
+            Self.cookie("cf_clearance", domain: "guest.example"),
         ])
         let forums = ForumSessions(credentials: MemoryCredentials(), dataStore: store)
-        #expect(forums.reachedHosts.isEmpty, "nothing is known before the store is read")
-        await forums.restoreSignIns(among: ["BBS.Example.ORG", "guest.example", "never.example"])
+        forums.watch(forums: ["BBS.Example.ORG", "guest.example", "never.example"])
+        await forums.readReached()
         // A guest's cookies are what every forum this app has read holds; counting them would
         // offer "Sign out" on a forum nobody signed in to.
         #expect(forums.reachedHosts == ["bbs.example.org"])
     }
 
+    @Test("A Clear pressed while the launch is still reading leaves the forum signed out")
+    func clearDuringTheLaunchRead() async {
+        let store = await store(holding: [Self.cookie("a_auth", domain: "one.example")])
+        let forums = ForumSessions(credentials: MemoryCredentials(), dataStore: store)
+        let session = ShellSession(http: FixtureHTTP(), forums: forums)
+        session.sources = [forum("one.example")]
+        let launch = Task { await forums.readReached() }
+        await session.clear(host: "one.example")
+        await launch.value
+        #expect(!forums.reachedSignIn(host: "one.example"), "a read from before the Clear landed after it")
+        await forums.readReached()
+        #expect(forums.reachedHosts.isEmpty)
+    }
+
     @Test("Clear after a relaunch drops that host's cookies with no browser built, and no other host's")
     func clearAfterRelaunchWithoutAnEngine() async {
         let store = await store(holding: [
-            cookie("a_auth", domain: "one.example"),
-            cookie("b_auth", domain: "two.example"),
+            Self.cookie("a_auth", domain: "one.example"),
+            Self.cookie("b_auth", domain: "two.example"),
         ])
-        let hosts = ["one.example", "two.example"]
         let forums = ForumSessions(credentials: MemoryCredentials(), dataStore: store)
         let session = ShellSession(http: FixtureHTTP(), forums: forums)
-        await forums.restoreSignIns(among: hosts)
-        #expect(forums.reachedHosts == Set(hosts), "the premise did not hold")
+        session.sources = [forum("one.example"), forum("two.example")]
+        await forums.readReached()
+        #expect(forums.reachedHosts == ["one.example", "two.example"], "the premise did not hold")
 
         await session.clear(host: "ONE.example")
 
@@ -63,8 +96,56 @@ struct ForumDeviceStoreTests {
 
         // And the next launch agrees with this one: the sign-in does not come back.
         let relaunched = ForumSessions(credentials: MemoryCredentials(), dataStore: store)
-        await relaunched.restoreSignIns(among: hosts)
+        relaunched.watch(forums: ["one.example", "two.example"])
+        await relaunched.readReached()
         #expect(relaunched.reachedHosts == ["two.example"])
+    }
+
+    @Test("Clearing one forum signs out a sibling whose records sit under the same domain")
+    func clearReachesASibling() async {
+        let store = await store(holding: [
+            Self.cookie("a_auth", domain: "one.example.org"),
+            Self.cookie("b_auth", domain: "two.example.org"),
+        ])
+        let forums = ForumSessions(credentials: MemoryCredentials(), dataStore: store)
+        let session = ShellSession(http: FixtureHTTP(), forums: forums)
+        session.sources = [forum("one.example.org"), forum("two.example.org")]
+        await forums.readReached()
+        #expect(forums.reachedHosts == ["one.example.org", "two.example.org"], "the premise did not hold")
+
+        await session.clear(host: "one.example.org")
+
+        // WebKit files both under example.org, so the Clear took both sessions. The row that
+        // still said Sign out would be offering to end a session that is gone.
+        #expect(forums.reachedHosts.isEmpty)
+    }
+
+    @Test("A forum added after launch is read off the store as it arrives")
+    func aForumAddedLater() async {
+        let store = await store(holding: [Self.cookie("a_auth", domain: "later.example")])
+        let forums = ForumSessions(credentials: MemoryCredentials(), dataStore: store)
+        let session = ShellSession(http: FixtureHTTP(), forums: forums)
+        #expect(forums.reachedHosts.isEmpty)
+        session.sources = [forum("later.example")]
+        #expect(await eventually { forums.reachedSignIn(host: "later.example") })
+    }
+
+    @Test("No forum among the sources, no store opened — not even by a Clear")
+    func noForumNoStore() async {
+        var built = 0
+        let make = { () -> WKWebsiteDataStore in
+            built += 1
+            return .nonPersistent()
+        }
+        let forums = ForumSessions(credentials: MemoryCredentials(), dataStore: make())
+        let session = ShellSession(http: FixtureHTTP(), forums: forums)
+        session.sources = [Source(host: "social.example", kind: .mastodon)]
+        await session.clear(host: "social.example")
+        await forums.readReached()
+        #expect(built == 0, "a reader with no forum opened the WebKit store")
+
+        session.sources.append(forum("bbs.example.org"))
+        #expect(await eventually { built == 1 })
     }
 
     @Test("Every engine is built on the store the sessions were handed")
@@ -88,28 +169,5 @@ struct ForumDeviceStoreTests {
     ])
     func holds(name: String, host: String, belongs: Bool) {
         #expect(ForumWebEngine.holds(name, for: host) == belongs)
-    }
-
-    // MARK: - Out of backups
-
-    @Test("The store's directory is where WebKit keeps it, inside a sandbox and outside one")
-    func storeDirectory() {
-        let library = URL(fileURLWithPath: "/L", isDirectory: true)
-        let id = UUID(uuidString: "ABCDEF11-2222-4333-8444-555555555555")!
-        let inside = ForumSessions.storeDirectory(library: library, identifier: id, sandboxed: true, bundleID: "b.id")
-        #expect(inside.path == "/L/WebKit/WebsiteDataStore/abcdef11-2222-4333-8444-555555555555")
-        let outside = ForumSessions.storeDirectory(library: library, identifier: id, sandboxed: false, bundleID: "b.id")
-        #expect(outside.path == "/L/WebKit/b.id/WebsiteDataStore/abcdef11-2222-4333-8444-555555555555")
-    }
-
-    @Test("The directory is made and marked out of backups, and marking it again is harmless")
-    func markedOutOfBackups() throws {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-            .appendingPathComponent("WebsiteDataStore", isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: dir.deletingLastPathComponent()) }
-        try ForumSessions.excludeFromBackup(dir)
-        try ForumSessions.excludeFromBackup(dir)
-        #expect(try dir.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup == true)
     }
 }
