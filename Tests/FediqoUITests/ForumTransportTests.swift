@@ -8,8 +8,8 @@ import Testing
 ///
 /// **What is not here, and why it is not here.** A `WKWebView` is a second process with a render
 /// surface, and nothing in a Swift package can run a view body or put a window on screen — so the
-/// fetch itself, the cookie store, the Keychain and a browser check clearing are all verified by
-/// running the app, not here. What is here is every decision that is a decision rather than a
+/// fetch itself, the Keychain and a browser check clearing are all verified by running the app,
+/// not here. (The cookie store is reachable without a view; `ForumDeviceStoreTests` has it.) What is here is every decision that is a decision rather than a
 /// framework call: which addresses this transport will go to, what a Clear reaches, when a reader
 /// is offered a sign-in, and that every way a sign-in can stop has a sentence in every language.
 @MainActor
@@ -85,19 +85,35 @@ struct ForumTransportTests {
     }
 
     /// The pane's own doc warns against exactly this: a true-looking sentence that is false.
-    @Test("The cache footer stops claiming nothing is written to disk, now that something is")
+    @Test("The cache footer owns up to what a sign-in keeps on this device, and where it does not go")
     func theFooterIsNoLongerALie() {
         // "None of this is written to disk" was true when three memory caches were all this
-        // section listed. A saved password is in the Keychain, and a footer that denies it sits
-        // directly under a row saying a password is held — the reader is told two opposite
-        // things at once and one of them is this app's own promise.
+        // section listed. Then a saved password went into the Keychain, and since #5 a forum's
+        // session cookies stay on this device between launches. A footer that denies either sits
+        // under a row saying a sign-in is held — the reader is told two opposite things at once,
+        // and one of them is this app's own promise.
         for language in [DummyLanguage.english, .taiwanese] {
             let footer = L10n.t("prefs.cache.footer", language: language)
             #expect(footer != "prefs.cache.footer")
-            let names = language == .english ? ["exception", "Keychain"] : ["例外", "鑰匙圈"]
+            let names = language == .english
+                ? ["Keychain", "cookies", "not backed up", "Clear"]
+                : ["鑰匙圈", "Cookie", "不會被備份", "清除"]
             for name in names {
                 #expect(footer.contains(name),
-                        "the \(language.labelKey) footer does not own up to the one thing it keeps")
+                        "the \(language.labelKey) footer does not own up to what it keeps: \(name)")
+            }
+            let denial = language == .english ? "None of this is written to disk" : "不會寫進磁碟"
+            #expect(!footer.contains(denial), "the \(language.labelKey) footer still denies keeping anything")
+            // The header and the empty line sit on the same section and must not say the
+            // opposite: what is kept outlives the run, so neither may say it ends with it.
+            let header = L10n.t("prefs.cache", language: language)
+            let empty = L10n.t("prefs.cache.empty", language: language)
+            let perRun = language == .english ? ["this run", "until you close"] : ["這次執行", "直到你關閉"]
+            for line in [header, empty] {
+                #expect(line != "prefs.cache" && line != "prefs.cache.empty")
+                for phrase in perRun {
+                    #expect(!line.contains(phrase), "the \(language.labelKey) section still says it lasts one run: \(line)")
+                }
             }
         }
     }
@@ -109,7 +125,7 @@ struct ForumTransportTests {
             "forum.signin.title", "forum.signin.web.label", "forum.signin.save",
             "forum.signin.cancel", "forum.signin.done",
             "prefs.password.held", "prefs.password.forget", "prefs.password.forget.label",
-            "prefs.held.posts", "prefs.held.posts.none", "prefs.held.month",
+            "prefs.held.posts", "prefs.held.posts.none",
         ]
         for key in keys {
             for language in [DummyLanguage.english, .taiwanese] {
@@ -289,7 +305,10 @@ struct ForumTransportTests {
         #expect(!forums.reachedSignIn(host: "gaveup.example"))
 
         // And the reader who did get there, with nothing saved — the case `hasPassword` misses.
+        // The forum's page set its session cookie; that is what the predicate reads.
+        session.sources = [Source(host: "cookie.example", kind: .discuz)]
         session.signingIn = ForumSignInRequest(host: "cookie.example", stop: .noCredential)
+        await forums.plantSession(host: "cookie.example")
         session.signInFinished(reached: true, host: "cookie.example")
         #expect(forums.reachedSignIn(host: "cookie.example"))
         #expect(!forums.hasPassword(host: "cookie.example"), "the case that makes the two differ")
@@ -303,8 +322,9 @@ struct ForumTransportTests {
     func clearAndRemoveTakeTheSignIn() async {
         let forums = ForumSessions(credentials: MemoryCredentials())
         let session = ShellSession(http: FixtureHTTP(), forums: forums)
-        forums.recordSignIn(host: "one.example")
-        forums.recordSignIn(host: "two.example")
+        session.sources = [Source(host: "one.example", kind: .discuz), Source(host: "two.example", kind: .discuz)]
+        await forums.plantSession(host: "one.example")
+        await forums.plantSession(host: "two.example")
 
         await session.clear(host: "one.example")
         #expect(!forums.reachedSignIn(host: "one.example"))
@@ -322,7 +342,7 @@ struct ForumTransportTests {
         let session = ShellSession(http: FixtureHTTP(), forums: forums)
         await session.store.add(Source(host: "bbs.example.org", kind: .discuz))
         session.sources = await session.store.sources()
-        forums.recordSignIn(host: "bbs.example.org")
+        await forums.plantSession(host: "bbs.example.org")
 
         await session.signOut(host: "BBS.Example.ORG")
 
