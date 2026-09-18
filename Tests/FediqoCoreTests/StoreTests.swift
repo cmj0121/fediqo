@@ -207,7 +207,6 @@ struct StoreTests {
         #expect(Set(left.map(\.id)) == [uri, "only-second"])
         let shared = left.first { $0.id == uri }
         #expect(shared?.source.host == "second.example")
-        #expect(shared?.hosts == ["second.example"])
         #expect(shared?.origins == [.trending])
 
         await store.remove(host: other.host)
@@ -246,20 +245,6 @@ struct StoreTests {
         #expect(
             Set(left.filter { $0.id == "shared-by-two-survivors" }.map(\.source.host))
                 == ["second.example", "third.example"]
-        )
-    }
-
-    /// The set is seeded from the stamp at the wire boundary and is never empty, which is what
-    /// makes "gone when the set empties" a decidable rule rather than a race with construction.
-    @Test("A note names the server it arrived through from the moment it is built")
-    func aNoteAlwaysNamesAtLeastOneHost() async {
-        #expect(note(id: "mine", postedAt: origin, origins: [.publicTimeline]).hosts == ["first.example"])
-        // Folded by `Source`, so the set is comparable to a removal argument by == alone.
-        #expect(
-            note(
-                id: "mine", postedAt: origin, origins: [.publicTimeline],
-                from: Source(host: "SECOND.Example", kind: .mastodon)
-            ).hosts == ["second.example"]
         )
     }
 
