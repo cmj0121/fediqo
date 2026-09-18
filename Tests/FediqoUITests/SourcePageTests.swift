@@ -1359,6 +1359,99 @@ struct SourcePageTests {
         #expect(SourceMark.kindMark(.discuz, pixels: 24 * 3) == "KindDiscuz")
     }
 
+    /// Whether a name resolves to a drawing in this bundle, **by whichever of the two shapes the
+    /// bundle actually has**.
+    ///
+    /// **SwiftPM does not always compile an asset catalogue, and that is why this is not one
+    /// line.** Swift 6.4's build compiles `Media.xcassets` with `actool` and leaves an
+    /// `Assets.car`, which is what `Bundle.image(forResource:)` reads. Swift 6.1.2 -- what CI
+    /// runs -- says `Copying Media.xcassets` and puts the directory in the bundle verbatim, so
+    /// that accessor returns nil for every name and a test asking it alone fails the whole suite
+    /// on a machine where nothing is wrong.
+    ///
+    /// **What the app ships is unaffected**, because the app is built by `xcodebuild`, which
+    /// always compiles the catalogue -- the CI job that builds both apps was green on the run
+    /// this test failed. So the copied case is a real, correct bundle and has to be read as one.
+    private static func drawingExists(_ name: String) -> Bool {
+        if Bundle.module.image(forResource: name) != nil { return true }
+
+        return Self.copiedCatalogue(Bundle.module.resourceURL, draws: name)
+    }
+
+    /// The copied catalogue, read off the directory instead of off `Assets.car`: the imageset has
+    /// to be there, its `Contents.json` has to parse, and every file it names has to exist beside
+    /// it. That is each failure the compiled lookup would have caught -- a mis-spelt imageset, a
+    /// missing `Contents.json`, an SVG that never made it in.
+    ///
+    /// **Takes the directory rather than reading `Bundle.module`, so that it can be pinned
+    /// here.** This branch only ever runs where SwiftPM copied the catalogue, which is CI and not
+    /// this machine -- so written against the bundle it would have been a fix nobody could try
+    /// before pushing it, which is the shape this branch has already paid for more than once.
+    /// `theCopiedCatalogueIsReadAsCarefullyAsTheCompiledOne` builds the shape and drives it.
+    static func copiedCatalogue(_ resources: URL?, draws name: String) -> Bool {
+        guard let resources else { return false }
+        let imageset = resources
+            .appendingPathComponent("Media.xcassets")
+            .appendingPathComponent("\(name).imageset")
+        guard let data = try? Data(contentsOf: imageset.appendingPathComponent("Contents.json")),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let images = json["images"] as? [[String: Any]]
+        else { return false }
+
+        let named = images.compactMap { $0["filename"] as? String }
+        return !named.isEmpty && named.allSatisfy {
+            FileManager.default.fileExists(atPath: imageset.appendingPathComponent($0).path)
+        }
+    }
+
+    /// **The branch that only runs on the machine this was not written on.** Swift 6.1.2 copies
+    /// `Media.xcassets` into the bundle and Swift 6.4 compiles it, so the fallback above is dead
+    /// code here and the only code there. Built by hand, and asked the four questions that matter.
+    @Test("The copied catalogue is read as carefully as the compiled one")
+    func theCopiedCatalogueIsReadAsCarefullyAsTheCompiledOne() throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("copied-\(UUID().uuidString)")
+        let assets = root.appendingPathComponent("Media.xcassets")
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        func imageset(_ name: String, contents: String?, files: [String]) throws {
+            let folder = assets.appendingPathComponent("\(name).imageset")
+            try FileManager.default.createDirectory(
+                at: folder, withIntermediateDirectories: true
+            )
+            if let contents {
+                try contents.write(
+                    to: folder.appendingPathComponent("Contents.json"),
+                    atomically: true, encoding: .utf8
+                )
+            }
+            for file in files {
+                try Data().write(to: folder.appendingPathComponent(file))
+            }
+        }
+
+        let good = #"{"images":[{"filename":"a.svg","idiom":"universal"}]}"#
+
+        try imageset("Whole", contents: good, files: ["a.svg"])
+        try imageset("NoContents", contents: nil, files: ["a.svg"])
+        try imageset("NoDrawing", contents: good, files: [])
+        try imageset("Unparseable", contents: "{ not json", files: ["a.svg"])
+        try imageset("NamesNothing", contents: #"{"images":[]}"#, files: ["a.svg"])
+
+        #expect(Self.copiedCatalogue(root, draws: "Whole"))
+        #expect(!Self.copiedCatalogue(root, draws: "NoContents"),
+                "an imageset with no Contents.json was read as a drawing")
+        #expect(!Self.copiedCatalogue(root, draws: "NoDrawing"), """
+            The SVG never made it into the catalogue and the lookup said it had -- which is the \
+            failure this whole test exists to catch, arriving through the other shape.
+            """)
+        #expect(!Self.copiedCatalogue(root, draws: "Unparseable"))
+        #expect(!Self.copiedCatalogue(root, draws: "NamesNothing"),
+                "an imageset naming no file at all is not a drawing")
+        #expect(!Self.copiedCatalogue(root, draws: "NotThere"))
+        #expect(!Self.copiedCatalogue(nil, draws: "Whole"), "a bundle with no resources at all")
+    }
+
     /// **The one way this feature can ship invisible.** `Image(_:bundle:)` on a name that is not in
     /// the catalogue draws nothing at all, silently — so a mis-spelt imageset, a missing
     /// `Contents.json` or an SVG that never made it into `Media.xcassets` is a row with a blank
@@ -1373,13 +1466,20 @@ struct SourcePageTests {
         }
         #expect(asked == ["KindMastodon", "KindMastodonSmall", "KindDiscuz", "KindDiscuzSmall"])
         for name in asked.sorted() {
-            #expect(Bundle.module.image(forResource: name) != nil, """
+            #expect(Self.drawingExists(name), """
                 \(name) is not in Media.xcassets. `Image(_:bundle:)` draws nothing for a name it \
                 cannot find and says nothing about it, so this is the only place it can be caught.
                 """)
         }
-        // And the accessor says no when it should, or every line above proves nothing.
-        #expect(Bundle.module.image(forResource: "KindMastodonn") == nil)
+        // And the lookup says no when it should, or every line above proves nothing. Both shapes
+        // have to refuse it: a compiled catalogue has no such image, and a copied one has no such
+        // directory.
+        #expect(!Self.drawingExists("KindMastodonn"))
+        // The mascot has been in this catalogue since before the marks and is loaded the same
+        // way, so it is the control that says this lookup works at all on whichever build system
+        // is running -- a green suite where every name resolved by accident would otherwise look
+        // exactly like this one.
+        #expect(Self.drawingExists("Mascot"))
     }
 
     // MARK: - Decision 33 — the controls a source has, and two looks
