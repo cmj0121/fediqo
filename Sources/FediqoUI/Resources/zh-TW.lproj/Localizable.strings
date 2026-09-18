@@ -78,10 +78,8 @@
 "timeline.add" = "新增";
 "timeline.add.toast" = "新的 named query 仍是 dummy。";
 "timeline.tab.all" = "全部";
-"timeline.tab.work" = "工作";
 "timeline.tab.trends" = "趨勢";
 "timeline.rule.all" = "時間序，不過濾。";
-"timeline.rule.work" = "這些來源，只留和工作有關的。";
 "timeline.rule.trends" = "趨勢貼文，時間序。";
 "timeline.empty.title" = "還沒有東西進來";
 "timeline.empty.detail" = "你加的來源的公開貼文會落在這裡，新的在上面。";

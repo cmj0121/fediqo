@@ -700,7 +700,7 @@ public struct FediqoRootView: View {
 
     /// The stream `j` and `k` move through: the current query, All or Trends, over the store.
     private var streamItems: [DummyItem] {
-        DummyTimeline(id: session.timelineID ?? "").items(from: session.notes, among: session.sources)
+        session.currentTimeline.items(from: session.notes)
     }
 
     /// Whichever list is in front: the open conversation, or the stream under it.
@@ -813,10 +813,9 @@ public struct FediqoRootView: View {
     /// Tab only rotates named queries on the timeline. Elsewhere it is the platform's.
     private func rotateTimelineTab(by step: Int) -> Bool {
         guard place == .timeline else { return false }
-        let ids = session.queries.map(\.id)
-        guard !ids.isEmpty else { return false }
-        let current = session.timelineID ?? ids[0]
-        session.timelineID = DummyCommand.advanced(ids, from: current, by: step)
+        let queries = session.queries
+        guard !queries.isEmpty else { return false }
+        session.timelineID = DummyCommand.advanced(queries, from: session.currentTimeline, by: step)
         return true
     }
 

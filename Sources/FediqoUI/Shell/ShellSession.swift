@@ -165,8 +165,12 @@ final class ShellSession {
     /// reader with a sentence naming none of what they chose.
     var unreadAll = 0
 
-    var queries: [DummyTimeline] = DummyTimeline.shipped
-    var timelineID: String?
+    var queries: [TimelineQuery] = []
+    /// The query in front. Nothing only while nothing is joined; not persisted.
+    var timelineID: TimelineQuery?
+
+    /// The query the timeline draws: the one selected, or All.
+    var currentTimeline: TimelineQuery { timelineID ?? .all }
     /// Every change is handed on to `forums`, which is the one place that knows which of them
     /// are forums a sign-in can be held for.
     var sources: [Source] = [] {
@@ -1152,13 +1156,9 @@ final class ShellSession {
             timelineID = nil
             return
         }
-        var made = [DummyTimeline(id: "all")]
-        if sources.contains(where: { Self.hasTrends($0.kind) }) {
-            made.append(DummyTimeline(id: "trends"))
-        }
-        queries = made
-        if timelineID == nil || !made.contains(where: { $0.id == timelineID }) {
-            timelineID = made.first?.id
+        queries = sources.contains(where: { Self.hasTrends($0.kind) }) ? [.all, .trends] : [.all]
+        if !queries.contains(where: { $0 == timelineID }) {
+            timelineID = .all
         }
     }
 

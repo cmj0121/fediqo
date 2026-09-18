@@ -241,12 +241,7 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     }
 
     /// One stored note, drawn as a row.
-    ///
-    /// **`among` is read by nothing here any more.** It fed the other hosts a shared row named,
-    /// and since two sources became two rows (#10) a row names one host and there are no others
-    /// to find. It stays for now so the call sites need not all move in the same change; dropping
-    /// it is a signature change and nothing else.
-    public init(_ note: Note, among sources: [Source]) {
+    public init(_ note: Note) {
         noteID = note.id
         id = note.key.rowID
         source = DummySource.unsigned(note.source.host, kind: Self.shape(of: note.source.kind))
