@@ -55,6 +55,8 @@ struct TimelinePane: View {
                     onToast: showToast,
                     onBack: onPopThread
                 )
+                // One pane per thread, so going back from a nested one draws its parent afresh.
+                .id(opened.id)
             } else if items.isEmpty {
                 empty
             } else {
@@ -189,6 +191,11 @@ struct TimelinePane: View {
                 }
             }
             .scrollIndicators(.hidden)
+            .onAppear {
+                guard let id = DummyCommand.centredOnAppear(selected: selectedID) else { return }
+                // A tick later: a lazy stack just built has not laid out the row to scroll to.
+                Task { @MainActor in proxy.scrollTo(id, anchor: .center) }
+            }
             .onChange(of: selectedID) { _, id in
                 guard let id else { return }
                 withAnimation(.easeInOut(duration: 0.18)) {

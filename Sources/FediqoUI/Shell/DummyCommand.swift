@@ -198,6 +198,23 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         guard items.indices.contains(next) else { return current }
         return items[next]
     }
+
+    /// Leaving the innermost open thread: the stack one shorter, and the post that thread was
+    /// opened from selected again — whatever `j` and `k` moved to inside it.
+    public static func poppedThread(_ stack: [String]) -> (stack: [String], selected: String)? {
+        guard let opened = stack.last else { return nil }
+        return (Array(stack.dropLast()), opened)
+    }
+
+    /// Which post a list centres on when it is drawn afresh.
+    ///
+    /// A list is not drawn while a thread covers it, and it centres on a selection *change*, so
+    /// coming back with the selection unchanged moved nothing. The exception is a thread just
+    /// opened, whose selection is its own post: that one reads from the top as it always has.
+    public static func centredOnAppear(selected: String?, opening root: String? = nil) -> String? {
+        guard let selected, selected != root else { return nil }
+        return selected
+    }
 }
 
 /// What a dismissing press can close, outermost first.
