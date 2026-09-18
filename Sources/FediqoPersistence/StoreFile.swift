@@ -97,7 +97,7 @@ public struct StoreFile: Sendable {
 
     public func load() throws -> (sources: [Source], notes: [Note]) {
         try db.read { db in
-            let sources = try SourceRecord.fetchAll(db).map { try $0.source() }
+            let sources = try SourceRecord.fetchAll(db).map(\.source)
             let notes = try NoteRecord.fetchAll(db).map(\.note)
             return (sources, notes)
         }
@@ -105,8 +105,8 @@ public struct StoreFile: Sendable {
 
     public func save(sources: [Source], notes: [Note]) throws {
         try db.write { db in
-            try db.execute(sql: "DELETE FROM note")
-            try db.execute(sql: "DELETE FROM source")
+            try NoteRecord.deleteAll(db)
+            try SourceRecord.deleteAll(db)
             for source in sources {
                 try SourceRecord(source).insert(db)
             }
@@ -142,40 +142,33 @@ private var migrator: DatabaseMigrator {
     return migrator
 }
 
-/// One board subscription as it is written into `source.boards`, a JSON array of these.
-/// Core's `BoardSubscription` stays free of a storage format; this is the storage format.
+/// One board subscription as it is written into `source.boards`, a JSON array of these that
+/// GRDB encodes and decodes as a Codable column. Core's `BoardSubscription` stays free of a
+/// storage format; this is the storage format.
 private struct BoardRow: Codable {
     var fid: Int
     var name: String
-
-    static func encode(_ boards: [BoardRow]) throws -> String {
-        String(decoding: try JSONEncoder().encode(boards), as: UTF8.self)
-    }
-
-    static func decode(_ text: String) throws -> [BoardRow] {
-        try JSONDecoder().decode([BoardRow].self, from: Data(text.utf8))
-    }
 }
 
 private struct SourceRecord: Codable, FetchableRecord, PersistableRecord {
     static let databaseTableName = "source"
     var host: String
     var kind: String
-    var boards: String
+    /// A board list that is not JSON throws when the row is fetched, so a damaged row fails the
+    /// load — and the load fails closed — rather than coming back as a source with no boards.
+    var boards: [BoardRow]
 
-    init(_ source: Source) throws {
+    init(_ source: Source) {
         host = source.host
         kind = source.kind.rawValue
-        boards = try BoardRow.encode(source.boards.map { BoardRow(fid: $0.fid, name: $0.name) })
+        boards = source.boards.map { BoardRow(fid: $0.fid, name: $0.name) }
     }
 
-    /// Throws on a board list that is not JSON, so a damaged row fails the load — and the load
-    /// fails closed — rather than coming back as a source with no boards.
-    func source() throws -> Source {
+    var source: Source {
         Source(
             host: host,
             kind: ProtocolKind(rawValue: kind) ?? .unknown,
-            boards: try BoardRow.decode(boards).map { BoardSubscription(fid: $0.fid, name: $0.name) }
+            boards: boards.map { BoardSubscription(fid: $0.fid, name: $0.name) }
         )
     }
 }
@@ -189,7 +182,8 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
     var body: String
     var title: String?
     var posted_at: Date
-    var origins: String
+    /// A JSON array of `FetchOrigin` raw values, sorted so one set is always written one way.
+    var origins: [String]
 
     init(_ note: Note) {
         host = note.source.host
@@ -199,17 +193,14 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
         body = note.body
         title = note.title
         posted_at = note.postedAt
-        origins = note.origins.map(\.rawValue).sorted().joined(separator: ",")
+        origins = note.origins.map(\.rawValue).sorted()
     }
 
     /// Origins come back as they went in, an empty set included: which lists a note was seen in
     /// is a fact about it, and filling in `.publicTimeline` for none would put it in a list it
     /// was never read from.
     var note: Note {
-        let originSet = Set(
-            origins.split(separator: ",").compactMap { FetchOrigin(rawValue: String($0)) }
-        )
-        return Note(
+        Note(
             id: id,
             source: Source(host: host, kind: ProtocolKind(rawValue: kind) ?? .unknown),
             author: author,
@@ -217,7 +208,7 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             body: body,
             title: title,
             postedAt: posted_at,
-            origins: originSet
+            origins: Set(origins.compactMap(FetchOrigin.init(rawValue:)))
         )
     }
 }
