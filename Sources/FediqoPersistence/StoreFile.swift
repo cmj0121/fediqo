@@ -30,6 +30,13 @@ public struct StoreFile: Sendable {
         /// Where an unreadable index was moved, when one was. It is left there for a person, or a
         /// later version of this code, to look at; nothing in the app reads it again.
         public let setAside: URL?
+
+        init(file: StoreFile?, sources: [Source] = [], notes: [Note] = [], setAside: URL? = nil) {
+            self.file = file
+            self.sources = sources
+            self.notes = notes
+            self.setAside = setAside
+        }
     }
 
     /// Opens the index in `directory` and reads it, failing closed.
@@ -47,14 +54,12 @@ public struct StoreFile: Sendable {
         do {
             let file = try StoreFile(at: directory)
             let snapshot = try file.load()
-            return Opened(file: file, sources: snapshot.sources, notes: snapshot.notes, setAside: nil)
+            return Opened(file: file, sources: snapshot.sources, notes: snapshot.notes)
         } catch {
             guard let aside = try? setAside(in: directory, now: now),
                   let fresh = try? StoreFile(at: directory)
-            else {
-                return Opened(file: nil, sources: [], notes: [], setAside: nil)
-            }
-            return Opened(file: fresh, sources: [], notes: [], setAside: aside)
+            else { return Opened(file: nil) }
+            return Opened(file: fresh, setAside: aside)
         }
     }
 
