@@ -600,7 +600,8 @@ struct WrittenTimelineTests {
         #expect(key("x") == .toggleRule)
         #expect(key(KeyEquivalent.delete.character) == .removeRule)
         #expect(key(KeyEquivalent.delete.character, command: true) == .removeTimeline)
-        #expect(key("\u{1B}") == .cancel)
+        #expect(key("m") == .focusName)
+        #expect(EditorAction.escape(at: .rules) == .cancel)
         #expect(key("z") == nil)
     }
 
@@ -610,25 +611,61 @@ struct WrittenTimelineTests {
             #expect(EditorAction.from(Character("\(index + 1)"), stage: .kinds, fieldFocused: false) == .pickKind(tag))
         }
         #expect(EditorAction.from("5", stage: .kinds, fieldFocused: false) == nil)
-        #expect(EditorAction.from("\u{1B}", stage: .kinds, fieldFocused: false) == .back)
+        #expect(EditorAction.escape(at: .kinds) == .back)
         let form = EditorStage.form(.category)
         #expect(EditorAction.from("x", stage: form, fieldFocused: false) == .toggleEffect)
         #expect(EditorAction.from("o", stage: form, fieldFocused: false) == .nextScope)
         #expect(EditorAction.from("j", stage: form, fieldFocused: false) == .nextChoice)
         #expect(EditorAction.from("k", stage: form, fieldFocused: false) == .previousChoice)
         #expect(EditorAction.from("\r", stage: form, fieldFocused: false) == .confirmRule)
-        #expect(EditorAction.from("\u{1B}", stage: form, fieldFocused: false) == .back)
+        #expect(EditorAction.escape(at: form) == .back)
     }
 
-    @Test("A focused field keeps every letter; only Escape goes past it")
+    @Test("A focused field keeps every letter; only Escape and ⌥O go past it")
     func editorFieldKeepsLetters() {
         for stage in [EditorStage.rules, .kinds, .form(.keyword)] {
-            for c: Character in ["[", "]", "n", "x", "o", "j", "k", "1", "\u{7F}", "\r"] {
+            for c: Character in ["[", "]", "n", "m", "x", "o", "j", "k", "1", "\u{7F}", "\r"] {
                 #expect(EditorAction.from(c, stage: stage, fieldFocused: true) == nil, "\(c) \(stage)")
             }
         }
-        #expect(EditorAction.from("\u{1B}", stage: .rules, fieldFocused: true) == .cancel)
-        #expect(EditorAction.from("\u{1B}", stage: .form(.keyword), fieldFocused: true) == .back)
+        #expect(EditorAction.escape(at: .rules) == .cancel)
+        #expect(EditorAction.escape(at: .form(.keyword)) == .back)
+    }
+
+    @Test("⌥O changes a rule's scope while its author or keyword field has the keys, and nowhere else")
+    func optionOScopesFromTheField() {
+        for tag in [RuleKind.Tag.author, .keyword] {
+            for focused in [true, false] {
+                #expect(EditorAction.from("o", option: true, stage: .form(tag), fieldFocused: focused) == .nextScope)
+                #expect(EditorAction.from("ø", option: true, stage: .form(tag), fieldFocused: focused) == .nextScope)
+            }
+        }
+        #expect(EditorAction.from("o", option: true, stage: .rules, fieldFocused: false) == nil)
+        #expect(EditorAction.from("m", option: true, stage: .rules, fieldFocused: false) == nil)
+        #expect(EditorAction.from("o", command: true, option: true, stage: .form(.keyword), fieldFocused: true) == nil)
+    }
+
+    @Test("m puts the keys in the name field, to rename the timeline")
+    func mRenames() {
+        #expect(EditorAction.from("m", stage: .rules, fieldFocused: false) == .focusName)
+        #expect(EditorAction.from("m", stage: .rules, fieldFocused: true) == nil, "typed into the field")
+        #expect(EditorAction.from("m", stage: .kinds, fieldFocused: false) == nil)
+    }
+
+    @Test("Escape reaches the editor once: on macOS only as the exit command, never also as a key press")
+    func escapeOnce() {
+        let escape = KeyEquivalent.escape.character
+        for stage in [EditorStage.rules, .kinds, .form(.keyword)] {
+            for focused in [true, false] {
+                let pressed = EditorAction.from(escape, stage: stage, fieldFocused: focused)
+                #if os(macOS)
+                #expect(EditorAction.escapeIsExitCommand)
+                #expect(pressed == nil, "the exit command is the one path on macOS")
+                #else
+                #expect(pressed == EditorAction.escape(at: stage))
+                #endif
+            }
+        }
     }
 
     @Test("The keycap strip names a key for every stage, and each is in both languages")
@@ -643,6 +680,8 @@ struct WrittenTimelineTests {
         }
         #expect(EditorAction.strip(for: .rules).map(\.caps).contains("[ ]"))
         #expect(EditorAction.strip(for: .rules).map(\.caps).contains("n"))
+        #expect(EditorAction.strip(for: .rules).map(\.caps).contains("m"))
+        #expect(EditorAction.strip(for: .form(.keyword)).map(\.caps).contains("o ⌥O"))
     }
 
     @Test("By keys alone a rule is picked, switched to Hide, scoped and built")
@@ -653,11 +692,11 @@ struct WrittenTimelineTests {
         #expect(adding.rule(sources) == nil)
         adding.step(1, through: choices, sources: sources)
         #expect(adding.target == choices[0])
+        #expect(adding.scope == .source(host: "m.example"), "picked under m.example's heading")
+        adding.nextScope(sources)
         #expect(adding.scope == .every)
         adding.nextScope(sources)
         #expect(adding.scope == .source(host: "m.example"))
-        adding.nextScope(sources)
-        #expect(adding.scope == .every)
         adding.toggleEffect()
         #expect(adding.effect == .exclude)
         adding.step(1, through: choices, sources: sources)
@@ -672,6 +711,20 @@ struct WrittenTimelineTests {
         #expect(keyword.rule(sources) == nil)
         keyword.type("swift", sources: sources)
         #expect(keyword.rule(sources)?.kind == .keyword("swift", in: .every))
+    }
+
+    @Test("Public, trends and home picked under one host's heading are that host's until o widens them")
+    func sharedCategoryDefaultsToItsHost() {
+        let other = Source(host: "n.example", kind: .mastodon)
+        let sources = [microblog, other, forum]
+        for category in [FediqoCore.Category.public, .trends, .home] {
+            var adding = RuleDraft(.category)
+            adding.pick(.category(category, on: "n.example"), sources: sources)
+            #expect(adding.scope == .source(host: "n.example"), "\(category)")
+            #expect(adding.rule(sources)?.kind == .category(category, in: .source(host: "n.example")))
+            adding.nextScope(sources)
+            #expect(adding.scope == .every)
+        }
     }
 
     @Test("The remove question names the kept timeline when the draft's name is emptied")
