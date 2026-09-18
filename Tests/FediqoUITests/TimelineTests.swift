@@ -285,3 +285,43 @@ struct TimelineStreamTests {
         #expect(mentioned.audience == .mentioned)
     }
 }
+
+/// Esc from a thread: the post it was opened from is selected again and the list centres on it.
+@Suite("Back from a thread")
+struct BackFromThreadTests {
+    private static let ids = ["top", "middle", "bottom"]
+
+    @Test("Esc selects and centres the post the thread was opened from, whichever post it is")
+    func escSelectsTheOpeningPost() {
+        for id in Self.ids {
+            let popped = DummyCommand.poppedThread([id])
+            #expect(popped?.stack == [])
+            #expect(popped?.selected == id)
+            // The timeline is drawn afresh with that selection, and centres on it.
+            #expect(DummyCommand.centredOnAppear(selected: popped?.selected) == id)
+        }
+    }
+
+    @Test("Back from a nested thread selects and centres its post in the outer one")
+    func nestedThreadCentresItsPost() {
+        let popped = DummyCommand.poppedThread(["outer", "reply"])
+        #expect(popped?.stack == ["outer"])
+        #expect(popped?.selected == "reply")
+        #expect(DummyCommand.centredOnAppear(selected: "reply", opening: "outer") == "reply")
+
+        let out = DummyCommand.poppedThread(["outer"])
+        #expect(out?.stack == [])
+        #expect(out?.selected == "outer")
+    }
+
+    @Test("Nothing to pop with no thread open")
+    func noThreadNoPop() {
+        #expect(DummyCommand.poppedThread([]) == nil)
+    }
+
+    @Test("A thread just opened reads from the top, and no selection centres nothing")
+    func openedThreadAndNoSelectionDoNotCentre() {
+        #expect(DummyCommand.centredOnAppear(selected: "outer", opening: "outer") == nil)
+        #expect(DummyCommand.centredOnAppear(selected: nil) == nil)
+    }
+}
