@@ -64,11 +64,45 @@ public struct MediaCache: MediaCopies {
         }
     }
 
-    func bytes(host: String) -> Int {
-        guard let files = try? FileManager.default.contentsOfDirectory(
-            at: folder(for: host), includingPropertiesForKeys: [.fileSizeKey]
-        ) else { return 0 }
-        return files.reduce(0) { $0 + ((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
+    public func removeAll() {
+        let folders = (try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil
+        )) ?? []
+        for folder in folders { try? FileManager.default.removeItem(at: folder) }
+    }
+
+    public func bytes(host: String) -> Int {
+        Self.files(in: folder(for: host)).reduce(0) { $0 + $1.size }
+    }
+
+    /// Oldest written first, by modification date, so what goes is what has been kept longest.
+    /// A folder emptied by the trim goes too, so `keepOnly` and `bytes` see no husk of a host.
+    public func trim(toBytes cap: Int) {
+        let folders = (try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil
+        )) ?? []
+        let files = folders.flatMap(Self.files(in:))
+        var total = files.reduce(0) { $0 + $1.size }
+        guard total > cap else { return }
+        for file in files.sorted(by: { $0.written < $1.written }) {
+            guard total > cap else { break }
+            try? FileManager.default.removeItem(at: file.url)
+            total -= file.size
+        }
+        for folder in folders where Self.files(in: folder).isEmpty {
+            try? FileManager.default.removeItem(at: folder)
+        }
+    }
+
+    private static func files(in folder: URL) -> [(url: URL, size: Int, written: Date)] {
+        let keys: [URLResourceKey] = [.fileSizeKey, .contentModificationDateKey]
+        let urls = (try? FileManager.default.contentsOfDirectory(
+            at: folder, includingPropertiesForKeys: keys
+        )) ?? []
+        return urls.map { url in
+            let values = try? url.resourceValues(forKeys: Set(keys))
+            return (url, values?.fileSize ?? 0, values?.contentModificationDate ?? .distantPast)
+        }
     }
 
     /// The one folder `host` may touch: a child of `directory` named by the digest of the folded
@@ -77,7 +111,7 @@ public struct MediaCache: MediaCopies {
         directory.appendingPathComponent(Self.folderName(host), isDirectory: true)
     }
 
-    private func file(host: String, url: URL) -> URL {
+    func file(host: String, url: URL) -> URL {
         folder(for: host).appendingPathComponent(Self.digest(url.absoluteString))
     }
 

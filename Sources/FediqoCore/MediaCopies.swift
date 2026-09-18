@@ -16,4 +16,10 @@ public protocol MediaCopies: Sendable {
     func forget(host: String)
     /// Drops the copies of every host not in `hosts`.
     func keepOnly(hosts: some Sequence<String>)
+    /// Drops every copy, of every host: the drop by cache (#7).
+    func removeAll()
+    /// What the copies kept under `host` weigh on disk, in bytes.
+    func bytes(host: String) -> Int
+    /// Drops copies, oldest written first, until what is kept weighs no more than `cap` bytes.
+    func trim(toBytes cap: Int)
 }

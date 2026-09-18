@@ -426,7 +426,7 @@ final class ShellPictures {
         enforcingViewerContract: Bool = true
     ) {
         self.http = http
-        self.disk = disk.map(DiskCopies.init)
+        self.disk = disk.map { DiskCopies($0) }
         self.enforcingViewerContract = enforcingViewerContract
     }
 
@@ -785,6 +785,29 @@ final class ShellPictures {
             missingSources.removeValue(forKey: key)
         }
         generation += 1
+    }
+
+    /// Drops every picture this device holds, in memory and on disk: the drop by cache (#7).
+    ///
+    /// `forget(host:)` for every host at once, by the same rules: work in flight has every host
+    /// struck off, so nothing lands behind the drop and files a copy back; the marks of absence go
+    /// too, so a row asks again; and the generation bumps, so every row on screen asks its
+    /// hyperlink afresh. The rows themselves are the store's and are not touched here.
+    func forgetAll() {
+        for key in Array(inFlight.keys) { inFlight[key]?.hosts.removeAll() }
+        pictures.removeAll()
+        sources.removeAll()
+        heldBytes = 0
+        missing.removeAll()
+        missingSources.removeAll()
+        disk?.removeAll()
+        generation += 1
+    }
+
+    /// What each host's copies on this device weigh, read off the main actor. Empty where this
+    /// cache keeps no copies on disk.
+    func diskBytes(hosts: [String]) async -> [String: Int] {
+        await disk?.bytes(hosts: hosts.map(Self.tag)) ?? [:]
     }
 
     /// Lets go of everything held at viewer tier, when the viewer stops drawing it.

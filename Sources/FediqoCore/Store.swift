@@ -78,14 +78,9 @@ public actor ItemStore {
         sourceList
     }
 
-    /// Drops this host's notes. The source stays joined: this is Clear, not Remove (#7).
-    public func dropNotes(host raw: String) {
-        let host = raw.lowercased()
-        notes = notes.filter { $0.key.host != host }
-    }
-
-    /// Drops notes posted before `date` — the time drop. Nothing calls this unless the reader
-    /// chose to keep only the latest months; keeping everything forever is the default.
+    /// Drops notes posted before `date` — the drop by time (#7). Nothing calls this unless the
+    /// reader chose to keep only the latest months; keeping everything forever is the default.
+    /// Sources are untouched: a source with nothing left inside the window stays joined.
     public func dropPosted(before date: Date) {
         notes = notes.filter { $0.value.postedAt >= date }
     }

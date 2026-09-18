@@ -211,7 +211,7 @@ final class ShellSession {
     /// The Account search field is first responder; dummy keys must not steal its typing.
     var searchFocused = false
 
-    /// Writes the store to disk. Set by the app so Clear and time-drop survive a relaunch.
+    /// Writes the store to disk. Set by the app so a drop by time survives a relaunch.
     @ObservationIgnored var persist: (@MainActor () async -> Void)?
 
     init(
@@ -1121,6 +1121,9 @@ final class ShellSession {
 
     /// What the store now holds, and the queries that draw it.
     private func adopt() async {
+        if let cutoff = KeepPolicy.cutoff(keepingMonths: keepMonths, from: Date()) {
+            await store.dropPosted(before: cutoff)
+        }
         sources = await store.sources()
         notes = await store.all()
         rebuildQueries()
@@ -1283,17 +1286,43 @@ final class ShellSession {
         // pictures and left the posts would empty half of what the reader was looking at.
         posts.forget(host: host)
         await forums.forget(host: host)
-        // Only the notes go; the source stays joined, so the sources are not read back.
-        await store.dropNotes(host: host)
-        notes = await store.all()
+        // **The rows stay (#7).** Clear drops this source's copies — pictures in memory and on
+        // disk, emoji, first posts, the sign-in — and not its place in the index: every row still
+        // draws, reading its pictures from their hyperlinks again. Nothing in this app reads a
+        // joined source's timeline a second time, so dropping its notes here would leave a source
+        // still joined and permanently empty; the drop by time is what lets posts go.
         cleared += 1
-        await persist?()
     }
 
-    /// Keeps only notes posted in the last `months` months. Forever is the default elsewhere.
+    /// Drops every picture copy this device holds, from every source — the drop by cache (#7).
+    ///
+    /// Memory and disk both, through the two picture caches; the rows and the index are left
+    /// alone, so every row still draws and reads its pictures from their hyperlinks again. What
+    /// is dropped is gone from disk the moment the queue reaches it, so it stays dropped after a
+    /// relaunch without a save. Bumps `cleared` for the emoji lines, as a Clear does.
+    func dropCopies() {
+        pictures.forgetAll()
+        emojis.clear()
+        cleared += 1
+    }
+
+    /// How many months of posts the reader keeps, or `KeepPolicy.forever` (the default) — the
+    /// policy half of the drop by time (#7). Set from `DummyPrefs.keepMonths` at launch and on
+    /// every change; `adopt()` holds every read to it, so a join cannot bring older posts back.
+    var keepMonths = KeepPolicy.forever
+
+    /// Holds the store to `keepMonths`, and saves: what the app does at launch and when the
+    /// reader changes the policy. Keeping forever drops nothing.
+    func applyKeepPolicy(from now: Date = Date()) async {
+        await dropOlderThan(months: keepMonths, from: now)
+    }
+
+    /// Drops posts older than the latest `months` months, once, and saves so the drop holds after
+    /// a relaunch — the drop by time (#7). A `months` that is not a positive count is keeping
+    /// forever and drops nothing, and does not write.
     func dropOlderThan(months: Int, from now: Date = Date()) async {
-        guard months > 0, let start = Calendar.current.date(byAdding: .month, value: -months, to: now) else { return }
-        await store.dropPosted(before: start)
+        guard let cutoff = KeepPolicy.cutoff(keepingMonths: months, from: now) else { return }
+        await store.dropPosted(before: cutoff)
         notes = await store.all()
         await persist?()
     }
