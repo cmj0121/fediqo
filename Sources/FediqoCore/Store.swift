@@ -78,6 +78,17 @@ public actor ItemStore {
     }
 
     /// Replaces what this device holds. Used to load a snapshot after a relaunch.
+    /// Drops this host's notes. The source stays joined.
+    public func dropNotes(host raw: String) {
+        let host = raw.lowercased()
+        notes = notes.filter { $0.key.host != host }
+    }
+
+    /// Drops notes posted before `date`. Forever is the default; this is the time drop.
+    public func dropPosted(before date: Date) {
+        notes = notes.filter { $0.value.postedAt >= date }
+    }
+
     public func replace(sources: [Source], notes incoming: [Note]) {
         sourceList = sources
         notes = Dictionary(uniqueKeysWithValues: incoming.map { (Self.key(of: $0), $0) })
