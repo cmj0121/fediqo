@@ -78,6 +78,16 @@ public actor ItemStore {
         sourceList
     }
 
+    /// Everything this store holds, read in one hop — what a save writes to disk.
+    ///
+    /// **Unsorted, and taken at one moment.** A save does not draw anything, so it has no use for
+    /// `all()`'s order and should not pay for it; and asking for the sources and the notes in two
+    /// awaits would let an ingest or a remove land between them, writing notes whose source is
+    /// gone. This is the counterpart of `init(sources:notes:)`.
+    public func snapshot() -> (sources: [Source], notes: [Note]) {
+        (sourceList, Array(notes.values))
+    }
+
     public func all() -> [Note] {
         notes.values.sorted(by: Self.storeOrder)
     }
