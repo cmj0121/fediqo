@@ -335,7 +335,7 @@ struct ViewerTests {
             handle: "@ada@first.example",
             body: "words",
             postedAt: Date(timeIntervalSince1970: 1_700_000_000),
-            origins: [.publicTimeline],
+            categories: [.public],
             attachments: [FediqoCore.Attachment(
                 kind: .image,
                 previewURL: Self.picture,
@@ -366,7 +366,7 @@ struct ViewerTests {
             handle: "@ada@first.example",
             body: "words",
             postedAt: Date(timeIntervalSince1970: 1_700_000_000),
-            origins: [.publicTimeline],
+            categories: [.public],
             attachments: attachments,
             spoiler: spoiler
         ))

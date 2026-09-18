@@ -23,7 +23,7 @@ struct DummyItemTests {
             title: "A named discussion",
             board: "A section",
             postedAt: .distantPast,
-            origins: [.publicTimeline],
+            categories: [.public],
             url: url,
             counts: Counts(replies: 3)
         )
@@ -210,7 +210,7 @@ struct DummyItemTests {
                 handle: "@ada@origin.example",
                 body: "",
                 postedAt: .distantPast,
-                origins: [.publicTimeline]
+                categories: [.public]
             ))
         }
         let first = row("first.example")

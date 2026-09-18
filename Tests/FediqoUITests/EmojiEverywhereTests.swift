@@ -38,7 +38,7 @@ struct EmojiEverywhereTests {
             handle: handle ?? "",
             body: body,
             postedAt: posted,
-            origins: [.publicTimeline],
+            categories: [.public],
             sensitive: sensitive,
             spoiler: spoiler,
             emojis: emojis

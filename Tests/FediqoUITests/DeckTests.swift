@@ -21,7 +21,7 @@ struct DeckTests {
             handle: "@ada@first.example",
             body: "words",
             postedAt: posted,
-            origins: [.publicTimeline],
+            categories: [.public],
             attachments: attachments,
             sensitive: sensitive,
             spoiler: spoiler
@@ -145,7 +145,7 @@ struct DeckTests {
             handle: "@ada@first.example",
             body: "words",
             postedAt: Self.posted,
-            origins: [.publicTimeline],
+            categories: [.public],
             avatarURL: URL(string: "https://first.example/a.png"),
             attachments: [Self.picture("one"), Self.picture("two")],
             sensitive: true,

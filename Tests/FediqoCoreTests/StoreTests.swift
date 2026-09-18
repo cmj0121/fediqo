@@ -14,8 +14,8 @@ struct StoreTests {
         await store.add(source)
         await store.add(other)
         await store.ingest([
-            note(id: "old", postedAt: origin, origins: [.publicTimeline], from: other),
-            note(id: "new", postedAt: origin.addingTimeInterval(200 * 86_400), origins: [.publicTimeline]),
+            note(id: "old", postedAt: origin, categories: [.public], from: other),
+            note(id: "new", postedAt: origin.addingTimeInterval(200 * 86_400), categories: [.public]),
         ])
         let now = origin.addingTimeInterval(210 * 86_400)
         #expect(await store.setRetention(months: 3, from: now) == 1)
@@ -31,17 +31,17 @@ struct StoreTests {
         let now = origin.addingTimeInterval(400 * 86_400)
         await store.setRetention(months: 1, from: now)
         await store.ingest([
-            note(id: "old", postedAt: origin, origins: [.publicTimeline]),
-            note(id: "new", postedAt: now, origins: [.publicTimeline]),
+            note(id: "old", postedAt: origin, categories: [.public]),
+            note(id: "new", postedAt: now, categories: [.public]),
         ])
         #expect(await store.all().map(\.id) == ["new"])
     }
 
     @Test("No window is forever: nothing is dropped and nothing refused", arguments: [nil, 0, -3] as [Int?])
     func noRetentionIsForever(months: Int?) async {
-        let store = ItemStore(sources: [source], notes: [note(id: "old", postedAt: origin, origins: [.publicTimeline])])
+        let store = ItemStore(sources: [source], notes: [note(id: "old", postedAt: origin, categories: [.public])])
         #expect(await store.setRetention(months: months, from: origin.addingTimeInterval(999 * 86_400)) == 0)
-        await store.ingest([note(id: "older", postedAt: origin.addingTimeInterval(-86_400), origins: [.publicTimeline])])
+        await store.ingest([note(id: "older", postedAt: origin.addingTimeInterval(-86_400), categories: [.public])])
         #expect(await store.all().map(\.id) == ["old", "older"])
         #expect(await store.retention == nil)
     }
@@ -49,7 +49,7 @@ struct StoreTests {
     @Test("A relaunch builds the store from a snapshot")
     func initLoadsASnapshot() async {
         let forum = Source(host: "forum.example", kind: .discuz)
-        let kept = note(id: "kept", postedAt: origin, origins: [.trending], from: forum)
+        let kept = note(id: "kept", postedAt: origin, categories: [.trends], from: forum)
         let store = ItemStore(sources: [forum, source], notes: [kept])
         #expect(await store.sources().map(\.host) == ["forum.example", "first.example"])
         #expect(await store.all().map(\.id) == ["kept"])
@@ -59,10 +59,10 @@ struct StoreTests {
     @Test("snapshot() hands back what init took, for a save to write")
     func snapshotRoundTrips() async {
         let forum = Source(host: "forum.example", kind: .discuz, boards: [BoardSubscription(fid: 3, name: "x")])
-        let one = note(id: "1", postedAt: origin, origins: [.trending], from: forum)
-        let two = note(id: "2", postedAt: origin.addingTimeInterval(60), origins: [.publicTimeline])
+        let one = note(id: "1", postedAt: origin, categories: [.trends], from: forum)
+        let two = note(id: "2", postedAt: origin.addingTimeInterval(60), categories: [.public])
         let store = ItemStore(sources: [source, forum], notes: [one, two])
-        await store.ingest([note(id: "3", postedAt: origin, origins: [])])
+        await store.ingest([note(id: "3", postedAt: origin, categories: [])])
         await store.remove(host: "forum.example")
         let snapshot = await store.snapshot()
         #expect(snapshot.sources == [source])
@@ -88,7 +88,7 @@ struct StoreTests {
         #expect(await moved())
         await store.subscribe(host: other.host, to: [BoardSubscription(fid: 1, name: "b")])
         #expect(await moved())
-        await store.ingest([note(id: "old", postedAt: origin, origins: [.publicTimeline])])
+        await store.ingest([note(id: "old", postedAt: origin, categories: [.public])])
         #expect(await moved())
         await store.setRetention(months: 1, from: origin.addingTimeInterval(400 * 86_400))
         #expect(await moved())
@@ -100,8 +100,8 @@ struct StoreTests {
 
     @Test("A snapshot with duplicates loads instead of trapping")
     func initToleratesDuplicates() async {
-        let first = note(id: "1", postedAt: origin, origins: [.publicTimeline], body: "first")
-        let second = note(id: "1", postedAt: origin, origins: [.trending], body: "second")
+        let first = note(id: "1", postedAt: origin, categories: [.public], body: "first")
+        let second = note(id: "1", postedAt: origin, categories: [.trends], body: "second")
         let store = ItemStore(
             sources: [source, Source(host: "First.Example", kind: .pleroma)],
             notes: [first, second]
@@ -109,7 +109,7 @@ struct StoreTests {
         #expect(await store.sources() == [source])
         let all = await store.all()
         #expect(all.map(\.body) == ["second"])
-        #expect(all.first?.origins == [.trending])
+        #expect(all.first?.categories == [.trends])
     }
 
     @Test("Adding a host twice keeps the first and insertion order")
@@ -182,9 +182,9 @@ struct StoreTests {
     @Test("all() is postedAt descending, then id, not insert order")
     func allSortsByTimeNotInsert() async {
         let store = ItemStore()
-        let older = note(id: "b", postedAt: origin, origins: [.publicTimeline])
-        let newer = note(id: "a", postedAt: origin.addingTimeInterval(60), origins: [.publicTimeline])
-        let sameTime = note(id: "c", postedAt: origin.addingTimeInterval(60), origins: [.publicTimeline])
+        let older = note(id: "b", postedAt: origin, categories: [.public])
+        let newer = note(id: "a", postedAt: origin.addingTimeInterval(60), categories: [.public])
+        let sameTime = note(id: "c", postedAt: origin.addingTimeInterval(60), categories: [.public])
         await store.ingest([older, newer, sameTime])
         #expect(await store.all().map(\.id) == ["a", "c", "b"])
     }
@@ -198,8 +198,8 @@ struct StoreTests {
         for firstIn in [source, other] {
             let store = ItemStore()
             let secondIn = firstIn == source ? other : source
-            await store.ingest([note(id: uri, postedAt: origin, origins: [.publicTimeline], from: firstIn)])
-            await store.ingest([note(id: uri, postedAt: origin, origins: [.publicTimeline], from: secondIn)])
+            await store.ingest([note(id: uri, postedAt: origin, categories: [.public], from: firstIn)])
+            await store.ingest([note(id: uri, postedAt: origin, categories: [.public], from: secondIn)])
             #expect(await store.all().map(\.source.host) == ["first.example", "second.example"])
         }
     }
@@ -209,10 +209,10 @@ struct StoreTests {
     @Test("A note's key is the host it came through and its id, and two hosts are two keys")
     func aNoteIsKeyedByHostAndID() {
         let uri = "https://origin.example/users/ada/statuses/1"
-        let first = note(id: uri, postedAt: origin, origins: [.publicTimeline])
-        let second = note(id: uri, postedAt: origin, origins: [.publicTimeline], from: other)
+        let first = note(id: uri, postedAt: origin, categories: [.public])
+        let second = note(id: uri, postedAt: origin, categories: [.public], from: other)
         let shouted = note(
-            id: uri, postedAt: origin, origins: [.publicTimeline],
+            id: uri, postedAt: origin, categories: [.public],
             from: Source(host: "FIRST.Example", kind: .mastodon)
         )
         #expect(first.key == NoteKey(host: "first.example", id: uri))
@@ -222,13 +222,13 @@ struct StoreTests {
         #expect(first.key.rowID == "first.example\u{1e}\(uri)")
     }
 
-    @Test("Overlapping uri ingest on one host is one row with both origins, and it is a trend")
-    func overlappingURIMergesOrigins() async {
+    @Test("Overlapping uri ingest on one host is one row with both categories, and it is a trend")
+    func overlappingURIMergesCategories() async {
         let store = ItemStore()
         let publicNote = note(
             id: "https://first.example/users/ada/statuses/1",
             postedAt: origin,
-            origins: [.publicTimeline],
+            categories: [.public],
             author: "Ada",
             body: "first",
             reply: Reply(handle: "@you@second.example"),
@@ -238,7 +238,7 @@ struct StoreTests {
         let trendingNote = note(
             id: "https://first.example/users/ada/statuses/1",
             postedAt: origin.addingTimeInterval(9_000),
-            origins: [.trending],
+            categories: [.trends],
             author: "Other",
             body: "second"
         )
@@ -246,25 +246,70 @@ struct StoreTests {
         await store.ingest([trendingNote])
         let all = await store.all()
         #expect(all.count == 1)
-        #expect(all[0].origins == [.publicTimeline, .trending])
+        #expect(all[0].categories == [.public, .trends])
         #expect(all[0].author == "Ada")
         #expect(all[0].body == "first")
         #expect(all[0].reply?.handle == "@you@second.example")
         let trends = await store.trends()
         #expect(trends.map(\.id) == all.map(\.id))
-        #expect(trends[0].origins.contains(.trending))
+        #expect(trends[0].categories.contains(.trends))
     }
 
     @Test("trends() is the store order of notes that arrived as trending")
     func trendsFollowsStoreOrder() async {
         let store = ItemStore()
         await store.ingest([
-            note(id: "old-trend", postedAt: origin, origins: [.trending]),
-            note(id: "public-only", postedAt: origin.addingTimeInterval(30), origins: [.publicTimeline]),
-            note(id: "new-trend", postedAt: origin.addingTimeInterval(60), origins: [.trending, .publicTimeline]),
+            note(id: "old-trend", postedAt: origin, categories: [.trends]),
+            note(id: "public-only", postedAt: origin.addingTimeInterval(30), categories: [.public]),
+            note(id: "new-trend", postedAt: origin.addingTimeInterval(60), categories: [.trends, .public]),
         ])
         #expect(await store.trends().map(\.id) == ["new-trend", "old-trend"])
         #expect(await store.all().map(\.id) == ["new-trend", "public-only", "old-trend"])
+    }
+
+    // MARK: - Categories (#25)
+
+    @Test("A later fetch through fewer categories takes none away")
+    func categoriesOnlyGrow() async {
+        let store = ItemStore()
+        await store.ingest([note(id: "1", postedAt: origin, categories: [.public, .trends])])
+        await store.ingest([note(id: "1", postedAt: origin, categories: [.public])])
+        await store.ingest([note(id: "1", postedAt: origin, categories: [])])
+        #expect(await store.all().map(\.categories) == [[.public, .trends]])
+    }
+
+    @Test("Dropping a board keeps it on the posts that arrived through it")
+    func unsubscribingKeepsTheBoard() async {
+        let forum = Source(host: "forum.example", kind: .discuz, boards: [BoardSubscription(fid: 37, name: "News")])
+        let store = ItemStore(sources: [forum], notes: [])
+        await store.ingest([note(id: "t1", postedAt: origin, categories: [.board(id: "37")], from: forum)])
+        await store.subscribe(host: forum.host, to: [])
+        #expect(await store.all().map(\.categories) == [[.board(id: "37")]])
+    }
+
+    @Test("One id from two hosts keeps each host's own categories")
+    func twoHostsKeepTheirOwnCategories() async {
+        let store = ItemStore()
+        let uri = "https://origin.example/users/ada/statuses/1"
+        await store.ingest([
+            note(id: uri, postedAt: origin, categories: [.public]),
+            note(id: uri, postedAt: origin, categories: [.trends], from: other),
+        ])
+        let byHost = Dictionary(uniqueKeysWithValues: await store.all().map { ($0.source.host, $0.categories) })
+        #expect(byHost == ["first.example": [.public], "second.example": [.trends]])
+    }
+
+    @Test("trends() holds only what arrived through trends, never a forum post")
+    func trendsIsOnlyTrends() async {
+        let forum = Source(host: "forum.example", kind: .discuz)
+        let store = ItemStore()
+        await store.ingest([
+            note(id: "trend", postedAt: origin, categories: [.trends]),
+            note(id: "public", postedAt: origin, categories: [.public]),
+            note(id: "board", postedAt: origin, categories: [.board(id: "37")], from: forum),
+            note(id: "front", postedAt: origin, categories: [], from: forum),
+        ])
+        #expect(await store.trends().map(\.id) == ["trend"])
     }
 
     // MARK: - Letting go of a server
@@ -282,8 +327,8 @@ struct StoreTests {
         await store.add(forum)
         await store.subscribe(host: forum.host, to: [BoardSubscription(fid: 33, name: "a")])
         await store.ingest([
-            note(id: "mine", postedAt: origin, origins: [.publicTimeline]),
-            note(id: "theirs", postedAt: origin, origins: [.publicTimeline], from: forum),
+            note(id: "mine", postedAt: origin, categories: [.public]),
+            note(id: "theirs", postedAt: origin, categories: [.public], from: forum),
         ])
         #expect(await store.sources().last?.boards.count == 1)
 
@@ -298,7 +343,7 @@ struct StoreTests {
     func removeFoldsTheHost() async {
         let store = ItemStore()
         await store.add(source)
-        await store.ingest([note(id: "mine", postedAt: origin, origins: [.publicTimeline])])
+        await store.ingest([note(id: "mine", postedAt: origin, categories: [.public])])
 
         await store.remove(host: "First.EXAMPLE")
 
@@ -313,7 +358,7 @@ struct StoreTests {
     func removingAStrangerChangesNothing() async {
         let store = ItemStore()
         await store.add(source)
-        await store.ingest([note(id: "mine", postedAt: origin, origins: [.publicTimeline])])
+        await store.ingest([note(id: "mine", postedAt: origin, categories: [.public])])
 
         await store.remove(host: "elsewhere.example")
 
@@ -329,10 +374,10 @@ struct StoreTests {
         let uri = "https://origin.example/users/ada/statuses/1"
         await store.add(source)
         await store.add(other)
-        await store.ingest([note(id: uri, postedAt: origin, origins: [.publicTimeline])])
+        await store.ingest([note(id: uri, postedAt: origin, categories: [.public])])
         await store.ingest([
-            note(id: uri, postedAt: origin, origins: [.trending], from: other),
-            note(id: "only-second", postedAt: origin, origins: [.publicTimeline], from: other),
+            note(id: uri, postedAt: origin, categories: [.trends], from: other),
+            note(id: "only-second", postedAt: origin, categories: [.public], from: other),
         ])
         let both = await store.all()
         #expect(both.filter { $0.id == uri }.count == 2)
@@ -344,7 +389,7 @@ struct StoreTests {
         #expect(Set(left.map(\.id)) == [uri, "only-second"])
         let shared = left.first { $0.id == uri }
         #expect(shared?.source.host == "second.example")
-        #expect(shared?.origins == [.trending])
+        #expect(shared?.categories == [.trends])
 
         await store.remove(host: other.host)
 
@@ -362,15 +407,15 @@ struct StoreTests {
         await store.add(other)
         await store.add(third)
         await store.ingest([
-            note(id: uri, postedAt: origin, origins: [.publicTimeline]),
-            note(id: onlyFirst, postedAt: origin, origins: [.publicTimeline]),
+            note(id: uri, postedAt: origin, categories: [.public]),
+            note(id: onlyFirst, postedAt: origin, categories: [.public]),
         ])
-        await store.ingest([note(id: uri, postedAt: origin, origins: [.publicTimeline], from: third)])
+        await store.ingest([note(id: uri, postedAt: origin, categories: [.public], from: third)])
         await store.ingest([
-            note(id: "shared-by-two-survivors", postedAt: origin, origins: [.publicTimeline], from: other)
+            note(id: "shared-by-two-survivors", postedAt: origin, categories: [.public], from: other)
         ])
         await store.ingest([
-            note(id: "shared-by-two-survivors", postedAt: origin, origins: [.publicTimeline], from: third)
+            note(id: "shared-by-two-survivors", postedAt: origin, categories: [.public], from: third)
         ])
 
         await store.remove(host: source.host)
@@ -388,7 +433,7 @@ struct StoreTests {
     private func note(
         id: String,
         postedAt: Date,
-        origins: Set<FetchOrigin>,
+        categories: Set<FediqoCore.Category>,
         author: String = "Ada",
         body: String = "hello",
         reply: Reply? = nil,
@@ -403,7 +448,7 @@ struct StoreTests {
             handle: "@ada@first.example",
             body: body,
             postedAt: postedAt,
-            origins: origins,
+            categories: categories,
             reply: reply,
             boostedBy: boostedBy,
             audience: audience,

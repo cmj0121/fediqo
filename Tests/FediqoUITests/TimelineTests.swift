@@ -58,7 +58,7 @@ struct TimelineStreamTests {
         let all = TimelineQuery.all.items(from: session.notes)
         let trends = TimelineQuery.trends.items(from: session.notes)
         #expect(all.map(\.noteID) == stored.map(\.id))
-        #expect(trends.map(\.noteID) == stored.filter { $0.origins.contains(.trending) }.map(\.id))
+        #expect(trends.map(\.noteID) == stored.filter { $0.categories.contains(.trends) }.map(\.id))
         #expect(trends.map(\.noteID) == [
             "https://first.example/users/ada/statuses/trend-only",
             "https://first.example/users/ada/statuses/shared",
@@ -187,7 +187,7 @@ struct TimelineStreamTests {
             handle: "@ada@first.example",
             body: "item.note.public.body",
             postedAt: posted,
-            origins: [.publicTimeline],
+            categories: [.public],
             reply: Reply(handle: nil),
             boostedBy: "Bob",
             audience: .followers,
@@ -219,7 +219,7 @@ struct TimelineStreamTests {
                 handle: "@ada@first.example",
                 body: "hi",
                 postedAt: posted,
-                origins: [.trending],
+                categories: [.trends],
                 reply: Reply(handle: "@bob@second.example"),
                 audience: .everyone,
                 avatarURL: nil,
@@ -244,7 +244,7 @@ struct TimelineStreamTests {
                 handle: "@ada@first.example",
                 body: "listen",
                 postedAt: posted,
-                origins: [.publicTimeline],
+                categories: [.public],
                 attachments: [
                     Attachment(kind: .audio, url: URL(string: "https://first.example/clip.mp3")),
                 ]
@@ -261,7 +261,7 @@ struct TimelineStreamTests {
                 handle: "@ada@first.example",
                 body: "root",
                 postedAt: posted,
-                origins: [.publicTimeline],
+                categories: [.public],
                 audience: .unlisted
             )
         )
@@ -278,7 +278,7 @@ struct TimelineStreamTests {
                 handle: "@ada@first.example",
                 body: "d",
                 postedAt: posted,
-                origins: [.publicTimeline],
+                categories: [.public],
                 audience: .mentioned
             )
         )

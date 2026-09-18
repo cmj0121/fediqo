@@ -56,7 +56,7 @@ struct ThreadReadingTests {
             body: "",
             title: title,
             postedAt: .distantPast,
-            origins: [.publicTimeline],
+            categories: [.public],
             url: url
         ))
     }
@@ -217,7 +217,7 @@ struct ThreadReadingTests {
         note = DummyItem(Note(
             id: "109252111", source: Source(host: Self.host, kind: .mastodon),
             author: "ada", handle: "@ada@\(Self.host)", body: "hi",
-            postedAt: .distantPast, origins: [.publicTimeline], avatarURL: sent
+            postedAt: .distantPast, categories: [.public], avatarURL: sent
         ))
         #expect(Self.row(note, posts: posts).thread == nil)
         #expect(Self.row(note, posts: posts).avatarURL == sent)

@@ -29,7 +29,7 @@ struct InventoryTests {
     private func note(_ id: String, daysAgo: Double, from source: Source) -> Note {
         Note(
             id: id, source: source, author: "Ada", handle: "@ada", body: "hello",
-            postedAt: now.addingTimeInterval(-daysAgo * 86_400), origins: [.publicTimeline],
+            postedAt: now.addingTimeInterval(-daysAgo * 86_400), categories: [.public],
             avatarURL: address(Int(id) ?? 0)
         )
     }
