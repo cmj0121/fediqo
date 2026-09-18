@@ -1,9 +1,10 @@
 import SwiftUI
 
-/// The dummy keys, written down over the page, grouped by what they are for.
+/// The dummy keys, written down over the page, grouped by tab.
 struct ShortcutGuide: View {
     var onClose: () -> Void
     @Environment(\.colorScheme) private var colorScheme
+    @State private var tab: DummyShortcutGroup = .timeline
 
     var body: some View {
         ZStack {
@@ -30,6 +31,8 @@ struct ShortcutGuide: View {
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
 
+            tabs
+
             ViewThatFits(in: .vertical) {
                 shortcutGrid
                 ScrollView {
@@ -53,24 +56,49 @@ struct ShortcutGuide: View {
         .transition(.scale(scale: 0.96).combined(with: .opacity))
     }
 
+    /// The same pills the timeline uses for All and Trends: one selected, the rest a well.
+    private var tabs: some View {
+        HStack(spacing: ShellSpace.tight) {
+            ForEach(DummyShortcutGroup.allCases) { group in
+                let selected = group == tab
+                Button {
+                    tab = group
+                } label: {
+                    Text(L10n.t(group.titleKey))
+                        .lineLimit(1)
+                        .fixedSize()
+                        .font(ShellType.meta.weight(selected ? .semibold : .regular))
+                        .foregroundStyle(
+                            selected
+                                ? ShellChrome.selectInk(colorScheme)
+                                : ShellChrome.inkDim(colorScheme)
+                        )
+                        .padding(.horizontal, ShellSpace.snug)
+                        .padding(.vertical, ShellSpace.tight)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(
+                                    selected
+                                        ? ShellChrome.selectFill(colorScheme)
+                                        : ShellChrome.well(colorScheme)
+                                )
+                        )
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
+    }
+
     private var shortcutGrid: some View {
         Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
-            ForEach(DummyShortcutGroup.allCases) { group in
+            ForEach(DummyShortcut.lines(in: tab)) { line in
                 GridRow {
-                    Text(L10n.t(group.titleKey))
-                        .font(ShellType.meta.weight(.semibold))
-                        .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-                        .padding(.top, group == DummyShortcutGroup.allCases.first ? 0 : 8)
-                        .gridCellColumns(2)
-                }
-                ForEach(DummyShortcut.all.filter { $0.group == group }) { line in
-                    GridRow {
-                        keys(of: line)
-                        Text(line.detail)
-                            .font(ShellType.body)
-                            .foregroundStyle(ShellChrome.ink(colorScheme))
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                    keys(of: line)
+                    Text(line.detail)
+                        .font(ShellType.body)
+                        .foregroundStyle(ShellChrome.ink(colorScheme))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }

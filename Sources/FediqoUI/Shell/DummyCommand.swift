@@ -43,6 +43,8 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     case compose
     case showShortcuts
     case dismiss
+    /// The key `r` — play the launch overlay again, from rest, without quitting the process.
+    case replayLanding
 
     /// What a press means. Letters are the draft's while composing, except Escape.
     /// A focused text field owns every key, including Escape.
@@ -76,6 +78,7 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         case "s": return .reveal
         case KeyEquivalent.return.character, " ": return .expandPost
         case "q": return .back
+        case "r": return .replayLanding
         default: return nil
         }
     }
@@ -232,11 +235,10 @@ public enum DummyFocus: Equatable, Sendable {
     case post(DummyItem)
 }
 
-/// The three questions the list answers: where am I going, what am I doing, how do I leave.
+/// The tabs of the written-down keys. Timeline is this page's stream; App is every tab.
 public enum DummyShortcutGroup: String, CaseIterable, Identifiable, Sendable {
-    case moving
-    case doing
-    case leaving
+    case timeline
+    case app
 
     public var id: String { rawValue }
     var titleKey: String { "shortcut.group.\(rawValue)" }
@@ -252,23 +254,28 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
     public var id: String { name }
     public var detail: String { L10n.t("shortcut.\(name)") }
 
+    static func lines(in group: DummyShortcutGroup) -> [DummyShortcut] {
+        all.filter { $0.group == group }
+    }
+
     public static let all: [DummyShortcut] = [
-        DummyShortcut(group: .moving, keys: ["Tab", "⇧Tab"], name: "tabs",
+        DummyShortcut(group: .timeline, keys: ["Tab", "⇧Tab"], name: "tabs",
                       commands: [.nextTab, .previousTab]),
-        DummyShortcut(group: .moving, keys: ["⌃Tab", "⌃⇧Tab"], name: "pages",
-                      commands: [.nextPage, .previousPage]),
-        DummyShortcut(group: .moving, keys: ["j", "k", "↓", "↑"], name: "posts",
+        DummyShortcut(group: .timeline, keys: ["j", "k", "↓", "↑"], name: "posts",
                       commands: [.nextPost, .previousPost]),
-        DummyShortcut(group: .moving, keys: ["g"], name: "top", commands: [.goTop]),
-        DummyShortcut(group: .doing, keys: ["Return", "Space"], name: "expand",
+        DummyShortcut(group: .timeline, keys: ["g"], name: "top", commands: [.goTop]),
+        DummyShortcut(group: .timeline, keys: ["Return", "Space"], name: "expand",
                       commands: [.expandPost]),
-        DummyShortcut(group: .doing, keys: ["v"], name: "view", commands: [.viewAttachment]),
-        DummyShortcut(group: .doing, keys: ["a"], name: "play", commands: [.playAttachment]),
-        DummyShortcut(group: .doing, keys: ["m"], name: "turn", commands: [.nextAttachment]),
-        DummyShortcut(group: .doing, keys: ["s"], name: "reveal", commands: [.reveal]),
-        DummyShortcut(group: .doing, keys: ["c"], name: "compose", commands: [.compose]),
-        DummyShortcut(group: .doing, keys: ["?"], name: "list", commands: [.showShortcuts]),
-        DummyShortcut(group: .leaving, keys: ["q"], name: "back", commands: [.back]),
-        DummyShortcut(group: .leaving, keys: ["Escape"], name: "dismiss", commands: [.dismiss]),
+        DummyShortcut(group: .timeline, keys: ["v"], name: "view", commands: [.viewAttachment]),
+        DummyShortcut(group: .timeline, keys: ["a"], name: "play", commands: [.playAttachment]),
+        DummyShortcut(group: .timeline, keys: ["m"], name: "turn", commands: [.nextAttachment]),
+        DummyShortcut(group: .timeline, keys: ["s"], name: "reveal", commands: [.reveal]),
+        DummyShortcut(group: .timeline, keys: ["q"], name: "back", commands: [.back]),
+        DummyShortcut(group: .app, keys: ["⌃Tab", "⌃⇧Tab"], name: "pages",
+                      commands: [.nextPage, .previousPage]),
+        DummyShortcut(group: .app, keys: ["c"], name: "compose", commands: [.compose]),
+        DummyShortcut(group: .app, keys: ["?"], name: "list", commands: [.showShortcuts]),
+        DummyShortcut(group: .app, keys: ["Escape"], name: "dismiss", commands: [.dismiss]),
+        DummyShortcut(group: .app, keys: ["r"], name: "landing", commands: [.replayLanding]),
     ]
 }

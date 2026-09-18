@@ -13,6 +13,9 @@ public struct FediqoRootView: View {
     /// The launch overlay. Starts true; `LandingView` clears it after the flips, and
     /// `playsLanding` is false from the first frame when reduce motion is on.
     @State private var showingLanding = true
+    /// Bumped so a press of `r` remounts the overlay from rest rather than showing a
+    /// view that has already flipped.
+    @State private var landingTick = 0
     #if os(macOS)
     /// Owns the sign-in window so that it outlives the body that opened it — a window held only
     /// by a view's local is a window that closes the next time SwiftUI rebuilds.
@@ -307,6 +310,7 @@ public struct FediqoRootView: View {
             .overlay {
                 if playsLanding {
                     LandingView { showingLanding = false }
+                        .id(landingTick)
                 }
             }
             .animation(.easeInOut(duration: 0.18), value: showingShortcuts)
@@ -458,6 +462,13 @@ public struct FediqoRootView: View {
             guard availability.canCompose else { return false }
             showingShortcuts = false
             composing = true
+            return true
+        case .replayLanding:
+            showingShortcuts = false
+            _ = closeViewer()
+            playback.stop()
+            landingTick += 1
+            showingLanding = true
             return true
         case .dismiss:
             switch DummyCommand.outermost(of: openLayers) {
