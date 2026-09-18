@@ -226,6 +226,12 @@ struct DummyCommandTests {
         #expect(L10n.t("shortcut.group.app", language: .english) == "Every tab")
         #expect(L10n.t("shortcut.group.timeline", language: .taiwanese) == "時間軸")
         #expect(L10n.t("shortcut.group.app", language: .taiwanese) == "每個分頁")
+        #expect(DummyShortcutGroup.rotated(from: .timeline, by: 1) == .app)
+        #expect(DummyShortcutGroup.rotated(from: .app, by: 1) == .timeline)
+        #expect(DummyShortcutGroup.rotated(from: .timeline, by: -1) == .app)
+        #expect(DummyShortcutGroup.rotated(from: .app, by: -1) == .timeline)
+        // The plate plus its outer padding still fits the minimum window.
+        #expect(ShortcutGuide.Metrics.plate + 2 * ShellSpace.room <= 520)
     }
 
     @Test("r plays the launch again")
