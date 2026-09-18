@@ -106,6 +106,73 @@ struct StoreFileTests {
         #expect(try file.load().notes.first?.source == forum)
     }
 
+    /// Every field an attachment and an emoji carry, a picture with only a preview among them:
+    /// what a row drew before a relaunch — the alt text, the shape it reserved — is what it draws
+    /// after.
+    private var multimedia: Note {
+        note(
+            avatarURL: URL(string: "https://cdn.example/ada.png"),
+            attachments: [
+                FediqoCore.Attachment(
+                    kind: .image,
+                    url: URL(string: "https://cdn.example/pic.jpg"),
+                    previewURL: URL(string: "https://cdn.example/pic-small.jpg"),
+                    alt: "a cat on a mat",
+                    width: 1200,
+                    height: 800
+                ),
+                FediqoCore.Attachment(kind: .video, previewURL: URL(string: "https://cdn.example/clip.jpg")),
+                FediqoCore.Attachment(kind: .unknown, url: URL(string: "https://cdn.example/file.bin"), alt: "",
+                                      width: 0, height: 5),
+            ],
+            emojis: [
+                CustomEmoji(shortcode: "blobcat", url: URL(string: "https://cdn.example/blobcat.gif")!,
+                            staticURL: URL(string: "https://cdn.example/blobcat.png")),
+                CustomEmoji(shortcode: "ok", url: URL(string: "https://cdn.example/ok.png")!),
+            ],
+            url: URL(string: "https://first.example/@ada/1")
+        )
+    }
+
+    @Test("Every attachment field, every emoji, and the post's address survive a save and load")
+    func multimediaRoundTrip() throws {
+        let file = try StoreFile(database: DatabaseQueue())
+        let saved = multimedia
+        try file.save(sources: [mastodon], notes: [saved])
+        let loaded = try #require(try file.load().notes.first)
+        #expect(loaded == saved)
+        // Spelled out, so a `==` that stopped comparing a field could not pass this quietly.
+        #expect(loaded.attachments.map(\.alt) == ["a cat on a mat", "", ""])
+        #expect(loaded.attachments.map(\.width) == [1200, nil, nil])
+        #expect(loaded.attachments.map(\.height) == [800, nil, nil])
+        #expect(loaded.attachments.map(\.kind) == [.image, .video, .unknown])
+        #expect(loaded.attachments[1].url == nil)
+        #expect(loaded.attachments[1].previewURL == URL(string: "https://cdn.example/clip.jpg"))
+        #expect(loaded.emojis.map(\.staticURL) == [URL(string: "https://cdn.example/blobcat.png"), nil])
+        #expect(loaded.url == URL(string: "https://first.example/@ada/1"))
+        #expect(loaded.avatarURL == URL(string: "https://cdn.example/ada.png"))
+    }
+
+    @Test("A note with no multimedia comes back with none")
+    func noMultimedia() throws {
+        let file = try StoreFile(database: DatabaseQueue())
+        let saved = note()
+        try file.save(sources: [mastodon], notes: [saved])
+        let loaded = try #require(try file.load().notes.first)
+        #expect(loaded.attachments.isEmpty && loaded.emojis.isEmpty)
+        #expect(loaded.avatarURL == nil && loaded.url == nil)
+    }
+
+    @Test("Multimedia survives a relaunch on the same directory")
+    func multimediaSurvivesRelaunch() throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try StoreFile(at: dir).save(sources: [mastodon], notes: [multimedia])
+        let opened = StoreFile.open(at: dir)
+        #expect(opened.setAside == nil)
+        #expect(opened.notes == [multimedia])
+    }
+
     @Test("Two sources carrying the same id stay two rows")
     func twoSourcesTwoRows() throws {
         let file = try StoreFile(database: DatabaseQueue())
