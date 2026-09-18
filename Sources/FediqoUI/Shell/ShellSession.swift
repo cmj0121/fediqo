@@ -52,6 +52,9 @@ final class ShellSession {
     /// to comes back withheld.
     let posts: ForumPosts
 
+    /// `r` (#29): one reload at a time, and what the last one could not read.
+    let reload = ShellReload()
+
     /// The sheet the reader is being shown the forum's own page in, or nothing.
     var signingIn: ForumSignInRequest?
 
@@ -1496,6 +1499,7 @@ final class ShellSession {
     /// they bring may land afterwards.
     private func stopReadingAsYou(host: String) {
         readsAsYou.removeValue(forKey: host.lowercased())?.cancel()
+        reload.stop(host: host)
     }
 
     /// The sentence under a Mastodon row whose sign-in did not finish.
@@ -1503,7 +1507,7 @@ final class ShellSession {
         switch failure {
         case .unreachable, .http: "account.mastodon.failed.unreachable"
         case .keychain: "account.mastodon.failed.keychain"
-        case .cancelled, .denied, .stateMismatch, .unreadable, .clientRejected:
+        case .cancelled, .denied, .stateMismatch, .unreadable, .clientRejected, .invalidScope:
             "account.mastodon.failed"
         }
     }

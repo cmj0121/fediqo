@@ -512,6 +512,8 @@ public struct FediqoRootView: View {
             case .thread: return popThread()
             case .search, .shortcuts, .selection, nil: return false
             }
+        case .reload:
+            return reload()
         case .showShortcuts:
             // Closing is always allowed; opening obeys the entry rule, so `?` under an open
             // viewer does nothing and yields rather than closing the viewer to make room.
@@ -544,6 +546,8 @@ public struct FediqoRootView: View {
             }
             return session.editCurrentTimeline()
         case .dismiss:
+            // A running reload is the first thing Escape stops (#29); the next one leaves.
+            if place == .timeline, session.reload.stop() { return true }
             switch DummyCommand.outermost(of: openLayers) {
             case .viewer: return closeViewer()
             case .shortcuts:
@@ -927,6 +931,27 @@ public struct FediqoRootView: View {
               DummyCommand.canOpen(.thread, whenOpen: openLayers) else { return false }
         if threadStack.last == selectedItemID { return false }
         threadStack.append(selectedItemID)
+        return true
+    }
+
+    /// `r`: the open thread, or else the selected timeline — and only on what the reader can see,
+    /// so not under the viewer, the keys list or the timeline editor. A second press while one
+    /// runs stops it and starts nothing.
+    private func reload() -> Bool {
+        guard place == .timeline, session.editing == nil, !session.sources.isEmpty else { return false }
+        // `r` again while one runs stops it rather than starting a second.
+        if session.reload.stop() { return true }
+        switch DummyCommand.outermost(of: openLayers) {
+        // A search's results are what this device holds, found without asking anybody.
+        case .viewer, .shortcuts, .search: return false
+        case .thread, .selection, nil: break
+        }
+        // The thread as `TimelinePane` draws it: one it cannot find draws the timeline instead.
+        if let opened = threadStack.last, let item = streamItems.first(where: { $0.id == opened }) {
+            Task { await session.reload.thread(item, in: session) }
+        } else {
+            Task { await session.reload.timeline(session.currentTimeline, in: session) }
+        }
         return true
     }
 
