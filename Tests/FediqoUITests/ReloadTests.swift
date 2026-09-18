@@ -360,6 +360,54 @@ struct ReloadTests {
         #expect(session.reload.landed == 1)
     }
 
+    @Test("r, Esc, r: the stopped run ending late does not end the new one")
+    func stoppedRunDoesNotEndTheNext() async throws {
+        var routes = Self.everything
+        routes["https://\(Self.one)/api/v1/statuses/9"] = .text(Self.status("9", "edited words"))
+        routes["https://\(Self.one)/api/v1/statuses/9/context"] = .text(Self.context)
+        let held = Held(routes, holding: ["/api/v1/trends/statuses", "/api/v1/statuses/9"])
+        let guards = [hangGuard(held.first), hangGuard(held.second)]
+        defer { for guardTask in guards { guardTask.cancel() } }
+        let (session, _) = await shell(http: held)
+        let item = await holding(Self.mastodonNote(statusID: "9"), in: session)
+
+        let first = Task { await session.reload.timeline(.trends, in: session) }
+        #expect(await spun { await held.asks("/api/v1/trends/statuses") == 2 })
+        #expect(session.reload.stop())
+        await first.value
+        let second = Task { await session.reload.thread(item, in: session) }
+        #expect(await spun { await held.asks("/api/v1/statuses/9") == 1 })
+
+        await held.first.open()
+        for _ in 0..<2_000 { await Task.yield() }
+        #expect(session.reload.running, "the first run's late end left the second running")
+        #expect(session.reload.line == "Reloading…")
+        await session.reload.timeline(.trends, in: session)
+        #expect(await held.asks("/api/v1/trends/statuses") == 2, "a further r started nothing")
+        #expect(session.reload.stop(), "the second run can still be stopped")
+        await second.value
+        #expect(!session.reload.running)
+        await held.second.open()
+    }
+
+    @Test("A second r while a reload runs does nothing: it neither stops it nor starts another")
+    func secondPressDoesNothing() async {
+        let gated = GatedHTTP(Self.everything, holding: "/api/v1/trends/statuses")
+        let guardTask = hangGuard(gated.gate)
+        defer { guardTask.cancel() }
+        let (session, _) = await shell(http: gated)
+        session.reload.press(thread: nil, timeline: .trends, in: session)
+        #expect(await spun { await gated.asks == 2 })
+        session.reload.press(thread: nil, timeline: .trends, in: session)
+        for _ in 0..<200 { await Task.yield() }
+        #expect(session.reload.running)
+        #expect(!session.reload.stopped)
+        #expect(await gated.asks == 2)
+        await gated.gate.open()
+        #expect(await spun { !session.reload.running })
+        #expect(session.reload.landed == 1)
+    }
+
     @Test("The selected post is still there to be selected after a reload")
     func selectionStays() async {
         let (session, _) = await shell()
@@ -417,6 +465,38 @@ struct ReloadTests {
         await session.reload.thread(DummyItem(Self.forumNote()), in: session)
         #expect(session.reload.failed == [Self.forum])
         #expect(session.posts.reading(ref) == .words("工具箱一键下载安装。"))
+    }
+
+    @Test("Esc on a Discuz! thread reload: its page does not land, and what was noted stays")
+    func stopTheThreadReload() async {
+        let http = Switching(Self.threadAddress)
+        let guardTask = hangGuard(http.gate)
+        defer { guardTask.cancel() }
+        let (session, _) = await shell(http: http)
+        let ref = ForumThreadRef(host: Self.forum, tid: Self.tid)
+        await session.posts.fetch(ref)
+        #expect(session.posts.reading(ref) == .absent(.refused))
+
+        await http.answer(Self.thread)
+        let running = Task { await session.reload.thread(DummyItem(Self.forumNote()), in: session) }
+        #expect(await spun { await http.held })
+        #expect(session.reload.stop())
+        await running.value
+        #expect(session.posts.reading(ref) == .absent(.refused), "the mark stays while stopped")
+        await http.gate.open()
+        #expect(await spun { session.posts.inFlight.isEmpty })
+        #expect(session.posts.reading(ref) == .absent(.refused), "the stopped page did not land")
+        #expect(session.reload.failed.isEmpty)
+    }
+
+    @Test("A Discuz! thread that trickles past the deadline fails the reload")
+    func threadDeadline() async {
+        let slow = Slow(Self.forum, then: FixtureHTTP(Self.everything))
+        let (session, _) = await shell(http: slow)
+        session.reload.deadline = .milliseconds(50)
+        await session.reload.thread(DummyItem(Self.forumNote()), in: session)
+        #expect(session.reload.failed == [Self.forum])
+        #expect(session.posts.reading(ForumThreadRef(host: Self.forum, tid: Self.tid)) == .absent(.unreachable))
     }
 
     private static func status(_ id: String, _ text: String) -> String {
@@ -689,6 +769,57 @@ private actor Flaky: HTTPClient {
         guard url.absoluteString == address, !failing, case .text(let text, _) = answer else {
             throw FixtureHTTPError.unreachable
         }
+        return (Data(text.utf8), HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+    }
+}
+
+/// Holds two paths, each on its own gate, and counts the asks for every path.
+private actor Held: HTTPClient {
+    private let inner: FixtureHTTP
+    private let paths: [String]
+    let first = Gate()
+    let second = Gate()
+    private var counted: [String: Int] = [:]
+
+    init(_ routes: [String: FixtureHTTP.Outcome], holding paths: [String]) {
+        inner = FixtureHTTP(routes)
+        self.paths = paths
+    }
+
+    func asks(_ path: String) -> Int {
+        counted[path] ?? 0
+    }
+
+    func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
+        counted[url.path, default: 0] += 1
+        if url.path == paths[0] { await first.wait() }
+        if url.path == paths[1] { await second.wait() }
+        return try await inner.data(from: url)
+    }
+}
+
+/// One address refused with a 403 until given an answer, which it then holds on a gate.
+private actor Switching: HTTPClient {
+    private let address: String
+    private var answer: FixtureHTTP.Outcome?
+    let gate = Gate()
+    private(set) var held = false
+
+    init(_ address: String) {
+        self.address = address
+    }
+
+    func answer(_ outcome: FixtureHTTP.Outcome) {
+        answer = outcome
+    }
+
+    func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
+        guard url.absoluteString == address else { throw FixtureHTTPError.unmapped }
+        guard case .text(let text, _) = answer else {
+            return (Data(), HTTPURLResponse(url: url, statusCode: 403, httpVersion: nil, headerFields: nil)!)
+        }
+        held = true
+        await gate.wait()
         return (Data(text.utf8), HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
     }
 }
