@@ -312,3 +312,32 @@ public struct Note: Identifiable, Hashable, Sendable {
         self.counts = counts
     }
 }
+
+/// Which row a note is: the host it came through and the id that host gave it.
+///
+/// **One rule, stated here and read everywhere.** Two instances carrying one Mastodon status send
+/// the same id, so the id alone is not a row (#10); the host beside it is. `ItemStore` keys its
+/// rows by this and a drawn row takes its `id` from `rowID`, so the store and the list cannot
+/// disagree about when two notes are one.
+///
+/// **Nothing is folded here.** `Note.key` builds this from `source.host`, which `Source.init` has
+/// already folded; a second fold would be a second rule that only agrees with the first today.
+/// A caller building one by hand is handing over a host it has already parsed.
+public struct NoteKey: Hashable, Sendable {
+    public let host: String
+    public let id: String
+
+    public init(host: String, id: String) {
+        self.host = host
+        self.id = id
+    }
+
+    /// The same key as one string, for a surface whose identity has to be a `String`. Joined on
+    /// the record separator, which neither a hostname nor any id a server sends can contain.
+    public var rowID: String { "\(host)\u{1e}\(id)" }
+}
+
+extension Note {
+    /// This note's row. See `NoteKey`.
+    public var key: NoteKey { NoteKey(host: source.host, id: id) }
+}
