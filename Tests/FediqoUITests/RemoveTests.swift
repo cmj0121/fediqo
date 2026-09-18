@@ -151,7 +151,7 @@ struct RemoveTests {
         #expect(session.notes.map(\.id) == ["two"])
         // A forum has no Trends, so the rail loses that tab with the microblog that had it.
         #expect(session.queries.map(\.id) == ["all"])
-        #expect(session.timelineID == "all")
+        #expect(session.timelineID == .all)
     }
 
     // MARK: - #10 two sources, two rows
@@ -180,24 +180,14 @@ struct RemoveTests {
         #expect(session.notes.isEmpty)
     }
 
-    // MARK: - Decision 16 — what a row is still fetched from
-
-    /// **The test this unit exists for: after Remove, nothing this device fetches is addressed to
-    /// the removed server.**
+    /// **After Remove, nothing this device fetches is addressed to the removed server.**
     ///
-    /// Every avatar and emoji request a row makes is tagged with a host — `DummyItemRow` reads
-    /// `item.source.host` at three places and `FediqoRootView` at two — and the tag comes from the
-    /// note's stamp. Unit 3 kept the stamp, correctly, as a record of how that copy was *parsed*;
-    /// what it did not say is that the same field is read as fetch provenance. So a status two
-    /// instances both carried went on being fetched from the instance the reader removed, in an app
-    /// whose whole claim is that nothing leaves this device except to the servers they chose.
-    ///
-    /// Asserted over **every** host any fetch could be tagged with, rather than over the one row
-    /// this test happens to know about: the stamp and `alsoFrom` together are the whole of what
-    /// `DummyItemRow` and `FediqoRootView` can address a request to, so a set that does not contain
-    /// the removed host is the property itself and not a sample of it. Driven through
-    /// `items(from:among:)`, which is the call both screens make — a pin on `ItemStore` alone would
-    /// pass with the wiring disconnected, which is this milestone's recurring failure.
+    /// Every avatar and emoji request a row makes is tagged with `item.source.host` — `DummyItemRow`
+    /// reads it at three places and `FediqoRootView` at two — so the set of every row's host is the
+    /// whole of what a fetch can be addressed to, and a set without the removed host is the
+    /// property itself rather than a sample of it. Driven through `items(from:)`, which is
+    /// the call both screens make: a pin on `ItemStore` alone would pass with the wiring
+    /// disconnected.
     @Test("After Remove, no fetch this device can make is addressed to the server that went")
     func nothingIsStillFetchedFromARemovedServer() async {
         let session = ShellSession(http: FixtureHTTP(), pictures: ShellPictures(http: FixtureHTTP()))
@@ -209,25 +199,22 @@ struct RemoveTests {
             notes: [note(uri, from: one), note(uri, from: two), note("only-beta", from: two)]
         )
 
-        let before = DummyTimeline(id: "all").items(from: session.notes, among: session.sources)
+        let before = TimelineQuery.all.items(from: session.notes)
         #expect(before.contains { $0.source.host == alpha })
         #expect(before.contains { $0.source.host == beta })
 
         await session.remove(host: alpha)
 
-        let after = DummyTimeline(id: "all").items(from: session.notes, among: session.sources)
-        let addressable = Set(after.flatMap { [$0.source.host] + $0.alsoFrom.map(\.host) })
+        let after = TimelineQuery.all.items(from: session.notes)
+        let addressable = Set(after.map(\.source.host))
         #expect(!addressable.contains(alpha))
         #expect(addressable == [beta])
     }
 
-    /// The other half of decision 16, and the reason the half above is not enough on its own: a row
-    /// two servers carry has to **say** so, or the list is honest about what it fetches and silent
-    /// about where the reader's timeline came from. `alsoFrom` was built for this in unit 3 and has
-    /// been empty ever since, because a host needs a protocol behind it to be drawn and only the
-    /// list of joined sources holds one.
-    @Test("A row two servers carry names both, with the shape each of them is")
-    func aSharedRowNamesEveryServerItCameThrough() async {
+    /// A post a microblog and a forum both carry is one row each, and each row is drawn in the
+    /// shape of the server it came through.
+    @Test("A post two servers carry is a row from each, with the shape each of them is")
+    func aSharedPostIsARowFromEachServer() async {
         let session = ShellSession(http: FixtureHTTP(), pictures: ShellPictures(http: FixtureHTTP()))
         let micro = Source(host: alpha, kind: .mastodon)
         let forum = Source(host: beta, kind: .discourse)
@@ -237,10 +224,9 @@ struct RemoveTests {
             notes: [note(uri, from: micro), note(uri, from: forum)]
         )
 
-        let items = DummyTimeline(id: "all").items(from: session.notes, among: session.sources)
+        let items = TimelineQuery.all.items(from: session.notes)
         #expect(items.count == 2)
         #expect(Set(items.map(\.source.host)) == [alpha, beta])
-        #expect(items.allSatisfy { $0.alsoFrom.isEmpty })
         #expect(items.first { $0.source.host == alpha }?.source.kind == .microblog)
         #expect(items.first { $0.source.host == beta }?.source.kind == .forum)
     }

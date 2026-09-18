@@ -35,13 +35,18 @@ struct FediqoApp: App {
     #endif
     @Environment(\.scenePhase) private var scenePhase
 
+    /// `file` is `nil` when the index could not be read and could not be set aside either:
+    /// this run then saves nothing, so what is on disk survives it (`StoreFile.open(at:now:)`).
     init() {
-        let file = try? StoreFile.applicationSupport()
-        let snapshot = (try? file?.load()) ?? (sources: [], notes: [])
-        let signedIn = (try? file?.loadSignedIn()) ?? []
-        self.file = file
-        self.store = ItemStore(sources: snapshot.sources, notes: snapshot.notes)
-        self.forums = ForumSessions(persistentCookies: true, reached: signedIn)
+        let opened = StoreFile.openApplicationSupport()
+        self.file = opened.file
+        self.store = ItemStore(sources: opened.sources, notes: opened.notes)
+        // Built on first use only: a reader with no forum never opens the WebKit store.
+        self.forums = ForumSessions(dataStore: ForumWebsiteData.onDevice())
+        // Where Caches cannot be made, pictures are read from their hyperlinks only.
+        if let media = try? MediaCache.caches() {
+            FediqoRootView.keepPictures(in: media, for: opened.sources.map(\.host))
+        }
         #if os(macOS)
         FediqoAppDelegate.save = save
         #endif
@@ -62,9 +67,7 @@ struct FediqoApp: App {
     }
 
     private func save() async {
-        let sources = await store.sources()
-        let notes = await store.all()
-        try? file?.save(sources: sources, notes: notes)
-        try? file?.saveSignedIn(forums.reachedHosts)
+        let snapshot = await store.snapshot()
+        try? file?.save(sources: snapshot.sources, notes: snapshot.notes)
     }
 }

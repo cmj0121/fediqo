@@ -92,7 +92,13 @@ final class DummyPrefs {
         didSet { Self.write("fontSize", fontSize.rawValue) }
     }
 
+    /// How many months of posts to keep; nil, the default, keeps them all forever.
+    var keepMonths: Int? {
+        didSet { Self.write("keepMonths", keepMonths.map(String.init) ?? "") }
+    }
+
     init() {
+        keepMonths = Int(Self.read("keepMonths") ?? "").flatMap { $0 > 0 ? $0 : nil }
         language = DummyLanguage(rawValue: Self.read("language") ?? "") ?? .system
         theme = DummyTheme(rawValue: Self.read("theme") ?? "") ?? .system
         fontSize = DummyFontSize(rawValue: Self.read("fontSize") ?? "") ?? .standard

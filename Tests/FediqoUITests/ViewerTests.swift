@@ -329,7 +329,7 @@ struct ViewerTests {
             )],
             emojis: [blobcat]
         )
-        let item = DummyItem(note, among: [])
+        let item = DummyItem(note)
         #expect(item.emojis.map(\.shortcode) == ["blobcat"])
         // And the shortcode is still in the words, so there is something for the list to name.
         #expect(item.attachments.first?.alt.contains(":blobcat:") == true)
@@ -355,7 +355,7 @@ struct ViewerTests {
             origins: [.publicTimeline],
             attachments: attachments,
             spoiler: spoiler
-        ), among: [])
+        ))
     }
 
     private static func filmed(_ name: String) -> FediqoCore.Attachment {
@@ -374,10 +374,10 @@ struct ViewerTests {
             FediqoCore.Attachment(kind: .image, previewURL: picture),
         ]),
     ]
-    private static let a = DummyItem.rowID(host: "first.example", note: "a")
-    private static let b = DummyItem.rowID(host: "first.example", note: "b")
-    private static let c = DummyItem.rowID(host: "first.example", note: "c")
-    private static let d = DummyItem.rowID(host: "first.example", note: "d")
+    private static let a = NoteKey(host: "first.example", id: "a").rowID
+    private static let b = NoteKey(host: "first.example", id: "b").rowID
+    private static let c = NoteKey(host: "first.example", id: "c").rowID
+    private static let d = NoteKey(host: "first.example", id: "d").rowID
 
     /// The root's own switch, rearranged into something a test can hold.
     ///
