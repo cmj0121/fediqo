@@ -23,9 +23,12 @@ struct WrittenTimelineStore {
     let defaults: UserDefaults
     var key = "fediqo.timelines"
 
+    /// Nothing kept only where nothing is under the key: a value of another type there is
+    /// something this build cannot read, not an absence.
     func load() -> Loaded {
-        guard let data = defaults.data(forKey: key) else { return .timelines([]) }
-        guard Self.knowsEveryField(data),
+        guard let value = defaults.object(forKey: key) else { return .timelines([]) }
+        guard let data = value as? Data,
+              Self.knowsEveryField(data),
               let kept = try? JSONDecoder().decode(Kept.self, from: data),
               kept.version == Self.version
         else { return .unreadable }
@@ -37,7 +40,9 @@ struct WrittenTimelineStore {
         return .timelines(timelines)
     }
 
+    /// Refused while what is kept cannot be read: it is never written over, whoever asks.
     func save(_ timelines: [TimelineDefinition]) {
+        guard load() != .unreadable else { return }
         let kept = Kept(version: Self.version, timelines: timelines.map(TimelineRow.init))
         guard let data = try? JSONEncoder().encode(kept) else { return }
         defaults.set(data, forKey: key)
