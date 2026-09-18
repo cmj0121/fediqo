@@ -7,11 +7,7 @@ public struct StoreFile: Sendable {
     let db: DatabaseQueue
 
     public init(at directory: URL) throws {
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        var excluded = URLResourceValues()
-        excluded.isExcludedFromBackup = true
-        var marked = directory
-        try marked.setResourceValues(excluded)
+        try makeExcludedFromBackup(directory)
         try self.init(database: DatabaseQueue(path: directory.appendingPathComponent(Self.indexName).path))
     }
 
@@ -191,10 +187,60 @@ private struct NoteFacts: Codable {
     var boostedBy: String?
     var sensitive: Bool?
     var spoiler: String?
+    var avatarURL: URL?
+    var attachments: [AttachmentRow]
+    var emojis: [EmojiRow]
+    var url: URL?
 }
 
 private struct ReplyRow: Codable {
     var handle: String?
+}
+
+/// One attachment as `NoteFacts` writes it: every field, so what a row drew before a relaunch
+/// — the alt text, the shape it reserved — is what it draws after.
+private struct AttachmentRow: Codable {
+    var kind: String
+    var url: URL?
+    var previewURL: URL?
+    var alt: String
+    var width: Int?
+    var height: Int?
+
+    init(_ attachment: Attachment) {
+        kind = attachment.kind.rawValue
+        url = attachment.url
+        previewURL = attachment.previewURL
+        alt = attachment.alt
+        width = attachment.width
+        height = attachment.height
+    }
+
+    var attachment: Attachment {
+        Attachment(
+            kind: Attachment.Kind(rawValue: kind) ?? .unknown,
+            url: url,
+            previewURL: previewURL,
+            alt: alt,
+            width: width,
+            height: height
+        )
+    }
+}
+
+/// One custom emoji as `NoteFacts` writes it.
+private struct EmojiRow: Codable {
+    var shortcode: String
+    var url: URL
+    var staticURL: URL?
+
+    init(_ emoji: CustomEmoji) {
+        shortcode = emoji.shortcode
+        url = emoji.url
+        staticURL = emoji.staticURL
+    }
+
+    var emoji: CustomEmoji { CustomEmoji(shortcode: shortcode, url: url, staticURL: staticURL) }
 }
 
 private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
@@ -222,7 +268,11 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             reply: note.reply.map { ReplyRow(handle: $0.handle) },
             boostedBy: note.boostedBy,
             sensitive: note.sensitive,
-            spoiler: note.spoiler
+            spoiler: note.spoiler,
+            avatarURL: note.avatarURL,
+            attachments: note.attachments.map(AttachmentRow.init),
+            emojis: note.emojis.map(EmojiRow.init),
+            url: note.url
         )
     }
 
@@ -247,8 +297,12 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             origins: Set(origins.compactMap(FetchOrigin.init(rawValue:))),
             reply: facts.reply.map { Reply(handle: $0.handle) },
             boostedBy: facts.boostedBy,
+            avatarURL: facts.avatarURL,
+            attachments: facts.attachments.map(\.attachment),
             sensitive: facts.sensitive,
-            spoiler: facts.spoiler
+            spoiler: facts.spoiler,
+            emojis: facts.emojis.map(\.emoji),
+            url: facts.url
         )
     }
 }

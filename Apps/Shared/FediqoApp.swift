@@ -16,6 +16,10 @@ struct FediqoApp: App {
         let opened = StoreFile.openApplicationSupport()
         self.file = opened.file
         self.store = ItemStore(sources: opened.sources, notes: opened.notes)
+        // Where Caches cannot be made, pictures are read from their hyperlinks only.
+        if let media = try? MediaCache.caches() {
+            FediqoRootView.keepPictures(in: media, for: opened.sources.map(\.host))
+        }
     }
 
     var body: some Scene {
