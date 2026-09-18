@@ -72,6 +72,85 @@ struct StoreFileTests {
         #expect(loaded.sensitive == true)
     }
 
+    @Test("A reply whose parent's handle is unknown comes back a reply")
+    func replyWithoutHandle() throws {
+        let file = try StoreFile(database: DatabaseQueue())
+        let source = Source(host: "first.example", kind: .mastodon)
+        let reply = Note(
+            id: "1", source: source, author: "Ada", handle: "@ada", body: "b",
+            postedAt: origin, origins: [.publicTimeline], reply: Reply(handle: nil)
+        )
+        let plain = Note(id: "2", source: source, author: "Ada", handle: "@ada", body: "b", postedAt: origin, origins: [.publicTimeline])
+        try file.save(sources: [source], notes: [reply, plain])
+        let loaded = Dictionary(uniqueKeysWithValues: try file.load().notes.map { ($0.id, $0) })
+        #expect(loaded["1"]?.reply == Reply(handle: nil))
+        #expect(loaded["2"]?.reply == nil)
+    }
+
+    @Test("Unset sensitive and spoiler stay unset, apart from false and empty", arguments: [
+        (Bool?.none, String?.none), (false, ""), (true, "cover"),
+    ])
+    func unsetStaysUnset(sensitive: Bool?, spoiler: String?) throws {
+        let file = try StoreFile(database: DatabaseQueue())
+        let source = Source(host: "first.example", kind: .mastodon)
+        let note = Note(
+            id: "1", source: source, author: "Ada", handle: "", body: "b", postedAt: origin,
+            origins: [.publicTimeline], sensitive: sensitive, spoiler: spoiler
+        )
+        try file.save(sources: [source], notes: [note])
+        let loaded = try #require(try file.load().notes.first)
+        #expect(loaded.sensitive == sensitive)
+        #expect(loaded.spoiler == spoiler)
+    }
+
+    @Test("A loaded note carries every row fact but no multimedia")
+    func rowFactsWithoutMultimedia() throws {
+        let file = try StoreFile(database: DatabaseQueue())
+        let source = Source(host: "first.example", kind: .mastodon)
+        let note = Note(
+            id: "1", source: source, author: "Ada", handle: "@ada", body: "b",
+            board: "tools", boardID: "33", postedAt: origin, origins: [.publicTimeline],
+            reply: Reply(handle: "@bob"), boostedBy: "Carol",
+            avatarURL: URL(string: "https://first.example/ada.png"),
+            attachments: [Attachment(kind: .image, url: URL(string: "https://first.example/a.png"))],
+            sensitive: false, spoiler: "cover"
+        )
+        try file.save(sources: [source], notes: [note])
+        let loaded = try #require(try file.load().notes.first)
+        #expect(loaded.avatarURL == nil)
+        #expect(loaded.attachments.isEmpty)
+        #expect(loaded.handle == "@ada")
+        #expect(loaded.board == "tools")
+        #expect(loaded.boardID == "33")
+        #expect(loaded.reply == Reply(handle: "@bob"))
+        #expect(loaded.boostedBy == "Carol")
+        #expect(loaded.sensitive == false)
+        #expect(loaded.spoiler == "cover")
+    }
+
+    @Test("Row facts survive a relaunch on the same directory")
+    func rowFactsSurviveRelaunch() throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let source = Source(host: "first.example", kind: .mastodon)
+        let note = Note(
+            id: "1", source: source, author: "Ada", handle: "@ada", body: "b",
+            board: "tools", boardID: "33", postedAt: origin, origins: [.publicTimeline],
+            reply: Reply(handle: nil), boostedBy: "Carol", sensitive: true, spoiler: ""
+        )
+        try StoreFile(at: dir).save(sources: [source], notes: [note])
+        let opened = StoreFile.open(at: dir)
+        #expect(opened.setAside == nil)
+        let loaded = try #require(opened.notes.first)
+        #expect(loaded.handle == "@ada")
+        #expect(loaded.board == "tools")
+        #expect(loaded.boardID == "33")
+        #expect(loaded.reply == Reply(handle: nil))
+        #expect(loaded.boostedBy == "Carol")
+        #expect(loaded.sensitive == true)
+        #expect(loaded.spoiler == "")
+    }
+
     @Test("Two sources carrying the same id stay two rows")
     func twoSourcesTwoRows() throws {
         let file = try StoreFile(database: DatabaseQueue())
