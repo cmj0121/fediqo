@@ -204,7 +204,7 @@ struct SourcePageTests {
 
         // Seen: the press ends it, and the predicate goes back to no.
         session.signingIn = nil
-        forums.recordSignIn(host: Self.forum)
+        await forums.plantSession(host: Self.forum)
         #expect(forums.reachedSignIn(host: Self.forum), "the premise did not hold")
         await pane.press(row)
         #expect(!forums.reachedSignIn(host: Self.forum), "the press did not sign the reader out")
@@ -239,6 +239,8 @@ struct SourcePageTests {
         await pane.press(row)
         #expect(session.signingIn?.host == Self.forum, "the premise: the row offered a sign-in")
 
+        // What the forum's own page does when the reader gets there.
+        await forums.plantSession(host: Self.forum)
         if session.signInFinished(reached: true, host: Self.forum) {
             await session.resumeAfterSignIn()
         }
@@ -263,15 +265,16 @@ struct SourcePageTests {
     /// above says nothing is said under the field, and that is only defensible if the row itself
     /// moves: otherwise a reader presses Sign in, signs in to the forum, and watches the app do
     /// nothing at all. The row draws its toggle from `reachedSignIn`, so what has to be true is
-    /// that reading it inside a body is a read that a later `recordSignIn` wakes.
+    /// that reading it inside a body is a read that a later read of the store wakes.
     ///
     /// Driven through `withObservationTracking`, which is the same machinery SwiftUI redraws a
     /// body from — a `@ObservationIgnored` on `reachedHosts`, or the predicate ever being
     /// answered from something untracked, would leave the row saying Sign in for the rest of the
     /// run and this is the only thing that would notice.
-    @Test("Recording a sign-in wakes the read the row's toggle is drawn from")
-    func recordingASignInWakesTheRow() {
+    @Test("A sign-in read off the store wakes the read the row's toggle is drawn from")
+    func recordingASignInWakesTheRow() async {
         let forums = ForumSessions(credentials: MemoryCredentials())
+        forums.watch(forums: [Self.forum])
         let woken = Woken()
 
         withObservationTracking {
@@ -281,7 +284,7 @@ struct SourcePageTests {
         }
         #expect(!woken.fired, "nothing has happened yet")
 
-        forums.recordSignIn(host: Self.forum)
+        await forums.plantSession(host: Self.forum)
 
         #expect(woken.fired, """
             The row's toggle would still read Sign in after a sign-in that was reached, and the \

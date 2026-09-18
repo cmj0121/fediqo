@@ -45,8 +45,12 @@ public struct FediqoRootView: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
 
-    public init(http: any HTTPClient = URLSessionClient(), store: ItemStore = ItemStore()) {
-        _session = State(initialValue: ShellSession(http: http, store: store))
+    public init(
+        http: any HTTPClient = URLSessionClient(),
+        store: ItemStore = ItemStore(),
+        forums: ForumSessions = ForumSessions()
+    ) {
+        _session = State(initialValue: ShellSession(http: http, store: store, forums: forums))
     }
 
     /// Hands the copies of pictures already on this device to the one picture cache every row
