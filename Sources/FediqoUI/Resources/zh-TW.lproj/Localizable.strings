@@ -228,9 +228,6 @@
 "board.unread.refused" = "%1$@ — 這個論壇不讓這個 App 讀它（HTTP %2$d）。";
 "board.unread.unreadable" = "%@ — 這個論壇有回應，但那個版塊上沒有主題列表。";
 "board.unread.network" = "%@ — 連不上那個版塊。";
-"timeline.rule.board" = "%2$@ 的 %1$@，最新的在前。";
-"timeline.empty.board.title" = "這個版塊這裡沒有東西";
-"timeline.empty.board.detail" = "從這個版塊讀到的主題會落在這裡，最新的在前。";
 
 /* Unit F6 — the first posts this device is holding, in the inventory beside Clear. */
 "prefs.cache.posts" = "%d 篇主文";

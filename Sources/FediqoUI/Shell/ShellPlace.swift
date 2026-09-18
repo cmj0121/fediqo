@@ -62,11 +62,10 @@ struct ShellAvailability: Hashable, Sendable {
     /// **`all` is what a timeline needs, and `trends` is no longer part of the answer.**
     ///
     /// This used to require both, which was true while every joinable source was a microblog.
-    /// D27 gave a forum boards instead of a trending tab — a forum has no trending read at all,
-    /// and the permanently empty tab that used to stand in for one is the thing this branch
-    /// recorded against itself and this unit removes. Asking for `trends` here would have made
-    /// that removal close the Timeline place to a reader whose only source is a forum: the one
-    /// place their boards are.
+    /// A forum has no trending read at all, so a forum-only store is offered All alone — the
+    /// timelines are All and Trends, and a forum's boards only choose what is fetched. Asking for
+    /// `trends` here would close the Timeline place to a reader whose only source is a forum:
+    /// the one place their threads are drawn.
     var timelineEnabled: Bool {
         queryIDs.contains("all")
     }

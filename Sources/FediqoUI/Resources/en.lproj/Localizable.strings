@@ -232,9 +232,6 @@
 "board.unread.refused" = "%1$@ — this forum would not let this app read it (HTTP %2$d).";
 "board.unread.unreadable" = "%@ — this forum answered, but there was no thread list on that board.";
 "board.unread.network" = "%@ — that board could not be reached.";
-"timeline.rule.board" = "%1$@ on %2$@, newest first.";
-"timeline.empty.board.title" = "This board has nothing here";
-"timeline.empty.board.detail" = "Threads read from this board land here, newest first.";
 
 /* Unit F6 — the first posts this device is holding, in the inventory beside Clear. */
 "prefs.cache.posts" = "%d first posts";

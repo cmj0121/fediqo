@@ -1173,20 +1173,10 @@ final class ShellSession {
             .gotosocial:
             true
         // Neither forum has one. Discourse publishes no trending read this app takes, and
-        // Discuz! publishes a page; what a forum has instead is boards, and those are the tabs.
+        // Discuz! publishes a page. A forum's boards choose what is fetched; they are not tabs.
         case .discourse, .discuz, .unknown:
             false
         }
-    }
-
-    /// The query a timeline id names, resolved out of the list that knows the names.
-    ///
-    /// A board's tab cannot be rebuilt from its id — see `DummyTimeline.board` — so a view that
-    /// reconstructed one would draw a tab that matched no note. Falls back to a plain query for
-    /// `all`, `trends`, and for nothing selected at all.
-    func timeline(for id: String?) -> DummyTimeline {
-        guard let id else { return DummyTimeline(id: "") }
-        return queries.first { $0.id == id } ?? DummyTimeline(id: id)
     }
 
     /// The client a join of this host should go through.
