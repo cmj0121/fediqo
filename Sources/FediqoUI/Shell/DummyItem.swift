@@ -126,14 +126,7 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     public let emojis: [CustomEmoji]
     public let counts: DummyCounts
     public let marks: DummyMarks
-    /// Other hosts that also carried this item. Empty for a single source.
-    ///
-    /// **Filled from `Note.hosts`, which is the only thing that knows.** `source` is a stamp: for
-    /// a Mastodon status, whose id is host-independent, it names whichever joined instance handed
-    /// the row over first and says nothing about the second. Two instances carrying one status are
-    /// one stored row, and a row drawn from it that named one host was under-reporting where the
-    /// reader's timeline came from — decision 9's cost, and the half of it `ItemStore.remove`
-    /// cannot pay.
+    /// Other hosts that also carried this item. Empty while two sources are two rows (#10).
     public let alsoFrom: [DummySource]
 
     /// Hosts to name on the row, stable and unique. First is drawn; the rest are +n.
@@ -263,7 +256,8 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// real answer, meaning "nothing else is joined", and it should be written down where it is
     /// true rather than inherited by omission where it is not.
     public init(_ note: Note, among sources: [Source]) {
-        id = note.id
+        // Unique across sources: two hosts carrying one URI are two rows (#10).
+        id = "\(note.source.host)\u{1e}\(note.id)"
         source = DummySource.unsigned(note.source.host, kind: Self.shape(of: note.source.kind))
         author = note.author
         handle = note.handle
