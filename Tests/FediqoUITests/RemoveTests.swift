@@ -105,7 +105,7 @@ struct RemoveTests {
 
         // The premise, stated rather than assumed: a Remove that started with nothing measures
         // nothing at all.
-        #expect(session.queries.map(\.id) == ["all", "board:\(alpha):33"])
+        #expect(session.queries.map(\.id) == ["all"])
         #expect(await session.emoji.catalogue(host: alpha)?.count == 1)
         #expect(pictures.holding(host: alpha).count == 1)
 
@@ -151,7 +151,7 @@ struct RemoveTests {
         #expect(session.notes.map(\.id) == ["two"])
         // A forum has no Trends, so the rail loses that tab with the microblog that had it.
         #expect(session.queries.map(\.id) == ["all"])
-        #expect(session.timelineID == "all")
+        #expect(session.timelineID == .all)
     }
 
     // MARK: - #10 two sources, two rows
@@ -185,7 +185,7 @@ struct RemoveTests {
     /// Every avatar and emoji request a row makes is tagged with `item.source.host` — `DummyItemRow`
     /// reads it at three places and `FediqoRootView` at two — so the set of every row's host is the
     /// whole of what a fetch can be addressed to, and a set without the removed host is the
-    /// property itself rather than a sample of it. Driven through `items(from:among:)`, which is
+    /// property itself rather than a sample of it. Driven through `items(from:)`, which is
     /// the call both screens make: a pin on `ItemStore` alone would pass with the wiring
     /// disconnected.
     @Test("After Remove, no fetch this device can make is addressed to the server that went")
@@ -199,13 +199,13 @@ struct RemoveTests {
             notes: [note(uri, from: one), note(uri, from: two), note("only-beta", from: two)]
         )
 
-        let before = DummyTimeline(id: "all").items(from: session.notes, among: session.sources)
+        let before = TimelineQuery.all.items(from: session.notes)
         #expect(before.contains { $0.source.host == alpha })
         #expect(before.contains { $0.source.host == beta })
 
         await session.remove(host: alpha)
 
-        let after = DummyTimeline(id: "all").items(from: session.notes, among: session.sources)
+        let after = TimelineQuery.all.items(from: session.notes)
         let addressable = Set(after.map(\.source.host))
         #expect(!addressable.contains(alpha))
         #expect(addressable == [beta])
@@ -224,7 +224,7 @@ struct RemoveTests {
             notes: [note(uri, from: micro), note(uri, from: forum)]
         )
 
-        let items = DummyTimeline(id: "all").items(from: session.notes, among: session.sources)
+        let items = TimelineQuery.all.items(from: session.notes)
         #expect(items.count == 2)
         #expect(Set(items.map(\.source.host)) == [alpha, beta])
         #expect(items.first { $0.source.host == alpha }?.source.kind == .microblog)

@@ -329,7 +329,7 @@ struct ViewerTests {
             )],
             emojis: [blobcat]
         )
-        let item = DummyItem(note, among: [])
+        let item = DummyItem(note)
         #expect(item.emojis.map(\.shortcode) == ["blobcat"])
         // And the shortcode is still in the words, so there is something for the list to name.
         #expect(item.attachments.first?.alt.contains(":blobcat:") == true)
@@ -355,7 +355,7 @@ struct ViewerTests {
             origins: [.publicTimeline],
             attachments: attachments,
             spoiler: spoiler
-        ), among: [])
+        ))
     }
 
     private static func filmed(_ name: String) -> FediqoCore.Attachment {

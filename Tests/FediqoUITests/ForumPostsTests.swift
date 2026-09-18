@@ -88,11 +88,11 @@ struct ForumPostsTests {
         let notes = try await DiscuzClient(http: http, host: Self.host).board(34, source: source)
         let first = try #require(notes.first)
 
-        let ref = try #require(ForumThreadRef(DummyItem(first, among: [])))
+        let ref = try #require(ForumThreadRef(DummyItem(first)))
         #expect(ref.host == Self.host)
         #expect(ref.tid == 40125)
         // And the row agrees with the ref, because the row is what asks.
-        #expect(Self.row(DummyItem(first, among: [])).thread == ref)
+        #expect(Self.row(DummyItem(first)).thread == ref)
     }
 
     /// A row that is not a Discuz! thread has no thread behind it, and every one of these would
@@ -737,8 +737,7 @@ struct ForumPostsTests {
         // One source, one board, and it is the child's own number — not its parent's.
         #expect(session.sources.map(\.host) == ["install-d.example"])
         #expect(session.sources.first?.boards.map(\.fid) == [300])
-        #expect(session.queries.map(\.id).contains("board:install-d.example:300"))
-        #expect(!session.queries.map(\.id).contains("board:install-d.example:297"))
+        #expect(session.queries.map(\.id) == ["all"])
         // And exactly one board was read: a tick on a child is one board's worth of traffic.
         let listings = await http.requested.filter { $0.query?.contains("forumdisplay") == true }
         #expect(listings.count == 1)
@@ -829,7 +828,7 @@ struct ForumPostsTests {
             title: title,
             postedAt: .distantPast,
             origins: [.publicTimeline]
-        ), among: [])
+        ))
     }
 }
 
