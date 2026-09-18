@@ -99,7 +99,10 @@ public struct StoreFile: Sendable {
     public func load() throws -> (sources: [Source], notes: [Note]) {
         try db.read { db in
             let sources = try SourceRecord.fetchAll(db).map(\.source)
-            let notes = try NoteRecord.fetchAll(db).map(\.note)
+            let byHost = Dictionary(uniqueKeysWithValues: sources.map { ($0.host, $0) })
+            let notes = try NoteRecord.fetchAll(db).compactMap { record in
+                byHost[record.host].map(record.note(from:))
+            }
             return (sources, notes)
         }
     }
@@ -132,12 +135,11 @@ private var migrator: DatabaseMigrator {
             t.column("host", .text).notNull()
             t.column("id", .text).notNull()
             t.primaryKey(["host", "id"])
-            t.column("kind", .text).notNull()
-            t.column("author", .text).notNull()
-            t.column("body", .text).notNull()
-            t.column("title", .text)
             t.column("posted_at", .datetime).notNull()
             t.column("origins", .text).notNull()
+            // A JSON `NoteFacts`: what a row draws and nothing reads by, so it is one column
+            // rather than one per field.
+            t.column("facts", .text).notNull()
         }
     }
     return migrator
@@ -174,42 +176,79 @@ private struct SourceRecord: Codable, FetchableRecord, PersistableRecord {
     }
 }
 
+/// What a row draws about a note, written into `note.facts` as JSON that GRDB encodes and
+/// decodes as a Codable column. Only what the index keys or orders by has a column of its own;
+/// everything else is here, so a new fact is a new field rather than a new migration step.
+private struct NoteFacts: Codable {
+    var author: String
+    var handle: String
+    var body: String
+    var title: String?
+    var board: String?
+    var boardID: String?
+    /// `nil` is not a reply; a `ReplyRow` with no handle is a reply whose parent was never named.
+    var reply: ReplyRow?
+    var boostedBy: String?
+    var sensitive: Bool?
+    var spoiler: String?
+}
+
+private struct ReplyRow: Codable {
+    var handle: String?
+}
+
 private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
     static let databaseTableName = "note"
     var host: String
     var id: String
-    var kind: String
-    var author: String
-    var body: String
-    var title: String?
     var posted_at: Date
     /// A JSON array of `FetchOrigin` raw values, sorted so one set is always written one way.
     var origins: [String]
+    /// A `facts` that is not JSON throws when the row is fetched, so the load fails closed.
+    var facts: NoteFacts
 
     init(_ note: Note) {
         host = note.source.host
         id = note.id
-        kind = note.source.kind.rawValue
-        author = note.author
-        body = note.body
-        title = note.title
         posted_at = note.postedAt
         origins = note.origins.map(\.rawValue).sorted()
+        facts = NoteFacts(
+            author: note.author,
+            handle: note.handle,
+            body: note.body,
+            title: note.title,
+            board: note.board,
+            boardID: note.boardID,
+            reply: note.reply.map { ReplyRow(handle: $0.handle) },
+            boostedBy: note.boostedBy,
+            sensitive: note.sensitive,
+            spoiler: note.spoiler
+        )
     }
 
+    /// The note this row holds, stamped with `source` — the row `load()` read for this host.
+    /// The note table keeps no copy of a source; `load()` drops a note whose host has no source
+    /// row, since a note from a server nobody follows is one nothing should draw.
+    ///
     /// Origins come back as they went in, an empty set included: which lists a note was seen in
     /// is a fact about it, and filling in `.publicTimeline` for none would put it in a list it
     /// was never read from.
-    var note: Note {
+    func note(from source: Source) -> Note {
         Note(
             id: id,
-            source: Source(host: host, kind: ProtocolKind(rawValue: kind) ?? .unknown),
-            author: author,
-            handle: "",
-            body: body,
-            title: title,
+            source: source,
+            author: facts.author,
+            handle: facts.handle,
+            body: facts.body,
+            title: facts.title,
+            board: facts.board,
+            boardID: facts.boardID,
             postedAt: posted_at,
-            origins: Set(origins.compactMap(FetchOrigin.init(rawValue:)))
+            origins: Set(origins.compactMap(FetchOrigin.init(rawValue:))),
+            reply: facts.reply.map { Reply(handle: $0.handle) },
+            boostedBy: facts.boostedBy,
+            sensitive: facts.sensitive,
+            spoiler: facts.spoiler
         )
     }
 }
