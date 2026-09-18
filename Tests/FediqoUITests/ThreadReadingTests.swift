@@ -324,14 +324,14 @@ struct ThreadReadingTests {
         // A letter belongs to the draft while composing, and to a focused field always.
         #expect(DummyCommand.from("s", typing: true) == nil)
         #expect(DummyCommand.from("s", fieldFocused: true) == nil)
-        // Nothing that already meant something changed meaning. `r` is the launch overlay;
-        // these still have no job.
+        // Nothing that already meant something changed meaning. `r` is later reblog, and
+        // the launch is ⌘R so the letter stays free.
         #expect(DummyCommand.from("v") == .viewAttachment)
         #expect(DummyCommand.from("a") == .playAttachment)
         #expect(DummyCommand.from("m") == .nextAttachment)
         #expect(DummyCommand.from("\r") == .expandPost)
         #expect(DummyCommand.from("q") == .back)
-        for free in ["l", "e", "o", "h"] {
+        for free in ["l", "r", "e", "o", "h"] {
             #expect(DummyCommand.from(Character(free)) == nil, "\(free) is no longer free")
         }
     }

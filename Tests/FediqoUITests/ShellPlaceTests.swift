@@ -234,14 +234,19 @@ struct DummyCommandTests {
         #expect(ShortcutGuide.Metrics.plate + 2 * ShellSpace.room <= 520)
     }
 
-    @Test("r plays the launch again")
-    func rReplaysTheLaunch() {
-        #expect(DummyCommand.from("r") == .replayLanding)
-        #expect(DummyCommand.from("r", typing: true) == nil)
-        #expect(DummyCommand.from("r", fieldFocused: true) == nil)
-        #expect(DummyCommand.consumes("r", did: false))
+    @Test("⌘R plays the launch again, and the letter r stays free")
+    func commandRReplaysTheLaunch() {
+        #expect(DummyCommand.from("r") == nil)
+        #expect(DummyCommand.from("r", command: true) == .replayLanding)
+        #expect(DummyCommand.from("R", command: true) == .replayLanding)
+        #expect(DummyCommand.from("r", command: true, typing: true) == .replayLanding)
+        #expect(DummyCommand.from("r", command: true, fieldFocused: true) == .replayLanding)
+        // ⌘Q, ⌘C, and Control+⌘R stay the platform's.
+        #expect(DummyCommand.from("q", command: true) == nil)
+        #expect(DummyCommand.from("c", command: true) == nil)
+        #expect(DummyCommand.from("r", control: true, command: true) == nil)
         let line = DummyShortcut.all.first { $0.commands == [.replayLanding] }
-        #expect(line?.keys == ["r"])
+        #expect(line?.keys == ["⌘R"])
         #expect(line?.group == .app)
         #expect(L10n.t("shortcut.landing", language: .english) == "Reload from the launch")
         #expect(L10n.t("shortcut.landing", language: .taiwanese) == "從啟動重新載入")
