@@ -431,6 +431,26 @@ struct WrittenTimelineTests {
 
     // MARK: Missing targets
 
+    @Test("A tab's missing mark is worked out once per definition and sources, not on every redraw")
+    func missingMarkKept() throws {
+        let session = session()
+        let gone = try #require(Rule.source("gone.example"))
+        session.commit(draft("Old", [gone], in: session))
+        let query = TimelineQuery.written(session.written[0].id)
+        #expect(session.hasMissingRule(query))
+        #expect(session.hasMissingRule(query))
+        #expect(session.missingRuleEvaluations == 1)
+        session.sources.append(Source(host: "gone.example", kind: .mastodon))
+        #expect(!session.hasMissingRule(query), "the source came back")
+        #expect(session.missingRuleEvaluations == 2)
+        let here = try #require(Rule.keyword("swift", in: .every))
+        var edited = try #require(session.editCurrentTimeline() ? session.editing : nil)
+        edited.rules = [here]
+        session.commit(edited)
+        #expect(!session.hasMissingRule(query))
+        #expect(session.missingRuleEvaluations == 3)
+    }
+
     @Test("A rule whose source is gone stays, marks its tab, and says missing")
     func missingTarget() throws {
         let session = session()
