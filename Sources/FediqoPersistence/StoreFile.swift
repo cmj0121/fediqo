@@ -349,6 +349,9 @@ private struct NoteFacts: Codable {
     var attachments: [AttachmentRow]
     var emojis: [EmojiRow]
     var url: URL?
+    /// `Note.statusID`. Additive and optional, so no migration id (Decision 11): a row written
+    /// before 0.2.0 learned it reads as none, and an older build ignores the key.
+    var statusID: String?
 }
 
 private struct ReplyRow: Codable {
@@ -431,7 +434,8 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             avatarURL: note.avatarURL,
             attachments: note.attachments.map(AttachmentRow.init),
             emojis: note.emojis.map(EmojiRow.init),
-            url: note.url
+            url: note.url,
+            statusID: note.statusID
         )
     }
 
@@ -461,7 +465,8 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             sensitive: facts.sensitive,
             spoiler: facts.spoiler,
             emojis: facts.emojis.map(\.emoji),
-            url: facts.url
+            url: facts.url,
+            statusID: facts.statusID
         )
     }
 }
