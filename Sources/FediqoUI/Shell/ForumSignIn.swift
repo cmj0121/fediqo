@@ -120,21 +120,38 @@ public final class ForumSessions {
     /// including the case where they looked at the forum's page and gave up.
     public private(set) var reachedHosts: Set<String> = []
 
+    /// `dataStore` is where every engine keeps its cookies. The default forgets them when this
+    /// object goes, which is what a test wants; the app passes `deviceDataStore()`.
     public init(
         credentials: any ForumCredentialStore = KeychainCredentials(),
-        persistentCookies: Bool = false,
-        reached: Set<String> = []
+        dataStore: WKWebsiteDataStore = .nonPersistent()
     ) {
         self.credentials = credentials
-        self.dataStore = persistentCookies
-            ? WKWebsiteDataStore(forIdentifier: Self.storeID)
-            : .nonPersistent()
-        self.reachedHosts = reached
+        self.dataStore = dataStore
         refreshSavedHosts()
     }
 
-    /// Stable id for this app's cookie store on this device.
-    private static let storeID = UUID(uuidString: "66656469-7171-4000-8000-000000000005")!
+    /// Reads which of `hosts` the store still holds a member's session for, and counts those as
+    /// reached — the launch half of `reachedHosts`.
+    ///
+    /// **Read off the store, not off a list this app wrote.** A list kept beside the cookies is
+    /// a second record of one fact, and the two disagree the moment either changes without the
+    /// other: a cookie expires, a Clear half-finishes, a file is restored. The store is the
+    /// thing a fetch will actually send, so it is the only honest answer to "will this forum
+    /// treat me as signed in". And a session cookie specifically, not any cookie: every forum
+    /// this app has read holds a guest's (`ForumMember.isSessionCookie(named:)`).
+    ///
+    /// Adds and never removes, so a sign-in reached while this was reading is not undone by it.
+    public func restoreSignIns(among hosts: [String]) async {
+        let cookies = await dataStore.httpCookieStore.allCookies()
+        for host in hosts.map({ $0.lowercased() }) {
+            let held = cookies.contains { cookie in
+                ForumMember.isSessionCookie(named: cookie.name)
+                    && ForumWebEngine.holds(cookie.domain, for: host)
+            }
+            if held { reachedHosts.insert(host) }
+        }
+    }
 
     func engine(host: String) -> ForumWebEngine {
         let host = host.lowercased()
@@ -265,6 +282,10 @@ public final class ForumSessions {
         if let engine = engines[host] {
             await engine.forget()
             engines[host] = nil
+        } else {
+            // No engine this run is no evidence of no cookies: the store persists, and a host
+            // signed in to last launch holds its session before anything asks for its page.
+            await ForumWebEngine.forget(host: host, in: dataStore)
         }
         forgetPassword(host: host)
         // The cookies this run signed in with have just gone, so what this device last saw is no
@@ -276,5 +297,71 @@ public final class ForumSessions {
 
     func refreshSavedHosts() {
         savedHosts = (try? credentials.savedHosts()) ?? []
+    }
+}
+
+// MARK: - The store on this device
+
+extension ForumSessions {
+    /// Stable id for this app's cookie store on this device.
+    static let storeID = UUID(uuidString: "66656469-7171-4000-8000-000000000005")!
+
+    /// The cookie store the app signs in with: kept on this device between launches, and kept
+    /// out of its backups.
+    ///
+    /// **Out of backups because the issue says the secret stays on this device** (#5). A forum
+    /// session cookie is a bearer credential; restored onto another device it signs that device
+    /// in as the reader, which is the one thing the password beside it is kept from by
+    /// `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`. WebKit offers no switch for this, so the
+    /// directory is marked by hand before WebKit opens it — see `storeDirectory` for where it is
+    /// and why that is an observed path rather than a documented one. A failure to mark it is
+    /// not a reason to refuse the store: the reader would be signed out every launch instead,
+    /// which is worse, and the mark is retried every launch.
+    public static func deviceDataStore() -> WKWebsiteDataStore {
+        let library = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
+        let directory = storeDirectory(
+            library: library,
+            identifier: storeID,
+            sandboxed: isSandboxed,
+            bundleID: Bundle.main.bundleIdentifier ?? ProcessInfo.processInfo.processName
+        )
+        try? excludeFromBackup(directory)
+        return WKWebsiteDataStore(forIdentifier: storeID)
+    }
+
+    /// Where `WKWebsiteDataStore(forIdentifier:)` keeps its files.
+    ///
+    /// **Observed, not documented.** Apple names no path for this store. What WebKit does, and
+    /// what was checked on macOS 26 against this app's container and a bare command-line
+    /// process: inside a sandbox — every iOS app and the sandboxed Mac app — it is
+    /// `Library/WebKit/WebsiteDataStore/<id>`; outside one, WebKit adds the bundle identifier (or
+    /// the process name) after `WebKit`. WebKit takes a directory made and marked beforehand
+    /// as its own and the mark survives it writing cookies there. If a later WebKit moves the
+    /// store, this marks an empty directory and the store goes back to being backed up — which
+    /// is why the test pins the path and not only the mark.
+    static func storeDirectory(library: URL, identifier: UUID, sandboxed: Bool, bundleID: String) -> URL {
+        var directory = library.appendingPathComponent("WebKit", isDirectory: true)
+        if !sandboxed { directory.appendPathComponent(bundleID, isDirectory: true) }
+        return directory
+            .appendingPathComponent("WebsiteDataStore", isDirectory: true)
+            // WebKit spells the id in lower case; `uuidString` is upper case, and on a
+            // case-sensitive volume the mark would land on a directory WebKit never opens.
+            .appendingPathComponent(identifier.uuidString.lowercased(), isDirectory: true)
+    }
+
+    static func excludeFromBackup(_ directory: URL) throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        var marked = directory
+        try marked.setResourceValues(values)
+    }
+
+    private static var isSandboxed: Bool {
+        #if os(macOS)
+        ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil
+        #else
+        true
+        #endif
     }
 }

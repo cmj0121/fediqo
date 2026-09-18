@@ -50,8 +50,10 @@ public enum ForumTransportError: Error, Equatable, Sendable {
 /// misses" is one of the two conventions it earned. A second web view here would be consumer
 /// N+1, and the symptom would be a reader who signs in successfully and still cannot read.
 ///
-/// Cookies may persist on this device (#5). Tests keep a non-persistent store. Clear still
-/// drops the host's cookies through `forget`.
+/// **The store is `ForumSessions`' and may persist (#5).** The app hands every engine the one
+/// store kept on this device and out of its backups (`ForumSessions.deviceDataStore()`), so a
+/// sign-in outlives a relaunch; tests hand a non-persistent one. Clear drops the host's records
+/// from that store directly (`forget(host:in:)`), whether or not this run built an engine.
 @MainActor
 final class ForumWebEngine: NSObject, WKNavigationDelegate {
     /// How long one navigation may take before the transport gives up on it.
@@ -257,20 +259,40 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
 
     // MARK: - Clearing
 
-    /// Drops every cookie and every other trace this host left in this engine — D25's half of
-    /// decision 14. The store is non-persistent, so this is belt and braces against a reader who
-    /// presses Clear while the view is still open; dropping the engine does the rest.
+    /// Stops this view and drops everything its host left in the store — D25's half of decision
+    /// 14, for a reader who presses Clear while the view is still open. The dropping itself is
+    /// `ForumWebEngine.forget(host:in:)`, which `ForumSessions` also calls when no engine was
+    /// built this run: the store persists, so a host signed in last week still holds cookies
+    /// today whether or not anything has asked for its page yet.
     func forget() async {
         view.stopLoading()
-        let store = view.configuration.websiteDataStore
+        await Self.forget(host: host, in: view.configuration.websiteDataStore)
+        view.load(URLRequest(url: URL(string: "about:blank")!))
+    }
+
+    /// Removes every record `store` keeps for `host`: cookies, storage, cache.
+    ///
+    /// WebKit files its records under a site's registrable domain, not the host a reader typed,
+    /// so a record belongs here when either name is the other or ends in it. That is coarser
+    /// than a host: two forums under one registrable domain share their records, and clearing
+    /// one clears both. The alternative — keeping records a Clear should have dropped — is the
+    /// worse error.
+    static func forget(host: String, in store: WKWebsiteDataStore) async {
+        let host = host.lowercased()
         let types = WKWebsiteDataStore.allWebsiteDataTypes()
         let records = await store.dataRecords(ofTypes: types)
-        let mine = records.filter { record in
-            let name = record.displayName.lowercased()
-            return host == name || host.hasSuffix("." + name) || name.hasSuffix("." + host)
-        }
+        let mine = records.filter { holds($0.displayName, for: host) }
+        guard !mine.isEmpty else { return }
         await store.removeData(ofTypes: types, for: mine)
-        view.load(URLRequest(url: URL(string: "about:blank")!))
+    }
+
+    /// Whether a record or cookie filed under `name` belongs to `host`. A cookie's domain may
+    /// carry a leading dot, which says "and every subdomain" and is not part of the name.
+    static func holds(_ name: String, for host: String) -> Bool {
+        var name = name.lowercased()
+        if name.hasPrefix(".") { name.removeFirst() }
+        let host = host.lowercased()
+        return !name.isEmpty && (host == name || host.hasSuffix("." + name) || name.hasSuffix("." + host))
     }
 
     // MARK: - Plumbing
