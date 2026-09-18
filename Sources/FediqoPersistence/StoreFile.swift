@@ -103,21 +103,6 @@ public struct StoreFile: Sendable {
         }
     }
 
-    public func loadSignedIn() throws -> Set<String> {
-        try db.read { db in
-            Set(try String.fetchAll(db, sql: "SELECT host FROM signed_in"))
-        }
-    }
-
-    public func saveSignedIn(_ hosts: Set<String>) throws {
-        try db.write { db in
-            try db.execute(sql: "DELETE FROM signed_in")
-            for host in hosts {
-                try db.execute(sql: "INSERT INTO signed_in (host) VALUES (?)", arguments: [host])
-            }
-        }
-    }
-
     public func save(sources: [Source], notes: [Note]) throws {
         try db.write { db in
             try NoteRecord.deleteAll(db)
@@ -151,11 +136,6 @@ private var migrator: DatabaseMigrator {
             // A JSON `NoteFacts`: what a row draws and nothing reads by, so it is one column
             // rather than one per field.
             t.column("facts", .text).notNull()
-        }
-    }
-    migrator.registerMigration("v4-signed-in") { db in
-        try db.create(table: "signed_in") { t in
-            t.primaryKey("host", .text)
         }
     }
     return migrator

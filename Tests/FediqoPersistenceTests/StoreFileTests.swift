@@ -193,13 +193,6 @@ struct StoreFileTests {
         #expect(values.isExcludedFromBackup == true)
     }
 
-    @Test("Signed-in hosts survive a save and load")
-    func signedInRoundTrip() throws {
-        let file = try StoreFile(database: DatabaseQueue())
-        try file.saveSignedIn(["forum.example", "other.example"])
-        #expect(try file.loadSignedIn() == ["forum.example", "other.example"])
-    }
-
     @Test("An empty index loads as nothing")
     func emptyLoad() throws {
         let loaded = try StoreFile(database: DatabaseQueue()).load()
