@@ -426,7 +426,7 @@ final class ShellPictures {
         enforcingViewerContract: Bool = true
     ) {
         self.http = http
-        self.disk = disk.map(DiskCopies.init)
+        self.disk = disk.map { DiskCopies($0) }
         self.enforcingViewerContract = enforcingViewerContract
     }
 
@@ -754,15 +754,36 @@ final class ShellPictures {
     /// each survive until the last of them is cleared.
     func forget(host: String) {
         let host = Self.tag(host)
+        strike { $0 == host }
+        // The copies on this device go with the pictures in memory, whole: a copy on disk is
+        // filed under one host only, so there is no second source for it to survive for.
+        disk?.forget(host: host)
+    }
+
+    /// Drops every picture this device holds, in memory and on disk: the drop by cache (#7).
+    ///
+    /// `forget(host:)` for every host at once, through the same `strike`: nothing in flight lands
+    /// behind it, the marks of absence go, and the generation bumps so every row on screen asks
+    /// its hyperlink afresh. The rows themselves are the store's and are not touched here.
+    func forgetAll() {
+        strike { _ in true }
+        disk?.removeAll()
+    }
+
+    /// Strikes every host `goes` names off work in flight, off the pictures held and off the marks
+    /// of absence, dropping an entry where no host is left on it; then bumps the generation. The
+    /// one body behind both `forget(host:)` and `forgetAll()`.
+    private func strike(_ goes: (String) -> Bool) {
         // Over a copy of the keys, because the body writes back into the map it is walking.
-        for key in Array(inFlight.keys) { inFlight[key]?.hosts.remove(host) }
+        for (key, fetch) in inFlight where fetch.hosts.contains(where: goes) {
+            inFlight[key]?.hosts = fetch.hosts.filter { !goes($0) }
+        }
         // Likewise over a copy. What is evicted here keeps its `interest` stamp: I7 forbids a
         // held key without one and says nothing about a stamp without a picture, which is the
         // ordinary state of every address a row has ever read. `trimInterest` clears those.
         let tagging = sources
-        for (key, tagged) in tagging where tagged.contains(host) {
-            var rest = tagged
-            rest.remove(host)
+        for (key, tagged) in tagging where tagged.contains(where: goes) {
+            let rest = tagged.filter { !goes($0) }
             guard rest.isEmpty else {
                 sources[key] = rest
                 continue
@@ -770,13 +791,9 @@ final class ShellPictures {
             if let gone = pictures.removeValue(forKey: key) { heldBytes -= gone.cost }
             sources.removeValue(forKey: key)
         }
-        // The copies on this device go with the pictures in memory, whole: a copy on disk is
-        // filed under one host only, so there is no second source for it to survive for.
-        disk?.forget(host: host)
         let noted = missingSources
-        for (key, tagged) in noted where tagged.contains(host) {
-            var rest = tagged
-            rest.remove(host)
+        for (key, tagged) in noted where tagged.contains(where: goes) {
+            let rest = tagged.filter { !goes($0) }
             guard rest.isEmpty else {
                 missingSources[key] = rest
                 continue
@@ -785,6 +802,12 @@ final class ShellPictures {
             missingSources.removeValue(forKey: key)
         }
         generation += 1
+    }
+
+    /// What each host's copies on this device weigh, read off the main actor. Empty where this
+    /// cache keeps no copies on disk.
+    func diskBytes(hosts: [String]) async -> [String: Int] {
+        await disk?.bytes(hosts: hosts.map(Self.tag)) ?? [:]
     }
 
     /// Lets go of everything held at viewer tier, when the viewer stops drawing it.

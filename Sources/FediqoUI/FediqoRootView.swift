@@ -48,18 +48,23 @@ public struct FediqoRootView: View {
     public init(
         http: any HTTPClient = URLSessionClient(),
         store: ItemStore = ItemStore(),
-        forums: ForumSessions = ForumSessions()
+        forums: ForumSessions = ForumSessions(),
+        persist: (@MainActor () async -> Void)? = nil
     ) {
-        _session = State(initialValue: ShellSession(http: http, store: store, forums: forums))
+        let session = ShellSession(http: http, store: store, forums: forums)
+        session.persist = persist
+        _session = State(initialValue: session)
     }
 
     /// Hands the copies of pictures already on this device to the one picture cache every row
     /// draws from, once, at launch — and first drops the copies of any host not in `hosts`, the
     /// servers the reader still reads. Queued ahead of every picture a row can ask for, so the
-    /// sweep never races a copy being written for a server just added.
+    /// sweep never races a copy being written for a server just added. What is left is then
+    /// trimmed to the cap (#7), so a cap lowered by a new build holds from its first launch.
     public static func keepPictures(in copies: any MediaCopies, for hosts: [String]) {
         let disk = DiskCopies(copies)
         disk.keepOnly(hosts: hosts)
+        disk.trim()
         ShellPictures.shared.disk = disk
     }
 
@@ -91,7 +96,16 @@ public struct FediqoRootView: View {
 
     public var body: some View {
         layout
-            .task { await session.reloadFromStore() }
+            // The reader's time window is set on the store once at launch, before the store is
+            // adopted, so a window chosen last run binds what was kept and everything read after
+            // (#7). `prefs` is its one owner; a change is handed on, and written only if it dropped.
+            .task {
+                await session.keep(months: prefs.keepMonths)
+                await session.reloadFromStore()
+            }
+            .onChange(of: prefs.keepMonths) { _, months in
+                Task { await session.keep(months: months) }
+            }
             .onChange(of: place) { old, new in
                 let accepted = availability.placing(old, as: new)
                 if accepted != new { place = accepted }
