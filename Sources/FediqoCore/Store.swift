@@ -57,8 +57,9 @@ public actor ItemStore {
     }
 
     /// Takes notes in. The same item through one source stays one row: the first copy wins and
-    /// origins grow, so All and Trends of one host share a row. The same item through two sources
-    /// is two rows (#10). Merging those into one thread is later.
+    /// categories grow, so All and Trends of one host share a row. A fetch with fewer takes none
+    /// away: a category is what the copy arrived through, and that stays true (#25). The same
+    /// item through two sources is two rows (#10). Merging those into one thread is later.
     ///
     /// A note posted before the retention window is refused: the reader chose not to keep it.
     public func ingest(_ incoming: [Note]) {
@@ -67,7 +68,7 @@ public actor ItemStore {
         for note in incoming where retention.map({ note.postedAt >= $0 }) ?? true {
             let key = note.key
             if var existing = notes[key] {
-                existing.origins.formUnion(note.origins)
+                existing.categories.formUnion(note.categories)
                 notes[key] = existing
             } else {
                 notes[key] = note
@@ -122,7 +123,7 @@ public actor ItemStore {
     }
 
     public func trends() -> [Note] {
-        all().filter { $0.origins.contains(.trending) }
+        all().filter { $0.categories.contains(.trends) }
     }
 
     private static func storeOrder(_ a: Note, _ b: Note) -> Bool {

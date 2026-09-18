@@ -14,7 +14,7 @@ public struct MastodonClient: Sendable {
             path: "/api/v1/timelines/public",
             limit: 40,
             source: source,
-            origin: .publicTimeline
+            category: .public
         )
     }
 
@@ -23,7 +23,7 @@ public struct MastodonClient: Sendable {
             path: "/api/v1/trends/statuses",
             limit: 20,
             source: source,
-            origin: .trending
+            category: .trends
         )
     }
 
@@ -88,7 +88,7 @@ public struct MastodonClient: Sendable {
         path: String,
         limit: Int,
         source: Source,
-        origin: FetchOrigin
+        category: Category
     ) async throws -> [Note] {
         guard let url = Host.httpsURL(
             host: host,
@@ -102,7 +102,7 @@ public struct MastodonClient: Sendable {
             throw MastodonRequestError.http(response.statusCode)
         }
         return try MastodonJSON.decoder.decode([StatusDTO].self, from: data).map {
-            $0.asNote(source: source, origin: origin)
+            $0.asNote(source: source, category: category)
         }
     }
 }
@@ -323,7 +323,7 @@ struct StatusDTO: Decodable, Sendable {
         }
     }
 
-    func asNote(source: Source, origin: FetchOrigin) -> Note {
+    func asNote(source: Source, category: Category) -> Note {
         let subject = reblog?.value ?? self
         // Named once, so the name the row draws and the pictures that name is written in
         // cannot come to disagree about whether there is a booster at all.
@@ -336,7 +336,7 @@ struct StatusDTO: Decodable, Sendable {
             handle: Self.handle(subject.account.acct, host: host),
             body: HTMLText.plain(subject.content),
             postedAt: subject.createdAt,
-            origins: [origin],
+            categories: [category],
             reply: Self.reply(inReplyToId: subject.inReplyToId, mentions: subject.mentions, host: host),
             boostedBy: booster?.name,
             audience: Self.audience(subject.visibility),
