@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 // What a signed-in Mastodon source reads as you (#25): Home, and the lists the reader chose.
 //
@@ -117,10 +118,14 @@ public struct MastodonAccount: Sendable {
         do {
             return try await read()
         } catch MastodonAuthError.signedOut {
+            NetLog.auth.notice(
+                "\(NetLog.line("read as you", host: host, error: MastodonAuthError.signedOut), privacy: .public)"
+            )
             throw MastodonAuthError.signedOut
         } catch let error where Cancellation.happened(error) {
             throw CancellationError()
         } catch {
+            NetLog.auth.error("\(NetLog.line("read as you", host: host, error: error), privacy: .public)")
             return nil
         }
     }

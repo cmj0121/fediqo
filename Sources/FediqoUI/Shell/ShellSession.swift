@@ -1,6 +1,7 @@
 import FediqoCore
 import Foundation
 import Observation
+import os
 import SwiftUI
 
 /// In-memory session: unsigned sources, All and Trends, and the Account add flow.
@@ -1409,6 +1410,7 @@ final class ShellSession {
             if mastodon.isSignedIn(host: host) { await readAsYou(host: host) }
             return
         }
+        NetLog.auth.notice("\(NetLog.line("sign-in", host: host, error: failure), privacy: .public)")
         guard isAdded(host) else { return }
         rowRefusal = (host: host, key: Self.signInFailureKey(failure))
     }
