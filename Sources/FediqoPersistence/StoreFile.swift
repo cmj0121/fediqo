@@ -64,7 +64,10 @@ public struct StoreFile: Sendable {
         return open(at: root.appendingPathComponent("Fediqo", isDirectory: true))
     }
 
-    /// Moves `index.sqlite` and any journal SQLite left beside it to `index-unreadable-<time>`.
+    /// Moves `index.sqlite` and any journal SQLite left beside it to
+    /// `index-unreadable-<time>-<random>`. The time, to the millisecond, is for the person who
+    /// finds it; the random part is what makes the name unique, so a second failed launch in the
+    /// same instant never lands on the first one's copy.
     /// Throws when there is no index to move, which is the case where the directory itself could
     /// not be made: then there is nothing to protect by moving, and nowhere safe to write either.
     private static func setAside(in directory: URL, now: Date) throws -> URL {
@@ -72,14 +75,9 @@ public struct StoreFile: Sendable {
         let index = directory.appendingPathComponent(indexName)
         guard manager.fileExists(atPath: index.path) else { throw CocoaError(.fileNoSuchFile) }
         let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withYear, .withMonth, .withDay, .withTime, .withTimeZone]
-        let stamp = formatter.string(from: now)
-        var base = "index-unreadable-\(stamp)"
-        var attempt = 1
-        while manager.fileExists(atPath: directory.appendingPathComponent(base + ".sqlite").path) {
-            attempt += 1
-            base = "index-unreadable-\(stamp)-\(attempt)"
-        }
+        formatter.formatOptions = [.withYear, .withMonth, .withDay, .withTime, .withFractionalSeconds, .withTimeZone]
+        let random = UUID().uuidString.prefix(8).lowercased()
+        let base = "index-unreadable-\(formatter.string(from: now))-\(random)"
         let aside = directory.appendingPathComponent(base + ".sqlite")
         try manager.moveItem(at: index, to: aside)
         for suffix in ["-journal", "-wal", "-shm"] {
