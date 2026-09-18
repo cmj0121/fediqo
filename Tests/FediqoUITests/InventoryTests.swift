@@ -50,7 +50,7 @@ struct InventoryTests {
     }
 
     private func persisting(_ session: ShellSession, to dir: URL, counting saves: Saves) throws {
-        let saver = StoreSaver(store: session.store, index: try StoreFile(at: dir))
+        let saver = StoreSaver(store: session.store, file: try StoreFile(at: dir))
         session.persist = {
             saves.count += 1
             try? await saver.save()
