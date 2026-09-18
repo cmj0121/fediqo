@@ -38,6 +38,38 @@ struct StoreFileTests {
         #expect(loaded.notes[0].body == "hello")
         #expect(loaded.notes[0].origins == [.publicTimeline, .trending])
         #expect(loaded.notes[0].postedAt == origin)
+        #expect(loaded.notes[0].handle == "@ada@first.example")
+    }
+
+    @Test("Handle, board, boost, reply, and cover survive a save and load")
+    func rowFactsRoundTrip() throws {
+        let file = try StoreFile(database: DatabaseQueue())
+        let source = Source(host: "forum.example", kind: .discuz)
+        let note = Note(
+            id: "discuz:forum.example:1",
+            source: source,
+            author: "Ada",
+            handle: "@ada",
+            body: "hello",
+            title: "tool",
+            board: "tools",
+            boardID: "33",
+            postedAt: origin,
+            origins: [.publicTimeline],
+            reply: Reply(handle: "@bob"),
+            boostedBy: "Carol",
+            sensitive: true,
+            spoiler: "cover"
+        )
+        try file.save(sources: [source], notes: [note])
+        let loaded = try file.load().notes[0]
+        #expect(loaded.handle == "@ada")
+        #expect(loaded.board == "tools")
+        #expect(loaded.boardID == "33")
+        #expect(loaded.reply?.handle == "@bob")
+        #expect(loaded.boostedBy == "Carol")
+        #expect(loaded.spoiler == "cover")
+        #expect(loaded.sensitive == true)
     }
 
     @Test("Two sources carrying the same id stay two rows")
