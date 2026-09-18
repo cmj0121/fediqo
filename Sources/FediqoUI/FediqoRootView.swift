@@ -45,7 +45,14 @@ public struct FediqoRootView: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
 
-    public init(http: any HTTPClient = URLSessionClient(), store: ItemStore = ItemStore()) {
+    /// `media` is where copies of pictures already on this device are kept, handed to the one
+    /// picture cache every row draws from. Nothing keeps none, which is what a preview wants.
+    public init(
+        http: any HTTPClient = URLSessionClient(),
+        store: ItemStore = ItemStore(),
+        media: (any MediaCopies)? = nil
+    ) {
+        if let media { ShellPictures.shared.disk = media }
         _session = State(initialValue: ShellSession(http: http, store: store))
     }
 

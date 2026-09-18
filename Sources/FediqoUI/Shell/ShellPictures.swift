@@ -403,6 +403,14 @@ final class ShellPictures {
 
     @ObservationIgnored let http: any HTTPClient
 
+    /// The copies of pictures already on this device, where there are any to keep.
+    ///
+    /// Read before the network and written after it, so a picture fetched once is drawn from this
+    /// device on every launch after. Nothing where the caller keeps none — a test, a preview.
+    /// Settable because `shared` is built before the app knows where its caches live; the app
+    /// hands it over once, at launch, before any row asks for a picture.
+    @ObservationIgnored var disk: (any MediaCopies)?
+
     /// Whether this cache holds its caller to unit 7's viewer-tier contract in debug builds.
     ///
     /// Scoped on intent rather than on being the shared instance. "Nothing else builds one" is
@@ -411,8 +419,13 @@ final class ShellPictures {
     /// self-documenting and visible in review, which is the whole of what it needs to be.
     @ObservationIgnored private let enforcingViewerContract: Bool
 
-    init(http: any HTTPClient = ShellPictures.live, enforcingViewerContract: Bool = true) {
+    init(
+        http: any HTTPClient = ShellPictures.live,
+        disk: (any MediaCopies)? = nil,
+        enforcingViewerContract: Bool = true
+    ) {
         self.http = http
+        self.disk = disk
         self.enforcingViewerContract = enforcingViewerContract
     }
 
@@ -459,17 +472,23 @@ final class ShellPictures {
             return running.task
         }
         let client = http
+        let disk = disk
         // Unstructured on purpose: the caller is a view's `.task`, and that is cancelled by any
         // rebuild. What it cancels has to be this view's waiting and not the work itself.
         //
         // The task is created and registered eagerly so that dedup still works and every asker
         // waits on this one piece of work; only the network call queues behind the gate.
         let started = Task { @MainActor in
-            await self.enter()
-            let answer = await Self.load(
-                key.url, using: client, maxPixels: key.tier.maxPixels
-            )
-            self.leave()
+            // **The copy on this device first, and outside the gate.** The gate bounds what is
+            // on the wire; a read from disk puts nothing there.
+            let answer: Result<Loaded, Absence>
+            if let kept = await Self.copy(of: key.url, in: disk, host: host, maxPixels: key.tier.maxPixels) {
+                answer = .success(Loaded(image: kept, fresh: nil))
+            } else {
+                await self.enter()
+                answer = await Self.load(key.url, using: client, maxPixels: key.tier.maxPixels)
+                self.leave()
+            }
             defer { self.inFlight[key] = nil }
 
             // **The guard that stops a `forget` being undone by work already running.** This
@@ -497,7 +516,15 @@ final class ShellPictures {
             guard !tagged.isEmpty else { return }
 
             switch answer {
-            case .success(let decoded):
+            case .success(let loaded):
+                let decoded = loaded.image
+                // Kept on disk **after** the guard above and on this actor, so a Clear that
+                // struck every host off this fetch also stops its bytes being written back under
+                // the host it just emptied. Under the asker's host while it is still tagged,
+                // otherwise under whoever is still waiting.
+                if let fresh = loaded.fresh, let disk, let owner = tagged.contains(host) ? host : tagged.min() {
+                    try? disk.store(fresh, host: owner, url: key.url)
+                }
                 self.keep(
                     Image(decorative: decoded, scale: key.scale),
                     cost: decoded.height * decoded.bytesPerRow,
@@ -741,6 +768,9 @@ final class ShellPictures {
             if let gone = pictures.removeValue(forKey: key) { heldBytes -= gone.cost }
             sources.removeValue(forKey: key)
         }
+        // The copies on this device go with the pictures in memory, whole: a copy on disk is
+        // filed under one host only, so there is no second source for it to survive for.
+        try? disk?.forget(host: host)
         let noted = missingSources
         for (key, tagged) in noted where tagged.contains(host) {
             var rest = tagged
@@ -875,14 +905,34 @@ final class ShellPictures {
         _ url: URL,
         using http: any HTTPClient,
         maxPixels: Int
-    ) async -> Result<CGImage, Absence> {
+    ) async -> Result<Loaded, Absence> {
         switch await body(url, using: http) {
         case .success(let data):
             guard let decoded = decode(data, maxPixels: maxPixels) else { return .failure(.refused) }
-            return .success(decoded)
+            return .success(Loaded(image: decoded, fresh: data))
         case .failure(let absence):
             return .failure(absence)
         }
+    }
+
+    /// A decoded picture, and the bytes it came from where they came off the network — which are
+    /// what is worth keeping on disk. Nothing where it was read from disk in the first place.
+    struct Loaded: Sendable {
+        let image: CGImage
+        let fresh: Data?
+    }
+
+    /// The copy of `url` already on this device under `host`, decoded, or nothing. A copy that
+    /// will not decode is treated as no copy: the network is asked, and what it sends replaces it.
+    @concurrent
+    nonisolated static func copy(
+        of url: URL,
+        in disk: (any MediaCopies)?,
+        host: String,
+        maxPixels: Int
+    ) async -> CGImage? {
+        guard let data = disk?.data(host: host, url: url), data.count <= maxBytes else { return nil }
+        return decode(data, maxPixels: maxPixels)
     }
 
     /// What the response carries, and only if it is worth carrying.
