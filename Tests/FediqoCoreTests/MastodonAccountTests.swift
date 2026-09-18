@@ -133,6 +133,35 @@ struct MastodonAccountTests {
         #expect(!(await server.paths.contains("/api/v1/timelines/list/42")))
     }
 
+    @Test("A reload asks only what it names: one chosen list, and neither Home nor the list names")
+    func reloadAsksWhatItNames() async throws {
+        let work = ListSubscription(id: "7", name: "Work")
+        let (account, store, server, _) = try await account([
+            "/api/v1/lists": Self.lists(("42", "Friends"), ("7", "Work")),
+            "/api/v1/timelines/home": Self.timeline("1"),
+            "/api/v1/timelines/list/42": Self.timeline("3"),
+            "/api/v1/timelines/list/7": Self.timeline("4"),
+        ], lists: [Self.friends, work])
+        #expect(try await account.read(home: false, lists: ["42", "99"]))
+        #expect(await categories(store) == ["3": [.list(id: "42")]])
+        #expect(await server.paths == ["/api/v1/timelines/list/42"], "99 is not chosen, so it asks nothing")
+    }
+
+    @Test("A reload of Home alone asks Home alone; a failed read says not everything came")
+    func reloadHomeAlone() async throws {
+        let (account, store, server, _) = try await account([
+            "/api/v1/timelines/home": Self.timeline("1"),
+        ], lists: [Self.friends])
+        #expect(try await account.read(home: true, lists: []))
+        #expect(await categories(store) == ["1": [.home]])
+        #expect(await server.paths == ["/api/v1/timelines/home"])
+
+        let (failing, _, _, _) = try await self.account([
+            "/api/v1/timelines/home": .json("{}", status: 500),
+        ])
+        #expect(try await failing.read(home: true, lists: []) == false)
+    }
+
     @Test("Choosing lists keeps the choice and reads only the lists not chosen before")
     func choose() async throws {
         let (account, store, server, _) = try await account([

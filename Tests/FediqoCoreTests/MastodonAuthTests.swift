@@ -111,7 +111,9 @@ struct MastodonAuthTests {
     func registers() async throws {
         let server = MastodonFixture.server()
         let app = try await MastodonOAuth(host: host, sender: server).register()
-        #expect(app == MastodonFixture.app)
+        #expect(app == MastodonApp(
+            host: host, clientID: "cid", clientSecret: "csecret", scopes: MastodonOAuth.scopes
+        ), "a registration records the scopes it was made for")
 
         let request = try #require(await server.requests.first)
         #expect(request.httpMethod == "POST")
@@ -121,7 +123,7 @@ struct MastodonAuthTests {
         let form = await server.form("/api/v1/apps")
         #expect(form["client_name"] == "Fediqo")
         #expect(form["redirect_uris"] == "fediqo://oauth")
-        #expect(form["scopes"] == "read:statuses read:lists read:accounts")
+        #expect(form["scopes"] == "read:statuses read:lists read:accounts read:search")
     }
 
     @Test("A refused registration is its status; an unreadable one is unreadable")
@@ -151,7 +153,7 @@ struct MastodonAuthTests {
             "response_type": "code",
             "client_id": "cid",
             "redirect_uri": "fediqo://oauth",
-            "scope": "read:statuses read:lists read:accounts",
+            "scope": "read:statuses read:lists read:accounts read:search",
             "state": "st",
             "code_challenge": "chal",
             "code_challenge_method": "S256",
@@ -189,6 +191,11 @@ struct MastodonAuthTests {
         #expect(throws: MastodonSignInError.denied) {
             try MastodonOAuth.code(
                 from: URL(string: "fediqo://oauth?error=access_denied&state=st")!, state: "st"
+            )
+        }
+        #expect(throws: MastodonSignInError.invalidScope) {
+            try MastodonOAuth.code(
+                from: URL(string: "fediqo://oauth?error=invalid_scope&state=st")!, state: "st"
             )
         }
         #expect(throws: MastodonSignInError.unreadable) {
@@ -231,7 +238,7 @@ struct MastodonAuthTests {
         #expect(exchange["client_id"] == "cid")
         #expect(exchange["client_secret"] == "csecret")
         #expect(exchange["redirect_uri"] == "fediqo://oauth")
-        #expect(exchange["scope"] == "read:statuses read:lists read:accounts")
+        #expect(exchange["scope"] == "read:statuses read:lists read:accounts read:search")
         // The verifier sent is the one whose challenge the page carried.
         let verifier = try #require(exchange["code_verifier"])
         #expect(PKCE(verifier: verifier).challenge == FixtureBrowser.query(page, "code_challenge"))
@@ -451,6 +458,13 @@ struct MastodonAuthTests {
             MastodonKeychain.attributes(for: MastodonFixture.app)[kSecValueData as String] as? Data
         )
         #expect(MastodonKeychain.Wire.decodeApp(app, host: host) == MastodonFixture.app)
+        // The scopes a registration was made for go with it; one kept before they were recorded
+        // reads back with none.
+        let scoped = MastodonApp(host: host, clientID: "cid", clientSecret: "csecret", scopes: MastodonOAuth.scopes)
+        let scopedData = try #require(MastodonKeychain.attributes(for: scoped)[kSecValueData as String] as? Data)
+        #expect(MastodonKeychain.Wire.decodeApp(scopedData, host: host)?.scopes == MastodonOAuth.scopes)
+        let older = Data(#"{"clientID":"cid","clientSecret":"csecret"}"#.utf8)
+        #expect(MastodonKeychain.Wire.decodeApp(older, host: host)?.scopes == nil)
         #expect(MastodonKeychain.Wire.decodeApp(Data("junk".utf8), host: host) == nil)
     }
 
