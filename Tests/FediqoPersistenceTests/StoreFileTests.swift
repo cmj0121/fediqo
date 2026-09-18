@@ -35,18 +35,18 @@ struct StoreFileTests {
     }
 
     @Test("Sources and slim notes survive a save and load")
-    func roundTrip() throws {
+    func roundTrip() async throws {
         let file = try StoreFile(database: DatabaseQueue())
         let forum = Source(host: "forum.example", kind: .discuz, boards: [BoardSubscription(fid: 33, name: "a")])
         let saved = note(id: "https://first.example/users/ada/statuses/1", origins: [.publicTimeline, .trending])
-        try file.save(sources: [mastodon, forum], notes: [saved])
+        try await file.save(sources: [mastodon, forum], notes: [saved])
         let loaded = try file.load()
         #expect(loaded.sources == [mastodon, forum])
         #expect(loaded.notes == [saved])
     }
 
     @Test("A loaded note has every row fact and its multimedia hyperlinks")
-    func rowFactsWithMultimedia() throws {
+    func rowFactsWithMultimedia() async throws {
         let file = try StoreFile(database: DatabaseQueue())
         let forum = Source(host: "forum.example", kind: .discuz)
         let picture = URL(string: "https://forum.example/a.png")
@@ -56,34 +56,34 @@ struct StoreFileTests {
             avatarURL: picture, attachments: [FediqoCore.Attachment(kind: .image, url: picture)],
             sensitive: true, spoiler: "cover"
         )
-        try file.save(sources: [forum], notes: [saved])
+        try await file.save(sources: [forum], notes: [saved])
         #expect(try file.load().notes == [saved])
     }
 
     @Test("A reply whose parent's handle is unknown comes back a reply")
-    func replyWithoutHandle() throws {
+    func replyWithoutHandle() async throws {
         let file = try StoreFile(database: DatabaseQueue())
         let saved = [note(id: "1", reply: Reply(handle: nil)), note(id: "2")]
-        try file.save(sources: [mastodon], notes: saved)
+        try await file.save(sources: [mastodon], notes: saved)
         #expect(Set(try file.load().notes) == Set(saved))
     }
 
     @Test("Unset sensitive and spoiler stay unset, apart from false and empty", arguments: [
         (Bool?.none, String?.none), (false, ""), (true, "cover"),
     ])
-    func unsetStaysUnset(sensitive: Bool?, spoiler: String?) throws {
+    func unsetStaysUnset(sensitive: Bool?, spoiler: String?) async throws {
         let file = try StoreFile(database: DatabaseQueue())
         let saved = note(sensitive: sensitive, spoiler: spoiler)
-        try file.save(sources: [mastodon], notes: [saved])
+        try await file.save(sources: [mastodon], notes: [saved])
         #expect(try file.load().notes == [saved])
     }
 
     @Test("Row facts survive a relaunch on the same directory")
-    func rowFactsSurviveRelaunch() throws {
+    func rowFactsSurviveRelaunch() async throws {
         let dir = scratch()
         defer { try? FileManager.default.removeItem(at: dir) }
         let saved = note(board: "tools", boardID: "33", reply: Reply(handle: nil), boostedBy: "Carol", sensitive: true, spoiler: "")
-        try StoreFile(at: dir).save(sources: [mastodon], notes: [saved])
+        try await StoreFile(at: dir).save(sources: [mastodon], notes: [saved])
         let opened = StoreFile.open(at: dir)
         #expect(opened.setAside == nil)
         #expect(opened.notes == [saved])
@@ -102,7 +102,7 @@ struct StoreFileTests {
         let store = ItemStore(sources: [mastodon], notes: [old, new])
         #expect(await store.setRetention(months: 1, from: origin.addingTimeInterval(40 * 86_400)) == 1)
         let snapshot = await store.snapshot()
-        try StoreFile(at: dir).save(sources: snapshot.sources, notes: snapshot.notes)
+        try await StoreFile(at: dir).save(sources: snapshot.sources, notes: snapshot.notes)
 
         let opened = StoreFile.open(at: dir)
         #expect(opened.notes.map(\.id) == ["new"])
@@ -110,19 +110,19 @@ struct StoreFileTests {
     }
 
     @Test("A note whose host has no source row is dropped on load")
-    func orphanDropped() throws {
+    func orphanDropped() async throws {
         let file = try StoreFile(database: DatabaseQueue())
         let kept = note(id: "1")
         let orphan = note(id: "2", source: Source(host: "gone.example", kind: .mastodon))
-        try file.save(sources: [mastodon], notes: [kept, orphan])
+        try await file.save(sources: [mastodon], notes: [kept, orphan])
         #expect(try file.load().notes == [kept])
     }
 
     @Test("A note takes its source, boards and all, from the source row")
-    func sourceFromRow() throws {
+    func sourceFromRow() async throws {
         let file = try StoreFile(database: DatabaseQueue())
         let forum = Source(host: "forum.example", kind: .discuz, boards: [BoardSubscription(fid: 3, name: "x")])
-        try file.save(sources: [forum], notes: [note(source: Source(host: "forum.example", kind: .discuz))])
+        try await file.save(sources: [forum], notes: [note(source: Source(host: "forum.example", kind: .discuz))])
         #expect(try file.load().notes.first?.source == forum)
     }
 
@@ -155,10 +155,10 @@ struct StoreFileTests {
     }
 
     @Test("Every attachment field, every emoji, and the post's address survive a save and load")
-    func multimediaRoundTrip() throws {
+    func multimediaRoundTrip() async throws {
         let file = try StoreFile(database: DatabaseQueue())
         let saved = multimedia
-        try file.save(sources: [mastodon], notes: [saved])
+        try await file.save(sources: [mastodon], notes: [saved])
         let loaded = try #require(try file.load().notes.first)
         #expect(loaded == saved)
         // Spelled out, so a `==` that stopped comparing a field could not pass this quietly.
@@ -174,33 +174,33 @@ struct StoreFileTests {
     }
 
     @Test("A note with no multimedia comes back with none")
-    func noMultimedia() throws {
+    func noMultimedia() async throws {
         let file = try StoreFile(database: DatabaseQueue())
         let saved = note()
-        try file.save(sources: [mastodon], notes: [saved])
+        try await file.save(sources: [mastodon], notes: [saved])
         let loaded = try #require(try file.load().notes.first)
         #expect(loaded.attachments.isEmpty && loaded.emojis.isEmpty)
         #expect(loaded.avatarURL == nil && loaded.url == nil)
     }
 
     @Test("Multimedia survives a relaunch on the same directory")
-    func multimediaSurvivesRelaunch() throws {
+    func multimediaSurvivesRelaunch() async throws {
         let dir = scratch()
         defer { try? FileManager.default.removeItem(at: dir) }
-        try StoreFile(at: dir).save(sources: [mastodon], notes: [multimedia])
+        try await StoreFile(at: dir).save(sources: [mastodon], notes: [multimedia])
         let opened = StoreFile.open(at: dir)
         #expect(opened.setAside == nil)
         #expect(opened.notes == [multimedia])
     }
 
     @Test("Two sources carrying the same id stay two rows")
-    func twoSourcesTwoRows() throws {
+    func twoSourcesTwoRows() async throws {
         let file = try StoreFile(database: DatabaseQueue())
         let one = Source(host: "a.example", kind: .mastodon)
         let two = Source(host: "b.example", kind: .mastodon)
         let uri = "https://origin.example/users/ada/statuses/1"
         let saved = [note(id: uri, source: one), note(id: uri, source: two, origins: [.trending])]
-        try file.save(sources: [one, two], notes: saved)
+        try await file.save(sources: [one, two], notes: saved)
         #expect(Set(try file.load().notes) == Set(saved))
     }
 
@@ -221,45 +221,45 @@ struct StoreFileTests {
     }
 
     @Test("A title and the source's kind come back")
-    func titleAndKind() throws {
+    func titleAndKind() async throws {
         let file = try StoreFile(database: DatabaseQueue())
         let forum = Source(host: "forum.example", kind: .discuz)
         let saved = note(id: "tid-7", source: forum, title: "A thread", origins: [.trending])
-        try file.save(sources: [forum], notes: [saved])
+        try await file.save(sources: [forum], notes: [saved])
         let loaded = try file.load()
         #expect(loaded.notes == [saved])
         #expect(loaded.sources.first?.kind == .discuz)
     }
 
     @Test("A note seen in no list comes back seen in no list")
-    func emptyOrigins() throws {
+    func emptyOrigins() async throws {
         let file = try StoreFile(database: DatabaseQueue())
-        try file.save(sources: [mastodon], notes: [note(origins: [])])
+        try await file.save(sources: [mastodon], notes: [note(origins: [])])
         #expect(try file.load().notes.first?.origins == [])
     }
 
     @Test("Board names holding separators, quotes and emoji survive", arguments: [
         "a\u{1e}b", "a\u{1f}b", "\u{1f}", "", "\"quoted\", [brackets]", "水 🌊 board", "comma,semi;colon",
     ])
-    func oddBoardNames(name: String) throws {
+    func oddBoardNames(name: String) async throws {
         let file = try StoreFile(database: DatabaseQueue())
         let boards = [BoardSubscription(fid: 1, name: name), BoardSubscription(fid: 2, name: "plain")]
-        try file.save(sources: [Source(host: "forum.example", kind: .discuz, boards: boards)], notes: [])
+        try await file.save(sources: [Source(host: "forum.example", kind: .discuz, boards: boards)], notes: [])
         #expect(try file.load().sources.first?.boards == boards)
     }
 
     @Test("A second StoreFile on the same directory reads what the first saved")
-    func reopenSameDirectory() throws {
+    func reopenSameDirectory() async throws {
         let dir = scratch()
         defer { try? FileManager.default.removeItem(at: dir) }
         let source = Source(host: "forum.example", kind: .discuz, boards: [BoardSubscription(fid: 3, name: "x")])
         let saved = note(source: source, origins: [.trending])
-        try StoreFile(at: dir).save(sources: [source], notes: [saved])
+        try await StoreFile(at: dir).save(sources: [source], notes: [saved])
         let again = try StoreFile(at: dir)
         let loaded = try again.load()
         #expect(loaded.sources == [source])
         #expect(loaded.notes == [saved])
-        try again.save(sources: [], notes: [])
+        try await again.save(sources: [], notes: [])
         #expect(try StoreFile(at: dir).load().sources.isEmpty)
     }
 
@@ -274,11 +274,11 @@ struct StoreFileOpenTests {
     private let garbage = Data("this is not a database, and it is the reader's only copy".utf8)
 
     @Test("A healthy index opens with what it held and sets nothing aside")
-    func healthy() throws {
+    func healthy() async throws {
         let dir = scratch()
         defer { try? FileManager.default.removeItem(at: dir) }
         let source = Source(host: "first.example", kind: .mastodon)
-        try StoreFile(at: dir).save(sources: [source], notes: [])
+        try await StoreFile(at: dir).save(sources: [source], notes: [])
         let opened = StoreFile.open(at: dir)
         #expect(opened.file != nil)
         #expect(opened.sources == [source])
@@ -296,7 +296,7 @@ struct StoreFileOpenTests {
     }
 
     @Test("A corrupt index is moved aside, byte for byte, and a save does not touch it")
-    func corruptIsSetAside() throws {
+    func corruptIsSetAside() async throws {
         let dir = scratch()
         defer { try? FileManager.default.removeItem(at: dir) }
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -309,7 +309,7 @@ struct StoreFileOpenTests {
         #expect(opened.sources.isEmpty && opened.notes.isEmpty)
         let file = try #require(opened.file)
         let source = Source(host: "first.example", kind: .mastodon)
-        try file.save(sources: [source], notes: [])
+        try await file.save(sources: [source], notes: [])
         #expect(try Data(contentsOf: aside) == garbage)
         #expect(try StoreFile(at: dir).load().sources == [source])
     }
@@ -330,18 +330,18 @@ struct StoreFileOpenTests {
     }
 
     @Test("An index whose migration fails is set aside, not migrated over")
-    func failedMigrationIsSetAside() throws {
+    func failedMigrationIsSetAside() async throws {
         let dir = scratch()
         defer { try? FileManager.default.removeItem(at: dir) }
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         // A `source` table the migrator did not make: v1 cannot create its own over it.
-        try DatabaseQueue(path: dir.appendingPathComponent("index.sqlite").path).write { db in
+        try await DatabaseQueue(path: dir.appendingPathComponent("index.sqlite").path).write { db in
             try db.execute(sql: "CREATE TABLE source (anything TEXT)")
             try db.execute(sql: "INSERT INTO source VALUES ('keep me')")
         }
         let opened = StoreFile.open(at: dir)
         let aside = try #require(opened.setAside)
-        let kept = try DatabaseQueue(path: aside.path).read { db in
+        let kept = try await DatabaseQueue(path: aside.path).read { db in
             try String.fetchOne(db, sql: "SELECT anything FROM source")
         }
         #expect(kept == "keep me")
@@ -349,12 +349,12 @@ struct StoreFileOpenTests {
     }
 
     @Test("A row that cannot be decoded fails the load, and the file is set aside")
-    func undecodableRowIsSetAside() throws {
+    func undecodableRowIsSetAside() async throws {
         let dir = scratch()
         defer { try? FileManager.default.removeItem(at: dir) }
         let file = try StoreFile(at: dir)
-        try file.save(sources: [Source(host: "forum.example", kind: .discuz)], notes: [])
-        try file.db.write { db in
+        try await file.save(sources: [Source(host: "forum.example", kind: .discuz)], notes: [])
+        try await file.db.write { db in
             try db.execute(sql: "UPDATE source SET boards = 'not json'")
         }
         let opened = StoreFile.open(at: dir)

@@ -103,8 +103,10 @@ public struct StoreFile: Sendable {
         }
     }
 
-    public func save(sources: [Source], notes: [Note]) throws {
-        try db.write { db in
+    /// Empties both tables and writes `sources` and `notes` in their place, in one transaction,
+    /// on GRDB's queue rather than the caller's. The app saves through `StoreSaver`.
+    public func save(sources: [Source], notes: [Note]) async throws {
+        try await db.write { db in
             try NoteRecord.deleteAll(db)
             try SourceRecord.deleteAll(db)
             for source in sources {

@@ -8,6 +8,10 @@ public actor ItemStore {
     /// The oldest a note may be posted and still be held, or nil to keep everything forever —
     /// the default. The reader's drop by time (#7), held here so every way in obeys it.
     private(set) var retention: Date?
+    /// Counts the changes to what a save writes: every call that may have changed a source or a
+    /// note bumps it. A saver that remembers the revision it last wrote skips a save with nothing
+    /// new in it. Starts at 0 for any store, a relaunched one included.
+    public private(set) var revision = 0
 
     public init() {}
 
@@ -29,6 +33,7 @@ public actor ItemStore {
     public func add(_ source: Source) {
         if sourceList.contains(where: { $0.host == source.host }) { return }
         sourceList.append(source)
+        revision += 1
     }
 
     /// Restates which boards a source is subscribed to, where that source is here.
@@ -48,6 +53,7 @@ public actor ItemStore {
         guard let index = sourceList.firstIndex(where: { $0.host == host }) else { return }
         let existing = sourceList[index]
         sourceList[index] = Source(host: existing.host, kind: existing.kind, boards: boards)
+        revision += 1
     }
 
     /// Takes notes in. The same item through one source stays one row: the first copy wins and
@@ -56,6 +62,8 @@ public actor ItemStore {
     ///
     /// A note posted before the retention window is refused: the reader chose not to keep it.
     public func ingest(_ incoming: [Note]) {
+        guard !incoming.isEmpty else { return }
+        revision += 1
         for note in incoming where retention.map({ note.postedAt >= $0 }) ?? true {
             let key = note.key
             if var existing = notes[key] {
@@ -77,6 +85,7 @@ public actor ItemStore {
         let host = raw.lowercased()
         sourceList.removeAll { $0.host == host }
         notes = notes.filter { $0.key.host != host }
+        revision += 1
     }
 
     public func sources() -> [Source] {
@@ -93,6 +102,7 @@ public actor ItemStore {
         guard let retention else { return 0 }
         let before = notes.count
         notes = notes.filter { $0.value.postedAt >= retention }
+        if notes.count != before { revision += 1 }
         return before - notes.count
     }
 
@@ -102,8 +112,9 @@ public actor ItemStore {
     /// `all()`'s order and should not pay for it; and asking for the sources and the notes in two
     /// awaits would let an ingest or a remove land between them, writing notes whose source is
     /// gone. This is the counterpart of `init(sources:notes:)`.
-    public func snapshot() -> (sources: [Source], notes: [Note]) {
-        (sourceList, Array(notes.values))
+    /// `revision` is the one this snapshot is of, read in the same hop.
+    public func snapshot() -> (sources: [Source], notes: [Note], revision: Int) {
+        (sourceList, Array(notes.values), revision)
     }
 
     public func all() -> [Note] {
