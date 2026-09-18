@@ -78,7 +78,14 @@ public struct DummyMarks: Hashable, Sendable {
 }
 
 public struct DummyItem: Identifiable, Hashable, Sendable {
+    /// Unique across sources: two hosts carrying one URI are two rows (#10).
     public let id: String
+    /// The item's id as the source sent it.
+    public let noteID: String
+
+    public static func rowID(host: String, note: String) -> String {
+        "\(host.lowercased())\u{1e}\(note)"
+    }
     public let source: DummySource
     public let author: String
     public let handle: String?
@@ -256,8 +263,8 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// real answer, meaning "nothing else is joined", and it should be written down where it is
     /// true rather than inherited by omission where it is not.
     public init(_ note: Note, among sources: [Source]) {
-        // Unique across sources: two hosts carrying one URI are two rows (#10).
-        id = "\(note.source.host)\u{1e}\(note.id)"
+        noteID = note.id
+        id = Self.rowID(host: note.source.host, note: note.id)
         source = DummySource.unsigned(note.source.host, kind: Self.shape(of: note.source.kind))
         author = note.author
         handle = note.handle
