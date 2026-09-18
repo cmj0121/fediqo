@@ -10,11 +10,9 @@ public struct StoreFile: Sendable {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         var excluded = URLResourceValues()
         excluded.isExcludedFromBackup = true
-        var directory = directory
-        try directory.setResourceValues(excluded)
-        let url = directory.appendingPathComponent(Self.indexName)
-        db = try DatabaseQueue(path: url.path)
-        try migrator.migrate(db)
+        var marked = directory
+        try marked.setResourceValues(excluded)
+        try self.init(database: DatabaseQueue(path: directory.appendingPathComponent(Self.indexName).path))
     }
 
     public init(database: DatabaseQueue) throws {
