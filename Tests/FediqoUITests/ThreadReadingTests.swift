@@ -324,15 +324,14 @@ struct ThreadReadingTests {
         // A letter belongs to the draft while composing, and to a focused field always.
         #expect(DummyCommand.from("s", typing: true) == nil)
         #expect(DummyCommand.from("s", fieldFocused: true) == nil)
-        // Nothing that already meant something changed meaning, and — the half worth saying —
-        // **no new key was taken.** `l` was chosen and written before the reader named `s`; it
-        // went back.
+        // Nothing that already meant something changed meaning. `r` is the launch overlay;
+        // these still have no job.
         #expect(DummyCommand.from("v") == .viewAttachment)
         #expect(DummyCommand.from("a") == .playAttachment)
         #expect(DummyCommand.from("m") == .nextAttachment)
         #expect(DummyCommand.from("\r") == .expandPost)
         #expect(DummyCommand.from("q") == .back)
-        for free in ["l", "r", "e", "o", "h"] {
+        for free in ["l", "e", "o", "h"] {
             #expect(DummyCommand.from(Character(free)) == nil, "\(free) is no longer free")
         }
     }
@@ -347,7 +346,7 @@ struct ThreadReadingTests {
     func theGuideSaysWhatSDoesNow() throws {
         let line = try #require(DummyShortcut.all.first { $0.commands == [.reveal] })
         #expect(line.keys == ["s"])
-        #expect(line.group == .doing)
+        #expect(line.group == .timeline)
         // One line for one key. `s` having two jobs must not become two lines claiming two keys.
         #expect(DummyShortcut.all.filter { $0.keys == ["s"] }.count == 1)
 

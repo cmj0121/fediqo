@@ -210,6 +210,37 @@ struct DummyCommandTests {
         #expect(DummyCommand.from("?", typing: true) == nil)
     }
 
+    @Test("The guide is grouped by tab")
+    func theGuideIsGroupedByTab() {
+        #expect(DummyShortcutGroup.allCases == [.timeline, .app])
+        #expect(DummyShortcut.lines(in: .timeline).allSatisfy { $0.group == .timeline })
+        #expect(DummyShortcut.lines(in: .app).allSatisfy { $0.group == .app })
+        #expect(
+            DummyShortcut.lines(in: .timeline).count + DummyShortcut.lines(in: .app).count
+                == DummyShortcut.all.count
+        )
+        #expect(!DummyShortcut.lines(in: .timeline).isEmpty)
+        #expect(!DummyShortcut.lines(in: .app).isEmpty)
+        #expect(L10n.t("shortcut.group.moving") == "shortcut.group.moving")
+        #expect(L10n.t("shortcut.group.timeline", language: .english) == "Timeline")
+        #expect(L10n.t("shortcut.group.app", language: .english) == "Every tab")
+        #expect(L10n.t("shortcut.group.timeline", language: .taiwanese) == "時間軸")
+        #expect(L10n.t("shortcut.group.app", language: .taiwanese) == "每個分頁")
+    }
+
+    @Test("r plays the launch again")
+    func rReplaysTheLaunch() {
+        #expect(DummyCommand.from("r") == .replayLanding)
+        #expect(DummyCommand.from("r", typing: true) == nil)
+        #expect(DummyCommand.from("r", fieldFocused: true) == nil)
+        #expect(DummyCommand.consumes("r", did: false))
+        let line = DummyShortcut.all.first { $0.commands == [.replayLanding] }
+        #expect(line?.keys == ["r"])
+        #expect(line?.group == .app)
+        #expect(L10n.t("shortcut.landing", language: .english) == "Reload from the launch")
+        #expect(L10n.t("shortcut.landing", language: .taiwanese) == "從啟動重新載入")
+    }
+
     @Test("The guide names every dummy command")
     func guideNamesEveryCommand() {
         let named = Set(DummyShortcut.all.flatMap(\.commands))
@@ -219,7 +250,8 @@ struct DummyCommandTests {
         #expect(L10n.t("shortcut.tabs") != "shortcut.tabs")
         #expect(L10n.t("shortcut.pages") != "shortcut.pages")
         #expect(Set(DummyShortcut.all.map(\.group)) == Set(DummyShortcutGroup.allCases))
-        #expect(L10n.t("shortcut.group.moving") != "shortcut.group.moving")
+        #expect(L10n.t("shortcut.group.timeline") != "shortcut.group.timeline")
+        #expect(L10n.t("shortcut.group.app") != "shortcut.group.app")
     }
 
     @Test("Letters belong to the draft while composing")

@@ -48,4 +48,17 @@ struct LandingTests {
         #expect(Landing.duration > 0)
         #expect(Landing.hold > 0)
     }
+
+    /// `r` remounts this value from rest. A flip already spent must not be the next first frame.
+    @Test("A dismissed launch can be shown again, unturned")
+    func aDismissedLaunchCanBeShownAgain() {
+        var launch = Landing.start(reduceMotion: false)
+        launch.flipVertical()
+        launch.flipHorizontal()
+        launch.dismiss()
+        let again = Landing.start(reduceMotion: false)
+        #expect(again.showing)
+        #expect(again.pitch == 0)
+        #expect(again.yaw == 0)
+    }
 }
