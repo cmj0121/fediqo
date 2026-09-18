@@ -35,6 +35,21 @@ public struct StoreFile: Sendable {
         }
     }
 
+    public func loadSignedIn() throws -> Set<String> {
+        try db.read { db in
+            Set(try String.fetchAll(db, sql: "SELECT host FROM signed_in"))
+        }
+    }
+
+    public func saveSignedIn(_ hosts: Set<String>) throws {
+        try db.write { db in
+            try db.execute(sql: "DELETE FROM signed_in")
+            for host in hosts {
+                try db.execute(sql: "INSERT INTO signed_in (host) VALUES (?)", arguments: [host])
+            }
+        }
+    }
+
     public func save(sources: [Source], notes: [Note]) throws {
         try db.write { db in
             try db.execute(sql: "DELETE FROM note")
@@ -85,6 +100,11 @@ private var migrator: DatabaseMigrator {
             t.add(column: "avatar_url", .text)
             t.add(column: "attachments", .text).notNull().defaults(to: "")
             t.add(column: "url", .text)
+        }
+    }
+    migrator.registerMigration("v4-signed-in") { db in
+        try db.create(table: "signed_in") { t in
+            t.primaryKey("host", .text)
         }
     }
     return migrator
