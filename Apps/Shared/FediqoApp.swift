@@ -8,6 +8,8 @@ import SwiftUI
 struct FediqoApp: App {
     private let store: ItemStore
     private let file: StoreFile?
+    /// `nil` when Caches could not be made: pictures are then read from their hyperlinks only.
+    private let media: MediaCache?
     @Environment(\.scenePhase) private var scenePhase
 
     /// `file` is `nil` when the index could not be read and could not be set aside either:
@@ -16,11 +18,12 @@ struct FediqoApp: App {
         let opened = StoreFile.openApplicationSupport()
         self.file = opened.file
         self.store = ItemStore(sources: opened.sources, notes: opened.notes)
+        self.media = try? MediaCache.caches()
     }
 
     var body: some Scene {
         WindowGroup {
-            FediqoRootView(store: store)
+            FediqoRootView(store: store, media: media)
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .background {
                         Task { await save() }
