@@ -8,6 +8,45 @@ struct StoreTests {
     private let other = Source(host: "second.example", kind: .mastodon)
     private let origin = Date(timeIntervalSince1970: 1_700_000_000)
 
+    @Test("A relaunch builds the store from a snapshot")
+    func initLoadsASnapshot() async {
+        let forum = Source(host: "forum.example", kind: .discuz)
+        let kept = note(id: "kept", postedAt: origin, origins: [.trending], from: forum)
+        let store = ItemStore(sources: [forum, source], notes: [kept])
+        #expect(await store.sources().map(\.host) == ["forum.example", "first.example"])
+        #expect(await store.all().map(\.id) == ["kept"])
+        #expect(await store.trends().map(\.id) == ["kept"])
+    }
+
+    @Test("snapshot() hands back what init took, for a save to write")
+    func snapshotRoundTrips() async {
+        let forum = Source(host: "forum.example", kind: .discuz, boards: [BoardSubscription(fid: 3, name: "x")])
+        let one = note(id: "1", postedAt: origin, origins: [.trending], from: forum)
+        let two = note(id: "2", postedAt: origin.addingTimeInterval(60), origins: [.publicTimeline])
+        let store = ItemStore(sources: [source, forum], notes: [one, two])
+        await store.ingest([note(id: "3", postedAt: origin, origins: [])])
+        await store.remove(host: "forum.example")
+        let snapshot = await store.snapshot()
+        #expect(snapshot.sources == [source])
+        #expect(Set(snapshot.notes.map(\.key)) == Set(["2", "3"].map { NoteKey(host: "first.example", id: $0) }))
+        let reloaded = ItemStore(sources: snapshot.sources, notes: snapshot.notes)
+        #expect(await reloaded.all() == store.all())
+    }
+
+    @Test("A snapshot with duplicates loads instead of trapping")
+    func initToleratesDuplicates() async {
+        let first = note(id: "1", postedAt: origin, origins: [.publicTimeline], body: "first")
+        let second = note(id: "1", postedAt: origin, origins: [.trending], body: "second")
+        let store = ItemStore(
+            sources: [source, Source(host: "First.Example", kind: .pleroma)],
+            notes: [first, second]
+        )
+        #expect(await store.sources() == [source])
+        let all = await store.all()
+        #expect(all.map(\.body) == ["second"])
+        #expect(all.first?.origins == [.trending])
+    }
+
     @Test("Adding a host twice keeps the first and insertion order")
     func addIsIdempotentByHost() async {
         let store = ItemStore()
