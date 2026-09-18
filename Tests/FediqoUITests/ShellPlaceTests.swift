@@ -158,7 +158,8 @@ struct EmptySessionTests {
         )
     }
 
-    /// **`all` on its own is now enough, and that is the change D27 forced.**
+    /// **`all` on its own is enough.** The timelines are All and Trends, and a forum is offered
+    /// All alone.
     ///
     /// This used to require Trends as well, which held while every source that could be joined
     /// was a microblog. A forum has no trending read at all, so F4 stopped offering it one — and
@@ -167,8 +168,9 @@ struct EmptySessionTests {
     @Test("Timeline enables on All, with or without Trends")
     func timelineEnablesOnAll() {
         #expect(ShellAvailability(queryIDs: ["all"]).allows(.timeline))
-        // A board query is not a substitute for All: All is what the place is built around, and
-        // a query list without it is a list nothing rebuilt.
+        // Nothing is a substitute for All — not Trends, and not a stale id such as the old board
+        // tabs saved: All is what the place is built around, and a list without it is one
+        // nothing rebuilt.
         #expect(!ShellAvailability(queryIDs: ["trends"]).allows(.timeline))
         #expect(!ShellAvailability(queryIDs: ["board:forum.example:33"]).allows(.timeline))
         let ready = ShellAvailability(queryIDs: ["all", "trends"])
