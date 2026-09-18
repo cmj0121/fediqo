@@ -10,11 +10,9 @@ public struct StoreFile: Sendable {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         var excluded = URLResourceValues()
         excluded.isExcludedFromBackup = true
-        var directory = directory
-        try directory.setResourceValues(excluded)
-        let url = directory.appendingPathComponent("index.sqlite")
-        db = try DatabaseQueue(path: url.path)
-        try migrator.migrate(db)
+        var marked = directory
+        try marked.setResourceValues(excluded)
+        try self.init(database: DatabaseQueue(path: directory.appendingPathComponent(Self.indexName).path))
     }
 
     public init(database: DatabaseQueue) throws {
@@ -22,10 +20,81 @@ public struct StoreFile: Sendable {
         try migrator.migrate(db)
     }
 
-    public static func applicationSupport() throws -> StoreFile {
-        let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return try StoreFile(at: root.appendingPathComponent("Fediqo", isDirectory: true))
+    /// What a launch found on disk: the file to write back to, if there is one to trust, and
+    /// what it held.
+    public struct Opened: Sendable {
+        /// Where saves go. `nil` means this run must not write at all — see `open(at:now:)`.
+        public let file: StoreFile?
+        public let sources: [Source]
+        public let notes: [Note]
+        /// Where an unreadable index was moved, when one was. It is left there for a person, or a
+        /// later version of this code, to look at; nothing in the app reads it again.
+        public let setAside: URL?
+
+        init(file: StoreFile?, sources: [Source] = [], notes: [Note] = [], setAside: URL? = nil) {
+            self.file = file
+            self.sources = sources
+            self.notes = notes
+            self.setAside = setAside
+        }
     }
+
+    /// Opens the index in `directory` and reads it, failing closed.
+    ///
+    /// **An index that cannot be read is never written over.** `save` begins by emptying both
+    /// tables, so a launch that shrugged off a failed read — a corrupt page, a migration this
+    /// build cannot run, a row it cannot decode — and started empty would, at the first save,
+    /// turn one bad launch into everything the reader had, gone. So a failure here moves the
+    /// file aside under a timestamped name before a fresh one is made in its place, and when it
+    /// cannot even do that the run gets no file at all: it reads nothing and saves nothing, and
+    /// whatever is on disk is still there next launch.
+    ///
+    /// The decision lives here rather than in the app so it can be tested against a real file.
+    public static func open(at directory: URL, now: Date = Date()) -> Opened {
+        do {
+            let file = try StoreFile(at: directory)
+            let snapshot = try file.load()
+            return Opened(file: file, sources: snapshot.sources, notes: snapshot.notes)
+        } catch {
+            guard let aside = try? setAside(in: directory, now: now),
+                  let fresh = try? StoreFile(at: directory)
+            else { return Opened(file: nil) }
+            return Opened(file: fresh, setAside: aside)
+        }
+    }
+
+    /// `open(at:now:)` on the index this app keeps in Application Support.
+    public static func openApplicationSupport() -> Opened {
+        let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return open(at: root.appendingPathComponent("Fediqo", isDirectory: true))
+    }
+
+    /// Moves `index.sqlite` and any journal SQLite left beside it to
+    /// `index-unreadable-<time>-<random>`. The time, to the millisecond, is for the person who
+    /// finds it; the random part is what makes the name unique, so a second failed launch in the
+    /// same instant never lands on the first one's copy.
+    /// Throws when there is no index to move, which is the case where the directory itself could
+    /// not be made: then there is nothing to protect by moving, and nowhere safe to write either.
+    private static func setAside(in directory: URL, now: Date) throws -> URL {
+        let manager = FileManager.default
+        let index = directory.appendingPathComponent(indexName)
+        guard manager.fileExists(atPath: index.path) else { throw CocoaError(.fileNoSuchFile) }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withYear, .withMonth, .withDay, .withTime, .withFractionalSeconds, .withTimeZone]
+        let random = UUID().uuidString.prefix(8).lowercased()
+        let base = "index-unreadable-\(formatter.string(from: now))-\(random)"
+        let aside = directory.appendingPathComponent(base + ".sqlite")
+        try manager.moveItem(at: index, to: aside)
+        for suffix in ["-journal", "-wal", "-shm"] {
+            let sidecar = directory.appendingPathComponent(indexName + suffix)
+            if manager.fileExists(atPath: sidecar.path) {
+                try manager.moveItem(at: sidecar, to: directory.appendingPathComponent(base + ".sqlite" + suffix))
+            }
+        }
+        return aside
+    }
+
+    private static let indexName = "index.sqlite"
 
     public func load() throws -> (sources: [Source], notes: [Note]) {
         try db.read { db in
@@ -37,8 +106,8 @@ public struct StoreFile: Sendable {
 
     public func save(sources: [Source], notes: [Note]) throws {
         try db.write { db in
-            try db.execute(sql: "DELETE FROM note")
-            try db.execute(sql: "DELETE FROM source")
+            try NoteRecord.deleteAll(db)
+            try SourceRecord.deleteAll(db)
             for source in sources {
                 try SourceRecord(source).insert(db)
             }
@@ -55,6 +124,8 @@ private var migrator: DatabaseMigrator {
         try db.create(table: "source") { t in
             t.primaryKey("host", .text)
             t.column("kind", .text).notNull()
+            // A JSON array of `BoardRow`: a board name can hold any character, so no separator
+            // chosen here could be trusted to stay one.
             t.column("boards", .text).notNull()
         }
         try db.create(table: "note") { t in
@@ -83,33 +154,34 @@ private var migrator: DatabaseMigrator {
     return migrator
 }
 
+/// One board subscription as it is written into `source.boards`, a JSON array of these that
+/// GRDB encodes and decodes as a Codable column. Core's `BoardSubscription` stays free of a
+/// storage format; this is the storage format.
+private struct BoardRow: Codable {
+    var fid: Int
+    var name: String
+}
+
 private struct SourceRecord: Codable, FetchableRecord, PersistableRecord {
     static let databaseTableName = "source"
     var host: String
     var kind: String
-    var boards: String
+    /// A board list that is not JSON throws when the row is fetched, so a damaged row fails the
+    /// load — and the load fails closed — rather than coming back as a source with no boards.
+    var boards: [BoardRow]
 
     init(_ source: Source) {
         host = source.host
         kind = source.kind.rawValue
-        boards = SourceRecord.encodeBoards(source.boards)
+        boards = source.boards.map { BoardRow(fid: $0.fid, name: $0.name) }
     }
 
     var source: Source {
-        Source(host: host, kind: ProtocolKind(rawValue: kind) ?? .unknown, boards: SourceRecord.decodeBoards(boards))
-    }
-
-    private static func encodeBoards(_ boards: [BoardSubscription]) -> String {
-        boards.map { "\($0.fid)\u{1f}\($0.name)" }.joined(separator: "\u{1e}")
-    }
-
-    private static func decodeBoards(_ raw: String) -> [BoardSubscription] {
-        guard !raw.isEmpty else { return [] }
-        return raw.split(separator: "\u{1e}").compactMap { part in
-            let bits = part.split(separator: "\u{1f}", maxSplits: 1)
-            guard bits.count == 2, let fid = Int(bits[0]) else { return nil }
-            return BoardSubscription(fid: fid, name: String(bits[1]))
-        }
+        Source(
+            host: host,
+            kind: ProtocolKind(rawValue: kind) ?? .unknown,
+            boards: boards.map { BoardSubscription(fid: $0.fid, name: $0.name) }
+        )
     }
 }
 
@@ -129,7 +201,8 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
     var spoiler: String?
     var sensitive: Bool?
     var posted_at: Date
-    var origins: String
+    /// A JSON array of `FetchOrigin` raw values, sorted so one set is always written one way.
+    var origins: [String]
 
     init(_ note: Note) {
         host = note.source.host
@@ -146,14 +219,14 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
         spoiler = note.spoiler
         sensitive = note.sensitive
         posted_at = note.postedAt
-        origins = note.origins.map(\.rawValue).sorted().joined(separator: ",")
+        origins = note.origins.map(\.rawValue).sorted()
     }
 
+    /// Origins come back as they went in, an empty set included: which lists a note was seen in
+    /// is a fact about it, and filling in `.publicTimeline` for none would put it in a list it
+    /// was never read from.
     var note: Note {
-        let originSet = Set(
-            origins.split(separator: ",").compactMap { FetchOrigin(rawValue: String($0)) }
-        )
-        return Note(
+        Note(
             id: id,
             source: Source(host: host, kind: ProtocolKind(rawValue: kind) ?? .unknown),
             author: author,
@@ -163,7 +236,7 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             board: board,
             boardID: board_id,
             postedAt: posted_at,
-            origins: originSet.isEmpty ? [.publicTimeline] : originSet,
+            origins: Set(origins.compactMap(FetchOrigin.init(rawValue:))),
             reply: reply_handle.map { Reply(handle: $0) },
             boostedBy: boosted_by,
             sensitive: sensitive,
