@@ -1305,15 +1305,41 @@ final class ShellSession {
     /// re-fetch. Nothing in the code says this; it is why the two awaits are in this order and not
     /// the other.
     ///
-    /// Then what is left over of the reader's last errand, where that errand was about this host.
-    /// `progressHost` is the one field that records which host `add` and `subscribe` were about, so
-    /// it is what the refusal sentence, the unread boards and their count are gated on — clearing
-    /// them unconditionally would take away a sentence owed about a different server.
+    /// **Before either, what is left over of the reader's last errand**, where that errand was
+    /// about this host — ended ahead of the first await, so no errand can land in the gaps between
+    /// them. `progressHost` is the one field that records which host `add` and `subscribe` were
+    /// about, so it is what the token, the refusal sentence, the unread boards and their count are
+    /// gated on — clearing them unconditionally would take away a sentence owed about a different
+    /// server.
     func remove(host raw: String) async {
         let host = raw.lowercased()
         // The question has been answered, so nothing is pending any more — set before the awaits,
         // so no dialog state outlives the decision it was asking about.
         removing = nil
+        if progressHost.lowercased() == host {
+            // **The errand in flight is about the server that just went, so it ends here.** This
+            // is the same token `add`, `take` and `subscribe` compare before they write, bumped by
+            // the one act that can invalidate an errand from outside it. Without it, a `subscribe`
+            // whose boards are still being read one at a time returns after this and writes the
+            // source, its board picks and its threads straight back into the store — the reader
+            // presses Remove, watches the row go, and watches it come back seconds later.
+            //
+            // **Only where the errand is about *this* host**, which is the question this branch
+            // already exists to ask. Removing one server while another is being added is two
+            // unrelated acts, and bumping unconditionally would abandon a join the reader is still
+            // waiting on, for a press that had nothing to do with it.
+            //
+            // **Before the first await, not after the last.** The awaits below give way to the
+            // main actor, and a `subscribe` whose Core call returns in that window reads the token
+            // there: bumped after them, it read a token that still matched and adopted the source
+            // this call had just taken out of the store, so the row came back. Bumped here, every
+            // continuation that runs after this line sees a stale token and takes its write back.
+            errand += 1
+            refuse = nil
+            unread = []
+            unreadAll = 0
+            progressHost = ""
+        }
         await store.remove(host: host)
         await adopt()
         await clear(host: host)
@@ -1337,24 +1363,6 @@ final class ShellSession {
         // one, and `.browsing` names no host so it is left where it is — a reader looking for
         // something else has not asked for their list to be taken away.
         if stage?.host?.lowercased() == host { dismissStage() }
-        if progressHost.lowercased() == host {
-            // **The errand in flight is about the server that just went, so it ends here.** This
-            // is the same token `add`, `take` and `subscribe` compare before they write, bumped by
-            // the one act that can invalidate an errand from outside it. Without it, a `subscribe`
-            // whose boards are still being read one at a time returns after this and writes the
-            // source, its board picks and its threads straight back into the store — the reader
-            // presses Remove, watches the row go, and watches it come back seconds later.
-            //
-            // **Only where the errand is about *this* host**, which is the question this branch
-            // already exists to ask. Removing one server while another is being added is two
-            // unrelated acts, and bumping unconditionally would abandon a join the reader is still
-            // waiting on, for a press that had nothing to do with it.
-            errand += 1
-            refuse = nil
-            unread = []
-            unreadAll = 0
-            progressHost = ""
-        }
     }
 
     /// Shows the reader the forum's own page, after asking the saved credential first.

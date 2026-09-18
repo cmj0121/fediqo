@@ -363,7 +363,7 @@ struct BoardChoiceTests {
         let query = DummyTimeline(
             board: BoardQuery(host: "forum.example", fid: 39, name: "启动盘工具")
         )
-        #expect(query.items(from: notes, among: []).map(\.id) == ["a"])
+        #expect(query.items(from: notes, among: []).map(\.noteID) == ["a"])
         #expect(query.id == "board:forum.example:39")
         #expect(query.name == "启动盘工具")
         #expect(query.emptyKey == "timeline.empty.board")
@@ -1454,7 +1454,7 @@ struct BoardChoiceTests {
         let query = DummyTimeline(
             board: BoardQuery(host: "forum.example", fid: 39, name: "What the index calls it")
         )
-        #expect(query.items(from: [onTheBoardPage, fromAListing, elsewhere], among: []).map(\.id) == ["a", "b"])
+        #expect(query.items(from: [onTheBoardPage, fromAListing, elsewhere], among: []).map(\.noteID) == ["a", "b"])
 
         // And the number is not a name: a board whose id says 40 is not this tab, whatever it is
         // called. Without this the fallback would quietly re-admit everything it was added for.

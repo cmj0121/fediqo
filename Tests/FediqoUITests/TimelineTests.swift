@@ -57,16 +57,16 @@ struct TimelineStreamTests {
         let stored = await session.store.all()
         let all = DummyTimeline(id: "all").items(from: session.notes, among: [])
         let trends = DummyTimeline(id: "trends").items(from: session.notes, among: [])
-        #expect(all.map(\.id) == stored.map(\.id))
-        #expect(trends.map(\.id) == stored.filter { $0.origins.contains(.trending) }.map(\.id))
-        #expect(trends.map(\.id) == [
+        #expect(all.map(\.noteID) == stored.map(\.id))
+        #expect(trends.map(\.noteID) == stored.filter { $0.origins.contains(.trending) }.map(\.id))
+        #expect(trends.map(\.noteID) == [
             "https://first.example/users/ada/statuses/trend-only",
             "https://first.example/users/ada/statuses/shared",
         ])
 
         let shared = "https://first.example/users/ada/statuses/shared"
-        #expect(all.filter { $0.id == shared }.count == 1)
-        #expect(trends.contains { $0.id == shared })
+        #expect(all.filter { $0.noteID == shared }.count == 1)
+        #expect(trends.contains { $0.noteID == shared })
         #expect(Set(all.map(\.id)).count == all.count)
 
         let publicOrder = [
@@ -74,10 +74,10 @@ struct TimelineStreamTests {
             "https://first.example/users/ada/statuses/shared",
             "https://first.example/users/bob/statuses/new",
         ]
-        #expect(all.map(\.id) != publicOrder)
+        #expect(all.map(\.noteID) != publicOrder)
         #expect(all.map(\.postedAt) == all.map(\.postedAt).sorted(by: >))
         #expect(trends.map(\.postedAt) == trends.map(\.postedAt).sorted(by: >))
-        #expect(all.map(\.id).first == "https://first.example/users/bob/statuses/new")
+        #expect(all.map(\.noteID).first == "https://first.example/users/bob/statuses/new")
         #expect(all.contains { $0.body == "Newest public" })
         // The public payload's words, not the trending one's: one uri is one row, and the first
         // answer in is the one kept.
