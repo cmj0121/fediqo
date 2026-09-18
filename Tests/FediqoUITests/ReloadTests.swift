@@ -606,6 +606,25 @@ struct ReloadTests {
         #expect(session.isSignedIn(host: Self.one), "a 403 is not a sign-out")
     }
 
+    @Test("Signed out just as the search answers: the post is not asked for on the forgotten token")
+    func signOutBetweenThreadSteps() async throws {
+        let tokens = MemoryMastodonTokens()
+        try tokens.save(MastodonToken(host: Self.one, accessToken: "tok", clientID: "c", clientSecret: "s"))
+        let signedIn = SignsOut([
+            "/api/v2/search": #"{"statuses":["# + Self.status("9", "x") + "]}",
+            "/api/v1/statuses/9": Self.status("9", "edited words"),
+            "/api/v1/statuses/9/context": Self.context,
+        ])
+        let (session, _) = await shell(mastodon: MastodonSessions(tokens: tokens, sender: signedIn))
+        await signedIn.after("/api/v2/search") { await session.signOut(host: Self.one) }
+        let item = await holding(Self.mastodonNote(statusID: nil), in: session)
+        await session.reload.thread(item, in: session)
+        #expect(await spun { !session.isSignedIn(host: Self.one) })
+        let sent = await signedIn.paths.filter { $0.hasPrefix("/api") }
+        #expect(sent == ["/api/v2/search"], "nothing after the sign-out went out")
+        #expect(session.notes.first { $0.key.rowID == item.id }?.body == "first words")
+    }
+
     @Test("Search finding some other post is not believed: nothing more is asked, and the line says so")
     func mastodonThreadSearchMismatch() async throws {
         let tokens = MemoryMastodonTokens()
@@ -821,5 +840,31 @@ private actor Switching: HTTPClient {
         held = true
         await gate.wait()
         return (Data(text.utf8), HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+    }
+}
+
+/// A signed-in door answering by path that, as it answers one path, starts `then` on the main
+/// actor — so it runs before the answer is back with whoever asked.
+private actor SignsOut: HTTPSender {
+    private let bodies: [String: String]
+    private var trigger: (path: String, then: @MainActor @Sendable () async -> Void)?
+    private(set) var paths: [String] = []
+
+    init(_ bodies: [String: String]) {
+        self.bodies = bodies
+    }
+
+    func after(_ path: String, then: @escaping @MainActor @Sendable () async -> Void) {
+        trigger = (path, then)
+    }
+
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        let url = request.url!
+        paths.append(url.path)
+        if let trigger, trigger.path == url.path {
+            Task { @MainActor in await trigger.then() }
+        }
+        let body = bodies[url.path] ?? "{}"
+        return (Data(body.utf8), HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
     }
 }
