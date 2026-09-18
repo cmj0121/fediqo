@@ -55,13 +55,14 @@ arrived and what you see is a rule you wrote.
 checkout does not already carry. [`docs/release.md`](docs/release.md) covers the one command
 that does need more — the one that signs both apps and sends them to TestFlight.
 
-An empty launch opens Account. Add an unsigned Mastodon host from the catalog or by
-typing its hostname. It names the protocol; only Mastodon joins this session.
-Public and trending notes land in the store. All and Trends are queries of
-that store. Timeline, notices and compose stay off until they have something.
-The store survives a relaunch. There is no OAuth.
+An empty launch opens Account. Add an unsigned Mastodon host or a Discuz forum from the
+catalog or by typing its hostname. It names the protocol; only those two join this session.
+Public and trending notes, and a forum's threads, land in the store. All and Trends are
+queries of that store. Timeline, notices and compose stay off until they have something.
+The store survives a relaunch, and so does a forum sign-in: its cookies stay on this device.
+Clear takes a server's cached copies and sign-in, and keeps its posts. There is no OAuth.
 
-This checkout has no release tag yet: the mascot, and a Mastodon source that stays after a quit.
+This checkout has no release tag yet: the mascot, and Mastodon and forum sources that stay after a quit.
 
 ## The mark
 
