@@ -109,6 +109,7 @@ struct ForumTransportTests {
             "forum.signin.title", "forum.signin.web.label", "forum.signin.save",
             "forum.signin.cancel", "forum.signin.done",
             "prefs.password.held", "prefs.password.forget", "prefs.password.forget.label",
+            "prefs.held.posts", "prefs.held.posts.none", "prefs.held.month",
         ]
         for key in keys {
             for language in [DummyLanguage.english, .taiwanese] {
