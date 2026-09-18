@@ -88,11 +88,11 @@ struct ForumPostsTests {
         let notes = try await DiscuzClient(http: http, host: Self.host).board(34, source: source)
         let first = try #require(notes.first)
 
-        let ref = try #require(ForumThreadRef(DummyItem(first, among: [])))
+        let ref = try #require(ForumThreadRef(DummyItem(first)))
         #expect(ref.host == Self.host)
         #expect(ref.tid == 40125)
         // And the row agrees with the ref, because the row is what asks.
-        #expect(Self.row(DummyItem(first, among: [])).thread == ref)
+        #expect(Self.row(DummyItem(first)).thread == ref)
     }
 
     /// A row that is not a Discuz! thread has no thread behind it, and every one of these would
@@ -122,6 +122,19 @@ struct ForumPostsTests {
 
         // Decision 21: folded once, where it enters.
         #expect(ref("discuz:Install-C.EXAMPLE:7")?.host == "install-c.example")
+    }
+
+    /// The row's `id` names its source as well as its note (#10), so it is no longer the Discuz!
+    /// spelling this reads back. A ref read off `id` instead of `noteID` would find no thread
+    /// behind any row, and every forum post would open to nothing.
+    @Test("A thread is still found when the row's id carries its host")
+    func aHostPrefixedRowStillHasItsThread() throws {
+        let item = Self.item(id: "discuz:\(Self.host):\(Self.tid)", kind: .discuz)
+        #expect(item.id == NoteKey(host: Self.host, id: item.noteID).rowID)
+        #expect(item.id != item.noteID)
+        let ref = try #require(ForumThreadRef(item))
+        #expect(ref.host == Self.host)
+        #expect(ref.tid == Self.tid)
     }
 
     // MARK: - What a post is worth to a row
@@ -724,8 +737,7 @@ struct ForumPostsTests {
         // One source, one board, and it is the child's own number — not its parent's.
         #expect(session.sources.map(\.host) == ["install-d.example"])
         #expect(session.sources.first?.boards.map(\.fid) == [300])
-        #expect(session.queries.map(\.id).contains("board:install-d.example:300"))
-        #expect(!session.queries.map(\.id).contains("board:install-d.example:297"))
+        #expect(session.queries.map(\.id) == ["all"])
         // And exactly one board was read: a tick on a child is one board's worth of traffic.
         let listings = await http.requested.filter { $0.query?.contains("forumdisplay") == true }
         #expect(listings.count == 1)
@@ -816,7 +828,7 @@ struct ForumPostsTests {
             title: title,
             postedAt: .distantPast,
             origins: [.publicTimeline]
-        ), among: [])
+        ))
     }
 }
 

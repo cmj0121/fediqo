@@ -165,10 +165,29 @@ final class ShellSession {
     /// reader with a sentence naming none of what they chose.
     var unreadAll = 0
 
-    var queries: [DummyTimeline] = DummyTimeline.shipped
-    var timelineID: String?
-    var sources: [Source] = []
-    var notes: [Note] = []
+    var queries: [TimelineQuery] = []
+    /// The query in front. Nothing only while nothing is joined; not persisted.
+    var timelineID: TimelineQuery?
+
+    /// The query the timeline draws: the one selected, or All.
+    var currentTimeline: TimelineQuery { timelineID ?? .all }
+    /// Every change is handed on to `forums`, which is the one place that knows which of them
+    /// are forums a sign-in can be held for.
+    var sources: [Source] = [] {
+        didSet { forums.watch(forums: sources.filter { $0.kind == .discuz }.map(\.host)) }
+    }
+    var notes: [Note] = [] {
+        didSet { holdings = Holdings(notes: notes, per: heldPeriod) }
+    }
+
+    /// What `notes` holds, counted (#7) — rebuilt where `notes` is assigned or the breakdown
+    /// switches between week and month, never on a redraw.
+    private(set) var holdings = Holdings(notes: [], per: .month)
+
+    /// Whether the breakdown is by week or by month.
+    var heldPeriod: HeldPeriod = .month {
+        didSet { holdings = Holdings(notes: notes, per: heldPeriod) }
+    }
 
     /// How many times the reader has cleared a server — decision 14's press, counted.
     ///
@@ -206,6 +225,9 @@ final class ShellSession {
     var refuse: String?
     /// The Account search field is first responder; dummy keys must not steal its typing.
     var searchFocused = false
+
+    /// Writes the store to disk. Set by the app so a drop by time survives a relaunch.
+    @ObservationIgnored var persist: (@MainActor () async -> Void)?
 
     init(
         http: any HTTPClient,
@@ -1107,6 +1129,11 @@ final class ShellSession {
         }
     }
 
+    /// Reload the session from the store after a snapshot is loaded.
+    func reloadFromStore() async {
+        await adopt()
+    }
+
     /// What the store now holds, and the queries that draw it.
     private func adopt() async {
         sources = await store.sources()
@@ -1116,10 +1143,9 @@ final class ShellSession {
 
     /// The tabs, rebuilt from what is actually joined.
     ///
-    /// **A forum is not offered Trends** (D27, and the open item this branch recorded against
-    /// itself): a join used to set the list to `all` and `trends` whatever it had joined, and a
-    /// forum has no trending endpoint at all, so that tab was permanently empty. An empty tab is
-    /// a promise the app cannot keep, and the reader has no way to tell it from a quiet hour.
+    /// **All and Trends are the only two queries of this store.** Boards stay a property of
+    /// the source — what this device fetches next — not a third timeline. A forum is not
+    /// offered Trends: it has no trending read, and an empty tab is a promise the app cannot keep.
     ///
     /// Rebuilt rather than appended to, because a second join changes what the first one's tabs
     /// should be: joining a forum after a microblog must not take Trends away, and the only way
@@ -1130,20 +1156,9 @@ final class ShellSession {
             timelineID = nil
             return
         }
-        var made = [DummyTimeline(id: "all")]
-        if sources.contains(where: { Self.hasTrends($0.kind) }) {
-            made.append(DummyTimeline(id: "trends"))
-        }
-        for source in sources {
-            for board in source.boards {
-                made.append(DummyTimeline(
-                    board: BoardQuery(host: source.host, fid: board.fid, name: board.name)
-                ))
-            }
-        }
-        queries = made
-        if timelineID == nil || !made.contains(where: { $0.id == timelineID }) {
-            timelineID = made.first?.id
+        queries = sources.contains(where: { Self.hasTrends($0.kind) }) ? [.all, .trends] : [.all]
+        if !queries.contains(where: { $0 == timelineID }) {
+            timelineID = .all
         }
     }
 
@@ -1158,20 +1173,10 @@ final class ShellSession {
             .gotosocial:
             true
         // Neither forum has one. Discourse publishes no trending read this app takes, and
-        // Discuz! publishes a page; what a forum has instead is boards, and those are the tabs.
+        // Discuz! publishes a page. A forum's boards choose what is fetched; they are not tabs.
         case .discourse, .discuz, .unknown:
             false
         }
-    }
-
-    /// The query a timeline id names, resolved out of the list that knows the names.
-    ///
-    /// A board's tab cannot be rebuilt from its id — see `DummyTimeline.board` — so a view that
-    /// reconstructed one would draw a tab that matched no note. Falls back to a plain query for
-    /// `all`, `trends`, and for nothing selected at all.
-    func timeline(for id: String?) -> DummyTimeline {
-        guard let id else { return DummyTimeline(id: "") }
-        return queries.first { $0.id == id } ?? DummyTimeline(id: id)
     }
 
     /// The client a join of this host should go through.
@@ -1271,7 +1276,39 @@ final class ShellSession {
         // pictures and left the posts would empty half of what the reader was looking at.
         posts.forget(host: host)
         await forums.forget(host: host)
+        // **The rows stay (#7).** Clear drops this source's copies — pictures in memory and on
+        // disk, emoji, first posts, the sign-in — and not its place in the index: every row still
+        // draws, reading its pictures from their hyperlinks again. Nothing in this app reads a
+        // joined source's timeline a second time, so dropping its notes here would leave a source
+        // still joined and permanently empty; the drop by time is what lets posts go.
         cleared += 1
+    }
+
+    /// The drop by cache (#7), and exactly one set: the pictures held in memory and on disk
+    /// (`ShellPictures`) and the emoji pictures held in memory (`EmojiCache`, which keeps none on
+    /// disk). Emoji names, first posts, sign-ins and the rows themselves are not in it: every row
+    /// still draws and reads its pictures from their hyperlinks again. The disk half is gone once
+    /// the queue reaches it, so it stays dropped after a relaunch without a save. Bumps `cleared`
+    /// for the emoji lines, as a Clear does.
+    func dropCopies() {
+        pictures.forgetAll()
+        emojis.clear()
+        cleared += 1
+    }
+
+    /// Keeps only the latest `months` months, or everything where nil — the drop by time (#7).
+    ///
+    /// The window is the store's, so every note read after this obeys it too. Where it dropped
+    /// something, the rows are read again and the store is written, so the drop holds after a
+    /// relaunch; where it dropped nothing — forever, a wider window, a launch with nothing old —
+    /// neither happens. Returns how many notes went.
+    @discardableResult
+    func keep(months: Int?, from now: Date = Date()) async -> Int {
+        let dropped = await store.setRetention(months: months, from: now)
+        guard dropped > 0 else { return 0 }
+        notes = await store.all()
+        await persist?()
+        return dropped
     }
 
     /// The reader is done being signed in to one forum, and nothing else about it changes.
@@ -1305,15 +1342,41 @@ final class ShellSession {
     /// re-fetch. Nothing in the code says this; it is why the two awaits are in this order and not
     /// the other.
     ///
-    /// Then what is left over of the reader's last errand, where that errand was about this host.
-    /// `progressHost` is the one field that records which host `add` and `subscribe` were about, so
-    /// it is what the refusal sentence, the unread boards and their count are gated on — clearing
-    /// them unconditionally would take away a sentence owed about a different server.
+    /// **Before either, what is left over of the reader's last errand**, where that errand was
+    /// about this host — ended ahead of the first await, so no errand can land in the gaps between
+    /// them. `progressHost` is the one field that records which host `add` and `subscribe` were
+    /// about, so it is what the token, the refusal sentence, the unread boards and their count are
+    /// gated on — clearing them unconditionally would take away a sentence owed about a different
+    /// server.
     func remove(host raw: String) async {
         let host = raw.lowercased()
         // The question has been answered, so nothing is pending any more — set before the awaits,
         // so no dialog state outlives the decision it was asking about.
         removing = nil
+        if progressHost.lowercased() == host {
+            // **The errand in flight is about the server that just went, so it ends here.** This
+            // is the same token `add`, `take` and `subscribe` compare before they write, bumped by
+            // the one act that can invalidate an errand from outside it. Without it, a `subscribe`
+            // whose boards are still being read one at a time returns after this and writes the
+            // source, its board picks and its threads straight back into the store — the reader
+            // presses Remove, watches the row go, and watches it come back seconds later.
+            //
+            // **Only where the errand is about *this* host**, which is the question this branch
+            // already exists to ask. Removing one server while another is being added is two
+            // unrelated acts, and bumping unconditionally would abandon a join the reader is still
+            // waiting on, for a press that had nothing to do with it.
+            //
+            // **Before the first await, not after the last.** The awaits below give way to the
+            // main actor, and a `subscribe` whose Core call returns in that window reads the token
+            // there: bumped after them, it read a token that still matched and adopted the source
+            // this call had just taken out of the store, so the row came back. Bumped here, every
+            // continuation that runs after this line sees a stale token and takes its write back.
+            errand += 1
+            refuse = nil
+            unread = []
+            unreadAll = 0
+            progressHost = ""
+        }
         await store.remove(host: host)
         await adopt()
         await clear(host: host)
@@ -1337,24 +1400,6 @@ final class ShellSession {
         // one, and `.browsing` names no host so it is left where it is — a reader looking for
         // something else has not asked for their list to be taken away.
         if stage?.host?.lowercased() == host { dismissStage() }
-        if progressHost.lowercased() == host {
-            // **The errand in flight is about the server that just went, so it ends here.** This
-            // is the same token `add`, `take` and `subscribe` compare before they write, bumped by
-            // the one act that can invalidate an errand from outside it. Without it, a `subscribe`
-            // whose boards are still being read one at a time returns after this and writes the
-            // source, its board picks and its threads straight back into the store — the reader
-            // presses Remove, watches the row go, and watches it come back seconds later.
-            //
-            // **Only where the errand is about *this* host**, which is the question this branch
-            // already exists to ask. Removing one server while another is being added is two
-            // unrelated acts, and bumping unconditionally would abandon a join the reader is still
-            // waiting on, for a press that had nothing to do with it.
-            errand += 1
-            refuse = nil
-            unread = []
-            unreadAll = 0
-            progressHost = ""
-        }
     }
 
     /// Shows the reader the forum's own page, after asking the saved credential first.
@@ -1367,8 +1412,8 @@ final class ShellSession {
         guard let host = try? Host.parse(raw) else { return }
         switch await forums.signIn(host: host) {
         case .signedIn:
-            // The automatic path, and one of the two things that can witness a sign-in being
-            // reached — decision 13. The other is the reader closing the forum's own page below.
+            // The automatic path, and one of the two witnesses of a sign-in — decision 13. The
+            // other is the reader closing the forum's own page below.
             forums.recordSignIn(host: host)
             signingIn = nil
             offerSignIn = nil
@@ -1390,7 +1435,7 @@ final class ShellSession {
     ///
     /// *A host that is already a source.* This is the row's toggle (decision 13), and there is
     /// nothing to resume: the server is read, its boards are picked, and **the sign-in was the
-    /// whole errand**. So this says no. It is quiet and it is not silent — `recordSignIn` above
+    /// whole errand**. So this says no. It is quiet and it is not silent — `recordSignIn` below
     /// has already run, `ForumSessions` is observed, and the row's toggle is drawn from
     /// `reachedSignIn`, so it reads Sign out by the time the sheet is gone. That is the reader's
     /// answer, and it is why no sentence is needed under the field for a press that was not made
@@ -1419,8 +1464,8 @@ final class ShellSession {
         signingIn = nil
         guard reached else { return false }
         offerSignIn = nil
-        // The other witness — decision 13. A reader who closed the forum's own page having got
-        // there is the only evidence this device will ever have of a sign-in it did not perform.
+        // The other witness: the reader closed the forum's own page having got there. Counted
+        // whatever the forum named its cookie; the store is what a relaunch reads.
         if let was { forums.recordSignIn(host: was) }
         // The row's errand, and it is finished: recorded on the line above, and drawn by the
         // toggle that reads it. Asked before the field is written, because writing the field is

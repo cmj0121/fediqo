@@ -258,6 +258,17 @@ public enum ForumMember {
     public static func isSignedIn(_ html: String) -> Bool {
         ForumMarkers.signedIn.contains { html.contains($0) }
     }
+
+    /// Whether a cookie by this name is a member's session, as opposed to what any visitor is
+    /// handed.
+    ///
+    /// **Not "holds a cookie".** Discuz! sets `<prefix>_saltkey`, `_lastvisit` and `_sid` on a
+    /// guest's first page, and a challenged host adds `cf_clearance`, so every forum this app
+    /// has merely read holds cookies. Only a sign-in writes `<prefix>_auth` — the prefix is the
+    /// site's own and is not known in advance, which is why this reads the suffix.
+    public static func isSessionCookie(named name: String) -> Bool {
+        name == "auth" || name.hasSuffix("_auth")
+    }
 }
 
 /// The JavaScript the web view runs on the forum's own login page.

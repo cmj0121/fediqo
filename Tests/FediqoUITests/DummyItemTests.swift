@@ -30,7 +30,7 @@ struct DummyItemTests {
     }
 
     private static func row(_ kind: ProtocolKind, url: String?) -> DummyItem {
-        DummyItem(note(kind, url: url.flatMap { URL(string: $0) }), among: [])
+        DummyItem(note(kind, url: url.flatMap { URL(string: $0) }))
     }
 
     @Test("Every protocol is drawn as exactly one shape, and none of them as a board")
@@ -61,7 +61,7 @@ struct DummyItemTests {
         #expect(unshaped.isEmpty, "no shape stated for \(unshaped.map(\.rawValue).sorted())")
 
         for kind in ProtocolKind.allCases {
-            let item = DummyItem(Self.note(kind), among: [])
+            let item = DummyItem(Self.note(kind))
             #expect(item.source.kind == expected[kind], "\(kind.rawValue)")
             // `.board` is a query inside a source, never a shape a protocol has. `shape(of:)`
             // returning it would draw a whole host as one section of itself, and no switch would
@@ -76,7 +76,7 @@ struct DummyItemTests {
         // nothing here can arrive from a real server yet. It is pinned because the alternative
         // answers, `.note` and `.thread`, are both plausible and both silently wrong, and M2's
         // PeerTube unit should be changing a stated expectation rather than discovering one.
-        let item = DummyItem(Self.note(.peertube), among: [])
+        let item = DummyItem(Self.note(.peertube))
         #expect(item.source.kind == .video)
         #expect(item.kind == .video)
     }
@@ -85,7 +85,7 @@ struct DummyItemTests {
     func aDiscuzThreadIsAThread() {
         // The whole point of the shape: a forum row draws a name and a section, and a microblog
         // row draws neither because a microblog has neither.
-        let item = DummyItem(Self.note(.discuz), among: [])
+        let item = DummyItem(Self.note(.discuz))
         #expect(item.source.kind == .forum)
         #expect(item.kind == .thread)
         #expect(item.title == "A named discussion")
@@ -93,7 +93,7 @@ struct DummyItemTests {
         #expect(item.counts.replies == 3)
 
         // The same note from a microblog is the same words drawn as a note.
-        let post = DummyItem(Self.note(.mastodon), among: [])
+        let post = DummyItem(Self.note(.mastodon))
         #expect(post.source.kind == .microblog)
         #expect(post.kind == .note)
     }
@@ -194,6 +194,31 @@ struct DummyItemTests {
             #expect(spoken != L10n.t("thread.open", language: language),
                     "\(language) did not fill the slot at all")
         }
+    }
+
+    /// One status two instances carry is two rows (#10), and SwiftUI tells rows apart by `id` — so
+    /// the two must not share one, or the list draws a single row twice and loses the other. The
+    /// note's own spelling stays on `noteID`, which is what a thread and a board query read back.
+    @Test("One note through two hosts is two row ids and one note id")
+    func twoHostsGiveTwoRowIDs() {
+        let uri = "https://origin.example/users/ada/statuses/1"
+        func row(_ host: String) -> DummyItem {
+            DummyItem(Note(
+                id: uri,
+                source: Source(host: host, kind: .mastodon),
+                author: "ada",
+                handle: "@ada@origin.example",
+                body: "",
+                postedAt: .distantPast,
+                origins: [.publicTimeline]
+            ))
+        }
+        let first = row("first.example")
+        let second = row("second.example")
+        #expect(first.id != second.id)
+        #expect(first.noteID == uri)
+        #expect(second.noteID == uri)
+        #expect(first.id == NoteKey(host: "first.example", id: uri).rowID)
     }
 
     /// **One sentence for both surfaces that draw a way out.**

@@ -72,6 +72,8 @@ targets:
     dependencies:
       - package: Fediqo
         product: FediqoUI
+      - package: Fediqo
+        product: FediqoPersistence
     info:
       path: Apps/macOS/Info.plist
       properties:
@@ -127,6 +129,8 @@ targets:
     dependencies:
       - package: Fediqo
         product: FediqoUI
+      - package: Fediqo
+        product: FediqoPersistence
     info:
       path: Apps/iOS/Info.plist
       properties:
