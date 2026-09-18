@@ -1,5 +1,6 @@
 import Foundation
 import FediqoCore
+import Testing
 
 enum FixtureHTTPError: Error {
     case unmapped
@@ -147,5 +148,27 @@ actor GatedHTTP: HTTPClient {
             await gate.wait()
         }
         return try await inner.data(from: url)
+    }
+}
+
+/// Opens a gate nobody else will, so a test that lost its synchronisation fails instead of
+/// hanging the suite. Armed before anything awaits and cancelled on the passing path.
+///
+/// **A hang guard, not a clock.** These used to open the gate after five seconds, and on a loaded
+/// runner five seconds is a time a starved test body can still be short of the line it gates —
+/// the watchdog then opened the gate early, the test measured an order it never set up, and CI
+/// went red on a test that was right. Fifty seconds is past any honest wait, and still inside the
+/// minute `.timeLimit` these tests carry, so the only run that reaches the end is one whose gate
+/// nobody was ever going to open, and that run says so rather than passing on whatever the gate
+/// let through. `.timeLimit` does not rescue a task parked on a
+/// continuation, which is why this has to exist at all.
+func hangGuard(_ gate: Gate) -> Task<Void, Never> {
+    Task {
+        try? await Task.sleep(for: .seconds(50))
+        // `try?` swallows the cancellation, so without this a guard cancelled on the passing path
+        // would still go on to open the gate and record an issue against a test that passed.
+        guard !Task.isCancelled else { return }
+        Issue.record("watchdog opened the gate; the test lost its synchronisation")
+        await gate.open()
     }
 }

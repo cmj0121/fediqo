@@ -167,7 +167,11 @@ final class ShellSession {
 
     var queries: [DummyTimeline] = DummyTimeline.shipped
     var timelineID: String?
-    var sources: [Source] = []
+    /// Every change is handed on to `forums`, which is the one place that knows which of them
+    /// are forums a sign-in can be held for.
+    var sources: [Source] = [] {
+        didSet { forums.watch(forums: sources.filter { $0.kind == .discuz }.map(\.host)) }
+    }
     var notes: [Note] = []
 
     /// How many times the reader has cleared a server — decision 14's press, counted.
@@ -1279,8 +1283,9 @@ final class ShellSession {
         // pictures and left the posts would empty half of what the reader was looking at.
         posts.forget(host: host)
         await forums.forget(host: host)
+        // Only the notes go; the source stays joined, so the sources are not read back.
         await store.dropNotes(host: host)
-        await adopt()
+        notes = await store.all()
         cleared += 1
         await persist?()
     }
@@ -1289,7 +1294,7 @@ final class ShellSession {
     func dropOlderThan(months: Int, from now: Date = Date()) async {
         guard months > 0, let start = Calendar.current.date(byAdding: .month, value: -months, to: now) else { return }
         await store.dropPosted(before: start)
-        await adopt()
+        notes = await store.all()
         await persist?()
     }
 
@@ -1324,15 +1329,41 @@ final class ShellSession {
     /// re-fetch. Nothing in the code says this; it is why the two awaits are in this order and not
     /// the other.
     ///
-    /// Then what is left over of the reader's last errand, where that errand was about this host.
-    /// `progressHost` is the one field that records which host `add` and `subscribe` were about, so
-    /// it is what the refusal sentence, the unread boards and their count are gated on — clearing
-    /// them unconditionally would take away a sentence owed about a different server.
+    /// **Before either, what is left over of the reader's last errand**, where that errand was
+    /// about this host — ended ahead of the first await, so no errand can land in the gaps between
+    /// them. `progressHost` is the one field that records which host `add` and `subscribe` were
+    /// about, so it is what the token, the refusal sentence, the unread boards and their count are
+    /// gated on — clearing them unconditionally would take away a sentence owed about a different
+    /// server.
     func remove(host raw: String) async {
         let host = raw.lowercased()
         // The question has been answered, so nothing is pending any more — set before the awaits,
         // so no dialog state outlives the decision it was asking about.
         removing = nil
+        if progressHost.lowercased() == host {
+            // **The errand in flight is about the server that just went, so it ends here.** This
+            // is the same token `add`, `take` and `subscribe` compare before they write, bumped by
+            // the one act that can invalidate an errand from outside it. Without it, a `subscribe`
+            // whose boards are still being read one at a time returns after this and writes the
+            // source, its board picks and its threads straight back into the store — the reader
+            // presses Remove, watches the row go, and watches it come back seconds later.
+            //
+            // **Only where the errand is about *this* host**, which is the question this branch
+            // already exists to ask. Removing one server while another is being added is two
+            // unrelated acts, and bumping unconditionally would abandon a join the reader is still
+            // waiting on, for a press that had nothing to do with it.
+            //
+            // **Before the first await, not after the last.** The awaits below give way to the
+            // main actor, and a `subscribe` whose Core call returns in that window reads the token
+            // there: bumped after them, it read a token that still matched and adopted the source
+            // this call had just taken out of the store, so the row came back. Bumped here, every
+            // continuation that runs after this line sees a stale token and takes its write back.
+            errand += 1
+            refuse = nil
+            unread = []
+            unreadAll = 0
+            progressHost = ""
+        }
         await store.remove(host: host)
         await adopt()
         await clear(host: host)
@@ -1356,24 +1387,6 @@ final class ShellSession {
         // one, and `.browsing` names no host so it is left where it is — a reader looking for
         // something else has not asked for their list to be taken away.
         if stage?.host?.lowercased() == host { dismissStage() }
-        if progressHost.lowercased() == host {
-            // **The errand in flight is about the server that just went, so it ends here.** This
-            // is the same token `add`, `take` and `subscribe` compare before they write, bumped by
-            // the one act that can invalidate an errand from outside it. Without it, a `subscribe`
-            // whose boards are still being read one at a time returns after this and writes the
-            // source, its board picks and its threads straight back into the store — the reader
-            // presses Remove, watches the row go, and watches it come back seconds later.
-            //
-            // **Only where the errand is about *this* host**, which is the question this branch
-            // already exists to ask. Removing one server while another is being added is two
-            // unrelated acts, and bumping unconditionally would abandon a join the reader is still
-            // waiting on, for a press that had nothing to do with it.
-            errand += 1
-            refuse = nil
-            unread = []
-            unreadAll = 0
-            progressHost = ""
-        }
     }
 
     /// Shows the reader the forum's own page, after asking the saved credential first.
@@ -1386,8 +1399,8 @@ final class ShellSession {
         guard let host = try? Host.parse(raw) else { return }
         switch await forums.signIn(host: host) {
         case .signedIn:
-            // The automatic path, and one of the two things that can witness a sign-in being
-            // reached — decision 13. The other is the reader closing the forum's own page below.
+            // The automatic path, and one of the two witnesses of a sign-in — decision 13. The
+            // other is the reader closing the forum's own page below.
             forums.recordSignIn(host: host)
             signingIn = nil
             offerSignIn = nil
@@ -1409,7 +1422,7 @@ final class ShellSession {
     ///
     /// *A host that is already a source.* This is the row's toggle (decision 13), and there is
     /// nothing to resume: the server is read, its boards are picked, and **the sign-in was the
-    /// whole errand**. So this says no. It is quiet and it is not silent — `recordSignIn` above
+    /// whole errand**. So this says no. It is quiet and it is not silent — `recordSignIn` below
     /// has already run, `ForumSessions` is observed, and the row's toggle is drawn from
     /// `reachedSignIn`, so it reads Sign out by the time the sheet is gone. That is the reader's
     /// answer, and it is why no sentence is needed under the field for a press that was not made
@@ -1438,8 +1451,8 @@ final class ShellSession {
         signingIn = nil
         guard reached else { return false }
         offerSignIn = nil
-        // The other witness — decision 13. A reader who closed the forum's own page having got
-        // there is the only evidence this device will ever have of a sign-in it did not perform.
+        // The other witness: the reader closed the forum's own page having got there. Counted
+        // whatever the forum named its cookie; the store is what a relaunch reads.
         if let was { forums.recordSignIn(host: was) }
         // The row's errand, and it is finished: recorded on the line above, and drawn by the
         // toggle that reads it. Asked before the field is written, because writing the field is
