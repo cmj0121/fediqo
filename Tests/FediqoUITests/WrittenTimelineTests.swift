@@ -484,6 +484,58 @@ struct WrittenTimelineTests {
         #expect(session.textIndex.folded == 0)
     }
 
+    @Test("A redraw reads the stream as drawn; each thing it was drawn from draws it again")
+    func streamIsDrawnOnce() throws {
+        let session = session()
+        let notes = [
+            Note(id: "1", source: microblog, author: "Ada", handle: "@ada@m.example", body: "swift news",
+                 postedAt: Date(timeIntervalSince1970: 86_400 * 400), categories: [.public]),
+            Note(id: "2", source: microblog, author: "Bob", handle: "@bob@m.example", body: "other",
+                 postedAt: Date(timeIntervalSince1970: 0), categories: [.public]),
+        ]
+        session.notes = notes
+        #expect(session.timelineItems(latest: nil).map(\.noteID) == ["1", "2"])
+        _ = session.timelineItems(latest: nil)
+        _ = session.timelineItems(latest: nil)
+        #expect(session.timelineEvaluations == 1)
+
+        // The notes, even the same ones assigned again.
+        session.notes = notes + [
+            Note(id: "3", source: microblog, author: "Cy", handle: "@cy@m.example", body: "swift too",
+                 postedAt: Date(timeIntervalSince1970: 86_400 * 200), categories: [.public]),
+        ]
+        #expect(session.timelineItems(latest: nil).map(\.noteID) == ["1", "2", "3"])
+        #expect(session.timelineEvaluations == 2)
+
+        // The latest date.
+        let latest = try #require(LatestDate("1970-12-31"))
+        #expect(session.timelineItems(latest: latest).map(\.noteID) == ["2", "3"])
+        #expect(session.timelineEvaluations == 3)
+
+        // The timeline in front: a new one, then its definition edited.
+        session.commit(draft("Swift", [try #require(Rule.keyword("swift", in: .every))], in: session))
+        #expect(session.timelineItems(latest: latest).map(\.noteID) == ["3"])
+        #expect(session.timelineEvaluations == 4)
+        let id = session.written[0].id
+        var edit = TimelineDraft(editing: session.written[0], at: 0, of: 1)
+        edit.rules = [try #require(Rule.keyword("other", in: .every))]
+        session.commit(edit)
+        #expect(session.timelineID == .written(id))
+        #expect(session.timelineItems(latest: latest).map(\.noteID) == ["2"])
+        #expect(session.timelineEvaluations == 5)
+
+        // Back to All, which it drew before but no longer holds.
+        session.timelineID = .all
+        #expect(session.timelineItems(latest: latest).map(\.noteID) == ["2", "3"])
+        _ = session.timelineItems(latest: latest)
+        #expect(session.timelineEvaluations == 6)
+
+        // Sources are not read by the stream, so a change to them draws nothing again.
+        session.sources = [microblog]
+        _ = session.timelineItems(latest: latest)
+        #expect(session.timelineEvaluations == 6)
+    }
+
     @Test("A written timeline drawn through the session stops at the latest date, after its rules")
     func writtenStopsAtLatestDate() throws {
         let session = session()
