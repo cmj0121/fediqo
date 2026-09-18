@@ -154,14 +154,9 @@ struct RemoveTests {
         #expect(session.timelineID == "all")
     }
 
-    // MARK: - Decision 9, from the screen
+    // MARK: - #10 two sources, two rows
 
-    /// **The case a one-source test proves nothing about.** Two joined instances both carrying one
-    /// Mastodon status are one stored row — its id is a canonical URI and is host-independent —
-    /// stamped with whichever joined first. A Remove that went by that stamp would take the row off
-    /// the timeline of a reader who is still reading the other instance, and would leave behind
-    /// every row the removed instance was the only route to.
-    @Test("A status two instances carry stays on the timeline until the second one goes")
+    @Test("A status two instances carry is two rows, and Remove takes only that instance's row")
     func aSharedStatusSurvivesTheFirstRemove() async {
         let session = ShellSession(http: FixtureHTTP(), pictures: ShellPictures(http: FixtureHTTP()))
         let one = Source(host: alpha, kind: .mastodon)
@@ -171,19 +166,18 @@ struct RemoveTests {
             session, sources: [one, two],
             notes: [note(uri, from: one), note(uri, from: two), note("only-beta", from: two)]
         )
-        #expect(session.notes.count == 2, "the premise: the shared status is one row, not two")
-        #expect(session.notes.first { $0.id == uri }?.source.host == alpha, "stamped by the first")
+        #expect(session.notes.count == 3)
+        #expect(session.notes.filter { $0.id == uri }.count == 2)
 
         await session.remove(host: alpha)
 
-        let left = session.notes.first { $0.id == uri }
-        #expect(left != nil, "the shared row went with the stamp; beta is still showing it")
-        #expect(left?.hosts == [beta], "beta is still named as a route to it")
-        #expect(session.notes.contains { $0.id == "only-beta" }, "a row only beta carried was stranded")
+        let left = session.notes.filter { $0.id == uri }
+        #expect(left.map(\.source.host) == [beta])
+        #expect(session.notes.contains { $0.id == "only-beta" })
 
         await session.remove(host: beta)
 
-        #expect(session.notes.isEmpty, "a row nobody is left reading stayed")
+        #expect(session.notes.isEmpty)
     }
 
     // MARK: - Decision 16 — what a row is still fetched from
@@ -216,20 +210,15 @@ struct RemoveTests {
         )
 
         let before = DummyTimeline(id: "all").items(from: session.notes, among: session.sources)
-        let shared = before.first { $0.id == uri }
-        #expect(shared?.source.host == alpha, "the premise: this row is fetched from alpha today")
-        #expect(shared?.shownHosts == [alpha, beta], "and the row says so, which is the other half")
+        #expect(before.contains { $0.source.host == alpha })
+        #expect(before.contains { $0.source.host == beta })
 
         await session.remove(host: alpha)
 
         let after = DummyTimeline(id: "all").items(from: session.notes, among: session.sources)
         let addressable = Set(after.flatMap { [$0.source.host] + $0.alsoFrom.map(\.host) })
-        #expect(
-            !addressable.contains(alpha),
-            "a row is still addressed to a server the reader let go of"
-        )
+        #expect(!addressable.contains(alpha))
         #expect(addressable == [beta])
-        #expect(after.first { $0.id == uri }?.shownHosts == [beta], "and the row no longer names it")
     }
 
     /// The other half of decision 16, and the reason the half above is not enough on its own: a row
@@ -249,18 +238,11 @@ struct RemoveTests {
         )
 
         let items = DummyTimeline(id: "all").items(from: session.notes, among: session.sources)
-        let row = items.first { $0.id == uri }
-        #expect(row?.alsoFrom.map(\.host) == [beta])
-        // The shape comes from the joined source's protocol, which is the one thing `Note.hosts`
-        // cannot carry — a bare host has no shape, and guessing `.microblog` for it is the failure
-        // `DummySource.unsigned`'s deleted default is a monument to.
-        #expect(row?.alsoFrom.first?.kind == .forum)
-        #expect(row?.shownHosts == [alpha, beta])
-
-        // Told nothing about what is joined, it says only what it is stamped with. Not a
-        // degradation to tolerate: it is what `[]` means, and it is why the argument is required.
-        let alone = DummyTimeline(id: "all").items(from: session.notes, among: [])
-        #expect(alone.first { $0.id == uri }?.alsoFrom.isEmpty == true)
+        #expect(items.count == 2)
+        #expect(Set(items.map(\.source.host)) == [alpha, beta])
+        #expect(items.allSatisfy { $0.alsoFrom.isEmpty })
+        #expect(items.first { $0.source.host == alpha }?.source.kind == .microblog)
+        #expect(items.first { $0.source.host == beta }?.source.kind == .forum)
     }
 
     // MARK: - The order
