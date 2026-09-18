@@ -79,16 +79,16 @@ struct ViewerTests {
 
     @Test("? under an open viewer does nothing, and leaves the viewer alone")
     func theGuideDoesNotOpenUnderTheViewer() {
-        let shell = Shell(items: Self.list, selected: "a")
+        let shell = Shell(items: Self.list, selected: Self.a)
         #expect(shell.press(.viewAttachment))
         #expect(!shell.press(.showShortcuts))
         #expect(!shell.shortcutsOpen)
-        #expect(shell.viewing == "a")
+        #expect(shell.viewing == Self.a)
     }
 
     @Test("Return under the guide does not open a conversation beneath it")
     func aThreadDoesNotOpenUnderTheGuide() {
-        let shell = Shell(items: Self.list, selected: "a")
+        let shell = Shell(items: Self.list, selected: Self.a)
         #expect(shell.press(.showShortcuts))
         #expect(!shell.press(.expandPost))
         #expect(!shell.threadOpen)
@@ -98,7 +98,7 @@ struct ViewerTests {
     // second time. It reads the one list now, so it reaches past nothing.
     @Test("q leaves the outermost layer and reaches past nothing")
     func backReachesPastNothing() {
-        let shell = Shell(items: Self.list, selected: "a")
+        let shell = Shell(items: Self.list, selected: Self.a)
         #expect(shell.press(.expandPost))
         #expect(shell.press(.showShortcuts))
         // The guide is in front, and `q` is not the key that closes it.
@@ -146,18 +146,18 @@ struct ViewerTests {
 
     @Test("v opens what is on top, and a second v does not close it")
     func openingAndNotClosing() {
-        let shell = Shell(items: Self.list, selected: "a")
+        let shell = Shell(items: Self.list, selected: Self.a)
         #expect(shell.press(.viewAttachment))
-        #expect(shell.viewing == "a")
+        #expect(shell.viewing == Self.a)
         // `Escape` and `q` are how this is left. One key that both opens and closes a layer is
         // the conditional rule the order is kept free of.
         #expect(!shell.press(.viewAttachment))
-        #expect(shell.viewing == "a")
+        #expect(shell.viewing == Self.a)
     }
 
     @Test("v on a row that brought nothing opens nothing")
     func nothingToOpen() {
-        let shell = Shell(items: Self.list, selected: "c")
+        let shell = Shell(items: Self.list, selected: Self.c)
         #expect(!shell.press(.viewAttachment))
         #expect(shell.viewing == nil)
     }
@@ -165,7 +165,7 @@ struct ViewerTests {
     @Test("Escape and q both close the viewer before the thread under it")
     func leavingTheViewerFirst() {
         for command in [DummyCommand.dismiss, .back] {
-            let shell = Shell(items: Self.list, selected: "a")
+            let shell = Shell(items: Self.list, selected: Self.a)
             shell.threadOpen = true
             #expect(shell.press(.viewAttachment))
             #expect(shell.press(command))
@@ -178,23 +178,23 @@ struct ViewerTests {
 
     @Test("m turns the same deck the row is turning, and stops what was playing")
     func turningWithTheViewerOpen() {
-        let shell = Shell(items: Self.list, selected: "a")
+        let shell = Shell(items: Self.list, selected: Self.a)
         #expect(shell.press(.viewAttachment))
         #expect(shell.press(.playAttachment))
-        #expect(shell.playing.here(Self.film, of: "a", on: .viewer) == Self.film)
+        #expect(shell.playing.here(Self.film, of: Self.a, on: .viewer) == Self.film)
         #expect(shell.press(.nextAttachment))
-        #expect(shell.decks.top(of: "a", of: 3) == 1)
+        #expect(shell.decks.top(of: Self.a, of: 3) == 1)
         // Sound out of a card the reader has just turned away from is a fault.
         #expect(shell.playing.url == nil)
         // And it turned the row's deck, not a copy of its own.
-        #expect(shell.viewing == "a")
+        #expect(shell.viewing == Self.a)
     }
 
     @Test("m in the row stops what the row was playing")
     func turningInTheRow() {
-        let shell = Shell(items: Self.list, selected: "a")
+        let shell = Shell(items: Self.list, selected: Self.a)
         #expect(shell.press(.playAttachment))
-        #expect(shell.playing.here(Self.film, of: "a", on: .row) == Self.film)
+        #expect(shell.playing.here(Self.film, of: Self.a, on: .row) == Self.film)
         #expect(shell.press(.nextAttachment))
         #expect(shell.playing.url == nil)
     }
@@ -203,15 +203,15 @@ struct ViewerTests {
     // rule inside the layer order is the named risk.
     @Test("s with the viewer open blurs in place and never navigates")
     func coveringBlursInPlace() {
-        let shell = Shell(items: Self.list, selected: "b")
+        let shell = Shell(items: Self.list, selected: Self.b)
         #expect(shell.press(.viewAttachment))
         #expect(shell.press(.reveal))
-        #expect(shell.decks.isLifted("b"))
-        #expect(shell.viewing == "b")
+        #expect(shell.decks.isLifted(Self.b))
+        #expect(shell.viewing == Self.b)
         // And another `s` puts it back, still without leaving.
         #expect(shell.press(.reveal))
-        #expect(!shell.decks.isLifted("b"))
-        #expect(shell.viewing == "b")
+        #expect(!shell.decks.isLifted(Self.b))
+        #expect(shell.viewing == Self.b)
         // `Escape` still means leave.
         #expect(shell.press(.dismiss))
         #expect(shell.viewing == nil)
@@ -219,10 +219,10 @@ struct ViewerTests {
 
     @Test("a plays in the row silently and in the viewer with everything")
     func theTwoStages() {
-        let shell = Shell(items: Self.list, selected: "a")
+        let shell = Shell(items: Self.list, selected: Self.a)
         #expect(shell.press(.playAttachment))
-        #expect(shell.playing.here(Self.film, of: "a", on: .row) == Self.film)
-        #expect(shell.playing.here(Self.film, of: "a", on: .viewer) == nil)
+        #expect(shell.playing.here(Self.film, of: Self.a, on: .row) == Self.film)
+        #expect(shell.playing.here(Self.film, of: Self.a, on: .viewer) == nil)
 
         // Opening the viewer stops the row's: it would go on playing behind an opaque ground
         // where nobody can see it or stop it.
@@ -230,7 +230,7 @@ struct ViewerTests {
         #expect(shell.playing.url == nil)
 
         #expect(shell.press(.playAttachment))
-        #expect(shell.playing.here(Self.film, of: "a", on: .viewer) == Self.film)
+        #expect(shell.playing.here(Self.film, of: Self.a, on: .viewer) == Self.film)
         // And leaving stops it again.
         #expect(shell.press(.dismiss))
         #expect(shell.playing.url == nil)
@@ -240,9 +240,9 @@ struct ViewerTests {
     // playback only where the viewer had been open, and with a row playing it never was.
     @Test("Leaving the page stops a film playing in a row")
     func leavingThePageStopsTheRow() {
-        let shell = Shell(items: Self.list, selected: "a")
+        let shell = Shell(items: Self.list, selected: Self.a)
         #expect(shell.press(.playAttachment))
-        #expect(shell.playing.here(Self.film, of: "a", on: .row) == Self.film)
+        #expect(shell.playing.here(Self.film, of: Self.a, on: .row) == Self.film)
         shell.leavePlace()
         #expect(shell.playing.url == nil)
     }
@@ -260,7 +260,7 @@ struct ViewerTests {
 
     @Test("A press while the viewer names a post that is gone acts on what is really open")
     func aStaleViewerIsNotALayer() {
-        let shell = Shell(items: Self.list, selected: "a")
+        let shell = Shell(items: Self.list, selected: Self.a)
         shell.viewing = "nobody"
         shell.threadOpen = true
         // `q` must give back the conversation, not pretend to close a viewer nobody can see.
@@ -271,18 +271,18 @@ struct ViewerTests {
 
     @Test("Nothing plays under a cover")
     func nothingPlaysUnderACover() {
-        let shell = Shell(items: Self.list, selected: "b")
+        let shell = Shell(items: Self.list, selected: Self.b)
         #expect(!shell.press(.playAttachment))
         #expect(shell.playing.url == nil)
         // Lifted, it plays.
         #expect(shell.press(.reveal))
         #expect(shell.press(.playAttachment))
-        #expect(shell.playing.here(Self.film, of: "b", on: .row) == Self.film)
+        #expect(shell.playing.here(Self.film, of: Self.b, on: .row) == Self.film)
     }
 
     @Test("a on a picture does nothing at all")
     func aPictureDoesNotPlay() {
-        let shell = Shell(items: Self.list, selected: "d")
+        let shell = Shell(items: Self.list, selected: Self.d)
         #expect(!shell.press(.playAttachment))
         #expect(shell.playing.url == nil)
     }
@@ -374,6 +374,10 @@ struct ViewerTests {
             FediqoCore.Attachment(kind: .image, previewURL: picture),
         ]),
     ]
+    private static let a = DummyItem.rowID(host: "first.example", note: "a")
+    private static let b = DummyItem.rowID(host: "first.example", note: "b")
+    private static let c = DummyItem.rowID(host: "first.example", note: "c")
+    private static let d = DummyItem.rowID(host: "first.example", note: "d")
 
     /// The root's own switch, rearranged into something a test can hold.
     ///
