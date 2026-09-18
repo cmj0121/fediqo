@@ -256,12 +256,48 @@ private struct CategoryRow: Codable, Comparable {
     }
 }
 
-/// One board subscription as it is written into `source.boards`, a JSON array of these that
-/// GRDB encodes and decodes as a Codable column. Core's `BoardSubscription` stays free of a
-/// storage format; this is the storage format.
-private struct BoardRow: Codable {
-    var fid: Int
+/// One subscription as it is written into `source.boards`, a JSON array of these that GRDB
+/// encodes and decodes as a Codable column: a board `{"fid":37,"name":…}` or a Mastodon list
+/// `{"list":"42","name":…}` (#25). Core's `BoardSubscription` and `ListSubscription` stay free of
+/// a storage format; this is the storage format.
+///
+/// **Lists ride in the boards column rather than a column of their own**, so they cost no schema
+/// change: a board is written exactly as before, and a row that is neither a board nor a list
+/// throws, so the load fails closed.
+///
+/// **A new subscription shape is a new migration**, as a new `CategoryRow` kind is. A 0.2.0
+/// build throws on a shape it does not know and sets the whole store aside, so a shape added
+/// after 0.2.0 must also register a new migration id — an empty one will do — so a 0.2.0 build
+/// refuses that store as newer instead.
+///
+/// A list id read back here is not trusted with a path: `MastodonAccount` asks only for ids
+/// that are one path segment.
+private struct SubscriptionRow: Codable {
+    var fid: Int?
+    var list: String?
     var name: String
+
+    init(_ board: BoardSubscription) {
+        fid = board.fid
+        name = board.name
+    }
+
+    init(_ list: ListSubscription) {
+        self.list = list.id
+        name = list.name
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        fid = try container.decodeIfPresent(Int.self, forKey: .fid)
+        list = try container.decodeIfPresent(String.self, forKey: .list)
+        name = try container.decode(String.self, forKey: .name)
+        guard (fid == nil) != (list == nil) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .fid, in: container, debugDescription: "neither a board nor a list"
+            )
+        }
+    }
 }
 
 private struct SourceRecord: Codable, FetchableRecord, PersistableRecord {
@@ -270,19 +306,24 @@ private struct SourceRecord: Codable, FetchableRecord, PersistableRecord {
     var kind: String
     /// A board list that is not JSON throws when the row is fetched, so a damaged row fails the
     /// load — and the load fails closed — rather than coming back as a source with no boards.
-    var boards: [BoardRow]
+    var boards: [SubscriptionRow]
 
     init(_ source: Source) {
         host = source.host
         kind = source.kind.rawValue
-        boards = source.boards.map { BoardRow(fid: $0.fid, name: $0.name) }
+        boards = source.boards.map(SubscriptionRow.init) + source.lists.map(SubscriptionRow.init)
     }
 
     var source: Source {
         Source(
             host: host,
             kind: ProtocolKind(rawValue: kind) ?? .unknown,
-            boards: boards.map { BoardSubscription(fid: $0.fid, name: $0.name) }
+            boards: boards.compactMap { row in
+                row.fid.map { BoardSubscription(fid: $0, name: row.name) }
+            },
+            lists: boards.compactMap { row in
+                row.list.map { ListSubscription(id: $0, name: row.name) }
+            }
         )
     }
 }
