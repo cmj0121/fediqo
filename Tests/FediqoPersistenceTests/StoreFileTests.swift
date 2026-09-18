@@ -72,6 +72,29 @@ struct StoreFileTests {
         #expect(loaded.sensitive == true)
     }
 
+    @Test("Avatar and attachment hyperlinks survive a save and load")
+    func mediaURLsRoundTrip() throws {
+        let file = try StoreFile(database: DatabaseQueue())
+        let source = Source(host: "first.example", kind: .mastodon)
+        let avatar = URL(string: "https://cdn.example/ada.png")!
+        let full = URL(string: "https://cdn.example/pic.jpg")!
+        let note = Note(
+            id: "https://first.example/users/ada/statuses/1",
+            source: source,
+            author: "Ada",
+            handle: "@ada",
+            body: "hi",
+            postedAt: origin,
+            origins: [.publicTimeline],
+            avatarURL: avatar,
+            attachments: [Attachment(kind: .image, url: full)]
+        )
+        try file.save(sources: [source], notes: [note])
+        let loaded = try file.load().notes[0]
+        #expect(loaded.avatarURL == avatar)
+        #expect(loaded.attachments.map(\.url) == [full])
+    }
+
     @Test("Two sources carrying the same id stay two rows")
     func twoSourcesTwoRows() throws {
         let file = try StoreFile(database: DatabaseQueue())
