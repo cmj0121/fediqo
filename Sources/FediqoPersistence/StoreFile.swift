@@ -134,21 +134,20 @@ private var migrator: DatabaseMigrator {
             t.primaryKey(["host", "id"])
             t.column("kind", .text).notNull()
             t.column("author", .text).notNull()
+            t.column("handle", .text).notNull()
             t.column("body", .text).notNull()
             t.column("title", .text)
+            t.column("board", .text)
+            t.column("board_id", .text)
+            // A reply whose parent's handle was never learned is still a reply, so whether a
+            // note is one is kept apart from whom it answers.
+            t.column("is_reply", .boolean).notNull()
+            t.column("reply_handle", .text)
+            t.column("boosted_by", .text)
+            t.column("spoiler", .text)
+            t.column("sensitive", .boolean)
             t.column("posted_at", .datetime).notNull()
             t.column("origins", .text).notNull()
-        }
-    }
-    migrator.registerMigration("v2-row-facts") { db in
-        try db.alter(table: "note") { t in
-            t.add(column: "handle", .text).notNull().defaults(to: "")
-            t.add(column: "board", .text)
-            t.add(column: "board_id", .text)
-            t.add(column: "reply_handle", .text)
-            t.add(column: "boosted_by", .text)
-            t.add(column: "spoiler", .text)
-            t.add(column: "sensitive", .boolean)
         }
     }
     return migrator
@@ -196,6 +195,7 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
     var title: String?
     var board: String?
     var board_id: String?
+    var is_reply: Bool
     var reply_handle: String?
     var boosted_by: String?
     var spoiler: String?
@@ -214,6 +214,7 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
         title = note.title
         board = note.board
         board_id = note.boardID
+        is_reply = note.reply != nil
         reply_handle = note.reply?.handle
         boosted_by = note.boostedBy
         spoiler = note.spoiler
@@ -237,7 +238,7 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             boardID: board_id,
             postedAt: posted_at,
             origins: Set(origins.compactMap(FetchOrigin.init(rawValue:))),
-            reply: reply_handle.map { Reply(handle: $0) },
+            reply: is_reply ? Reply(handle: reply_handle) : nil,
             boostedBy: boosted_by,
             sensitive: sensitive,
             spoiler: spoiler
