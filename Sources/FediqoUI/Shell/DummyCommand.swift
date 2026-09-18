@@ -242,6 +242,12 @@ public enum DummyShortcutGroup: String, CaseIterable, Identifiable, Sendable {
 
     public var id: String { rawValue }
     var titleKey: String { "shortcut.group.\(rawValue)" }
+
+    /// Tab under the guide rotates these, wrapping, the same ring `DummyCommand.advanced`
+    /// uses for All/Trends. A second list here would be the order written down twice.
+    static func rotated(from current: DummyShortcutGroup, by step: Int) -> DummyShortcutGroup {
+        DummyCommand.advanced(allCases, from: current, by: step)
+    }
 }
 
 /// One line of the written-down list. Caps are not translated: a keyboard is labelled as it is.

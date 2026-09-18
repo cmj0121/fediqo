@@ -10,6 +10,7 @@ public struct FediqoRootView: View {
     @State private var jumpToTop = 0
     @State private var composing = false
     @State private var showingShortcuts = false
+    @State private var shortcutTab: DummyShortcutGroup = .timeline
     /// The launch overlay. Starts true; `LandingView` clears it after the flips, and
     /// `playsLanding` is false from the first frame when reduce motion is on.
     @State private var showingLanding = true
@@ -290,7 +291,7 @@ public struct FediqoRootView: View {
             }
             .overlay {
                 if showingShortcuts {
-                    ShortcutGuide { showingShortcuts = false }
+                    ShortcutGuide(tab: $shortcutTab) { showingShortcuts = false }
                 }
             }
             // Outside the guide's overlay and after it, which is what puts it on top of
@@ -393,9 +394,17 @@ public struct FediqoRootView: View {
         forgetAVanishedViewer()
         switch command {
         case .nextTab:
-            return rotateTimelineTab(by: 1)
+            guard DummyCommand.outermost(of: openLayers) == .shortcuts else {
+                return rotateTimelineTab(by: 1)
+            }
+            shortcutTab = DummyShortcutGroup.rotated(from: shortcutTab, by: 1)
+            return true
         case .previousTab:
-            return rotateTimelineTab(by: -1)
+            guard DummyCommand.outermost(of: openLayers) == .shortcuts else {
+                return rotateTimelineTab(by: -1)
+            }
+            shortcutTab = DummyShortcutGroup.rotated(from: shortcutTab, by: -1)
+            return true
         case .nextPage:
             place = availability.rotate(from: place, by: 1)
             return true
