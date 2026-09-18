@@ -160,9 +160,9 @@
 "prefs.fontSize.larger" = "較大";
 "prefs.fontSize.largest" = "最大";
 
-"prefs.cache" = "這次執行所存";
-"prefs.cache.footer" = "除了一項例外，這些都不會寫進磁碟。下次開啟 Fediqo 時，每個來源都會重新讀取；來源的表情符號名稱則會在一天後自行重新讀取。例外是你要求 Fediqo 存起來的密碼：它放在這台裝置的鑰匙圈裡，按「清除」時會和其他東西一起刪掉。";
-"prefs.cache.empty" = "先到「帳號」加入來源。各來源送來的內容會留在這裡，直到你關閉 Fediqo。";
+"prefs.cache" = "存在這台裝置上";
+"prefs.cache.footer" = "這些大多會向各來源重新讀取：表情符號名稱會在一天後自行重新讀取，其他則在你需要時再讀。登入留下的兩樣東西只存在這台裝置上。你登入過的論壇會把登入 Cookie 留在這裡，下次開啟 Fediqo 時你仍是登入狀態；它們不會被備份，也不會跟著你的 Apple 帳號走。你要求 Fediqo 存起來的密碼放在這台裝置的鑰匙圈裡，永遠不會複製到 iCloud。按「清除」時，兩者都會和其他東西一起刪掉。";
+"prefs.cache.empty" = "先到「帳號」加入來源。各來源送來的內容會留在這裡，存在這台裝置上。";
 "prefs.cache.catalogue" = "%d 個表情符號名稱 ·";
 "prefs.cache.catalogue.none" = "未存表情符號名稱";
 "prefs.cache.pictures" = "%d 張圖片";

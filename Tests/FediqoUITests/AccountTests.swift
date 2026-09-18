@@ -585,7 +585,7 @@ struct AccountMarkTests {
         #expect(glance.allSatisfy { !$0.signedIn }, "nobody has signed in to either")
 
         // And the signed-in fact reaches it from the same place the row's control reads.
-        session.forums.recordSignIn(host: "b.example")
+        await session.forums.plantSession(host: "b.example")
         let after = try #require(pane.glance)
         #expect(after.filter(\.signedIn).map(\.id) == ["b.example"])
         #expect(SourceMarkRow.count(after) == "2 sources, 1 signed in")

@@ -8,6 +8,7 @@ import SwiftUI
 struct FediqoApp: App {
     private let store: ItemStore
     private let file: StoreFile?
+    private let forums: ForumSessions
     @Environment(\.scenePhase) private var scenePhase
 
     /// `file` is `nil` when the index could not be read and could not be set aside either:
@@ -16,6 +17,8 @@ struct FediqoApp: App {
         let opened = StoreFile.openApplicationSupport()
         self.file = opened.file
         self.store = ItemStore(sources: opened.sources, notes: opened.notes)
+        // Built on first use only: a reader with no forum never opens the WebKit store.
+        self.forums = ForumSessions(dataStore: ForumWebsiteData.onDevice())
         // Where Caches cannot be made, pictures are read from their hyperlinks only.
         if let media = try? MediaCache.caches() {
             FediqoRootView.keepPictures(in: media, for: opened.sources.map(\.host))
@@ -24,7 +27,7 @@ struct FediqoApp: App {
 
     var body: some Scene {
         WindowGroup {
-            FediqoRootView(store: store)
+            FediqoRootView(store: store, forums: forums)
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .background {
                         Task { await save() }
