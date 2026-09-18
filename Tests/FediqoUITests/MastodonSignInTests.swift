@@ -53,7 +53,9 @@ private actor MastodonServer: HTTPSender {
 /// or waits at a gate first.
 @MainActor
 private final class Page: OAuthBrowser {
-    enum Answer { case approve, close, invalidScope }
+    /// `refusesSearch` answers `invalid_scope` to a page asking for `read:search`, and approves
+    /// any other.
+    enum Answer { case approve, close, invalidScope, refusesSearch }
 
     private let answer: Answer
     private let gate: Gate?
@@ -69,7 +71,12 @@ private final class Page: OAuthBrowser {
         await gate?.wait()
         let state = URLComponents(url: url, resolvingAgainstBaseURL: false)?
             .queryItems?.first { $0.name == "state" }?.value ?? ""
-        if answer == .invalidScope { return URL(string: "fediqo://oauth?error=invalid_scope&state=\(state)")! }
+        let scope = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?.first { $0.name == "scope" }?.value ?? ""
+        if answer == .invalidScope || (answer == .refusesSearch && scope.contains("read:search")) {
+            return URL(string: "fediqo://oauth?error=invalid_scope&state=\(state)")!
+        }
+        if answer == .refusesSearch { return URL(string: "fediqo://oauth?code=c&state=\(state)")! }
         guard answer == .approve else { throw MastodonSignInError.cancelled }
         return URL(string: "fediqo://oauth?code=c&state=\(state)")!
     }
@@ -159,7 +166,7 @@ struct MastodonSignInTests {
     }
 
     @Test("A registration kept for other scopes is made again, for the scopes asked now",
-          arguments: [nil, "read:statuses read:lists read:accounts"])
+          arguments: [nil, "read", "read:statuses read:accounts"])
     func registrationForOtherScopes(scopes: String?) async throws {
         let (session, server, tokens) = await shell()
         try tokens.save(MastodonApp(host: host, clientID: "old", clientSecret: "old", scopes: scopes))
@@ -178,6 +185,45 @@ struct MastodonSignInTests {
         #expect(!session.isSignedIn(host: host))
         #expect(session.rowRefusal?.key == "account.mastodon.failed", "never a silent nothing")
         #expect(await !server.paths.contains("/oauth/token"))
+    }
+
+    @Test("A server refusing read:search: registered once more without it, the reduced scopes kept, and signed in")
+    func refusesSearch() async throws {
+        let (session, server, tokens) = await shell()
+        let page = Page(.refusesSearch)
+        await session.signIn(host: host, through: page)
+        #expect(page.opened == 2)
+        #expect(await server.paths == [
+            "/api/v1/apps", "/api/v1/apps", "/oauth/token", "/api/v1/accounts/verify_credentials",
+            "/api/v1/timelines/home",
+        ])
+        let registered = await server.requests.filter { $0.url?.path == "/api/v1/apps" }
+            .map { String(decoding: $0.httpBody ?? Data(), as: UTF8.self) }
+        #expect(registered.first?.contains("search") == true)
+        #expect(registered.last?.contains("search") == false, "the second registration leaves search out")
+        #expect(try tokens.app(host: host)?.scopes == MastodonOAuth.scopesWithoutSearch)
+        #expect(session.isSignedIn(host: host))
+        #expect(session.rowRefusal == nil)
+
+        // Signing in again reuses the reduced registration: no app piles up per attempt.
+        await session.signOut(host: host)
+        let again = Page(.refusesSearch)
+        await session.signIn(host: host, through: again)
+        #expect(again.opened == 1)
+        #expect(await server.paths.filter { $0 == "/api/v1/apps" }.count == 2)
+        #expect(session.isSignedIn(host: host))
+    }
+
+    @Test("A server refusing even the reduced scopes: two registrations at most, none kept, and a sentence")
+    func refusesEveryScope() async throws {
+        let (session, server, tokens) = await shell()
+        let page = Page(.invalidScope)
+        await session.signIn(host: host, through: page)
+        #expect(page.opened == 2)
+        #expect(await server.paths == ["/api/v1/apps", "/api/v1/apps"])
+        #expect(try tokens.app(host: host) == nil)
+        #expect(!session.isSignedIn(host: host))
+        #expect(session.rowRefusal?.key == "account.mastodon.failed")
     }
 
     /// A server that no longer knows the client shows an error page with no way back, so a closed
