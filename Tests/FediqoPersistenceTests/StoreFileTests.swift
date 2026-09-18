@@ -89,6 +89,26 @@ struct StoreFileTests {
         #expect(opened.notes == [saved])
     }
 
+    /// #7: a drop by time is written, so a relaunch reads back only what was kept.
+    @Test("A drop by time holds after a relaunch")
+    func dropByTimeSurvivesRelaunch() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let old = note(id: "old")
+        let new = Note(
+            id: "new", source: mastodon, author: "Ada", handle: "@ada", body: "hello",
+            postedAt: origin.addingTimeInterval(86_400), origins: [.publicTimeline]
+        )
+        let store = ItemStore(sources: [mastodon], notes: [old, new])
+        await store.dropPosted(before: origin.addingTimeInterval(60))
+        let snapshot = await store.snapshot()
+        try StoreFile(at: dir).save(sources: snapshot.sources, notes: snapshot.notes)
+
+        let opened = StoreFile.open(at: dir)
+        #expect(opened.notes.map(\.id) == ["new"])
+        #expect(opened.sources.map(\.host) == [mastodon.host], "the source did not stay joined")
+    }
+
     @Test("A note whose host has no source row is dropped on load")
     func orphanDropped() throws {
         let file = try StoreFile(database: DatabaseQueue())

@@ -1,0 +1,303 @@
+import CoreGraphics
+import Foundation
+import ImageIO
+import Testing
+import UniformTypeIdentifiers
+@testable import FediqoCore
+@testable import FediqoPersistence
+@testable import FediqoUI
+
+/// #7: what this device holds, and the three ways to drop some of it — by source (Clear), by
+/// cache, and by time — each pinned against a relaunch: a new `StoreFile` or `MediaCache` opened
+/// on the same folder.
+@MainActor
+@Suite("What this device holds, and dropping some of it")
+struct InventoryTests {
+    private let alpha = Source(host: "alpha.test", kind: .mastodon)
+    private let beta = Source(host: "beta.test", kind: .mastodon)
+    /// The real clock: a keep policy read at launch cuts back from the moment it runs.
+    private let now = Date()
+
+    private func address(_ n: Int) -> URL {
+        URL(string: "https://example.test/\(n).png")!
+    }
+
+    private func scratch() -> URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    }
+
+    private func note(_ id: String, daysAgo: Double, from source: Source) -> Note {
+        Note(
+            id: id, source: source, author: "Ada", handle: "@ada", body: "hello",
+            postedAt: now.addingTimeInterval(-daysAgo * 86_400), origins: [.publicTimeline],
+            avatarURL: address(Int(id) ?? 0)
+        )
+    }
+
+    /// Two sources, a post from each this week and one from alpha a year ago.
+    private func held() -> ItemStore {
+        ItemStore(sources: [alpha, beta], notes: [
+            note("1", daysAgo: 1, from: alpha),
+            note("2", daysAgo: 2, from: beta),
+            note("3", daysAgo: 365, from: alpha),
+        ])
+    }
+
+    /// Counts saves, and writes them where a relaunch will look, as the app's `save` does.
+    private final class Saves {
+        var count = 0
+    }
+
+    private func persisting(_ session: ShellSession, to dir: URL, counting saves: Saves) throws {
+        let file = try StoreFile(at: dir)
+        let store = session.store
+        session.persist = {
+            saves.count += 1
+            let snapshot = await store.snapshot()
+            try? file.save(sources: snapshot.sources, notes: snapshot.notes)
+        }
+    }
+
+    private actor Counting: HTTPClient {
+        private(set) var requests = 0
+        private let png: Data
+
+        init(png: Data) { self.png = png }
+
+        func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
+            requests += 1
+            return (png, HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!)
+        }
+    }
+
+    // MARK: By time
+
+    @Test("Keeping forever, or a count that is not positive, drops nothing and writes nothing", arguments: [0, -1])
+    func dropOlderThanGuard(months: Int) async throws {
+        let session = ShellSession(http: FixtureHTTP(), store: held())
+        let saves = Saves()
+        try persisting(session, to: scratch(), counting: saves)
+        await session.reloadFromStore()
+        await session.dropOlderThan(months: months, from: now)
+        #expect(session.notes.count == 3)
+        #expect(saves.count == 0)
+    }
+
+    @Test("Dropping once to the latest months holds after a relaunch, and every source stays joined")
+    func dropOlderThanSurvivesRelaunch() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let session = ShellSession(http: FixtureHTTP(), store: held())
+        let saves = Saves()
+        try persisting(session, to: dir, counting: saves)
+        await session.reloadFromStore()
+
+        await session.dropOlderThan(months: 3, from: now)
+        #expect(session.notes.map(\.id).sorted() == ["1", "2"])
+        #expect(session.sources.map(\.host) == [alpha.host, beta.host])
+        #expect(saves.count == 1)
+
+        let opened = StoreFile.open(at: dir)
+        #expect(opened.notes.map(\.id).sorted() == ["1", "2"])
+        #expect(opened.sources.map(\.host) == [alpha.host, beta.host])
+    }
+
+    @Test("A keep policy binds at launch and every read after, and is written")
+    func keepPolicyAppliesAndPersists() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = held()
+        let session = ShellSession(http: FixtureHTTP(), store: store)
+        let saves = Saves()
+        try persisting(session, to: dir, counting: saves)
+        session.keepMonths = 3
+        await session.reloadFromStore()
+        #expect(session.notes.map(\.id).sorted() == ["1", "2"], "the policy did not hold at launch")
+        await session.applyKeepPolicy()
+        #expect(saves.count == 1)
+        #expect(StoreFile.open(at: dir).notes.count == 2)
+
+        // Anything read later that is older than the window does not stay.
+        await store.ingest([note("4", daysAgo: 400, from: beta)])
+        await session.reloadFromStore()
+        #expect(!session.notes.contains { $0.id == "4" })
+    }
+
+    @Test("Forever is the default: nothing is dropped by time unless the reader chose it")
+    func foreverIsTheDefault() async {
+        let session = ShellSession(http: FixtureHTTP(), store: held())
+        #expect(session.keepMonths == KeepPolicy.forever)
+        await session.reloadFromStore()
+        await session.applyKeepPolicy(from: now)
+        #expect(session.notes.count == 3)
+    }
+
+    // MARK: By source
+
+    @Test("Clear keeps the source joined and its rows drawn")
+    func clearKeepsRows() async {
+        let session = ShellSession(
+            http: FixtureHTTP(), store: held(), pictures: ShellPictures(http: FixtureHTTP()), emojis: EmojiCache()
+        )
+        await session.reloadFromStore()
+        await session.clear(host: alpha.host)
+        #expect(session.sources.map(\.host) == [alpha.host, beta.host])
+        #expect(session.notes.count == 3)
+    }
+
+    // MARK: By cache
+
+    @Test("Dropping copies empties memory and disk for every source, holds after a relaunch, and rows still draw")
+    func dropCopiesKeepsRowsDrawable() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let png = try picture()
+        let http = Counting(png: png)
+        let pictures = ShellPictures(http: http, disk: try MediaCache(directory: dir))
+        let session = ShellSession(http: FixtureHTTP(), store: held(), pictures: pictures, emojis: EmojiCache())
+        await session.reloadFromStore()
+        await pictures.fetch(address(1), scale: 2, tier: .deck, host: alpha.host)
+        await pictures.fetch(address(2), scale: 2, tier: .deck, host: beta.host)
+        await pictures.diskSettled()
+        let before = await pictures.diskBytes(hosts: [alpha.host, beta.host])
+        #expect(before[alpha.host, default: 0] > 0)
+        #expect(before[beta.host, default: 0] > 0)
+        let generation = pictures.generation
+        let cleared = session.cleared
+
+        session.dropCopies()
+        await pictures.diskSettled()
+
+        #expect(pictures.holding(host: alpha.host).count == 0)
+        #expect(pictures.holding(host: beta.host).count == 0)
+        #expect(pictures.generation > generation, "rows on screen were not told to ask again")
+        #expect(session.cleared == cleared + 1)
+        #expect(await pictures.diskBytes(hosts: [alpha.host, beta.host]).values.reduce(0, +) == 0)
+        let reopened = try MediaCache(directory: dir)
+        #expect(reopened.data(host: alpha.host, url: address(1)) == nil)
+        #expect(reopened.data(host: beta.host, url: address(2)) == nil)
+
+        // The index is untouched, and a row still draws: its picture is read from its hyperlink.
+        #expect(session.notes.count == 3)
+        #expect(session.sources.count == 2)
+        let row = try #require(session.notes.first { $0.id == "1" })
+        let avatar = try #require(row.avatarURL as URL?)
+        let requests = await http.requests
+        await pictures.fetch(avatar, scale: 2, tier: .deck, host: row.source.host)
+        #expect(await http.requests == requests + 1)
+        #expect(pictures.picture(address(1), scale: 2, tier: .deck, host: alpha.host) != nil)
+    }
+
+    @Test("With no copies on disk, there is nothing on disk to read")
+    func noDiskNoBytes() async {
+        #expect(await ShellPictures(http: FixtureHTTP()).diskBytes(hosts: [alpha.host]).isEmpty)
+    }
+
+    // MARK: The cap
+
+    @Test("Past the cap, the oldest copies on disk go first")
+    func capTrimsOldest() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let cache = try MediaCache(directory: dir)
+        let copies = DiskCopies(cache, cap: 15, trimEvery: 1)
+        for n in 0..<3 {
+            copies.store(Data(count: 10), host: alpha.host, url: address(n))
+            await copies.settled()
+            try FileManager.default.setAttributes(
+                [.modificationDate: now.addingTimeInterval(Double(n) - 100)],
+                ofItemAtPath: cache.file(host: alpha.host, url: address(n)).path
+            )
+        }
+        copies.store(Data(count: 1), host: beta.host, url: address(9))
+        await copies.settled()
+        #expect(cache.data(host: alpha.host, url: address(0)) == nil, "the oldest copy survived the cap")
+        #expect(cache.data(host: alpha.host, url: address(1)) == nil)
+        #expect(cache.data(host: alpha.host, url: address(2)) != nil)
+        #expect(await copies.bytes(hosts: [alpha.host, beta.host]) == [alpha.host: 10, beta.host: 1])
+
+        copies.removeAll()
+        copies.trim()
+        #expect(await copies.bytes(hosts: [alpha.host]) == [alpha.host: 0])
+    }
+
+    @Test("The cap is only checked every so many writes")
+    func capWaitsForItsTurn() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let copies = DiskCopies(try MediaCache(directory: dir), cap: 5, trimEvery: 3)
+        copies.store(Data(count: 10), host: alpha.host, url: address(1))
+        copies.store(Data(count: 10), host: alpha.host, url: address(2))
+        #expect(await copies.bytes(hosts: [alpha.host]) == [alpha.host: 20])
+        copies.store(Data(count: 1), host: alpha.host, url: address(3))
+        #expect(await copies.bytes(hosts: [alpha.host])[alpha.host, default: 99] <= 5)
+        #expect(DiskCopies.defaultCap > 0 && DiskCopies.defaultTrimEvery > 0)
+    }
+
+    // MARK: The readout
+
+    @Test("Counts read as one or many, in both languages")
+    func countsReadInTheRightNumber() {
+        #expect(L10n.count("prefs.held.posts", 1, language: .english) == "1 post")
+        #expect(L10n.count("prefs.held.posts", 2, language: .english) == "2 posts")
+        #expect(L10n.count("prefs.cache.pictures", 1, language: .english) == "1 picture")
+        #expect(L10n.count("prefs.held.posts", 1, language: .taiwanese) == "1 則貼文")
+        #expect(L10n.count("prefs.keep.months", 1, language: .english) == "Latest 1 month")
+    }
+
+    @Test("Every key the readout and the drops use is in both languages")
+    func keysInBothLanguages() {
+        let keys = [
+            "prefs.held.posts", "prefs.held.posts.one", "prefs.held.posts.none",
+            "prefs.cache.pictures", "prefs.cache.pictures.one", "prefs.held.total",
+            "prefs.held.memory", "prefs.held.disk", "prefs.held.breakdown", "prefs.held.per",
+            "prefs.held.per.week", "prefs.held.per.month", "prefs.held.week", "prefs.drop",
+            "prefs.keep", "prefs.keep.forever", "prefs.keep.months", "prefs.keep.months.one",
+            "prefs.drop.once", "prefs.drop.once.months", "prefs.drop.once.months.one",
+            "prefs.drop.once.title", "prefs.drop.once.title.one", "prefs.drop.once.detail",
+            "prefs.drop.copies", "prefs.drop.copies.title", "prefs.drop.copies.detail",
+            "prefs.drop.confirm", "prefs.drop.footer",
+        ]
+        for key in keys {
+            for language in [DummyLanguage.english, .taiwanese] {
+                #expect(L10n.t(key, language: language) != key, "\(key) is missing in \(language)")
+            }
+        }
+    }
+
+    @Test("The readout's lines say what they count")
+    func readoutLines() {
+        let saved = L10n.language
+        L10n.language = .english
+        defer { L10n.language = saved }
+        #expect(PreferencesPane.postsLine(0) == "No posts held")
+        #expect(PreferencesPane.postsLine(1) == "1 post")
+        #expect(PreferencesPane.postsLine(3) == "3 posts")
+        #expect(PreferencesPane.dropTitle(.olderThan(1)) == "Drop posts older than 1 month?")
+        #expect(PreferencesPane.dropTitle(.olderThan(6)) == "Drop posts older than 6 months?")
+        #expect(PreferencesPane.dropTitle(.copies) == L10n.t("prefs.drop.copies.title"))
+        #expect(PreferencesPane.dropDetail(.copies) == L10n.t("prefs.drop.copies.detail"))
+        #expect(PreferencesPane.dropDetail(.olderThan(3)) == L10n.t("prefs.drop.once.detail"))
+        #expect(PreferencesPane.stretchLabel(now, period: .week).hasPrefix("Week of "))
+        #expect(PreferencesPane.stretchLabel(now, period: .month).contains(String(Calendar.current.component(.year, from: now))))
+        #expect(PreferencesPane.monthChoices == [1, 3, 6, 12])
+    }
+
+    // MARK: Helpers
+
+    private func picture() throws -> Data {
+        let context = try #require(CGContext(
+            data: nil, width: 8, height: 8, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.setFillColor(CGColor(red: 0.2, green: 0.4, blue: 0.6, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+        let written = NSMutableData()
+        let destination = try #require(CGImageDestinationCreateWithData(
+            written, UTType.png.identifier as CFString, 1, nil
+        ))
+        CGImageDestinationAddImage(destination, try #require(context.makeImage()), nil)
+        #expect(CGImageDestinationFinalize(destination))
+        return written as Data
+    }
+}
