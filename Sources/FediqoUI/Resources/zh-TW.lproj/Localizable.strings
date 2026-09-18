@@ -101,7 +101,9 @@
 "item.deck.audio" = "一段聲音";
 "item.deck.unknown" = "一個附件";
 "item.deck.play" = "播放";
-"item.covered.title" = "作者把這篇蓋起來了";
+"item.covered.mark" = "已蓋住";
+"item.lifted.mark" = "原本蓋著";
+"item.covered.warning" = "作者的警告：%@";
 "item.covered.show" = "掀開";
 "item.covered.label" = "按 s 掀開";
 "item.covered.hide" = "蓋回去";
