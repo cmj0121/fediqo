@@ -339,7 +339,7 @@ struct DummyItemRow: View {
     /// that is useless half-drawn — keeps its own size and its place at the end.
     private var meta: some View {
         HStack(spacing: ShellSpace.snug) {
-            sourcePills
+            sourcePill
                 .layoutPriority(0)
             visibility
             postedAgo
@@ -428,22 +428,10 @@ struct DummyItemRow: View {
         .frame(width: vis, height: vis)
     }
 
-    private var sourcePills: some View {
-        let hosts = item.shownHosts
-        return HStack(spacing: ShellSpace.tight) {
-            if let first = hosts.first {
-                pill(first)
-            }
-            if hosts.count > 1 {
-                pill("+\(hosts.count - 1)")
-                    .accessibilityLabel(L10n.t("item.sources"))
-                    .help(hosts.joined(separator: "\n"))
-            }
-        }
-    }
-
-    private func pill(_ text: String) -> some View {
-        Text(text)
+    /// The one server this row came through. A post two servers carry is two rows (#10), each
+    /// naming its own, so there is never a second host to count here.
+    private var sourcePill: some View {
+        Text(item.source.host)
             .font(ShellType.mark)
             .foregroundStyle(ShellChrome.inkDim(colorScheme))
             .lineLimit(1)

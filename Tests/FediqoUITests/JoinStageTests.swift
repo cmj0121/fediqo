@@ -123,10 +123,7 @@ struct JoinStageTests {
         // on the wire. (Holding the index instead parks the same look one request later: a look
         // reads the front page and the index, so both are inside it.)
         let http = GatedHTTP(Self.forumRoutes(), holding: "/")
-        let watchdog = Task {
-            try? await Task.sleep(for: .seconds(5))
-            await http.gate.open()
-        }
+        let watchdog = hangGuard(http.gate)
         defer { watchdog.cancel() }
         let session = ShellSession(http: http, store: ItemStore())
         session.hostname = Self.forum
@@ -172,10 +169,7 @@ struct JoinStageTests {
         //
         // Not hypothetical: the index probe made `look` want the forum's index, and the first cut
         // of it deadlocked exactly this way.
-        let watchdog = Task {
-            try? await Task.sleep(for: .seconds(5))
-            await http.gate.open()
-        }
+        let watchdog = hangGuard(http.gate)
         defer { watchdog.cancel() }
 
         session.hostname = Self.forum
@@ -233,10 +227,7 @@ struct JoinStageTests {
         //
         // Not hypothetical: the index probe made `look` want the forum's index, and the first cut
         // of it deadlocked exactly this way.
-        let watchdog = Task {
-            try? await Task.sleep(for: .seconds(5))
-            await http.gate.open()
-        }
+        let watchdog = hangGuard(http.gate)
         defer { watchdog.cancel() }
 
         session.hostname = "first.example"
@@ -503,10 +494,7 @@ struct JoinStageTests {
         // Armed before anything can await, for the reason the other gated tests give: nothing but
         // this test releases the gate, and `.timeLimit` does not rescue a task parked on a
         // continuation.
-        let watchdog = Task {
-            try? await Task.sleep(for: .seconds(5))
-            await http.gate.open()
-        }
+        let watchdog = hangGuard(http.gate)
         defer { watchdog.cancel() }
 
         let session = ShellSession(http: http, store: ItemStore())
@@ -1419,10 +1407,7 @@ struct JoinStageTests {
         let session = ShellSession(http: http, store: ItemStore())
         // Armed before anything awaits, for the reason the two tests above give: nothing else
         // releases this gate, and `.timeLimit` does not rescue a task held on a continuation.
-        let watchdog = Task {
-            try? await Task.sleep(for: .seconds(5))
-            await http.gate.open()
-        }
+        let watchdog = hangGuard(http.gate)
         defer { watchdog.cancel() }
 
         session.hostname = Self.forum
@@ -1454,6 +1439,79 @@ struct JoinStageTests {
         #expect(session.unread.isEmpty, "a sentence was left about a server that is gone")
     }
 
+    /// **The same resurrection, from inside `remove` rather than after it** — the ordering CI
+    /// found. `remove` awaits the store, the list and every cache in turn, and each of those gives
+    /// the main actor away; a `subscribe` whose boards come back in that window used to read a
+    /// token `remove` had not bumped yet, because the bump came after the last await. Core had
+    /// written the source back behind `store.remove`, and the stale-token branch that takes it
+    /// back was never taken.
+    ///
+    /// **The main actor is held on purpose, and that is what makes the window reachable.** Remove
+    /// is let run to its first await and then the test body sits on the main actor, without
+    /// yielding, while a detached task watches the store: once `store.remove` has run it opens the
+    /// gate, and once Core has written the forum back it lets go. By then remove's own
+    /// continuation and the subscribe's are both queued behind this body, remove's first — so the
+    /// subscribe resumes with `remove` still mid-flight, which is the whole of the bug. The grace
+    /// before letting go is for the subscribe's continuation to be queued at all; a run where it
+    /// is late passes on the fixed code and merely stops discriminating on the broken one.
+    @Test(
+        "A board read that lands while Remove is still running does not bring the server back",
+        .timeLimit(.minutes(1))
+    )
+    func aSubscribeLandingMidRemoveStaysRemoved() async {
+        let board = "https://\(Self.forum)/forum.php?mod=forumdisplay&fid=33"
+        var routes = Self.forumRoutes()
+        routes[board] = .text(Self.oneBoard)
+        let http = GatedHTTP(routes, holding: board)
+        let session = ShellSession(http: http, store: ItemStore())
+        let watchdog = hangGuard(http.gate)
+        defer { watchdog.cancel() }
+
+        session.hostname = Self.forum
+        await session.add()
+        await session.confirm()
+        guard let offer = session.choosing?.offer else {
+            Issue.record("a Discuz! should have paused for the reader to choose")
+            return
+        }
+
+        let press = Task { await session.subscribe(offer.boards.filter { $0.fid == 33 }) }
+        #expect(await spun { await http.reached }, "the pick never reached the wire")
+        // Something of the forum's in the store, so "`store.remove` has run" is a thing the
+        // watcher below can see.
+        let store = session.store
+        await store.add(Source(host: Self.forum, kind: .discuz))
+
+        let forum = Self.forum
+        let gate = http.gate
+        let landed = DispatchSemaphore(value: 0)
+        Task.detached {
+            while await store.sources().contains(where: { $0.host == forum }) { await Task.yield() }
+            await gate.open()
+            while await !store.all().contains(where: { $0.source.host == forum }) { await Task.yield() }
+            try? await Task.sleep(for: .milliseconds(100))
+            landed.signal()
+        }
+
+        let removal = Task { await session.remove(host: Self.forum) }
+        // Remove runs to its first await; this body resumes behind it.
+        await Task.yield()
+        #expect(Self.hold(until: landed), "Core never wrote the forum back")
+        await removal.value
+        await press.value
+
+        #expect(session.sources.isEmpty, "the subscribe put back a server removed around it")
+        #expect(await store.sources().isEmpty, "the store kept what the list let go of")
+        #expect(await store.all().isEmpty, "its threads came back with it")
+        #expect(session.unread.isEmpty, "a sentence was left about a server that is gone")
+    }
+
+    /// Blocks the caller — the main actor, here — until `signal` or ten seconds. Synchronous on
+    /// purpose, so no continuation queued behind it can run until it returns.
+    private static func hold(until signal: DispatchSemaphore) -> Bool {
+        signal.wait(timeout: .now() + 10) == .success
+    }
+
     /// The other side of the same token: **a Remove of a *different* server must not abandon this
     /// one's subscribe.** `remove` bumps `errand` only where `progressHost` names the host going
     /// away, and that narrowing is what this pins.
@@ -1471,10 +1529,7 @@ struct JoinStageTests {
         routes[board] = .text(Self.oneBoard)
         let http = GatedHTTP(routes, holding: board)
         let session = ShellSession(http: http, store: ItemStore())
-        let watchdog = Task {
-            try? await Task.sleep(for: .seconds(5))
-            await http.gate.open()
-        }
+        let watchdog = hangGuard(http.gate)
         defer { watchdog.cancel() }
 
         await session.store.add(Source(host: "elsewhere.example", kind: .mastodon))
@@ -1552,10 +1607,7 @@ struct JoinStageTests {
             "/api/v1/timelines/public": .text("[]"),
             "/api/v1/trends/statuses": .text("[]"),
         ], holding: "/api/v1/timelines/public")
-        let watchdog = Task {
-            try? await Task.sleep(for: .seconds(5))
-            await http.gate.open()
-        }
+        let watchdog = hangGuard(http.gate)
         defer { watchdog.cancel() }
 
         let session = ShellSession(http: http, store: ItemStore())
@@ -1609,10 +1661,7 @@ struct JoinStageTests {
             "/api/v1/timelines/public": .text("[]"),
             "/api/v1/trends/statuses": .text("[]"),
         ], holding: "/api/v1/timelines/public")
-        let watchdog = Task {
-            try? await Task.sleep(for: .seconds(5))
-            await http.gate.open()
-        }
+        let watchdog = hangGuard(http.gate)
         defer { watchdog.cancel() }
 
         let session = ShellSession(http: http, store: ItemStore())
@@ -1671,10 +1720,7 @@ struct JoinStageTests {
             "/api/v1/timelines/public": .text("[]"),
             "/api/v1/trends/statuses": .text("[]"),
         ], holding: "/api/v1/timelines/public")
-        let watchdog = Task {
-            try? await Task.sleep(for: .seconds(5))
-            await http.gate.open()
-        }
+        let watchdog = hangGuard(http.gate)
         defer { watchdog.cancel() }
 
         let session = ShellSession(http: http, store: ItemStore())

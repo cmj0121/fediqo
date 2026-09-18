@@ -2,24 +2,25 @@ import Foundation
 
 /// Notes this device is holding, until it forgets them.
 public actor ItemStore {
-    /// One row per source and item. Two hosts carrying the same Mastodon URI are two rows (#10).
-    private struct NoteKey: Hashable, Sendable {
-        let host: String
-        let id: String
-    }
-
     private var sourceList: [Source] = []
+    /// One row per `NoteKey`: two hosts carrying the same Mastodon URI are two rows (#10).
     private var notes: [NoteKey: Note] = [:]
 
     public init() {}
 
+    /// A store holding what a relaunch read back from disk — the one way a snapshot gets in.
+    ///
+    /// **A snapshot is taken as it is, but never trusted to be well-formed.** It is whatever the
+    /// last run wrote, read through a file format that can be older than this code; a duplicate
+    /// in it is a bug somewhere else, and trapping at launch over it would turn that bug into an
+    /// app that does not open. So the rules `add` and `ingest` keep hold here too: one source per
+    /// host, the first one winning as `add` has it, and one row per `NoteKey`, the later copy
+    /// winning outright — a snapshot is one moment written once, not two reads to merge.
     public init(sources: [Source], notes incoming: [Note]) {
-        sourceList = sources
-        notes = Dictionary(uniqueKeysWithValues: incoming.map { (Self.key(of: $0), $0) })
-    }
-
-    private static func key(of note: Note) -> NoteKey {
-        NoteKey(host: note.source.host, id: note.id)
+        for source in sources where !sourceList.contains(where: { $0.host == source.host }) {
+            sourceList.append(source)
+        }
+        notes = Dictionary(incoming.map { ($0.key, $0) }, uniquingKeysWith: { _, new in new })
     }
 
     public func add(_ source: Source) {
@@ -51,7 +52,7 @@ public actor ItemStore {
     /// is two rows (#10). Merging those into one thread is later.
     public func ingest(_ incoming: [Note]) {
         for note in incoming {
-            let key = Self.key(of: note)
+            let key = note.key
             if var existing = notes[key] {
                 existing.origins.formUnion(note.origins)
                 notes[key] = existing
@@ -77,10 +78,14 @@ public actor ItemStore {
         sourceList
     }
 
-    /// Replaces what this device holds. Used to load a snapshot after a relaunch.
-    public func replace(sources: [Source], notes incoming: [Note]) {
-        sourceList = sources
-        notes = Dictionary(uniqueKeysWithValues: incoming.map { (Self.key(of: $0), $0) })
+    /// Everything this store holds, read in one hop — what a save writes to disk.
+    ///
+    /// **Unsorted, and taken at one moment.** A save does not draw anything, so it has no use for
+    /// `all()`'s order and should not pay for it; and asking for the sources and the notes in two
+    /// awaits would let an ingest or a remove land between them, writing notes whose source is
+    /// gone. This is the counterpart of `init(sources:notes:)`.
+    public func snapshot() -> (sources: [Source], notes: [Note]) {
+        (sourceList, Array(notes.values))
     }
 
     public func all() -> [Note] {
