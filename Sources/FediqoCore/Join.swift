@@ -504,8 +504,8 @@ public struct DiscuzBoardJoin: Sendable {
         let stamp = Source(host: host, kind: .discuz)
         let client = DiscuzClient(http: http, host: host)
         // `fid` and nothing else, because `fid` is the identity — a board renamed between two
-        // reads is the same board, and `DummyTimeline`'s matching by name is written down in this
-        // repo as the thing that is *not* the identity. A set rather than a map of the stored
+        // reads is the same board, and a board's name is written down in this repo as the
+        // thing that is *not* the identity. A set rather than a map of the stored
         // subscriptions, so there is nothing stale here to reach for by accident.
         let held = Set(keeping.map(\.fid))
 
