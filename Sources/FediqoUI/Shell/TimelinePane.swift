@@ -235,12 +235,8 @@ struct TimelinePane: View {
 
     /// The title, the queries, and the rule the current one is under.
     ///
-    /// **The pills scroll, because there can now be thirty-five of them.** Two queries fit beside
-    /// a title; `all` plus the 33 boards of `install-a.example` does not, and an `HStack` asked to
-    /// hold them squeezes every pill until none of the names can be read — at phone width it
-    /// squeezes them out of the window entirely. So the row scrolls sideways and the rule moves
-    /// below it, where it has the full width a sentence wants rather than whatever a row of
-    /// thirty-five pills left over.
+    /// The pills are All and Trends. The row still scrolls so a narrow window does not squeeze
+    /// the names, and the rule sits below them at full width.
     private var header: some View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
             HStack(alignment: .center, spacing: ShellSpace.step) {
