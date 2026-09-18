@@ -80,6 +80,17 @@ struct DrawnTimeline {
     let items: [DummyItem]
 }
 
+/// One tab's missing-rule mark, and what it was worked out from.
+struct MissingRules {
+    struct Key: Equatable {
+        let definition: TimelineDefinition
+        let sources: [Source]
+    }
+
+    let key: Key
+    let missing: Bool
+}
+
 /// Where Tab can land on the timeline: a query, or the pinned `[+]` pill after the last one.
 enum TimelineTabStop: Hashable {
     case query(TimelineQuery)
@@ -140,10 +151,17 @@ extension ShellSession {
         return L10n.count("timeline.rule.written", definition(of: query).rules.count)
     }
 
-    /// Whether a rule of this query names something this device no longer holds.
+    /// Whether a rule of this query names something this device no longer holds. Asked for every
+    /// tab on every redraw, so the answer is kept per tab until its definition or the sources
+    /// change.
     func hasMissingRule(_ query: TimelineQuery) -> Bool {
-        let compiled = CompiledTimeline(definition(of: query), sources: sources)
-        return compiled.definition.rules.contains { compiled.status(of: $0) != .present }
+        let key = MissingRules.Key(definition: definition(of: query), sources: sources)
+        if let kept = missingRules[query], kept.key == key { return kept.missing }
+        let compiled = CompiledTimeline(key.definition, sources: sources)
+        let missing = compiled.definition.rules.contains { compiled.status(of: $0) != .present }
+        missingRules[query] = MissingRules(key: key, missing: missing)
+        missingRuleEvaluations += 1
+        return missing
     }
 
     func showToast(_ text: String) {
