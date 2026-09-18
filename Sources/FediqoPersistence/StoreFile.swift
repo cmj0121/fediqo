@@ -103,20 +103,18 @@ public struct StoreFile: Sendable {
         }
     }
 
-    public func save(sources: [Source], notes: [Note]) throws {
-        try db.write { db in try Self.replaceAll(in: db, sources: sources, notes: notes) }
-    }
-
-    /// Empties both tables and writes `sources` and `notes` in their place, in the caller's
-    /// transaction. The app saves through `StoreSaver`, which writes this off the main actor.
-    static func replaceAll(in db: Database, sources: [Source], notes: [Note]) throws {
-        try NoteRecord.deleteAll(db)
-        try SourceRecord.deleteAll(db)
-        for source in sources {
-            try SourceRecord(source).insert(db)
-        }
-        for note in notes {
-            try NoteRecord(note).insert(db)
+    /// Empties both tables and writes `sources` and `notes` in their place, in one transaction,
+    /// on GRDB's queue rather than the caller's. The app saves through `StoreSaver`.
+    public func save(sources: [Source], notes: [Note]) async throws {
+        try await db.write { db in
+            try NoteRecord.deleteAll(db)
+            try SourceRecord.deleteAll(db)
+            for source in sources {
+                try SourceRecord(source).insert(db)
+            }
+            for note in notes {
+                try NoteRecord(note).insert(db)
+            }
         }
     }
 }
