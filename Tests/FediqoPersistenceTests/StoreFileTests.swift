@@ -146,3 +146,112 @@ struct StoreFileTests {
         FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
     }
 }
+
+@Suite("Opening the index at launch")
+struct StoreFileOpenTests {
+    private let origin = Date(timeIntervalSince1970: 1_700_000_000)
+    private let garbage = Data("this is not a database, and it is the reader's only copy".utf8)
+
+    @Test("A healthy index opens with what it held and sets nothing aside")
+    func healthy() throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let source = Source(host: "first.example", kind: .mastodon)
+        try StoreFile(at: dir).save(sources: [source], notes: [])
+        let opened = StoreFile.open(at: dir)
+        #expect(opened.file != nil)
+        #expect(opened.sources == [source])
+        #expect(opened.setAside == nil)
+    }
+
+    @Test("A directory with no index opens empty and writable")
+    func fresh() throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let opened = StoreFile.open(at: dir)
+        #expect(opened.file != nil)
+        #expect(opened.sources.isEmpty && opened.notes.isEmpty)
+        #expect(opened.setAside == nil)
+    }
+
+    @Test("A corrupt index is moved aside, byte for byte, and a save does not touch it")
+    func corruptIsSetAside() throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try garbage.write(to: dir.appendingPathComponent("index.sqlite"))
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let opened = StoreFile.open(at: dir, now: now)
+        let aside = try #require(opened.setAside)
+        #expect(aside.lastPathComponent == "index-unreadable-20270115T080000Z.sqlite")
+        #expect(opened.sources.isEmpty && opened.notes.isEmpty)
+        let file = try #require(opened.file)
+        let source = Source(host: "first.example", kind: .mastodon)
+        try file.save(sources: [source], notes: [])
+        #expect(try Data(contentsOf: aside) == garbage)
+        #expect(try StoreFile(at: dir).load().sources == [source])
+    }
+
+    @Test("Setting aside twice in one second keeps both copies")
+    func twoInOneSecond() throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        try garbage.write(to: dir.appendingPathComponent("index.sqlite"))
+        let first = try #require(StoreFile.open(at: dir, now: now).setAside)
+        try garbage.write(to: dir.appendingPathComponent("index.sqlite"))
+        let second = try #require(StoreFile.open(at: dir, now: now).setAside)
+        #expect(first != second)
+        #expect(second.lastPathComponent == "index-unreadable-20270115T080000Z-2.sqlite")
+        #expect(FileManager.default.fileExists(atPath: first.path))
+    }
+
+    @Test("An index whose migration fails is set aside, not migrated over")
+    func failedMigrationIsSetAside() throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        // A `source` table the migrator did not make: v1 cannot create its own over it.
+        try DatabaseQueue(path: dir.appendingPathComponent("index.sqlite").path).write { db in
+            try db.execute(sql: "CREATE TABLE source (anything TEXT)")
+            try db.execute(sql: "INSERT INTO source VALUES ('keep me')")
+        }
+        let opened = StoreFile.open(at: dir)
+        let aside = try #require(opened.setAside)
+        let kept = try DatabaseQueue(path: aside.path).read { db in
+            try String.fetchOne(db, sql: "SELECT anything FROM source")
+        }
+        #expect(kept == "keep me")
+        #expect(opened.file != nil)
+    }
+
+    @Test("A row that cannot be decoded fails the load, and the file is set aside")
+    func undecodableRowIsSetAside() throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = try StoreFile(at: dir)
+        try file.save(sources: [Source(host: "forum.example", kind: .discuz)], notes: [])
+        try file.db.write { db in
+            try db.execute(sql: "UPDATE source SET boards = 'not json'")
+        }
+        let opened = StoreFile.open(at: dir)
+        #expect(opened.setAside != nil)
+        #expect(opened.sources.isEmpty)
+    }
+
+    @Test("When the directory cannot be made, the run gets no file to save to")
+    func noDirectoryNoFile() throws {
+        let blocker = scratch()
+        defer { try? FileManager.default.removeItem(at: blocker) }
+        try garbage.write(to: blocker)
+        let opened = StoreFile.open(at: blocker.appendingPathComponent("Fediqo", isDirectory: true))
+        #expect(opened.file == nil)
+        #expect(opened.setAside == nil)
+        #expect(try Data(contentsOf: blocker) == garbage)
+    }
+
+    private func scratch() -> URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    }
+}
