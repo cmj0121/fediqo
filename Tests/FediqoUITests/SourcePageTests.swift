@@ -660,8 +660,8 @@ struct SourcePageTests {
         // to learn that the short row is short on purpose.
         #expect(
             L10n.t("account.sources.marks", language: .english) == """
-                A row carries only the marks its own server has: sign in, change boards, clear \
-                what it left here, and remove it.
+                A row carries only the marks its own server has: sign in, change boards or \
+                lists, clear what it left here, and remove it.
                 """
         )
         #expect(L10n.t("account.source.boards", language: .english) == "%1$d boards: %2$@")
@@ -925,13 +925,13 @@ struct SourcePageTests {
             floor, and `touch` is the only fixed metric in this row that already carries a \
             what-a-human-needs argument.
             """)
-        #expect(SourceRow.Control.allCases.count == 4)
+        #expect(SourceRow.Control.allCases.count == 5)
 
         // **The gap is a property of the control now, not an index into a list.** `gaps[index - 1]`
         // was correct only while every row drew all four: a Mastodon drawing [clear, remove] would
         // have read `gaps[0]` — `tight` — for a pair the design deliberately separates.
         let leads: [SourceRow.Control: CGFloat] = [
-            .signIn: ShellSpace.snug, .boards: ShellSpace.tight,
+            .signIn: ShellSpace.snug, .boards: ShellSpace.tight, .lists: ShellSpace.tight,
             .clear: ShellSpace.snug, .remove: ShellSpace.snug,
         ]
         #expect(Set(leads.keys) == Set(SourceRow.Control.allCases), """
@@ -1019,7 +1019,7 @@ struct SourcePageTests {
         // **The declared order is the drawn order and the suffix property falls out of it.** A
         // later hand reordering the enum to put Remove first would destroy the property that Clear
         // and Remove stand in the same two columns on every row, silently.
-        #expect(SourceRow.Control.allCases == [.signIn, .boards, .clear, .remove])
+        #expect(SourceRow.Control.allCases == [.signIn, .boards, .lists, .clear, .remove])
     }
 
     /// **One threshold for the whole list, computed from the widest row in it** — decision 33's

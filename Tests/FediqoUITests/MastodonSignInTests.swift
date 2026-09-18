@@ -24,6 +24,7 @@ private actor MastodonServer: HTTPSender {
             "/oauth/token": .json(#"{"access_token":"tok-123"}"#),
             "/api/v1/accounts/verify_credentials": .json(#"{"id":"1"}"#),
             "/oauth/revoke": .json("{}"),
+            "/api/v1/timelines/home": .json("[]"),
         ].merging(overrides) { $1 }
     }
 
@@ -121,8 +122,10 @@ struct MastodonSignInTests {
         #expect(try tokens.token(host: host) == token(host))
         #expect(session.isSignedIn(host: host))
         #expect(session.mastodon.signedInHosts == [host])
-        #expect(await server.paths
-            == ["/api/v1/apps", "/oauth/token", "/api/v1/accounts/verify_credentials"])
+        #expect(await server.paths == [
+            "/api/v1/apps", "/oauth/token", "/api/v1/accounts/verify_credentials",
+            "/api/v1/timelines/home",
+        ])
         #expect(session.rowRefusal == nil)
         #expect(try tokens.app(host: host) == app, "the registration was not kept")
     }
