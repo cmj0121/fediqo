@@ -29,7 +29,7 @@ final class Launch {
         store = ItemStore(sources: opened.sources, notes: opened.notes)
         // `nil` when the index could not be read and could not be set aside either: this run
         // then saves nothing, so what is on disk survives it (`StoreFile.open(at:now:)`).
-        saver = StoreSaver(store: store, index: opened.file)
+        saver = StoreSaver(store: store, file: opened.file)
         // Built on first use only: a reader with no forum never opens the WebKit store.
         forums = ForumSessions(dataStore: ForumWebsiteData.onDevice())
         // Where Caches cannot be made, pictures are read from their hyperlinks only.
@@ -42,19 +42,12 @@ final class Launch {
 #if os(macOS)
 /// Cmd+Q on a Mac often never delivers `scenePhase == .background`, and a fire-and-forget Task
 /// is cancelled when the process exits. Termination waits for the write — up to
-/// `PersistOnQuit.deadline`, and then quits anyway.
+/// `StoreSaver.deadline`, and then quits anyway.
 @MainActor
 final class FediqoAppDelegate: NSObject, NSApplicationDelegate {
-    private let saver: StoreSaver
-
-    override init() {
-        saver = Launch.shared.saver
-        super.init()
-    }
-
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        let saver = saver
-        PersistOnQuit.holdUntilSaved(save: { try await saver.save() }) { _ in
+        Task {
+            _ = await Launch.shared.saver.flush()
             NSApp.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
@@ -65,7 +58,6 @@ final class FediqoAppDelegate: NSObject, NSApplicationDelegate {
 /// The app entry, shared by every platform host. Everything it shows lives in `FediqoUI`.
 @main
 struct FediqoApp: App {
-    private let launch = Launch.shared
     #if os(macOS)
     @NSApplicationDelegateAdaptor(FediqoAppDelegate.self) private var appDelegate
     #endif
@@ -73,7 +65,7 @@ struct FediqoApp: App {
 
     var body: some Scene {
         WindowGroup {
-            FediqoRootView(store: launch.store, forums: launch.forums, persist: save)
+            FediqoRootView(store: Launch.shared.store, forums: Launch.shared.forums, persist: save)
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .background {
                         saveInBackground()
@@ -87,21 +79,22 @@ struct FediqoApp: App {
 
     /// A failure is already logged by the saver; there is nothing more to do about it here.
     private func save() async {
-        try? await launch.saver.save()
+        try? await Launch.shared.saver.save()
     }
 
     /// On iOS a backgrounded app is suspended within moments, which would stop a write halfway;
-    /// the background task asks for the time to finish it, and gives it back as soon as it has.
+    /// the background task asks for the time to finish it, and gives it back as soon as it has —
+    /// or at the deadline, the same one a quit has.
     private func saveInBackground() {
         #if os(iOS)
         let grant = BackgroundGrant()
-        Task {
-            await save()
-            grant.end()
-        }
-        #else
-        Task { await save() }
         #endif
+        Task {
+            _ = await Launch.shared.saver.flush()
+            #if os(iOS)
+            grant.end()
+            #endif
+        }
     }
 }
 
