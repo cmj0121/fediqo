@@ -8,6 +8,44 @@ struct StoreTests {
     private let other = Source(host: "second.example", kind: .mastodon)
     private let origin = Date(timeIntervalSince1970: 1_700_000_000)
 
+    @Test("A retention window drops what is older, says how many went, and keeps every source")
+    func retentionPrunes() async {
+        let store = ItemStore()
+        await store.add(source)
+        await store.add(other)
+        await store.ingest([
+            note(id: "old", postedAt: origin, origins: [.publicTimeline], from: other),
+            note(id: "new", postedAt: origin.addingTimeInterval(200 * 86_400), origins: [.publicTimeline]),
+        ])
+        let now = origin.addingTimeInterval(210 * 86_400)
+        #expect(await store.setRetention(months: 3, from: now) == 1)
+        #expect(await store.sources().map(\.host) == ["first.example", "second.example"])
+        #expect(await store.all().map(\.id) == ["new"])
+        #expect(await store.setRetention(months: 3, from: now) == 0, "nothing left to drop")
+    }
+
+    @Test("Inside a window, a note older than it is refused by ingest")
+    func retentionRefusesOldNotes() async {
+        let store = ItemStore()
+        await store.add(source)
+        let now = origin.addingTimeInterval(400 * 86_400)
+        await store.setRetention(months: 1, from: now)
+        await store.ingest([
+            note(id: "old", postedAt: origin, origins: [.publicTimeline]),
+            note(id: "new", postedAt: now, origins: [.publicTimeline]),
+        ])
+        #expect(await store.all().map(\.id) == ["new"])
+    }
+
+    @Test("No window is forever: nothing is dropped and nothing refused", arguments: [nil, 0, -3] as [Int?])
+    func noRetentionIsForever(months: Int?) async {
+        let store = ItemStore(sources: [source], notes: [note(id: "old", postedAt: origin, origins: [.publicTimeline])])
+        #expect(await store.setRetention(months: months, from: origin.addingTimeInterval(999 * 86_400)) == 0)
+        await store.ingest([note(id: "older", postedAt: origin.addingTimeInterval(-86_400), origins: [.publicTimeline])])
+        #expect(await store.all().map(\.id) == ["old", "older"])
+        #expect(await store.retention == nil)
+    }
+
     @Test("A relaunch builds the store from a snapshot")
     func initLoadsASnapshot() async {
         let forum = Source(host: "forum.example", kind: .discuz)

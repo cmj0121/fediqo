@@ -56,19 +56,53 @@ public struct MediaCache: MediaCopies {
     /// before its Clear reached the disk, or one no build ever cleared, leaves behind.
     public func keepOnly(hosts: some Sequence<String>) {
         let kept = Set(hosts.map(Self.folderName))
-        let folders = (try? FileManager.default.contentsOfDirectory(
-            at: directory, includingPropertiesForKeys: nil
-        )) ?? []
-        for folder in folders where !kept.contains(folder.lastPathComponent) {
+        for folder in hostFolders() where !kept.contains(folder.lastPathComponent) {
             try? FileManager.default.removeItem(at: folder)
         }
     }
 
-    func bytes(host: String) -> Int {
-        guard let files = try? FileManager.default.contentsOfDirectory(
-            at: folder(for: host), includingPropertiesForKeys: [.fileSizeKey]
-        ) else { return 0 }
-        return files.reduce(0) { $0 + ((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
+    public func removeAll() {
+        keepOnly(hosts: [])
+    }
+
+    public func bytes(host: String) -> Int {
+        Self.files(in: folder(for: host)).reduce(0) { $0 + $1.size }
+    }
+
+    /// Oldest written first, by modification date, so what goes is what has been kept longest.
+    /// A folder the trim emptied goes too, so `keepOnly` and `bytes` see no husk of a host.
+    @discardableResult
+    public func trim(toBytes cap: Int) -> Int {
+        let files = hostFolders().flatMap(Self.files(in:))
+        var total = files.reduce(0) { $0 + $1.size }
+        guard total > cap else { return total }
+        var touched = Set<URL>()
+        for file in files.sorted(by: { $0.written < $1.written }) {
+            guard total > cap else { break }
+            try? FileManager.default.removeItem(at: file.url)
+            total -= file.size
+            touched.insert(file.url.deletingLastPathComponent())
+        }
+        for folder in touched where Self.files(in: folder).isEmpty {
+            try? FileManager.default.removeItem(at: folder)
+        }
+        return total
+    }
+
+    /// Every host's folder under `directory`.
+    private func hostFolders() -> [URL] {
+        (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+    }
+
+    private static func files(in folder: URL) -> [(url: URL, size: Int, written: Date)] {
+        let keys: [URLResourceKey] = [.fileSizeKey, .contentModificationDateKey]
+        let urls = (try? FileManager.default.contentsOfDirectory(
+            at: folder, includingPropertiesForKeys: keys
+        )) ?? []
+        return urls.map { url in
+            let values = try? url.resourceValues(forKeys: Set(keys))
+            return (url, values?.fileSize ?? 0, values?.contentModificationDate ?? .distantPast)
+        }
     }
 
     /// The one folder `host` may touch: a child of `directory` named by the digest of the folded
@@ -77,7 +111,7 @@ public struct MediaCache: MediaCopies {
         directory.appendingPathComponent(Self.folderName(host), isDirectory: true)
     }
 
-    private func file(host: String, url: URL) -> URL {
+    func file(host: String, url: URL) -> URL {
         folder(for: host).appendingPathComponent(Self.digest(url.absoluteString))
     }
 
