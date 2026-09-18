@@ -124,6 +124,9 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
         origins = note.origins.map(\.rawValue).sorted().joined(separator: ",")
     }
 
+    /// Origins come back as they went in, an empty set included: which lists a note was seen in
+    /// is a fact about it, and filling in `.publicTimeline` for none would put it in a list it
+    /// was never read from.
     var note: Note {
         let originSet = Set(
             origins.split(separator: ",").compactMap { FetchOrigin(rawValue: String($0)) }
@@ -136,7 +139,7 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             body: body,
             title: title,
             postedAt: posted_at,
-            origins: originSet.isEmpty ? [.publicTimeline] : originSet
+            origins: originSet
         )
     }
 }
