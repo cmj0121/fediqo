@@ -8,8 +8,8 @@ import Testing
 ///
 /// **What is not here, and why it is not here.** A `WKWebView` is a second process with a render
 /// surface, and nothing in a Swift package can run a view body or put a window on screen — so the
-/// fetch itself, the cookie store, the Keychain and a browser check clearing are all verified by
-/// running the app, not here. What is here is every decision that is a decision rather than a
+/// fetch itself, the Keychain and a browser check clearing are all verified by running the app,
+/// not here. (The cookie store is reachable without a view; `ForumDeviceStoreTests` has it.) What is here is every decision that is a decision rather than a
 /// framework call: which addresses this transport will go to, what a Clear reaches, when a reader
 /// is offered a sign-in, and that every way a sign-in can stop has a sentence in every language.
 @MainActor
@@ -85,20 +85,25 @@ struct ForumTransportTests {
     }
 
     /// The pane's own doc warns against exactly this: a true-looking sentence that is false.
-    @Test("The cache footer stops claiming nothing is written to disk, now that something is")
+    @Test("The cache footer owns up to what a sign-in keeps on this device, and where it does not go")
     func theFooterIsNoLongerALie() {
         // "None of this is written to disk" was true when three memory caches were all this
-        // section listed. A saved password is in the Keychain, and a footer that denies it sits
-        // directly under a row saying a password is held — the reader is told two opposite
-        // things at once and one of them is this app's own promise.
+        // section listed. Then a saved password went into the Keychain, and since #5 a forum's
+        // session cookies stay on this device between launches. A footer that denies either sits
+        // under a row saying a sign-in is held — the reader is told two opposite things at once,
+        // and one of them is this app's own promise.
         for language in [DummyLanguage.english, .taiwanese] {
             let footer = L10n.t("prefs.cache.footer", language: language)
             #expect(footer != "prefs.cache.footer")
-            let names = language == .english ? ["exception", "Keychain"] : ["例外", "鑰匙圈"]
+            let names = language == .english
+                ? ["Keychain", "cookies", "not backed up", "Clear"]
+                : ["鑰匙圈", "Cookie", "不會被備份", "清除"]
             for name in names {
                 #expect(footer.contains(name),
-                        "the \(language.labelKey) footer does not own up to the one thing it keeps")
+                        "the \(language.labelKey) footer does not own up to what it keeps: \(name)")
             }
+            let denial = language == .english ? "None of this is written to disk" : "不會寫進磁碟"
+            #expect(!footer.contains(denial), "the \(language.labelKey) footer still denies keeping anything")
         }
     }
 
