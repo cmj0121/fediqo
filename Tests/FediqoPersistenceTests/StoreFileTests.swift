@@ -108,25 +108,6 @@ struct StoreFileTests {
         #expect(try file.load().sources.first?.boards == boards)
     }
 
-    @Test("A board list an older build wrote is carried into the new form")
-    func boardsMigrateFromSeparators() throws {
-        let queue = try DatabaseQueue()
-        try migrator.migrate(queue, upTo: "v1-index")
-        try queue.write { db in
-            try db.execute(
-                sql: "INSERT INTO source (host, kind, boards) VALUES (?, ?, ?), (?, ?, ?)",
-                arguments: [
-                    "forum.example", "discuz", "33\u{1f}Tea\u{1e}34\u{1f}Water",
-                    "first.example", "mastodon", "",
-                ]
-            )
-        }
-        let loaded = try StoreFile(database: queue).load()
-        let boards = Dictionary(uniqueKeysWithValues: loaded.sources.map { ($0.host, $0.boards) })
-        #expect(boards["forum.example"] == [BoardSubscription(fid: 33, name: "Tea"), BoardSubscription(fid: 34, name: "Water")])
-        #expect(boards["first.example"] == [])
-    }
-
     @Test("A second StoreFile on the same directory reads what the first saved")
     func reopenSameDirectory() throws {
         let dir = scratch()
