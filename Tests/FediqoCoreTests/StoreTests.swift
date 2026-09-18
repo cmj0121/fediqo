@@ -85,6 +85,21 @@ struct StoreTests {
         #expect(await store.all().map(\.id) == ["a", "c", "b"])
     }
 
+    /// Two sources carrying one status are two rows with the same time and the same id, so the
+    /// host is what is left to order them by. Without it their order would be whatever the
+    /// dictionary iterates to, and a timeline would swap the pair between one build and the next.
+    @Test("One item through two hosts sorts by host, whichever arrived first")
+    func sameTimeAndIdSortsByHost() async {
+        let uri = "https://origin.example/users/ada/statuses/1"
+        for firstIn in [source, other] {
+            let store = ItemStore()
+            let secondIn = firstIn == source ? other : source
+            await store.ingest([note(id: uri, postedAt: origin, origins: [.publicTimeline], from: firstIn)])
+            await store.ingest([note(id: uri, postedAt: origin, origins: [.publicTimeline], from: secondIn)])
+            #expect(await store.all().map(\.source.host) == ["first.example", "second.example"])
+        }
+    }
+
     @Test("Overlapping uri ingest on one host is one row with both origins, and it is a trend")
     func overlappingURIMergesOrigins() async {
         let store = ItemStore()
