@@ -94,6 +94,20 @@ struct ViewerTests {
         #expect(!shell.threadOpen)
     }
 
+    @Test("Tab under the guide rotates the guide's tabs, not a conversation beneath it")
+    func tabUnderTheGuideRotatesTheGuide() {
+        let shell = Shell(items: Self.list, selected: Self.a)
+        #expect(shell.press(.showShortcuts))
+        #expect(shell.shortcutTab == .timeline)
+        #expect(shell.press(.nextTab))
+        #expect(shell.shortcutTab == .app)
+        #expect(shell.press(.nextTab))
+        #expect(shell.shortcutTab == .timeline)
+        #expect(shell.press(.previousTab))
+        #expect(shell.shortcutTab == .app)
+        #expect(!shell.threadOpen)
+    }
+
     // `q` used to intersect its own subset of the layers, which was the order written down a
     // second time. It reads the one list now, so it reaches past nothing.
     @Test("q leaves the outermost layer and reaches past nothing")
@@ -398,6 +412,7 @@ struct ViewerTests {
         var viewing: String?
         var threadOpen = false
         var shortcutsOpen = false
+        var shortcutTab = DummyShortcutGroup.timeline
         var decks = ShellDecks()
         var playing = ShellPlaying()
 
@@ -478,6 +493,13 @@ struct ViewerTests {
                 }
                 guard DummyCommand.canOpen(.shortcuts, whenOpen: openLayers) else { return false }
                 shortcutsOpen = true
+                return true
+            case .nextTab, .previousTab:
+                guard DummyCommand.outermost(of: openLayers) == .shortcuts else { return false }
+                shortcutTab = DummyShortcutGroup.rotated(
+                    from: shortcutTab,
+                    by: command == .nextTab ? 1 : -1
+                )
                 return true
             case .back, .dismiss:
                 switch DummyCommand.outermost(of: openLayers) {

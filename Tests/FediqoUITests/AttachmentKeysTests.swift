@@ -58,6 +58,8 @@ struct AttachmentKeysTests {
         #expect(DummyCommand.from("\u{1B}") == .dismiss)
         #expect(DummyCommand.from("?") == .showShortcuts)
         #expect(DummyCommand.from("?", shift: true) == .showShortcuts)
+        #expect(DummyCommand.from("r") == nil)
+        #expect(DummyCommand.from("r", command: true) == .replayLanding)
     }
 
     @Test("The guide names a key cap and a translated line for each of the four")
@@ -65,7 +67,7 @@ struct AttachmentKeysTests {
         for (character, command) in Self.keys {
             let line = DummyShortcut.all.first { $0.commands == [command] }
             #expect(line?.keys == [String(character)])
-            #expect(line?.group == .doing)
+            #expect(line?.group == .timeline)
         }
     }
 

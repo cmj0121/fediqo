@@ -10,6 +10,13 @@ public struct FediqoRootView: View {
     @State private var jumpToTop = 0
     @State private var composing = false
     @State private var showingShortcuts = false
+    @State private var shortcutTab: DummyShortcutGroup = .timeline
+    /// The launch overlay. Starts true; `LandingView` clears it after the flips, and
+    /// `playsLanding` is false from the first frame when reduce motion is on.
+    @State private var showingLanding = true
+    /// Bumped so a press of `r` remounts the overlay from rest rather than showing a
+    /// view that has already flipped.
+    @State private var landingTick = 0
     #if os(macOS)
     /// Owns the sign-in window so that it outlives the body that opened it — a window held only
     /// by a view's local is a window that closes the next time SwiftUI rebuilds.
@@ -32,6 +39,7 @@ public struct FediqoRootView: View {
     @State private var prefs = DummyPrefs()
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The same scale every `RemoteImage` on this screen reads, so a wake asks for the keys the
     /// screen actually holds rather than for a second decode of each of them.
     @Environment(\.displayScale) private var displayScale
@@ -69,6 +77,10 @@ public struct FediqoRootView: View {
     }
 
     private var availability: ShellAvailability { session.availability }
+
+    /// Reduce motion never mounts the overlay, so a reader who asked for stillness does not
+    /// get one frame of a flip and then a skip.
+    private var playsLanding: Bool { showingLanding && !reduceMotion }
 
     /// Whether the join sheet is up, derived from the stage rather than stored beside it.
     ///
@@ -279,7 +291,7 @@ public struct FediqoRootView: View {
             }
             .overlay {
                 if showingShortcuts {
-                    ShortcutGuide { showingShortcuts = false }
+                    ShortcutGuide(tab: $shortcutTab) { showingShortcuts = false }
                 }
             }
             // Outside the guide's overlay and after it, which is what puts it on top of
@@ -293,8 +305,15 @@ public struct FediqoRootView: View {
             // film behind a ground they can neither see through nor stop — the exact fault
             // `openViewer` stops playback to avoid, arriving by another route. Applied here so it
             // covers the guide as well, which the viewer is also allowed to open over.
-            .accessibilityHidden(viewedItem != nil)
+            .accessibilityHidden(viewedItem != nil || playsLanding)
             .overlay { viewer }
+            // After the viewer, so the mascot is the first thing a launch draws over.
+            .overlay {
+                if playsLanding {
+                    LandingView { showingLanding = false }
+                        .id(landingTick)
+                }
+            }
             .animation(.easeInOut(duration: 0.18), value: showingShortcuts)
             .animation(.easeInOut(duration: 0.18), value: viewing)
             // A viewer whose post the last refresh took away is not a layer any more, and the id
@@ -318,8 +337,8 @@ public struct FediqoRootView: View {
                     session.dismissStage()
                 }
             }
-            .dummyShellKeys { character, shift, control in
-                performDummyKey(character, shift: shift, control: control)
+            .dummyShellKeys { character, shift, control, command in
+                performDummyKey(character, shift: shift, control: control, command: command)
             }
             .environment(prefs)
             // **The session, for the panes that are handed no binding.** `PreferencesPane` reads
@@ -353,17 +372,27 @@ public struct FediqoRootView: View {
         return String(format: L10n.t("account.remove.detail.boards"), boards)
     }
 
-    private func performDummyKey(_ character: Character, shift: Bool, control: Bool) -> Bool {
-        guard let command = DummyCommand.from(
+    private func performDummyKey(
+        _ character: Character,
+        shift: Bool,
+        control: Bool,
+        command: Bool
+    ) -> Bool {
+        guard let mapped = DummyCommand.from(
             character,
             shift: shift,
             control: control,
+            command: command,
             typing: composing,
             fieldFocused: session.searchFocused
         ) else {
             return false
         }
-        let did = apply(command)
+        // The overlay is not a layer a press can leave, so dummy keys are swallowed until
+        // the flips finish rather than driving the shell underneath. Unmapped chords —
+        // ⌘Q, ⌘C — have already returned false, so a quit still quits.
+        if playsLanding { return true }
+        let did = apply(mapped)
         return DummyCommand.consumes(character, did: did)
     }
 
@@ -372,9 +401,17 @@ public struct FediqoRootView: View {
         forgetAVanishedViewer()
         switch command {
         case .nextTab:
-            return rotateTimelineTab(by: 1)
+            guard DummyCommand.outermost(of: openLayers) == .shortcuts else {
+                return rotateTimelineTab(by: 1)
+            }
+            shortcutTab = DummyShortcutGroup.rotated(from: shortcutTab, by: 1)
+            return true
         case .previousTab:
-            return rotateTimelineTab(by: -1)
+            guard DummyCommand.outermost(of: openLayers) == .shortcuts else {
+                return rotateTimelineTab(by: -1)
+            }
+            shortcutTab = DummyShortcutGroup.rotated(from: shortcutTab, by: -1)
+            return true
         case .nextPage:
             place = availability.rotate(from: place, by: 1)
             return true
@@ -441,6 +478,13 @@ public struct FediqoRootView: View {
             guard availability.canCompose else { return false }
             showingShortcuts = false
             composing = true
+            return true
+        case .replayLanding:
+            showingShortcuts = false
+            _ = closeViewer()
+            playback.stop()
+            landingTick += 1
+            showingLanding = true
             return true
         case .dismiss:
             switch DummyCommand.outermost(of: openLayers) {

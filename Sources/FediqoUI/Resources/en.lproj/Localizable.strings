@@ -48,9 +48,9 @@
 "shortcut.title" = "Keys";
 "shortcut.note" = "These work while you are not writing.";
 "shortcut.close" = "Close";
-"shortcut.group.moving" = "Moving";
-"shortcut.group.doing" = "Doing";
-"shortcut.group.leaving" = "Leaving";
+"shortcut.group.timeline" = "Timeline";
+"shortcut.group.app" = "Every tab";
+"shortcut.landing" = "Reload from the launch";
 "shortcut.tabs" = "Rotate this page's tabs";
 "shortcut.pages" = "Rotate the places";
 "shortcut.posts" = "Move in this list";

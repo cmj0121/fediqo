@@ -210,6 +210,48 @@ struct DummyCommandTests {
         #expect(DummyCommand.from("?", typing: true) == nil)
     }
 
+    @Test("The guide is grouped by tab")
+    func theGuideIsGroupedByTab() {
+        #expect(DummyShortcutGroup.allCases == [.timeline, .app])
+        #expect(DummyShortcut.lines(in: .timeline).allSatisfy { $0.group == .timeline })
+        #expect(DummyShortcut.lines(in: .app).allSatisfy { $0.group == .app })
+        #expect(
+            DummyShortcut.lines(in: .timeline).count + DummyShortcut.lines(in: .app).count
+                == DummyShortcut.all.count
+        )
+        #expect(!DummyShortcut.lines(in: .timeline).isEmpty)
+        #expect(!DummyShortcut.lines(in: .app).isEmpty)
+        #expect(L10n.t("shortcut.group.moving") == "shortcut.group.moving")
+        #expect(L10n.t("shortcut.group.timeline", language: .english) == "Timeline")
+        #expect(L10n.t("shortcut.group.app", language: .english) == "Every tab")
+        #expect(L10n.t("shortcut.group.timeline", language: .taiwanese) == "時間軸")
+        #expect(L10n.t("shortcut.group.app", language: .taiwanese) == "每個分頁")
+        #expect(DummyShortcutGroup.rotated(from: .timeline, by: 1) == .app)
+        #expect(DummyShortcutGroup.rotated(from: .app, by: 1) == .timeline)
+        #expect(DummyShortcutGroup.rotated(from: .timeline, by: -1) == .app)
+        #expect(DummyShortcutGroup.rotated(from: .app, by: -1) == .timeline)
+        // The plate plus its outer padding still fits the minimum window.
+        #expect(ShortcutGuide.Metrics.plate + 2 * ShellSpace.room <= 520)
+    }
+
+    @Test("⌘R plays the launch again, and the letter r stays free")
+    func commandRReplaysTheLaunch() {
+        #expect(DummyCommand.from("r") == nil)
+        #expect(DummyCommand.from("r", command: true) == .replayLanding)
+        #expect(DummyCommand.from("R", command: true) == .replayLanding)
+        #expect(DummyCommand.from("r", command: true, typing: true) == .replayLanding)
+        #expect(DummyCommand.from("r", command: true, fieldFocused: true) == .replayLanding)
+        // ⌘Q, ⌘C, and Control+⌘R stay the platform's.
+        #expect(DummyCommand.from("q", command: true) == nil)
+        #expect(DummyCommand.from("c", command: true) == nil)
+        #expect(DummyCommand.from("r", control: true, command: true) == nil)
+        let line = DummyShortcut.all.first { $0.commands == [.replayLanding] }
+        #expect(line?.keys == ["⌘R"])
+        #expect(line?.group == .app)
+        #expect(L10n.t("shortcut.landing", language: .english) == "Reload from the launch")
+        #expect(L10n.t("shortcut.landing", language: .taiwanese) == "從啟動重新載入")
+    }
+
     @Test("The guide names every dummy command")
     func guideNamesEveryCommand() {
         let named = Set(DummyShortcut.all.flatMap(\.commands))
@@ -219,7 +261,8 @@ struct DummyCommandTests {
         #expect(L10n.t("shortcut.tabs") != "shortcut.tabs")
         #expect(L10n.t("shortcut.pages") != "shortcut.pages")
         #expect(Set(DummyShortcut.all.map(\.group)) == Set(DummyShortcutGroup.allCases))
-        #expect(L10n.t("shortcut.group.moving") != "shortcut.group.moving")
+        #expect(L10n.t("shortcut.group.timeline") != "shortcut.group.timeline")
+        #expect(L10n.t("shortcut.group.app") != "shortcut.group.app")
     }
 
     @Test("Letters belong to the draft while composing")
