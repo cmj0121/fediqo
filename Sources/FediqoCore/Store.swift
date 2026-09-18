@@ -2,24 +2,15 @@ import Foundation
 
 /// Notes this device is holding, until it forgets them.
 public actor ItemStore {
-    /// One row per source and item. Two hosts carrying the same Mastodon URI are two rows (#10).
-    private struct NoteKey: Hashable, Sendable {
-        let host: String
-        let id: String
-    }
-
     private var sourceList: [Source] = []
+    /// One row per `NoteKey`: two hosts carrying the same Mastodon URI are two rows (#10).
     private var notes: [NoteKey: Note] = [:]
 
     public init() {}
 
     public init(sources: [Source], notes incoming: [Note]) {
         sourceList = sources
-        notes = Dictionary(uniqueKeysWithValues: incoming.map { (Self.key(of: $0), $0) })
-    }
-
-    private static func key(of note: Note) -> NoteKey {
-        NoteKey(host: note.source.host, id: note.id)
+        notes = Dictionary(uniqueKeysWithValues: incoming.map { ($0.key, $0) })
     }
 
     public func add(_ source: Source) {
@@ -51,7 +42,7 @@ public actor ItemStore {
     /// is two rows (#10). Merging those into one thread is later.
     public func ingest(_ incoming: [Note]) {
         for note in incoming {
-            let key = Self.key(of: note)
+            let key = note.key
             if var existing = notes[key] {
                 existing.origins.formUnion(note.origins)
                 notes[key] = existing
@@ -80,7 +71,7 @@ public actor ItemStore {
     /// Replaces what this device holds. Used to load a snapshot after a relaunch.
     public func replace(sources: [Source], notes incoming: [Note]) {
         sourceList = sources
-        notes = Dictionary(uniqueKeysWithValues: incoming.map { (Self.key(of: $0), $0) })
+        notes = Dictionary(uniqueKeysWithValues: incoming.map { ($0.key, $0) })
     }
 
     public func all() -> [Note] {
