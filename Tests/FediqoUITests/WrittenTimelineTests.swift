@@ -306,6 +306,33 @@ struct WrittenTimelineTests {
         #expect(session.written.isEmpty)
     }
 
+    @Test("A value of another type under the key is unreadable, not nothing kept, and is never written over")
+    func otherTypeIsUnreadable() {
+        let store = freshStore()
+        store.defaults.set("not data", forKey: store.key)
+        #expect(store.load() == .unreadable)
+        store.save([TimelineDefinition(id: UUID(), name: "Would overwrite", rules: [])])
+        #expect(store.defaults.object(forKey: store.key) as? String == "not data")
+        #expect(session(store).timelinesUnreadable)
+    }
+
+    @Test("The store itself refuses to write over what it cannot read, whoever asks")
+    func saveRefusesOverUnreadable() {
+        let store = freshStore()
+        let kept = Data(#"{"version":2,"timelines":[]}"#.utf8)
+        store.defaults.set(kept, forKey: store.key)
+        store.save([TimelineDefinition(id: UUID(), name: "Would overwrite", rules: [])])
+        #expect(store.defaults.data(forKey: store.key) == kept)
+
+        let readable = freshStore()
+        readable.save([TimelineDefinition(id: UUID(), name: "Kept", rules: [])])
+        guard case .timelines(let timelines) = readable.load() else {
+            Issue.record("what was saved reads back")
+            return
+        }
+        #expect(timelines.map(\.name) == ["Kept"])
+    }
+
     @Test("Nothing kept yet is no timelines, and is not unreadable")
     func nothingKept() {
         #expect(freshStore().load() == .timelines([]))
