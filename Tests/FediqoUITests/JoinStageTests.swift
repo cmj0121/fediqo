@@ -123,10 +123,7 @@ struct JoinStageTests {
         // on the wire. (Holding the index instead parks the same look one request later: a look
         // reads the front page and the index, so both are inside it.)
         let http = GatedHTTP(Self.forumRoutes(), holding: "/")
-        let watchdog = Task {
-            try? await Task.sleep(for: .seconds(5))
-            await http.gate.open()
-        }
+        let watchdog = hangGuard(http.gate)
         defer { watchdog.cancel() }
         let session = ShellSession(http: http, store: ItemStore())
         session.hostname = Self.forum
@@ -172,10 +169,7 @@ struct JoinStageTests {
         //
         // Not hypothetical: the index probe made `look` want the forum's index, and the first cut
         // of it deadlocked exactly this way.
-        let watchdog = Task {
-            try? await Task.sleep(for: .seconds(5))
-            await http.gate.open()
-        }
+        let watchdog = hangGuard(http.gate)
         defer { watchdog.cancel() }
 
         session.hostname = Self.forum
@@ -233,10 +227,7 @@ struct JoinStageTests {
         //
         // Not hypothetical: the index probe made `look` want the forum's index, and the first cut
         // of it deadlocked exactly this way.
-        let watchdog = Task {
-            try? await Task.sleep(for: .seconds(5))
-            await http.gate.open()
-        }
+        let watchdog = hangGuard(http.gate)
         defer { watchdog.cancel() }
 
         session.hostname = "first.example"
@@ -503,10 +494,7 @@ struct JoinStageTests {
         // Armed before anything can await, for the reason the other gated tests give: nothing but
         // this test releases the gate, and `.timeLimit` does not rescue a task parked on a
         // continuation.
-        let watchdog = Task {
-            try? await Task.sleep(for: .seconds(5))
-            await http.gate.open()
-        }
+        let watchdog = hangGuard(http.gate)
         defer { watchdog.cancel() }
 
         let session = ShellSession(http: http, store: ItemStore())
@@ -1419,10 +1407,7 @@ struct JoinStageTests {
         let session = ShellSession(http: http, store: ItemStore())
         // Armed before anything awaits, for the reason the two tests above give: nothing else
         // releases this gate, and `.timeLimit` does not rescue a task held on a continuation.
-        let watchdog = Task {
-            try? await Task.sleep(for: .seconds(5))
-            await http.gate.open()
-        }
+        let watchdog = hangGuard(http.gate)
         defer { watchdog.cancel() }
 
         session.hostname = Self.forum
@@ -1471,10 +1456,7 @@ struct JoinStageTests {
         routes[board] = .text(Self.oneBoard)
         let http = GatedHTTP(routes, holding: board)
         let session = ShellSession(http: http, store: ItemStore())
-        let watchdog = Task {
-            try? await Task.sleep(for: .seconds(5))
-            await http.gate.open()
-        }
+        let watchdog = hangGuard(http.gate)
         defer { watchdog.cancel() }
 
         await session.store.add(Source(host: "elsewhere.example", kind: .mastodon))
@@ -1552,10 +1534,7 @@ struct JoinStageTests {
             "/api/v1/timelines/public": .text("[]"),
             "/api/v1/trends/statuses": .text("[]"),
         ], holding: "/api/v1/timelines/public")
-        let watchdog = Task {
-            try? await Task.sleep(for: .seconds(5))
-            await http.gate.open()
-        }
+        let watchdog = hangGuard(http.gate)
         defer { watchdog.cancel() }
 
         let session = ShellSession(http: http, store: ItemStore())
@@ -1609,10 +1588,7 @@ struct JoinStageTests {
             "/api/v1/timelines/public": .text("[]"),
             "/api/v1/trends/statuses": .text("[]"),
         ], holding: "/api/v1/timelines/public")
-        let watchdog = Task {
-            try? await Task.sleep(for: .seconds(5))
-            await http.gate.open()
-        }
+        let watchdog = hangGuard(http.gate)
         defer { watchdog.cancel() }
 
         let session = ShellSession(http: http, store: ItemStore())
@@ -1671,10 +1647,7 @@ struct JoinStageTests {
             "/api/v1/timelines/public": .text("[]"),
             "/api/v1/trends/statuses": .text("[]"),
         ], holding: "/api/v1/timelines/public")
-        let watchdog = Task {
-            try? await Task.sleep(for: .seconds(5))
-            await http.gate.open()
-        }
+        let watchdog = hangGuard(http.gate)
         defer { watchdog.cancel() }
 
         let session = ShellSession(http: http, store: ItemStore())
