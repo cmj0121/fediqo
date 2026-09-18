@@ -8,6 +8,21 @@ public actor ItemStore {
 
     public init() {}
 
+    /// A store holding what a relaunch read back from disk — the one way a snapshot gets in.
+    ///
+    /// **A snapshot is taken as it is, but never trusted to be well-formed.** It is whatever the
+    /// last run wrote, read through a file format that can be older than this code; a duplicate
+    /// in it is a bug somewhere else, and trapping at launch over it would turn that bug into an
+    /// app that does not open. So the rules `add` and `ingest` keep hold here too: one source per
+    /// host, the first one winning as `add` has it, and one row per `NoteKey`, the later copy
+    /// winning outright — a snapshot is one moment written once, not two reads to merge.
+    public init(sources: [Source], notes incoming: [Note]) {
+        for source in sources where !sourceList.contains(where: { $0.host == source.host }) {
+            sourceList.append(source)
+        }
+        notes = Dictionary(incoming.map { ($0.key, $0) }, uniquingKeysWith: { _, new in new })
+    }
+
     public func add(_ source: Source) {
         if sourceList.contains(where: { $0.host == source.host }) { return }
         sourceList.append(source)
@@ -61,6 +76,16 @@ public actor ItemStore {
 
     public func sources() -> [Source] {
         sourceList
+    }
+
+    /// Everything this store holds, read in one hop — what a save writes to disk.
+    ///
+    /// **Unsorted, and taken at one moment.** A save does not draw anything, so it has no use for
+    /// `all()`'s order and should not pay for it; and asking for the sources and the notes in two
+    /// awaits would let an ingest or a remove land between them, writing notes whose source is
+    /// gone. This is the counterpart of `init(sources:notes:)`.
+    public func snapshot() -> (sources: [Source], notes: [Note]) {
+        (sourceList, Array(notes.values))
     }
 
     public func all() -> [Note] {
