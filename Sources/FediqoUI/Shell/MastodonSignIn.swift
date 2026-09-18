@@ -115,7 +115,14 @@ public final class MastodonSessions {
         let host = raw.lowercased()
         signOuts[host, default: 0] += 1
         let token = (try? tokens.token(host: host)) ?? nil
-        try? tokens.forget(host: host)
+        do {
+            try tokens.forget(host: host)
+        } catch {
+            // The token is still in the Keychain, so the row still reads signed in — `refresh`
+            // reads it back rather than claiming a sign-out that did not happen. The server is
+            // still asked to forget it.
+            NetLog.auth.error("\(NetLog.line("sign-out", host: host, error: error), privacy: .public)")
+        }
         if forgettingApp { try? tokens.forgetApp(host: host) }
         refresh()
         if let token {
