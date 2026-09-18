@@ -1107,6 +1107,11 @@ final class ShellSession {
         }
     }
 
+    /// Reload the session from the store after a snapshot is loaded.
+    func reloadFromStore() async {
+        await adopt()
+    }
+
     /// What the store now holds, and the queries that draw it.
     private func adopt() async {
         sources = await store.sources()
