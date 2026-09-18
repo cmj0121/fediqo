@@ -33,8 +33,7 @@ struct FediqoApp: App {
     }
 
     private func save() async {
-        let sources = await store.sources()
-        let notes = await store.all()
-        try? file?.save(sources: sources, notes: notes)
+        let snapshot = await store.snapshot()
+        try? file?.save(sources: snapshot.sources, notes: snapshot.notes)
     }
 }
