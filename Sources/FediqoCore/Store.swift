@@ -8,9 +8,19 @@ public actor ItemStore {
 
     public init() {}
 
+    /// A store holding what a relaunch read back from disk — the one way a snapshot gets in.
+    ///
+    /// **A snapshot is taken as it is, but never trusted to be well-formed.** It is whatever the
+    /// last run wrote, read through a file format that can be older than this code; a duplicate
+    /// in it is a bug somewhere else, and trapping at launch over it would turn that bug into an
+    /// app that does not open. So the rules `add` and `ingest` keep hold here too: one source per
+    /// host, the first one winning as `add` has it, and one row per `NoteKey`, the later copy
+    /// winning outright — a snapshot is one moment written once, not two reads to merge.
     public init(sources: [Source], notes incoming: [Note]) {
-        sourceList = sources
-        notes = Dictionary(uniqueKeysWithValues: incoming.map { ($0.key, $0) })
+        for source in sources where !sourceList.contains(where: { $0.host == source.host }) {
+            sourceList.append(source)
+        }
+        notes = Dictionary(incoming.map { ($0.key, $0) }, uniquingKeysWith: { _, new in new })
     }
 
     public func add(_ source: Source) {
@@ -66,12 +76,6 @@ public actor ItemStore {
 
     public func sources() -> [Source] {
         sourceList
-    }
-
-    /// Replaces what this device holds. Used to load a snapshot after a relaunch.
-    public func replace(sources: [Source], notes incoming: [Note]) {
-        sourceList = sources
-        notes = Dictionary(uniqueKeysWithValues: incoming.map { ($0.key, $0) })
     }
 
     public func all() -> [Note] {
