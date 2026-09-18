@@ -481,13 +481,10 @@ struct EmojiCatalogueTests {
         let catalogues = EmojiCatalogueStore()
 
         // Nothing but this test can release the gate, so a join that went back to waiting for
-        // the catalogue would wait for ever. The watchdog turns that into a failed expectation
-        // a few seconds later instead of a suite that never finishes. On the passing path the
-        // join returns at once and this is cancelled without ever having waited.
-        let watchdog = Task {
-            try? await Task.sleep(for: .seconds(5))
-            await gate.open()
-        }
+        // the catalogue would wait for ever. The guard turns that into a recorded issue inside
+        // the time limit instead of a suite that never finishes. On the passing path the join
+        // returns at once and this is cancelled without ever having waited.
+        let watchdog = hangGuard { await gate.open() }
         defer { watchdog.cancel() }
 
         try await MastodonJoin(http: http, store: items, catalogues: catalogues)
