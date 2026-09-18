@@ -408,8 +408,9 @@ final class ShellPictures {
     /// Read before the network and written after it, so a picture fetched once is drawn from this
     /// device on every launch after. Nothing where the caller keeps none — a test, a preview.
     /// Settable because `shared` is built before the app knows where its caches live; the app
-    /// hands it over once, at launch, before any row asks for a picture.
-    @ObservationIgnored var disk: (any MediaCopies)?
+    /// hands it over once, at launch, before any row asks for a picture. See `DiskCopies` for
+    /// why every touch goes through one queue.
+    @ObservationIgnored var disk: DiskCopies?
 
     /// Whether this cache holds its caller to unit 7's viewer-tier contract in debug builds.
     ///
@@ -425,7 +426,7 @@ final class ShellPictures {
         enforcingViewerContract: Bool = true
     ) {
         self.http = http
-        self.disk = disk
+        self.disk = disk.map(DiskCopies.init)
         self.enforcingViewerContract = enforcingViewerContract
     }
 
@@ -482,7 +483,7 @@ final class ShellPictures {
             // **The copy on this device first, and outside the gate.** The gate bounds what is
             // on the wire; a read from disk puts nothing there.
             let answer: Result<Loaded, Absence>
-            if let kept = await Self.copy(of: key.url, in: disk, host: host, maxPixels: key.tier.maxPixels) {
+            if let disk, let kept = await Self.copy(of: key.url, in: disk, host: host, maxPixels: key.tier.maxPixels) {
                 answer = .success(Loaded(image: kept, fresh: nil))
             } else {
                 await self.enter()
@@ -518,12 +519,13 @@ final class ShellPictures {
             switch answer {
             case .success(let loaded):
                 let decoded = loaded.image
-                // Kept on disk **after** the guard above and on this actor, so a Clear that
-                // struck every host off this fetch also stops its bytes being written back under
-                // the host it just emptied. Under the asker's host while it is still tagged,
-                // otherwise under whoever is still waiting.
-                if let fresh = loaded.fresh, let disk, let owner = tagged.contains(host) ? host : tagged.min() {
-                    try? disk.store(fresh, host: owner, url: key.url)
+                // Who the copy is kept under is decided **after** the guard above and on this
+                // actor, so a Clear that struck every host off this fetch also stops its bytes
+                // being written back under the host it just emptied. The asker's host while it
+                // is still tagged, otherwise whoever is still waiting.
+                let owner = tagged.contains(host) ? host : tagged.min()
+                if let fresh = loaded.fresh, let disk, let owner {
+                    disk.store(fresh, host: owner, url: key.url)
                 }
                 self.keep(
                     Image(decorative: decoded, scale: key.scale),
@@ -770,7 +772,7 @@ final class ShellPictures {
         }
         // The copies on this device go with the pictures in memory, whole: a copy on disk is
         // filed under one host only, so there is no second source for it to survive for.
-        try? disk?.forget(host: host)
+        disk?.forget(host: host)
         let noted = missingSources
         for (key, tagged) in noted where tagged.contains(host) {
             var rest = tagged
@@ -923,16 +925,26 @@ final class ShellPictures {
     }
 
     /// The copy of `url` already on this device under `host`, decoded, or nothing. A copy that
-    /// will not decode is treated as no copy: the network is asked, and what it sends replaces it.
+    /// will not decode is deleted and treated as no copy, so it is not read again on every ask:
+    /// the network is asked, and what it sends takes its place.
     @concurrent
     nonisolated static func copy(
         of url: URL,
-        in disk: (any MediaCopies)?,
+        in disk: DiskCopies,
         host: String,
         maxPixels: Int
     ) async -> CGImage? {
-        guard let data = disk?.data(host: host, url: url), data.count <= maxBytes else { return nil }
-        return decode(data, maxPixels: maxPixels)
+        guard let data = await disk.data(host: host, url: url) else { return nil }
+        guard let decoded = decode(data, maxPixels: maxPixels) else {
+            disk.remove(host: host, url: url)
+            return nil
+        }
+        return decoded
+    }
+
+    /// Returns once every write and delete asked of the copies on this device has run.
+    func diskSettled() async {
+        await disk?.settled()
     }
 
     /// What the response carries, and only if it is worth carrying.

@@ -45,15 +45,18 @@ public struct FediqoRootView: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
 
-    /// `media` is where copies of pictures already on this device are kept, handed to the one
-    /// picture cache every row draws from. Nothing keeps none, which is what a preview wants.
-    public init(
-        http: any HTTPClient = URLSessionClient(),
-        store: ItemStore = ItemStore(),
-        media: (any MediaCopies)? = nil
-    ) {
-        if let media { ShellPictures.shared.disk = media }
+    public init(http: any HTTPClient = URLSessionClient(), store: ItemStore = ItemStore()) {
         _session = State(initialValue: ShellSession(http: http, store: store))
+    }
+
+    /// Hands the copies of pictures already on this device to the one picture cache every row
+    /// draws from, once, at launch — and first drops the copies of any host not in `hosts`, the
+    /// servers the reader still reads. Queued ahead of every picture a row can ask for, so the
+    /// sweep never races a copy being written for a server just added.
+    public static func keepPictures(in copies: any MediaCopies, for hosts: [String]) {
+        let disk = DiskCopies(copies)
+        disk.keepOnly(hosts: hosts)
+        ShellPictures.shared.disk = disk
     }
 
     private var availability: ShellAvailability { session.availability }
