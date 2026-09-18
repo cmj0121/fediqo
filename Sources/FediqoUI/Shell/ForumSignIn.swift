@@ -101,6 +101,10 @@ public final class ForumSessions {
     /// Bumped by every read of the cookie store, so a read that started before a Clear cannot
     /// land after it and put back a sign-in the Clear took away.
     @ObservationIgnored private var readings = 0
+    /// Hosts this run saw a sign-in reached on, by the forum's own page and not by a cookie
+    /// name — so a forum whose session cookie is not `*_auth` still reads signed in until a
+    /// forget, and falls back to the cookie rule after a relaunch.
+    @ObservationIgnored private var witnessed: Set<String> = []
 
     /// Which hosts have a password saved, as a fact a view body may read.
     ///
@@ -119,6 +123,13 @@ public final class ForumSessions {
     /// store whenever the store says its cookies changed, whenever the set of forums changes, and
     /// after every forget. And a member's session cookie specifically, not any cookie: every
     /// forum this app has read holds a guest's (`ForumMember.isSessionCookie(named:)`).
+    ///
+    /// **Plus what this run witnessed.** A sign-in reached here — the automatic path's verdict, or
+    /// the reader closing the forum's page having got there — counts until a forget, whatever
+    /// the forum named its cookie; the cookie rule is only what survives a relaunch.
+    ///
+    /// **The store's change notification is a hint only.** The reads that keep this true are the
+    /// ones on a change of sources, a sign-in and a forget; see `CookieWatcher`.
     ///
     /// It is still only **as far as this device can see**. A forum can end a session on its own
     /// side without telling anybody, and the next read simply comes back signed out; a row
@@ -175,7 +186,7 @@ public final class ForumSessions {
         while true {
             let reading = readings
             guard !forumHosts.isEmpty else {
-                if !reachedHosts.isEmpty { reachedHosts = [] }
+                if reachedHosts != witnessed { reachedHosts = witnessed }
                 return
             }
             let cookies = await dataStore.httpCookieStore.allCookies()
@@ -183,7 +194,7 @@ public final class ForumSessions {
             let sessions = cookies.filter { ForumMember.isSessionCookie(named: $0.name) }
             let reached = forumHosts.filter { host in
                 sessions.contains { ForumWebEngine.holds($0.domain, for: host) }
-            }
+            }.union(witnessed)
             // Assigned only when it differs: every row reading this redraws on an assignment.
             if reached != reachedHosts { reachedHosts = reached }
             return
@@ -296,6 +307,12 @@ public final class ForumSessions {
         reachedHosts.contains(host.lowercased())
     }
 
+    /// A sign-in was reached on the forum's own page this run. See `witnessed`.
+    func recordSignIn(host: String) {
+        witnessed.insert(host.lowercased())
+        reachedHosts.insert(host.lowercased())
+    }
+
     // MARK: - Clearing
 
     /// D25: everything this host left here goes, including the cookies and the saved password.
@@ -314,6 +331,7 @@ public final class ForumSessions {
         // built this run holds nothing this run could have put there, and is left unopened.
         if let madeStore { await ForumWebEngine.forget(host: host, in: madeStore) }
         forgetPassword(host: host)
+        witnessed.remove(host.lowercased())
         // The cookies have just gone, so what the row says goes with them — for this host and
         // for any sibling whose records WebKit filed under the same domain. Decision 13 puts it
         // here on purpose: Clear and Remove both arrive through this one door.
