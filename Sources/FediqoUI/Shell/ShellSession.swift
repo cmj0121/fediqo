@@ -172,7 +172,36 @@ final class ShellSession {
 
     var queries: [TimelineQuery] = []
     /// The query in front. Nothing only while nothing is joined; not persisted.
-    var timelineID: TimelineQuery?
+    var timelineID: TimelineQuery? {
+        didSet { addFocused = false }
+    }
+
+    /// The timelines the reader wrote, in their tab order (#27). Changed only through
+    /// `commit(_:)` and `removeTimeline(_:)`, which keep them on this device.
+    var written: [TimelineDefinition] = []
+    /// The kept timelines could not be read by this build. They stay as they are on the device
+    /// and nothing is written over them (Decision 15); the timeline says so.
+    var timelinesUnreadable = false
+    /// Where the reader's timelines are kept, or nothing for a session that keeps none.
+    @ObservationIgnored let timelineStore: WrittenTimelineStore?
+    /// The timeline editor, where it is open. Edits apply on Done (Decision 21).
+    var editing: TimelineDraft?
+    /// Tab has reached the pinned `[+]` pill, the last stop (Decision 19).
+    var addFocused = false
+    /// A sentence the timeline shows for a moment.
+    var toast: ShellToast?
+    /// Every held note's folded text, built the first time something reads text after `notes`
+    /// changes — a written timeline with a keyword or author rule — and reusing what did not
+    /// change, so a redraw folds nothing and a session that reads no text folds nothing at all.
+    var textIndex: TextIndex {
+        if !textIndexIsCurrent {
+            builtTextIndex = TextIndex(notes, reusing: builtTextIndex)
+            textIndexIsCurrent = true
+        }
+        return builtTextIndex ?? TextIndex([])
+    }
+    @ObservationIgnored private var builtTextIndex: TextIndex?
+    @ObservationIgnored private(set) var textIndexIsCurrent = false
 
     /// The query the timeline draws: the one selected, or All.
     var currentTimeline: TimelineQuery { timelineID ?? .all }
@@ -182,7 +211,10 @@ final class ShellSession {
         didSet { forums.watch(forums: sources.filter { $0.kind == .discuz }.map(\.host)) }
     }
     var notes: [Note] = [] {
-        didSet { holdings = Holdings(notes: notes, per: heldPeriod) }
+        didSet {
+            holdings = Holdings(notes: notes, per: heldPeriod)
+            textIndexIsCurrent = false
+        }
     }
 
     /// What `notes` holds, counted (#7) — rebuilt where `notes` is assigned or the breakdown
@@ -241,9 +273,11 @@ final class ShellSession {
         emojis: EmojiCache = .shared,
         forums: ForumSessions = ForumSessions(),
         mastodon: MastodonSessions = MastodonSessions(),
-        posts: ForumPosts? = nil
+        posts: ForumPosts? = nil,
+        timelines: WrittenTimelineStore? = nil
     ) {
         self.http = http
+        timelineStore = timelines
         self.store = store
         self.pictures = pictures
         self.emojis = emojis
@@ -258,6 +292,11 @@ final class ShellSession {
         // 274KB — so it carries its own far tighter ceiling. See `ForumPosts.maxBytes`, and the
         // plan's standing item about per-caller response ceilings, of which this is the first.
         self.posts = posts ?? ForumPosts(through: forums)
+        switch timelines?.load() {
+        case .timelines(let kept)?: written = kept
+        case .unreadable?: timelinesUnreadable = true
+        case nil: break
+        }
     }
 
     var availability: ShellAvailability {
@@ -1152,7 +1191,7 @@ final class ShellSession {
 
     /// The tabs, rebuilt from what is actually joined.
     ///
-    /// **All and Trends are the only two queries of this store.** Boards stay a property of
+    /// **All and Trends, then the reader's own timelines in their order.** Boards stay a property of
     /// the source — what this device fetches next — not a third timeline. A forum is not
     /// offered Trends: it has no trending read, and an empty tab is a promise the app cannot keep.
     ///
@@ -1166,6 +1205,7 @@ final class ShellSession {
             return
         }
         queries = sources.contains(where: { Self.hasTrends($0.kind) }) ? [.all, .trends] : [.all]
+        queries += written.map { .written($0.id) }
         if !queries.contains(where: { $0 == timelineID }) {
             timelineID = .all
         }

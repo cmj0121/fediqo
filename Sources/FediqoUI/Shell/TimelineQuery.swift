@@ -9,8 +9,8 @@ import Foundation
 /// source that decides what this device fetches next (`BoardPicker`), and what they fetch lands
 /// under All like everything else.
 ///
-/// Written timelines have no tab and no store yet (#27); `written` is here so an id that names
-/// one already has somewhere to go.
+/// A written timeline's name and rule line are its definition's, which the session holds; see
+/// `ShellSession.name(of:)`.
 public enum TimelineQuery: Hashable, Identifiable, Sendable {
     case all
     case trends
@@ -52,8 +52,8 @@ public enum TimelineQuery: Hashable, Identifiable, Sendable {
         }
     }
 
-    // A written timeline's name and rule line come from its definition, which #27 draws; until
-    // then nothing offers one as a tab, so these answer as All does.
+    // A written timeline's own name and rule line are the session's to give (it holds the
+    // definitions); these are the built-ins'.
     public var name: String {
         switch self {
         case .all, .written: L10n.t("timeline.tab.all")
@@ -77,15 +77,18 @@ public enum TimelineQuery: Hashable, Identifiable, Sendable {
 
     /// Newest first. `notes` is already store order; Trends is origin, not rank.
     ///
-    /// Evaluated against no text index: All and Trends read no text, and the session that draws
-    /// written timelines (#27) is the one that will hold an index to hand in.
+    /// `index` is the session's, built where its notes are set, so a written timeline's keyword
+    /// and author rules do not fold every note on each redraw. All and Trends read no text.
     ///
     /// `latest` is the reader's latest date (#22), cut after the rules so every query stops at
     /// the same day. It has no default, so a list drawn without asking about it does not compile.
     public func items(
-        from notes: [Note], among written: [TimelineDefinition] = [], latest: LatestDate?
+        from notes: [Note],
+        among written: [TimelineDefinition] = [],
+        index: TextIndex = TextIndex([]),
+        latest: LatestDate?
     ) -> [DummyItem] {
-        let shown = CompiledTimeline(definition(among: written), sources: []).shown(notes, TextIndex([]))
+        let shown = CompiledTimeline(definition(among: written), sources: []).shown(notes, index)
         return (latest?.shown(shown) ?? shown).map { DummyItem($0) }
     }
 }

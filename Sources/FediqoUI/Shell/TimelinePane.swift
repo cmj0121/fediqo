@@ -28,7 +28,7 @@ struct TimelinePane: View {
 
     private var timeline: TimelineQuery { session.currentTimeline }
 
-    private var items: [DummyItem] { timeline.items(from: session.notes, latest: prefs.latestDate) }
+    private var items: [DummyItem] { session.timelineItems(latest: prefs.latestDate) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -78,6 +78,9 @@ struct TimelinePane: View {
         }
         .animation(.easeInOut(duration: 0.2), value: toast)
         .task(id: catalogueHosts) { await waitForCatalogues() }
+        .onChange(of: session.toast) { _, toast in
+            if let toast { showToast(toast.text) }
+        }
         .onChange(of: session.timelineID) { _, _ in
             if let selectedID, !items.contains(where: { $0.id == selectedID }) {
                 self.selectedID = nil
@@ -241,7 +244,7 @@ struct TimelinePane: View {
 
     /// The title, the queries, and the rule the current one is under.
     ///
-    /// The pills are All and Trends. The row scrolls so a narrow window or a larger text size
+    /// The pills are All, Trends and the reader's own, then `[+]`. The row scrolls so a narrow window or a larger text size
     /// does not squeeze the names, and the rule sits below them at full width.
     private var header: some View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
@@ -250,19 +253,34 @@ struct TimelinePane: View {
                     .font(ShellType.pane)
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                     .fixedSize()
-                ScrollView(.horizontal) {
-                    HStack(spacing: ShellSpace.tight) {
-                        ForEach(session.queries) { query in
-                            queryPill(query)
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal) {
+                        HStack(spacing: ShellSpace.tight) {
+                            ForEach(session.queries) { query in
+                                queryPill(query)
+                                    .id(query.id)
+                            }
                         }
+                        .padding(.vertical, ShellSpace.hair)
                     }
-                    .padding(.vertical, ShellSpace.hair)
+                    .scrollIndicators(.never)
+                    .onChange(of: session.timelineID) { _, query in
+                        guard let query else { return }
+                        withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(query.id) }
+                    }
                 }
-                .scrollIndicators(.never)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                // Pinned outside the scroll, so adding is always in reach — and the last Tab stop.
+                if !session.queries.isEmpty { addPill }
+            }
+            if session.timelinesUnreadable {
+                Text(L10n.t("timeline.unreadable"))
+                    .font(ShellType.meta)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if session.timelineID != nil {
-                Text(timeline.rule)
+                Text(session.rule(of: timeline))
                     .font(ShellType.meta)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .lineLimit(1)
@@ -287,25 +305,55 @@ struct TimelinePane: View {
     }
 
     private func queryPill(_ query: TimelineQuery) -> some View {
-        let selected = query == session.timelineID
+        let selected = query == session.timelineID && !session.addFocused
+        let missing = session.hasMissingRule(query)
         return Button {
             session.timelineID = query
         } label: {
             // One line at its own width; the row it sits in scrolls rather than squeezing it.
-            Text(query.name)
-                .lineLimit(1)
-                .fixedSize()
-                .font(ShellType.meta.weight(selected ? .semibold : .regular))
-                .foregroundStyle(selected ? ShellChrome.selectInk(colorScheme) : ShellChrome.inkDim(colorScheme))
+            HStack(spacing: ShellSpace.tight) {
+                Text(session.name(of: query))
+                    .lineLimit(1)
+                    .fixedSize()
+                if missing {
+                    Image(systemName: "circle.dashed")
+                        .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                        .accessibilityHidden(true)
+                }
+            }
+            .font(ShellType.meta.weight(selected ? .semibold : .regular))
+            .foregroundStyle(selected ? ShellChrome.selectInk(colorScheme) : ShellChrome.inkDim(colorScheme))
+            .padding(.horizontal, ShellSpace.snug)
+            .padding(.vertical, ShellSpace.tight)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(selected ? ShellChrome.selectFill(colorScheme) : ShellChrome.well(colorScheme))
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityHint(missing ? L10n.t("timeline.pill.missing.hint") : "")
+    }
+
+    /// `[+]`: a new timeline. Lit like a picked pill while Tab rests on it, where `e` opens one.
+    private var addPill: some View {
+        let focused = session.addFocused
+        return Button {
+            session.newTimeline()
+        } label: {
+            Image(systemName: "plus")
+                .font(ShellType.meta.weight(.semibold))
+                .foregroundStyle(focused ? ShellChrome.selectInk(colorScheme) : ShellChrome.inkDim(colorScheme))
                 .padding(.horizontal, ShellSpace.snug)
                 .padding(.vertical, ShellSpace.tight)
                 .background(
                     Capsule(style: .continuous)
-                        .fill(selected ? ShellChrome.selectFill(colorScheme) : ShellChrome.well(colorScheme))
+                        .fill(focused ? ShellChrome.selectFill(colorScheme) : ShellChrome.well(colorScheme))
                 )
         }
         .buttonStyle(.plain)
-        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityLabel(L10n.t("timeline.new.title"))
+        .accessibilityAddTraits(focused ? .isSelected : [])
     }
 
     private var empty: some View {

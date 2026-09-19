@@ -331,7 +331,9 @@ struct ThreadReadingTests {
         #expect(DummyCommand.from("m") == .nextAttachment)
         #expect(DummyCommand.from("\r") == .expandPost)
         #expect(DummyCommand.from("q") == .back)
-        for free in ["l", "r", "e", "o", "h"] {
+        // `e` is the timeline editor's (#27, Decision 18).
+        #expect(DummyCommand.from("e") == .editTimeline)
+        for free in ["l", "r", "o", "h"] {
             #expect(DummyCommand.from(Character(free)) == nil, "\(free) is no longer free")
         }
     }
