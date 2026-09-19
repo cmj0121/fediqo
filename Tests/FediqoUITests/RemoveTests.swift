@@ -56,7 +56,7 @@ struct RemoveTests {
             handle: "@ada@\(source.host)",
             body: "hello",
             postedAt: origin,
-            origins: [.publicTimeline]
+            categories: [.public]
         )
     }
 

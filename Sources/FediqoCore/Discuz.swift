@@ -302,7 +302,8 @@ public struct DiscuzClient: Sendable {
 
         let heading = DiscuzPage.boardHeading(in: html) ?? named
         // The number, where this read was a board's own page. A cross-board listing passes
-        // nothing, because its rows name a section but carry no id — see `Note.boardID`.
+        // nothing: its rows name a section but did not arrive through one, so they carry no
+        // category — a source rule still reaches them (#31).
         return rows.map { $0.asNote(source: source, host: host, board: heading, boardID: boardID) }
     }
 
@@ -1044,13 +1045,12 @@ struct DiscuzThread: Equatable, Sendable {
             // the other way round: on a guide page the heading is 最新发表, which is the name of
             // a view and not of a section, and it would overwrite fifty correct answers.
             board: board ?? heading,
-            boardID: boardID,
             // **When it was posted, not when it was last bumped.** The date taken is the one in
             // the row's *first* person-cell, which is the thread's author; the last cell's date
             // belongs to whoever answered most recently and would date somebody's question by a
             // stranger's reply.
             postedAt: postedAt ?? .distantPast,
-            origins: [.publicTimeline],
+            categories: boardID.map { [.board(id: $0)] } ?? [],
             // Discuz! puts no avatar in a thread table. It can be *guessed* at
             // `uc_server/avatar.php?uid=…`, and that guess is wrong on any install that moved or
             // renamed UCenter — so nothing is drawn rather than a broken address fetched fifty

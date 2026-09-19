@@ -42,7 +42,7 @@ public enum TimelineQuery: String, CaseIterable, Identifiable, Sendable {
     public func items(from notes: [Note]) -> [DummyItem] {
         switch self {
         case .all: notes.map { DummyItem($0) }
-        case .trends: notes.filter { $0.origins.contains(.trending) }.map { DummyItem($0) }
+        case .trends: notes.filter { $0.categories.contains(.trends) }.map { DummyItem($0) }
         }
     }
 }

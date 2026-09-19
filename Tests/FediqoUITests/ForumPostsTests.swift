@@ -827,7 +827,7 @@ struct ForumPostsTests {
             body: body,
             title: title,
             postedAt: .distantPast,
-            origins: [.publicTimeline]
+            categories: [.public]
         ))
     }
 }

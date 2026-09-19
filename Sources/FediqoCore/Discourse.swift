@@ -254,7 +254,9 @@ struct LatestDTO: Decodable, Sendable {
                 // by the second; a row that showed it would date somebody's question by a
                 // stranger's reply.
                 postedAt: createdAt ?? bumpedAt ?? .distantPast,
-                origins: [.publicTimeline],
+                // `/latest.json` is a cross-board listing: the topic names its section but did
+                // not arrive through it, so it carries no category (#31).
+                categories: [],
                 avatarURL: Self.avatarURL(person?.avatarTemplate, host: host),
                 attachments: Self.attachments(imageUrl),
                 url: Host.httpsURL(host: host, path: "/t/\(slug ?? "topic")/\(id)"),

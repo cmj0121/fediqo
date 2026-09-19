@@ -94,9 +94,29 @@ public struct Source: Identifiable, Hashable, Sendable {
     }
 }
 
-public enum FetchOrigin: String, Sendable, Hashable {
-    case publicTimeline
-    case trending
+/// How the source itself divides what it serves, and what a post arrived through (#25).
+///
+/// **Known by id; a name is only a label** and lives on the source (`Source.boards`), never on
+/// the note — a board renamed on the server is still the same category. A category means
+/// nothing without its note's `source.host`: a board id is one forum's, while public and trends
+/// mean the same thing on every Mastodon source.
+///
+/// **Every kind 0.2.0 knows is here from the first 0.2.0 store on.** Home and lists are not
+/// fetched yet, but a store must never hold a kind the build reading it cannot name: that build
+/// would drop it on load and lose it at the next save. A kind added after a release must also
+/// register a new store migration — an empty one will do — so an older build refuses the store
+/// rather than silently dropping what it cannot read.
+public enum Category: Hashable, Sendable {
+    /// A Mastodon source's public timeline.
+    case `public`
+    /// A Mastodon source's trending statuses.
+    case trends
+    /// A signed-in Mastodon account's home timeline.
+    case home
+    /// A Mastodon list, by the id the server gives it; its name is only a label.
+    case list(id: String)
+    /// A forum section, by the id the source gives it — Discuz!'s `fid` as a string.
+    case board(id: String)
 }
 
 public enum Audience: String, Sendable, Hashable {
@@ -201,7 +221,7 @@ public struct Attachment: Sendable, Hashable {
     public var isEmpty: Bool { displayURL == nil }
 }
 
-/// A note this device has stored. Origins remember how it arrived.
+/// A note this device has stored. Its categories remember what it arrived through.
 public struct Note: Identifiable, Hashable, Sendable {
     public let id: String
     /// Which server handed this copy over, and **what future fetches about it are tagged with**.
@@ -232,21 +252,11 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// The section of the source this was posted in — a forum's category. Nothing where the
     /// source has no such division, which is every microblog.
     public let board: String?
-    /// What the source calls that section, as against what it *shows* the reader.
-    ///
-    /// **Kept as data, and persisted, for a later per-board filter.** Nothing draws a board on
-    /// its own today — the timelines are All and Trends — but a filter that does will need the
-    /// section's identity, and a name is not one: a board's heading on its own page and its name
-    /// in the forum's index are written by hand and are free to differ, and an administrator can
-    /// rename a board between two reads.
-    ///
-    /// A `String` rather than the number Discuz! uses, because a section id is whatever the
-    /// source says it is and Discourse's is its own; this is the identity, not the format.
-    /// Nothing where the page carried no id — a forum's cross-board listing names no section per
-    /// row — and a reader of this must fall back to the name rather than assume.
-    public let boardID: String?
     public let postedAt: Date
-    public var origins: Set<FetchOrigin>
+    /// Every category this copy arrived through. Only grows: a later fetch that did not come
+    /// through one takes nothing away (#25). Empty is a post from a cross-board listing — a forum's
+    /// front page — which a source rule still reaches.
+    public var categories: Set<Category>
     public let reply: Reply?
     public let boostedBy: String?
     public let audience: Audience?
@@ -275,9 +285,8 @@ public struct Note: Identifiable, Hashable, Sendable {
         body: String,
         title: String? = nil,
         board: String? = nil,
-        boardID: String? = nil,
         postedAt: Date,
-        origins: Set<FetchOrigin>,
+        categories: Set<Category>,
         reply: Reply? = nil,
         boostedBy: String? = nil,
         audience: Audience? = nil,
@@ -296,9 +305,8 @@ public struct Note: Identifiable, Hashable, Sendable {
         self.body = body
         self.title = title
         self.board = board
-        self.boardID = boardID
         self.postedAt = postedAt
-        self.origins = origins
+        self.categories = categories
         self.reply = reply
         self.boostedBy = boostedBy
         self.audience = audience

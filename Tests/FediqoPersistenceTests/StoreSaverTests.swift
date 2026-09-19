@@ -13,7 +13,7 @@ struct StoreSaverTests {
     private func note(_ id: String, from source: Source) -> Note {
         Note(
             id: id, source: source, author: "Ada", handle: "@ada", body: "hello \(id)",
-            postedAt: origin.addingTimeInterval(Double(id) ?? 0), origins: [.publicTimeline]
+            postedAt: origin.addingTimeInterval(Double(id) ?? 0), categories: [.public]
         )
     }
 

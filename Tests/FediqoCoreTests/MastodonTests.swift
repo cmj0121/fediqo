@@ -76,7 +76,7 @@ struct MastodonTests {
             "https://first.example/users/ada/statuses/shared",
             "https://first.example/users/bob/statuses/new",
         ])
-        #expect(notes.allSatisfy { $0.origins == [.publicTimeline] })
+        #expect(notes.allSatisfy { $0.categories == [.public] })
         #expect(notes[0].handle == "@ada@first.example")
         #expect(notes[2].handle == "@bob@second.example")
         #expect(notes[0].attachments.isEmpty)
@@ -116,7 +116,7 @@ struct MastodonTests {
         let notes = try await MastodonClient(http: http, host: "first.example")
             .trending(source: source)
         #expect(notes.count == 2)
-        #expect(notes.allSatisfy { $0.origins == [.trending] })
+        #expect(notes.allSatisfy { $0.categories == [.trends] })
         #expect(await http.requested.first?.query == "limit=20")
     }
 
@@ -587,7 +587,7 @@ struct MastodonTests {
 
     private static func note(_ json: String) throws -> Note {
         let dto = try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(json.utf8))
-        return dto.asNote(source: Source(host: "first.example", kind: .mastodon), origin: .publicTimeline)
+        return dto.asNote(source: Source(host: "first.example", kind: .mastodon), category: .public)
     }
 
     /// The smallest status a decoder will take, with one more key spliced in. For the cases

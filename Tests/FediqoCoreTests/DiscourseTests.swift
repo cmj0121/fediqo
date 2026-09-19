@@ -162,6 +162,9 @@ struct DiscourseTests {
         let notes = try await DiscourseClient(http: http, host: Self.host).latest(source: Self.source)
 
         #expect(notes.count == 3)
+        // `/latest.json` is a cross-board listing: a topic names its section but did not arrive
+        // through it, so none carries a category (#31).
+        #expect(notes.allSatisfy { $0.categories.isEmpty })
         let first = try #require(notes.first)
 
         // The title is the post. A forum's front page carries no excerpt for most topics, so a

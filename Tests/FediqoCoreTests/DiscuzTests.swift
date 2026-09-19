@@ -69,6 +69,8 @@ struct DiscuzTests {
         #expect(first.title == "套牌超速两百公里，自称路上不限速")
         #expect(first.body == "")
         #expect(first.board == "闲谈茶座")
+        // A cross-board listing: the row names a board but did not arrive through one (#31).
+        #expect(first.categories == [])
 
         // Prefixed and host-qualified: a thread number is a plausible id on any forum, and they
         // share one store with every microblog's status ids.
@@ -368,6 +370,7 @@ struct DiscuzTests {
             1, source: Source(host: "install-c.example", kind: .discuz))
 
         #expect(notes.count == 1)
+        #expect(notes.first?.categories == [.board(id: "1")])
         let asked = try #require(await http.requested.first)
         #expect(asked.absoluteString
             == "https://install-c.example/forum.php?mod=forumdisplay&fid=1")
@@ -392,6 +395,8 @@ struct DiscuzTests {
             host: host
         ).threads(board: stale, source: source)
         #expect(named.allSatisfy { $0.board == "休闲驿站" })
+        // Known by its number, not its name: a renamed board is still one category.
+        #expect(named.allSatisfy { $0.categories == [.board(id: "1")] })
 
         // A listing with no heading at all falls back rather than losing the board entirely.
         let fallback = try await DiscuzClient(

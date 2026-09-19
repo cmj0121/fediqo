@@ -21,7 +21,7 @@ struct HoldingsTests {
 
     private func note(_ id: String, _ postedAt: Date, from source: Source) -> Note {
         Note(id: id, source: source, author: "Ada", handle: "@ada", body: "hello",
-             postedAt: postedAt, origins: [.publicTimeline])
+             postedAt: postedAt, categories: [.public])
     }
 
     private var notes: [Note] {

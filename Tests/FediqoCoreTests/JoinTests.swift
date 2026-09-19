@@ -4,7 +4,7 @@ import Testing
 
 @Suite("Join")
 struct JoinTests {
-    @Test("Overlapping uri is one All row with both origins, and it is a trend")
+    @Test("Overlapping uri is one All row with both categories, and it is a trend")
     func overlappingURI() async throws {
         let store = ItemStore()
         try await MastodonJoin(http: Self.joinHTTP(), store: store, catalogues: EmojiCatalogueStore())
@@ -17,7 +17,7 @@ struct JoinTests {
             "https://first.example/users/ada/statuses/old",
         ])
         let shared = all.first { $0.id.hasSuffix("/shared") }
-        #expect(shared?.origins == [.publicTimeline, .trending])
+        #expect(shared?.categories == [.public, .trends])
         #expect(shared?.author == "Ada")
         #expect(shared?.body == "Shared with trends")
         let trends = await store.trends()
@@ -85,7 +85,7 @@ struct JoinTests {
             "https://first.example/users/ada/statuses/shared",
             "https://first.example/users/ada/statuses/old",
         ])
-        #expect(await store.all().allSatisfy { $0.origins == [.publicTimeline] })
+        #expect(await store.all().allSatisfy { $0.categories == [.public] })
     }
 
     /// **Decision 18, and the whole of it.** A Mastodon that closes its public timeline to a
@@ -106,7 +106,7 @@ struct JoinTests {
             "https://first.example/users/ada/statuses/trend-only",
             "https://first.example/users/ada/statuses/shared",
         ])
-        #expect(await store.all().allSatisfy { $0.origins == [.trending] })
+        #expect(await store.all().allSatisfy { $0.categories == [.trends] })
         // The Trends tab `hasTrends` offers has something behind it, which is the point.
         #expect(await store.trends().count == 2)
     }
