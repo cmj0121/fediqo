@@ -496,14 +496,15 @@ final class ForumPosts {
 
     /// The reader through which one forum is read.
     ///
-    /// **Through the sign-in engine where there is one**, and this is not an optimisation: a
-    /// cookie jar is not something a `URLSession` may borrow, so a thread on a forum the reader
-    /// signed in to comes back withheld — or as a login page — if it is fetched any other way.
-    /// `hasEngine` rather than `transport`, because `transport(host:)` would *build* one and this
-    /// app does not start a web process for a host that never needed it.
+    /// **Through the sign-in engine where there is one, or where the reader is signed in**, and
+    /// this is not an optimisation: a cookie jar is not something a `URLSession` may borrow, so a
+    /// thread on a forum the reader signed in to comes back withheld — or as a login page, or a
+    /// challenge's 403 — if it is fetched any other way, a relaunch included.
+    /// `readsThroughEngine` rather than `transport`, because `transport(host:)` would *build* one
+    /// for every host and this app does not start a web process for a host that never needed it.
     private func client(for host: String, within limit: Duration?) -> DiscuzClient {
         var transport = http
-        if let forums, forums.hasEngine(host: host) {
+        if let forums, forums.readsThroughEngine(host: host) {
             transport = ForumJoinTransport(forums.transport(host: host))
         }
         if let limit { transport = Deadline(transport, within: limit) }
