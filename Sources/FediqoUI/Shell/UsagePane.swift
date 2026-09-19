@@ -4,7 +4,8 @@ import SwiftUI
 /// What this device is holding from each server the reader added (#21). Preferences keeps what a
 /// person chooses; this page keeps what this device holds.
 ///
-/// The cache section is decision 14's screen. Three caches hold a server's copy between them and
+/// Tabbed by purpose (#7): by source, by time, by cache. The cache section is decision 14's
+/// screen. Three caches hold a server's copy between them and
 /// none of them is visible from anywhere else in the app, so this is the only place a reader can
 /// see what has accumulated in their name, and the only place they can drop it. Each row is an
 /// instrument readout rather than a storage-management control: the host, two figures in the type
@@ -16,8 +17,8 @@ import SwiftUI
 /// kept both in memory and as copies on disk, and emoji names are read again after a day. The
 /// header says it is this device's, the footer says what is re-read and what stays, and the
 /// readout counts posts in total, by source and by week or month, beside pictures in memory and
-/// on disk (#7). Below it are the two drops that are not a row's Clear: by time, as a window kept
-/// from here on, and by cache.
+/// on disk (#7). The other two drops sit on their own tabs: by time, as a window kept from here
+/// on, and by cache.
 ///
 /// **Clear empties; it does not remove.** The server stays added and its timeline stays the
 /// reader's; what goes is this device's copy, and the pictures are read again as they are wanted.
@@ -89,6 +90,23 @@ struct UsagePane: View {
     /// The windows offered for keeping, in months. Forever, the default, is offered beside them.
     static let monthChoices = [1, 3, 6, 12]
 
+    /// What this page is for, one tab each (#7): by source, by time, by cache.
+    enum Purpose: String, CaseIterable, Identifiable {
+        case source
+        case time
+        case copies
+
+        var id: Self { self }
+
+        var titleKey: String {
+            switch self {
+            case .source: "usage.tab.source"
+            case .time: "usage.tab.time"
+            case .copies: "usage.tab.copies"
+            }
+        }
+    }
+
     var body: some View {
         if let session, session.sources.isEmpty {
             ShellNotice(
@@ -103,7 +121,8 @@ struct UsagePane: View {
 
     private var readout: some View {
         Form {
-            held
+            Section { tabs }
+            page
         }
         .formStyle(.grouped)
         .padding(ShellSpace.snug)
@@ -140,17 +159,60 @@ struct UsagePane: View {
         }
     }
 
+    /// The same pills the timeline uses for All and Trends: one selected, the rest a well.
+    /// Tab rotates them (`ShellSession.rotateUsageTab`); they sit in the Form so the grouped
+    /// chrome is the page's own, not a second colour.
+    private var tabs: some View {
+        HStack(spacing: ShellSpace.tight) {
+            ForEach(Purpose.allCases) { tab in
+                let selected = tab == (session?.usagePurpose ?? .source)
+                Button {
+                    session?.usagePurpose = tab
+                } label: {
+                    Text(L10n.t(tab.titleKey))
+                        .lineLimit(1)
+                        .fixedSize()
+                        .font(ShellType.meta.weight(selected ? .semibold : .regular))
+                        .foregroundStyle(
+                            selected
+                                ? ShellChrome.selectInk(colorScheme)
+                                : ShellChrome.inkDim(colorScheme)
+                        )
+                        .padding(.horizontal, ShellSpace.snug)
+                        .padding(.vertical, ShellSpace.tight)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(
+                                    selected
+                                        ? ShellChrome.selectFill(colorScheme)
+                                        : ShellChrome.well(colorScheme)
+                                )
+                        )
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
     @ViewBuilder
-    private var held: some View {
+    private var page: some View {
         // **Nothing at all, rather than an empty state, when there is no session.** Falling
         // through to the empty notice would tell a reader who has joined a server to go and add
         // one, with the rail summary pointing them at it. The empty state is for a reader who
         // genuinely has no sources; "the shell has not handed this pane its session" is not that,
         // and this pane must not guess which it is looking at.
         if let session {
-            section(session, holdings: session.holdings)
-            breakdown(session)
-            drops
+            switch session.usagePurpose {
+            case .source:
+                section(session, holdings: session.holdings)
+            case .time:
+                breakdown(session)
+                keep
+            case .copies:
+                copies(session)
+            }
         }
     }
 
@@ -214,8 +276,9 @@ struct UsagePane: View {
     /// How many weeks or months the breakdown lists before it stops.
     static let stretchesShown = 12
 
-    /// The three ways to drop (#7). By source is each row's Clear, above; these are the other two.
-    private var drops: some View {
+    /// How long posts are kept (#7, by time). Shortening asks first; Forever and a longer window
+    /// drop nothing and apply at once.
+    private var keep: some View {
         Section {
             Picker(L10n.t("prefs.keep"), selection: keepSelection) {
                 Text(L10n.t("prefs.keep.forever")).tag(Int?.none)
@@ -223,9 +286,19 @@ struct UsagePane: View {
                     Text(L10n.count("prefs.keep.months", months)).tag(Int?.some(months))
                 }
             }
-            Button(L10n.t("prefs.drop.copies")) { droppingCopies = true }
         } header: {
-            Text(L10n.t("prefs.drop"))
+            Text(L10n.t("prefs.keep"))
+        }
+    }
+
+    /// Picture copies, all sources together, and the drop that takes them (#7, by cache).
+    private func copies(_ session: ShellSession) -> some View {
+        let memory = Self.memory(session.sources.map(\.host), in: session)
+        let disk = onDisk.map { $0.values.reduce(0, +) }
+        return Section {
+            reading(Self.picturesText(count: memory.count, bytes: memory.bytes, disk: disk))
+                .padding(.vertical, ShellSpace.tight)
+            Button(L10n.t("prefs.drop.copies")) { droppingCopies = true }
         } footer: {
             Text(L10n.t("prefs.drop.footer"))
                 .font(ShellType.mark)

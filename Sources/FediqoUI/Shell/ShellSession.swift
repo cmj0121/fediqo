@@ -239,6 +239,16 @@ final class ShellSession {
         didSet { holdings = Holdings(notes: notes, per: heldPeriod) }
     }
 
+    /// Which purpose Usage is showing. Tab rotates it the way it rotates timeline queries.
+    var usagePurpose: UsagePane.Purpose = .source
+
+    /// Tab and ⇧Tab on Usage: Sources, Time, Copies, and round again.
+    @discardableResult
+    func rotateUsageTab(by step: Int) -> Bool {
+        usagePurpose = DummyCommand.advanced(Array(UsagePane.Purpose.allCases), from: usagePurpose, by: step)
+        return true
+    }
+
     /// How many times the reader has cleared a server — decision 14's press, counted.
     ///
     /// **A signal, not a statistic.** Three caches hold this device's copy of a server, and only
