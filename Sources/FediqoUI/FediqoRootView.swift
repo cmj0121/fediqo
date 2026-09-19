@@ -7,6 +7,8 @@ public struct FediqoRootView: View {
     @State private var place: ShellPlace = .launch
     @State private var selectedItemID: String?
     @State private var threadStack: [String] = []
+    /// What `/` opened (#32). Its results stand in for the stream while it is open.
+    @State private var search = ShellSearch()
     @State private var jumpToTop = 0
     @State private var composing = false
     @State private var showingShortcuts = false
@@ -136,6 +138,7 @@ public struct FediqoRootView: View {
                 let accepted = availability.placing(old, as: new)
                 if accepted != new { place = accepted }
                 guard accepted != old else { return }
+                if search.closes(leavingFor: accepted) { closeSearch() }
                 // A picture opened over the timeline is not opened over the account page.
                 _ = closeViewer()
                 // And the film stops — **including one playing in a row**, which is the half
@@ -427,7 +430,7 @@ public struct FediqoRootView: View {
             control: control,
             command: command,
             typing: composing,
-            fieldFocused: session.searchFocused
+            fieldFocused: session.searchFocused || search.fieldFocused
         ) else {
             return false
         }
@@ -507,7 +510,7 @@ public struct FediqoRootView: View {
             switch DummyCommand.outermost(of: openLayers) {
             case .viewer: return closeViewer()
             case .thread: return popThread()
-            case .shortcuts, .selection, nil: return false
+            case .search, .shortcuts, .selection, nil: return false
             }
         case .showShortcuts:
             // Closing is always allowed; opening obeys the entry rule, so `?` under an open
@@ -519,6 +522,8 @@ public struct FediqoRootView: View {
             guard DummyCommand.canOpen(.shortcuts, whenOpen: openLayers) else { return false }
             showingShortcuts = true
             return true
+        case .search:
+            return openSearch()
         case .compose:
             guard availability.canCompose else { return false }
             showingShortcuts = false
@@ -545,6 +550,9 @@ public struct FediqoRootView: View {
                 showingShortcuts = false
                 return true
             case .thread: return popThread()
+            case .search:
+                closeSearch()
+                return true
             case .selection:
                 selectedItemID = nil
                 return true
@@ -574,6 +582,7 @@ public struct FediqoRootView: View {
         case .viewer: viewedItem != nil
         case .shortcuts: showingShortcuts
         case .thread: !threadStack.isEmpty
+        case .search: search.isOpen
         case .selection: selectedItemID != nil
         }
     }
@@ -794,9 +803,39 @@ public struct FediqoRootView: View {
         return true
     }
 
-    /// The stream `j` and `k` move through: the current query, All or Trends, over the store.
+    /// The stream `j` and `k` move through: a search's results while one is open, otherwise the
+    /// current query over the store.
     private var streamItems: [DummyItem] {
-        session.timelineItems(latest: prefs.latestDate)
+        searchItems ?? session.timelineItems(latest: prefs.latestDate)
+    }
+
+    private var searchItems: [DummyItem]? {
+        search.items(from: session.notes, sources: session.sources, latest: prefs.latestDate)
+    }
+
+    /// `/` on the timeline: an empty search over what this device holds, or the field again if
+    /// one is open. The selection is put aside, to come back when the search closes.
+    private func openSearch() -> Bool {
+        guard place == .timeline, DummyCommand.canOpen(.search, whenOpen: openLayers) else { return false }
+        if search.isOpen {
+            search.focus()
+        } else {
+            search.open(from: selectedItemID, over: session.notes)
+            selectedItemID = nil
+        }
+        return true
+    }
+
+    /// The timeline back as it was, with the post that was selected before the search.
+    private func closeSearch() {
+        threadStack = []
+        selectedItemID = search.close()
+    }
+
+    /// The field emptied: the timeline is back, so the post selected before the search is too.
+    private func searchCleared() {
+        threadStack = []
+        selectedItemID = search.selectionBefore
     }
 
     /// Whichever list is in front: the open conversation, or the stream under it.
@@ -1015,8 +1054,20 @@ public struct FediqoRootView: View {
                 playback: playback,
                 onPlayRow: playRow,
                 jumpToTop: jumpToTop,
-                onPopThread: { _ = popThread() }
+                onPopThread: { _ = popThread() },
+                search: search
             )
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if search.isOpen {
+                    SearchBar(
+                        search: search,
+                        found: searchItems?.count,
+                        onSubmit: { selectedItemID = streamItems.first?.id },
+                        onCleared: searchCleared,
+                        onClose: closeSearch
+                    )
+                }
+            }
         case .notices: NoticesPane()
         case .account: AccountPane(session: session)
         case .usage: UsagePane()

@@ -42,6 +42,8 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     case back
     case compose
     case showShortcuts
+    /// `/` — search what this device holds (#32). `?` is still the keys list; see `typed`.
+    case search
     case dismiss
     /// ⌘R — play the launch overlay again, from rest, without quitting the process.
     ///
@@ -52,6 +54,15 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     /// `e` — open the editor on the timeline in front, or a new one from the `[+]` pill (#27).
     /// All and Trends are not edited: the press says so and how to add one (Decision 19).
     case editTimeline
+
+    /// The character a press stands for, where a platform reports Shift-/ as `/` with Shift held.
+    ///
+    /// **Only on the key that is `/` on an ANSI keyboard is Shift-/ a `?`** — the keys list. On a
+    /// layout where `/` itself needs Shift (German and Nordic Shift-7, AZERTY Shift-:), the same
+    /// report is the reader typing `/`, and reading it as `?` would leave search unreachable.
+    public static func typed(_ character: Character, shift: Bool, onSlashKey: Bool) -> Character {
+        shift && character == "/" && onSlashKey ? "?" : character
+    }
 
     /// What a press means. Letters are the draft's while composing, except Escape.
     /// A focused text field owns every key, including Escape.
@@ -78,9 +89,9 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
             return shift ? .previousTab : .nextTab
         }
         guard !typing else { return nil }
-        if shift, character == "?" || character == "/" { return .showShortcuts }
         switch character {
         case "?": return .showShortcuts
+        case "/": return .search
         case "c": return .compose
         case "j", KeyEquivalent.downArrow.character: return .nextPost
         case "k", KeyEquivalent.upArrow.character: return .previousPost
@@ -238,6 +249,9 @@ public enum DummyLayer: Hashable, Sendable, CaseIterable {
     case shortcuts
     /// The conversation opened over the stream.
     case thread
+    /// A search's results in place of the stream (#32). Under a thread, because a result can be
+    /// opened; over the selection, because leaving it gives back the one made before it opened.
+    case search
     /// The lamp on a row.
     case selection
 }
@@ -308,6 +322,7 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
         DummyShortcut(group: .timeline, keys: ["s"], name: "reveal", commands: [.reveal]),
         DummyShortcut(group: .timeline, keys: ["q"], name: "back", commands: [.back]),
         DummyShortcut(group: .timeline, keys: ["e"], name: "edit", commands: [.editTimeline]),
+        DummyShortcut(group: .timeline, keys: ["/"], name: "search", commands: [.search]),
         DummyShortcut(group: .app, keys: ["⌃Tab", "⌃⇧Tab"], name: "pages",
                       commands: [.nextPage, .previousPage]),
         DummyShortcut(group: .app, keys: ["c"], name: "compose", commands: [.compose]),

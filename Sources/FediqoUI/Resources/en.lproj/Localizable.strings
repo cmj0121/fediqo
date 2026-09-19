@@ -64,6 +64,7 @@
 "shortcut.list" = "This list";
 "shortcut.back" = "Back to the list";
 "shortcut.dismiss" = "Close what is in front, or unfocus";
+"shortcut.search" = "Search the posts this device holds";
 
 "thread.title" = "Thread";
 "thread.replies" = "Replies";
@@ -156,6 +157,11 @@
 "editor.keys.pick" = "pick";
 "editor.keys.scope" = "scope";
 "editor.keys.confirm" = "add";
+"search.placeholder" = "Search what this device holds: * any run, ? one character";
+"search.label" = "Search the posts this device holds";
+"search.found" = "%d found";
+"search.empty.title" = "Nothing held matches";
+"search.empty.detail" = "Only posts already on this device are searched. Try fewer characters, or * for any run of them.";
 
 "item.replies" = "replies";
 "item.board.dev" = "dev";
