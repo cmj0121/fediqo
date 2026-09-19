@@ -355,6 +355,23 @@ struct InventoryTests {
         #expect(!L10n.t("shell.preferences.summary", language: .english).contains("held"))
     }
 
+    /// No view inspector here either, so the pages are pinned by what their files say: a grouped
+    /// Form draws its own grey unless told not to, and `.hidden` still leaves a bar where the
+    /// system is set to always show one.
+    @Test("Usage and Preferences sit on the page's colour, and no page shows a scroll bar")
+    func pagesShareOneBackgroundAndNoScrollBar() throws {
+        for name in ["UsagePane", "PreferencesPane"] {
+            let file = try Self.source(name)
+            #expect(file.contains(".scrollContentBackground(.hidden)"), "\(name) draws the Form's own background")
+            #expect(file.contains(".scrollIndicators(.never)"), "\(name) can show a scroll bar")
+        }
+        for name in ["TimelinePane", "DummyThreadPane", "AccountPane"] {
+            let file = try Self.source(name)
+            #expect(file.contains(".scrollIndicators(.never)"), "\(name) can show a scroll bar")
+            #expect(!file.contains(".scrollIndicators(.hidden)"), "\(name) shows a bar when the system asks")
+        }
+    }
+
     private static func source(_ name: String) throws -> String {
         try String(
             contentsOf: URL(fileURLWithPath: #filePath)
