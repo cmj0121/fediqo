@@ -216,7 +216,9 @@ final class ShellReload {
         let door = session.mastodon.authorized(host: host, within: deadline)
         let post = door.map(MastodonPost.init(door:))
             ?? MastodonPost(http: timed(session.http), host: host)
-        let read = { @MainActor (work: @escaping @MainActor () async throws -> Void) in
+        // Typed on the name rather than in the closure: Swift 6.0 reads `@MainActor (work: …)` as
+        // an attribute with arguments and will not build it.
+        let read: @MainActor (@escaping @MainActor () async throws -> Void) async throws -> Void = { work in
             if door == nil { try await work() } else { try await self.asReader(host, work) }
         }
         var found: String?
