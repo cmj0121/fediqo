@@ -42,7 +42,7 @@ final class ShellReload {
     @ObservationIgnored private var asYou: [String: [UUID: () -> Void]] = [:]
 
     /// Why an open Mastodon post, held without its server id, could not be read again.
-    enum Unfindable: Equatable {
+    enum Unfindable: Equatable, Sendable {
         /// Signed out, so nobody may look it up.
         case signedOut(host: String)
         /// Looked up, and what came back was not this post.
@@ -193,7 +193,7 @@ final class ShellReload {
         }
     }
 
-    private enum Again {
+    private enum Again: Sendable {
         case read
         case failed
         case unfindable(Unfindable)
@@ -231,36 +231,42 @@ final class ShellReload {
 
     /// The post first, landed on its own; then its context, whose failure — a busy thread past
     /// the signed-in ceiling, say — keeps the post's refresh rather than failing it.
+    ///
+    /// Signed in, the whole sequence is one piece of work read as the reader, so a sign-out or
+    /// Clear between two of its requests ends it before the next goes out on a forgotten token.
     private func againOnMastodon(_ held: Note, stamp: Source, in session: ShellSession) async throws -> Again {
         let host = stamp.host
-        let door = session.mastodon.authorized(host: host, within: deadline)
-        let post = door.map(MastodonPost.init(door:))
-            ?? MastodonPost(http: timed(session.http), host: host)
-        // Typed on the name rather than in the closure: Swift 6.0 reads `@MainActor (work: …)` as
-        // an attribute with arguments and will not build it.
-        let read: @MainActor (@escaping @MainActor () async throws -> Void) async throws -> Void = { work in
-            if door == nil { try await work() } else { try await self.asReader(host, work) }
+        guard let door = session.mastodon.authorized(host: host, within: deadline) else {
+            let post = MastodonPost(http: timed(session.http), host: host)
+            return try await Self.again(held, stamp: stamp, through: post, signedIn: false, in: session)
         }
-        var found: String?
+        let post = MastodonPost(door: door)
+        return try await asReader(host) {
+            try await Self.again(held, stamp: stamp, through: post, signedIn: true, in: session)
+        }
+    }
+
+    private static func again(
+        _ held: Note, stamp: Source, through post: MastodonPost, signedIn: Bool, in session: ShellSession
+    ) async throws -> Again {
+        let host = stamp.host
+        let found: String?
         do {
-            try await read { found = try await post.id(of: held) }
+            found = try await post.id(of: held)
         } catch MastodonAuthError.http(403) {
             return .unfindable(.cannotSearch(host: host))
         }
         guard let id = found else {
-            return .unfindable(door == nil ? .signedOut(host: host) : .notFound(host: host))
+            return .unfindable(signedIn ? .notFound(host: host) : .signedOut(host: host))
         }
-        try await read {
-            let note = try await post.post(id: id, source: stamp)
-            try Task.checkCancellation()
-            await session.store.refresh([note], ifSourceHere: host)
-        }
+        try Task.checkCancellation()
+        let note = try await post.post(id: id, source: stamp)
+        try Task.checkCancellation()
+        await session.store.refresh([note], ifSourceHere: host)
         do {
-            try await read {
-                let context = try await post.context(id: id, source: stamp)
-                try Task.checkCancellation()
-                await session.store.refresh(context, ifSourceHere: host)
-            }
+            let context = try await post.context(id: id, source: stamp)
+            try Task.checkCancellation()
+            await session.store.refresh(context, ifSourceHere: host)
         } catch MastodonAuthError.signedOut {
             throw MastodonAuthError.signedOut
         } catch let error where Cancellation.happened(error) {
