@@ -19,7 +19,7 @@ public enum Fold {
         let folded = text.folding(options: [.caseInsensitive, .widthInsensitive], locale: nil)
             .precomposedStringWithCanonicalMapping
         guard folded.unicodeScalars.contains(where: { spaces.contains($0) || $0 == dotAbove }) else {
-            return folded
+            return native(folded)
         }
         var repaired = String.UnicodeScalarView()
         var previous: Unicode.Scalar?
@@ -29,6 +29,16 @@ public enum Fold {
             repaired.append(spaces.contains(scalar) ? " " : scalar)
         }
         return String(repaired)
+    }
+
+    /// **Native UTF-8, always.** `folding` and `precomposedStringWithCanonicalMapping` hand back
+    /// an `NSString` on macOS 15, whose bytes are not contiguous — so `contains` below found no
+    /// storage to read and fell back to Foundation's substring search, which finds `🇺🇸` inside
+    /// `🇦🇺🇸🇪`. A newer OS hands back a native string, which is why only CI saw it.
+    private static func native(_ text: String) -> String {
+        var text = text
+        text.makeContiguousUTF8()
+        return text
     }
 
     private static let spaces: Set<Unicode.Scalar> = ["\u{00A0}", "\u{202F}", "\u{3000}"]
@@ -61,7 +71,10 @@ public enum Fold {
                 return false
             }
         }
-        return found.flatMap { $0 } ?? text.contains(part)
+        if let found = found.flatMap({ $0 }) { return found }
+        // Not contiguous — a string that did not come through `key`. Made so, and read the same
+        // way, rather than handed to a substring search that splits characters.
+        return contains(native(text), native(part))
     }
 
     private static func onBoundary(_ text: String, _ offset: Int) -> Bool {
