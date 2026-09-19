@@ -301,13 +301,13 @@ struct AttachmentViewer: View {
     }
 
     /// The cover mark, the author's warning where they wrote one, and the control that takes the
-    /// cover off — **drawn here for the same reason it is drawn in the row, and in both
-    /// directions.**
+    /// cover off — **drawn here for the same reason it is drawn in the row.** Putting the cover
+    /// back is still `s`; this notice does not say so.
     ///
     /// A viewer that can only be uncovered with `s` reproduces one layer up the defect unit 6 was
     /// just fixed for, where a reader using VoiceOver or a pointer could not uncover a post at
-    /// all. The control is a real button with a real action, and it says which of the two things
-    /// it will do.
+    /// all. The control is a real button with a real action, and it is only there while the cover
+    /// is still on.
     ///
     /// **`s` blurs in place and never navigates.** The blur at this size is what confirms the
     /// press took; another `s` lifts it again; `Escape` still means leave. Two intents, two keys.
@@ -326,7 +326,7 @@ struct AttachmentViewer: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityLabel(Self.spokenWarning(coverLine, covered: covered))
                 }
-                coverButton
+                if covered { coverButton }
             }
             .padding(ShellSpace.room)
             .background(
@@ -345,7 +345,7 @@ struct AttachmentViewer: View {
                     .padding(.horizontal, ShellSpace.snug)
                     .padding(.vertical, ShellSpace.hair * 2)
                     .background(Capsule(style: .continuous).fill(ShellChrome.scrim))
-                Text(L10n.t(covered ? "item.covered.show" : "item.covered.hide"))
+                Text(L10n.t("item.covered.show"))
                     .font(ShellType.meta)
             }
             .foregroundStyle(ShellChrome.overPicture)
@@ -356,7 +356,7 @@ struct AttachmentViewer: View {
         // middle of a sentence — and the action put back on, because ignoring the children throws
         // the real button's activation away with them.
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Self.spokenButton(covered: covered, warned: coverLine != nil))
+        .accessibilityLabel(Self.spokenButton(warned: coverLine != nil))
         .accessibilityAddTraits(.isButton)
         .accessibilityAction(.default, onToggleCover)
     }
@@ -368,9 +368,9 @@ struct AttachmentViewer: View {
             .joined(separator: ". ")
     }
 
-    static func spokenButton(covered: Bool, warned: Bool) -> String {
-        let how = L10n.t(covered ? "item.covered.label" : "item.lifted.label")
-        return warned ? how : [mark(covered: covered), how].joined(separator: ". ")
+    static func spokenButton(warned: Bool) -> String {
+        let how = L10n.t("item.covered.label")
+        return warned ? how : [mark(covered: true), how].joined(separator: ". ")
     }
 
     private static func mark(covered: Bool) -> String {

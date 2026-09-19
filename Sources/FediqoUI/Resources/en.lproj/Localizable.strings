@@ -193,8 +193,6 @@
 "item.covered.warning" = "Author's warning: %@";
 "item.covered.show" = "Show it";
 "item.covered.label" = "Press s to show it";
-"item.covered.hide" = "Hide it";
-"item.lifted.label" = "Press s to cover it again";
 
 "item.act.reply" = "Reply";
 "item.act.reblog" = "Reblog";
