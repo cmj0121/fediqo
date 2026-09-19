@@ -127,6 +127,29 @@ struct SearchTests {
         #expect(NoteSearch("", sources: []) == nil)
     }
 
+    @Test("A pattern of spaces alone is no search, and a space among other characters is itself")
+    func spacesAlone() {
+        #expect(WildcardPattern(" ") == nil)
+        #expect(WildcardPattern("   ") == nil)
+        #expect(WildcardPattern("\u{3000}") == nil, "a full-width space too")
+        #expect(NoteSearch("  ", sources: []) == nil)
+        let notes = [Self.note("a", "foot ball"), Self.note("b", "football")]
+        #expect(Self.found("t b", notes) == ["a"])
+    }
+
+    @Test("A handle is found with or without its leading @, the author's and the booster's")
+    func handleWithAt() {
+        let notes = [
+            Self.note("author", by: "@ada@one.example"),
+            Self.note("booster", boosterHandle: "@ada@two.example"),
+            Self.note("other", by: "@bob@one.example"),
+        ]
+        #expect(Self.found("@ada", notes) == ["author", "booster"])
+        #expect(Self.found("@ada@one", notes) == ["author"])
+        #expect(Self.found("ada@one", notes) == ["author"])
+        #expect(Self.found("@a?a@*.example", notes) == ["author", "booster"])
+    }
+
     // MARK: Wildcards
 
     @Test("A star alone finds every post")
@@ -282,8 +305,12 @@ struct SearchTests {
             let pattern = Fold.key((0..<(1 + next(5))).map { _ in
                 [alphabet[next(alphabet.count)], "*", "?"][next(3)]
             }.joined())
+            guard let wildcard = WildcardPattern(pattern) else {
+                #expect(pattern.allSatisfy { $0.isWhitespace }, "only spaces are no pattern: \(pattern)")
+                continue
+            }
             let expected = reference(Array(pattern), Array(field))
-            #expect(WildcardPattern(pattern)!.matches(field) == expected, "\(pattern) in \(field)")
+            #expect(wildcard.matches(field) == expected, "\(pattern) in \(field)")
         }
     }
 

@@ -151,6 +151,7 @@
 "rule.kind.category" = "Category";
 "rule.keyword.placeholder" = "A word";
 "rule.keyword.hint" = "#swift finds the hashtag only; swift finds both.";
+"editor.keys.name" = "rename";
 "editor.keys.move" = "move";
 "editor.keys.add" = "new rule";
 "editor.keys.rule" = "rule";
@@ -169,6 +170,8 @@
 "search.found" = "%d found";
 "search.empty.title" = "Nothing held matches";
 "search.empty.detail" = "Only posts already on this device are searched. Try fewer characters, or * for any run of them.";
+"search.indexing.title" = "Searching…";
+"search.indexing.detail" = "Reading the posts this device holds, once, so each key only matches.";
 
 "item.replies" = "replies";
 "item.board.dev" = "dev";

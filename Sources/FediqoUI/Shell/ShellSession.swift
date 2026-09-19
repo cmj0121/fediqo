@@ -214,6 +214,10 @@ final class ShellSession {
     @ObservationIgnored var drawnTimeline: DrawnTimeline?
     /// How many times the rules ran for the stream: the test's window on `drawnTimeline`.
     @ObservationIgnored var timelineEvaluations = 0
+    /// Each tab's missing-rule mark as last worked out, so a redraw compiles no tab again.
+    @ObservationIgnored var missingRules: [TimelineQuery: MissingRules] = [:]
+    /// How many times a tab's mark was worked out: the test's window on `missingRules`.
+    @ObservationIgnored var missingRuleEvaluations = 0
 
     /// The query the timeline draws: the one selected, or All.
     var currentTimeline: TimelineQuery { timelineID ?? .all }

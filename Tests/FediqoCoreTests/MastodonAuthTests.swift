@@ -247,6 +247,20 @@ struct MastodonAuthTests {
         #expect(check.value(forHTTPHeaderField: "Authorization") == "Bearer tok-123")
     }
 
+    @Test("A registration made without read:search records it, and its page and exchange ask only for that")
+    func withoutSearch() async throws {
+        let server = MastodonFixture.server()
+        let oauth = MastodonOAuth(host: host, sender: server)
+        let app = try await oauth.register(scopes: MastodonOAuth.scopesWithoutSearch)
+        #expect(app.scopes == "read:statuses read:lists read:accounts")
+        #expect(await server.form("/api/v1/apps")["scopes"] == "read:statuses read:lists read:accounts")
+        let browser = await FixtureBrowser.approving()
+        _ = try await oauth.signIn(as: app, through: browser)
+        let page = try #require(await browser.opened.first)
+        #expect(FixtureBrowser.query(page, "scope") == "read:statuses read:lists read:accounts")
+        #expect(await server.form("/oauth/token")["scope"] == "read:statuses read:lists read:accounts")
+    }
+
     @Test("A closed page stops the sign-in before any token is asked for")
     func cancelled() async {
         let server = MastodonFixture.server()

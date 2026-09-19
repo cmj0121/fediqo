@@ -84,6 +84,9 @@ public struct MastodonOAuth: Sendable {
     /// Decision 8: what Home, lists, the account check and finding a post again by its address
     /// (#29) need, and no more. A token issued before `read:search` was asked for lacks it.
     public static let scopes = "read:statuses read:lists read:accounts read:search"
+    /// Decision 32: what is asked of a server that refuses `read:search` (`invalid_scope`), once.
+    /// Everything but finding an old post again works; that says to sign in again.
+    public static let scopesWithoutSearch = "read:statuses read:lists read:accounts"
 
     let host: String
     private let sender: any HTTPSender
@@ -101,8 +104,9 @@ public struct MastodonOAuth: Sendable {
     {
         let pkce = PKCE.make()
         let state = PKCE.random(bytes: 16)
+        let scopes = app.scopes ?? Self.scopes
         guard let page = authorizeURL(
-            clientID: app.clientID, challenge: pkce.challenge, state: state
+            clientID: app.clientID, challenge: pkce.challenge, state: state, scopes: scopes
         ) else { throw MastodonSignInError.unreadable }
         let callback = try await browser.authorize(page, callbackScheme: Self.callbackScheme)
         let code = try Self.code(from: callback, state: state)
@@ -110,7 +114,7 @@ public struct MastodonOAuth: Sendable {
             host: host,
             accessToken: try await exchange(
                 code: code, verifier: pkce.verifier, clientID: app.clientID,
-                clientSecret: app.clientSecret
+                clientSecret: app.clientSecret, scopes: scopes
             ),
             clientID: app.clientID,
             clientSecret: app.clientSecret
@@ -124,8 +128,8 @@ public struct MastodonOAuth: Sendable {
         return token
     }
 
-    /// This app, registered on the server with the callback and the read scopes.
-    public func register() async throws -> MastodonApp {
+    /// This app, registered on the server with the callback and `scopes`, which it records.
+    public func register(scopes: String = MastodonOAuth.scopes) async throws -> MastodonApp {
         struct Registered: Decodable {
             let client_id: String
             let client_secret: String
@@ -133,19 +137,21 @@ public struct MastodonOAuth: Sendable {
         let answer: Registered = try await post("/api/v1/apps", [
             ("client_name", Fediqo.name),
             ("redirect_uris", Self.redirect),
-            ("scopes", Self.scopes),
+            ("scopes", scopes),
         ])
         return MastodonApp(
-            host: host, clientID: answer.client_id, clientSecret: answer.client_secret, scopes: Self.scopes
+            host: host, clientID: answer.client_id, clientSecret: answer.client_secret, scopes: scopes
         )
     }
 
-    func authorizeURL(clientID: String, challenge: String, state: String) -> URL? {
+    func authorizeURL(
+        clientID: String, challenge: String, state: String, scopes: String = MastodonOAuth.scopes
+    ) -> URL? {
         Host.httpsURL(host: host, path: "/oauth/authorize", query: [
             URLQueryItem(name: "response_type", value: "code"),
             URLQueryItem(name: "client_id", value: clientID),
             URLQueryItem(name: "redirect_uri", value: Self.redirect),
-            URLQueryItem(name: "scope", value: Self.scopes),
+            URLQueryItem(name: "scope", value: scopes),
             URLQueryItem(name: "state", value: state),
             URLQueryItem(name: "code_challenge", value: challenge),
             URLQueryItem(name: "code_challenge_method", value: "S256"),
@@ -169,7 +175,8 @@ public struct MastodonOAuth: Sendable {
     }
 
     func exchange(
-        code: String, verifier: String, clientID: String, clientSecret: String
+        code: String, verifier: String, clientID: String, clientSecret: String,
+        scopes: String = MastodonOAuth.scopes
     ) async throws -> String {
         struct Issued: Decodable { let access_token: String }
         let answer: Issued = try await post("/oauth/token", [
@@ -179,7 +186,7 @@ public struct MastodonOAuth: Sendable {
             ("client_secret", clientSecret),
             ("redirect_uri", Self.redirect),
             ("code_verifier", verifier),
-            ("scope", Self.scopes),
+            ("scope", scopes),
         ])
         guard !answer.access_token.isEmpty else { throw MastodonSignInError.unreadable }
         return answer.access_token

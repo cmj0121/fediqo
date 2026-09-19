@@ -22,15 +22,25 @@ public enum NetLog {
     static func kind(of error: any Error) -> String {
         let mirror = Mirror(reflecting: error)
         if mirror.displayStyle == .enum {
-            // A case without a payload has no child, and prints as its name unless the type
-            // prints itself some other way.
-            let printsItself = error is CustomStringConvertible || error is CustomDebugStringConvertible
-                || error is TextOutputStreamable
-            let name = mirror.children.first?.label ?? (printsItself ? nil : String(describing: error))
-            if let name { return "\(type(of: error)).\(name)" }
+            // A case with a payload is named by its one child's label.
+            if let label = mirror.children.first?.label { return "\(type(of: error)).\(label)" }
+            // A case without one has no child, and prints as its name — unless its type prints
+            // itself some other way, and then nothing it prints is trusted.
+            if mirror.children.isEmpty, !printsItself(error) {
+                return "\(type(of: error)).\(String(describing: error))"
+            }
         }
         let error = error as NSError
         return "\(error.domain) \(error.code)"
+    }
+
+    /// Whether the error's own type says how it prints. Asked of it as `Any`: asked of `any Error`,
+    /// the bridge every error has to `NSError` makes the answer always yes, and an optimiser may
+    /// fold it so, which would name no payload-free case in a release build.
+    private static func printsItself(_ error: any Error) -> Bool {
+        let value: Any = error
+        return value is CustomStringConvertible || value is CustomDebugStringConvertible
+            || value is TextOutputStreamable
     }
 
     /// `request m.example: HTTP 401`.

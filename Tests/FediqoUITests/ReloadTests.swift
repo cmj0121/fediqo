@@ -236,6 +236,24 @@ struct ReloadTests {
         #expect(await !http.requested.isEmpty, "with the editor gone, r reloads again")
     }
 
+    @Test("Opening the timeline editor stops a running reload, which Esc could no longer reach")
+    func editorStopsTheReload() async {
+        let gated = GatedHTTP(Self.everything, holding: "/api/v1/trends/statuses")
+        let guardTask = hangGuard(gated.gate)
+        defer { guardTask.cancel() }
+        let (session, _) = await shell(http: gated)
+        let running = Task { await session.reload.timeline(.trends, in: session) }
+        #expect(await spun { await gated.asks == 2 })
+        session.newTimeline()
+        #expect(session.editing != nil)
+        #expect(!session.reload.running)
+        #expect(session.reload.stopped)
+        await running.value
+        await gated.gate.open()
+        for _ in 0..<2_000 { await Task.yield() }
+        #expect(await session.store.all().isEmpty, "what it had not landed did not land")
+    }
+
     @Test("A server that ends the sign-in on a reload signs the row out and says the source failed")
     func signedOutOnReload() async throws {
         let tokens = MemoryMastodonTokens()
@@ -360,6 +378,54 @@ struct ReloadTests {
         #expect(session.reload.landed == 1)
     }
 
+    @Test("r, Esc, r: the stopped run ending late does not end the new one")
+    func stoppedRunDoesNotEndTheNext() async throws {
+        var routes = Self.everything
+        routes["https://\(Self.one)/api/v1/statuses/9"] = .text(Self.status("9", "edited words"))
+        routes["https://\(Self.one)/api/v1/statuses/9/context"] = .text(Self.context)
+        let held = Held(routes, holding: ["/api/v1/trends/statuses", "/api/v1/statuses/9"])
+        let guards = [hangGuard(held.first), hangGuard(held.second)]
+        defer { for guardTask in guards { guardTask.cancel() } }
+        let (session, _) = await shell(http: held)
+        let item = await holding(Self.mastodonNote(statusID: "9"), in: session)
+
+        let first = Task { await session.reload.timeline(.trends, in: session) }
+        #expect(await spun { await held.asks("/api/v1/trends/statuses") == 2 })
+        #expect(session.reload.stop())
+        await first.value
+        let second = Task { await session.reload.thread(item, in: session) }
+        #expect(await spun { await held.asks("/api/v1/statuses/9") == 1 })
+
+        await held.first.open()
+        for _ in 0..<2_000 { await Task.yield() }
+        #expect(session.reload.running, "the first run's late end left the second running")
+        #expect(session.reload.line == "Reloading…")
+        await session.reload.timeline(.trends, in: session)
+        #expect(await held.asks("/api/v1/trends/statuses") == 2, "a further r started nothing")
+        #expect(session.reload.stop(), "the second run can still be stopped")
+        await second.value
+        #expect(!session.reload.running)
+        await held.second.open()
+    }
+
+    @Test("A second r while a reload runs does nothing: it neither stops it nor starts another")
+    func secondPressDoesNothing() async {
+        let gated = GatedHTTP(Self.everything, holding: "/api/v1/trends/statuses")
+        let guardTask = hangGuard(gated.gate)
+        defer { guardTask.cancel() }
+        let (session, _) = await shell(http: gated)
+        session.reload.press(thread: nil, timeline: .trends, in: session)
+        #expect(await spun { await gated.asks == 2 })
+        session.reload.press(thread: nil, timeline: .trends, in: session)
+        for _ in 0..<200 { await Task.yield() }
+        #expect(session.reload.running)
+        #expect(!session.reload.stopped)
+        #expect(await gated.asks == 2)
+        await gated.gate.open()
+        #expect(await spun { !session.reload.running })
+        #expect(session.reload.landed == 1)
+    }
+
     @Test("The selected post is still there to be selected after a reload")
     func selectionStays() async {
         let (session, _) = await shell()
@@ -417,6 +483,38 @@ struct ReloadTests {
         await session.reload.thread(DummyItem(Self.forumNote()), in: session)
         #expect(session.reload.failed == [Self.forum])
         #expect(session.posts.reading(ref) == .words("工具箱一键下载安装。"))
+    }
+
+    @Test("Esc on a Discuz! thread reload: its page does not land, and what was noted stays")
+    func stopTheThreadReload() async {
+        let http = Switching(Self.threadAddress)
+        let guardTask = hangGuard(http.gate)
+        defer { guardTask.cancel() }
+        let (session, _) = await shell(http: http)
+        let ref = ForumThreadRef(host: Self.forum, tid: Self.tid)
+        await session.posts.fetch(ref)
+        #expect(session.posts.reading(ref) == .absent(.refused))
+
+        await http.answer(Self.thread)
+        let running = Task { await session.reload.thread(DummyItem(Self.forumNote()), in: session) }
+        #expect(await spun { await http.held })
+        #expect(session.reload.stop())
+        await running.value
+        #expect(session.posts.reading(ref) == .absent(.refused), "the mark stays while stopped")
+        await http.gate.open()
+        #expect(await spun { session.posts.inFlight.isEmpty })
+        #expect(session.posts.reading(ref) == .absent(.refused), "the stopped page did not land")
+        #expect(session.reload.failed.isEmpty)
+    }
+
+    @Test("A Discuz! thread that trickles past the deadline fails the reload")
+    func threadDeadline() async {
+        let slow = Slow(Self.forum, then: FixtureHTTP(Self.everything))
+        let (session, _) = await shell(http: slow)
+        session.reload.deadline = .milliseconds(50)
+        await session.reload.thread(DummyItem(Self.forumNote()), in: session)
+        #expect(session.reload.failed == [Self.forum])
+        #expect(session.posts.reading(ForumThreadRef(host: Self.forum, tid: Self.tid)) == .absent(.unreachable))
     }
 
     private static func status(_ id: String, _ text: String) -> String {
@@ -524,6 +622,25 @@ struct ReloadTests {
         #expect(session.reload.unfindable == .cannotSearch(host: Self.one))
         #expect(session.reload.line == "This post can't be reloaded: sign in to one.example again to let Fediqo find it.")
         #expect(session.isSignedIn(host: Self.one), "a 403 is not a sign-out")
+    }
+
+    @Test("Signed out just as the search answers: the post is not asked for on the forgotten token")
+    func signOutBetweenThreadSteps() async throws {
+        let tokens = MemoryMastodonTokens()
+        try tokens.save(MastodonToken(host: Self.one, accessToken: "tok", clientID: "c", clientSecret: "s"))
+        let signedIn = SignsOut([
+            "/api/v2/search": #"{"statuses":["# + Self.status("9", "x") + "]}",
+            "/api/v1/statuses/9": Self.status("9", "edited words"),
+            "/api/v1/statuses/9/context": Self.context,
+        ])
+        let (session, _) = await shell(mastodon: MastodonSessions(tokens: tokens, sender: signedIn))
+        await signedIn.after("/api/v2/search") { await session.signOut(host: Self.one) }
+        let item = await holding(Self.mastodonNote(statusID: nil), in: session)
+        await session.reload.thread(item, in: session)
+        #expect(await spun { !session.isSignedIn(host: Self.one) })
+        let sent = await signedIn.paths.filter { $0.hasPrefix("/api") }
+        #expect(sent == ["/api/v2/search"], "nothing after the sign-out went out")
+        #expect(session.notes.first { $0.key.rowID == item.id }?.body == "first words")
     }
 
     @Test("Search finding some other post is not believed: nothing more is asked, and the line says so")
@@ -690,5 +807,82 @@ private actor Flaky: HTTPClient {
             throw FixtureHTTPError.unreachable
         }
         return (Data(text.utf8), HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+    }
+}
+
+/// Holds two paths, each on its own gate, and counts the asks for every path.
+private actor Held: HTTPClient {
+    private let inner: FixtureHTTP
+    private let paths: [String]
+    let first = Gate()
+    let second = Gate()
+    private var counted: [String: Int] = [:]
+
+    init(_ routes: [String: FixtureHTTP.Outcome], holding paths: [String]) {
+        inner = FixtureHTTP(routes)
+        self.paths = paths
+    }
+
+    func asks(_ path: String) -> Int {
+        counted[path] ?? 0
+    }
+
+    func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
+        counted[url.path, default: 0] += 1
+        if url.path == paths[0] { await first.wait() }
+        if url.path == paths[1] { await second.wait() }
+        return try await inner.data(from: url)
+    }
+}
+
+/// One address refused with a 403 until given an answer, which it then holds on a gate.
+private actor Switching: HTTPClient {
+    private let address: String
+    private var answer: FixtureHTTP.Outcome?
+    let gate = Gate()
+    private(set) var held = false
+
+    init(_ address: String) {
+        self.address = address
+    }
+
+    func answer(_ outcome: FixtureHTTP.Outcome) {
+        answer = outcome
+    }
+
+    func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
+        guard url.absoluteString == address else { throw FixtureHTTPError.unmapped }
+        guard case .text(let text, _) = answer else {
+            return (Data(), HTTPURLResponse(url: url, statusCode: 403, httpVersion: nil, headerFields: nil)!)
+        }
+        held = true
+        await gate.wait()
+        return (Data(text.utf8), HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+    }
+}
+
+/// A signed-in door answering by path that, as it answers one path, starts `then` on the main
+/// actor — so it runs before the answer is back with whoever asked.
+private actor SignsOut: HTTPSender {
+    private let bodies: [String: String]
+    private var trigger: (path: String, then: @MainActor @Sendable () async -> Void)?
+    private(set) var paths: [String] = []
+
+    init(_ bodies: [String: String]) {
+        self.bodies = bodies
+    }
+
+    func after(_ path: String, then: @escaping @MainActor @Sendable () async -> Void) {
+        trigger = (path, then)
+    }
+
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        let url = request.url!
+        paths.append(url.path)
+        if let trigger, trigger.path == url.path {
+            Task { @MainActor in await trigger.then() }
+        }
+        let body = bodies[url.path] ?? "{}"
+        return (Data(body.utf8), HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
     }
 }

@@ -71,6 +71,7 @@ struct TimelineEditor: View {
             let action = EditorAction.from(
                 press.key.character,
                 command: press.modifiers.contains(.command),
+                option: press.modifiers.contains(.option),
                 stage: stage,
                 fieldFocused: focus == .name || focus == .text
             )
@@ -79,8 +80,9 @@ struct TimelineEditor: View {
             return .handled
         }
         #if os(macOS)
-        // A focused text field takes Escape as a cancel of its own; this is where it lands.
-        .onExitCommand { perform(stage == .rules ? .cancel : .back) }
+        // A focused text field takes Escape as a cancel of its own; this is where it lands, and
+        // the only place it does (`EditorAction.escapeIsExitCommand`).
+        .onExitCommand { perform(EditorAction.escape(at: stage)) }
         #endif
         .confirmationDialog(
             Text(String(format: L10n.t("timeline.remove.title"), session.removeName(of: draft))),
@@ -124,6 +126,7 @@ struct TimelineEditor: View {
             draft.remove(removed)
         case .removeTimeline:
             if !draft.isNew { confirmingRemove = true }
+        case .focusName: focus = .name
         case .pickKind(let tag):
             adding = RuleDraft(tag)
             stage = .form(tag)
@@ -383,6 +386,13 @@ private struct RuleForm: View {
                     .font(ShellType.mark)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
             }
+        }
+        .background {
+            // ⌥O as a key equivalent, which is seen before the focused field would type `ø`.
+            Button("") { draft.nextScope(sources) }
+                .keyboardShortcut("o", modifiers: .option)
+                .opacity(0)
+                .accessibilityHidden(true)
         }
     }
 

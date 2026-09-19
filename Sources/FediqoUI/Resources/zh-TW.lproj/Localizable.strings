@@ -150,6 +150,7 @@
 "rule.kind.category" = "分類";
 "rule.keyword.placeholder" = "一個字詞";
 "rule.keyword.hint" = "#swift 只找標籤；swift 兩者都找。";
+"editor.keys.name" = "改名";
 "editor.keys.move" = "移動";
 "editor.keys.add" = "新規則";
 "editor.keys.rule" = "規則";
@@ -168,6 +169,8 @@
 "search.found" = "找到 %d 則";
 "search.empty.title" = "沒有相符的貼文";
 "search.empty.detail" = "只會搜尋已經在這台裝置上的貼文。試著少打幾個字，或用 * 代表任意多字。";
+"search.indexing.title" = "搜尋中…";
+"search.indexing.detail" = "正在讀一次這台裝置上的貼文，之後每打一個字只需比對。";
 
 "item.replies" = "則回覆";
 "item.board.dev" = "dev";

@@ -30,6 +30,25 @@ struct NetLogTests {
         #expect(line.hasSuffix(" 0"))
     }
 
+    @Test("A case without a payload is named when its type does not print itself, however it prints")
+    func payloadFree() {
+        enum Plain: Error { case denied }
+        enum Debugs: Error, CustomDebugStringConvertible {
+            case quiet
+            var debugDescription: String { "s3cr3t token" }
+        }
+        enum Streams: Error, TextOutputStreamable {
+            case quiet
+            func write<Target: TextOutputStream>(to target: inout Target) { target.write("s3cr3t token") }
+        }
+        #expect(NetLog.kind(of: Plain.denied) == "Plain.denied")
+        for error in [Debugs.quiet as any Error, Streams.quiet] {
+            let line = NetLog.line("request", host: "m.example", error: error)
+            for secret in secrets { #expect(!line.contains(secret)) }
+            #expect(!line.contains("quiet"), "a type that prints itself is not named by what it prints")
+        }
+    }
+
     @Test("A refusal names the host and its status")
     func status() {
         #expect(NetLog.line("request", host: "m.example", status: 401) == "request m.example: HTTP 401")

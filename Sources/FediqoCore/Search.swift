@@ -29,10 +29,10 @@ public struct WildcardPattern: Sendable {
 
     let tokens: [Token]
 
-    /// Nothing for an empty pattern: an empty field searches nothing.
+    /// Nothing for an empty pattern, or one of spaces alone: neither searches anything.
     public init?(_ text: String) {
         let folded = Fold.key(text)
-        guard !folded.isEmpty else { return nil }
+        guard !folded.allSatisfy(\.isWhitespace) else { return nil }
         var tokens: [Token] = [.any]
         var run = ""
         for character in folded {
@@ -55,12 +55,16 @@ public struct WildcardPattern: Sendable {
     public func matches(_ field: String) -> Bool {
         // A plain keyword, the commonest search, skips the walk and its copy of the field.
         if tokens.count == 3, case .literal(let word) = tokens[1] { return Fold.contains(field, word) }
-        return Glob(field).matches(tokens)
+        var field = field
+        // A folded field is a native string already, so this copies nothing and the walk reads
+        // its bytes where they are.
+        field.makeContiguousUTF8()
+        return field.utf8.withContiguousStorageIfAvailable { Glob(field, $0).matches(tokens) } ?? false
     }
 }
 
-/// The match of the whole field, over its UTF-8 bytes with character boundaries checked. The
-/// pattern's own `*` at each end is what makes that "anywhere".
+/// The match of the whole field, over its UTF-8 bytes in place, with character boundaries
+/// checked. The pattern's own `*` at each end is what makes that "anywhere".
 ///
 /// The classic single-backtrack wildcard walk: on a mismatch, go back to the last `*` and let it
 /// take one more character. Where the token after a `*` is a literal, the next place it can
@@ -68,11 +72,12 @@ public struct WildcardPattern: Sendable {
 /// body costs one byte search, not a walk.
 private struct Glob {
     let text: String
-    let bytes: [UInt8]
+    /// `text`'s own UTF-8 storage, valid only for the one match it is lent to.
+    let bytes: UnsafeBufferPointer<UInt8>
 
-    init(_ text: String) {
+    init(_ text: String, _ bytes: UnsafeBufferPointer<UInt8>) {
         self.text = text
-        bytes = Array(text.utf8)
+        self.bytes = bytes
     }
 
     func matches(_ tokens: [WildcardPattern.Token]) -> Bool {
@@ -129,11 +134,9 @@ private struct Glob {
         let needle = Array(word.utf8)
         var from = from
         while from + needle.count <= bytes.count {
-            let hit = bytes.withUnsafeBufferPointer { haystack in
-                needle.withUnsafeBufferPointer { key in
-                    memmem(haystack.baseAddress! + from, haystack.count - from, key.baseAddress!, key.count)
-                        .map { UnsafeRawPointer(haystack.baseAddress!).distance(to: UnsafeRawPointer($0)) }
-                }
+            let hit = needle.withUnsafeBufferPointer { key in
+                memmem(bytes.baseAddress! + from, bytes.count - from, key.baseAddress!, key.count)
+                    .map { UnsafeRawPointer(bytes.baseAddress!).distance(to: UnsafeRawPointer($0)) }
             }
             guard let start = hit else { return nil }
             if onBoundary(start) && onBoundary(start + needle.count) { return start }
@@ -173,7 +176,8 @@ public struct SearchIndex: Sendable {
         let boostedBy: String?
         let boosterHandle: String?
         /// Folded: the text, the author's handle and name, the booster's handle and name, each
-        /// hashtag with its `#`, and the host. Categories are looked up per search, because
+        /// hashtag with its `#`, and the host. A handle is kept with its leading `@`, so `@ada`
+        /// finds `@ada@one.example` as `ada` does. Categories are looked up per search, because
         /// their names live on the source and not on the note.
         let fields: [String]
 
@@ -184,8 +188,8 @@ public struct SearchIndex: Sendable {
             boostedBy = note.boostedBy
             boosterHandle = note.boosterHandle
             let text = Fold.key(note.body)
-            var fields = [text, Fold.handle(note.handle), Fold.key(note.author)]
-            if let booster = note.boosterHandle { fields.append(Fold.handle(booster)) }
+            var fields = [text, "@" + Fold.handle(note.handle), Fold.key(note.author)]
+            if let booster = note.boosterHandle { fields.append("@" + Fold.handle(booster)) }
             if let name = note.boostedBy { fields.append(Fold.key(name)) }
             fields += Self.hashtags(in: text)
             fields.append(note.source.host)

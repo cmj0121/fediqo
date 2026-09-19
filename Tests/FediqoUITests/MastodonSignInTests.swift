@@ -53,7 +53,9 @@ private actor MastodonServer: HTTPSender {
 /// or waits at a gate first.
 @MainActor
 private final class Page: OAuthBrowser {
-    enum Answer { case approve, close, invalidScope }
+    /// `refusesSearch` answers `invalid_scope` to a page asking for `read:search`, and approves
+    /// any other.
+    enum Answer { case approve, close, invalidScope, refusesSearch }
 
     private let answer: Answer
     private let gate: Gate?
@@ -69,7 +71,12 @@ private final class Page: OAuthBrowser {
         await gate?.wait()
         let state = URLComponents(url: url, resolvingAgainstBaseURL: false)?
             .queryItems?.first { $0.name == "state" }?.value ?? ""
-        if answer == .invalidScope { return URL(string: "fediqo://oauth?error=invalid_scope&state=\(state)")! }
+        let scope = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?.first { $0.name == "scope" }?.value ?? ""
+        if answer == .invalidScope || (answer == .refusesSearch && scope.contains("read:search")) {
+            return URL(string: "fediqo://oauth?error=invalid_scope&state=\(state)")!
+        }
+        if answer == .refusesSearch { return URL(string: "fediqo://oauth?code=c&state=\(state)")! }
         guard answer == .approve else { throw MastodonSignInError.cancelled }
         return URL(string: "fediqo://oauth?code=c&state=\(state)")!
     }
@@ -159,7 +166,7 @@ struct MastodonSignInTests {
     }
 
     @Test("A registration kept for other scopes is made again, for the scopes asked now",
-          arguments: [nil, "read:statuses read:lists read:accounts"])
+          arguments: [nil, "read", "read:statuses read:accounts"])
     func registrationForOtherScopes(scopes: String?) async throws {
         let (session, server, tokens) = await shell()
         try tokens.save(MastodonApp(host: host, clientID: "old", clientSecret: "old", scopes: scopes))
@@ -178,6 +185,45 @@ struct MastodonSignInTests {
         #expect(!session.isSignedIn(host: host))
         #expect(session.rowRefusal?.key == "account.mastodon.failed", "never a silent nothing")
         #expect(await !server.paths.contains("/oauth/token"))
+    }
+
+    @Test("A server refusing read:search: registered once more without it, the reduced scopes kept, and signed in")
+    func refusesSearch() async throws {
+        let (session, server, tokens) = await shell()
+        let page = Page(.refusesSearch)
+        await session.signIn(host: host, through: page)
+        #expect(page.opened == 2)
+        #expect(await server.paths == [
+            "/api/v1/apps", "/api/v1/apps", "/oauth/token", "/api/v1/accounts/verify_credentials",
+            "/api/v1/timelines/home",
+        ])
+        let registered = await server.requests.filter { $0.url?.path == "/api/v1/apps" }
+            .map { String(decoding: $0.httpBody ?? Data(), as: UTF8.self) }
+        #expect(registered.first?.contains("search") == true)
+        #expect(registered.last?.contains("search") == false, "the second registration leaves search out")
+        #expect(try tokens.app(host: host)?.scopes == MastodonOAuth.scopesWithoutSearch)
+        #expect(session.isSignedIn(host: host))
+        #expect(session.rowRefusal == nil)
+
+        // Signing in again reuses the reduced registration: no app piles up per attempt.
+        await session.signOut(host: host)
+        let again = Page(.refusesSearch)
+        await session.signIn(host: host, through: again)
+        #expect(again.opened == 1)
+        #expect(await server.paths.filter { $0 == "/api/v1/apps" }.count == 2)
+        #expect(session.isSignedIn(host: host))
+    }
+
+    @Test("A server refusing even the reduced scopes: two registrations at most, none kept, and a sentence")
+    func refusesEveryScope() async throws {
+        let (session, server, tokens) = await shell()
+        let page = Page(.invalidScope)
+        await session.signIn(host: host, through: page)
+        #expect(page.opened == 2)
+        #expect(await server.paths == ["/api/v1/apps", "/api/v1/apps"])
+        #expect(try tokens.app(host: host) == nil)
+        #expect(!session.isSignedIn(host: host))
+        #expect(session.rowRefusal?.key == "account.mastodon.failed")
     }
 
     /// A server that no longer knows the client shows an error page with no way back, so a closed
@@ -236,6 +282,18 @@ struct MastodonSignInTests {
         #expect(form.contains("client_id=cid"))
         #expect(form.contains("client_secret=csecret"))
         #expect(form.contains("token=tok-123"))
+    }
+
+    @Test("A token the Keychain would not delete: the row stays signed in, as the Keychain says, and the server is asked to revoke it")
+    func keychainKeepsTheToken() async throws {
+        let tokens = StuckTokens()
+        try tokens.save(token(host))
+        let server = MastodonServer(tokens: MemoryMastodonTokens())
+        let sessions = MastodonSessions(tokens: tokens, sender: server)
+        #expect(sessions.isSignedIn(host: host))
+        await sessions.signOut(host: host)
+        #expect(sessions.isSignedIn(host: host), "not claimed signed out while the token is still kept")
+        #expect(await server.paths == ["/oauth/revoke"])
     }
 
     @Test("A revoke the server refuses or never hears still signs out", arguments: [false, true])
@@ -408,4 +466,18 @@ struct MastodonSignInTests {
         }
         #expect(ShellSession.signInFailureKey(.http(503)) == "account.mastodon.failed.unreachable")
     }
+}
+
+/// A token store whose Keychain will not delete a token by host.
+private final class StuckTokens: MastodonTokenStore, @unchecked Sendable {
+    private let held = MemoryMastodonTokens()
+
+    func token(host: String) throws -> MastodonToken? { try held.token(host: host) }
+    func save(_ token: MastodonToken) throws { try held.save(token) }
+    func forget(host: String) throws { throw ForumCredentialError.keychain(-25_308) }
+    func forget(_ token: MastodonToken) throws -> Bool { try held.forget(token) }
+    func signedInHosts() throws -> Set<String> { try held.signedInHosts() }
+    func app(host: String) throws -> MastodonApp? { try held.app(host: host) }
+    func save(_ app: MastodonApp) throws { try held.save(app) }
+    func forgetApp(host: String) throws { try held.forgetApp(host: host) }
 }

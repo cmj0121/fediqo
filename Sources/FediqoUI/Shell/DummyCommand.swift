@@ -157,6 +157,16 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         DummyLayer.allCases.first(where: open.contains)
     }
 
+    /// Whether `e` may open the timeline editor now: only over the timeline itself, with at most
+    /// a post selected on it. Under a search, a thread, the viewer or the keys list, the timeline
+    /// is not what the reader is looking at. **No `default:`**, for the reason `.back` gives.
+    public static func canEditTimeline(whenOpen open: Set<DummyLayer>) -> Bool {
+        switch outermost(of: open) {
+        case .selection, nil: true
+        case .viewer, .shortcuts, .thread, .search: false
+        }
+    }
+
     /// Whether a layer may be entered now.
     ///
     /// The dual of `outermost`, and deliberately the **same function** rather than a second list:

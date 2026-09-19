@@ -539,11 +539,7 @@ public struct FediqoRootView: View {
             showingLanding = true
             return true
         case .editTimeline:
-            // Only over the timeline itself: inside a thread the timeline underneath is not what
-            // the reader is looking at.
-            guard place == .timeline, viewedItem == nil, !showingShortcuts, threadStack.isEmpty else {
-                return false
-            }
+            guard place == .timeline, DummyCommand.canEditTimeline(whenOpen: openLayers) else { return false }
             return session.editCurrentTimeline()
         case .dismiss:
             // A running reload is the first thing Escape stops (#29); the next one leaves.
@@ -814,7 +810,9 @@ public struct FediqoRootView: View {
     }
 
     private var searchItems: [DummyItem]? {
-        search.items(from: session.notes, sources: session.sources, latest: prefs.latestDate)
+        search.items(
+            from: session.notes, revision: session.notesRevision, sources: session.sources, latest: prefs.latestDate
+        )
     }
 
     /// `/` on the timeline: an empty search over what this device holds, or the field again if
@@ -838,8 +836,10 @@ public struct FediqoRootView: View {
 
     /// The field emptied: the timeline is back, so the post selected before the search is too.
     private func searchCleared() {
-        threadStack = []
-        selectedItemID = search.selectionBefore
+        search.cleared { selection in
+            threadStack = []
+            selectedItemID = selection
+        }
     }
 
     /// Whichever list is in front: the open conversation, or the stream under it.
@@ -936,22 +936,18 @@ public struct FediqoRootView: View {
 
     /// `r`: the open thread, or else the selected timeline — and only on what the reader can see,
     /// so not under the viewer, the keys list or the timeline editor. A second press while one
-    /// runs stops it and starts nothing.
+    /// runs is taken and does nothing; Esc is what stops it.
     private func reload() -> Bool {
         guard place == .timeline, session.editing == nil, !session.sources.isEmpty else { return false }
-        // `r` again while one runs stops it rather than starting a second.
-        if session.reload.stop() { return true }
+        if session.reload.running { return true }
         switch DummyCommand.outermost(of: openLayers) {
         // A search's results are what this device holds, found without asking anybody.
         case .viewer, .shortcuts, .search: return false
         case .thread, .selection, nil: break
         }
         // The thread as `TimelinePane` draws it: one it cannot find draws the timeline instead.
-        if let opened = threadStack.last, let item = streamItems.first(where: { $0.id == opened }) {
-            Task { await session.reload.thread(item, in: session) }
-        } else {
-            Task { await session.reload.timeline(session.currentTimeline, in: session) }
-        }
+        let opened = threadStack.last.flatMap { opened in streamItems.first { $0.id == opened } }
+        session.reload.press(thread: opened, timeline: session.currentTimeline, in: session)
         return true
     }
 
@@ -1086,7 +1082,7 @@ public struct FediqoRootView: View {
                 if search.isOpen {
                     SearchBar(
                         search: search,
-                        found: searchItems?.count,
+                        found: search.isIndexed ? searchItems?.count : nil,
                         onSubmit: { selectedItemID = streamItems.first?.id },
                         onCleared: searchCleared,
                         onClose: closeSearch
