@@ -68,6 +68,7 @@ struct AccountPane: View {
                 .frame(maxWidth: .infinity, alignment: .topLeading)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .scrollIndicators(.never)
             // **The page takes the reader to the block, once, on its appearing.**
             //
             // **Gated on `nil → non-nil` and nothing else.** A reader coming back from the boards

@@ -201,7 +201,7 @@ struct TimelinePane: View {
                     }
                 }
             }
-            .scrollIndicators(.hidden)
+            .scrollIndicators(.never)
             .onAppear {
                 guard let id = DummyCommand.centredOnAppear(selected: selectedID) else { return }
                 // A tick later: a lazy stack just built has not laid out the row to scroll to.

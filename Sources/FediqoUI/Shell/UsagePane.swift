@@ -125,6 +125,9 @@ struct UsagePane: View {
             page
         }
         .formStyle(.grouped)
+        // The page's own colour, as on the timeline and Account, and no scroll bar.
+        .scrollContentBackground(.hidden)
+        .scrollIndicators(.never)
         .padding(ShellSpace.snug)
         .task(id: Probe(hosts: sources.map(\.host), cleared: session?.cleared ?? 0)) {
             await readCatalogues()

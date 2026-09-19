@@ -72,7 +72,7 @@ struct DummyThreadPane: View {
                     .padding(.vertical, 8)
                     .padding(.trailing, 8)
                 }
-                .scrollIndicators(.hidden)
+                .scrollIndicators(.never)
                 .onAppear {
                     guard let id = DummyCommand.centredOnAppear(selected: selectedID, opening: root.id)
                     else { return }
