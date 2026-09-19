@@ -40,6 +40,8 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     /// there is no cover to lift, so the second press asks for the replies.
     case reveal
     case back
+    /// `r` — reload what is in front: the open thread, or else the selected timeline (#29).
+    case reload
     case compose
     case showShortcuts
     /// `/` — search what this device holds (#32). `?` is still the keys list; see `typed`.
@@ -47,9 +49,8 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     case dismiss
     /// ⌘R — play the launch overlay again, from rest, without quitting the process.
     ///
-    /// **Not the letter `r`.** That letter is later reblog, and taking it here would make
-    /// the two jobs a collision the day the later one arrives. A ⌘ chord is otherwise the
-    /// platform's — this is the one dummy exception.
+    /// **Not the letter `r`**, which reloads (#29). A ⌘ chord is otherwise the platform's — this
+    /// is the one dummy exception.
     case replayLanding
     /// `e` — open the editor on the timeline in front, or a new one from the `[+]` pill (#27).
     /// All and Trends are not edited: the press says so and how to add one (Decision 19).
@@ -103,6 +104,7 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         case KeyEquivalent.return.character, " ": return .expandPost
         case "q": return .back
         case "e": return .editTimeline
+        case "r": return .reload
         default: return nil
         }
     }
@@ -323,6 +325,7 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
         DummyShortcut(group: .timeline, keys: ["q"], name: "back", commands: [.back]),
         DummyShortcut(group: .timeline, keys: ["e"], name: "edit", commands: [.editTimeline]),
         DummyShortcut(group: .timeline, keys: ["/"], name: "search", commands: [.search]),
+        DummyShortcut(group: .timeline, keys: ["r"], name: "reload", commands: [.reload]),
         DummyShortcut(group: .app, keys: ["⌃Tab", "⌃⇧Tab"], name: "pages",
                       commands: [.nextPage, .previousPage]),
         DummyShortcut(group: .app, keys: ["c"], name: "compose", commands: [.compose]),

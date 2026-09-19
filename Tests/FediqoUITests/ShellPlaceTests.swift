@@ -238,9 +238,9 @@ struct DummyCommandTests {
         #expect(ShortcutGuide.Metrics.plate + 2 * ShellSpace.room <= 520)
     }
 
-    @Test("⌘R plays the launch again, and the letter r stays free")
+    @Test("⌘R plays the launch again, and the letter r reloads")
     func commandRReplaysTheLaunch() {
-        #expect(DummyCommand.from("r") == nil)
+        #expect(DummyCommand.from("r") == .reload)
         #expect(DummyCommand.from("r", command: true) == .replayLanding)
         #expect(DummyCommand.from("R", command: true) == .replayLanding)
         #expect(DummyCommand.from("r", command: true, typing: true) == .replayLanding)

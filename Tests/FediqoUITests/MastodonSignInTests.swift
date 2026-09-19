@@ -53,7 +53,7 @@ private actor MastodonServer: HTTPSender {
 /// or waits at a gate first.
 @MainActor
 private final class Page: OAuthBrowser {
-    enum Answer { case approve, close }
+    enum Answer { case approve, close, invalidScope }
 
     private let answer: Answer
     private let gate: Gate?
@@ -67,9 +67,10 @@ private final class Page: OAuthBrowser {
     func authorize(_ url: URL, callbackScheme: String) async throws -> URL {
         opened += 1
         await gate?.wait()
-        guard answer == .approve else { throw MastodonSignInError.cancelled }
         let state = URLComponents(url: url, resolvingAgainstBaseURL: false)?
             .queryItems?.first { $0.name == "state" }?.value ?? ""
+        if answer == .invalidScope { return URL(string: "fediqo://oauth?error=invalid_scope&state=\(state)")! }
+        guard answer == .approve else { throw MastodonSignInError.cancelled }
         return URL(string: "fediqo://oauth?code=c&state=\(state)")!
     }
 }
@@ -84,7 +85,10 @@ struct MastodonSignInTests {
         MastodonToken(host: host, accessToken: "tok-123", clientID: "cid", clientSecret: "csecret")
     }
 
-    private var app: MastodonApp { token(host).app }
+    /// A registration made for the scopes this build asks for.
+    private var app: MastodonApp {
+        MastodonApp(host: host, clientID: "cid", clientSecret: "csecret", scopes: MastodonOAuth.scopes)
+    }
 
     private func shell(
         _ overrides: [String: MastodonServer.Outcome] = [:],
@@ -152,6 +156,28 @@ struct MastodonSignInTests {
         #expect(!session.isSignedIn(host: host))
         #expect(session.rowRefusal?.key == "account.mastodon.failed")
         #expect(await !server.paths.contains("/api/v1/apps"))
+    }
+
+    @Test("A registration kept for other scopes is made again, for the scopes asked now",
+          arguments: [nil, "read:statuses read:lists read:accounts"])
+    func registrationForOtherScopes(scopes: String?) async throws {
+        let (session, server, tokens) = await shell()
+        try tokens.save(MastodonApp(host: host, clientID: "old", clientSecret: "old", scopes: scopes))
+        await session.signIn(host: host, through: Page())
+        #expect(await server.paths.first == "/api/v1/apps")
+        #expect(try tokens.app(host: host) == app)
+        #expect(session.isSignedIn(host: host))
+    }
+
+    @Test("A page answering invalid_scope drops the kept registration and says the sign-in failed")
+    func invalidScope() async throws {
+        let (session, server, tokens) = await shell()
+        try tokens.save(app)
+        await session.signIn(host: host, through: Page(.invalidScope))
+        #expect(try tokens.app(host: host) == nil, "the next sign-in registers afresh")
+        #expect(!session.isSignedIn(host: host))
+        #expect(session.rowRefusal?.key == "account.mastodon.failed", "never a silent nothing")
+        #expect(await !server.paths.contains("/oauth/token"))
     }
 
     /// A server that no longer knows the client shows an error page with no way back, so a closed

@@ -58,6 +58,28 @@ public struct MastodonAccount: Sendable {
         return complete && all
     }
 
+    /// Only what a reload asks for (#29): Home where `home`, and those lists in `lists` this source
+    /// still reads. A list no longer chosen asks nothing, and nothing is relabelled.
+    ///
+    /// Returns whether every read came back. Throws only `.signedOut` and cancellation.
+    public func read(home: Bool, lists ids: Set<String>) async throws -> Bool {
+        guard let source = await source() else { return true }
+        var complete = true
+        var notes: [Note] = []
+        if home {
+            if let read = try await attempt({
+                try await statuses("/api/v1/timelines/home", source: source, category: .home)
+            }) {
+                notes += read
+            } else {
+                complete = false
+            }
+        }
+        let (read, all) = try await statuses(of: source.lists.filter { ids.contains($0.id) }, source: source)
+        try await ingest(notes + read)
+        return complete && all
+    }
+
     /// Makes `picks` the lists this source reads, and reads the ones that were not chosen before.
     ///
     /// Returns whether every read came back. Throws only `.signedOut` and cancellation.

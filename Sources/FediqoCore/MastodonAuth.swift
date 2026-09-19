@@ -33,6 +33,9 @@ public enum MastodonSignInError: Error, Equatable, Sendable {
     case keychain
     /// The server no longer knows this app's registration (`invalid_client`): register again.
     case clientRejected
+    /// The server answered `invalid_scope`: the registration was made for other scopes than
+    /// this build asks for. It is dropped, so the next attempt registers afresh.
+    case invalidScope
 }
 
 /// A request made with a token, answered.
@@ -78,8 +81,9 @@ struct PKCE: Equatable {
 public struct MastodonOAuth: Sendable {
     public static let callbackScheme = "fediqo"
     public static let redirect = "fediqo://oauth"
-    /// Decision 8: what Home, lists and the account check need, and no more.
-    public static let scopes = "read:statuses read:lists read:accounts"
+    /// Decision 8: what Home, lists, the account check and finding a post again by its address
+    /// (#29) need, and no more. A token issued before `read:search` was asked for lacks it.
+    public static let scopes = "read:statuses read:lists read:accounts read:search"
 
     let host: String
     private let sender: any HTTPSender
@@ -131,7 +135,9 @@ public struct MastodonOAuth: Sendable {
             ("redirect_uris", Self.redirect),
             ("scopes", Self.scopes),
         ])
-        return MastodonApp(host: host, clientID: answer.client_id, clientSecret: answer.client_secret)
+        return MastodonApp(
+            host: host, clientID: answer.client_id, clientSecret: answer.client_secret, scopes: Self.scopes
+        )
     }
 
     func authorizeURL(clientID: String, challenge: String, state: String) -> URL? {
@@ -154,7 +160,9 @@ public struct MastodonOAuth: Sendable {
         else { throw MastodonSignInError.unreadable }
         let items = URLComponents(url: callback, resolvingAgainstBaseURL: false)?.queryItems ?? []
         func value(_ name: String) -> String? { items.first { $0.name == name }?.value }
-        if value("error") != nil { throw MastodonSignInError.denied }
+        if let error = value("error") {
+            throw error == "invalid_scope" ? MastodonSignInError.invalidScope : MastodonSignInError.denied
+        }
         guard value("state") == state else { throw MastodonSignInError.stateMismatch }
         guard let code = value("code"), !code.isEmpty else { throw MastodonSignInError.unreadable }
         return code

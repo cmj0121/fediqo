@@ -211,6 +211,11 @@ struct TimelinePane: View {
                     proxy.scrollTo(id, anchor: .center)
                 }
             }
+            // A reload lands newer rows above the selected one; it stays centred (#23, #29).
+            .onChange(of: session.reload.landed) { _, _ in
+                guard let selectedID else { return }
+                proxy.scrollTo(selectedID, anchor: .center)
+            }
             .onChange(of: jumpToTop) { _, _ in
                 guard let first = items.first else { return }
                 withAnimation(.easeInOut(duration: 0.18)) {
@@ -293,6 +298,13 @@ struct TimelinePane: View {
             }
             if let latest = prefs.latestDate {
                 latestMark(latest)
+            }
+            if let line = session.reload.line {
+                Text(line)
+                    .font(ShellType.meta)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .accessibilityElement(children: .contain)

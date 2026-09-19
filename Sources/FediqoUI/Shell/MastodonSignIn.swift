@@ -41,14 +41,21 @@ public final class MastodonSessions {
     /// **One registration per host.** The app is registered the first time and the registration
     /// kept, so signing out and in again does not leave a trail of apps on the reader's account.
     /// It is dropped — and the next attempt registers afresh — where the server rejects it at
-    /// the token exchange, or where a sign-in through it ends with the page closed: a server that
+    /// the token exchange or its page answers `invalid_scope`, where it was made for other scopes
+    /// than this build asks for, or where a sign-in through it ends with the page closed: a server that
     /// no longer knows the client shows an error page with no way back, and closing it is the
     /// only thing the reader can do there.
     func signIn(host raw: String, through browser: any OAuthBrowser) async -> MastodonSignInError? {
         let host = raw.lowercased()
         let before = signOuts[host, default: 0]
         let oauth = MastodonOAuth(host: host, sender: sender)
-        let kept = (try? tokens.app(host: host)) ?? nil
+        var kept = (try? tokens.app(host: host)) ?? nil
+        // A registration made for other scopes than this build asks for is made again: the
+        // server would refuse the page with `invalid_scope`.
+        if let app = kept, app.scopes != MastodonOAuth.scopes {
+            try? tokens.forgetApp(host: host)
+            kept = nil
+        }
         let token: MastodonToken
         do {
             let app: MastodonApp
@@ -60,7 +67,7 @@ public final class MastodonSessions {
             }
             token = try await oauth.signIn(as: app, through: browser)
         } catch let error as MastodonSignInError {
-            if error == .clientRejected || (kept != nil && error == .cancelled) {
+            if error == .clientRejected || error == .invalidScope || (kept != nil && error == .cancelled) {
                 try? tokens.forgetApp(host: host)
             }
             return error == .cancelled || error == .denied ? nil : error
@@ -103,9 +110,11 @@ public final class MastodonSessions {
     }
 
     /// The door a signed-in request goes through, or nothing where no token can be read.
-    func authorized(host: String) -> MastodonAuthorized? {
+    /// `within` puts a deadline on each request — a reload's (#29).
+    func authorized(host: String, within limit: Duration? = nil) -> MastodonAuthorized? {
         guard let token = (try? tokens.token(host: host)) ?? nil else { return nil }
-        return MastodonAuthorized(token: token, sender: sender, store: tokens)
+        let wire: any HTTPSender = limit.map { Deadline(sender, within: $0) } ?? sender
+        return MastodonAuthorized(token: token, sender: wire, store: tokens)
     }
 
     /// A request answered `.signedOut`: the token is already gone, so the row and the reader are

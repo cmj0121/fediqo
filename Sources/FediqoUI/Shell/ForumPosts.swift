@@ -381,6 +381,19 @@ final class ForumPosts {
         await fetch(ref, part: .replies)
     }
 
+    /// `r` on an open thread (#29): its opening post asked again, and the rest of the topic too
+    /// where the reader had asked for it. What is held stays drawn until the answer replaces it.
+    ///
+    /// Returns whether every part asked came back.
+    func reload(_ ref: ForumThreadRef) async -> Bool {
+        let keys = Part.allCases.map { Key(ref, $0) }.filter { key in
+            key.part == .opening || entries[key] != nil || missing[key] != nil || inFlight[key] != nil
+        }
+        for key in keys { missing.removeValue(forKey: key) }
+        for key in keys { await work(for: key).value }
+        return keys.allSatisfy { missing[$0] == nil }
+    }
+
     private func fetch(_ ref: ForumThreadRef, part: Part) async {
         let key = Key(ref, part)
         guard entries[key] == nil, missing[key]?.asksAgain ?? true else { return }

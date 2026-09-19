@@ -63,6 +63,7 @@
 "shortcut.compose" = "新貼文";
 "shortcut.list" = "這份清單";
 "shortcut.back" = "回到清單";
+"shortcut.reload" = "重新載入這條時間軸，或打開的討論串";
 "shortcut.dismiss" = "關掉眼前的東西，或取消選取";
 "shortcut.search" = "搜尋這台裝置上的貼文";
 
@@ -84,6 +85,12 @@
 "timeline.rule.trends" = "趨勢貼文，時間序。";
 "timeline.latest" = "只到 %@";
 "timeline.latest.label" = "只顯示 %@ 以前的貼文，較新的貼文已隱藏";
+"timeline.reload.progress" = "重新載入中…";
+"timeline.reload.failed" = "無法重新載入 %@。";
+"timeline.reload.stopped" = "已停止重新載入。";
+"thread.reload.unfindable" = "這篇無法重新載入：登入 %@ 才能在那裡找到它。";
+"thread.reload.notfound" = "這篇無法重新載入：%@ 找不到它。";
+"thread.reload.scope" = "這篇無法重新載入：請重新登入 %@，讓 Fediqo 能找到它。";
 "timeline.empty.title" = "還沒有東西進來";
 "timeline.empty.detail" = "你加的來源的公開貼文會落在這裡，新的在上面。";
 "timeline.empty.trends.title" = "目前沒有趨勢";

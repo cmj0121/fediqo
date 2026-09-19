@@ -114,6 +114,22 @@ public actor ItemStore {
         }
     }
 
+    /// Posts read again (#29), only while `host` is still a source here and only those stamped
+    /// with it. Unlike `ingest`, a row already held is **replaced** by what the server says now —
+    /// an edited post shows its new words — keeping the categories it arrived through and its
+    /// booster (`Note.refreshed(over:)`). **A post not held is dropped**: reading one post again
+    /// updates what is here, and brings in nothing the reader did not already have.
+    public func refresh(_ incoming: [Note], ifSourceHere host: String) {
+        let host = host.lowercased()
+        guard sourceList.contains(where: { $0.host == host }) else { return }
+        let held = incoming.filter { $0.source.host == host && notes[$0.key] != nil }
+        guard !held.isEmpty else { return }
+        revision += 1
+        for note in held {
+            notes[note.key] = notes[note.key].map(note.refreshed(over:))
+        }
+    }
+
     /// Lets go of one server: the source, the boards the reader picked on it, and the notes it
     /// carried here. Each source is its own rows, so this host's copy goes and the other source's
     /// copy of the same content stays (#10).

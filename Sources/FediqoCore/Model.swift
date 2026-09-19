@@ -328,6 +328,10 @@ public struct Note: Identifiable, Hashable, Sendable {
     public let emojis: [CustomEmoji]
     public let url: URL?
     public let counts: Counts
+    /// The id the server this copy came through gives the status, where it is a microblog's —
+    /// what reading the post again (#29) asks for. Nothing on a row stored before 0.2.0 learned
+    /// it, and on every forum post.
+    public let statusID: String?
 
     public init(
         id: String,
@@ -349,7 +353,8 @@ public struct Note: Identifiable, Hashable, Sendable {
         spoiler: String? = nil,
         emojis: [CustomEmoji] = [],
         url: URL? = nil,
-        counts: Counts = Counts()
+        counts: Counts = Counts(),
+        statusID: String? = nil
     ) {
         self.id = id
         self.source = source
@@ -371,6 +376,22 @@ public struct Note: Identifiable, Hashable, Sendable {
         self.emojis = emojis
         self.url = url
         self.counts = counts
+        self.statusID = statusID
+    }
+
+    /// This copy, read again, laid over the one held for the same row (#29): what the server says
+    /// now — text, cover, attachments, counts — with the categories the held copy arrived through
+    /// kept (and grown), its booster kept, and its board where this read names none.
+    func refreshed(over held: Note) -> Note {
+        Note(
+            id: id, source: source, author: author, handle: handle, body: body, title: title,
+            board: board ?? held.board, postedAt: postedAt,
+            categories: held.categories.union(categories), reply: reply,
+            boostedBy: held.boostedBy, boosterHandle: held.boosterHandle,
+            audience: audience, avatarURL: avatarURL, attachments: attachments,
+            sensitive: sensitive, spoiler: spoiler, emojis: emojis, url: url, counts: counts,
+            statusID: statusID ?? held.statusID
+        )
     }
 }
 

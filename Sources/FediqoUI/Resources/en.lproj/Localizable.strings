@@ -63,6 +63,7 @@
 "shortcut.compose" = "New post";
 "shortcut.list" = "This list";
 "shortcut.back" = "Back to the list";
+"shortcut.reload" = "Reload this timeline, or the open thread";
 "shortcut.dismiss" = "Close what is in front, or unfocus";
 "shortcut.search" = "Search the posts this device holds";
 
@@ -84,6 +85,12 @@
 "timeline.rule.trends" = "Trending notes, in time order.";
 "timeline.latest" = "Up to %@";
 "timeline.latest.label" = "Showing posts up to %@; newer posts are hidden";
+"timeline.reload.progress" = "Reloading…";
+"timeline.reload.failed" = "Could not reload %@.";
+"timeline.reload.stopped" = "Reload stopped.";
+"thread.reload.unfindable" = "This post can't be reloaded: sign in to %@ to find it there.";
+"thread.reload.notfound" = "This post can't be reloaded: %@ did not find it.";
+"thread.reload.scope" = "This post can't be reloaded: sign in to %@ again to let Fediqo find it.";
 "timeline.empty.title" = "Nothing has arrived";
 "timeline.empty.detail" = "Public notes from the sources you added land here, newest first.";
 "timeline.empty.trends.title" = "Nothing is trending";
