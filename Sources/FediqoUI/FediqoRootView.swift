@@ -840,8 +840,9 @@ public struct FediqoRootView: View {
     }
 
     private func popThread() -> Bool {
-        guard !threadStack.isEmpty else { return false }
-        threadStack.removeLast()
+        guard let popped = DummyCommand.poppedThread(threadStack) else { return false }
+        threadStack = popped.stack
+        selectedItemID = popped.selected
         return true
     }
 
@@ -965,7 +966,7 @@ public struct FediqoRootView: View {
                 playback: playback,
                 onPlayRow: playRow,
                 jumpToTop: jumpToTop,
-                onPopThread: { _ = threadStack.popLast() }
+                onPopThread: { _ = popThread() }
             )
         case .notices: NoticesPane()
         case .account: AccountPane(session: session)
