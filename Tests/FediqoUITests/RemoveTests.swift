@@ -199,13 +199,13 @@ struct RemoveTests {
             notes: [note(uri, from: one), note(uri, from: two), note("only-beta", from: two)]
         )
 
-        let before = TimelineQuery.all.items(from: session.notes)
+        let before = TimelineQuery.all.items(from: session.notes, latest: nil)
         #expect(before.contains { $0.source.host == alpha })
         #expect(before.contains { $0.source.host == beta })
 
         await session.remove(host: alpha)
 
-        let after = TimelineQuery.all.items(from: session.notes)
+        let after = TimelineQuery.all.items(from: session.notes, latest: nil)
         let addressable = Set(after.map(\.source.host))
         #expect(!addressable.contains(alpha))
         #expect(addressable == [beta])
@@ -224,7 +224,7 @@ struct RemoveTests {
             notes: [note(uri, from: micro), note(uri, from: forum)]
         )
 
-        let items = TimelineQuery.all.items(from: session.notes)
+        let items = TimelineQuery.all.items(from: session.notes, latest: nil)
         #expect(items.count == 2)
         #expect(Set(items.map(\.source.host)) == [alpha, beta])
         #expect(items.first { $0.source.host == alpha }?.source.kind == .microblog)

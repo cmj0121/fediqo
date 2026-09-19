@@ -55,8 +55,8 @@ struct TimelineStreamTests {
         #expect(session.timelineID == .all)
 
         let stored = await session.store.all()
-        let all = TimelineQuery.all.items(from: session.notes)
-        let trends = TimelineQuery.trends.items(from: session.notes)
+        let all = TimelineQuery.all.items(from: session.notes, latest: nil)
+        let trends = TimelineQuery.trends.items(from: session.notes, latest: nil)
         #expect(all.map(\.noteID) == stored.map(\.id))
         #expect(trends.map(\.noteID) == stored.filter { $0.categories.contains(.trends) }.map(\.id))
         #expect(trends.map(\.noteID) == [
@@ -129,8 +129,8 @@ struct TimelineStreamTests {
         session.hostname = "first.example"
         await session.add()
         await session.confirm()
-        #expect(!TimelineQuery.all.items(from: session.notes).isEmpty)
-        #expect(TimelineQuery.trends.items(from: session.notes).isEmpty)
+        #expect(!TimelineQuery.all.items(from: session.notes, latest: nil).isEmpty)
+        #expect(TimelineQuery.trends.items(from: session.notes, latest: nil).isEmpty)
         #expect(TimelineQuery.all.emptyKey == "timeline.empty")
         #expect(TimelineQuery.trends.emptyKey == "timeline.empty.trends")
         // emptyKey is a stem: the pane asks for its .title and its .detail.
@@ -167,7 +167,7 @@ struct TimelineStreamTests {
         session.hostname = "first.example"
         await session.add()
         await session.confirm()
-        let ids = session.currentTimeline.items(from: session.notes).map(\.id)
+        let ids = session.currentTimeline.items(from: session.notes, latest: nil).map(\.id)
         #expect(!ids.isEmpty)
         #expect(DummyItem.stored.isEmpty)
         #expect(ids != DummyItem.stored.map(\.id))
@@ -343,8 +343,8 @@ struct TimelineQueryDefinitionTests {
         let notes = [note("1", [.public]), note("2", [.trends]), note("3", [.public, .trends]), note("4", [])]
         #expect(TimelineQuery.all.definition(among: []) == .all)
         #expect(TimelineQuery.trends.definition(among: []) == .trends)
-        #expect(TimelineQuery.all.items(from: notes).map(\.noteID) == ["1", "2", "3", "4"])
-        #expect(TimelineQuery.trends.items(from: notes).map(\.noteID) == ["2", "3"])
+        #expect(TimelineQuery.all.items(from: notes, latest: nil).map(\.noteID) == ["1", "2", "3", "4"])
+        #expect(TimelineQuery.trends.items(from: notes, latest: nil).map(\.noteID) == ["2", "3"])
     }
 
     @Test("A written timeline's id round-trips, draws its rules, and a deleted one is All")
@@ -357,9 +357,9 @@ struct TimelineQueryDefinitionTests {
 
         let notes = [note("1", [.public], "Swift news"), note("2", [.public], "other")]
         #expect(query.definition(among: [written]) == written)
-        #expect(query.items(from: notes, among: [written]).map(\.noteID) == ["1"])
+        #expect(query.items(from: notes, among: [written], latest: nil).map(\.noteID) == ["1"])
         #expect(query.definition(among: []) == .all)
-        #expect(query.items(from: notes).map(\.noteID) == ["1", "2"])
+        #expect(query.items(from: notes, latest: nil).map(\.noteID) == ["1", "2"])
     }
 
     @Test("The Trends tab is offered exactly where the Trends timeline's rule can reach")

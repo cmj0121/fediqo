@@ -415,7 +415,7 @@ struct BoardChoiceTests {
 
         #expect(session.queries.map(\.id) == ["all"])
         #expect(session.timelineID == .all)
-        #expect(!TimelineQuery.all.items(from: session.notes).isEmpty)
+        #expect(!TimelineQuery.all.items(from: session.notes, latest: nil).isEmpty)
     }
 
     // MARK: - Saying what did not work

@@ -1,3 +1,4 @@
+import FediqoCore
 import Foundation
 import SwiftUI
 
@@ -79,39 +80,45 @@ public enum DummyFontSize: String, CaseIterable, Identifiable, Sendable {
 final class DummyPrefs {
     var language: DummyLanguage {
         didSet {
-            Self.write("language", language.rawValue)
+            write("language", language.rawValue)
             L10n.language = language
         }
     }
 
     var theme: DummyTheme {
-        didSet { Self.write("theme", theme.rawValue) }
+        didSet { write("theme", theme.rawValue) }
     }
 
     var fontSize: DummyFontSize {
-        didSet { Self.write("fontSize", fontSize.rawValue) }
+        didSet { write("fontSize", fontSize.rawValue) }
     }
 
     /// How many months of posts to keep; nil, the default, keeps them all forever.
     var keepMonths: Int? {
-        didSet { Self.write("keepMonths", keepMonths.map(String.init) ?? "") }
+        didSet { write("keepMonths", keepMonths.map(String.init) ?? "") }
     }
 
-    init() {
-        keepMonths = Int(Self.read("keepMonths") ?? "").flatMap { $0 > 0 ? $0 : nil }
-        language = DummyLanguage(rawValue: Self.read("language") ?? "") ?? .system
-        theme = DummyTheme(rawValue: Self.read("theme") ?? "") ?? .system
-        fontSize = DummyFontSize(rawValue: Self.read("fontSize") ?? "") ?? .standard
+    /// The last day every timeline shows (#22); nil, the default, shows up to now.
+    var latestDate: LatestDate? {
+        didSet { write("latestDate", latestDate?.text ?? "") }
+    }
+
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        func read(_ name: String) -> String? { defaults.string(forKey: Self.prefix + name) }
+        keepMonths = Int(read("keepMonths") ?? "").flatMap { $0 > 0 ? $0 : nil }
+        latestDate = LatestDate(read("latestDate") ?? "")
+        language = DummyLanguage(rawValue: read("language") ?? "") ?? .system
+        theme = DummyTheme(rawValue: read("theme") ?? "") ?? .system
+        fontSize = DummyFontSize(rawValue: read("fontSize") ?? "") ?? .standard
         L10n.language = language
     }
 
     private static let prefix = "fediqo.dummy."
 
-    private static func read(_ name: String) -> String? {
-        UserDefaults.standard.string(forKey: prefix + name)
-    }
-
-    private static func write(_ name: String, _ value: String) {
-        UserDefaults.standard.set(value, forKey: prefix + name)
+    private func write(_ name: String, _ value: String) {
+        defaults.set(value, forKey: Self.prefix + name)
     }
 }

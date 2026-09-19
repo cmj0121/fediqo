@@ -79,9 +79,13 @@ public enum TimelineQuery: Hashable, Identifiable, Sendable {
     ///
     /// Evaluated against no text index: All and Trends read no text, and the session that draws
     /// written timelines (#27) is the one that will hold an index to hand in.
-    public func items(from notes: [Note], among written: [TimelineDefinition] = []) -> [DummyItem] {
-        CompiledTimeline(definition(among: written), sources: [])
-            .shown(notes, TextIndex([]))
-            .map { DummyItem($0) }
+    ///
+    /// `latest` is the reader's latest date (#22), cut after the rules so every query stops at
+    /// the same day. It has no default, so a list drawn without asking about it does not compile.
+    public func items(
+        from notes: [Note], among written: [TimelineDefinition] = [], latest: LatestDate?
+    ) -> [DummyItem] {
+        let shown = CompiledTimeline(definition(among: written), sources: []).shown(notes, TextIndex([]))
+        return (latest?.shown(shown) ?? shown).map { DummyItem($0) }
     }
 }

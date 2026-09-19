@@ -24,10 +24,11 @@ struct TimelinePane: View {
     @State private var toast: String?
     @State private var toastTick = 0
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(DummyPrefs.self) private var prefs
 
     private var timeline: TimelineQuery { session.currentTimeline }
 
-    private var items: [DummyItem] { timeline.items(from: session.notes) }
+    private var items: [DummyItem] { timeline.items(from: session.notes, latest: prefs.latestDate) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -267,8 +268,22 @@ struct TimelinePane: View {
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+            if let latest = prefs.latestDate {
+                latestMark(latest)
+            }
         }
         .accessibilityElement(children: .contain)
+    }
+
+    /// Quiet word that newer posts are held back by the latest date in Preferences (#22), so a
+    /// stream that stops short does not read as missing posts.
+    private func latestMark(_ latest: LatestDate) -> some View {
+        let day = latest.start().formatted(.dateTime.year().month().day().locale(L10n.locale()))
+        return Label(String(format: L10n.t("timeline.latest"), day), systemImage: "calendar")
+            .font(ShellType.meta)
+            .foregroundStyle(ShellChrome.inkDim(colorScheme))
+            .lineLimit(1)
+            .accessibilityLabel(String(format: L10n.t("timeline.latest.label"), day))
     }
 
     private func queryPill(_ query: TimelineQuery) -> some View {
