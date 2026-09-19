@@ -68,6 +68,18 @@ struct ShellToast: Equatable {
     let text: String
 }
 
+/// The stream as last drawn, and what it was drawn from.
+struct DrawnTimeline {
+    struct Key: Equatable {
+        let definition: TimelineDefinition
+        let notesRevision: Int
+        let latest: LatestDate?
+    }
+
+    let key: Key
+    let items: [DummyItem]
+}
+
 /// Where Tab can land on the timeline: a query, or the pinned `[+]` pill after the last one.
 enum TimelineTabStop: Hashable {
     case query(TimelineQuery)
@@ -94,13 +106,20 @@ extension ShellSession {
 
     /// What the stream draws: the query in front, through the one text index this session holds,
     /// stopped at the reader's latest date (#22).
+    ///
+    /// Kept until the definition in front, the notes or the latest date change, because one
+    /// redraw reads it several times. Sources are no key: the stream compiles without them.
     func timelineItems(latest: LatestDate?) -> [DummyItem] {
-        let readsText = definition(of: currentTimeline).rules.contains {
-            $0.kind.tag == .keyword || $0.kind.tag == .author
-        }
-        return currentTimeline.items(
+        let definition = definition(of: currentTimeline)
+        let key = DrawnTimeline.Key(definition: definition, notesRevision: notesRevision, latest: latest)
+        if let drawnTimeline, drawnTimeline.key == key { return drawnTimeline.items }
+        let readsText = definition.rules.contains { $0.kind.tag == .keyword || $0.kind.tag == .author }
+        let items = currentTimeline.items(
             from: notes, among: written, index: readsText ? textIndex : TextIndex([]), latest: latest
         )
+        drawnTimeline = DrawnTimeline(key: key, items: items)
+        timelineEvaluations += 1
+        return items
     }
 
     func definition(of query: TimelineQuery) -> TimelineDefinition {

@@ -73,10 +73,18 @@ public struct URLSessionClient: HTTPClient, Sendable {
             if Task.isCancelled {
                 throw URLError(.cancelled)
             }
+            NetLog.network.error(
+                "\(NetLog.line("request", host: url.host() ?? "", error: error), privacy: .public)"
+            )
             throw error
         }
         guard let http = response as? HTTPURLResponse else {
             throw URLError(.badServerResponse)
+        }
+        if http.statusCode >= 400 {
+            NetLog.network.notice(
+                "\(NetLog.line("request", host: url.host() ?? "", status: http.statusCode), privacy: .public)"
+            )
         }
         return (body, http)
     }
