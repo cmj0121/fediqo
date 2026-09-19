@@ -326,7 +326,7 @@
 "account.sources.detail"         = "Everything this device reads. Press a row for what that server says about itself — its name, its size, its boards. Removing one takes its boards and its posts with it.";
 "account.sources.held"           = "What each one has left on this device is on Usage.";
 /* M1 tail rev 4 — the compact row. What the marks on a row mean, said once for the list. */
-"account.sources.marks"          = "A row carries only the marks its own server has: sign in, change boards, clear what it left here, and remove it.";
+"account.sources.marks"          = "A row carries only the marks its own server has: sign in, change boards or lists, clear what it left here, and remove it.";
 "account.source.boards"          = "%1$d boards: %2$@";
 "account.source.unread"          = "Its description could not be read.";
 "account.source.remove.label"    = "Remove %@ and everything it left here";
@@ -371,3 +371,17 @@
 "account.mastodon.failed.keychain"    = "This device could not keep the sign-in for %@.";
 "account.mastodon.ended.title"        = "Signed out by the server";
 "account.mastodon.ended.detail"       = "%@ ended this sign-in. What it brought in is still here; sign in again on Account to read it as you.";
+
+/* #25 — Home and your lists, read as you, and choosing which lists. */
+"account.mastodon.home.progress"      = "Reading your Home on %@…";
+"account.mastodon.read.partial"       = "Some of your Home and lists on %@ could not be read just now.";
+"account.source.lists.change"         = "Choose which of your lists you read on %@";
+"account.source.lists.progress"       = "Reading your lists on %@…";
+"account.source.lists.reading"        = "Reading the lists you chose on %@…";
+"account.source.lists.unread"         = "Your lists on %@ could not be read just now.";
+"list.choose.title"                   = "Your lists on %@";
+"list.choose.detail"                  = "Pick the lists this device reads. Your Home is always read. What you pick replaces what you read now.";
+"list.choose.none"                    = "You have no lists on this server.";
+"list.choose.done"                    = "Done";
+"list.choose.hint.on"                 = "Read this list";
+"list.choose.hint.off"                = "Stop reading this list";

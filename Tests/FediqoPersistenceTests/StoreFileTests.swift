@@ -279,6 +279,45 @@ struct StoreFileTests {
         #expect(try file.load().sources.first?.boards == boards)
     }
 
+    @Test("Chosen lists and what Home and they brought in survive a relaunch; boards are written as before")
+    func listsRoundTrip() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let lists = [ListSubscription(id: "42", name: "Friends"), ListSubscription(id: "7", name: "a:b \"q\" 🧵")]
+        let signedIn = Source(host: "first.example", kind: .mastodon, lists: lists)
+        let forum = Source(host: "forum.example", kind: .discuz, boards: [BoardSubscription(fid: 33, name: "a")])
+        let saved = [
+            note(id: "1", source: signedIn, categories: [.home, .list(id: "42")]),
+            note(id: "2", source: signedIn, categories: [.public]),
+        ]
+        let file = try StoreFile(at: dir)
+        try await file.save(sources: [signedIn, forum], notes: saved)
+        let written = try await file.db.read { db in
+            try String.fetchOne(db, sql: "SELECT boards FROM source WHERE host = 'forum.example'")
+        }
+        #expect(written == #"[{"fid":33,"name":"a"}]"#)
+        let opened = StoreFile.open(at: dir)
+        #expect(opened.setAside == nil)
+        #expect(opened.sources == [signedIn, forum])
+        #expect(opened.sources.first?.lists == lists)
+        #expect(Set(opened.notes) == Set(saved))
+    }
+
+    @Test("A subscription that is neither a board nor a list, or both, fails the load, and the file is set aside",
+          arguments: [#"[{"name":"x"}]"#, #"[{"fid":1,"list":"42","name":"x"}]"#])
+    func neitherBoardNorList(row: String) async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = try StoreFile(at: dir)
+        try await file.save(sources: [mastodon], notes: [])
+        try await file.db.write { db in
+            try db.execute(sql: "UPDATE source SET boards = ?", arguments: [row])
+        }
+        let opened = StoreFile.open(at: dir)
+        #expect(opened.setAside != nil)
+        #expect(opened.sources.isEmpty)
+    }
+
     @Test("A second StoreFile on the same directory reads what the first saved")
     func reopenSameDirectory() async throws {
         let dir = scratch()

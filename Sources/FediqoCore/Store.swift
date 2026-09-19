@@ -52,8 +52,46 @@ public actor ItemStore {
         let host = host.lowercased()
         guard let index = sourceList.firstIndex(where: { $0.host == host }) else { return }
         let existing = sourceList[index]
-        sourceList[index] = Source(host: existing.host, kind: existing.kind, boards: boards)
+        sourceList[index] = Source(
+            host: existing.host, kind: existing.kind, boards: boards, lists: existing.lists
+        )
         revision += 1
+    }
+
+    /// Restates which Mastodon lists a source reads — a choice, or the same lists relabelled with
+    /// the names the server gives them now. `subscribe(host:to:)`'s rules: replaces the set, and
+    /// is silent where the host is not here.
+    public func subscribe(host: String, toLists lists: [ListSubscription]) {
+        let host = host.lowercased()
+        guard let index = sourceList.firstIndex(where: { $0.host == host }) else { return }
+        let existing = sourceList[index]
+        sourceList[index] = Source(
+            host: existing.host, kind: existing.kind, boards: existing.boards, lists: lists
+        )
+        revision += 1
+    }
+
+    /// Gives the lists a source reads **now** the names in `names`, by id. Only relabels: a list
+    /// chosen or unchosen while the names were on the wire stays as that choice left it. Silent
+    /// where the host is not here or nothing changes.
+    public func relabel(host: String, lists names: [String: String]) {
+        let host = host.lowercased()
+        guard let index = sourceList.firstIndex(where: { $0.host == host }) else { return }
+        let existing = sourceList[index]
+        let lists = existing.lists.map { ListSubscription(id: $0.id, name: names[$0.id] ?? $0.name) }
+        guard lists != existing.lists else { return }
+        sourceList[index] = Source(
+            host: existing.host, kind: existing.kind, boards: existing.boards, lists: lists
+        )
+        revision += 1
+    }
+
+    /// `ingest(_:)`, only while `host` is still a source here — in the same step, so a source
+    /// removed while its reads were on the wire does not get their posts back.
+    public func ingest(_ incoming: [Note], ifSourceHere host: String) {
+        let host = host.lowercased()
+        guard sourceList.contains(where: { $0.host == host }) else { return }
+        ingest(incoming)
     }
 
     /// Takes notes in. The same item through one source stays one row: the first copy wins and

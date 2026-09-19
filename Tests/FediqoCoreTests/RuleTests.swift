@@ -426,6 +426,26 @@ struct RuleTests {
         ], sources: remaining) == [])
     }
 
+    @Test("A list rule is present only while the list is chosen, and a missing list is not asked for")
+    func listRules() {
+        let chosen = Source(host: "one.example", kind: .mastodon, lists: [ListSubscription(id: "7", name: "Friends")])
+        let unchosen = Source(host: "one.example", kind: .mastodon)
+        let rule = Rule.category(.list(id: "7"), in: .source(host: "one.example"), sources: [chosen])!
+        let other = Rule.category(.list(id: "8"), in: .source(host: "one.example"), sources: [chosen])!
+        let definition = TimelineDefinition(name: "t", rules: [rule])
+
+        #expect(CompiledTimeline(definition, sources: [chosen]).status(of: rule) == .present)
+        #expect(CompiledTimeline(definition, sources: [chosen]).status(of: other) == .missingCategory)
+        #expect(CompiledTimeline(definition, sources: [unchosen]).status(of: rule) == .missingCategory)
+        #expect(asks([rule], sources: [chosen]) == [ask("one.example", [.list(id: "7")])])
+        #expect(asks([rule], sources: [unchosen]) == [])
+        #expect(asks([rule, other], sources: [chosen]) == [ask("one.example", [.list(id: "7")])])
+
+        let held = [Self.note("l1", Self.one, "on a list", [.list(id: "7")])]
+        #expect(CompiledTimeline(definition, sources: [unchosen]).shown(held, TextIndex(held)) == held,
+                "a list no longer chosen stopped matching what it brought")
+    }
+
     // MARK: - The index
 
     @Test("A rebuilt index folds only the notes that changed")
