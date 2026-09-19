@@ -26,26 +26,44 @@ public struct URLSessionClient: HTTPClient, Sendable {
     /// client with a ceiling to match rather than lean on this one.
     public static let defaultByteLimit = 128 << 20
 
-    private let session: URLSession
+    let session: URLSession
     private let byteLimit: Int
+    /// Whether every redirect must stay on the request's own origin, and not only one carrying a
+    /// token. The sign-in's client sets it: its bodies carry the client secret, the code and the
+    /// token itself.
+    let sameOriginOnly: Bool
 
-    public init(session: URLSession = .shared, byteLimit: Int = URLSessionClient.defaultByteLimit) {
+    public init(
+        session: URLSession = .shared,
+        byteLimit: Int = URLSessionClient.defaultByteLimit,
+        sameOriginOnly: Bool = false
+    ) {
         self.session = session
         self.byteLimit = byteLimit
+        self.sameOriginOnly = sameOriginOnly
     }
 
     public func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
-        guard Host.isFetchable(url) else {
-            throw URLError(.unsupportedURL)
-        }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
+        return try await send(request)
+    }
+
+    /// Any request, under the same rules as `data(from:)`: `https` only, this app's agent, the
+    /// ceiling. The sign-in's POSTs and its `Authorization` header come through here.
+    public func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        guard let url = request.url, Host.isFetchable(url) else {
+            throw URLError(.unsupportedURL)
+        }
+        var request = request
         request.setValue(Fediqo.userAgent, forHTTPHeaderField: "User-Agent")
 
         let body: Data
         let response: URLResponse?
         do {
-            (body, response) = try await CappedBody.load(request, in: session, limit: byteLimit)
+            (body, response) = try await CappedBody.load(
+                request, in: session, limit: byteLimit, sameOriginOnly: sameOriginOnly
+            )
         } catch {
             // The delegate runs on the session's queue, where `Task.isCancelled` is not visible,
             // so a reader walking away races the ceiling tripping and the ceiling usually wins.
@@ -61,6 +79,27 @@ public struct URLSessionClient: HTTPClient, Sendable {
             throw URLError(.badServerResponse)
         }
         return (body, http)
+    }
+}
+
+/// Sends a request that is not a plain GET — a form POST, or one carrying a token.
+public protocol HTTPSender: Sendable {
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse)
+}
+
+extension URLSessionClient: HTTPSender {
+    /// The client for a signed-in source's traffic: an ephemeral session, so no cookie and no
+    /// cached response of a reader's own timeline is written to disk; a 1 MiB ceiling, which no
+    /// token, app registration or page of statuses comes near; and no redirect off the origin a
+    /// request was sent to, whatever it carries.
+    public static func signedIn() -> URLSessionClient {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.urlCache = nil
+        configuration.httpShouldSetCookies = false
+        return URLSessionClient(
+            session: URLSession(configuration: configuration), byteLimit: 1 << 20,
+            sameOriginOnly: true
+        )
     }
 }
 
@@ -99,10 +138,12 @@ final class CappedBody: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     }
 
     private let limit: Int
+    private let sameOriginOnly: Bool
     private let state = OSAllocatedUnfairLock(initialState: State())
 
-    private init(limit: Int) {
+    private init(limit: Int, sameOriginOnly: Bool) {
         self.limit = limit
+        self.sameOriginOnly = sameOriginOnly
     }
 
     /// The response for `request`, or `URLError.dataLengthExceedsMaximum` where it was bigger
@@ -112,9 +153,10 @@ final class CappedBody: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     static func load(
         _ request: URLRequest,
         in session: URLSession,
-        limit: Int
+        limit: Int,
+        sameOriginOnly: Bool = false
     ) async throws -> (Data, URLResponse?) {
-        let sink = CappedBody(limit: limit)
+        let sink = CappedBody(limit: limit, sameOriginOnly: sameOriginOnly)
         let task = session.dataTask(with: request)
         task.delegate = sink
         return try await withTaskCancellationHandler {
@@ -212,12 +254,31 @@ final class CappedBody: NSObject, URLSessionDataDelegate, @unchecked Sendable {
         newRequest request: URLRequest,
         completionHandler: @escaping (URLRequest?) -> Void
     ) {
-        guard let url = request.url, Host.isFetchable(url) else {
+        guard let url = request.url, Host.isFetchable(url),
+              Self.mayFollow(from: task.originalRequest, to: url, sameOriginOnly: sameOriginOnly)
+        else {
             refuse(URLError(.unsupportedURL))
             completionHandler(nil)
             return
         }
         completionHandler(request)
+    }
+
+    /// A request carrying a token — or any request, where `sameOriginOnly` — may only be
+    /// redirected within its own origin: scheme, host and port. **Refused rather than stripped
+    /// and followed**: a follow without the token comes back 401 from wherever it lands, and a
+    /// 401 is what signs the reader out.
+    static func mayFollow(from original: URLRequest?, to url: URL, sameOriginOnly: Bool = false) -> Bool {
+        let carriesToken = original?.value(forHTTPHeaderField: "Authorization") != nil
+        guard sameOriginOnly || carriesToken else { return true }
+        guard let from = original?.url else { return false }
+        return origin(from) == origin(url)
+    }
+
+    private static func origin(_ url: URL) -> String {
+        let scheme = url.scheme?.lowercased() ?? ""
+        let port = url.port ?? (scheme == "https" ? 443 : 80)
+        return "\(scheme)://\(url.host()?.lowercased() ?? ""):\(port)"
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: (any Error)?) {

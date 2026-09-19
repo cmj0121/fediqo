@@ -337,7 +337,7 @@
 /* Decision 29: Clear asks first, and says what actually goes. */
 "account.clear.title"             = "Clear what %@ left here?";
 "account.clear.detail"            = "The pictures, emoji names and first posts this device is holding go. They come back as you read it again, and it stays in your sources, with its boards and its posts.";
-"account.clear.detail.signedout"  = "The pictures, emoji names and first posts this device is holding go, and you are signed out of this forum. They come back as you read it again, and it stays in your sources, with its boards and its posts.";
+"account.clear.detail.signedout"  = "The pictures, emoji names and first posts this device is holding go, and you are signed out of this server. They come back as you read it again, and it stays in your sources, with its boards and its posts.";
 "account.clear.detail.password"   = "The pictures, emoji names and first posts this device is holding go, you are signed out of this forum, and the password saved for it is deleted. Only the password does not come back: you type it again next time. It stays in your sources, with its boards and its posts.";
 "account.clear.confirm"           = "Clear";
 
@@ -360,3 +360,9 @@
 
 /* The longest wait in the app, said correctly: it detects nothing. */
 "account.join.boards.progress"    = "Reading the boards you picked on %@…";
+
+"account.mastodon.failed"             = "%@ did not finish signing you in. Try again.";
+"account.mastodon.failed.unreachable" = "%@ could not be reached to sign you in just now.";
+"account.mastodon.failed.keychain"    = "This device could not keep the sign-in for %@.";
+"account.mastodon.ended.title"        = "Signed out by the server";
+"account.mastodon.ended.detail"       = "%@ ended this sign-in. What it brought in is still here; sign in again on Account to read it as you.";

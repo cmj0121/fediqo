@@ -19,6 +19,7 @@ final class Launch {
 
     let store: ItemStore
     let forums: ForumSessions
+    let mastodon: MastodonSessions
     let saver: StoreSaver
     /// The index was written by a newer build and left alone; the root view says so. Cleared when
     /// the reader dismisses that, so it is said once a launch rather than once a window.
@@ -37,6 +38,10 @@ final class Launch {
         storeIsNewer = opened.storeIsNewer
         // Built on first use only: a reader with no forum never opens the WebKit store.
         forums = ForumSessions(dataStore: ForumWebsiteData.onDevice())
+        // Signed in is what the Keychain holds; each server is asked once a launch whether it
+        // still honours its token, in the background, and only a 401 signs out.
+        mastodon = MastodonSessions(tokens: KeychainMastodonTokens())
+        Task { [mastodon] in await mastodon.verifyAll() }
         // Where Caches cannot be made, pictures are read from their hyperlinks only.
         if let media = try? MediaCache.caches() {
             FediqoRootView.keepPictures(in: media, for: opened.sources.map(\.host))
@@ -71,7 +76,8 @@ struct FediqoApp: App {
     var body: some Scene {
         WindowGroup {
             FediqoRootView(
-                store: Launch.shared.store, forums: Launch.shared.forums, persist: save,
+                store: Launch.shared.store, forums: Launch.shared.forums,
+                mastodon: Launch.shared.mastodon, persist: save,
                 storeIsNewer: Launch.shared.storeIsNewer,
                 storeNoticeSeen: { Launch.shared.storeIsNewer = false }
             )
