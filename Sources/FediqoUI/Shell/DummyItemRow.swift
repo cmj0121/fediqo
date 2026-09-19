@@ -16,7 +16,7 @@ struct DummyItemRow: View {
     /// Where a forum thread's opening post is fetched and kept — D30.
     ///
     /// Handed in rather than reached for as a shared instance, for the reason `ShellSession`
-    /// holds the two picture caches: what Preferences reports and what Clear empties have to be
+    /// holds the two picture caches: what Usage reports and what Clear empties have to be
     /// the same object by construction, and a preview or a test wired to its own cache would
     /// otherwise press one and draw the other.
     let posts: ForumPosts

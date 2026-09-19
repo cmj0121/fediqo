@@ -215,7 +215,7 @@ public final class ForumSessions {
     }
 
     /// Whether this run has a browser for that host at all, without making one. Lets Clear and
-    /// the Preferences pane ask without quietly starting a web process per server listed.
+    /// the Usage pane ask without quietly starting a web process per server listed.
     func hasEngine(host: String) -> Bool {
         engines[host.lowercased()] != nil
     }

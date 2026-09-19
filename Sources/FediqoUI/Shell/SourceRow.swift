@@ -193,7 +193,7 @@ struct SourceRow: Identifiable, Hashable {
     ///
     /// **The reader is told the password goes, and that is what this function is for.** Clear
     /// reaches `ForumSessions.forget(host:)`, which drops the forum's cookies *and* deletes the
-    /// saved password from the Keychain. `PreferencesPane` draws `passwordLine` before its Clear,
+    /// saved password from the Keychain. `UsagePane` draws `passwordLine` before its Clear,
     /// so that pane meets `forget`'s own fairness condition — "the row says a password is held
     /// before the button is pressed". An Account row draws no inventory line at all by `DESIGN.md`
     /// §3.6's rule, so until decision 29 this device deleted a Keychain password with nothing on
@@ -296,7 +296,7 @@ extension SourceRow {
             return String(format: L10n.t(signInLabelKey(reached: signedIn)), source.host)
         case .boards:
             return String(format: L10n.t("account.source.boards.change"), source.host)
-        // One key, one word, one call — the same Clear as Preferences', because it is one act
+        // One key, one word, one call — the same Clear as Usage's, because it is one act
         // reached from two questions and not a duplicate of anything.
         case .clear:
             return String(format: L10n.t("prefs.cache.clear.label"), source.host)
@@ -775,7 +775,7 @@ struct SourceRowView: View {
     /// The element keeps `.combine` and `spoken(_:)`, so what it *says* is unchanged while what it
     /// draws is one line. What it must not become is the *parent* of the controls: a row collapsed
     /// with `children: .ignore` swallows its buttons' activation and leaves a keyboard-only reader
-    /// with no way to act — `PreferencesPane` records shipping that defect twice, and `.ignore` on
+    /// with no way to act — `UsagePane` records shipping that defect twice, and `.ignore` on
     /// an element that is itself pressable is the same defect with a press attached.
     private var said: some View {
         Text(row.source.host)

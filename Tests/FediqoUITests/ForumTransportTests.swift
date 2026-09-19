@@ -104,13 +104,13 @@ struct ForumTransportTests {
             }
             let denial = language == .english ? "None of this is written to disk" : "不會寫進磁碟"
             #expect(!footer.contains(denial), "the \(language.labelKey) footer still denies keeping anything")
-            // The header and the empty line sit on the same section and must not say the
+            // The header and the page's empty line sit on the same page and must not say the
             // opposite: what is kept outlives the run, so neither may say it ends with it.
             let header = L10n.t("prefs.cache", language: language)
-            let empty = L10n.t("prefs.cache.empty", language: language)
+            let empty = L10n.t("usage.empty.detail", language: language)
             let perRun = language == .english ? ["this run", "until you close"] : ["這次執行", "直到你關閉"]
             for line in [header, empty] {
-                #expect(line != "prefs.cache" && line != "prefs.cache.empty")
+                #expect(line != "prefs.cache" && line != "usage.empty.detail")
                 for phrase in perRun {
                     #expect(!line.contains(phrase), "the \(language.labelKey) section still says it lasts one run: \(line)")
                 }

@@ -386,7 +386,7 @@ struct SourcePageTests {
         #expect(spoken.contains("虚拟机专区"), "a board name was clipped out of the spoken sentence")
     }
 
-    // MARK: - §3.6 — this list and Preferences' stay apart
+    // MARK: - §3.6 — this list and Usage's stay apart
 
     /// **No byte figure and no date on an Account row, ever** — and pinned as the row's *complete*
     /// vocabulary rather than as a property of one helper.
@@ -438,7 +438,7 @@ struct SourcePageTests {
 
         // The footnote that names the other list, which is what kills the duplicate reading.
         #expect(L10n.t("account.sources.held", language: .english)
-            == "What each one has left on this device is on Preferences.")
+            == "What each one has left on this device is on Usage.")
     }
 
     // MARK: - Every control on this page, driven
