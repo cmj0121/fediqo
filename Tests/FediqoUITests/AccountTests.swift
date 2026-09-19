@@ -357,7 +357,7 @@ struct AccountAddTests {
         let session = ShellSession(http: FixtureHTTP([
             "/": .text(front),
             "https://install-a.example/forum.php": .text(index),
-            "https://install-a.example/forum.php?mod=forumdisplay&fid=33": .cancelled,
+            "https://install-a.example/forum.php?mod=forumdisplay&fid=33&filter=author&orderby=dateline": .cancelled,
         ]))
         session.hostname = "install-a.example"
         await session.add()

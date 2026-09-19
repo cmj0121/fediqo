@@ -7,6 +7,8 @@ public struct FediqoRootView: View {
     @State private var place: ShellPlace = .launch
     @State private var selectedItemID: String?
     @State private var threadStack: [String] = []
+    /// What `/` opened (#32). Its results stand in for the stream while it is open.
+    @State private var search = ShellSearch()
     @State private var jumpToTop = 0
     @State private var composing = false
     @State private var showingShortcuts = false
@@ -37,6 +39,12 @@ public struct FediqoRootView: View {
     /// What is playing, and the one `AVPlayer` in the app. See `ShellPlayback`.
     @State private var playback = ShellPlayback()
     @State private var prefs = DummyPrefs()
+    /// Up once at launch when the index on disk was written by a newer build and this run left it
+    /// alone: without it the reader sees an empty app and nothing to say why.
+    @State private var storeIsNewer: Bool
+    /// Told when the reader dismisses that notice, so a window opened later does not raise it
+    /// again: each window is its own root view with its own state.
+    private let storeNoticeSeen: (@MainActor () -> Void)?
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -57,11 +65,19 @@ public struct FediqoRootView: View {
         http: any HTTPClient = URLSessionClient(),
         store: ItemStore = ItemStore(),
         forums: ForumSessions = ForumSessions(),
-        persist: (@MainActor () async -> Void)? = nil
+        mastodon: MastodonSessions = MastodonSessions(),
+        persist: (@MainActor () async -> Void)? = nil,
+        storeIsNewer: Bool = false,
+        storeNoticeSeen: (@MainActor () -> Void)? = nil
     ) {
-        let session = ShellSession(http: http, store: store, forums: forums)
+        let session = ShellSession(
+            http: http, store: store, forums: forums, mastodon: mastodon,
+            timelines: WrittenTimelineStore(defaults: .standard)
+        )
         session.persist = persist
         _session = State(initialValue: session)
+        _storeIsNewer = State(initialValue: storeIsNewer)
+        self.storeNoticeSeen = storeNoticeSeen
     }
 
     /// Hands the copies of pictures already on this device to the one picture cache every row
@@ -122,6 +138,7 @@ public struct FediqoRootView: View {
                 let accepted = availability.placing(old, as: new)
                 if accepted != new { place = accepted }
                 guard accepted != old else { return }
+                if search.closes(leavingFor: accepted) { closeSearch() }
                 // A picture opened over the timeline is not opened over the account page.
                 _ = closeViewer()
                 // And the film stops — **including one playing in a row**, which is the half
@@ -222,6 +239,11 @@ public struct FediqoRootView: View {
             .sheet(isPresented: stagePresented) {
                 JoinSheet(session: session)
             }
+            // The timeline editor (#27), on the root beside the other presenters for their reason.
+            // Dismissed by any route it is Cancel: the draft is dropped (Decision 21).
+            .sheet(item: $session.editing) { draft in
+                TimelineEditor(session: session, draft: draft)
+            }
             // **The Remove question, on the root beside the other three presenters**, and for the
             // same documented reason: one presenter driven by one piece of session state survives
             // a second call site. Remove is asked from a source row today and will be asked from
@@ -252,7 +274,7 @@ public struct FediqoRootView: View {
             }
             // **The Clear question, beside Remove's and driven the same way** (decision 29). One
             // presenter, one piece of session state, two entrances: a source row and
-            // `PreferencesPane`'s row, which press the same key for the same call and must
+            // `UsagePane`'s row, which press the same key for the same call and must
             // therefore ask the same question.
             //
             // **It exists because Clear is not reversible, whatever the row looks like.** It drops
@@ -286,8 +308,29 @@ public struct FediqoRootView: View {
             } message: { host in
                 Text(L10n.t(SourceRow.clearDetailKey(
                     hasPassword: session.forums.hasPassword(host: host),
-                    reachedSignIn: session.forums.reachedSignIn(host: host)
+                    reachedSignIn: session.isSignedIn(host: host)
                 )))
+            }
+            // A server ended a sign-in on its own side: the row already reads signed out, and this
+            // says why rather than leaving a timeline to go quiet.
+            .alert(
+                Text(L10n.t("account.mastodon.ended.title")),
+                isPresented: Binding(
+                    get: { !session.mastodon.ended.isEmpty },
+                    set: { if !$0 { session.mastodon.endedSeen() } }
+                )
+            ) {
+                Button(L10n.t("store.newer.ok"), role: .cancel) { session.mastodon.endedSeen() }
+            } message: {
+                Text(String(
+                    format: L10n.t("account.mastodon.ended.detail"),
+                    session.mastodon.ended.joined(separator: ", ")
+                ))
+            }
+            .alert(Text(L10n.t("store.newer.title")), isPresented: $storeIsNewer) {
+                Button(L10n.t("store.newer.ok"), role: .cancel) { storeNoticeSeen?() }
+            } message: {
+                Text(L10n.t("store.newer.detail"))
             }
             .overlay {
                 if showingShortcuts {
@@ -327,6 +370,9 @@ public struct FediqoRootView: View {
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active {
                     wakeTheCaches()
+                    // A Keychain read at launch on a locked device finds no token; the sign-in
+                    // is read again once the reader is here.
+                    session.mastodon.refresh()
                 } else if ShellSession.windowLeft(phase),
                           session.stage?.closesWhenTheWindowLeaves == true {
                     // **The selectors only**, and the stage is what says so. The editor and a new
@@ -341,7 +387,7 @@ public struct FediqoRootView: View {
                 performDummyKey(character, shift: shift, control: control, command: command)
             }
             .environment(prefs)
-            // **The session, for the panes that are handed no binding.** `PreferencesPane` reads
+            // **The session, for the panes that are handed no binding.** `UsagePane` reads
             // it out of the environment, and without this it is nil on every real launch — so the
             // pane draws its empty state and tells a reader who has already joined a server to go
             // and add one. A pane whose whole purpose is not to say a false thing, saying one.
@@ -384,7 +430,7 @@ public struct FediqoRootView: View {
             control: control,
             command: command,
             typing: composing,
-            fieldFocused: session.searchFocused
+            fieldFocused: session.searchFocused || search.fieldFocused
         ) else {
             return false
         }
@@ -392,6 +438,8 @@ public struct FediqoRootView: View {
         // the flips finish rather than driving the shell underneath. Unmapped chords —
         // ⌘Q, ⌘C — have already returned false, so a quit still quits.
         if playsLanding { return true }
+        // The editor is a sheet and owns its keys; nothing under it moves.
+        if session.editing != nil { return false }
         let did = apply(mapped)
         return DummyCommand.consumes(character, did: did)
     }
@@ -402,13 +450,13 @@ public struct FediqoRootView: View {
         switch command {
         case .nextTab:
             guard DummyCommand.outermost(of: openLayers) == .shortcuts else {
-                return rotateTimelineTab(by: 1)
+                return rotatePlaceTab(by: 1)
             }
             shortcutTab = DummyShortcutGroup.rotated(from: shortcutTab, by: 1)
             return true
         case .previousTab:
             guard DummyCommand.outermost(of: openLayers) == .shortcuts else {
-                return rotateTimelineTab(by: -1)
+                return rotatePlaceTab(by: -1)
             }
             shortcutTab = DummyShortcutGroup.rotated(from: shortcutTab, by: -1)
             return true
@@ -462,8 +510,10 @@ public struct FediqoRootView: View {
             switch DummyCommand.outermost(of: openLayers) {
             case .viewer: return closeViewer()
             case .thread: return popThread()
-            case .shortcuts, .selection, nil: return false
+            case .search, .shortcuts, .selection, nil: return false
             }
+        case .reload:
+            return reload()
         case .showShortcuts:
             // Closing is always allowed; opening obeys the entry rule, so `?` under an open
             // viewer does nothing and yields rather than closing the viewer to make room.
@@ -474,6 +524,8 @@ public struct FediqoRootView: View {
             guard DummyCommand.canOpen(.shortcuts, whenOpen: openLayers) else { return false }
             showingShortcuts = true
             return true
+        case .search:
+            return openSearch()
         case .compose:
             guard availability.canCompose else { return false }
             showingShortcuts = false
@@ -486,13 +538,21 @@ public struct FediqoRootView: View {
             landingTick += 1
             showingLanding = true
             return true
+        case .editTimeline:
+            guard place == .timeline, DummyCommand.canEditTimeline(whenOpen: openLayers) else { return false }
+            return session.editCurrentTimeline()
         case .dismiss:
+            // A running reload is the first thing Escape stops (#29); the next one leaves.
+            if place == .timeline, session.reload.stop() { return true }
             switch DummyCommand.outermost(of: openLayers) {
             case .viewer: return closeViewer()
             case .shortcuts:
                 showingShortcuts = false
                 return true
             case .thread: return popThread()
+            case .search:
+                closeSearch()
+                return true
             case .selection:
                 selectedItemID = nil
                 return true
@@ -522,6 +582,7 @@ public struct FediqoRootView: View {
         case .viewer: viewedItem != nil
         case .shortcuts: showingShortcuts
         case .thread: !threadStack.isEmpty
+        case .search: search.isOpen
         case .selection: selectedItemID != nil
         }
     }
@@ -648,11 +709,11 @@ public struct FediqoRootView: View {
         }
     }
 
-    /// What the author wrote on the cover, or what to say where they flagged it and wrote nothing.
-    /// The same two cases the row draws, because it is the same line.
-    private func coverLine(of item: DummyItem) -> String {
+    /// The author's warning, or nothing where they flagged it and wrote none — no sentence of
+    /// ours in their place, the same as the row.
+    private func coverLine(of item: DummyItem) -> String? {
         let spoiler = item.spoiler ?? ""
-        return spoiler.isEmpty ? L10n.t("item.covered.title") : spoiler
+        return spoiler.isEmpty ? nil : spoiler
     }
 
     /// Asks again for the pictures on this screen that were written off while the network was down.
@@ -742,9 +803,43 @@ public struct FediqoRootView: View {
         return true
     }
 
-    /// The stream `j` and `k` move through: the current query, All or Trends, over the store.
+    /// The stream `j` and `k` move through: a search's results while one is open, otherwise the
+    /// current query over the store.
     private var streamItems: [DummyItem] {
-        session.currentTimeline.items(from: session.notes)
+        searchItems ?? session.timelineItems(latest: prefs.latestDate)
+    }
+
+    private var searchItems: [DummyItem]? {
+        search.items(
+            from: session.notes, revision: session.notesRevision, sources: session.sources, latest: prefs.latestDate
+        )
+    }
+
+    /// `/` on the timeline: an empty search over what this device holds, or the field again if
+    /// one is open. The selection is put aside, to come back when the search closes.
+    private func openSearch() -> Bool {
+        guard place == .timeline, DummyCommand.canOpen(.search, whenOpen: openLayers) else { return false }
+        if search.isOpen {
+            search.focus()
+        } else {
+            search.open(from: selectedItemID, over: session.notes)
+            selectedItemID = nil
+        }
+        return true
+    }
+
+    /// The timeline back as it was, with the post that was selected before the search.
+    private func closeSearch() {
+        threadStack = []
+        selectedItemID = search.close()
+    }
+
+    /// The field emptied: the timeline is back, so the post selected before the search is too.
+    private func searchCleared() {
+        search.cleared { selection in
+            threadStack = []
+            selectedItemID = selection
+        }
     }
 
     /// Whichever list is in front: the open conversation, or the stream under it.
@@ -839,9 +934,27 @@ public struct FediqoRootView: View {
         return true
     }
 
+    /// `r`: the open thread, or else the selected timeline — and only on what the reader can see,
+    /// so not under the viewer, the keys list or the timeline editor. A second press while one
+    /// runs is taken and does nothing; Esc is what stops it.
+    private func reload() -> Bool {
+        guard place == .timeline, session.editing == nil, !session.sources.isEmpty else { return false }
+        if session.reload.running { return true }
+        switch DummyCommand.outermost(of: openLayers) {
+        // A search's results are what this device holds, found without asking anybody.
+        case .viewer, .shortcuts, .search: return false
+        case .thread, .selection, nil: break
+        }
+        // The thread as `TimelinePane` draws it: one it cannot find draws the timeline instead.
+        let opened = threadStack.last.flatMap { opened in streamItems.first { $0.id == opened } }
+        session.reload.press(thread: opened, timeline: session.currentTimeline, in: session)
+        return true
+    }
+
     private func popThread() -> Bool {
-        guard !threadStack.isEmpty else { return false }
-        threadStack.removeLast()
+        guard let popped = DummyCommand.poppedThread(threadStack) else { return false }
+        threadStack = popped.stack
+        selectedItemID = popped.selected
         return true
     }
 
@@ -854,13 +967,14 @@ public struct FediqoRootView: View {
         )
     }
 
-    /// Tab only rotates named queries on the timeline. Elsewhere it is the platform's.
-    private func rotateTimelineTab(by step: Int) -> Bool {
-        guard place == .timeline else { return false }
-        let queries = session.queries
-        guard !queries.isEmpty else { return false }
-        session.timelineID = DummyCommand.advanced(queries, from: session.currentTimeline, by: step)
-        return true
+    /// Tab rotates this page's tabs: named queries on the timeline, purposes on Usage.
+    /// Elsewhere it is the platform's.
+    private func rotatePlaceTab(by step: Int) -> Bool {
+        switch place {
+        case .timeline: session.rotateTab(by: step)
+        case .usage: session.rotateUsageTab(by: step)
+        default: false
+        }
     }
 
     @ViewBuilder
@@ -965,8 +1079,20 @@ public struct FediqoRootView: View {
                 playback: playback,
                 onPlayRow: playRow,
                 jumpToTop: jumpToTop,
-                onPopThread: { _ = threadStack.popLast() }
+                onPopThread: { _ = popThread() },
+                search: search
             )
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if search.isOpen {
+                    SearchBar(
+                        search: search,
+                        found: search.isIndexed ? searchItems?.count : nil,
+                        onSubmit: { selectedItemID = streamItems.first?.id },
+                        onCleared: searchCleared,
+                        onClose: closeSearch
+                    )
+                }
+            }
         case .notices: NoticesPane()
         case .account: AccountPane(session: session)
         case .usage: UsagePane()

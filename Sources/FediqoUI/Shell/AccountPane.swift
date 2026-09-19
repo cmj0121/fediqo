@@ -1,3 +1,4 @@
+import AuthenticationServices
 import FediqoCore
 import SwiftUI
 
@@ -15,6 +16,8 @@ struct AccountPane: View {
     /// narrow row.
     @State private var rowWidth: CGFloat = 0
     @Environment(\.colorScheme) private var colorScheme
+    /// The system's sign-in sheet, which a Mastodon row's Sign in opens on the server's own page.
+    @Environment(\.webAuthenticationSession) private var webAuthenticationSession
 
     private enum Metrics {
         /// The mark, at the size the mark is drawn rather than the size of an icon.
@@ -54,7 +57,7 @@ struct AccountPane: View {
                 // not an empty state. The hero above already says what the app is for and names
                 // the next act, and Browse is beside the field; a second invitation under a rule
                 // would be two of them on one screen, with the mascot arguing against the other.
-                // `PreferencesPane` draws its empty state and is right to, because it has no
+                // `UsagePane` draws its empty state and is right to, because it has no
                 // hero to be contradicted by.
                 if !session.sources.isEmpty {
                     ShellRule()
@@ -65,6 +68,7 @@ struct AccountPane: View {
                 .frame(maxWidth: .infinity, alignment: .topLeading)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .scrollIndicators(.never)
             // **The page takes the reader to the block, once, on its appearing.**
             //
             // **Gated on `nil → non-nil` and nothing else.** A reader coming back from the boards
@@ -238,7 +242,7 @@ struct AccountPane: View {
     var glance: [SourceMarkRow.Mark]? {
         guard SourceMarkRow.drawn(sources: session.sources.count) else { return nil }
         return session.rows.map {
-            Self.mark($0, signedIn: session.forums.reachedSignIn(host: $0.source.host))
+            Self.mark($0, signedIn: session.isSignedIn(host: $0.source.host))
         }
     }
 
@@ -476,7 +480,7 @@ struct AccountPane: View {
 
     /// The sources this device reads, one row each.
     ///
-    /// **This list and `PreferencesPane`'s answer different questions and are kept visibly apart.**
+    /// **This list and `UsagePane`'s answer different questions and are kept visibly apart.**
     /// This one is *what am I reading* — a mark, a hostname, and what can be done about it. That
     /// one is *what is this device holding* — an inventory, every line of it with a byte count or a
     /// date. So **no byte figure and no date appears on a row here, ever**, and the footnote below
@@ -532,7 +536,7 @@ struct AccountPane: View {
                 ForEach(rows) { row in
                     SourceRowView(
                         row: row,
-                        signedIn: session.forums.reachedSignIn(host: row.source.host),
+                        signedIn: session.isSignedIn(host: row.source.host),
                         width: rowWidth,
                         // **Handed down, never derived per row.** Decision 33 made the control
                         // count per-protocol, so the widest row is a property of the list; a row
@@ -551,11 +555,12 @@ struct AccountPane: View {
                         waiting: SourceRow.waitingLine(
                             session.progress, drawnAs: session.stage, host: row.source.host
                         ),
-                        refusal: session.boardsRefusal,
+                        refusal: session.rowRefusal,
                         signIn: { Task { await press(row) } },
                         clear: { askClear(row) },
                         remove: { askRemove(row) },
                         changeBoards: { Task { await changeBoards(row) } },
+                        chooseLists: { Task { await changeLists(row) } },
                         open: { openSource(row) }
                     )
                     // **Between rows and not after every one.** A rule under the last row is a
@@ -677,17 +682,19 @@ struct AccountPane: View {
     /// **Which way it goes is `reachedSignIn`'s answer and not this view's** — see its doc comment
     /// for why "signed in" here can only ever mean as far as this device last saw.
     func press(_ row: SourceRow) async {
-        if session.forums.reachedSignIn(host: row.source.host) {
+        if session.isSignedIn(host: row.source.host) {
             await session.signOut(host: row.source.host)
         } else {
-            await session.signIn(host: row.source.host)
+            await session.signIn(
+                host: row.source.host, through: WebAuthBrowser(session: webAuthenticationSession)
+            )
         }
     }
 
     /// A row's Clear. **Empties nothing** — it raises the question, and only the dialog's confirm
     /// reaches `clear(host:)`. Decision 29, and `askRemove`'s shape for its reason.
     ///
-    /// The same act, and the same key, as the one on Preferences — which now asks the same
+    /// The same act, and the same key, as the one on Usage — which now asks the same
     /// question through the same presenter, or one word would do two things two panes apart.
     func askClear(_ row: SourceRow) {
         session.clearing = row.source.host
@@ -698,6 +705,12 @@ struct AccountPane: View {
     /// nothing.
     func changeBoards(_ row: SourceRow) async {
         await session.changeBoards(host: row.source.host)
+    }
+
+    /// A signed-in Mastodon row's lists control. **Changes nothing by itself** — it reads the
+    /// account's lists and opens the picker pre-ticked; Cancel loses nothing.
+    func changeLists(_ row: SourceRow) async {
+        await session.changeLists(host: row.source.host)
     }
 
     /// A row's Remove. **Destroys nothing** — it raises the question, and only the dialog's

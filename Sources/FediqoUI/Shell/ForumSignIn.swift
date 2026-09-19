@@ -215,9 +215,21 @@ public final class ForumSessions {
     }
 
     /// Whether this run has a browser for that host at all, without making one. Lets Clear and
-    /// the Preferences pane ask without quietly starting a web process per server listed.
+    /// the Usage pane ask without quietly starting a web process per server listed.
     func hasEngine(host: String) -> Bool {
         engines[host.lowercased()] != nil
+    }
+
+    /// Whether a read of that host has to go through its browser: this run built one, or this
+    /// device holds a sign-in for it.
+    ///
+    /// **`hasEngine` alone is only this run.** A sign-in made before a relaunch leaves its
+    /// cookies in the store and no engine behind, so the row reads signed in while every thread
+    /// is read by `URLSession` — which a challenge-fronted forum answers with 403 and the reader
+    /// is told the forum would not let this app read it. A signed-in host is a forum, so this
+    /// still starts no web process for a microblog.
+    func readsThroughEngine(host: String) -> Bool {
+        hasEngine(host: host) || reachedSignIn(host: host)
     }
 
     // MARK: - Signing in

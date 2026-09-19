@@ -88,7 +88,7 @@ struct CancellationTests {
             "https://install-a.example/forum.php": .text(discuzIndex),
         ]
         for (fid, outcome) in boards {
-            routes["https://install-a.example/forum.php?mod=forumdisplay&fid=\(fid)"] = outcome
+            routes["https://install-a.example/forum.php?mod=forumdisplay&fid=\(fid)&filter=author&orderby=dateline"] = outcome
         }
         return FixtureHTTP(routes)
     }

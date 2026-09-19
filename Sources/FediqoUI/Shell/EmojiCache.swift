@@ -658,7 +658,7 @@ final class EmojiCache {
     }
 
     /// What this device is holding that was read through one source: how many pictures, and what
-    /// they cost. The reading beside the reader's Clear button in Preferences.
+    /// they cost. The reading beside the reader's Clear button on Usage.
     ///
     /// Records of nothing are not counted. They cost `entryOverhead` each and they are real
     /// state a Clear drops, but "3 emoji held" beside a server that drew none of them is a

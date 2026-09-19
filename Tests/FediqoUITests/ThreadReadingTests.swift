@@ -56,7 +56,7 @@ struct ThreadReadingTests {
             body: "",
             title: title,
             postedAt: .distantPast,
-            origins: [.publicTimeline],
+            categories: [.public],
             url: url
         ))
     }
@@ -217,7 +217,7 @@ struct ThreadReadingTests {
         note = DummyItem(Note(
             id: "109252111", source: Source(host: Self.host, kind: .mastodon),
             author: "ada", handle: "@ada@\(Self.host)", body: "hi",
-            postedAt: .distantPast, origins: [.publicTimeline], avatarURL: sent
+            postedAt: .distantPast, categories: [.public], avatarURL: sent
         ))
         #expect(Self.row(note, posts: posts).thread == nil)
         #expect(Self.row(note, posts: posts).avatarURL == sent)
@@ -287,7 +287,7 @@ struct ThreadReadingTests {
         // Two threads, because "every one of them" is the shape of the assertion: a cover that
         // appeared on one row and not another would pass a one-row page.
         let http = FixtureHTTP([
-            "https://\(Self.host)/forum.php?mod=forumdisplay&fid=34": .text(#"""
+            "https://\(Self.host)/forum.php?mod=forumdisplay&fid=34&filter=author&orderby=dateline": .text(#"""
             <html><head><meta name="generator" content="Discuz! X5.0" /></head><body>
             <h1 class="xs2"><a href="forum.php?mod=forumdisplay&fid=34">工具箱讨论区</a></h1>
             <table id="threadlisttableid">
@@ -324,14 +324,16 @@ struct ThreadReadingTests {
         // A letter belongs to the draft while composing, and to a focused field always.
         #expect(DummyCommand.from("s", typing: true) == nil)
         #expect(DummyCommand.from("s", fieldFocused: true) == nil)
-        // Nothing that already meant something changed meaning. `r` is later reblog, and
-        // the launch is ⌘R so the letter stays free.
+        // Nothing that already meant something changed meaning. `r` reloads (#29).
         #expect(DummyCommand.from("v") == .viewAttachment)
         #expect(DummyCommand.from("a") == .playAttachment)
         #expect(DummyCommand.from("m") == .nextAttachment)
         #expect(DummyCommand.from("\r") == .expandPost)
         #expect(DummyCommand.from("q") == .back)
-        for free in ["l", "r", "e", "o", "h"] {
+        // `e` is the timeline editor's (#27, Decision 18).
+        #expect(DummyCommand.from("e") == .editTimeline)
+        #expect(DummyCommand.from("r") == .reload)
+        for free in ["l", "o", "h"] {
             #expect(DummyCommand.from(Character(free)) == nil, "\(free) is no longer free")
         }
     }

@@ -55,10 +55,10 @@ struct TimelineStreamTests {
         #expect(session.timelineID == .all)
 
         let stored = await session.store.all()
-        let all = TimelineQuery.all.items(from: session.notes)
-        let trends = TimelineQuery.trends.items(from: session.notes)
+        let all = TimelineQuery.all.items(from: session.notes, latest: nil)
+        let trends = TimelineQuery.trends.items(from: session.notes, latest: nil)
         #expect(all.map(\.noteID) == stored.map(\.id))
-        #expect(trends.map(\.noteID) == stored.filter { $0.origins.contains(.trending) }.map(\.id))
+        #expect(trends.map(\.noteID) == stored.filter { $0.categories.contains(.trends) }.map(\.id))
         #expect(trends.map(\.noteID) == [
             "https://first.example/users/ada/statuses/trend-only",
             "https://first.example/users/ada/statuses/shared",
@@ -129,8 +129,8 @@ struct TimelineStreamTests {
         session.hostname = "first.example"
         await session.add()
         await session.confirm()
-        #expect(!TimelineQuery.all.items(from: session.notes).isEmpty)
-        #expect(TimelineQuery.trends.items(from: session.notes).isEmpty)
+        #expect(!TimelineQuery.all.items(from: session.notes, latest: nil).isEmpty)
+        #expect(TimelineQuery.trends.items(from: session.notes, latest: nil).isEmpty)
         #expect(TimelineQuery.all.emptyKey == "timeline.empty")
         #expect(TimelineQuery.trends.emptyKey == "timeline.empty.trends")
         // emptyKey is a stem: the pane asks for its .title and its .detail.
@@ -167,7 +167,7 @@ struct TimelineStreamTests {
         session.hostname = "first.example"
         await session.add()
         await session.confirm()
-        let ids = session.currentTimeline.items(from: session.notes).map(\.id)
+        let ids = session.currentTimeline.items(from: session.notes, latest: nil).map(\.id)
         #expect(!ids.isEmpty)
         #expect(DummyItem.stored.isEmpty)
         #expect(ids != DummyItem.stored.map(\.id))
@@ -187,7 +187,7 @@ struct TimelineStreamTests {
             handle: "@ada@first.example",
             body: "item.note.public.body",
             postedAt: posted,
-            origins: [.publicTimeline],
+            categories: [.public],
             reply: Reply(handle: nil),
             boostedBy: "Bob",
             audience: .followers,
@@ -219,7 +219,7 @@ struct TimelineStreamTests {
                 handle: "@ada@first.example",
                 body: "hi",
                 postedAt: posted,
-                origins: [.trending],
+                categories: [.trends],
                 reply: Reply(handle: "@bob@second.example"),
                 audience: .everyone,
                 avatarURL: nil,
@@ -244,7 +244,7 @@ struct TimelineStreamTests {
                 handle: "@ada@first.example",
                 body: "listen",
                 postedAt: posted,
-                origins: [.publicTimeline],
+                categories: [.public],
                 attachments: [
                     Attachment(kind: .audio, url: URL(string: "https://first.example/clip.mp3")),
                 ]
@@ -261,7 +261,7 @@ struct TimelineStreamTests {
                 handle: "@ada@first.example",
                 body: "root",
                 postedAt: posted,
-                origins: [.publicTimeline],
+                categories: [.public],
                 audience: .unlisted
             )
         )
@@ -278,10 +278,96 @@ struct TimelineStreamTests {
                 handle: "@ada@first.example",
                 body: "d",
                 postedAt: posted,
-                origins: [.publicTimeline],
+                categories: [.public],
                 audience: .mentioned
             )
         )
         #expect(mentioned.audience == .mentioned)
+    }
+}
+
+/// Esc from a thread: the post it was opened from is selected again and the list centres on it.
+@Suite("Back from a thread")
+struct BackFromThreadTests {
+    private static let ids = ["top", "middle", "bottom"]
+
+    @Test("Esc selects and centres the post the thread was opened from, whichever post it is")
+    func escSelectsTheOpeningPost() {
+        for id in Self.ids {
+            let popped = DummyCommand.poppedThread([id])
+            #expect(popped?.stack == [])
+            #expect(popped?.selected == id)
+            // The timeline is drawn afresh with that selection, and centres on it.
+            #expect(DummyCommand.centredOnAppear(selected: popped?.selected) == id)
+        }
+    }
+
+    @Test("Back from a nested thread selects and centres its post in the outer one")
+    func nestedThreadCentresItsPost() {
+        let popped = DummyCommand.poppedThread(["outer", "reply"])
+        #expect(popped?.stack == ["outer"])
+        #expect(popped?.selected == "reply")
+        #expect(DummyCommand.centredOnAppear(selected: "reply", opening: "outer") == "reply")
+
+        let out = DummyCommand.poppedThread(["outer"])
+        #expect(out?.stack == [])
+        #expect(out?.selected == "outer")
+    }
+
+    @Test("Nothing to pop with no thread open")
+    func noThreadNoPop() {
+        #expect(DummyCommand.poppedThread([]) == nil)
+    }
+
+    @Test("A thread just opened reads from the top, and no selection centres nothing")
+    func openedThreadAndNoSelectionDoNotCentre() {
+        #expect(DummyCommand.centredOnAppear(selected: "outer", opening: "outer") == nil)
+        #expect(DummyCommand.centredOnAppear(selected: nil) == nil)
+    }
+}
+
+/// Decision 17: All and Trends are two fixed timelines evaluated by the rule engine, and a written
+/// timeline is named by an id the shell can hold before #27 gives it a tab.
+@Suite("Queries as timelines")
+@MainActor
+struct TimelineQueryDefinitionTests {
+    private let one = Source(host: "one.example", kind: .mastodon)
+
+    private func note(_ id: String, _ categories: Set<FediqoCore.Category>, _ body: String = "hello") -> Note {
+        Note(id: id, source: one, author: "Ada", handle: "@ada@one.example", body: body,
+             postedAt: Date(timeIntervalSince1970: 0), categories: categories)
+    }
+
+    @Test("All and Trends resolve to the built-in definitions and draw what they drew before")
+    func builtInsUnchanged() {
+        let notes = [note("1", [.public]), note("2", [.trends]), note("3", [.public, .trends]), note("4", [])]
+        #expect(TimelineQuery.all.definition(among: []) == .all)
+        #expect(TimelineQuery.trends.definition(among: []) == .trends)
+        #expect(TimelineQuery.all.items(from: notes, latest: nil).map(\.noteID) == ["1", "2", "3", "4"])
+        #expect(TimelineQuery.trends.items(from: notes, latest: nil).map(\.noteID) == ["2", "3"])
+    }
+
+    @Test("A written timeline's id round-trips, draws its rules, and a deleted one is All")
+    func writtenTimeline() throws {
+        let swift = try #require(Rule.keyword("swift", in: .every))
+        let written = TimelineDefinition(name: "Swift", rules: [swift])
+        let query = TimelineQuery.written(written.id)
+        #expect(TimelineQuery(id: query.id) == query)
+        #expect(TimelineQuery(id: "written:not-a-uuid") == .all)
+
+        let notes = [note("1", [.public], "Swift news"), note("2", [.public], "other")]
+        #expect(query.definition(among: [written]) == written)
+        #expect(query.items(from: notes, among: [written], latest: nil).map(\.noteID) == ["1"])
+        #expect(query.definition(among: []) == .all)
+        #expect(query.items(from: notes, latest: nil).map(\.noteID) == ["1", "2"])
+    }
+
+    @Test("The Trends tab is offered exactly where the Trends timeline's rule can reach")
+    func trendsTabAgreesWithRule() {
+        for kind in ProtocolKind.allCases {
+            let source = Source(host: "x.example", kind: kind)
+            let asked = CompiledTimeline(.trends, sources: [source]).sourcesToAsk()
+            #expect(ShellSession.hasTrends(kind) == !asked.isEmpty, "\(kind)")
+        }
     }
 }

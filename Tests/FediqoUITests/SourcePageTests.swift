@@ -139,10 +139,10 @@ struct SourcePageTests {
     /// **A total map, not a set**, the shape unit 2's rewrite established: every protocol is named
     /// and the answer is written down twice by the same person, which is the only guard a `switch`
     /// with no `default:` can be given beyond the compiler's.
-    @Test("Exactly one protocol offers a sign-in, and every protocol has an answer")
-    func onlyDiscuzOffersASignIn() {
+    @Test("Discuz! and Mastodon offer a sign-in, and every protocol has an answer")
+    func onlyDiscuzAndMastodonOfferASignIn() {
         let expected: [ProtocolKind: Bool] = [
-            .mastodon: false, .pleroma: false, .akkoma: false, .misskey: false,
+            .mastodon: true, .pleroma: false, .akkoma: false, .misskey: false,
             .pixelfed: false, .lemmy: false, .peertube: false, .friendica: false,
             .gotosocial: false, .discourse: false, .discuz: true, .unknown: false,
         ]
@@ -386,7 +386,7 @@ struct SourcePageTests {
         #expect(spoken.contains("虚拟机专区"), "a board name was clipped out of the spoken sentence")
     }
 
-    // MARK: - §3.6 — this list and Preferences' stay apart
+    // MARK: - §3.6 — this list and Usage's stay apart
 
     /// **No byte figure and no date on an Account row, ever** — and pinned as the row's *complete*
     /// vocabulary rather than as a property of one helper.
@@ -438,7 +438,7 @@ struct SourcePageTests {
 
         // The footnote that names the other list, which is what kills the duplicate reading.
         #expect(L10n.t("account.sources.held", language: .english)
-            == "What each one has left on this device is on Preferences.")
+            == "What each one has left on this device is on Usage.")
     }
 
     // MARK: - Every control on this page, driven
@@ -660,8 +660,8 @@ struct SourcePageTests {
         // to learn that the short row is short on purpose.
         #expect(
             L10n.t("account.sources.marks", language: .english) == """
-                A row carries only the marks its own server has: sign in, change boards, clear \
-                what it left here, and remove it.
+                A row carries only the marks its own server has: sign in, change boards or \
+                lists, clear what it left here, and remove it.
                 """
         )
         #expect(L10n.t("account.source.boards", language: .english) == "%1$d boards: %2$@")
@@ -900,6 +900,8 @@ struct SourcePageTests {
     /// expectation below says which row it is about.
     private static let discuzControls: [SourceRow.Control] = [.signIn, .boards, .clear, .remove]
     private static let microControls: [SourceRow.Control] = [.clear, .remove]
+    /// What a Mastodon carries since it can be signed in to (#24).
+    private static let mastodonControls: [SourceRow.Control] = [.signIn, .clear, .remove]
 
     /// **Every term of the row as it is drawn, restated rather than trusted.** The threshold's
     /// whole claim is that the number is arithmetic and not taste, so if somebody moves
@@ -923,13 +925,13 @@ struct SourcePageTests {
             floor, and `touch` is the only fixed metric in this row that already carries a \
             what-a-human-needs argument.
             """)
-        #expect(SourceRow.Control.allCases.count == 4)
+        #expect(SourceRow.Control.allCases.count == 5)
 
         // **The gap is a property of the control now, not an index into a list.** `gaps[index - 1]`
         // was correct only while every row drew all four: a Mastodon drawing [clear, remove] would
         // have read `gaps[0]` — `tight` — for a pair the design deliberately separates.
         let leads: [SourceRow.Control: CGFloat] = [
-            .signIn: ShellSpace.snug, .boards: ShellSpace.tight,
+            .signIn: ShellSpace.snug, .boards: ShellSpace.tight, .lists: ShellSpace.tight,
             .clear: ShellSpace.snug, .remove: ShellSpace.snug,
         ]
         #expect(Set(leads.keys) == Set(SourceRow.Control.allCases), """
@@ -1017,7 +1019,7 @@ struct SourcePageTests {
         // **The declared order is the drawn order and the suffix property falls out of it.** A
         // later hand reordering the enum to put Remove first would destroy the property that Clear
         // and Remove stand in the same two columns on every row, silently.
-        #expect(SourceRow.Control.allCases == [.signIn, .boards, .clear, .remove])
+        #expect(SourceRow.Control.allCases == [.signIn, .boards, .lists, .clear, .remove])
     }
 
     /// **One threshold for the whole list, computed from the widest row in it** — decision 33's
@@ -1034,7 +1036,7 @@ struct SourcePageTests {
             ),
             profile: .unasked(host: Self.forum, kind: .discuz)
         )
-        #expect(SourceRow.widest([micro, micro, micro]) == Self.microControls)
+        #expect(SourceRow.widest([micro, micro, micro]) == Self.mastodonControls)
         #expect(SourceRow.widest([micro, forum, micro]) == Self.discuzControls, """
             One forum in a list of microblogs did not widen the list. Every row must restack \
             together or the list reads as broken.
@@ -1047,7 +1049,7 @@ struct SourcePageTests {
         let phone: CGFloat = 393 - ShellSpace.pad * 2
         let before = SourceRow.threshold(SourceRow.widest([micro, micro, micro]), mark: 24, host: 132)
         let after = SourceRow.threshold(SourceRow.widest([micro, micro, micro, forum]), mark: 24, host: 132)
-        #expect(before == 276 && after == 376)
+        #expect(before == 328 && after == 376)
         #expect(SourceRow.regime(width: phone, threshold: before) == .trailing)
         #expect(SourceRow.regime(width: phone, threshold: after) == .beneath)
     }
@@ -1524,8 +1526,9 @@ struct SourcePageTests {
         #expect(Self.drawn(Self.microRow, at: 0).regime == .beneath,
                 "the unmeasured first frame is not a wide row")
         #expect(Self.drawn(Self.microRow, at: 270).regime == .beneath)
-        #expect(Self.drawn(Self.microRow, at: 276).regime == .trailing,
-                "a list of microblogs reaches the one-line row at 276pt")
+        #expect(Self.drawn(Self.microRow, at: 322).regime == .beneath)
+        #expect(Self.drawn(Self.microRow, at: 328).regime == .trailing,
+                "a list of Mastodons reaches the one-line row at 328pt")
         #expect(Self.drawn(Self.forumRow, at: 300).regime == .beneath)
         #expect(Self.drawn(Self.forumRow, at: 376).regime == .trailing)
 
@@ -1572,7 +1575,7 @@ struct SourcePageTests {
         // the one-line row for a list of microblogs.
         let micro = self.session()
         await seed(micro, [Source(host: Self.micro, kind: .mastodon)])
-        #expect(AccountPane(session: micro).widest(micro.rows) == Self.microControls)
+        #expect(AccountPane(session: micro).widest(micro.rows) == Self.mastodonControls)
     }
 
     /// **Two looks, two meanings, and the third is gone.** Decision 33 withdraws decision 28: a
@@ -1618,7 +1621,7 @@ struct SourcePageTests {
         // view: what it lacks is absent rather than struck, and there is no state left that a
         // control not drawn could be in.
         let micro = Self.drawn(Self.microRow, at: 900)
-        #expect(micro.controls == Self.microControls)
+        #expect(micro.controls == Self.mastodonControls)
         #expect(micro.state(.clear) == .live(ShellChrome.alarm(light)))
         #expect(micro.state(.remove) == .live(ShellChrome.alarm(light)))
     }

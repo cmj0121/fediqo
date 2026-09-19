@@ -21,7 +21,7 @@ struct DeckTests {
             handle: "@ada@first.example",
             body: "words",
             postedAt: posted,
-            origins: [.publicTimeline],
+            categories: [.public],
             attachments: attachments,
             sensitive: sensitive,
             spoiler: spoiler
@@ -145,7 +145,7 @@ struct DeckTests {
             handle: "@ada@first.example",
             body: "words",
             postedAt: Self.posted,
-            origins: [.publicTimeline],
+            categories: [.public],
             avatarURL: URL(string: "https://first.example/a.png"),
             attachments: [Self.picture("one"), Self.picture("two")],
             sensitive: true,
@@ -205,17 +205,33 @@ struct DeckTests {
     func theCoverIsTranslated() {
         let keys = [
             "item.deck.position",
-            "item.covered.title",
+            "item.covered.mark",
+            "item.lifted.mark",
+            "item.covered.warning",
             "item.covered.show",
-            "item.covered.hide",
             "item.covered.label",
-            "item.lifted.label",
             "shortcut.reveal",
         ]
         for language in [DummyLanguage.english, .taiwanese] {
             for key in keys {
                 #expect(L10n.t(key, language: language) != key)
             }
+            // The sentence that stood in the author's place is gone, not merely unused.
+            #expect(L10n.t("item.covered.title", language: language) == "item.covered.title")
+            // Putting the cover back is still `s`; the row no longer says so.
+            #expect(L10n.t("item.covered.hide", language: language) == "item.covered.hide")
+            #expect(L10n.t("item.lifted.label", language: language) == "item.lifted.label")
+        }
+    }
+
+    // The warning is the author's text handed in as an argument, so it must survive formatting
+    // whole — `%` in it included — in every language.
+    @Test("The author's warning formats in every language, and carries their text whole")
+    func theWarningFormatsEverywhere() {
+        for language in [DummyLanguage.english, .taiwanese] {
+            let said = String(format: L10n.t("item.covered.warning", language: language), "100% spoilers")
+            #expect(said.contains("100% spoilers"))
+            #expect(said != "100% spoilers")
         }
     }
 

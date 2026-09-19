@@ -17,6 +17,8 @@ struct TimelinePane: View {
     var onPlayRow: (DummyItem) -> Void
     var jumpToTop: Int
     var onPopThread: () -> Void
+    /// While open, its results are the list and the timeline waits under it (#32).
+    var search: ShellSearch?
     @State private var marks: [String: DummyMarks] = [:]
     /// Bumped once each server's emoji catalogue has landed, so the rows already on screen ask
     /// again. Per host and not one counter for the pane: see `waitForCatalogues`.
@@ -24,10 +26,16 @@ struct TimelinePane: View {
     @State private var toast: String?
     @State private var toastTick = 0
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(DummyPrefs.self) private var prefs
 
     private var timeline: TimelineQuery { session.currentTimeline }
 
-    private var items: [DummyItem] { timeline.items(from: session.notes) }
+    private var items: [DummyItem] {
+        search?.items(
+            from: session.notes, revision: session.notesRevision, sources: session.sources, latest: prefs.latestDate
+        )
+            ?? session.timelineItems(latest: prefs.latestDate)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -55,6 +63,8 @@ struct TimelinePane: View {
                     onToast: showToast,
                     onBack: onPopThread
                 )
+                // One pane per thread, so going back from a nested one draws its parent afresh.
+                .id(opened.id)
             } else if items.isEmpty {
                 empty
             } else {
@@ -75,6 +85,9 @@ struct TimelinePane: View {
         }
         .animation(.easeInOut(duration: 0.2), value: toast)
         .task(id: catalogueHosts) { await waitForCatalogues() }
+        .onChange(of: session.toast) { _, toast in
+            if let toast { showToast(toast.text) }
+        }
         .onChange(of: session.timelineID) { _, _ in
             if let selectedID, !items.contains(where: { $0.id == selectedID }) {
                 self.selectedID = nil
@@ -188,12 +201,22 @@ struct TimelinePane: View {
                     }
                 }
             }
-            .scrollIndicators(.hidden)
+            .scrollIndicators(.never)
+            .onAppear {
+                guard let id = DummyCommand.centredOnAppear(selected: selectedID) else { return }
+                // A tick later: a lazy stack just built has not laid out the row to scroll to.
+                Task { @MainActor in proxy.scrollTo(id, anchor: .center) }
+            }
             .onChange(of: selectedID) { _, id in
                 guard let id else { return }
                 withAnimation(.easeInOut(duration: 0.18)) {
                     proxy.scrollTo(id, anchor: .center)
                 }
+            }
+            // A reload lands newer rows above the selected one; it stays centred (#23, #29).
+            .onChange(of: session.reload.landed) { _, _ in
+                guard let selectedID else { return }
+                proxy.scrollTo(selectedID, anchor: .center)
             }
             .onChange(of: jumpToTop) { _, _ in
                 guard let first = items.first else { return }
@@ -231,62 +254,150 @@ struct TimelinePane: View {
         }
     }
 
-    /// The title, the queries, and the rule the current one is under.
+    /// `[+]`, the queries, then the rule the current one is under — one line.
     ///
-    /// The pills are All and Trends. The row scrolls so a narrow window or a larger text size
-    /// does not squeeze the names, and the rule sits below them at full width.
+    /// `[+]` is pinned leading, outside the scroll, so adding is always in reach. It is a
+    /// press, not a Tab stop: Tab rotates All, Trends and yours. The names scroll so a
+    /// narrow window or a larger text size does not squeeze them; the rule keeps its own
+    /// width on the trailing edge.
     private var header: some View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
             HStack(alignment: .center, spacing: ShellSpace.step) {
-                Text(L10n.t("shell.timeline.title"))
-                    .font(ShellType.pane)
-                    .foregroundStyle(ShellChrome.ink(colorScheme))
-                    .fixedSize()
-                ScrollView(.horizontal) {
-                    HStack(spacing: ShellSpace.tight) {
-                        ForEach(session.queries) { query in
-                            queryPill(query)
+                if !session.queries.isEmpty { addPill }
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal) {
+                        HStack(spacing: ShellSpace.tight) {
+                            ForEach(session.queries) { query in
+                                queryPill(query)
+                                    .id(query.id)
+                            }
                         }
+                        .padding(.vertical, ShellSpace.hair)
                     }
-                    .padding(.vertical, ShellSpace.hair)
+                    .scrollIndicators(.never)
+                    .onChange(of: session.timelineID) { _, query in
+                        guard let query else { return }
+                        withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(query.id) }
+                    }
                 }
-                .scrollIndicators(.never)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                if session.timelineID != nil {
+                    Text(session.rule(of: timeline))
+                        .font(ShellType.meta)
+                        .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                        .lineLimit(1)
+                }
             }
-            if session.timelineID != nil {
-                Text(timeline.rule)
+            if session.timelinesUnreadable {
+                Text(L10n.t("timeline.unreadable"))
                     .font(ShellType.meta)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                    .lineLimit(1)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let latest = prefs.latestDate {
+                latestMark(latest)
+            }
+            if let line = session.reload.line {
+                Text(line)
+                    .font(ShellType.meta)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                    .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .accessibilityElement(children: .contain)
     }
 
+    /// Quiet word that newer posts are held back by the latest date in Preferences (#22), so a
+    /// stream that stops short does not read as missing posts.
+    private func latestMark(_ latest: LatestDate) -> some View {
+        let day = latest.start().formatted(.dateTime.year().month().day().locale(L10n.locale()))
+        return Label(String(format: L10n.t("timeline.latest"), day), systemImage: "calendar")
+            .font(ShellType.meta)
+            .foregroundStyle(ShellChrome.inkDim(colorScheme))
+            .lineLimit(1)
+            .accessibilityLabel(String(format: L10n.t("timeline.latest.label"), day))
+    }
+
     private func queryPill(_ query: TimelineQuery) -> some View {
         let selected = query == session.timelineID
+        let missing = session.hasMissingRule(query)
         return Button {
             session.timelineID = query
         } label: {
             // One line at its own width; the row it sits in scrolls rather than squeezing it.
-            Text(query.name)
-                .lineLimit(1)
-                .fixedSize()
-                .font(ShellType.meta.weight(selected ? .semibold : .regular))
-                .foregroundStyle(selected ? ShellChrome.selectInk(colorScheme) : ShellChrome.inkDim(colorScheme))
+            HStack(spacing: ShellSpace.tight) {
+                Text(session.name(of: query))
+                    .lineLimit(1)
+                    .fixedSize()
+                if missing {
+                    Image(systemName: "circle.dashed")
+                        .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                        .accessibilityHidden(true)
+                }
+            }
+            .font(ShellType.meta.weight(selected ? .semibold : .regular))
+            .foregroundStyle(selected ? ShellChrome.selectInk(colorScheme) : ShellChrome.inkDim(colorScheme))
+            .padding(.horizontal, ShellSpace.snug)
+            .padding(.vertical, ShellSpace.tight)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(selected ? ShellChrome.selectFill(colorScheme) : ShellChrome.well(colorScheme))
+            )
+        }
+        .buttonStyle(.plain)
+        .simultaneousGesture(
+            TapGesture(count: 2).onEnded { session.editTimeline(query) }
+        )
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.45).onEnded { _ in session.editTimeline(query) }
+        )
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityHint(missing ? L10n.t("timeline.pill.missing.hint") : "")
+        .accessibilityAction(named: Text(L10n.t("shortcut.edit"))) {
+            session.editTimeline(query)
+        }
+    }
+
+    /// `[+]`: a new timeline. A press, not a selected tab.
+    private var addPill: some View {
+        Button {
+            session.newTimeline()
+        } label: {
+            Image(systemName: "plus")
+                .font(ShellType.meta.weight(.semibold))
+                .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .padding(.horizontal, ShellSpace.snug)
                 .padding(.vertical, ShellSpace.tight)
                 .background(
                     Capsule(style: .continuous)
-                        .fill(selected ? ShellChrome.selectFill(colorScheme) : ShellChrome.well(colorScheme))
+                        .fill(ShellChrome.well(colorScheme))
                 )
         }
         .buttonStyle(.plain)
-        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityLabel(L10n.t("timeline.new.title"))
     }
 
+    @ViewBuilder
     private var empty: some View {
+        if let search, search.isSearching, !search.isIndexed {
+            ShellNotice(
+                symbol: "magnifyingglass",
+                title: L10n.t("search.indexing.title"),
+                detail: L10n.t("search.indexing.detail")
+            )
+        } else if search?.isSearching == true {
+            ShellNotice(
+                symbol: "magnifyingglass",
+                title: L10n.t("search.empty.title"),
+                detail: L10n.t("search.empty.detail")
+            )
+        } else {
+            timelineEmpty
+        }
+    }
+
+    private var timelineEmpty: some View {
         ShellNotice(
             symbol: "list.bullet.rectangle",
             title: L10n.t("\(timeline.emptyKey).title"),

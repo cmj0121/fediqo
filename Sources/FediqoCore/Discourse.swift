@@ -23,7 +23,11 @@ public struct DiscourseClient: Sendable {
         self.host = host
     }
 
-    /// The front page: the most recently active discussions, newest activity first.
+    /// The front page, newest topic first.
+    ///
+    /// **`order=created`, not the default.** `/latest.json` on its own is ordered by the last
+    /// activity, and a row stores when the topic was created — so a topic bumped by today's reply
+    /// would take a place on the page that belongs to one posted today, and push it off.
     ///
     /// The category names are fetched beside it and are **allowed to fail**. A forum that will not
     /// answer `/site.json` — an old version, a plugin, a permission — still has a readable front
@@ -42,7 +46,11 @@ public struct DiscourseClient: Sendable {
             }
         }()
 
-        guard let url = Host.httpsURL(host: host, path: "/latest.json") else {
+        guard let url = Host.httpsURL(
+            host: host,
+            path: "/latest.json",
+            query: [URLQueryItem(name: "order", value: "created")]
+        ) else {
             throw DiscourseRequestError.invalidURL
         }
         let (data, response) = try await http.data(from: url)
@@ -54,6 +62,20 @@ public struct DiscourseClient: Sendable {
         return page.topicList.topics.map {
             $0.asNote(source: source, host: host, people: people, sections: named)
         }
+    }
+
+    /// One topic read again (#29): `/t/{id}.json`, as the row `latest` draws for it, with the
+    /// opening post's own words for its body and the reply count as the post stream has it now.
+    /// `board` is the section name the held row carries — this read names its section by number
+    /// only, and `/site.json` is not asked a second time for it.
+    public func topic(_ id: Int, source: Source, board: String?) async throws -> Note {
+        guard let url = Host.httpsURL(host: host, path: "/t/\(id).json") else {
+            throw DiscourseRequestError.invalidURL
+        }
+        let (data, response) = try await http.data(from: url)
+        try Self.check(response.statusCode)
+        return try DiscourseJSON.decoder.decode(TopicDTO.self, from: data)
+            .asNote(source: source, host: host, board: board)
     }
 
     /// Every category this forum has, by the number a topic names it with.
@@ -254,7 +276,9 @@ struct LatestDTO: Decodable, Sendable {
                 // by the second; a row that showed it would date somebody's question by a
                 // stranger's reply.
                 postedAt: createdAt ?? bumpedAt ?? .distantPast,
-                origins: [.publicTimeline],
+                // `/latest.json` is a cross-board listing: the topic names its section but did
+                // not arrive through it, so it carries no category (#31).
+                categories: [],
                 avatarURL: Self.avatarURL(person?.avatarTemplate, host: host),
                 attachments: Self.attachments(imageUrl),
                 url: Host.httpsURL(host: host, path: "/t/\(slug ?? "topic")/\(id)"),
@@ -273,7 +297,7 @@ struct LatestDTO: Decodable, Sendable {
         ///
         /// No shape is sent with it, and `Attachment` is built to say so rather than to guess:
         /// nothing is not a square. The deck scales what arrives.
-        private static func attachments(_ raw: String?) -> [Attachment] {
+        static func attachments(_ raw: String?) -> [Attachment] {
             guard let url = Host.fetchableURL(raw) else { return [] }
             return [Attachment(kind: .image, url: url, previewURL: url)]
         }
@@ -290,6 +314,57 @@ struct LatestDTO: Decodable, Sendable {
             if path.hasPrefix("/") { return Host.httpsURL(host: host, path: path) }
             return Host.fetchableURL(path)
         }
+    }
+}
+
+/// `/t/{id}.json`: the topic, and its post stream's first page — the opening post first.
+struct TopicDTO: Decodable, Sendable {
+    let id: Int
+    let title: String?
+    let slug: String?
+    let createdAt: Date?
+    let postsCount: Int?
+    let replyCount: Int?
+    let likeCount: Int?
+    let imageUrl: String?
+    let postStream: PostStream
+
+    struct PostStream: Decodable, Sendable {
+        let posts: [Post]
+    }
+
+    struct Post: Decodable, Sendable {
+        let postNumber: Int?
+        let username: String?
+        let name: String?
+        let avatarTemplate: String?
+        let cooked: String?
+        let createdAt: Date?
+    }
+
+    /// The same row `LatestDTO.Topic.asNote` builds for this topic, under the same id.
+    func asNote(source: Source, host: String, board: String?) -> Note {
+        let opening = postStream.posts.first { $0.postNumber == 1 } ?? postStream.posts.first
+        let username = opening?.username ?? ""
+        return Note(
+            id: "discourse:\(host):\(id)",
+            source: source,
+            author: opening?.name?.isEmpty == false ? opening!.name! : username,
+            handle: username.isEmpty ? "" : "@\(username)@\(host)",
+            body: HTMLText.plain(opening?.cooked ?? ""),
+            title: (title?.isEmpty == false) ? title : nil,
+            board: board,
+            postedAt: createdAt ?? opening?.createdAt ?? .distantPast,
+            categories: [],
+            avatarURL: LatestDTO.Topic.avatarURL(opening?.avatarTemplate, host: host),
+            attachments: LatestDTO.Topic.attachments(imageUrl),
+            url: Host.httpsURL(host: host, path: "/t/\(slug ?? "topic")/\(id)"),
+            counts: Counts(
+                replies: replyCount ?? postsCount.map { max($0 - 1, 0) },
+                reblogs: nil,
+                favourites: likeCount
+            )
+        )
     }
 }
 

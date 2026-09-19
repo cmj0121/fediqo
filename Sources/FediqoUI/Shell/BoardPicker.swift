@@ -215,27 +215,8 @@ struct BoardPickerList: View {
             )
     }
 
-    /// The tick: a milled plate, filled when it is on. A square well and not a round checkmark,
-    /// because every other pressable plate in this shell is one.
     private func tick(_ on: Bool) -> some View {
-        let drawn = Self.tick(on, colorScheme)
-        return RoundedRectangle(cornerRadius: 3, style: .continuous)
-            .fill(drawn.plate)
-            .overlay {
-                RoundedRectangle(cornerRadius: 3, style: .continuous)
-                    .stroke(drawn.border, lineWidth: ShellSpace.hair)
-            }
-            .overlay {
-                if let mark = drawn.mark {
-                    Image(systemName: "checkmark")
-                        // Sized from the plate rather than fixed at 11, so the mark and the box
-                        // it is cut out of grow together.
-                        .font(.system(size: tickSize * 0.55, weight: .bold))
-                        .foregroundStyle(mark)
-                }
-            }
-            .frame(width: tickSize, height: tickSize)
-            .accessibilityHidden(true)
+        PickTick(on: on, size: tickSize)
     }
 
     /// What the index stated about this board, and **only** what it stated.
@@ -260,7 +241,7 @@ struct BoardPickerList: View {
 
     /// The stated figures, joined. `Text` concatenation rather than a formatted `String` so the
     /// numbers and the date follow the language the shell is set to, which is the reader's
-    /// preference and not the device's — `PreferencesPane.catalogueLine` states the same rule.
+    /// preference and not the device's — `UsagePane.catalogueLine` states the same rule.
     private func stated(_ board: DiscuzBoard) -> Text {
         var line = Text(verbatim: "")
         var first = true
@@ -278,6 +259,110 @@ struct BoardPickerList: View {
             add(Text(last, format: .relative(presentation: .named)))
         }
         return line
+    }
+}
+
+/// The tick: a milled plate, filled when it is on. A square well and not a round checkmark,
+/// because every other pressable plate in this shell is one. The board picker's and the list
+/// picker's, so the two choices look like the one kind of choice they are.
+struct PickTick: View {
+    let on: Bool
+    let size: CGFloat
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let drawn = BoardPickerList.tick(on, colorScheme)
+        RoundedRectangle(cornerRadius: 3, style: .continuous)
+            .fill(drawn.plate)
+            .overlay {
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .stroke(drawn.border, lineWidth: ShellSpace.hair)
+            }
+            .overlay {
+                if let mark = drawn.mark {
+                    Image(systemName: "checkmark")
+                        // Sized from the plate rather than fixed at 11, so the mark and the box
+                        // it is cut out of grow together.
+                        .font(.system(size: size * 0.55, weight: .bold))
+                        .foregroundStyle(mark)
+                }
+            }
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
+    }
+}
+
+/// A signed-in Mastodon's lists, and the reader deciding which of them this device reads (#25) —
+/// the board choice's counterpart, as a value the sheet is presented from.
+///
+/// `offered` is what the server has now; `ticked` opens as what is chosen, intersected with it,
+/// so a list the server no longer has is dropped by the next Done, as a board is.
+struct ListChoice: Equatable {
+    let host: String
+    let offered: [ListSubscription]
+    var ticked: Set<String>
+
+    /// What Done hands on: the ticked lists, in the server's order and under its names now.
+    var picks: [ListSubscription] { offered.filter { ticked.contains($0.id) } }
+}
+
+/// The lists themselves: one tick per list, the board rows' look without their figures — a list
+/// has none to state.
+struct ListPickerList: View {
+    let offered: [ListSubscription]
+    @Binding var picked: Set<String>
+
+    @Environment(\.colorScheme) private var colorScheme
+    @ScaledMetric(relativeTo: .callout) private var tickSize: CGFloat = 20
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                if offered.isEmpty {
+                    Text(L10n.t("list.choose.none"))
+                        .font(ShellType.meta)
+                        .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(ShellSpace.pad)
+                }
+                ForEach(offered) { list in
+                    row(list)
+                    Rectangle()
+                        .fill(ShellChrome.hairline(colorScheme))
+                        .frame(height: ShellSpace.hair)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func row(_ list: ListSubscription) -> some View {
+        let on = picked.contains(list.id)
+        return Button {
+            if on { picked.remove(list.id) } else { picked.insert(list.id) }
+        } label: {
+            HStack(alignment: .center, spacing: ShellSpace.step) {
+                PickTick(on: on, size: tickSize)
+                Text(list.name)
+                    .font(ShellType.name)
+                    .foregroundStyle(
+                        on ? ShellChrome.selectInk(colorScheme) : ShellChrome.ink(colorScheme)
+                    )
+                    .fixedSize(horizontal: false, vertical: true)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, ShellSpace.pad)
+            .padding(.vertical, ShellSpace.snug)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(on ? ShellChrome.selectFill(colorScheme) : .clear)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(on ? [.isSelected] : [])
+        .accessibilityHint(Text(L10n.t(on ? "list.choose.hint.off" : "list.choose.hint.on")))
+        .accessibilityLabel(Text(list.name))
     }
 }
 

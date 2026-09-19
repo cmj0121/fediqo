@@ -38,7 +38,7 @@ struct EmojiEverywhereTests {
             handle: handle ?? "",
             body: body,
             postedAt: posted,
-            origins: [.publicTimeline],
+            categories: [.public],
             sensitive: sensitive,
             spoiler: spoiler,
             emojis: emojis
@@ -242,13 +242,12 @@ struct EmojiEverywhereTests {
         #expect(await store.alphabet(own: [own], host: Self.reading).lookup("blobcat") == own)
     }
 
-    // MARK: - Our own copy is ours
+    // MARK: - The warning is the author's or nothing
 
-    // A shortcode in a string this app wrote would be this app's bug, and drawing it as a picture
-    // would hide the bug rather than show it. The cover line is the one place the two kinds of
-    // text share a slot, so it is the one place the distinction has to be made by hand.
-    @Test("The cover line is the author's only when the author wrote one")
-    func ourOwnCoverSentenceStaysOurs() {
+    // A post flagged with no warning line draws the mark alone. Only a warning the author wrote
+    // is a warning, so an empty one is the same as none.
+    @Test("A warning is drawn only where the author wrote one")
+    func aWarningOnlyWhereTheAuthorWroteOne() {
         let authors = Self.item(spoiler: "Blood")
         #expect(authors.covered)
         #expect(Self.row(authors).coverIsTheAuthors)
@@ -259,10 +258,59 @@ struct EmojiEverywhereTests {
         }
     }
 
-    // The alphabet is asked about `spoiler`, never about the line the row ends up drawing. Where
-    // the author wrote nothing, there is no stranger's text on that band to resolve.
-    @Test("Where the cover line is ours, nothing on that band goes through an alphabet")
-    func ourOwnSentenceIsNeverResolved() async {
+    // Issue #30: where the author flagged a post and wrote no warning, nothing is said in their
+    // place. The mark alone says covered, then what is under it, then how to lift it.
+    @Test("A covered post with no warning says no sentence in the author's place")
+    func noWarningNoSentence() {
+        for flagged in [Self.item(sensitive: true), Self.item(spoiler: "", sensitive: true)] {
+            let said = Self.row(flagged).spokenCover
+            #expect(said == [L10n.t("item.covered.mark"), L10n.t("item.covered.label")]
+                .joined(separator: ". "))
+            #expect(!said.contains(String(format: L10n.t("item.covered.warning"), "")))
+        }
+    }
+
+    // A warning is announced as the author's warning, so a listener cannot take it for the
+    // post's words — the spoken twin of drawing it apart from the body.
+    @Test("The author's warning is said as their warning, after the mark")
+    func theWarningIsSaidAsAWarning() {
+        let item = Self.item(spoiler: "Blood")
+        let said = Self.row(item).spokenCover
+        #expect(said.hasPrefix(L10n.t("item.covered.mark") + ". "))
+        #expect(said.contains(String(format: L10n.t("item.covered.warning"), "Blood")))
+    }
+
+    // After `s` lifts it, the row still says it was covered. It does not say how to cover it again.
+    @Test("A lifted row keeps the mark: it says it was covered")
+    func aLiftedRowKeepsTheMark() {
+        for item in [Self.item(spoiler: "Blood"), Self.item(sensitive: true)] {
+            let lifted = DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(),
+                                      marks: .constant(DummyMarks()), lifted: true, onToast: { _ in })
+            #expect(lifted.spokenCover.hasPrefix(L10n.t("item.lifted.mark")))
+            #expect(!lifted.spokenCover.hasPrefix(L10n.t("item.covered.mark")))
+            #expect(!lifted.spokenCover.contains(L10n.t("item.covered.label")))
+        }
+    }
+
+    // The viewer's chip is hidden too, so the state is said there as well — once, first: on the
+    // warning where there is one, and on the button where there is not.
+    @Test("The viewer says the picture is covered, once, before anything else")
+    func theViewerSaysCovered() {
+        let mark = L10n.t("item.covered.mark")
+        let warning = AttachmentViewer.spokenWarning("Blood", covered: true)
+        #expect(warning == mark + ". " + String(format: L10n.t("item.covered.warning"), "Blood"))
+        #expect(AttachmentViewer.spokenButton(warned: true) == L10n.t("item.covered.label"))
+
+        #expect(AttachmentViewer.spokenButton(warned: false)
+            == mark + ". " + L10n.t("item.covered.label"))
+        #expect(AttachmentViewer.spokenWarning("Blood", covered: false)
+            .hasPrefix(L10n.t("item.lifted.mark")))
+    }
+
+    // The alphabet is asked about `spoiler` only. Where the author wrote no warning, the band
+    // holds the mark alone and there is no stranger's text on it to resolve.
+    @Test("Where the author wrote no warning, nothing on that band goes through an alphabet")
+    func noWarningIsNeverResolved() async {
         let store = await Self.store([Self.emoji("wave", on: Self.reading)], host: Self.reading)
         let ours = Self.item(sensitive: true)
         let written = DummyItemRow.Written(
@@ -293,7 +341,7 @@ struct EmojiEverywhereTests {
         // Lifted is the reader's own doing and the words speak for themselves again — but the
         // label still does not repeat them.
         #expect(!lifted.spokenCover.contains("nobody asked to read"))
-        #expect(lifted.spokenCover.contains(L10n.t("item.lifted.label")))
+        #expect(!lifted.spokenCover.contains(L10n.t("item.covered.label")))
     }
 
     #if os(macOS)
@@ -336,6 +384,9 @@ struct EmojiEverywhereTests {
             (Self.item(spoiler: long), true),
             (Self.item(author: "Ada :blobcat:", body: "hello :blobcat:", spoiler: ":blobcat:"),
              false),
+            // The mark standing alone, with no warning beside it.
+            (Self.item(sensitive: true), false),
+            (Self.item(sensitive: true), true),
         ]
 
         for size in [DynamicTypeSize.large, .accessibility3] {
@@ -392,6 +443,22 @@ struct EmojiEverywhereTests {
         #expect(meta.picture <= DummyItemRow.Box.avatar)
         // The words: at most four lines beside a slot that is always the same square.
         #expect(body.picture * 4 <= DummyItemRow.Box.thumb)
+    }
+
+    // The warning is set apart from the body by weight, and `EmojiText` sets its own font inside.
+    // So the weight put on from outside has to reach through that font, or the warning would be
+    // drawn exactly as the body is — which is the fault #30 is about.
+    @Test("The warning's weight reaches through EmojiText, so it is not drawn as the body")
+    func theWarningIsNotDrawnAsTheBody() {
+        func width(_ view: some View) -> CGFloat {
+            let host = NSHostingView(rootView: view.fixedSize())
+            host.layoutSubtreeIfNeeded()
+            return host.fittingSize.width
+        }
+        let body = width(EmojiText("Finale spoilers, S2E8", emojis: [], host: Self.reading))
+        let warning = width(EmojiText("Finale spoilers, S2E8", emojis: [], host: Self.reading)
+            .fontWeight(.medium))
+        #expect(warning > body)
     }
 
     /// One line of a role, with a picture standing in it and without.

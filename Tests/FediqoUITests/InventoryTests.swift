@@ -29,7 +29,7 @@ struct InventoryTests {
     private func note(_ id: String, daysAgo: Double, from source: Source) -> Note {
         Note(
             id: id, source: source, author: "Ada", handle: "@ada", body: "hello",
-            postedAt: now.addingTimeInterval(-daysAgo * 86_400), origins: [.publicTimeline],
+            postedAt: now.addingTimeInterval(-daysAgo * 86_400), categories: [.public],
             avatarURL: address(Int(id) ?? 0)
         )
     }
@@ -277,6 +277,7 @@ struct InventoryTests {
             "prefs.keep", "prefs.keep.forever", "prefs.keep.months", "prefs.keep.shorten.title",
             "prefs.keep.shorten.detail", "prefs.drop.copies", "prefs.drop.copies.title",
             "prefs.drop.copies.detail", "prefs.drop.confirm", "prefs.drop.footer",
+            "usage.tab.source", "usage.tab.time", "usage.tab.copies",
         ]
         for key in keys {
             for language in [DummyLanguage.english, .taiwanese] {
@@ -285,17 +286,101 @@ struct InventoryTests {
         }
     }
 
+    @Test("Usage is grouped by purpose, one tab each")
+    func purposesAreTabs() {
+        #expect(UsagePane.Purpose.allCases == [.source, .time, .copies])
+        #expect(L10n.t("usage.tab.source", language: .english) == "Sources")
+        #expect(L10n.t("usage.tab.time", language: .english) == "Time")
+        #expect(L10n.t("usage.tab.copies", language: .english) == "Copies")
+        #expect(L10n.t("usage.tab.source", language: .taiwanese) == "來源")
+        #expect(L10n.t("usage.tab.time", language: .taiwanese) == "時間")
+        #expect(L10n.t("usage.tab.copies", language: .taiwanese) == "副本")
+    }
+
+    @Test("Tab goes Sources, Time, Copies, and round again")
+    func usageTabOrder() {
+        let session = ShellSession(http: FixtureHTTP())
+        #expect(session.usagePurpose == .source)
+        var visited: [UsagePane.Purpose] = []
+        for _ in 0..<4 {
+            #expect(session.rotateUsageTab(by: 1))
+            visited.append(session.usagePurpose)
+        }
+        #expect(visited == [.time, .copies, .source, .time])
+        session.rotateUsageTab(by: -1)
+        #expect(session.usagePurpose == .source)
+    }
+
     @Test("The readout's lines say what they count")
     func readoutLines() {
         let saved = L10n.language
         L10n.language = .english
         defer { L10n.language = saved }
-        #expect(PreferencesPane.postsLine(0) == "No posts held")
-        #expect(PreferencesPane.postsLine(1) == "1 post")
-        #expect(PreferencesPane.postsLine(3) == "3 posts")
-        #expect(PreferencesPane.stretchLabel(now, period: .week).hasPrefix("Week of "))
-        #expect(PreferencesPane.stretchLabel(now, period: .month).contains(String(Calendar.current.component(.year, from: now))))
-        #expect(PreferencesPane.monthChoices == [1, 3, 6, 12])
+        #expect(UsagePane.postsLine(0) == "No posts held")
+        #expect(UsagePane.postsLine(1) == "1 post")
+        #expect(UsagePane.postsLine(3) == "3 posts")
+        #expect(UsagePane.stretchLabel(now, period: .week).hasPrefix("Week of "))
+        #expect(UsagePane.stretchLabel(now, period: .month).contains(String(Calendar.current.component(.year, from: now))))
+        #expect(UsagePane.monthChoices == [1, 3, 6, 12])
+    }
+
+    /// #21. No view inspector here, so the pages are pinned by the keys their files draw: every
+    /// figure and every Clear is on Usage, and Preferences draws none of them.
+    @Test("The storage this device uses is on Usage, and Preferences no longer shows it")
+    func theFiguresLiveOnUsage() throws {
+        let usage = try Self.source("UsagePane")
+        let preferences = try Self.source("PreferencesPane")
+        for key in [
+            "prefs.cache", "prefs.cache.footer", "prefs.held.total", "prefs.held.disk",
+            "prefs.held.breakdown", "prefs.cache.clear", "prefs.password.forget",
+            "prefs.keep", "prefs.drop.copies",
+            "usage.tab.source", "usage.tab.time", "usage.tab.copies",
+        ] {
+            #expect(usage.contains("\"\(key)\""), "Usage does not draw \(key)")
+        }
+        for stem in ["prefs.cache", "prefs.held", "prefs.drop", "prefs.keep", "prefs.password"] {
+            #expect(!preferences.contains("\"\(stem)"), "Preferences still draws \(stem)")
+        }
+        #expect(usage.contains("session.clearing = source.host"), "a row's Clear no longer asks the same question")
+
+        for language in [DummyLanguage.english, .taiwanese] {
+            let usageTitle = L10n.t("shell.usage.title", language: language)
+            let preferencesTitle = L10n.t("shell.preferences.title", language: language)
+            for key in ["account.sources.held", "forum.signin.save.on"] {
+                let line = L10n.t(key, language: language)
+                #expect(line.contains(usageTitle), "\(key) does not send the reader to Usage")
+                #expect(!line.contains(preferencesTitle), "\(key) still sends the reader to Preferences")
+            }
+        }
+        #expect(!L10n.t("shell.preferences.summary", language: .english).contains("held"))
+    }
+
+    /// No view inspector here either, so the pages are pinned by what their files say: a grouped
+    /// Form draws its own grey unless told not to, and `.hidden` still leaves a bar where the
+    /// system is set to always show one.
+    @Test("Usage and Preferences sit on the page's colour, and no page shows a scroll bar")
+    func pagesShareOneBackgroundAndNoScrollBar() throws {
+        for name in ["UsagePane", "PreferencesPane"] {
+            let file = try Self.source(name)
+            #expect(file.contains(".scrollContentBackground(.hidden)"), "\(name) draws the Form's own background")
+            #expect(file.contains(".scrollIndicators(.never)"), "\(name) can show a scroll bar")
+        }
+        for name in ["TimelinePane", "DummyThreadPane", "AccountPane"] {
+            let file = try Self.source(name)
+            #expect(file.contains(".scrollIndicators(.never)"), "\(name) can show a scroll bar")
+            #expect(!file.contains(".scrollIndicators(.hidden)"), "\(name) shows a bar when the system asks")
+        }
+    }
+
+    private static func source(_ name: String) throws -> String {
+        try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appendingPathComponent("Sources/FediqoUI/Shell/\(name).swift"),
+            encoding: .utf8
+        )
     }
 
     @Test("Switching between week and month rebuilds the counts; a redraw does not")

@@ -8,12 +8,36 @@ public struct StoreFile: Sendable {
 
     public init(at directory: URL) throws {
         try makeExcludedFromBackup(directory)
-        try self.init(database: DatabaseQueue(path: directory.appendingPathComponent(Self.indexName).path))
+        let path = directory.appendingPathComponent(Self.indexName).path
+        if Self.isNewer(at: path) { throw Newer() }
+        try self.init(database: DatabaseQueue(path: path))
     }
 
     public init(database: DatabaseQueue) throws {
+        // Asked before `migrate`: GRDB migrates a superseded store without complaint, and the
+        // first save would then empty tables this build only half understands.
+        if try database.read(migrator.hasBeenSuperseded) { throw Newer() }
         db = database
         try migrator.migrate(db)
+    }
+
+    /// The index records a migration this build does not know: a newer build wrote it.
+    struct Newer: Error {}
+
+    /// Whether the index at `path` was written by a newer build, asked on a read-only connection
+    /// so that asking changes nothing on disk.
+    ///
+    /// The index is a rollback-journal `DatabaseQueue`, never WAL: a read-only connection to it
+    /// makes no `-wal` or `-shm` file and has no log to checkpoint, which is what lets this probe
+    /// leave a newer build's store byte for byte as it found it. A probe that cannot answer — no
+    /// file yet, or a hot journal only a writer can roll back — is not the newer-store case; it
+    /// falls through to the read-write open, whose own check still stands behind it.
+    private static func isNewer(at path: String) -> Bool {
+        guard FileManager.default.fileExists(atPath: path) else { return false }
+        var readOnly = Configuration()
+        readOnly.readonly = true
+        guard let probe = try? DatabaseQueue(path: path, configuration: readOnly) else { return false }
+        return (try? probe.read(migrator.hasBeenSuperseded)) ?? false
     }
 
     /// What a launch found on disk: the file to write back to, if there is one to trust, and
@@ -26,12 +50,19 @@ public struct StoreFile: Sendable {
         /// Where an unreadable index was moved, when one was. It is left there for a person, or a
         /// later version of this code, to look at; nothing in the app reads it again.
         public let setAside: URL?
+        /// The index was written by a newer build. It was left exactly as found — not read, not
+        /// set aside — and `file` is `nil`, so this run does not write over it either.
+        public let storeIsNewer: Bool
 
-        init(file: StoreFile?, sources: [Source] = [], notes: [Note] = [], setAside: URL? = nil) {
+        init(
+            file: StoreFile?, sources: [Source] = [], notes: [Note] = [], setAside: URL? = nil,
+            storeIsNewer: Bool = false
+        ) {
             self.file = file
             self.sources = sources
             self.notes = notes
             self.setAside = setAside
+            self.storeIsNewer = storeIsNewer
         }
     }
 
@@ -45,12 +76,18 @@ public struct StoreFile: Sendable {
     /// cannot even do that the run gets no file at all: it reads nothing and saves nothing, and
     /// whatever is on disk is still there next launch.
     ///
+    /// **An index from a newer build is not unreadable, and is not set aside.** It is left where
+    /// it is, byte for byte, and the run gets no file and `storeIsNewer`, so the newer build finds
+    /// it as it left it.
+    ///
     /// The decision lives here rather than in the app so it can be tested against a real file.
     public static func open(at directory: URL, now: Date = Date()) -> Opened {
         do {
             let file = try StoreFile(at: directory)
             let snapshot = try file.load()
             return Opened(file: file, sources: snapshot.sources, notes: snapshot.notes)
+        } catch is Newer {
+            return Opened(file: nil, storeIsNewer: true)
         } catch {
             guard let aside = try? setAside(in: directory, now: now),
                   let fresh = try? StoreFile(at: directory)
@@ -140,15 +177,127 @@ private var migrator: DatabaseMigrator {
             t.column("facts", .text).notNull()
         }
     }
+    // The one 0.2.0 schema change (#25, #31): `origins` becomes `categories`, and every row
+    // already held is carried forward in place, in this migration's transaction — a throw rolls
+    // it all back and `open` sets the untouched file aside. Nothing is fetched to do it.
+    //
+    // **Frozen code.** It reads raw rows and writes JSON it spells itself rather than going
+    // through `NoteRecord`, so a later change to the live record cannot change what this step
+    // did to a 0.1.0 store.
+    migrator.registerMigration("v2-categories") { db in
+        struct V1Facts: Decodable { var boardID: String? }
+        struct V2Category: Encodable { var kind: String; var id: String? }
+        try db.alter(table: "note") { t in t.rename(column: "origins", to: "categories") }
+        let rows = try Row.fetchAll(db, sql: """
+            SELECT note.rowid AS rowid, note.categories AS origins, note.facts AS facts,
+                   source.kind AS kind
+            FROM note LEFT JOIN source USING (host)
+            """)
+        let decoder = JSONDecoder()
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        for row in rows {
+            let rowid: Int64 = row["rowid"]
+            let origins = try decoder.decode([String].self, from: Data((row["origins"] as String).utf8))
+            let kind: String? = row["kind"]
+            var categories: [V2Category] = []
+            if kind == "discuz" || kind == "discourse" {
+                // A forum's 0.1.0 `publicTimeline` meant only "read from its front page"; its
+                // categories are its boards, and only a board's own page recorded one.
+                let facts = try decoder.decode(V1Facts.self, from: Data((row["facts"] as String).utf8))
+                if let id = facts.boardID { categories = [V2Category(kind: "board", id: id)] }
+            } else {
+                if origins.contains("publicTimeline") { categories.append(V2Category(kind: "public")) }
+                if origins.contains("trending") { categories.append(V2Category(kind: "trends")) }
+            }
+            let json = String(decoding: try encoder.encode(categories), as: UTF8.self)
+            try db.execute(sql: "UPDATE note SET categories = ? WHERE rowid = ?", arguments: [json, rowid])
+        }
+    }
     return migrator
 }
 
-/// One board subscription as it is written into `source.boards`, a JSON array of these that
-/// GRDB encodes and decodes as a Codable column. Core's `BoardSubscription` stays free of a
-/// storage format; this is the storage format.
-private struct BoardRow: Codable {
-    var fid: Int
+/// One category as it is written into `note.categories`, a JSON array of these sorted by kind
+/// then id, so one set is always written one way. Core's `Category` stays free of a storage
+/// format; this is the storage format.
+///
+/// **A new kind is a new migration.** `category` drops a kind it does not know, and the next
+/// save would then lose it for good; the `v2-categories` migration id is what makes a build
+/// that knows fewer kinds refuse the store instead. So a kind added after a release must also
+/// register a new migration id, even an empty one.
+private struct CategoryRow: Codable, Comparable {
+    var kind: String
+    var id: String?
+
+    init(_ category: FediqoCore.Category) {
+        switch category {
+        case .public: kind = "public"
+        case .trends: kind = "trends"
+        case .home: kind = "home"
+        case .list(let list): kind = "list"; id = list
+        case .board(let board): kind = "board"; id = board
+        }
+    }
+
+    /// Nothing for a kind this build does not know, so an unknown one is dropped, not guessed.
+    var category: FediqoCore.Category? {
+        switch (kind, id) {
+        case ("public", _): .public
+        case ("trends", _): .trends
+        case ("home", _): .home
+        case ("list", let id?): .list(id: id)
+        case ("board", let id?): .board(id: id)
+        default: nil
+        }
+    }
+
+    static func < (a: Self, b: Self) -> Bool {
+        (a.kind, a.id ?? "") < (b.kind, b.id ?? "")
+    }
+}
+
+/// One subscription as it is written into `source.boards`, a JSON array of these that GRDB
+/// encodes and decodes as a Codable column: a board `{"fid":37,"name":…}` or a Mastodon list
+/// `{"list":"42","name":…}` (#25). Core's `BoardSubscription` and `ListSubscription` stay free of
+/// a storage format; this is the storage format.
+///
+/// **Lists ride in the boards column rather than a column of their own**, so they cost no schema
+/// change: a board is written exactly as before, and a row that is neither a board nor a list
+/// throws, so the load fails closed.
+///
+/// **A new subscription shape is a new migration**, as a new `CategoryRow` kind is. A 0.2.0
+/// build throws on a shape it does not know and sets the whole store aside, so a shape added
+/// after 0.2.0 must also register a new migration id — an empty one will do — so a 0.2.0 build
+/// refuses that store as newer instead.
+///
+/// A list id read back here is not trusted with a path: `MastodonAccount` asks only for ids
+/// that are one path segment.
+private struct SubscriptionRow: Codable {
+    var fid: Int?
+    var list: String?
     var name: String
+
+    init(_ board: BoardSubscription) {
+        fid = board.fid
+        name = board.name
+    }
+
+    init(_ list: ListSubscription) {
+        self.list = list.id
+        name = list.name
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        fid = try container.decodeIfPresent(Int.self, forKey: .fid)
+        list = try container.decodeIfPresent(String.self, forKey: .list)
+        name = try container.decode(String.self, forKey: .name)
+        guard (fid == nil) != (list == nil) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .fid, in: container, debugDescription: "neither a board nor a list"
+            )
+        }
+    }
 }
 
 private struct SourceRecord: Codable, FetchableRecord, PersistableRecord {
@@ -157,19 +306,24 @@ private struct SourceRecord: Codable, FetchableRecord, PersistableRecord {
     var kind: String
     /// A board list that is not JSON throws when the row is fetched, so a damaged row fails the
     /// load — and the load fails closed — rather than coming back as a source with no boards.
-    var boards: [BoardRow]
+    var boards: [SubscriptionRow]
 
     init(_ source: Source) {
         host = source.host
         kind = source.kind.rawValue
-        boards = source.boards.map { BoardRow(fid: $0.fid, name: $0.name) }
+        boards = source.boards.map(SubscriptionRow.init) + source.lists.map(SubscriptionRow.init)
     }
 
     var source: Source {
         Source(
             host: host,
             kind: ProtocolKind(rawValue: kind) ?? .unknown,
-            boards: boards.map { BoardSubscription(fid: $0.fid, name: $0.name) }
+            boards: boards.compactMap { row in
+                row.fid.map { BoardSubscription(fid: $0, name: row.name) }
+            },
+            lists: boards.compactMap { row in
+                row.list.map { ListSubscription(id: $0, name: row.name) }
+            }
         )
     }
 }
@@ -183,16 +337,21 @@ private struct NoteFacts: Codable {
     var body: String
     var title: String?
     var board: String?
-    var boardID: String?
     /// `nil` is not a reply; a `ReplyRow` with no handle is a reply whose parent was never named.
     var reply: ReplyRow?
     var boostedBy: String?
+    /// Absent in a row written before 0.2.0 learned it, which reads as no booster. See
+    /// `Note.boosterHandle`.
+    var boosterHandle: String?
     var sensitive: Bool?
     var spoiler: String?
     var avatarURL: URL?
     var attachments: [AttachmentRow]
     var emojis: [EmojiRow]
     var url: URL?
+    /// `Note.statusID`. Additive and optional, so no migration id (Decision 11): a row written
+    /// before 0.2.0 learned it reads as none, and an older build ignores the key.
+    var statusID: String?
 }
 
 private struct ReplyRow: Codable {
@@ -250,8 +409,9 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
     var host: String
     var id: String
     var posted_at: Date
-    /// A JSON array of `FetchOrigin` raw values, sorted so one set is always written one way.
-    var origins: [String]
+    /// A JSON array of `CategoryRow`. Not JSON throws when the row is fetched, so the load fails
+    /// closed.
+    var categories: [CategoryRow]
     /// A `facts` that is not JSON throws when the row is fetched, so the load fails closed.
     var facts: NoteFacts
 
@@ -259,22 +419,23 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
         host = note.source.host
         id = note.id
         posted_at = note.postedAt
-        origins = note.origins.map(\.rawValue).sorted()
+        categories = note.categories.map(CategoryRow.init).sorted()
         facts = NoteFacts(
             author: note.author,
             handle: note.handle,
             body: note.body,
             title: note.title,
             board: note.board,
-            boardID: note.boardID,
             reply: note.reply.map { ReplyRow(handle: $0.handle) },
             boostedBy: note.boostedBy,
+            boosterHandle: note.boosterHandle,
             sensitive: note.sensitive,
             spoiler: note.spoiler,
             avatarURL: note.avatarURL,
             attachments: note.attachments.map(AttachmentRow.init),
             emojis: note.emojis.map(EmojiRow.init),
-            url: note.url
+            url: note.url,
+            statusID: note.statusID
         )
     }
 
@@ -282,9 +443,9 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
     /// The note table keeps no copy of a source; `load()` drops a note whose host has no source
     /// row, since a note from a server nobody follows is one nothing should draw.
     ///
-    /// Origins come back as they went in, an empty set included: which lists a note was seen in
-    /// is a fact about it, and filling in `.publicTimeline` for none would put it in a list it
-    /// was never read from.
+    /// Categories come back as they went in, an empty set included: what a note arrived through
+    /// is a fact about it, and filling in `.public` for none would put it somewhere it was never
+    /// read from.
     func note(from source: Source) -> Note {
         Note(
             id: id,
@@ -294,17 +455,18 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             body: facts.body,
             title: facts.title,
             board: facts.board,
-            boardID: facts.boardID,
             postedAt: posted_at,
-            origins: Set(origins.compactMap(FetchOrigin.init(rawValue:))),
+            categories: Set(categories.compactMap(\.category)),
             reply: facts.reply.map { Reply(handle: $0.handle) },
             boostedBy: facts.boostedBy,
+            boosterHandle: facts.boosterHandle,
             avatarURL: facts.avatarURL,
             attachments: facts.attachments.map(\.attachment),
             sensitive: facts.sensitive,
             spoiler: facts.spoiler,
             emojis: facts.emojis.map(\.emoji),
-            url: facts.url
+            url: facts.url,
+            statusID: facts.statusID
         )
     }
 }

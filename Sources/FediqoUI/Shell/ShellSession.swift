@@ -1,6 +1,7 @@
 import FediqoCore
 import Foundation
 import Observation
+import os
 import SwiftUI
 
 /// In-memory session: unsigned sources, All and Trends, and the Account add flow.
@@ -23,7 +24,7 @@ final class ShellSession {
     /// The two picture caches this session's Clear button empties.
     ///
     /// Held here rather than reached for as `.shared` at each call site, so that **the figures
-    /// Preferences draws and the caches its button presses are the same objects by
+    /// Usage draws and the caches its button presses are the same objects by
     /// construction**. They used to agree by convention — the pane read `.shared` while `clear`
     /// took parameters — which is an agreement a preview or a test wired to fixture caches
     /// breaks silently: it would press the fixtures and draw the live figures, and the reading
@@ -34,19 +35,26 @@ final class ShellSession {
     /// Every forum this run signs in to, one browser each — unit F2's transport.
     ///
     /// On the session for the same reason the two picture caches are: **what Clear presses and
-    /// what Preferences draws have to be the same object**, and a second one reached for as
+    /// what Usage draws have to be the same object**, and a second one reached for as
     /// `.shared` at a call site is an agreement that a test or a preview breaks in silence.
     let forums: ForumSessions
+
+    /// Every Mastodon this device is signed in to. Shared across windows like `forums`, so a
+    /// sign-out in one is a sign-out in all.
+    let mastodon: MastodonSessions
 
     /// One thread's opening post, fetched when its row is scrolled to — D30 — and the rest of
     /// the topic on request — D31.
     ///
     /// On the session for the reason the two picture caches and `forums` are: **what Clear
-    /// presses and what Preferences draws have to be the same object**. It is built here rather
+    /// presses and what Usage draws have to be the same object**. It is built here rather
     /// than passed in because it needs two things only the session has — this session's transport
     /// and this session's forum browsers, without which a thread on a forum the reader signed in
     /// to comes back withheld.
     let posts: ForumPosts
+
+    /// `r` (#29): one reload at a time, and what the last one could not read.
+    let reload = ShellReload()
 
     /// The sheet the reader is being shown the forum's own page in, or nothing.
     var signingIn: ForumSignInRequest?
@@ -76,14 +84,14 @@ final class ShellSession {
     /// real hole. `clear(host:)` reaches `ForumSessions.forget(host:)`, which drops the forum's
     /// cookies **and deletes the saved password from the Keychain** — and `forget`'s own doc makes
     /// the fairness of that conditional on one thing: *"the row says a password is held before the
-    /// button is pressed"*. `PreferencesPane` draws `passwordLine` and meets it. An Account row
+    /// button is pressed"*. `UsagePane` draws `passwordLine` and meets it. An Account row
     /// draws no inventory line at all, by `DESIGN.md` §3.6's own rule, so until now this device
     /// deleted a password with nothing on screen having said one was held — and signed the reader
     /// out of a forum, changing the state of the icon beside the one they pressed.
     ///
     /// **One presenter, both entrances.** `prefs.cache.clear` is one word for one call, so a Clear
-    /// that confirms on Account and fires straight on Preferences would be the same word doing two
-    /// different things two panes apart. `PreferencesPane` sets this too.
+    /// that confirms on Account and fires straight on Usage would be the same word doing two
+    /// different things two panes apart. `UsagePane` sets this too.
     var clearing: String?
 
     /// Which stage of adding a source the reader is being shown, or nothing.
@@ -135,7 +143,8 @@ final class ShellSession {
         sources.map { source in
             SourceRow(
                 source: source,
-                profile: profiles[source.host] ?? .unasked(host: source.host, kind: source.kind)
+                profile: profiles[source.host] ?? .unasked(host: source.host, kind: source.kind),
+                signedIn: isSignedIn(host: source.host)
             )
         }
     }
@@ -169,6 +178,43 @@ final class ShellSession {
     /// The query in front. Nothing only while nothing is joined; not persisted.
     var timelineID: TimelineQuery?
 
+    /// The timelines the reader wrote, in their tab order (#27). Changed only through
+    /// `commit(_:)` and `removeTimeline(_:)`, which keep them on this device.
+    var written: [TimelineDefinition] = []
+    /// The kept timelines could not be read by this build. They stay as they are on the device
+    /// and nothing is written over them (Decision 15); the timeline says so.
+    var timelinesUnreadable = false
+    /// Where the reader's timelines are kept, or nothing for a session that keeps none.
+    @ObservationIgnored let timelineStore: WrittenTimelineStore?
+    /// The timeline editor, where it is open. Edits apply on Done (Decision 21).
+    var editing: TimelineDraft?
+    /// A sentence the timeline shows for a moment.
+    var toast: ShellToast?
+    /// Every held note's folded text, built the first time something reads text after `notes`
+    /// changes — a written timeline with a keyword or author rule — and reusing what did not
+    /// change, so a redraw folds nothing and a session that reads no text folds nothing at all.
+    var textIndex: TextIndex {
+        if !textIndexIsCurrent {
+            builtTextIndex = TextIndex(notes, reusing: builtTextIndex)
+            textIndexIsCurrent = true
+        }
+        return builtTextIndex ?? TextIndex([])
+    }
+    @ObservationIgnored private var builtTextIndex: TextIndex?
+    @ObservationIgnored private(set) var textIndexIsCurrent = false
+    /// Bumped each time `notes` is assigned. Observed, so a view that read a cached timeline
+    /// still redraws when the notes under it change.
+    private(set) var notesRevision = 0
+    /// The last timeline drawn and what it was drawn from, so a redraw that reads it several
+    /// times evaluates the rules once.
+    @ObservationIgnored var drawnTimeline: DrawnTimeline?
+    /// How many times the rules ran for the stream: the test's window on `drawnTimeline`.
+    @ObservationIgnored var timelineEvaluations = 0
+    /// Each tab's missing-rule mark as last worked out, so a redraw compiles no tab again.
+    @ObservationIgnored var missingRules: [TimelineQuery: MissingRules] = [:]
+    /// How many times a tab's mark was worked out: the test's window on `missingRules`.
+    @ObservationIgnored var missingRuleEvaluations = 0
+
     /// The query the timeline draws: the one selected, or All.
     var currentTimeline: TimelineQuery { timelineID ?? .all }
     /// Every change is handed on to `forums`, which is the one place that knows which of them
@@ -177,7 +223,11 @@ final class ShellSession {
         didSet { forums.watch(forums: sources.filter { $0.kind == .discuz }.map(\.host)) }
     }
     var notes: [Note] = [] {
-        didSet { holdings = Holdings(notes: notes, per: heldPeriod) }
+        didSet {
+            holdings = Holdings(notes: notes, per: heldPeriod)
+            textIndexIsCurrent = false
+            notesRevision += 1
+        }
     }
 
     /// What `notes` holds, counted (#7) — rebuilt where `notes` is assigned or the breakdown
@@ -187,6 +237,16 @@ final class ShellSession {
     /// Whether the breakdown is by week or by month.
     var heldPeriod: HeldPeriod = .month {
         didSet { holdings = Holdings(notes: notes, per: heldPeriod) }
+    }
+
+    /// Which purpose Usage is showing. Tab rotates it the way it rotates timeline queries.
+    var usagePurpose: UsagePane.Purpose = .source
+
+    /// Tab and ⇧Tab on Usage: Sources, Time, Copies, and round again.
+    @discardableResult
+    func rotateUsageTab(by step: Int) -> Bool {
+        usagePurpose = DummyCommand.advanced(Array(UsagePane.Purpose.allCases), from: usagePurpose, by: step)
+        return true
     }
 
     /// How many times the reader has cleared a server — decision 14's press, counted.
@@ -235,13 +295,17 @@ final class ShellSession {
         pictures: ShellPictures = .shared,
         emojis: EmojiCache = .shared,
         forums: ForumSessions = ForumSessions(),
-        posts: ForumPosts? = nil
+        mastodon: MastodonSessions = MastodonSessions(),
+        posts: ForumPosts? = nil,
+        timelines: WrittenTimelineStore? = nil
     ) {
         self.http = http
+        timelineStore = timelines
         self.store = store
         self.pictures = pictures
         self.emojis = emojis
         self.forums = forums
+        self.mastodon = mastodon
         // Built with this session's forum browsers, so a thread on a forum the reader signed in
         // to is read through the engine that holds the cookies rather than around it.
         //
@@ -251,6 +315,11 @@ final class ShellSession {
         // 274KB — so it carries its own far tighter ceiling. See `ForumPosts.maxBytes`, and the
         // plan's standing item about per-caller response ceilings, of which this is the first.
         self.posts = posts ?? ForumPosts(through: forums)
+        switch timelines?.load() {
+        case .timelines(let kept)?: written = kept
+        case .unreadable?: timelinesUnreadable = true
+        case nil: break
+        }
     }
 
     var availability: ShellAvailability {
@@ -640,7 +709,7 @@ final class ShellSession {
             Task { await loadCatalog() }
         // None of these offers a protocol to press: the server list is a step further in, a
         // preview and a board list are about one server, and a detail is about one the reader has.
-        case .browsingServers, .previewing, .choosingBoards, nil:
+        case .browsingServers, .previewing, .choosingBoards, .choosingLists, nil:
             return
         }
     }
@@ -667,7 +736,8 @@ final class ShellSession {
         guard stage?.surface != .pane else { return }
         switch stage {
         case .choosingBoards(_, .preview): backToPreview()
-        case .choosingBoards(_, .joined), .browsing, .browsingServers, .previewing, nil:
+        case .choosingBoards(_, .joined), .choosingLists, .browsing, .browsingServers, .previewing,
+            nil:
             // **A swipe on the server list is a cancel and not a step back to the protocols.** The
             // reader dismissed the browser, not a step of it; landing them on the protocol list
             // would keep a sheet up that they asked to be rid of. Back is the button for that, and
@@ -684,7 +754,7 @@ final class ShellSession {
     /// and its `.chooseBoards` must not spring this sheet back open behind them.
     ///
     /// **A preview backed out of forgets the picture it pulled.** `ShellPictures` tags an entry
-    /// by host, and `PreferencesPane` lists the hosts in `sources` — so a thumbnail fetched for a
+    /// by host, and `UsagePane` lists the hosts in `sources` — so a thumbnail fetched for a
     /// server the reader looked at and did not take would be held for the run and appear in no
     /// inventory. Only where it is not a source: a host they did join keeps its pictures.
     func dismissStage() {
@@ -714,7 +784,7 @@ final class ShellSession {
         guard !picks.isEmpty else { return }
         refuse = nil
         offerSignIn = nil
-        boardsRefusal = nil
+        rowRefusal = nil
         unread = []
         unreadAll = 0
         progressHost = offer.host
@@ -792,7 +862,7 @@ final class ShellSession {
 
     /// Every board the reader picked failed. Which surface is told, and in what colour.
     ///
-    /// **The same rule `boardsRefusal` was built for, applied to the other half of the errand.** A
+    /// **The same rule `rowRefusal` was built for, applied to the other half of the errand.** A
     /// join that fails has not added a host, so its sentence belongs under the field, in `alarm`,
     /// beside the offer of a sign-in that might fix it. A **restate** that fails is about a host
     /// the reader added weeks ago and is still reading: nothing was undone, nothing is missing
@@ -820,7 +890,7 @@ final class ShellSession {
         // is exactly the argument that did not save the other site.
         switch owner {
         case .row:
-            boardsRefusal = (host: offer.host, key: "account.source.boards.unread")
+            rowRefusal = (host: offer.host, key: "account.source.boards.unread")
             return
         // A join, pressed at the field or in the block, and reported under the field either way.
         case .page, .block:
@@ -976,7 +1046,8 @@ final class ShellSession {
         #endif
     }
 
-    /// A row's boards control was pressed and the forum's index could not be read.
+    /// A row's own press did not finish — the forum's index could not be read for its boards
+    /// control, or a Mastodon's sign-in failed — and the sentence that says so.
     ///
     /// **Drawn by the row whose host matches, and by nothing else.** The refusal sentence every
     /// other errand on this page writes is `refuse`, which `AccountPane` draws under the field —
@@ -985,7 +1056,7 @@ final class ShellSession {
     ///
     /// **Not `alarm`, and the row says why**: that colour is spent on the line that says a host
     /// was *not added* and why, and this host was added weeks ago. Nothing changed here.
-    var boardsRefusal: (host: String, key: String)?
+    var rowRefusal: (host: String, key: String)?
 
     /// The reader wants a different set of boards on a forum they already read.
     ///
@@ -1020,7 +1091,7 @@ final class ShellSession {
               // this whole entrance is built on.
               SourceRow.canChangeBoards(source.kind)
         else { return }
-        boardsRefusal = nil
+        rowRefusal = nil
         refuse = nil
         unread = []
         unreadAll = 0
@@ -1050,7 +1121,7 @@ final class ShellSession {
             // One sentence, in the row the reader pressed. Which failure it was does not change
             // what they can do about it — press again — so it does not change what they are told.
             guard mine == errand else { return }
-            boardsRefusal = (host: host, key: "account.source.boards.unread")
+            rowRefusal = (host: host, key: "account.source.boards.unread")
         }
     }
 
@@ -1086,7 +1157,7 @@ final class ShellSession {
         // `JoinSheet.leading(for:)` offers this button to none of them, so this is unreachable
         // from the sheet — and it declines by deciding rather than by falling through somebody
         // else's answer.
-        case .browsing, .previewing, .choosingBoards, nil:
+        case .browsing, .previewing, .choosingBoards, .choosingLists, nil:
             return
         }
     }
@@ -1143,7 +1214,7 @@ final class ShellSession {
 
     /// The tabs, rebuilt from what is actually joined.
     ///
-    /// **All and Trends are the only two queries of this store.** Boards stay a property of
+    /// **All and Trends, then the reader's own timelines in their order.** Boards stay a property of
     /// the source — what this device fetches next — not a third timeline. A forum is not
     /// offered Trends: it has no trending read, and an empty tab is a promise the app cannot keep.
     ///
@@ -1157,6 +1228,7 @@ final class ShellSession {
             return
         }
         queries = sources.contains(where: { Self.hasTrends($0.kind) }) ? [.all, .trends] : [.all]
+        queries += written.map { .written($0.id) }
         if !queries.contains(where: { $0 == timelineID }) {
             timelineID = .all
         }
@@ -1164,19 +1236,11 @@ final class ShellSession {
 
     /// Whether a source of this kind has a trending timeline to offer.
     ///
-    /// **No `default:`.** This is a switch over a protocol kind, and this branch has already
-    /// shipped one silent wrong answer through exactly that shape. A protocol added and not
-    /// listed here would silently inherit somebody else's answer about a tab it may not have.
+    /// **`ProtocolKind.hasTimelines`, not a second list**, so the Trends tab and the Trends
+    /// timeline's own rule cannot disagree about which servers have trends. A forum has none;
+    /// its boards choose what is fetched and are not tabs.
     static func hasTrends(_ kind: ProtocolKind) -> Bool {
-        switch kind {
-        case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
-            .gotosocial:
-            true
-        // Neither forum has one. Discourse publishes no trending read this app takes, and
-        // Discuz! publishes a page. A forum's boards choose what is fetched; they are not tabs.
-        case .discourse, .discuz, .unknown:
-            false
-        }
+        kind.hasTimelines
     }
 
     /// The client a join of this host should go through.
@@ -1226,7 +1290,7 @@ final class ShellSession {
     /// makes it safe for a row still on screen to ask again immediately — see `ShellPictures`,
     /// "What Clear means".
     ///
-    /// Presses this session's own caches — the ones `PreferencesPane` reads its figures off — so
+    /// Presses this session's own caches — the ones `UsagePane` reads its figures off — so
     /// that what the button empties and what the screen reports cannot come apart.
     ///
     /// Four kinds became six. Cookies and a saved password are things a signed-in forum left
@@ -1268,6 +1332,8 @@ final class ShellSession {
         // a Clear was pending would otherwise leave that Clear's question standing over a row that
         // has gone.
         clearing = nil
+        // Before the first await: Home posts read before the Clear must not land after it.
+        stopReadingAsYou(host: host)
         await emoji.forget(host: host)
         emojis.forget(host: host)
         pictures.forget(host: host)
@@ -1276,6 +1342,10 @@ final class ShellSession {
         // pictures and left the posts would empty half of what the reader was looking at.
         posts.forget(host: host)
         await forums.forget(host: host)
+        // Decision 10: a Mastodon's sign-in goes with a Clear as a forum's does. Signing out
+        // drops nothing that Home or a list brought in.
+        // The app registration goes with it, so nothing of the sign-in is left.
+        await mastodon.signOut(host: host, forgettingApp: true)
         // **The rows stay (#7).** Clear drops this source's copies — pictures in memory and on
         // disk, emoji, first posts, the sign-in — and not its place in the index: every row still
         // draws, reading its pictures from their hyperlinks again. Nothing in this app reads a
@@ -1321,8 +1391,151 @@ final class ShellSession {
     ///
     /// Through `forums.forget` and not through anything of its own, which is what makes `Clear` and
     /// `Remove` clear the sign-in too: there is one door and all three go through it (decision 13).
+    /// A Mastodon's door is `mastodon.signOut`, which `clear` reaches the same way (decision 10).
     func signOut(host: String) async {
-        await forums.forget(host: host.lowercased())
+        if kind(of: host) == .mastodon {
+            stopReadingAsYou(host: host)
+            await mastodon.signOut(host: host)
+        } else {
+            await forums.forget(host: host.lowercased())
+        }
+    }
+
+    /// Whether this device holds a sign-in for that source, whichever protocol it is.
+    func isSignedIn(host: String) -> Bool {
+        forums.reachedSignIn(host: host) || mastodon.isSignedIn(host: host)
+    }
+
+    /// A row's Sign in. A Mastodon signs in on its own page through `browser`; anything else is a
+    /// forum, and takes `signIn(host:)`'s path.
+    ///
+    /// Closing the page, or saying no on it, says nothing. Any other failure is one sentence under
+    /// the row, through `rowRefusal`, the row's one slot for a sentence about its own press.
+    /// A source removed while its page is up is not signed in to.
+    func signIn(host raw: String, through browser: any OAuthBrowser) async {
+        guard let host = try? Host.parse(raw) else { return }
+        guard kind(of: host) == .mastodon else {
+            await signIn(host: host)
+            return
+        }
+        if rowRefusal?.host == host { rowRefusal = nil }
+        guard let failure = await mastodon.signIn(host: host, through: browser) else {
+            if mastodon.isSignedIn(host: host) { await readAsYou(host: host) }
+            return
+        }
+        NetLog.auth.notice("\(NetLog.line("sign-in", host: host, error: failure), privacy: .public)")
+        guard isAdded(host) else { return }
+        rowRefusal = (host: host, key: Self.signInFailureKey(failure))
+    }
+
+    /// Home and the lists this source reads, read as the reader (#25) — right after a sign-in.
+    ///
+    /// Only through the signed-in door, so a source never signed in to asks nothing here. A read
+    /// that did not all come back is one sentence under the row; a server that ended the sign-in
+    /// is told to `mastodon`, which signs the row out and says so.
+    func readAsYou(host: String) async {
+        guard let door = mastodon.authorized(host: host) else { return }
+        await readingAsYou(host: host, key: "account.mastodon.home.progress") {
+            try await MastodonAccount(door: door, store: self.store).read()
+        }
+    }
+
+    /// The reader wants a different set of lists on a Mastodon they are signed in to — the boards
+    /// restate's shape (`changeBoards`): the server's lists are read, and the picker opens ticked
+    /// from what is chosen, intersected with what the server still has.
+    func changeLists(host raw: String) async {
+        let host = raw.lowercased()
+        guard Self.rowActsLive(at: stage, checking: checking),
+              let source = sources.first(where: { $0.host == host }),
+              SourceRow.canChooseLists(source.kind),
+              let door = mastodon.authorized(host: host)
+        else { return }
+        rowRefusal = nil
+        progressHost = host
+        errand += 1
+        let mine = errand
+        progress = ProgressReport(owner: .row(host: host), key: "account.source.lists.progress")
+        defer { progress = nil }
+        do {
+            let offered = try await MastodonAccount(door: door, store: store).lists()
+            guard mine == errand else { return }
+            let chosen = Set(source.lists.map(\.id)).intersection(offered.map(\.id))
+            stage = .choosingLists(ListChoice(host: host, offered: offered, ticked: chosen))
+        } catch MastodonAuthError.signedOut {
+            mastodon.endedByServer(host: host)
+        } catch let error where Cancellation.happened(error) {
+            progressHost = ""
+        } catch {
+            guard mine == errand else { return }
+            rowRefusal = (host: host, key: "account.source.lists.unread")
+        }
+    }
+
+    /// The reader pressed Done on the lists: `picks` becomes what this source reads, and the lists
+    /// not chosen before are read now. An empty pick is a choice too — Home alone.
+    func chooseLists(_ picks: [ListSubscription]) async {
+        guard case .choosingLists(let choice) = stage, !checking else { return }
+        errand += 1
+        stage = nil
+        guard let door = mastodon.authorized(host: choice.host) else { return }
+        progressHost = choice.host
+        await readingAsYou(host: choice.host, key: "account.source.lists.reading") {
+            try await MastodonAccount(door: door, store: self.store).choose(picks)
+        }
+    }
+
+    /// The reads as the reader in flight, per host — so a sign-out, Clear or Remove can stop them
+    /// before their posts land (`stopReadingAsYou`).
+    @ObservationIgnored private var readsAsYou: [String: Task<Void, Never>] = [:]
+
+    /// One errand of reads as the reader, reported in its row.
+    ///
+    /// **It reports only where nothing else is.** A sign-in can finish while another row's errand
+    /// is on the wire; this read then runs without a line rather than taking that row's line and
+    /// clearing it when it ends.
+    private func readingAsYou(
+        host: String, key: String, _ read: @escaping @MainActor () async throws -> Bool
+    ) async {
+        let report = ProgressReport(owner: .row(host: host), key: key)
+        let reports = progress == nil
+        if reports { progress = report }
+        let task = Task { @MainActor in
+            do {
+                let complete = try await read()
+                await adopt()
+                if !complete { rowRefusal = (host: host, key: "account.mastodon.read.partial") }
+            } catch MastodonAuthError.signedOut {
+                mastodon.endedByServer(host: host)
+            } catch {
+                // Stopped, or a reader walking away: nothing came in and there is nothing to say.
+            }
+        }
+        readsAsYou[host] = task
+        await task.value
+        if readsAsYou[host] == task { readsAsYou[host] = nil }
+        if reports, progress == report { progress = nil }
+    }
+
+    /// Stops the reads as the reader in flight for `host`: signed out, cleared or removed, nothing
+    /// they bring may land afterwards.
+    private func stopReadingAsYou(host: String) {
+        readsAsYou.removeValue(forKey: host.lowercased())?.cancel()
+        reload.stop(host: host)
+    }
+
+    /// The sentence under a Mastodon row whose sign-in did not finish.
+    static func signInFailureKey(_ failure: MastodonSignInError) -> String {
+        switch failure {
+        case .unreachable, .http: "account.mastodon.failed.unreachable"
+        case .keychain: "account.mastodon.failed.keychain"
+        case .cancelled, .denied, .stateMismatch, .unreadable, .clientRejected, .invalidScope:
+            "account.mastodon.failed"
+        }
+    }
+
+    private func kind(of host: String) -> ProtocolKind? {
+        let host = host.lowercased()
+        return sources.first { $0.host == host }?.kind
     }
 
     /// The reader has stopped reading a server: it goes, and everything it left here goes with it.
@@ -1353,6 +1566,7 @@ final class ShellSession {
         // The question has been answered, so nothing is pending any more — set before the awaits,
         // so no dialog state outlives the decision it was asking about.
         removing = nil
+        stopReadingAsYou(host: host)
         if progressHost.lowercased() == host {
             // **The errand in flight is about the server that just went, so it ends here.** This
             // is the same token `add`, `take` and `subscribe` compare before they write, bumped by
@@ -1388,7 +1602,7 @@ final class ShellSession {
         if offerSignIn?.lowercased() == host { offerSignIn = nil }
         // A sentence drawn by a row that has gone. Its own host and not `progressHost`, because a
         // refusal outlives the errand that produced it — that is the whole of what it is for.
-        if boardsRefusal?.host == host { boardsRefusal = nil }
+        if rowRefusal?.host == host { rowRefusal = nil }
         // The sheet holding somebody else's login page, where it is that server's. A race rather
         // than a click today, because `signIn` sets this *after* `await forums.signIn(host:)` and
         // that await is exactly the window a Remove is pressable in — and properly reachable once

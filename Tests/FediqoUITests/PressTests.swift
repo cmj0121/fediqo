@@ -16,7 +16,7 @@ struct PressTests {
             handle: "@ada@first.example",
             body: "words",
             postedAt: Date(timeIntervalSince1970: 1_700_000_000),
-            origins: [.publicTimeline],
+            categories: [.public],
             attachments: (0..<attachments).map { n in
                 FediqoCore.Attachment(
                     kind: .image,

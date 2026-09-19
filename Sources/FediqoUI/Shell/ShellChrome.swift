@@ -94,6 +94,15 @@ enum ShellChrome {
         scheme == .dark ? rgb(0.898, 0.478, 0.443) : rgb(0.643, 0.212, 0.180)
     }
 
+    // MARK: The cover
+
+    /// The guard-plate hatch a covered post carries. Covered is neither where the reader is nor
+    /// a mark they switched on nor a refusal, so it takes no hue: the ink ramp carries it and the
+    /// pattern does the work. Decoration rather than text, so it has no contrast floor.
+    static func hatch(_ scheme: ColorScheme) -> Color {
+        ink(scheme).opacity(scheme == .dark ? 0.16 : 0.12)
+    }
+
     // MARK: On top of somebody's photograph
 
     /// The ink of a mark drawn over an attachment, and the shade it sits on.
@@ -106,6 +115,9 @@ enum ShellChrome {
     static let overPicture = Color.white
 
     static let scrim = Color.black.opacity(0.55)
+
+    /// The hatch drawn over a covered picture. No scheme, for the reason `scrim` takes none.
+    static let hatchOverPicture = overPicture.opacity(0.28)
 
     /// The ground a picture is opened on, when `v` gives it the whole app.
     ///

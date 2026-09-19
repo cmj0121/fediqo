@@ -28,7 +28,7 @@ private struct DummyKeyPresses: ViewModifier {
             .onAppear { focused = true }
             .onKeyPress(
                 keys: [
-                    "?", "/", "c", "j", "k", "g", "v", "a", "m", "s", "q", "r", " ",
+                    "?", "/", "c", "j", "k", "g", "v", "a", "m", "s", "q", "r", "e", " ",
                     .escape, .tab, .return, .upArrow, .downArrow,
                 ],
                 phases: .down
@@ -39,7 +39,12 @@ private struct DummyKeyPresses: ViewModifier {
                 let shift = press.modifiers.contains(.shift)
                 let control = press.modifiers.contains(.control)
                 let command = press.modifiers.contains(.command)
-                return handle(press.key.character, shift, control, command) ? .handled : .ignored
+                // A key press here carries no physical key, so the slash key is told by what it
+                // typed: Shift on the ANSI `/` types `?`, and on a layout whose `/` is shifted, `/`.
+                let character = DummyCommand.typed(
+                    press.key.character, shift: shift, onSlashKey: press.characters == "?"
+                )
+                return handle(character, shift, control, command) ? .handled : .ignored
             }
     }
 }
@@ -53,6 +58,8 @@ private enum DummyKeyCode {
     static let keypadEnter: UInt16 = 76
     static let downArrow: UInt16 = 125
     static let upArrow: UInt16 = 126
+    /// The key that is `/` on an ANSI keyboard, wherever the layout puts its `/`.
+    static let slash: UInt16 = 44
 }
 
 private struct DummyKeyMonitor: ViewModifier {
@@ -66,9 +73,12 @@ private struct DummyKeyMonitor: ViewModifier {
                 let handle = handle
                 monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
                     guard event.window?.isSheet != true,
-                          let character = dummyCharacter(of: event)
+                          let pressed = dummyCharacter(of: event)
                     else { return event }
                     let shift = event.modifierFlags.contains(.shift)
+                    let character = DummyCommand.typed(
+                        pressed, shift: shift, onSlashKey: event.keyCode == DummyKeyCode.slash
+                    )
                     let control = event.modifierFlags.contains(.control)
                     let command = event.modifierFlags.contains(.command)
                     let kept = MainActor.assumeIsolated {

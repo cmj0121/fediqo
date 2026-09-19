@@ -38,6 +38,26 @@ public enum ProtocolKind: String, Sendable, Hashable, CaseIterable {
         case .unknown: "unknown protocol"
         }
     }
+
+    /// Whether a source of this kind has the timelines every Mastodon-shaped server shares —
+    /// public, trends, home — so that a category naming one of them can mean this source.
+    ///
+    /// **The one list**, read by the Trends tab and by a timeline's rules alike: a second list
+    /// is how the tab and the rule come to disagree about a server. No `default:`, so a kind
+    /// added later has to be answered here rather than inheriting somebody else's answer.
+    public var hasTimelines: Bool {
+        switch self {
+        case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
+            .gotosocial:
+            true
+        // Neither forum has one. A forum's categories are its boards.
+        case .discourse, .discuz, .unknown:
+            false
+        }
+    }
+
+    /// Whether this is a forum, whose authors are that forum's and nobody else's.
+    public var isForum: Bool { self == .discourse || self == .discuz }
 }
 
 /// One board of a forum the reader subscribed to.
@@ -52,6 +72,20 @@ public struct BoardSubscription: Identifiable, Hashable, Sendable {
 
     public init(fid: Int, name: String) {
         self.fid = fid
+        self.name = name
+    }
+}
+
+/// One Mastodon list the reader chose to read (#25), the way a board is chosen.
+///
+/// **The id is the subscription and the name is the label**, as with a board: a list renamed on
+/// the server is still this list, and only `name` changes.
+public struct ListSubscription: Identifiable, Hashable, Sendable {
+    public let id: String
+    public let name: String
+
+    public init(id: String, name: String) {
+        self.id = id
         self.name = name
     }
 }
@@ -81,12 +115,22 @@ public struct Source: Identifiable, Hashable, Sendable {
     /// forum that renamed a board between two reads would otherwise give a reader two
     /// subscriptions to one board, with two names, and no way to tell which.
     public let boards: [BoardSubscription]
+    /// The Mastodon lists chosen to be read, in the order they were picked; at most one per id.
+    /// Empty for every source that is not a signed-in Mastodon, and kept through a sign-out.
+    public let lists: [ListSubscription]
 
-    public init(host: String, kind: ProtocolKind, boards: [BoardSubscription] = []) {
+    public init(
+        host: String,
+        kind: ProtocolKind,
+        boards: [BoardSubscription] = [],
+        lists: [ListSubscription] = []
+    ) {
         self.host = host.lowercased()
         self.kind = kind
         var seen: Set<Int> = []
         self.boards = boards.filter { seen.insert($0.fid).inserted }
+        var seenLists: Set<String> = []
+        self.lists = lists.filter { seenLists.insert($0.id).inserted }
     }
 
     public func subscribes(to fid: Int) -> Bool {
@@ -94,9 +138,29 @@ public struct Source: Identifiable, Hashable, Sendable {
     }
 }
 
-public enum FetchOrigin: String, Sendable, Hashable {
-    case publicTimeline
-    case trending
+/// How the source itself divides what it serves, and what a post arrived through (#25).
+///
+/// **Known by id; a name is only a label** and lives on the source (`boards`, `lists`), never on
+/// the note — a board or list renamed on the server is still the same category. A category means
+/// nothing without its note's `source.host`: a board id is one forum's, while public and trends
+/// mean the same thing on every Mastodon source.
+///
+/// **Every kind 0.2.0 knows is here from the first 0.2.0 store on.** A store must never hold a
+/// kind the build reading it cannot name: that build would drop it on load and lose it at the
+/// next save. A kind added after a release must also
+/// register a new store migration — an empty one will do — so an older build refuses the store
+/// rather than silently dropping what it cannot read.
+public enum Category: Hashable, Sendable {
+    /// A Mastodon source's public timeline.
+    case `public`
+    /// A Mastodon source's trending statuses.
+    case trends
+    /// A signed-in Mastodon account's home timeline.
+    case home
+    /// A Mastodon list, by the id the server gives it; its name is only a label.
+    case list(id: String)
+    /// A forum section, by the id the source gives it — Discuz!'s `fid` as a string.
+    case board(id: String)
 }
 
 public enum Audience: String, Sendable, Hashable {
@@ -201,7 +265,7 @@ public struct Attachment: Sendable, Hashable {
     public var isEmpty: Bool { displayURL == nil }
 }
 
-/// A note this device has stored. Origins remember how it arrived.
+/// A note this device has stored. Its categories remember what it arrived through.
 public struct Note: Identifiable, Hashable, Sendable {
     public let id: String
     /// Which server handed this copy over, and **what future fetches about it are tagged with**.
@@ -232,23 +296,21 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// The section of the source this was posted in — a forum's category. Nothing where the
     /// source has no such division, which is every microblog.
     public let board: String?
-    /// What the source calls that section, as against what it *shows* the reader.
-    ///
-    /// **Kept as data, and persisted, for a later per-board filter.** Nothing draws a board on
-    /// its own today — the timelines are All and Trends — but a filter that does will need the
-    /// section's identity, and a name is not one: a board's heading on its own page and its name
-    /// in the forum's index are written by hand and are free to differ, and an administrator can
-    /// rename a board between two reads.
-    ///
-    /// A `String` rather than the number Discuz! uses, because a section id is whatever the
-    /// source says it is and Discourse's is its own; this is the identity, not the format.
-    /// Nothing where the page carried no id — a forum's cross-board listing names no section per
-    /// row — and a reader of this must fall back to the name rather than assume.
-    public let boardID: String?
     public let postedAt: Date
-    public var origins: Set<FetchOrigin>
+    /// Every category this copy arrived through. Only grows: a later fetch that did not come
+    /// through one takes nothing away (#25). Empty is a post from a cross-board listing — a forum's
+    /// front page — which a source rule still reaches.
+    public var categories: Set<Category>
     public let reply: Reply?
+    /// The name of whoever boosted this copy, as drawn.
     public let boostedBy: String?
+    /// Who boosted this copy, as `@user@instance`, so an author rule can match the booster (#26).
+    ///
+    /// **Only as good as the first copy.** A boost and its original share one row per host, and
+    /// the first copy to arrive is the one kept, so a boost that arrives after its original
+    /// leaves no booster here and matches on its author alone. Nothing fills it in afterwards,
+    /// and a note stored before this existed has none.
+    public let boosterHandle: String?
     public let audience: Audience?
     public let avatarURL: URL?
     /// What came attached, in the order the server listed it. Empty is a post that brought
@@ -266,6 +328,10 @@ public struct Note: Identifiable, Hashable, Sendable {
     public let emojis: [CustomEmoji]
     public let url: URL?
     public let counts: Counts
+    /// The id the server this copy came through gives the status, where it is a microblog's —
+    /// what reading the post again (#29) asks for. Nothing on a row stored before 0.2.0 learned
+    /// it, and on every forum post.
+    public let statusID: String?
 
     public init(
         id: String,
@@ -275,11 +341,11 @@ public struct Note: Identifiable, Hashable, Sendable {
         body: String,
         title: String? = nil,
         board: String? = nil,
-        boardID: String? = nil,
         postedAt: Date,
-        origins: Set<FetchOrigin>,
+        categories: Set<Category>,
         reply: Reply? = nil,
         boostedBy: String? = nil,
+        boosterHandle: String? = nil,
         audience: Audience? = nil,
         avatarURL: URL? = nil,
         attachments: [Attachment] = [],
@@ -287,7 +353,8 @@ public struct Note: Identifiable, Hashable, Sendable {
         spoiler: String? = nil,
         emojis: [CustomEmoji] = [],
         url: URL? = nil,
-        counts: Counts = Counts()
+        counts: Counts = Counts(),
+        statusID: String? = nil
     ) {
         self.id = id
         self.source = source
@@ -296,11 +363,11 @@ public struct Note: Identifiable, Hashable, Sendable {
         self.body = body
         self.title = title
         self.board = board
-        self.boardID = boardID
         self.postedAt = postedAt
-        self.origins = origins
+        self.categories = categories
         self.reply = reply
         self.boostedBy = boostedBy
+        self.boosterHandle = boosterHandle
         self.audience = audience
         self.avatarURL = avatarURL
         self.attachments = attachments
@@ -309,6 +376,22 @@ public struct Note: Identifiable, Hashable, Sendable {
         self.emojis = emojis
         self.url = url
         self.counts = counts
+        self.statusID = statusID
+    }
+
+    /// This copy, read again, laid over the one held for the same row (#29): what the server says
+    /// now — text, cover, attachments, counts — with the categories the held copy arrived through
+    /// kept (and grown), its booster kept, and its board where this read names none.
+    func refreshed(over held: Note) -> Note {
+        Note(
+            id: id, source: source, author: author, handle: handle, body: body, title: title,
+            board: board ?? held.board, postedAt: postedAt,
+            categories: held.categories.union(categories), reply: reply,
+            boostedBy: held.boostedBy, boosterHandle: held.boosterHandle,
+            audience: audience, avatarURL: avatarURL, attachments: attachments,
+            sensitive: sensitive, spoiler: spoiler, emojis: emojis, url: url, counts: counts,
+            statusID: statusID ?? held.statusID
+        )
     }
 }
 

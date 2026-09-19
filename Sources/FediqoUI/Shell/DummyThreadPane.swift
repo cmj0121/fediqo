@@ -72,7 +72,13 @@ struct DummyThreadPane: View {
                     .padding(.vertical, 8)
                     .padding(.trailing, 8)
                 }
-                .scrollIndicators(.hidden)
+                .scrollIndicators(.never)
+                .onAppear {
+                    guard let id = DummyCommand.centredOnAppear(selected: selectedID, opening: root.id)
+                    else { return }
+                    // A tick later: a lazy stack just built has not laid out the row to scroll to.
+                    Task { @MainActor in proxy.scrollTo(id, anchor: .center) }
+                }
                 .onChange(of: selectedID) { _, id in
                     guard let id else { return }
                     withAnimation(.easeInOut(duration: 0.18)) {

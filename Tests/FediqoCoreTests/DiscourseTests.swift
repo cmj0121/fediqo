@@ -162,6 +162,9 @@ struct DiscourseTests {
         let notes = try await DiscourseClient(http: http, host: Self.host).latest(source: Self.source)
 
         #expect(notes.count == 3)
+        // `/latest.json` is a cross-board listing: a topic names its section but did not arrive
+        // through it, so none carries a category (#31).
+        #expect(notes.allSatisfy { $0.categories.isEmpty })
         let first = try #require(notes.first)
 
         // The title is the post. A forum's front page carries no excerpt for most topics, so a
@@ -195,6 +198,9 @@ struct DiscourseTests {
 
         // Both documents were read, and nothing else was.
         #expect(await Set(http.paths) == ["/latest.json", "/site.json"])
+        // Newest topic first, not newest activity: a row is dated by when the topic was created.
+        let front = await http.requested.first { $0.path == "/latest.json" }
+        #expect(front?.query == "order=created")
     }
 
     @Test("A topic is dated when it was asked, not when a stranger last answered")

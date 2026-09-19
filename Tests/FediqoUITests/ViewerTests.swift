@@ -13,9 +13,9 @@ import Testing
 struct ViewerTests {
     // MARK: The layer order
 
-    @Test("The order is viewer, shortcuts, thread, selection")
+    @Test("The order is viewer, shortcuts, thread, search, selection")
     func theOrderIsTheOrder() {
-        #expect(DummyLayer.allCases == [.viewer, .shortcuts, .thread, .selection])
+        #expect(DummyLayer.allCases == [.viewer, .shortcuts, .thread, .search, .selection])
     }
 
     @Test("A dismissing press closes the outermost thing that is open, and only that")
@@ -57,9 +57,9 @@ struct ViewerTests {
     /// independently of them.
     ///
     /// The cases above are the ones worth reading; this is the one that cannot be wrong about a
-    /// combination nobody thought of. Sixteen subsets of four layers is the whole world, and it
+    /// combination nobody thought of. Every subset of the layers is the whole world, and it
     /// is enumerated from `allCases` rather than listed — so a fifth layer widens this test on
-    /// the day it is added instead of leaving its sixteen new combinations unasserted.
+    /// the day it is added instead of leaving its new combinations unasserted.
     @Test("Both rules hold for every set of open layers")
     func theRulesOverTheWholeWorld() {
         let layers = DummyLayer.allCases
@@ -335,7 +335,7 @@ struct ViewerTests {
             handle: "@ada@first.example",
             body: "words",
             postedAt: Date(timeIntervalSince1970: 1_700_000_000),
-            origins: [.publicTimeline],
+            categories: [.public],
             attachments: [FediqoCore.Attachment(
                 kind: .image,
                 previewURL: Self.picture,
@@ -366,7 +366,7 @@ struct ViewerTests {
             handle: "@ada@first.example",
             body: "words",
             postedAt: Date(timeIntervalSince1970: 1_700_000_000),
-            origins: [.publicTimeline],
+            categories: [.public],
             attachments: attachments,
             spoiler: spoiler
         ))
@@ -412,6 +412,7 @@ struct ViewerTests {
         var viewing: String?
         var threadOpen = false
         var shortcutsOpen = false
+        var searchOpen = false
         var shortcutTab = DummyShortcutGroup.timeline
         var decks = ShellDecks()
         var playing = ShellPlaying()
@@ -431,6 +432,7 @@ struct ViewerTests {
             case .viewer: viewedItem != nil
             case .shortcuts: shortcutsOpen
             case .thread: threadOpen
+            case .search: searchOpen
             case .selection: selected != nil
             }
         }
@@ -509,6 +511,10 @@ struct ViewerTests {
                     shortcutsOpen = false
                     return true
                 case .thread: threadOpen = false; return true
+                case .search:
+                    guard command == .dismiss else { return false }
+                    searchOpen = false
+                    return true
                 case .selection:
                     guard command == .dismiss else { return false }
                     selected = nil

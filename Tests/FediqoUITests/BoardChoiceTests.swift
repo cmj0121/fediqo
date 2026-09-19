@@ -42,7 +42,7 @@ struct BoardChoiceTests {
             "https://\(host)/forum.php": index,
         ]
         for (fid, outcome) in boards {
-            routes["https://\(host)/forum.php?mod=forumdisplay&fid=\(fid)"] = outcome
+            routes["https://\(host)/forum.php?mod=forumdisplay&fid=\(fid)&filter=author&orderby=dateline"] = outcome
         }
         return FixtureHTTP(routes)
     }
@@ -415,7 +415,7 @@ struct BoardChoiceTests {
 
         #expect(session.queries.map(\.id) == ["all"])
         #expect(session.timelineID == .all)
-        #expect(!TimelineQuery.all.items(from: session.notes).isEmpty)
+        #expect(!TimelineQuery.all.items(from: session.notes, latest: nil).isEmpty)
     }
 
     // MARK: - Saying what did not work
@@ -945,7 +945,7 @@ struct BoardChoiceTests {
         // the press drops it by walking the picks rather than by a rule about it.
         #expect(origin.keeping.map(\.fid) == [33, 40, 37])
         #expect(reopened.refuse == nil, "decision 26: a dropped board gets no sentence")
-        #expect(reopened.boardsRefusal == nil)
+        #expect(reopened.rowRefusal == nil)
     }
 
     /// **Decision 24, from both ends.** Core cannot express "unsubscribe from everything" — with
@@ -990,14 +990,14 @@ struct BoardChoiceTests {
         await refusing.changeBoards(host: Self.host)
 
         #expect(refusing.stage == nil, "the picker opened on an index that was never read")
-        #expect(refusing.boardsRefusal?.host == Self.host)
-        #expect(refusing.boardsRefusal?.key == "account.source.boards.unread")
+        #expect(refusing.rowRefusal?.host == Self.host)
+        #expect(refusing.rowRefusal?.key == "account.source.boards.unread")
         // Not the page's own refusal line: that one is drawn under the field and says a host was
         // not added. This host was added weeks ago and nothing changed.
         #expect(refusing.refuse == nil)
         // And it goes when the row does.
         await refusing.remove(host: Self.host)
-        #expect(refusing.boardsRefusal == nil)
+        #expect(refusing.rowRefusal == nil)
     }
 
     /// **Risk 12's class, closed at the one place it can be.** All four controls are dimmed on
@@ -1146,10 +1146,10 @@ struct BoardChoiceTests {
         // Everything already subscribed is unticked, and only the new board is picked.
         await session.subscribe(offer.boards.filter { $0.fid == 41 })
 
-        #expect(session.boardsRefusal?.host == Self.host, """
+        #expect(session.rowRefusal?.host == Self.host, """
             A restate that failed at Subscribe said nothing in the row the reader pressed.
             """)
-        #expect(session.boardsRefusal?.key == "account.source.boards.unread")
+        #expect(session.rowRefusal?.key == "account.source.boards.unread")
         #expect(session.refuse == nil, """
             A restate drew an alarm-coloured line under the field about a host that was added \
             weeks ago and is still in the reader's list. That colour is spent on a host that was \
@@ -1218,7 +1218,7 @@ struct BoardChoiceTests {
         await session.changeBoards(host: Self.host)
 
         #expect(session.stage == nil)
-        #expect(session.boardsRefusal == nil, """
+        #expect(session.rowRefusal == nil, """
             A protocol with no picker was told its boards could not be read. Nothing was read, \
             because there was nothing to read — and that is not a failure to report.
             """)
@@ -1440,10 +1440,10 @@ struct BoardChoiceTests {
                 <html><head><meta name="generator" content="Discuz! X5.0" /></head><body></body></html>
                 """#),
                 "https://\(Self.host)/forum.php": .text(Self.fourBoards),
-                "https://\(Self.host)/forum.php?mod=forumdisplay&fid=33":
+                "https://\(Self.host)/forum.php?mod=forumdisplay&fid=33&filter=author&orderby=dateline":
                     .text(Self.oneBoard(33)),
             ],
-            holding: "https://\(Self.host)/forum.php?mod=forumdisplay&fid=33"
+            holding: "https://\(Self.host)/forum.php?mod=forumdisplay&fid=33&filter=author&orderby=dateline"
         )
         let session = ShellSession(http: http, store: ItemStore())
         let pane = AccountPane(session: session)
@@ -1489,8 +1489,8 @@ struct BoardChoiceTests {
     func aRestatesBoardReadSaysTheSameThing() async {
         let (seeded, _) = await Self.reading()
         let http = GatedHTTP(
-            ["https://\(Self.host)/forum.php?mod=forumdisplay&fid=40": .text(Self.oneBoard(40))],
-            holding: "https://\(Self.host)/forum.php?mod=forumdisplay&fid=40"
+            ["https://\(Self.host)/forum.php?mod=forumdisplay&fid=40&filter=author&orderby=dateline": .text(Self.oneBoard(40))],
+            holding: "https://\(Self.host)/forum.php?mod=forumdisplay&fid=40&filter=author&orderby=dateline"
         )
         let session = ShellSession(http: http, store: seeded.store)
         session.sources = seeded.sources

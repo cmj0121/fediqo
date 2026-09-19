@@ -15,8 +15,7 @@ struct StoreFileTests {
         handle: String = "@ada",
         title: String? = nil,
         board: String? = nil,
-        boardID: String? = nil,
-        origins: Set<FetchOrigin> = [.publicTimeline],
+        categories: Set<FediqoCore.Category> = [.public],
         reply: Reply? = nil,
         boostedBy: String? = nil,
         avatarURL: URL? = nil,
@@ -28,7 +27,7 @@ struct StoreFileTests {
     ) -> Note {
         Note(
             id: id, source: source ?? mastodon, author: "Ada", handle: handle, body: "hello",
-            title: title, board: board, boardID: boardID, postedAt: origin, origins: origins,
+            title: title, board: board, postedAt: origin, categories: categories,
             reply: reply, boostedBy: boostedBy, avatarURL: avatarURL, attachments: attachments,
             sensitive: sensitive, spoiler: spoiler, emojis: emojis, url: url
         )
@@ -38,7 +37,7 @@ struct StoreFileTests {
     func roundTrip() async throws {
         let file = try StoreFile(database: DatabaseQueue())
         let forum = Source(host: "forum.example", kind: .discuz, boards: [BoardSubscription(fid: 33, name: "a")])
-        let saved = note(id: "https://first.example/users/ada/statuses/1", origins: [.publicTimeline, .trending])
+        let saved = note(id: "https://first.example/users/ada/statuses/1", categories: [.public, .trends])
         try await file.save(sources: [mastodon, forum], notes: [saved])
         let loaded = try file.load()
         #expect(loaded.sources == [mastodon, forum])
@@ -51,13 +50,42 @@ struct StoreFileTests {
         let forum = Source(host: "forum.example", kind: .discuz)
         let picture = URL(string: "https://forum.example/a.png")
         let saved = note(
-            source: forum, title: "tool", board: "tools", boardID: "33",
+            source: forum, title: "tool", board: "tools", categories: [.board(id: "33")],
             reply: Reply(handle: "@bob"), boostedBy: "Carol",
             avatarURL: picture, attachments: [FediqoCore.Attachment(kind: .image, url: picture)],
             sensitive: true, spoiler: "cover"
         )
         try await file.save(sources: [forum], notes: [saved])
         #expect(try file.load().notes == [saved])
+    }
+
+    @Test("Who boosted a post, as user@instance, survives a relaunch; a post nobody boosted has nobody")
+    func boosterHandleSurvivesRelaunch() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let boosted = Note(
+            id: "1", source: mastodon, author: "Ada", handle: "@ada@second.example", body: "hello",
+            postedAt: origin, categories: [.public], boostedBy: "Bob", boosterHandle: "@bob@first.example"
+        )
+        let plain = note(id: "2")
+        try await StoreFile(at: dir).save(sources: [mastodon], notes: [boosted, plain])
+        let loaded = StoreFile.open(at: dir).notes
+        #expect(loaded.first { $0.id == "1" }?.boosterHandle == "@bob@first.example")
+        #expect(loaded.first { $0.id == "2" }?.boosterHandle == nil)
+    }
+
+    @Test("A post's id on its server survives a relaunch; a row without one reads back as none")
+    func statusIDSurvivesRelaunch() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let known = Note(
+            id: "1", source: mastodon, author: "Ada", handle: "@ada@first.example", body: "hello",
+            postedAt: origin, categories: [.public], statusID: "10942"
+        )
+        try await StoreFile(at: dir).save(sources: [mastodon], notes: [known, note(id: "2")])
+        let loaded = StoreFile.open(at: dir).notes
+        #expect(loaded.first { $0.id == "1" }?.statusID == "10942")
+        #expect(loaded.first { $0.id == "2" }?.statusID == nil)
     }
 
     @Test("A reply whose parent's handle is unknown comes back a reply")
@@ -82,7 +110,7 @@ struct StoreFileTests {
     func rowFactsSurviveRelaunch() async throws {
         let dir = scratch()
         defer { try? FileManager.default.removeItem(at: dir) }
-        let saved = note(board: "tools", boardID: "33", reply: Reply(handle: nil), boostedBy: "Carol", sensitive: true, spoiler: "")
+        let saved = note(board: "tools", categories: [.board(id: "33")], reply: Reply(handle: nil), boostedBy: "Carol", sensitive: true, spoiler: "")
         try await StoreFile(at: dir).save(sources: [mastodon], notes: [saved])
         let opened = StoreFile.open(at: dir)
         #expect(opened.setAside == nil)
@@ -97,7 +125,7 @@ struct StoreFileTests {
         let old = note(id: "old")
         let new = Note(
             id: "new", source: mastodon, author: "Ada", handle: "@ada", body: "hello",
-            postedAt: origin.addingTimeInterval(30 * 86_400), origins: [.publicTimeline]
+            postedAt: origin.addingTimeInterval(30 * 86_400), categories: [.public]
         )
         let store = ItemStore(sources: [mastodon], notes: [old, new])
         #expect(await store.setRetention(months: 1, from: origin.addingTimeInterval(40 * 86_400)) == 1)
@@ -199,7 +227,7 @@ struct StoreFileTests {
         let one = Source(host: "a.example", kind: .mastodon)
         let two = Source(host: "b.example", kind: .mastodon)
         let uri = "https://origin.example/users/ada/statuses/1"
-        let saved = [note(id: uri, source: one), note(id: uri, source: two, origins: [.trending])]
+        let saved = [note(id: uri, source: one), note(id: uri, source: two, categories: [.trends])]
         try await file.save(sources: [one, two], notes: saved)
         #expect(Set(try file.load().notes) == Set(saved))
     }
@@ -224,18 +252,35 @@ struct StoreFileTests {
     func titleAndKind() async throws {
         let file = try StoreFile(database: DatabaseQueue())
         let forum = Source(host: "forum.example", kind: .discuz)
-        let saved = note(id: "tid-7", source: forum, title: "A thread", origins: [.trending])
+        let saved = note(id: "tid-7", source: forum, title: "A thread", categories: [.trends])
         try await file.save(sources: [forum], notes: [saved])
         let loaded = try file.load()
         #expect(loaded.notes == [saved])
         #expect(loaded.sources.first?.kind == .discuz)
     }
 
-    @Test("A note seen in no list comes back seen in no list")
-    func emptyOrigins() async throws {
+    @Test("Every kind of category, an odd board id among them, and none, survive a save and a relaunch")
+    func categoriesRoundTrip() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let forum = Source(host: "forum.example", kind: .discuz)
+        let saved = [
+            note(id: "1", categories: [.public, .trends, .board(id: "a:b \"q\" 🧵")]),
+            note(id: "2", categories: []),
+            note(id: "4", categories: [.home, .list(id: "42"), .list(id: "a:b \"q\" 🧵"), .public]),
+            note(id: "3", source: forum, categories: [.board(id: "37"), .board(id: "4")]),
+        ]
+        try await StoreFile(at: dir).save(sources: [mastodon, forum], notes: saved)
+        let opened = StoreFile.open(at: dir)
+        #expect(opened.setAside == nil)
+        #expect(Set(opened.notes) == Set(saved))
+    }
+
+    @Test("A note seen in no category comes back in none")
+    func emptyCategories() async throws {
         let file = try StoreFile(database: DatabaseQueue())
-        try await file.save(sources: [mastodon], notes: [note(origins: [])])
-        #expect(try file.load().notes.first?.origins == [])
+        try await file.save(sources: [mastodon], notes: [note(categories: [])])
+        #expect(try file.load().notes.first?.categories == [])
     }
 
     @Test("Board names holding separators, quotes and emoji survive", arguments: [
@@ -248,12 +293,51 @@ struct StoreFileTests {
         #expect(try file.load().sources.first?.boards == boards)
     }
 
+    @Test("Chosen lists and what Home and they brought in survive a relaunch; boards are written as before")
+    func listsRoundTrip() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let lists = [ListSubscription(id: "42", name: "Friends"), ListSubscription(id: "7", name: "a:b \"q\" 🧵")]
+        let signedIn = Source(host: "first.example", kind: .mastodon, lists: lists)
+        let forum = Source(host: "forum.example", kind: .discuz, boards: [BoardSubscription(fid: 33, name: "a")])
+        let saved = [
+            note(id: "1", source: signedIn, categories: [.home, .list(id: "42")]),
+            note(id: "2", source: signedIn, categories: [.public]),
+        ]
+        let file = try StoreFile(at: dir)
+        try await file.save(sources: [signedIn, forum], notes: saved)
+        let written = try await file.db.read { db in
+            try String.fetchOne(db, sql: "SELECT boards FROM source WHERE host = 'forum.example'")
+        }
+        #expect(written == #"[{"fid":33,"name":"a"}]"#)
+        let opened = StoreFile.open(at: dir)
+        #expect(opened.setAside == nil)
+        #expect(opened.sources == [signedIn, forum])
+        #expect(opened.sources.first?.lists == lists)
+        #expect(Set(opened.notes) == Set(saved))
+    }
+
+    @Test("A subscription that is neither a board nor a list, or both, fails the load, and the file is set aside",
+          arguments: [#"[{"name":"x"}]"#, #"[{"fid":1,"list":"42","name":"x"}]"#])
+    func neitherBoardNorList(row: String) async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = try StoreFile(at: dir)
+        try await file.save(sources: [mastodon], notes: [])
+        try await file.db.write { db in
+            try db.execute(sql: "UPDATE source SET boards = ?", arguments: [row])
+        }
+        let opened = StoreFile.open(at: dir)
+        #expect(opened.setAside != nil)
+        #expect(opened.sources.isEmpty)
+    }
+
     @Test("A second StoreFile on the same directory reads what the first saved")
     func reopenSameDirectory() async throws {
         let dir = scratch()
         defer { try? FileManager.default.removeItem(at: dir) }
         let source = Source(host: "forum.example", kind: .discuz, boards: [BoardSubscription(fid: 3, name: "x")])
-        let saved = note(source: source, origins: [.trending])
+        let saved = note(source: source, categories: [.trends])
         try await StoreFile(at: dir).save(sources: [source], notes: [saved])
         let again = try StoreFile(at: dir)
         let loaded = try again.load()
@@ -293,6 +377,8 @@ struct StoreFileOpenTests {
         #expect(opened.file != nil)
         #expect(opened.sources.isEmpty && opened.notes.isEmpty)
         #expect(opened.setAside == nil)
+        #expect(!opened.storeIsNewer)
+        #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("index.sqlite").path))
     }
 
     @Test("A corrupt index is moved aside, byte for byte, and a save does not touch it")
@@ -360,6 +446,68 @@ struct StoreFileOpenTests {
         let opened = StoreFile.open(at: dir)
         #expect(opened.setAside != nil)
         #expect(opened.sources.isEmpty)
+    }
+
+    @Test("A note whose categories are not JSON fails the load, and the file is set aside unchanged")
+    func undecodableCategoriesAreSetAside() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let source = Source(host: "first.example", kind: .mastodon)
+        let note = Note(id: "1", source: source, author: "Ada", handle: "@ada", body: "hello",
+                        postedAt: origin, categories: [.public])
+        do {
+            let file = try StoreFile(at: dir)
+            try await file.save(sources: [source], notes: [note])
+            try await file.db.write { db in
+                try db.execute(sql: "UPDATE note SET categories = 'not json'")
+            }
+        }
+        let before = try Data(contentsOf: dir.appendingPathComponent("index.sqlite"))
+        let opened = StoreFile.open(at: dir)
+        let aside = try #require(opened.setAside)
+        #expect(try Data(contentsOf: aside) == before)
+        #expect(opened.sources.isEmpty && opened.notes.isEmpty)
+    }
+
+    @Test("An index from a newer build is left alone: no file, not set aside, bytes unchanged")
+    func newerStoreIsLeftAlone() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        do {
+            let file = try StoreFile(at: dir)
+            try await file.save(sources: [Source(host: "first.example", kind: .mastodon)], notes: [])
+            // What a newer build leaves behind: a migration this one has never heard of.
+            try await file.db.write { db in
+                try db.execute(sql: "INSERT INTO grdb_migrations (identifier) VALUES ('v9-from-a-newer-build')")
+            }
+        }
+        let index = dir.appendingPathComponent("index.sqlite")
+        let before = try Data(contentsOf: index)
+        let touched = try FileManager.default.attributesOfItem(atPath: index.path)[.modificationDate] as? Date
+        let listed = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+
+        let opened = StoreFile.open(at: dir)
+        let again = StoreFile.open(at: dir)
+
+        #expect(opened.file == nil)
+        #expect(again.file == nil && again.storeIsNewer)
+        #expect(opened.storeIsNewer)
+        #expect(opened.setAside == nil)
+        #expect(opened.sources.isEmpty && opened.notes.isEmpty)
+        #expect(try Data(contentsOf: index) == before)
+        #expect(try FileManager.default.attributesOfItem(atPath: index.path)[.modificationDate] as? Date == touched)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: dir.path).sorted() == listed.sorted())
+    }
+
+    @Test("An unreadable index is not mistaken for a newer one")
+    func unreadableIsNotNewer() throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try garbage.write(to: dir.appendingPathComponent("index.sqlite"))
+        let opened = StoreFile.open(at: dir)
+        #expect(!opened.storeIsNewer)
+        #expect(opened.setAside != nil)
     }
 
     @Test("When the directory cannot be made, the run gets no file to save to")

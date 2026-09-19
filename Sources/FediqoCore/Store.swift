@@ -52,13 +52,52 @@ public actor ItemStore {
         let host = host.lowercased()
         guard let index = sourceList.firstIndex(where: { $0.host == host }) else { return }
         let existing = sourceList[index]
-        sourceList[index] = Source(host: existing.host, kind: existing.kind, boards: boards)
+        sourceList[index] = Source(
+            host: existing.host, kind: existing.kind, boards: boards, lists: existing.lists
+        )
         revision += 1
     }
 
+    /// Restates which Mastodon lists a source reads — a choice, or the same lists relabelled with
+    /// the names the server gives them now. `subscribe(host:to:)`'s rules: replaces the set, and
+    /// is silent where the host is not here.
+    public func subscribe(host: String, toLists lists: [ListSubscription]) {
+        let host = host.lowercased()
+        guard let index = sourceList.firstIndex(where: { $0.host == host }) else { return }
+        let existing = sourceList[index]
+        sourceList[index] = Source(
+            host: existing.host, kind: existing.kind, boards: existing.boards, lists: lists
+        )
+        revision += 1
+    }
+
+    /// Gives the lists a source reads **now** the names in `names`, by id. Only relabels: a list
+    /// chosen or unchosen while the names were on the wire stays as that choice left it. Silent
+    /// where the host is not here or nothing changes.
+    public func relabel(host: String, lists names: [String: String]) {
+        let host = host.lowercased()
+        guard let index = sourceList.firstIndex(where: { $0.host == host }) else { return }
+        let existing = sourceList[index]
+        let lists = existing.lists.map { ListSubscription(id: $0.id, name: names[$0.id] ?? $0.name) }
+        guard lists != existing.lists else { return }
+        sourceList[index] = Source(
+            host: existing.host, kind: existing.kind, boards: existing.boards, lists: lists
+        )
+        revision += 1
+    }
+
+    /// `ingest(_:)`, only while `host` is still a source here — in the same step, so a source
+    /// removed while its reads were on the wire does not get their posts back.
+    public func ingest(_ incoming: [Note], ifSourceHere host: String) {
+        let host = host.lowercased()
+        guard sourceList.contains(where: { $0.host == host }) else { return }
+        ingest(incoming)
+    }
+
     /// Takes notes in. The same item through one source stays one row: the first copy wins and
-    /// origins grow, so All and Trends of one host share a row. The same item through two sources
-    /// is two rows (#10). Merging those into one thread is later.
+    /// categories grow, so All and Trends of one host share a row. A fetch with fewer takes none
+    /// away: a category is what the copy arrived through, and that stays true (#25). The same
+    /// item through two sources is two rows (#10). Merging those into one thread is later.
     ///
     /// A note posted before the retention window is refused: the reader chose not to keep it.
     public func ingest(_ incoming: [Note]) {
@@ -67,11 +106,27 @@ public actor ItemStore {
         for note in incoming where retention.map({ note.postedAt >= $0 }) ?? true {
             let key = note.key
             if var existing = notes[key] {
-                existing.origins.formUnion(note.origins)
+                existing.categories.formUnion(note.categories)
                 notes[key] = existing
             } else {
                 notes[key] = note
             }
+        }
+    }
+
+    /// Posts read again (#29), only while `host` is still a source here and only those stamped
+    /// with it. Unlike `ingest`, a row already held is **replaced** by what the server says now —
+    /// an edited post shows its new words — keeping the categories it arrived through and its
+    /// booster (`Note.refreshed(over:)`). **A post not held is dropped**: reading one post again
+    /// updates what is here, and brings in nothing the reader did not already have.
+    public func refresh(_ incoming: [Note], ifSourceHere host: String) {
+        let host = host.lowercased()
+        guard sourceList.contains(where: { $0.host == host }) else { return }
+        let held = incoming.filter { $0.source.host == host && notes[$0.key] != nil }
+        guard !held.isEmpty else { return }
+        revision += 1
+        for note in held {
+            notes[note.key] = notes[note.key].map(note.refreshed(over:))
         }
     }
 
@@ -122,7 +177,7 @@ public actor ItemStore {
     }
 
     public func trends() -> [Note] {
-        all().filter { $0.origins.contains(.trending) }
+        all().filter { $0.categories.contains(.trends) }
     }
 
     private static func storeOrder(_ a: Note, _ b: Note) -> Bool {

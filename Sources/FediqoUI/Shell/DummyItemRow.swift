@@ -16,7 +16,7 @@ struct DummyItemRow: View {
     /// Where a forum thread's opening post is fetched and kept — D30.
     ///
     /// Handed in rather than reached for as a shared instance, for the reason `ShellSession`
-    /// holds the two picture caches: what Preferences reports and what Clear empties have to be
+    /// holds the two picture caches: what Usage reports and what Clear empties have to be
     /// the same object by construction, and a preview or a test wired to its own cache would
     /// otherwise press one and draw the other.
     let posts: ForumPosts
@@ -98,6 +98,9 @@ struct DummyItemRow: View {
     /// server text sizing a band again — the same defect as a row that grows with its post, one
     /// layer down. Whatever the author wrote and however long the post is, the cover is this.
     @ScaledMetric(relativeTo: .body) private var coverBox: CGFloat = 44
+    /// One body line: the least the notice line takes, so the cover mark standing alone with no
+    /// warning beside it leaves the band where a one-line warning would.
+    @ScaledMetric(relativeTo: .body) private var noticeLine: CGFloat = 22
 
     enum Box {
         /// The lamp is a lamp at every type size, and a corner is a corner.
@@ -151,9 +154,8 @@ struct DummyItemRow: View {
     /// line's own ink height: a name and the words are two sizes, and handing both lists to both
     /// would decode every picture twice for the size it is never drawn at.
     ///
-    /// **Four lines, and the cover is `item.spoiler` rather than `coverLine`.** Where the author
-    /// wrote no line, `coverLine` is a sentence this app owns and there is nothing in it for an
-    /// alphabet to answer for.
+    /// **Four lines, and the cover is `item.spoiler`.** Where the author wrote no warning, nothing
+    /// is drawn in its place and there is nothing for an alphabet to answer for.
     struct Written: Equatable {
         /// Which post this was resolved for. See `written` for why an unstamped answer is not
         /// good enough.
@@ -516,16 +518,11 @@ struct DummyItemRow: View {
     /// drawn in both states and only this one blurs anything.
     private var covered: Bool { item.covered && !lifted }
 
-    /// The author's line and the control above, the words below.
+    /// The author's line above, the words below.
     ///
     /// **A band, not an overlay, and it does not go away when the row is lifted.** The spoiler
-    /// line is the author's own text and belongs on the post either way; keeping it means the
-    /// control that puts the cover back is the same control in the same place as the one that
-    /// took it off, rather than a second one somewhere else. Not the same *size*: `Show it` and
-    /// `Hide it` happen to match in English and 掀開 and 蓋回去 do not, so what stays put is the
-    /// control and its band, not its width. A control that exists only while the row is covered is
-    /// lift-only for anybody not using the keyboard — which is the fault this row has just been
-    /// fixed for once, and adding a second one deliberately would be the wrong direction.
+    /// line is the author's own text and belongs on the post either way. Putting the cover back is
+    /// still `s`; this band does not print a second label for that.
     ///
     /// **Blurred words are still words.** A `Text` behind a blur is in the accessibility tree and
     /// on the pasteboard, so a cover made of blur alone hides the post from the reader who can see
@@ -551,7 +548,7 @@ struct DummyItemRow: View {
         if item.covered {
             VStack(alignment: .leading, spacing: ShellSpace.tight) {
                 notice(written)
-                if covered { cover(written) } else { words(written) }
+                if covered { cover(written) } else { stitched(written) }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } else {
@@ -596,33 +593,29 @@ struct DummyItemRow: View {
         .frame(maxWidth: .infinity)
         .frame(height: coverBox)
         .background(ShellChrome.well(colorScheme))
+        // The guard plate's hatch over the smear, and still nothing printed on it. It takes no
+        // press, so the rectangle stays the way in.
+        .overlay {
+            Hatch()
+                .stroke(ShellChrome.hatch(colorScheme), lineWidth: ShellSpace.hair)
+                .allowsHitTesting(false)
+        }
         .clipShape(RoundedRectangle(cornerRadius: Box.plate, style: .continuous))
         .clipped()
     }
 
-    /// The key, drawn as the cap it is printed on, and what pressing it does.
-    ///
-    /// Drawn under the author's line once the row is open, and **not while it is covered** — a
-    /// cover carries nothing printed on it, and the way back in is pressing the smear itself.
-    /// So this is the way to put a cover *back*, and it is a button as well as a key: a reader
-    /// who never touches the keyboard would otherwise be told which key works and have no way to
-    /// press it, and on a phone there is no `s` to be told about at all.
-    private var lift: some View {
-        Button(action: onToggleCover) {
-            HStack(spacing: ShellSpace.snug) {
-                Text(verbatim: "s")
-                    .font(ShellType.keycap)
-                    .foregroundStyle(ShellChrome.ink(colorScheme))
-                    .padding(.horizontal, ShellSpace.snug)
-                    .padding(.vertical, ShellSpace.hair * 2)
-                    .background(Capsule(style: .continuous).fill(ShellChrome.well(colorScheme)))
-                Text(L10n.t(covered ? "item.covered.show" : "item.covered.hide"))
-                    .font(ShellType.meta)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+    /// The words once the reader has lifted the cover, with a 2pt hatch-ink rule down their
+    /// leading edge: which part was under the cover. Not the row lamp, which is phosphor at the
+    /// row's own edge and means where the reader is.
+    private func stitched(_ written: Written) -> some View {
+        words(written)
+            .padding(.leading, ShellSpace.snug)
+            .overlay(alignment: .leading) {
+                Rectangle()
+                    .fill(ShellChrome.hatch(colorScheme))
+                    .frame(width: Box.lamp)
+                    .accessibilityHidden(true)
             }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
     }
 
     /// The slot, smeared with the same hand as the words. One cover over the row means one
@@ -637,6 +630,10 @@ struct DummyItemRow: View {
             thumb
                 .blur(radius: smear)
                 .clipShape(RoundedRectangle(cornerRadius: Box.plate, style: .continuous))
+                // The same hatch as the words' cover, so a covered picture reads as covered with
+                // no words beside it. Only over a picture: an empty slot hatched would be a
+                // cover over nothing.
+                .overlay { if item.hasThumb { hatchedPlate } }
                 // And hidden, for the same reason the words are. What the author wrote for
                 // somebody who cannot see the picture describes the picture — read out from
                 // behind the cover, it is the cover lifted for exactly the reader who cannot
@@ -652,23 +649,34 @@ struct DummyItemRow: View {
         }
     }
 
-    /// The author's own line, and the key that takes the cover off or puts it back.
+    private var hatchedPlate: some View {
+        let plate = RoundedRectangle(cornerRadius: Box.plate, style: .continuous)
+        return Hatch()
+            .stroke(ShellChrome.hatchOverPicture, lineWidth: ShellSpace.hair)
+            .clipShape(plate)
+            .overlay { plate.strokeBorder(ShellChrome.hatch(colorScheme), lineWidth: ShellSpace.hair) }
+    }
+
+    /// The mark that says covered, the author's warning beside it where they wrote one, and the
+    /// key that takes the cover off or puts it back.
+    ///
+    /// **Where the author wrote no warning, the mark stands alone.** A sentence of ours in that
+    /// place reads as the author's own words, which is what it used to do. The line is held to one
+    /// body line's height either way, so a mark alone does not change the band.
     ///
     /// One control with two labels. It is a button as well as a key: a reader who never touches
     /// the keyboard would otherwise be told which key works and have no way to press it, and on a
     /// phone there is no `s` to be told about at all.
     private func notice(_ written: Written) -> some View {
         VStack(alignment: .leading, spacing: ShellSpace.tight) {
-            coverTitle(written)
-                .foregroundStyle(ShellChrome.ink(colorScheme))
-                .lineLimit(coverLines)
-                .fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
+                CoverChip(lifted: !covered)
+                if coverIsTheAuthors { warning(written) }
+            }
+            .frame(minHeight: noticeLine, alignment: .leading)
             // Covered, nothing is drawn: the smear below is itself the way in, and printing a
             // control over the one shape that means "not yet" undoes what the shape says. Lifted,
-            // the way to put the cover back has to be somewhere, and this is the line it belongs
-            // to. It is never conditional on hover or focus — that is a control half the readers
-            // of this row cannot find.
-            if !covered { lift }
+            // `s` still puts the cover back; this band does not say so.
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         // Ignored rather than combined, and then said properly: combining would read the key cap
@@ -702,8 +710,9 @@ struct DummyItemRow: View {
     /// wants all of it uncovers, and a screen reader is given every character regardless.
     private var coverLines: Int { max(1, bodyLines - 2) }
 
-    /// What the row says out loud: the author's line **in full**, what is under the cover named
-    /// but not described, and the way to work the control.
+    /// What the row says out loud: covered or was covered, the author's warning **in full** where
+    /// they wrote one, what is under the cover named but not described, and the way to work the
+    /// control.
     ///
     /// **The full `spoiler_text`, never the truncated string.** A visual limit is a fact about
     /// this column's height and about nothing else; inheriting it here would hide from a screen
@@ -715,42 +724,34 @@ struct DummyItemRow: View {
     /// there is anything there to uncover. `AttachmentDeck.named` carries the kind and the count
     /// and never the alt text, which is what keeps the cover a cover. Once the row is lifted the
     /// deck speaks for itself and the clause would only say it twice.
+    ///
+    /// It opens with the state — covered, or was covered — because the chip that says so is
+    /// hidden, and a warning read out with nothing before it is the post's own words to a
+    /// listener, the same confusion the drawn row used to make.
     var spokenCover: String {
+        let mark = L10n.t(covered ? "item.covered.mark" : "item.lifted.mark")
+        let warning = coverIsTheAuthors
+            ? String(format: L10n.t("item.covered.warning"), item.spoiler ?? "")
+            : nil
         let attached = covered ? AttachmentDeck.named(item.attachments, top: top) : nil
-        let how = L10n.t(covered ? "item.covered.label" : "item.lifted.label")
-        return [coverLine, attached, how].compactMap { $0 }.joined(separator: ". ")
+        let how = covered ? L10n.t("item.covered.label") : nil
+        return [mark, warning, attached, how].compactMap { $0 }.joined(separator: ". ")
     }
 
-    /// What the author wrote on the cover, or what to say where they wrote nothing but flagged it.
-    private var coverLine: String {
-        let spoiler = item.spoiler ?? ""
-        return spoiler.isEmpty ? L10n.t("item.covered.title") : spoiler
+    /// The author's warning, drawn as a label and not as the body: the words' size, a medium
+    /// weight and the dimmer ink, against the body's regular weight in full ink. No italic — a
+    /// CJK italic is a synthetic oblique and looks broken. It is a stranger's text and may be
+    /// written partly in pictures, so it stays an `EmojiText`.
+    private func warning(_ written: Written) -> some View {
+        EmojiText(item.spoiler ?? "", emojis: written.cover, host: host)
+            .fontWeight(.medium)
+            .foregroundStyle(ShellChrome.inkDim(colorScheme))
+            .lineLimit(coverLines)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
-    /// The same line, drawn — and the two halves of `coverLine` part company here.
-    ///
-    /// **A shortcode in our own copy would be our own bug, not an author's writing.** The
-    /// author's spoiler is a stranger's text and may be written partly in pictures; the sentence
-    /// we put there when they flagged a post and wrote nothing is a string this app owns, in
-    /// three languages, and drawing a picture out of it would hide a mistake rather than show
-    /// one. So one branch is an `EmojiText` and the other stays a plain `Text`.
-    ///
-    /// `.body` and not `.meta`, though the role's own list of quiet lines names a spoiler: while
-    /// a row is covered this line *is* the post's words — it is what the reader reads to decide —
-    /// and unit 6 drew it at the words' own size for that reason. `EmojiTextRole.body.font` is
-    /// `ShellType.body`, pinned by a test, so the drawing is the one that was already there.
-    @ViewBuilder
-    private func coverTitle(_ written: Written) -> some View {
-        if coverIsTheAuthors {
-            EmojiText(item.spoiler ?? "", emojis: written.cover, host: host)
-        } else {
-            Text(L10n.t("item.covered.title"))
-                .font(ShellType.body)
-        }
-    }
-
-    /// Whether the line on the cover is a stranger's writing or ours. The one question that
-    /// decides which of the two the row draws, named so a test can ask it.
+    /// Whether the author wrote a warning. Where they did not, the mark stands alone and nothing
+    /// is said in their place.
     var coverIsTheAuthors: Bool { !(item.spoiler ?? "").isEmpty }
 
     private func words(_ written: Written) -> some View {

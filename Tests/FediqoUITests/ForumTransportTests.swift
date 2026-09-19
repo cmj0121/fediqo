@@ -104,13 +104,13 @@ struct ForumTransportTests {
             }
             let denial = language == .english ? "None of this is written to disk" : "不會寫進磁碟"
             #expect(!footer.contains(denial), "the \(language.labelKey) footer still denies keeping anything")
-            // The header and the empty line sit on the same section and must not say the
+            // The header and the page's empty line sit on the same page and must not say the
             // opposite: what is kept outlives the run, so neither may say it ends with it.
             let header = L10n.t("prefs.cache", language: language)
-            let empty = L10n.t("prefs.cache.empty", language: language)
+            let empty = L10n.t("usage.empty.detail", language: language)
             let perRun = language == .english ? ["this run", "until you close"] : ["這次執行", "直到你關閉"]
             for line in [header, empty] {
-                #expect(line != "prefs.cache" && line != "prefs.cache.empty")
+                #expect(line != "prefs.cache" && line != "usage.empty.detail")
                 for phrase in perRun {
                     #expect(!line.contains(phrase), "the \(language.labelKey) section still says it lasts one run: \(line)")
                 }
@@ -313,6 +313,26 @@ struct ForumTransportTests {
         #expect(forums.reachedSignIn(host: "cookie.example"))
         #expect(!forums.hasPassword(host: "cookie.example"), "the case that makes the two differ")
         #expect(forums.reachedSignIn(host: "COOKIE.Example"), "the host was not folded")
+    }
+
+    /// **After a relaunch there is a sign-in and no browser**, and the reads have to follow the
+    /// sign-in. Asked of `hasEngine` alone, a thread on a challenge-fronted forum went through
+    /// `URLSession`, came back 403, and the reader who had signed in was told the forum would not
+    /// let this app read it.
+    @Test("A forum signed in before a relaunch is read through its browser, and a stranger is not")
+    func aSignInOutlivesTheRunThatMadeIt() async {
+        let fresh = ForumSessions(credentials: MemoryCredentials())
+        let session = ShellSession(http: FixtureHTTP(), forums: fresh)
+        session.sources = [Source(host: "cookie.example", kind: .discuz)]
+        await fresh.plantSession(host: "cookie.example")
+
+        #expect(!fresh.hasEngine(host: "cookie.example"), "the premise: this run built no browser")
+        #expect(fresh.reachedSignIn(host: "cookie.example"))
+        #expect(fresh.readsThroughEngine(host: "cookie.example"))
+        #expect(fresh.readsThroughEngine(host: "COOKIE.Example"), "the host was not folded")
+
+        #expect(!fresh.readsThroughEngine(host: "social.example"),
+                "a host nobody signed in to would start a web process")
     }
 
     /// Cleared by `forget(host:)` and therefore by Clear and by Remove, which is decision 13's

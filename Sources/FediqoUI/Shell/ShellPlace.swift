@@ -118,7 +118,7 @@ struct ShellAvailability: Hashable, Sendable {
 /// than the button that exposed it — on a compact `TabView` every tab stays alive, so a bulk cache
 /// invalidation makes an *invisible* timeline refetch its whole working set: on the order of
 /// fifteen to twenty-five deck-tier pictures, measured at 23 files and 7.6 MB for one server. A
-/// reader sitting in Preferences pays that with no button pressed and nothing on screen.
+/// reader sitting in Usage pays that with no button pressed and nothing on screen.
 ///
 /// **Only `fetch` reads it.** `RemoteImage` still reads the cache and still stamps its interest
 /// on every pass, gated or not; gating the read as well would break I8, which is what keeps the

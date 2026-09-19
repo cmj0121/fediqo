@@ -76,7 +76,7 @@ struct MastodonTests {
             "https://first.example/users/ada/statuses/shared",
             "https://first.example/users/bob/statuses/new",
         ])
-        #expect(notes.allSatisfy { $0.origins == [.publicTimeline] })
+        #expect(notes.allSatisfy { $0.categories == [.public] })
         #expect(notes[0].handle == "@ada@first.example")
         #expect(notes[2].handle == "@bob@second.example")
         #expect(notes[0].attachments.isEmpty)
@@ -116,7 +116,7 @@ struct MastodonTests {
         let notes = try await MastodonClient(http: http, host: "first.example")
             .trending(source: source)
         #expect(notes.count == 2)
-        #expect(notes.allSatisfy { $0.origins == [.trending] })
+        #expect(notes.allSatisfy { $0.categories == [.trends] })
         #expect(await http.requested.first?.query == "limit=20")
     }
 
@@ -148,6 +148,29 @@ struct MastodonTests {
         #expect(note.body == "Original")
         #expect(note.boostedBy == "Bob")
         #expect(note.postedAt == MastodonJSON.date(from: "2024-01-15T12:00:00Z"))
+    }
+
+    @Test("A boost keeps who boosted it as user@instance, and a status that is not a boost has nobody")
+    func boosterHandle() throws {
+        let boost = try Self.note("""
+        {
+          "id": "9",
+          "uri": "https://first.example/users/bob/statuses/boost",
+          "created_at": "2024-08-01T00:00:00.000Z",
+          "content": "",
+          "account": { "username": "bob", "acct": "bob", "display_name": "Bob" },
+          "reblog": {
+            "id": "1",
+            "uri": "https://second.example/users/ada/statuses/1",
+            "created_at": "2024-01-15T12:00:00Z",
+            "content": "<p>Original</p>",
+            "account": { "username": "ada", "acct": "ada@second.example", "display_name": "Ada" }
+          }
+        }
+        """)
+        #expect(boost.boosterHandle == "@bob@first.example")
+        #expect(boost.handle == "@ada@second.example")
+        #expect(try Self.note(Self.status()).boosterHandle == nil)
     }
 
     @Test("A reply names the first mention, or is unnamed")
@@ -587,7 +610,7 @@ struct MastodonTests {
 
     private static func note(_ json: String) throws -> Note {
         let dto = try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(json.utf8))
-        return dto.asNote(source: Source(host: "first.example", kind: .mastodon), origin: .publicTimeline)
+        return dto.asNote(source: Source(host: "first.example", kind: .mastodon), category: .public)
     }
 
     /// The smallest status a decoder will take, with one more key spliced in. For the cases

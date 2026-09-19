@@ -206,7 +206,11 @@ struct DummyCommandTests {
     @Test("Question mark opens the guide")
     func questionMarkShowsTheGuide() {
         #expect(DummyCommand.from("?", shift: true) == .showShortcuts)
-        #expect(DummyCommand.from("/") == nil)
+        // A bare `/` is search since #32. Shift-/ is the guide on the ANSI slash key, and the
+        // `/` the reader typed where a layout shifts it (German Shift-7, AZERTY Shift-:).
+        #expect(DummyCommand.from("/") == .search)
+        #expect(DummyCommand.from(DummyCommand.typed("/", shift: true, onSlashKey: true), shift: true) == .showShortcuts)
+        #expect(DummyCommand.from(DummyCommand.typed("/", shift: true, onSlashKey: false), shift: true) == .search)
         #expect(DummyCommand.from("?", typing: true) == nil)
     }
 
@@ -234,9 +238,9 @@ struct DummyCommandTests {
         #expect(ShortcutGuide.Metrics.plate + 2 * ShellSpace.room <= 520)
     }
 
-    @Test("⌘R plays the launch again, and the letter r stays free")
+    @Test("⌘R plays the launch again, and the letter r reloads")
     func commandRReplaysTheLaunch() {
-        #expect(DummyCommand.from("r") == nil)
+        #expect(DummyCommand.from("r") == .reload)
         #expect(DummyCommand.from("r", command: true) == .replayLanding)
         #expect(DummyCommand.from("R", command: true) == .replayLanding)
         #expect(DummyCommand.from("r", command: true, typing: true) == .replayLanding)
@@ -250,6 +254,16 @@ struct DummyCommandTests {
         #expect(line?.group == .app)
         #expect(L10n.t("shortcut.landing", language: .english) == "Reload from the launch")
         #expect(L10n.t("shortcut.landing", language: .taiwanese) == "從啟動重新載入")
+    }
+
+    @Test("An index from a newer build is named in both languages")
+    func newerStoreNoticeIsWritten() {
+        for key in ["store.newer.title", "store.newer.detail", "store.newer.ok"] {
+            for language in [DummyLanguage.english, .taiwanese] {
+                #expect(L10n.t(key, language: language) != key, "\(key) is missing in \(language)")
+            }
+        }
+        #expect(L10n.t("store.newer.title", language: .english) != L10n.t("store.newer.title", language: .taiwanese))
     }
 
     @Test("The guide names every dummy command")

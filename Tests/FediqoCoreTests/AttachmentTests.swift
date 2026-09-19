@@ -70,7 +70,7 @@ struct AttachmentTests {
             handle: "@ada@first.example",
             body: "hello",
             postedAt: Date(timeIntervalSince1970: 0),
-            origins: [.publicTimeline]
+            categories: [.public]
         )
         #expect(note.sensitive == nil)
         #expect(note.spoiler == nil)
@@ -84,7 +84,7 @@ struct AttachmentTests {
             handle: "@ada@first.example",
             body: "hello",
             postedAt: Date(timeIntervalSince1970: 0),
-            origins: [.publicTimeline],
+            categories: [.public],
             attachments: [Attachment(kind: .image, previewURL: still)],
             sensitive: true,
             spoiler: "the ending"
@@ -100,7 +100,7 @@ struct AttachmentTests {
             handle: "@ada@first.example",
             body: "hello",
             postedAt: Date(timeIntervalSince1970: 0),
-            origins: [.publicTimeline],
+            categories: [.public],
             sensitive: false,
             spoiler: ""
         )

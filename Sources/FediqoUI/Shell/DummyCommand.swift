@@ -40,15 +40,30 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     /// there is no cover to lift, so the second press asks for the replies.
     case reveal
     case back
+    /// `r` — reload what is in front: the open thread, or else the selected timeline (#29).
+    case reload
     case compose
     case showShortcuts
+    /// `/` — search what this device holds (#32). `?` is still the keys list; see `typed`.
+    case search
     case dismiss
     /// ⌘R — play the launch overlay again, from rest, without quitting the process.
     ///
-    /// **Not the letter `r`.** That letter is later reblog, and taking it here would make
-    /// the two jobs a collision the day the later one arrives. A ⌘ chord is otherwise the
-    /// platform's — this is the one dummy exception.
+    /// **Not the letter `r`**, which reloads (#29). A ⌘ chord is otherwise the platform's — this
+    /// is the one dummy exception.
     case replayLanding
+    /// `e` — open the editor on the timeline in front (#27). All and Trends are not edited:
+    /// the press says so. Adding is the `[+]` pill, pressed, not a Tab stop.
+    case editTimeline
+
+    /// The character a press stands for, where a platform reports Shift-/ as `/` with Shift held.
+    ///
+    /// **Only on the key that is `/` on an ANSI keyboard is Shift-/ a `?`** — the keys list. On a
+    /// layout where `/` itself needs Shift (German and Nordic Shift-7, AZERTY Shift-:), the same
+    /// report is the reader typing `/`, and reading it as `?` would leave search unreachable.
+    public static func typed(_ character: Character, shift: Bool, onSlashKey: Bool) -> Character {
+        shift && character == "/" && onSlashKey ? "?" : character
+    }
 
     /// What a press means. Letters are the draft's while composing, except Escape.
     /// A focused text field owns every key, including Escape.
@@ -75,9 +90,9 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
             return shift ? .previousTab : .nextTab
         }
         guard !typing else { return nil }
-        if shift, character == "?" || character == "/" { return .showShortcuts }
         switch character {
         case "?": return .showShortcuts
+        case "/": return .search
         case "c": return .compose
         case "j", KeyEquivalent.downArrow.character: return .nextPost
         case "k", KeyEquivalent.upArrow.character: return .previousPost
@@ -88,6 +103,8 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         case "s": return .reveal
         case KeyEquivalent.return.character, " ": return .expandPost
         case "q": return .back
+        case "e": return .editTimeline
+        case "r": return .reload
         default: return nil
         }
     }
@@ -138,6 +155,16 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     /// last wrote and cannot be asserted from anywhere.
     public static func outermost(of open: Set<DummyLayer>) -> DummyLayer? {
         DummyLayer.allCases.first(where: open.contains)
+    }
+
+    /// Whether `e` may open the timeline editor now: only over the timeline itself, with at most
+    /// a post selected on it. Under a search, a thread, the viewer or the keys list, the timeline
+    /// is not what the reader is looking at. **No `default:`**, for the reason `.back` gives.
+    public static func canEditTimeline(whenOpen open: Set<DummyLayer>) -> Bool {
+        switch outermost(of: open) {
+        case .selection, nil: true
+        case .viewer, .shortcuts, .thread, .search: false
+        }
     }
 
     /// Whether a layer may be entered now.
@@ -198,6 +225,23 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         guard items.indices.contains(next) else { return current }
         return items[next]
     }
+
+    /// Leaving the innermost open thread: the stack one shorter, and the post that thread was
+    /// opened from selected again — whatever `j` and `k` moved to inside it.
+    public static func poppedThread(_ stack: [String]) -> (stack: [String], selected: String)? {
+        guard let opened = stack.last else { return nil }
+        return (Array(stack.dropLast()), opened)
+    }
+
+    /// Which post a list centres on when it is drawn afresh.
+    ///
+    /// A list is not drawn while a thread covers it, and it centres on a selection *change*, so
+    /// coming back with the selection unchanged moved nothing. The exception is a thread just
+    /// opened, whose selection is its own post: that one reads from the top as it always has.
+    public static func centredOnAppear(selected: String?, opening root: String? = nil) -> String? {
+        guard let selected, selected != root else { return nil }
+        return selected
+    }
 }
 
 /// What a dismissing press can close, outermost first.
@@ -217,6 +261,9 @@ public enum DummyLayer: Hashable, Sendable, CaseIterable {
     case shortcuts
     /// The conversation opened over the stream.
     case thread
+    /// A search's results in place of the stream (#32). Under a thread, because a result can be
+    /// opened; over the selection, because leaving it gives back the one made before it opened.
+    case search
     /// The lamp on a row.
     case selection
 }
@@ -286,6 +333,9 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
         DummyShortcut(group: .timeline, keys: ["m"], name: "turn", commands: [.nextAttachment]),
         DummyShortcut(group: .timeline, keys: ["s"], name: "reveal", commands: [.reveal]),
         DummyShortcut(group: .timeline, keys: ["q"], name: "back", commands: [.back]),
+        DummyShortcut(group: .timeline, keys: ["e"], name: "edit", commands: [.editTimeline]),
+        DummyShortcut(group: .timeline, keys: ["/"], name: "search", commands: [.search]),
+        DummyShortcut(group: .timeline, keys: ["r"], name: "reload", commands: [.reload]),
         DummyShortcut(group: .app, keys: ["⌃Tab", "⌃⇧Tab"], name: "pages",
                       commands: [.nextPage, .previousPage]),
         DummyShortcut(group: .app, keys: ["c"], name: "compose", commands: [.compose]),

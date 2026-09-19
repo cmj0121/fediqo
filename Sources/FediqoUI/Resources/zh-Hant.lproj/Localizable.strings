@@ -7,7 +7,7 @@
 "shell.usage.title" = "用量";
 "shell.usage.summary" = "這台機器上留了什麼";
 "shell.preferences.title" = "偏好";
-"shell.preferences.summary" = "語言、主題、字級與已存內容";
+"shell.preferences.summary" = "語言、主題與字級";
 "shell.timeline.disabled" = "先到帳號頁新增來源";
 "shell.notices.disabled" = "通知需要已登入的來源";
 "account.rail.empty" = "新增來源";
@@ -63,7 +63,9 @@
 "shortcut.compose" = "新貼文";
 "shortcut.list" = "這份清單";
 "shortcut.back" = "回到清單";
+"shortcut.reload" = "重新載入這條時間軸，或打開的討論串";
 "shortcut.dismiss" = "關掉眼前的東西，或取消選取";
+"shortcut.search" = "搜尋這台裝置上的貼文";
 
 "thread.title" = "討論串";
 "thread.replies" = "回覆";
@@ -81,10 +83,94 @@
 "timeline.tab.trends" = "趨勢";
 "timeline.rule.all" = "時間序，不過濾。";
 "timeline.rule.trends" = "趨勢貼文，時間序。";
+"timeline.latest" = "只到 %@";
+"timeline.latest.label" = "只顯示 %@ 以前的貼文，較新的貼文已隱藏";
+"timeline.reload.progress" = "重新載入中…";
+"timeline.reload.failed" = "無法重新載入 %@。";
+"timeline.reload.stopped" = "已停止重新載入。";
+"thread.reload.unfindable" = "這篇無法重新載入：登入 %@ 才能在那裡找到它。";
+"thread.reload.notfound" = "這篇無法重新載入：%@ 找不到它。";
+"thread.reload.scope" = "這篇無法重新載入：請重新登入 %@，讓 Fediqo 能找到它。";
 "timeline.empty.title" = "還沒有東西進來";
 "timeline.empty.detail" = "你加的來源的公開貼文會落在這裡，新的在上面。";
 "timeline.empty.trends.title" = "目前沒有趨勢";
 "timeline.empty.trends.detail" = "來源標為趨勢的貼文會落在這裡，依發文時間排列。";
+"shortcut.edit" = "寫或改這條時間軸";
+"timeline.edit.title" = "編輯時間軸";
+"timeline.new.title" = "新時間軸";
+"timeline.edit.fixed" = "「全部」和「趨勢」不能編輯。要加你自己的時間軸，按 +，或用 Tab 移到 + 再按 e。";
+"timeline.unreadable" = "這台裝置上的時間軸在這裡讀不了。它們原封不動地留著，這裡不會存任何東西蓋過去。";
+"timeline.name.placeholder" = "替這條時間軸取名";
+"timeline.done" = "完成";
+"timeline.place" = "你的時間軸中的第 %1$d 條，共 %2$d 條";
+"timeline.earlier" = "‹ 往前";
+"timeline.later" = "往後 ›";
+"timeline.rules.empty" = "還沒有規則：這條時間軸和「全部」一樣，什麼都顯示。";
+"timeline.rule.written" = "你的 %d 條規則，時間序。";
+"timeline.remove" = "移除時間軸";
+"timeline.remove.title" = "移除「%@」？";
+"timeline.remove.detail" = "規則會一起移除，貼文還在「全部」裡。";
+"timeline.remove.confirm" = "移除";
+"timeline.pill.missing.hint" = "這裡有規則已不在";
+"rule.show" = "顯示";
+"rule.hide" = "隱藏";
+"rule.source" = "來自 %@ 的貼文";
+"rule.author" = "%@ 的貼文";
+"rule.keyword" = "含有「%@」的貼文";
+"rule.category" = "從 %@ 來的貼文";
+"rule.category.public" = "公開";
+"rule.category.home" = "首頁";
+"rule.category.list" = "列表 %@";
+"rule.category.board" = "看板 %@";
+"rule.scope.every" = "所有來源";
+"rule.scope.one" = "只在 %@";
+"rule.scope.forced" = "只在 %@：它屬於那個來源。";
+"rule.scope.pill.every" = "所有來源";
+"rule.scope.pill.one" = "只在 %@";
+"rule.spoken" = "%1$@%2$@，%3$@。";
+"rule.spoken.plain" = "%1$@%2$@。";
+"rule.missing" = "已不在";
+"rule.missing.help" = "這已經不在了，規則仍套用在這台裝置留著的貼文上。";
+"rule.missing.spoken" = "已不在：規則仍套用在這台裝置留著的貼文上。";
+"rule.action.hide" = "改成隱藏";
+"rule.action.show" = "改成顯示";
+"rule.action.remove" = "移除規則";
+"rule.add" = "+ 加一條規則";
+"rule.add.confirm" = "加入規則";
+"rule.back" = "規則";
+"rule.band.source" = "來自這些來源之一";
+"rule.band.author" = "這些人之一寫的";
+"rule.band.keyword" = "含有這些字之一";
+"rule.band.category" = "從這些之一來的";
+"rule.band.and" = "而且";
+"rule.band.hide" = "隱藏符合這些的";
+"rule.kind.source" = "來源";
+"rule.kind.author" = "作者";
+"rule.kind.keyword" = "關鍵字";
+"rule.kind.category" = "分類";
+"rule.keyword.placeholder" = "一個字詞";
+"rule.keyword.hint" = "#swift 只找標籤；swift 兩者都找。";
+"editor.keys.name" = "改名";
+"editor.keys.move" = "移動";
+"editor.keys.add" = "新規則";
+"editor.keys.rule" = "規則";
+"editor.keys.effect" = "顯示／隱藏";
+"editor.keys.remove" = "移除規則";
+"editor.keys.removeTimeline" = "移除時間軸";
+"editor.keys.done" = "完成";
+"editor.keys.cancel" = "取消";
+"editor.keys.back" = "返回";
+"editor.keys.kind" = "種類";
+"editor.keys.pick" = "選";
+"editor.keys.scope" = "範圍";
+"editor.keys.confirm" = "加入";
+"search.placeholder" = "搜尋這台裝置上的貼文：* 任意多字，? 一個字";
+"search.label" = "搜尋這台裝置上的貼文";
+"search.found" = "找到 %d 則";
+"search.empty.title" = "沒有相符的貼文";
+"search.empty.detail" = "只會搜尋已經在這台裝置上的貼文。試著少打幾個字，或用 * 代表任意多字。";
+"search.indexing.title" = "搜尋中…";
+"search.indexing.detail" = "正在讀一次這台裝置上的貼文，之後每打一個字只需比對。";
 
 "item.replies" = "則回覆";
 "item.board.dev" = "dev";
@@ -101,11 +187,11 @@
 "item.deck.audio" = "一段聲音";
 "item.deck.unknown" = "一個附件";
 "item.deck.play" = "播放";
-"item.covered.title" = "作者把這篇蓋起來了";
+"item.covered.mark" = "已蓋住";
+"item.lifted.mark" = "原本蓋著";
+"item.covered.warning" = "作者的警告：%@";
 "item.covered.show" = "掀開";
 "item.covered.label" = "按 s 掀開";
-"item.covered.hide" = "蓋回去";
-"item.lifted.label" = "按 s 再蓋回去";
 
 "item.act.reply" = "回覆";
 "item.act.reblog" = "轉發";
@@ -139,6 +225,13 @@
 
 "usage.empty.title" = "還沒有留下任何東西";
 "usage.empty.detail" = "先到「帳號」加一個來源。它帶回來的東西會算在這裡，而這也是這台裝置留著的全部。";
+"usage.tab.source" = "來源";
+"usage.tab.time" = "時間";
+"usage.tab.copies" = "副本";
+
+"store.newer.title" = "這台裝置的索引是較新版的 Fediqo 寫的";
+"store.newer.detail" = "這個版本讀不了它，所以原封不動地留著，也不會在上面存任何東西。用較新版的 Fediqo 開啟，就能看到裡面的內容。";
+"store.newer.ok" = "好";
 
 "preferences.empty.title" = "偏好";
 "preferences.empty.detail" = "來源與外觀會放在這裡。";
@@ -157,10 +250,12 @@
 "prefs.fontSize.default" = "預設";
 "prefs.fontSize.larger" = "較大";
 "prefs.fontSize.largest" = "最大";
+"prefs.latest" = "只看到某一天為止";
+"prefs.latest.date" = "最晚日期";
+"prefs.latest.footer" = "每個時間軸都不顯示這一天結束後（依這台裝置的時區）發佈的貼文。較新的貼文仍留在這台裝置上；關掉這項就會再看到。";
 
 "prefs.cache" = "存在這台裝置上";
 "prefs.cache.footer" = "這些大多會向各來源重新讀取：表情符號名稱會在一天後自行重新讀取，其他則在你需要時再讀。登入留下的兩樣東西只存在這台裝置上。你登入過的論壇會把登入 Cookie 留在這裡，下次開啟 Fediqo 時你仍是登入狀態；它們不會被備份，也不會跟著你的 Apple 帳號走。你要求 Fediqo 存起來的密碼放在這台裝置的鑰匙圈裡，永遠不會複製到 iCloud。按「清除」時，兩者都會和其他東西一起刪掉。";
-"prefs.cache.empty" = "先到「帳號」加入來源。各來源送來的內容會留在這裡，存在這台裝置上。";
 "prefs.held.posts" = "%d 則貼文";
 "prefs.held.posts.none" = "未存貼文";
 "prefs.held.total" = "所有來源";
@@ -196,7 +291,7 @@
 "forum.signin.web.label" = "%@ 自己的頁面";
 "forum.signin.save" = "把我的帳號與密碼存在這台裝置上";
 "forum.signin.save.off" = "這個程式看不到你的密碼。你是在這個論壇自己的頁面上輸入，這裡不會去讀你打了什麼。";
-"forum.signin.save.on" = "這個程式會看到你的密碼，因為要自己幫你登入就得握著它。密碼會存進這台裝置的鑰匙圈，只會送往這個論壇，也絕不會複製到 iCloud。清除這個來源、或在「偏好設定」按「忘掉」，都會把它刪掉。";
+"forum.signin.save.on" = "這個程式會看到你的密碼，因為要自己幫你登入就得握著它。密碼會存進這台裝置的鑰匙圈，只會送往這個論壇，也絕不會複製到 iCloud。清除這個來源、或在「用量」按「忘掉」，都會把它刪掉。";
 "forum.signin.cancel" = "取消";
 "forum.signin.done" = "完成";
 "forum.stop.first" = "第一次登入是你自己來。請在下面這個論壇自己的頁面上輸入。";
@@ -307,9 +402,9 @@
 /* Unit 5 — one row per server, and what it is. */
 "account.sources.title"          = "來源";
 "account.sources.detail"         = "這個裝置讀的全部。按一列，看那個來源怎麼說它自己——它的名字、它的規模、它的版塊。移除其中一個，它的版塊和它的文章都會跟著走。";
-"account.sources.held"           = "每一個在這個裝置上還留著什麼，在偏好設定裡。";
+"account.sources.held"           = "每一個在這個裝置上還留著什麼，在「用量」裡。";
 /* M1 tail rev 4 — the compact row. What the marks on a row mean, said once for the list. */
-"account.sources.marks"          = "一列只帶它自己那個來源有的標記：登入、換版塊、清除它留在這裡的東西、移除它。";
+"account.sources.marks"          = "一列只帶它自己那個來源有的標記：登入、換版塊或列表、清除它留在這裡的東西、移除它。";
 "account.source.boards"          = "%1$d 個版塊：%2$@";
 "account.source.unread"          = "讀不到它的自我介紹。";
 "account.source.remove.label"    = "移除 %@，連同它留在這裡的東西";
@@ -325,7 +420,7 @@
 /* Decision 29: Clear asks first, and says what actually goes. */
 "account.clear.title"             = "清除 %@ 留在這裡的東西？";
 "account.clear.detail"            = "這個裝置為它存的圖片、表情名稱和第一篇文章都會清掉。你再讀它的時候會回來，它也還留在你的來源裡，版塊和文章都在。";
-"account.clear.detail.signedout"  = "這個裝置為它存的圖片、表情名稱和第一篇文章都會清掉，你也會從這個論壇登出。它們會在你再讀的時候回來，它也還留在你的來源裡，版塊和文章都在。";
+"account.clear.detail.signedout"  = "這個裝置為它存的圖片、表情名稱和第一篇文章都會清掉，你也會從這個來源登出。它們會在你再讀的時候回來，它也還留在你的來源裡，版塊和文章都在。";
 "account.clear.detail.password"   = "這個裝置為它存的圖片、表情名稱和第一篇文章都會清掉，你會從這個論壇登出，為它存的密碼也會刪掉。只有密碼不會回來：下次要再打一次。它還留在你的來源裡，版塊和文章都在。";
 "account.clear.confirm"           = "清除";
 
@@ -348,3 +443,23 @@
 
 /* The longest wait in the app, said correctly: it detects nothing. */
 "account.join.boards.progress"    = "正在讀你在 %@ 上挑的版塊…";
+
+"account.mastodon.failed"             = "%@ 沒有完成登入。請再試一次。";
+"account.mastodon.failed.unreachable" = "現在連不上 %@，無法登入。";
+"account.mastodon.failed.keychain"    = "這個裝置無法保存 %@ 的登入。";
+"account.mastodon.ended.title"        = "這個來源已將你登出";
+"account.mastodon.ended.detail"       = "%@ 結束了這次登入。它帶進來的內容都還在；到「帳號」再登入一次，就能以你的身分閱讀。";
+
+/* #25 — Home and your lists, read as you, and choosing which lists. */
+"account.mastodon.home.progress"      = "正在讀你在 %@ 的首頁…";
+"account.mastodon.read.partial"       = "現在讀不到你在 %@ 的部分首頁和列表。";
+"account.source.lists.change"         = "選你在 %@ 上讀哪些列表";
+"account.source.lists.progress"       = "正在讀你在 %@ 的列表…";
+"account.source.lists.reading"        = "正在讀你在 %@ 選的列表…";
+"account.source.lists.unread"         = "現在讀不到你在 %@ 的列表。";
+"list.choose.title"                   = "你在 %@ 的列表";
+"list.choose.detail"                  = "挑這個裝置要讀的列表。首頁一定會讀。你挑的會取代你現在讀的。";
+"list.choose.none"                    = "你在這個來源上沒有列表。";
+"list.choose.done"                    = "完成";
+"list.choose.hint.on"                 = "讀這個列表";
+"list.choose.hint.off"                = "不再讀這個列表";
