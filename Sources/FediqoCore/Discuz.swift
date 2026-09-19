@@ -76,11 +76,17 @@ public struct DiscuzClient: Sendable {
         return try await read(url, source: source)
     }
 
-    /// One board's thread list.
+    /// One board's thread list, newest thread first.
     ///
     /// The same page as the guide with one column fewer, and the same parser reads both. A board
     /// listing names its board **once**, in the heading, because every row on it is in the same
     /// board; the guide page names it per row.
+    ///
+    /// **Ordered by when each thread was posted, asked for in the address.** A board's own default
+    /// is the last reply, for the reason the guide's `view=new` was not used: a row stores when the
+    /// thread was posted, so the first page of a busy board would be old threads a reply had just
+    /// bumped, and the newest ones would be past it and never read. `filter=author&orderby=dateline`
+    /// is the link Discuz! writes on the board's own 最新 tab.
     ///
     /// `named` is what the index called this board, and it is a *fallback* for the heading rather
     /// than a replacement for it: the page's own `<h1>` is the board's current name as the forum
@@ -93,6 +99,8 @@ public struct DiscuzClient: Sendable {
             query: [
                 URLQueryItem(name: "mod", value: "forumdisplay"),
                 URLQueryItem(name: "fid", value: String(fid)),
+                URLQueryItem(name: "filter", value: "author"),
+                URLQueryItem(name: "orderby", value: "dateline"),
             ]
         ) else {
             throw DiscuzRequestError.invalidURL

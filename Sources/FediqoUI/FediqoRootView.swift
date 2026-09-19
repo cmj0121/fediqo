@@ -450,13 +450,13 @@ public struct FediqoRootView: View {
         switch command {
         case .nextTab:
             guard DummyCommand.outermost(of: openLayers) == .shortcuts else {
-                return rotateTimelineTab(by: 1)
+                return rotatePlaceTab(by: 1)
             }
             shortcutTab = DummyShortcutGroup.rotated(from: shortcutTab, by: 1)
             return true
         case .previousTab:
             guard DummyCommand.outermost(of: openLayers) == .shortcuts else {
-                return rotateTimelineTab(by: -1)
+                return rotatePlaceTab(by: -1)
             }
             shortcutTab = DummyShortcutGroup.rotated(from: shortcutTab, by: -1)
             return true
@@ -967,10 +967,14 @@ public struct FediqoRootView: View {
         )
     }
 
-    /// Tab only rotates named queries, then `[+]`, on the timeline. Elsewhere it is the platform's.
-    private func rotateTimelineTab(by step: Int) -> Bool {
-        guard place == .timeline else { return false }
-        return session.rotateTab(by: step)
+    /// Tab rotates this page's tabs: named queries on the timeline, purposes on Usage.
+    /// Elsewhere it is the platform's.
+    private func rotatePlaceTab(by step: Int) -> Bool {
+        switch place {
+        case .timeline: session.rotateTab(by: step)
+        case .usage: session.rotateUsageTab(by: step)
+        default: false
+        }
     }
 
     @ViewBuilder

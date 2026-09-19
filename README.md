@@ -64,9 +64,10 @@ compose stay off until they have something.
 
 ### Timelines you write
 
-All and Trends are built in. Beside them you write your own. Tab goes All, Trends, then yours,
-in the order you gave them. `e` opens the editor for the selected timeline; on All or Trends
-it says they cannot be edited. To add one, press `+`, or Tab to it and press `e`. In the
+All and Trends are built in. Beside them you write your own. The header is `+`, then the
+tabs, then the rule for the one in front. Tab goes All, Trends, then yours, in the order you
+gave them. `e` opens the editor for the selected timeline; on All or Trends it says they
+cannot be edited. Double-click or long-press a tab to edit it. To add one, press `+`. In the
 editor you name, reorder, and remove a timeline, and the editor shows its own keys. Edits
 apply on Done; Esc leaves the timeline as it was. Your timelines stay on this device across a
 relaunch. Removing one takes its rules with it; its posts stay under All.
@@ -166,10 +167,12 @@ opened from is centred and still selected.
 
 ### What this device holds
 
-The Usage page holds the figures: the storage this device uses, the totals, the breakdown by
-source and by week or month, how long posts are kept, and each source's Clear. Clear takes a
-server's cached copies and its sign-in, and keeps its posts. Preferences keeps what you
-choose: language, theme, type, and the latest date.
+The Usage page is tabbed by purpose: by source, by time, and picture copies. Tab rotates
+them. Sources holds the totals, each source's figures and its Clear. Time holds the week or
+month breakdown and how long posts are kept. Copies holds the pictures this device is
+keeping, and the drop that takes them. Clear takes a server's cached copies and its sign-in,
+and keeps its posts. Preferences keeps what you choose: language, theme, type, and the
+latest date.
 
 The store survives a relaunch. The first 0.2.0 launch carries an older store forward in
 place, with nothing fetched and nothing for you to do: every source, post, board, sign-in,

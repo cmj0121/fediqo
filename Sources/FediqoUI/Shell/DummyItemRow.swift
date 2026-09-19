@@ -518,16 +518,11 @@ struct DummyItemRow: View {
     /// drawn in both states and only this one blurs anything.
     private var covered: Bool { item.covered && !lifted }
 
-    /// The author's line and the control above, the words below.
+    /// The author's line above, the words below.
     ///
     /// **A band, not an overlay, and it does not go away when the row is lifted.** The spoiler
-    /// line is the author's own text and belongs on the post either way; keeping it means the
-    /// control that puts the cover back is the same control in the same place as the one that
-    /// took it off, rather than a second one somewhere else. Not the same *size*: `Show it` and
-    /// `Hide it` happen to match in English and 掀開 and 蓋回去 do not, so what stays put is the
-    /// control and its band, not its width. A control that exists only while the row is covered is
-    /// lift-only for anybody not using the keyboard — which is the fault this row has just been
-    /// fixed for once, and adding a second one deliberately would be the wrong direction.
+    /// line is the author's own text and belongs on the post either way. Putting the cover back is
+    /// still `s`; this band does not print a second label for that.
     ///
     /// **Blurred words are still words.** A `Text` behind a blur is in the accessibility tree and
     /// on the pasteboard, so a cover made of blur alone hides the post from the reader who can see
@@ -623,31 +618,6 @@ struct DummyItemRow: View {
             }
     }
 
-    /// The key, drawn as the cap it is printed on, and what pressing it does.
-    ///
-    /// Drawn under the author's line once the row is open, and **not while it is covered** — a
-    /// cover carries nothing printed on it, and the way back in is pressing the smear itself.
-    /// So this is the way to put a cover *back*, and it is a button as well as a key: a reader
-    /// who never touches the keyboard would otherwise be told which key works and have no way to
-    /// press it, and on a phone there is no `s` to be told about at all.
-    private var lift: some View {
-        Button(action: onToggleCover) {
-            HStack(spacing: ShellSpace.snug) {
-                Text(verbatim: "s")
-                    .font(ShellType.keycap)
-                    .foregroundStyle(ShellChrome.ink(colorScheme))
-                    .padding(.horizontal, ShellSpace.snug)
-                    .padding(.vertical, ShellSpace.hair * 2)
-                    .background(Capsule(style: .continuous).fill(ShellChrome.well(colorScheme)))
-                Text(L10n.t(covered ? "item.covered.show" : "item.covered.hide"))
-                    .font(ShellType.meta)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
     /// The slot, smeared with the same hand as the words. One cover over the row means one
     /// radius: two blurs of different strengths would read as two covers.
     ///
@@ -706,10 +676,7 @@ struct DummyItemRow: View {
             .frame(minHeight: noticeLine, alignment: .leading)
             // Covered, nothing is drawn: the smear below is itself the way in, and printing a
             // control over the one shape that means "not yet" undoes what the shape says. Lifted,
-            // the way to put the cover back has to be somewhere, and this is the line it belongs
-            // to. It is never conditional on hover or focus — that is a control half the readers
-            // of this row cannot find.
-            if !covered { lift }
+            // `s` still puts the cover back; this band does not say so.
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         // Ignored rather than combined, and then said properly: combining would read the key cap
@@ -767,7 +734,7 @@ struct DummyItemRow: View {
             ? String(format: L10n.t("item.covered.warning"), item.spoiler ?? "")
             : nil
         let attached = covered ? AttachmentDeck.named(item.attachments, top: top) : nil
-        let how = L10n.t(covered ? "item.covered.label" : "item.lifted.label")
+        let how = covered ? L10n.t("item.covered.label") : nil
         return [mark, warning, attached, how].compactMap { $0 }.joined(separator: ". ")
     }
 

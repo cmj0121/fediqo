@@ -192,8 +192,6 @@
 "item.covered.warning" = "作者的警告：%@";
 "item.covered.show" = "掀開";
 "item.covered.label" = "按 s 掀開";
-"item.covered.hide" = "蓋回去";
-"item.lifted.label" = "按 s 再蓋回去";
 
 "item.act.reply" = "回覆";
 "item.act.reblog" = "轉發";
@@ -227,6 +225,9 @@
 
 "usage.empty.title" = "還沒有留下任何東西";
 "usage.empty.detail" = "先到「帳號」加一個來源。它帶回來的東西會算在這裡，而這也是這台裝置留著的全部。";
+"usage.tab.source" = "來源";
+"usage.tab.time" = "時間";
+"usage.tab.copies" = "副本";
 
 "store.newer.title" = "這台裝置的索引是較新版的 Fediqo 寫的";
 "store.newer.detail" = "這個版本讀不了它，所以原封不動地留著，也不會在上面存任何東西。用較新版的 Fediqo 開啟，就能看到裡面的內容。";

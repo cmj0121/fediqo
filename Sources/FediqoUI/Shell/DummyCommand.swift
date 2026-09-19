@@ -52,8 +52,8 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     /// **Not the letter `r`**, which reloads (#29). A ⌘ chord is otherwise the platform's — this
     /// is the one dummy exception.
     case replayLanding
-    /// `e` — open the editor on the timeline in front, or a new one from the `[+]` pill (#27).
-    /// All and Trends are not edited: the press says so and how to add one (Decision 19).
+    /// `e` — open the editor on the timeline in front (#27). All and Trends are not edited:
+    /// the press says so. Adding is the `[+]` pill, pressed, not a Tab stop.
     case editTimeline
 
     /// The character a press stands for, where a platform reports Shift-/ as `/` with Shift held.

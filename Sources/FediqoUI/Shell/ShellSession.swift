@@ -176,9 +176,7 @@ final class ShellSession {
 
     var queries: [TimelineQuery] = []
     /// The query in front. Nothing only while nothing is joined; not persisted.
-    var timelineID: TimelineQuery? {
-        didSet { addFocused = false }
-    }
+    var timelineID: TimelineQuery?
 
     /// The timelines the reader wrote, in their tab order (#27). Changed only through
     /// `commit(_:)` and `removeTimeline(_:)`, which keep them on this device.
@@ -190,8 +188,6 @@ final class ShellSession {
     @ObservationIgnored let timelineStore: WrittenTimelineStore?
     /// The timeline editor, where it is open. Edits apply on Done (Decision 21).
     var editing: TimelineDraft?
-    /// Tab has reached the pinned `[+]` pill, the last stop (Decision 19).
-    var addFocused = false
     /// A sentence the timeline shows for a moment.
     var toast: ShellToast?
     /// Every held note's folded text, built the first time something reads text after `notes`
@@ -241,6 +237,16 @@ final class ShellSession {
     /// Whether the breakdown is by week or by month.
     var heldPeriod: HeldPeriod = .month {
         didSet { holdings = Holdings(notes: notes, per: heldPeriod) }
+    }
+
+    /// Which purpose Usage is showing. Tab rotates it the way it rotates timeline queries.
+    var usagePurpose: UsagePane.Purpose = .source
+
+    /// Tab and ⇧Tab on Usage: Sources, Time, Copies, and round again.
+    @discardableResult
+    func rotateUsageTab(by step: Int) -> Bool {
+        usagePurpose = DummyCommand.advanced(Array(UsagePane.Purpose.allCases), from: usagePurpose, by: step)
+        return true
     }
 
     /// How many times the reader has cleared a server — decision 14's press, counted.

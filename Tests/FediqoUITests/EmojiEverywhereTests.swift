@@ -280,7 +280,7 @@ struct EmojiEverywhereTests {
         #expect(said.contains(String(format: L10n.t("item.covered.warning"), "Blood")))
     }
 
-    // After `s` lifts it, the row still says it was covered, and how to cover it again.
+    // After `s` lifts it, the row still says it was covered. It does not say how to cover it again.
     @Test("A lifted row keeps the mark: it says it was covered")
     func aLiftedRowKeepsTheMark() {
         for item in [Self.item(spoiler: "Blood"), Self.item(sensitive: true)] {
@@ -288,7 +288,7 @@ struct EmojiEverywhereTests {
                                       marks: .constant(DummyMarks()), lifted: true, onToast: { _ in })
             #expect(lifted.spokenCover.hasPrefix(L10n.t("item.lifted.mark")))
             #expect(!lifted.spokenCover.hasPrefix(L10n.t("item.covered.mark")))
-            #expect(lifted.spokenCover.hasSuffix(L10n.t("item.lifted.label")))
+            #expect(!lifted.spokenCover.contains(L10n.t("item.covered.label")))
         }
     }
 
@@ -299,12 +299,10 @@ struct EmojiEverywhereTests {
         let mark = L10n.t("item.covered.mark")
         let warning = AttachmentViewer.spokenWarning("Blood", covered: true)
         #expect(warning == mark + ". " + String(format: L10n.t("item.covered.warning"), "Blood"))
-        #expect(AttachmentViewer.spokenButton(covered: true, warned: true) == L10n.t("item.covered.label"))
+        #expect(AttachmentViewer.spokenButton(warned: true) == L10n.t("item.covered.label"))
 
-        #expect(AttachmentViewer.spokenButton(covered: true, warned: false)
+        #expect(AttachmentViewer.spokenButton(warned: false)
             == mark + ". " + L10n.t("item.covered.label"))
-        #expect(AttachmentViewer.spokenButton(covered: false, warned: false)
-            .hasPrefix(L10n.t("item.lifted.mark")))
         #expect(AttachmentViewer.spokenWarning("Blood", covered: false)
             .hasPrefix(L10n.t("item.lifted.mark")))
     }
@@ -343,7 +341,7 @@ struct EmojiEverywhereTests {
         // Lifted is the reader's own doing and the words speak for themselves again — but the
         // label still does not repeat them.
         #expect(!lifted.spokenCover.contains("nobody asked to read"))
-        #expect(lifted.spokenCover.contains(L10n.t("item.lifted.label")))
+        #expect(!lifted.spokenCover.contains(L10n.t("item.covered.label")))
     }
 
     #if os(macOS)

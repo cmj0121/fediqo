@@ -49,7 +49,7 @@ struct ForumJoinTests {
             "https://\(host)/forum.php": index,
         ]
         for (fid, outcome) in boards {
-            routes["https://\(host)/forum.php?mod=forumdisplay&fid=\(fid)"] = outcome
+            routes["https://\(host)/forum.php?mod=forumdisplay&fid=\(fid)&filter=author&orderby=dateline"] = outcome
         }
         return FixtureHTTP(routes)
     }
@@ -1140,7 +1140,7 @@ struct ForumJoinTests {
                 "https://\(host)/forum.php": .text(index),
             ]
             for (fid, name) in boards {
-                routes["https://\(host)/forum.php?mod=forumdisplay&fid=\(fid)"]
+                routes["https://\(host)/forum.php?mod=forumdisplay&fid=\(fid)&filter=author&orderby=dateline"]
                     = .text(threads(fid, name))
             }
             return FixtureHTTP(routes)
@@ -1194,7 +1194,7 @@ struct ForumJoinTests {
         // seconds; three of them to confirm what the store already says is the spend this
         // package refuses, and the risk it must not take.
         #expect(await http.requested.map(\.absoluteString) == [
-            "https://\(Restate.host)/forum.php?mod=forumdisplay&fid=41",
+            "https://\(Restate.host)/forum.php?mod=forumdisplay&fid=41&filter=author&orderby=dateline",
         ])
     }
 

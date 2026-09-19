@@ -373,7 +373,7 @@ struct DiscuzTests {
         #expect(notes.first?.categories == [.board(id: "1")])
         let asked = try #require(await http.requested.first)
         #expect(asked.absoluteString
-            == "https://install-c.example/forum.php?mod=forumdisplay&fid=1")
+            == "https://install-c.example/forum.php?mod=forumdisplay&fid=1&filter=author&orderby=dateline")
     }
 
     @Test("The page's own name for a board wins, and the reader's is only a fallback")
@@ -391,7 +391,7 @@ struct DiscuzTests {
 
         let titled = #"<h1><a href="forum.php?mod=forumdisplay&amp;fid=1">休闲驿站</a></h1>"# + row
         let named = try await DiscuzClient(
-            http: FixtureHTTP(["https://\(host)/forum.php?mod=forumdisplay&fid=1": .text(titled)]),
+            http: FixtureHTTP(["https://\(host)/forum.php?mod=forumdisplay&fid=1&filter=author&orderby=dateline": .text(titled)]),
             host: host
         ).threads(board: stale, source: source)
         #expect(named.allSatisfy { $0.board == "休闲驿站" })
@@ -400,7 +400,7 @@ struct DiscuzTests {
 
         // A listing with no heading at all falls back rather than losing the board entirely.
         let fallback = try await DiscuzClient(
-            http: FixtureHTTP(["https://\(host)/forum.php?mod=forumdisplay&fid=1": .text(row)]),
+            http: FixtureHTTP(["https://\(host)/forum.php?mod=forumdisplay&fid=1&filter=author&orderby=dateline": .text(row)]),
             host: host
         ).threads(board: stale, source: source)
         #expect(fallback.allSatisfy { $0.board == "what it used to be called" })

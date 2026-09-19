@@ -1400,7 +1400,7 @@ struct JoinStageTests {
     /// exists in.
     @Test("A server removed while its boards are still being read does not come back")
     func aRemovedSourceIsNotResurrectedByAnInFlightSubscribe() async {
-        let board = "https://\(Self.forum)/forum.php?mod=forumdisplay&fid=33"
+        let board = "https://\(Self.forum)/forum.php?mod=forumdisplay&fid=33&filter=author&orderby=dateline"
         var routes = Self.forumRoutes()
         routes[board] = .text(Self.oneBoard)
         let http = GatedHTTP(routes, holding: board)
@@ -1459,7 +1459,7 @@ struct JoinStageTests {
         .timeLimit(.minutes(1))
     )
     func aSubscribeLandingMidRemoveStaysRemoved() async {
-        let board = "https://\(Self.forum)/forum.php?mod=forumdisplay&fid=33"
+        let board = "https://\(Self.forum)/forum.php?mod=forumdisplay&fid=33&filter=author&orderby=dateline"
         var routes = Self.forumRoutes()
         routes[board] = .text(Self.oneBoard)
         let http = GatedHTTP(routes, holding: board)
@@ -1524,7 +1524,7 @@ struct JoinStageTests {
     /// the only way to write it.
     @Test("Removing one server does not abandon a subscribe to a different one")
     func removingOneServerLeavesAnotherSubscribeAlone() async {
-        let board = "https://\(Self.forum)/forum.php?mod=forumdisplay&fid=33"
+        let board = "https://\(Self.forum)/forum.php?mod=forumdisplay&fid=33&filter=author&orderby=dateline"
         var routes = Self.forumRoutes()
         routes[board] = .text(Self.oneBoard)
         let http = GatedHTTP(routes, holding: board)

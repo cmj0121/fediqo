@@ -42,7 +42,7 @@ struct BoardChoiceTests {
             "https://\(host)/forum.php": index,
         ]
         for (fid, outcome) in boards {
-            routes["https://\(host)/forum.php?mod=forumdisplay&fid=\(fid)"] = outcome
+            routes["https://\(host)/forum.php?mod=forumdisplay&fid=\(fid)&filter=author&orderby=dateline"] = outcome
         }
         return FixtureHTTP(routes)
     }
@@ -1440,10 +1440,10 @@ struct BoardChoiceTests {
                 <html><head><meta name="generator" content="Discuz! X5.0" /></head><body></body></html>
                 """#),
                 "https://\(Self.host)/forum.php": .text(Self.fourBoards),
-                "https://\(Self.host)/forum.php?mod=forumdisplay&fid=33":
+                "https://\(Self.host)/forum.php?mod=forumdisplay&fid=33&filter=author&orderby=dateline":
                     .text(Self.oneBoard(33)),
             ],
-            holding: "https://\(Self.host)/forum.php?mod=forumdisplay&fid=33"
+            holding: "https://\(Self.host)/forum.php?mod=forumdisplay&fid=33&filter=author&orderby=dateline"
         )
         let session = ShellSession(http: http, store: ItemStore())
         let pane = AccountPane(session: session)
@@ -1489,8 +1489,8 @@ struct BoardChoiceTests {
     func aRestatesBoardReadSaysTheSameThing() async {
         let (seeded, _) = await Self.reading()
         let http = GatedHTTP(
-            ["https://\(Self.host)/forum.php?mod=forumdisplay&fid=40": .text(Self.oneBoard(40))],
-            holding: "https://\(Self.host)/forum.php?mod=forumdisplay&fid=40"
+            ["https://\(Self.host)/forum.php?mod=forumdisplay&fid=40&filter=author&orderby=dateline": .text(Self.oneBoard(40))],
+            holding: "https://\(Self.host)/forum.php?mod=forumdisplay&fid=40&filter=author&orderby=dateline"
         )
         let session = ShellSession(http: http, store: seeded.store)
         session.sources = seeded.sources
