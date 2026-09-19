@@ -91,27 +91,12 @@ struct MissingRules {
     let missing: Bool
 }
 
-/// Where Tab can land on the timeline: a query, or the pinned `[+]` pill after the last one.
-enum TimelineTabStop: Hashable {
-    case query(TimelineQuery)
-    case add
-}
-
 extension ShellSession {
-    /// All, Trends, the reader's in their order, then `[+]` — so adding stays keyboard-reachable.
-    var tabStops: [TimelineTabStop] {
-        queries.isEmpty ? [] : queries.map(TimelineTabStop.query) + [.add]
-    }
-
-    /// Tab and ⇧Tab on the timeline.
+    /// Tab and ⇧Tab on the timeline: All, Trends, then yours. `[+]` is a press, not a stop.
     @discardableResult
     func rotateTab(by step: Int) -> Bool {
         guard !queries.isEmpty else { return false }
-        let current: TimelineTabStop = addFocused ? .add : .query(currentTimeline)
-        switch DummyCommand.advanced(tabStops, from: current, by: step) {
-        case .add: addFocused = true
-        case .query(let query): timelineID = query
-        }
+        timelineID = DummyCommand.advanced(queries, from: currentTimeline, by: step)
         return true
     }
 
@@ -145,7 +130,7 @@ extension ShellSession {
         return timeline.name
     }
 
-    /// The line under the tabs.
+    /// The line beside the tabs.
     func rule(of query: TimelineQuery) -> String {
         guard case .written = query else { return query.rule }
         return L10n.count("timeline.rule.written", definition(of: query).rules.count)
@@ -168,15 +153,11 @@ extension ShellSession {
         toast = ShellToast(tick: (toast?.tick ?? 0) + 1, text: text)
     }
 
-    /// `e`. Opens the editor on the timeline in front, or a new one where Tab is on `[+]`. All and
-    /// Trends answer with a toast and open nothing.
+    /// `e`. Opens the editor on the timeline in front. All and Trends answer with a toast and
+    /// open nothing. Adding is the `[+]` pill, pressed, not a Tab stop.
     @discardableResult
     func editCurrentTimeline() -> Bool {
         guard !queries.isEmpty else { return false }
-        if addFocused {
-            newTimeline()
-            return true
-        }
         guard case .written(let id) = currentTimeline,
               let index = written.firstIndex(where: { $0.id == id })
         else {
@@ -187,13 +168,19 @@ extension ShellSession {
         return true
     }
 
+    /// A pointer on a tab — double-click or long-press — puts it in front, then the same as `e`.
+    func editTimeline(_ query: TimelineQuery) {
+        timelineID = query
+        _ = editCurrentTimeline()
+    }
+
     /// The name the remove question asks about: the draft's, or the kept one where the draft's
     /// has been emptied.
     func removeName(of draft: TimelineDraft) -> String {
         draft.canSave ? draft.trimmedName : (written.first { $0.id == draft.id }?.name ?? "")
     }
 
-    /// The `[+]` pill, pressed or reached with Tab and `e`.
+    /// The `[+]` pill, pressed.
     func newTimeline() {
         guard !timelinesUnreadable else {
             showToast(L10n.t("timeline.unreadable"))

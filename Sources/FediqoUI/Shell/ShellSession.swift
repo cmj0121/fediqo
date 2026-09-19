@@ -176,9 +176,7 @@ final class ShellSession {
 
     var queries: [TimelineQuery] = []
     /// The query in front. Nothing only while nothing is joined; not persisted.
-    var timelineID: TimelineQuery? {
-        didSet { addFocused = false }
-    }
+    var timelineID: TimelineQuery?
 
     /// The timelines the reader wrote, in their tab order (#27). Changed only through
     /// `commit(_:)` and `removeTimeline(_:)`, which keep them on this device.
@@ -190,8 +188,6 @@ final class ShellSession {
     @ObservationIgnored let timelineStore: WrittenTimelineStore?
     /// The timeline editor, where it is open. Edits apply on Done (Decision 21).
     var editing: TimelineDraft?
-    /// Tab has reached the pinned `[+]` pill, the last stop (Decision 19).
-    var addFocused = false
     /// A sentence the timeline shows for a moment.
     var toast: ShellToast?
     /// Every held note's folded text, built the first time something reads text after `notes`

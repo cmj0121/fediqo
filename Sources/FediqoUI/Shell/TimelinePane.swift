@@ -254,17 +254,16 @@ struct TimelinePane: View {
         }
     }
 
-    /// The title, the queries, and the rule the current one is under.
+    /// `[+]`, the queries, then the rule the current one is under — one line.
     ///
-    /// The pills are All, Trends and the reader's own, then `[+]`. The row scrolls so a narrow window or a larger text size
-    /// does not squeeze the names, and the rule sits below them at full width.
+    /// `[+]` is pinned leading, outside the scroll, so adding is always in reach. It is a
+    /// press, not a Tab stop: Tab rotates All, Trends and yours. The names scroll so a
+    /// narrow window or a larger text size does not squeeze them; the rule keeps its own
+    /// width on the trailing edge.
     private var header: some View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
             HStack(alignment: .center, spacing: ShellSpace.step) {
-                Text(L10n.t("shell.timeline.title"))
-                    .font(ShellType.pane)
-                    .foregroundStyle(ShellChrome.ink(colorScheme))
-                    .fixedSize()
+                if !session.queries.isEmpty { addPill }
                 ScrollViewReader { proxy in
                     ScrollView(.horizontal) {
                         HStack(spacing: ShellSpace.tight) {
@@ -282,21 +281,18 @@ struct TimelinePane: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                // Pinned outside the scroll, so adding is always in reach — and the last Tab stop.
-                if !session.queries.isEmpty { addPill }
+                if session.timelineID != nil {
+                    Text(session.rule(of: timeline))
+                        .font(ShellType.meta)
+                        .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                        .lineLimit(1)
+                }
             }
             if session.timelinesUnreadable {
                 Text(L10n.t("timeline.unreadable"))
                     .font(ShellType.meta)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
-            }
-            if session.timelineID != nil {
-                Text(session.rule(of: timeline))
-                    .font(ShellType.meta)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             if let latest = prefs.latestDate {
                 latestMark(latest)
@@ -324,7 +320,7 @@ struct TimelinePane: View {
     }
 
     private func queryPill(_ query: TimelineQuery) -> some View {
-        let selected = query == session.timelineID && !session.addFocused
+        let selected = query == session.timelineID
         let missing = session.hasMissingRule(query)
         return Button {
             session.timelineID = query
@@ -350,29 +346,36 @@ struct TimelinePane: View {
             )
         }
         .buttonStyle(.plain)
+        .simultaneousGesture(
+            TapGesture(count: 2).onEnded { session.editTimeline(query) }
+        )
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.45).onEnded { _ in session.editTimeline(query) }
+        )
         .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityHint(missing ? L10n.t("timeline.pill.missing.hint") : "")
+        .accessibilityAction(named: Text(L10n.t("shortcut.edit"))) {
+            session.editTimeline(query)
+        }
     }
 
-    /// `[+]`: a new timeline. Lit like a picked pill while Tab rests on it, where `e` opens one.
+    /// `[+]`: a new timeline. A press, not a selected tab.
     private var addPill: some View {
-        let focused = session.addFocused
-        return Button {
+        Button {
             session.newTimeline()
         } label: {
             Image(systemName: "plus")
                 .font(ShellType.meta.weight(.semibold))
-                .foregroundStyle(focused ? ShellChrome.selectInk(colorScheme) : ShellChrome.inkDim(colorScheme))
+                .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .padding(.horizontal, ShellSpace.snug)
                 .padding(.vertical, ShellSpace.tight)
                 .background(
                     Capsule(style: .continuous)
-                        .fill(focused ? ShellChrome.selectFill(colorScheme) : ShellChrome.well(colorScheme))
+                        .fill(ShellChrome.well(colorScheme))
                 )
         }
         .buttonStyle(.plain)
         .accessibilityLabel(L10n.t("timeline.new.title"))
-        .accessibilityAddTraits(focused ? .isSelected : [])
     }
 
     @ViewBuilder
