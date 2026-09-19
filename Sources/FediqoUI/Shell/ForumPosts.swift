@@ -405,11 +405,14 @@ final class ForumPosts {
                 own.append(started)
             }
         }
+        // A copy for the handler: Swift 6.0 will not let a cancellation handler, which runs
+        // concurrently, read a `var` it captured.
+        let owned = own
         let landedWhole = await withTaskCancellationHandler {
             for wait in waits { await wait.value }
             return keys.allSatisfy { missing[$0] == nil }
         } onCancel: {
-            for task in own { task.cancel() }
+            for task in owned { task.cancel() }
         }
         return landedWhole && !Task.isCancelled
     }
