@@ -23,7 +23,11 @@ public struct DiscourseClient: Sendable {
         self.host = host
     }
 
-    /// The front page: the most recently active discussions, newest activity first.
+    /// The front page, newest topic first.
+    ///
+    /// **`order=created`, not the default.** `/latest.json` on its own is ordered by the last
+    /// activity, and a row stores when the topic was created — so a topic bumped by today's reply
+    /// would take a place on the page that belongs to one posted today, and push it off.
     ///
     /// The category names are fetched beside it and are **allowed to fail**. A forum that will not
     /// answer `/site.json` — an old version, a plugin, a permission — still has a readable front
@@ -42,7 +46,11 @@ public struct DiscourseClient: Sendable {
             }
         }()
 
-        guard let url = Host.httpsURL(host: host, path: "/latest.json") else {
+        guard let url = Host.httpsURL(
+            host: host,
+            path: "/latest.json",
+            query: [URLQueryItem(name: "order", value: "created")]
+        ) else {
             throw DiscourseRequestError.invalidURL
         }
         let (data, response) = try await http.data(from: url)
