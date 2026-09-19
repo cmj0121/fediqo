@@ -155,37 +155,55 @@ struct WrittenTimelineTests {
 
     // MARK: Acceptance: Tab order and the key
 
-    @Test("Tab goes All, Trends, yours in your order, then [+], and round again")
+    @Test("Tab goes All, Trends, yours in your order, and round again; [+] is not a stop")
     func tabOrder() {
         let session = session()
         for name in ["A", "B"] { session.commit(draft(name, in: session)) }
         session.timelineID = .all
         var visited: [String] = []
-        for _ in 0..<6 {
+        for _ in 0..<5 {
             session.rotateTab(by: 1)
-            visited.append(session.addFocused ? "+" : session.name(of: session.currentTimeline))
+            visited.append(session.name(of: session.currentTimeline))
         }
-        #expect(visited == ["Trends", "A", "B", "+", "All", "Trends"])
+        #expect(visited == ["Trends", "A", "B", "All", "Trends"])
 
         session.timelineID = .all
         session.rotateTab(by: -1)
-        #expect(session.addFocused)
-        session.rotateTab(by: -1)
-        #expect(!session.addFocused && session.currentTimeline == .written(session.written[1].id))
+        #expect(session.currentTimeline == .written(session.written[1].id))
     }
 
-    @Test("e on [+] opens a new timeline; a click on a tab takes the focus off [+]")
-    func eOnAdd() throws {
+    @Test("A pointer on a tab puts it in front and opens its editor; All and Trends still say they cannot")
+    func pointerEditsTheTab() throws {
+        let session = session()
+        session.commit(draft("Mine", in: session))
+        let mine = TimelineQuery.written(session.written[0].id)
+        session.timelineID = .trends
+        session.editTimeline(mine)
+        #expect(session.timelineID == mine)
+        let editing = try #require(session.editing)
+        #expect(!editing.isNew && editing.id == session.written[0].id)
+
+        session.editing = nil
+        session.editTimeline(.all)
+        #expect(session.timelineID == .all)
+        #expect(session.editing == nil)
+        #expect(session.toast?.text == L10n.t("timeline.edit.fixed"))
+    }
+
+    @Test("Pressing [+] opens a new timeline; Tab never lands on it")
+    func pressingAddOpensANewTimeline() throws {
         let session = session()
         session.timelineID = .trends
-        session.rotateTab(by: 1)
-        #expect(session.addFocused)
-        #expect(session.editCurrentTimeline())
+        session.newTimeline()
         let editing = try #require(session.editing)
         #expect(editing.isNew && editing.name.isEmpty && editing.position == 0)
+        #expect(session.currentTimeline == .trends)
         session.editing = nil
-        session.timelineID = .all
-        #expect(!session.addFocused)
+        session.rotateTab(by: 1)
+        #expect(session.currentTimeline == .all)
+        #expect(session.editCurrentTimeline())
+        #expect(session.editing == nil)
+        #expect(session.toast?.text == L10n.t("timeline.edit.fixed"))
     }
 
     @Test("e is the editor key and the keys list names it under Timeline")
