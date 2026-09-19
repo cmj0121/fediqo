@@ -315,6 +315,26 @@ struct ForumTransportTests {
         #expect(forums.reachedSignIn(host: "COOKIE.Example"), "the host was not folded")
     }
 
+    /// **After a relaunch there is a sign-in and no browser**, and the reads have to follow the
+    /// sign-in. Asked of `hasEngine` alone, a thread on a challenge-fronted forum went through
+    /// `URLSession`, came back 403, and the reader who had signed in was told the forum would not
+    /// let this app read it.
+    @Test("A forum signed in before a relaunch is read through its browser, and a stranger is not")
+    func aSignInOutlivesTheRunThatMadeIt() async {
+        let fresh = ForumSessions(credentials: MemoryCredentials())
+        let session = ShellSession(http: FixtureHTTP(), forums: fresh)
+        session.sources = [Source(host: "cookie.example", kind: .discuz)]
+        await fresh.plantSession(host: "cookie.example")
+
+        #expect(!fresh.hasEngine(host: "cookie.example"), "the premise: this run built no browser")
+        #expect(fresh.reachedSignIn(host: "cookie.example"))
+        #expect(fresh.readsThroughEngine(host: "cookie.example"))
+        #expect(fresh.readsThroughEngine(host: "COOKIE.Example"), "the host was not folded")
+
+        #expect(!fresh.readsThroughEngine(host: "social.example"),
+                "a host nobody signed in to would start a web process")
+    }
+
     /// Cleared by `forget(host:)` and therefore by Clear and by Remove, which is decision 13's
     /// other half: the cookies that sign-in produced have just gone, so a row still offering to
     /// sign the reader out would be offering to end a session that no longer exists.
