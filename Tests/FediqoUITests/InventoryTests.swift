@@ -277,12 +277,38 @@ struct InventoryTests {
             "prefs.keep", "prefs.keep.forever", "prefs.keep.months", "prefs.keep.shorten.title",
             "prefs.keep.shorten.detail", "prefs.drop.copies", "prefs.drop.copies.title",
             "prefs.drop.copies.detail", "prefs.drop.confirm", "prefs.drop.footer",
+            "usage.tab.source", "usage.tab.time", "usage.tab.copies",
         ]
         for key in keys {
             for language in [DummyLanguage.english, .taiwanese] {
                 #expect(L10n.t(key, language: language) != key, "\(key) is missing in \(language)")
             }
         }
+    }
+
+    @Test("Usage is grouped by purpose, one tab each")
+    func purposesAreTabs() {
+        #expect(UsagePane.Purpose.allCases == [.source, .time, .copies])
+        #expect(L10n.t("usage.tab.source", language: .english) == "Sources")
+        #expect(L10n.t("usage.tab.time", language: .english) == "Time")
+        #expect(L10n.t("usage.tab.copies", language: .english) == "Copies")
+        #expect(L10n.t("usage.tab.source", language: .taiwanese) == "來源")
+        #expect(L10n.t("usage.tab.time", language: .taiwanese) == "時間")
+        #expect(L10n.t("usage.tab.copies", language: .taiwanese) == "副本")
+    }
+
+    @Test("Tab goes Sources, Time, Copies, and round again")
+    func usageTabOrder() {
+        let session = ShellSession(http: FixtureHTTP())
+        #expect(session.usagePurpose == .source)
+        var visited: [UsagePane.Purpose] = []
+        for _ in 0..<4 {
+            #expect(session.rotateUsageTab(by: 1))
+            visited.append(session.usagePurpose)
+        }
+        #expect(visited == [.time, .copies, .source, .time])
+        session.rotateUsageTab(by: -1)
+        #expect(session.usagePurpose == .source)
     }
 
     @Test("The readout's lines say what they count")
@@ -308,6 +334,7 @@ struct InventoryTests {
             "prefs.cache", "prefs.cache.footer", "prefs.held.total", "prefs.held.disk",
             "prefs.held.breakdown", "prefs.cache.clear", "prefs.password.forget",
             "prefs.keep", "prefs.drop.copies",
+            "usage.tab.source", "usage.tab.time", "usage.tab.copies",
         ] {
             #expect(usage.contains("\"\(key)\""), "Usage does not draw \(key)")
         }
