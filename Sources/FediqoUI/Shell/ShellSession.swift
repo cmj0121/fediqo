@@ -1171,19 +1171,11 @@ final class ShellSession {
 
     /// Whether a source of this kind has a trending timeline to offer.
     ///
-    /// **No `default:`.** This is a switch over a protocol kind, and this branch has already
-    /// shipped one silent wrong answer through exactly that shape. A protocol added and not
-    /// listed here would silently inherit somebody else's answer about a tab it may not have.
+    /// **`ProtocolKind.hasTimelines`, not a second list**, so the Trends tab and the Trends
+    /// timeline's own rule cannot disagree about which servers have trends. A forum has none;
+    /// its boards choose what is fetched and are not tabs.
     static func hasTrends(_ kind: ProtocolKind) -> Bool {
-        switch kind {
-        case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
-            .gotosocial:
-            true
-        // Neither forum has one. Discourse publishes no trending read this app takes, and
-        // Discuz! publishes a page. A forum's boards choose what is fetched; they are not tabs.
-        case .discourse, .discuz, .unknown:
-            false
-        }
+        kind.hasTimelines
     }
 
     /// The client a join of this host should go through.

@@ -163,6 +163,8 @@ struct MigrationTests {
         #expect(opened.sources == [Self.mastodon, Self.forum, Self.discourse])
         #expect(Set(opened.notes) == Self.expected, "the orphan stays dropped; every other post is here")
         #expect(opened.notes.count == 8)
+        // 0.1.0 kept the booster's name only, so a carried boost matches on its author alone.
+        #expect(opened.notes.first { $0.id == "m5" }?.boosterHandle == nil)
         #expect(Holdings(notes: opened.notes, per: .month, calendar: utc) == counted)
         #expect(counted.posts == 8)
         #expect(try migrations(index) == ["v1-index", "v2-categories"])

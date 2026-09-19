@@ -59,6 +59,21 @@ struct StoreFileTests {
         #expect(try file.load().notes == [saved])
     }
 
+    @Test("Who boosted a post, as user@instance, survives a relaunch; a post nobody boosted has nobody")
+    func boosterHandleSurvivesRelaunch() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let boosted = Note(
+            id: "1", source: mastodon, author: "Ada", handle: "@ada@second.example", body: "hello",
+            postedAt: origin, categories: [.public], boostedBy: "Bob", boosterHandle: "@bob@first.example"
+        )
+        let plain = note(id: "2")
+        try await StoreFile(at: dir).save(sources: [mastodon], notes: [boosted, plain])
+        let loaded = StoreFile.open(at: dir).notes
+        #expect(loaded.first { $0.id == "1" }?.boosterHandle == "@bob@first.example")
+        #expect(loaded.first { $0.id == "2" }?.boosterHandle == nil)
+    }
+
     @Test("A reply whose parent's handle is unknown comes back a reply")
     func replyWithoutHandle() async throws {
         let file = try StoreFile(database: DatabaseQueue())
