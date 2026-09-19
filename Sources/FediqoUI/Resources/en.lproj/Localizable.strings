@@ -101,7 +101,9 @@
 "item.deck.audio" = "An audio clip";
 "item.deck.unknown" = "An attachment";
 "item.deck.play" = "Play this";
-"item.covered.title" = "The author covered this post";
+"item.covered.mark" = "Covered";
+"item.lifted.mark" = "Was covered";
+"item.covered.warning" = "Author's warning: %@";
 "item.covered.show" = "Show it";
 "item.covered.label" = "Press s to show it";
 "item.covered.hide" = "Hide it";

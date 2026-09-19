@@ -205,7 +205,9 @@ struct DeckTests {
     func theCoverIsTranslated() {
         let keys = [
             "item.deck.position",
-            "item.covered.title",
+            "item.covered.mark",
+            "item.lifted.mark",
+            "item.covered.warning",
             "item.covered.show",
             "item.covered.hide",
             "item.covered.label",
@@ -216,6 +218,19 @@ struct DeckTests {
             for key in keys {
                 #expect(L10n.t(key, language: language) != key)
             }
+            // The sentence that stood in the author's place is gone, not merely unused.
+            #expect(L10n.t("item.covered.title", language: language) == "item.covered.title")
+        }
+    }
+
+    // The warning is the author's text handed in as an argument, so it must survive formatting
+    // whole — `%` in it included — in every language.
+    @Test("The author's warning formats in every language, and carries their text whole")
+    func theWarningFormatsEverywhere() {
+        for language in [DummyLanguage.english, .taiwanese] {
+            let said = String(format: L10n.t("item.covered.warning", language: language), "100% spoilers")
+            #expect(said.contains("100% spoilers"))
+            #expect(said != "100% spoilers")
         }
     }
 

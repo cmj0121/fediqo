@@ -26,8 +26,8 @@ struct AttachmentViewer: View {
     let covered: Bool
     /// Whether the post carries a cover at all, lifted or not.
     let hasCover: Bool
-    /// The author's line, where they wrote one.
-    let coverLine: String
+    /// The author's warning, or nothing where they wrote none — the mark alone says covered.
+    let coverLine: String?
     /// The custom emoji the post arrived with, for the caption to draw the ones its alt text
     /// names. The post's own list and nothing else is asked for here — `EmojiText` reaches the
     /// server's catalogue behind it for a shortcode the post did not carry a picture for.
@@ -300,8 +300,9 @@ struct AttachmentViewer: View {
         )
     }
 
-    /// The author's line and the control that takes the cover off — **drawn here for the same
-    /// reason it is drawn in the row, and in both directions.**
+    /// The cover mark, the author's warning where they wrote one, and the control that takes the
+    /// cover off — **drawn here for the same reason it is drawn in the row, and in both
+    /// directions.**
     ///
     /// A viewer that can only be uncovered with `s` reproduces one layer up the defect unit 6 was
     /// just fixed for, where a reader using VoiceOver or a pointer could not uncover a post at
@@ -314,13 +315,17 @@ struct AttachmentViewer: View {
     private var notice: some View {
         if hasCover {
             VStack(spacing: ShellSpace.step) {
-                Text(coverLine)
-                    .font(ShellType.body)
-                    .foregroundStyle(ShellChrome.overPicture)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(Box.captionLines)
-                    .frame(maxWidth: Box.prose)
-                    .fixedSize(horizontal: false, vertical: true)
+                CoverChip(lifted: !covered, onPicture: true)
+                if let coverLine {
+                    Text(coverLine)
+                        .font(ShellType.body.weight(.medium))
+                        .foregroundStyle(ShellChrome.overPicture)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(Box.captionLines)
+                        .frame(maxWidth: Box.prose)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityLabel(Self.spokenWarning(coverLine, covered: covered))
+                }
                 coverButton
             }
             .padding(ShellSpace.room)
@@ -351,9 +356,25 @@ struct AttachmentViewer: View {
         // middle of a sentence — and the action put back on, because ignoring the children throws
         // the real button's activation away with them.
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(L10n.t(covered ? "item.covered.label" : "item.lifted.label"))
+        .accessibilityLabel(Self.spokenButton(covered: covered, warned: coverLine != nil))
         .accessibilityAddTraits(.isButton)
         .accessibilityAction(.default, onToggleCover)
+    }
+
+    /// The chip is hidden and the old sentence is gone, so the state has to be said: once, and
+    /// first — on the warning where the author wrote one, on the button where they did not.
+    static func spokenWarning(_ line: String, covered: Bool) -> String {
+        [mark(covered: covered), String(format: L10n.t("item.covered.warning"), line)]
+            .joined(separator: ". ")
+    }
+
+    static func spokenButton(covered: Bool, warned: Bool) -> String {
+        let how = L10n.t(covered ? "item.covered.label" : "item.lifted.label")
+        return warned ? how : [mark(covered: covered), how].joined(separator: ". ")
+    }
+
+    private static func mark(covered: Bool) -> String {
+        L10n.t(covered ? "item.covered.mark" : "item.lifted.mark")
     }
 
     /// The mark that starts it, where there is something to start and it is not started.

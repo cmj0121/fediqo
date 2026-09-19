@@ -663,11 +663,11 @@ public struct FediqoRootView: View {
         }
     }
 
-    /// What the author wrote on the cover, or what to say where they flagged it and wrote nothing.
-    /// The same two cases the row draws, because it is the same line.
-    private func coverLine(of item: DummyItem) -> String {
+    /// The author's warning, or nothing where they flagged it and wrote none — no sentence of
+    /// ours in their place, the same as the row.
+    private func coverLine(of item: DummyItem) -> String? {
         let spoiler = item.spoiler ?? ""
-        return spoiler.isEmpty ? L10n.t("item.covered.title") : spoiler
+        return spoiler.isEmpty ? nil : spoiler
     }
 
     /// Asks again for the pictures on this screen that were written off while the network was down.
