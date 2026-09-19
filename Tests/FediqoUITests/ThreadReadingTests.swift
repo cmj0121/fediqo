@@ -287,7 +287,7 @@ struct ThreadReadingTests {
         // Two threads, because "every one of them" is the shape of the assertion: a cover that
         // appeared on one row and not another would pass a one-row page.
         let http = FixtureHTTP([
-            "https://\(Self.host)/forum.php?mod=forumdisplay&fid=34": .text(#"""
+            "https://\(Self.host)/forum.php?mod=forumdisplay&fid=34&filter=author&orderby=dateline": .text(#"""
             <html><head><meta name="generator" content="Discuz! X5.0" /></head><body>
             <h1 class="xs2"><a href="forum.php?mod=forumdisplay&fid=34">工具箱讨论区</a></h1>
             <table id="threadlisttableid">

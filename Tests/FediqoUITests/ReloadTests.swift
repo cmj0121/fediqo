@@ -34,7 +34,7 @@ struct ReloadTests {
         "https://\(host)/api/v1/trends/statuses?limit=20"
     }
 
-    private static let boardAddress = "https://\(forum)/forum.php?mod=forumdisplay&fid=34"
+    private static let boardAddress = "https://\(forum)/forum.php?mod=forumdisplay&fid=34&filter=author&orderby=dateline"
     private static let threadAddress = "https://\(forum)/forum.php?mod=viewthread&tid=\(tid)&mobile=2"
 
     private static let board = FixtureHTTP.Outcome.text(#"""

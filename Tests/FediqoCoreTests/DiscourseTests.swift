@@ -198,6 +198,9 @@ struct DiscourseTests {
 
         // Both documents were read, and nothing else was.
         #expect(await Set(http.paths) == ["/latest.json", "/site.json"])
+        // Newest topic first, not newest activity: a row is dated by when the topic was created.
+        let front = await http.requested.first { $0.path == "/latest.json" }
+        #expect(front?.query == "order=created")
     }
 
     @Test("A topic is dated when it was asked, not when a stranger last answered")

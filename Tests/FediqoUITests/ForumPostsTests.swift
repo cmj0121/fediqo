@@ -72,7 +72,7 @@ struct ForumPostsTests {
         // wrapped in `<cite>`. The number in the `<tbody>` id is the only thing this test is
         // about: it has to come out the other end as the number a row reads back.
         let http = FixtureHTTP([
-            "https://\(Self.host)/forum.php?mod=forumdisplay&fid=34": .text(#"""
+            "https://\(Self.host)/forum.php?mod=forumdisplay&fid=34&filter=author&orderby=dateline": .text(#"""
             <html><head><meta name="generator" content="Discuz! X5.0" /></head><body>
             <h1 class="xs2"><a href="forum.php?mod=forumdisplay&fid=34">工具箱讨论区</a></h1>
             <table id="threadlisttableid">
@@ -712,7 +712,7 @@ struct ForumPostsTests {
             """#),
             // 300's own listing — proof it answers for itself, which is the whole argument for
             // making it a separate pick.
-            "https://install-d.example/forum.php?mod=forumdisplay&fid=300": .text(#"""
+            "https://install-d.example/forum.php?mod=forumdisplay&fid=300&filter=author&orderby=dateline": .text(#"""
             <html><head><meta name="generator" content="Discuz! X3.4" /></head><body>
             <h1 class="xs2"><a href="forum.php?mod=forumdisplay&fid=300">输入法工具</a></h1>
             <table id="threadlisttableid">
