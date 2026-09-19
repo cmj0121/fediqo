@@ -236,6 +236,18 @@ struct RuleTests {
         #expect(shown([.keyword("İstanbul", in: .every)], notes: notes) == ["tr"])
     }
 
+    /// The match reads bytes, and only a native string has them in one piece. macOS 15 folds to
+    /// an `NSString`; a newer OS does not, so this is the line that fails where it matters.
+    @Test("A folded key is native UTF-8, so a match reads its bytes on every OS")
+    func foldedKeysAreNative() {
+        for text in ["flags 🇦🇺🇸🇪 together", "ＳＷＩＦＴ", "İSTANBUL\u{00A0}da", ""] {
+            #expect(Fold.key(text).isContiguousUTF8, "\(text) folded to a string with no bytes to read")
+        }
+        let bridged = NSString(string: "flags 🇦🇺🇸🇪 together") as String
+        #expect(!Fold.contains(bridged, "🇺🇸"), "a string that did not come through key still splits a flag")
+        #expect(Fold.contains(bridged, "🇦🇺"))
+    }
+
     @Test("A match never splits a character: flags, marks and skin tones")
     func matchesWholeCharacters() {
         let notes = [
