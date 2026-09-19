@@ -209,9 +209,7 @@ struct DeckTests {
             "item.lifted.mark",
             "item.covered.warning",
             "item.covered.show",
-            "item.covered.hide",
             "item.covered.label",
-            "item.lifted.label",
             "shortcut.reveal",
         ]
         for language in [DummyLanguage.english, .taiwanese] {
@@ -220,6 +218,9 @@ struct DeckTests {
             }
             // The sentence that stood in the author's place is gone, not merely unused.
             #expect(L10n.t("item.covered.title", language: language) == "item.covered.title")
+            // Putting the cover back is still `s`; the row no longer says so.
+            #expect(L10n.t("item.covered.hide", language: language) == "item.covered.hide")
+            #expect(L10n.t("item.lifted.label", language: language) == "item.lifted.label")
         }
     }
 
