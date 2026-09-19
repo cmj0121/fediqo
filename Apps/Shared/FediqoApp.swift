@@ -20,6 +20,9 @@ final class Launch {
     let store: ItemStore
     let forums: ForumSessions
     let saver: StoreSaver
+    /// The index was written by a newer build and left alone; the root view says so. Cleared when
+    /// the reader dismisses that, so it is said once a launch rather than once a window.
+    var storeIsNewer: Bool
 
     /// The index is opened and read here, on the main actor, before the first frame. Moving it
     /// off would leave the store empty while the first frame draws, and every save asked for in
@@ -29,7 +32,9 @@ final class Launch {
         store = ItemStore(sources: opened.sources, notes: opened.notes)
         // `nil` when the index could not be read and could not be set aside either: this run
         // then saves nothing, so what is on disk survives it (`StoreFile.open(at:now:)`).
+        // It is also `nil` when the index was written by a newer build, which is left as found.
         saver = StoreSaver(store: store, file: opened.file)
+        storeIsNewer = opened.storeIsNewer
         // Built on first use only: a reader with no forum never opens the WebKit store.
         forums = ForumSessions(dataStore: ForumWebsiteData.onDevice())
         // Where Caches cannot be made, pictures are read from their hyperlinks only.
@@ -65,12 +70,16 @@ struct FediqoApp: App {
 
     var body: some Scene {
         WindowGroup {
-            FediqoRootView(store: Launch.shared.store, forums: Launch.shared.forums, persist: save)
-                .onChange(of: scenePhase) { _, phase in
-                    if phase == .background {
-                        saveInBackground()
-                    }
+            FediqoRootView(
+                store: Launch.shared.store, forums: Launch.shared.forums, persist: save,
+                storeIsNewer: Launch.shared.storeIsNewer,
+                storeNoticeSeen: { Launch.shared.storeIsNewer = false }
+            )
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .background {
+                    saveInBackground()
                 }
+            }
         }
         #if os(macOS)
         .windowResizability(.contentMinSize)

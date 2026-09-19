@@ -252,6 +252,16 @@ struct DummyCommandTests {
         #expect(L10n.t("shortcut.landing", language: .taiwanese) == "從啟動重新載入")
     }
 
+    @Test("An index from a newer build is named in both languages")
+    func newerStoreNoticeIsWritten() {
+        for key in ["store.newer.title", "store.newer.detail", "store.newer.ok"] {
+            for language in [DummyLanguage.english, .taiwanese] {
+                #expect(L10n.t(key, language: language) != key, "\(key) is missing in \(language)")
+            }
+        }
+        #expect(L10n.t("store.newer.title", language: .english) != L10n.t("store.newer.title", language: .taiwanese))
+    }
+
     @Test("The guide names every dummy command")
     func guideNamesEveryCommand() {
         let named = Set(DummyShortcut.all.flatMap(\.commands))
