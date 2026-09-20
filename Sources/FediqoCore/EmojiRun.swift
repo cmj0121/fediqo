@@ -27,13 +27,19 @@ public struct CustomEmoji: Sendable, Hashable {
     }
 }
 
-/// A line of text, cut into what is written in letters and what is written in pictures.
+/// A line of text, cut into what is written in letters, what is written in pictures, and — where
+/// the line is a post's own words — what is written as an address.
 ///
 /// The cut is made here rather than on the screen so that it can be tested without one, and so
 /// that the places drawing somebody's words cannot come to disagree about what a shortcode is.
+///
+/// **A `.link` is only ever produced by `EmojiRun.prose`**, which is the cut a call site has to
+/// ask for by name. `CustomEmoji.runs` cannot make one, so a label — a name, a handle, a spoiler
+/// line — cannot grow a control by accident.
 public enum EmojiRun: Sendable, Hashable {
     case text(String)
     case emoji(CustomEmoji)
+    case link(PostLink)
 }
 
 public extension CustomEmoji {
