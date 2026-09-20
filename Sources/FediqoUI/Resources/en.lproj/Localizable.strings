@@ -471,3 +471,12 @@
 "list.choose.done"                    = "Done";
 "list.choose.hint.on"                 = "Read this list";
 "list.choose.hint.off"                = "Stop reading this list";
+
+/* #34 — an address in somebody's post, and the two ways to follow it. */
+"link.open.here"                      = "Open %@ in Fediqo";
+"link.open.browser"                   = "Open %@ in your browser";
+"link.hint.pointer"                   = "Press to read it here. Control-click to open it in your browser.";
+"link.hint.touch"                     = "Press to read it here. Press and hold to open it in your browser.";
+"link.reader.label"                   = "%@, read inside Fediqo";
+"link.reader.browser"                 = "Open in your browser";
+"link.reader.close"                   = "Done";

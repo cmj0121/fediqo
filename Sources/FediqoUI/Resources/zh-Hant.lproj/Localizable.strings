@@ -463,3 +463,12 @@
 "list.choose.done"                    = "完成";
 "list.choose.hint.on"                 = "讀這個列表";
 "list.choose.hint.off"                = "不再讀這個列表";
+
+/* #34 — an address in somebody's post, and the two ways to follow it. */
+"link.open.here"                      = "在 Fediqo 開啟 %@";
+"link.open.browser"                   = "用瀏覽器開啟 %@";
+"link.hint.pointer"                   = "按一下在這裡讀。Control 加按一下改用瀏覽器開啟。";
+"link.hint.touch"                     = "按一下在這裡讀。長按改用瀏覽器開啟。";
+"link.reader.label"                   = "%@，在 Fediqo 裡讀";
+"link.reader.browser"                 = "用瀏覽器開啟";
+"link.reader.close"                   = "完成";
