@@ -292,8 +292,14 @@ struct SpokenLinks: ViewModifier {
     @Environment(\.openURL) private var openURL
 
     func body(content: Content) -> some View {
-        content.accessibilityActions {
-            LinkWays(links: PostLink.found(in: text), reader: reader, browser: openURL)
+        // **The cut the words beside this were already drawn from**, rather than a second scan of
+        // the same text on every pass of the band. Both call sites draw this text as prose with
+        // no picture list, which is this exact key in the cache's memo, so what this costs is a
+        // dictionary lookup. `PostLink.found` rescanned instead — bounded by `maxLinks`, and paid
+        // again on every pass of every reply.
+        let links = EmojiText.links(in: EmojiCache.shared.proseRuns(in: text, from: []))
+        return content.accessibilityActions {
+            LinkWays(links: links, reader: reader, browser: openURL)
         }
     }
 }
