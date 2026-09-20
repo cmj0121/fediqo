@@ -86,7 +86,9 @@ enum MastodonFixture {
     static let issued = #"{"access_token":"tok-123","token_type":"Bearer"}"#
     static let me = #"{"id":"1","acct":"reader"}"#
 
-    static func server(verify: FixtureSender.Outcome = .json(me)) -> FixtureSender {
+    static func server(
+        verify: FixtureSender.Outcome = .json(me), issued: String = issued
+    ) -> FixtureSender {
         FixtureSender([
             "/api/v1/apps": .json(apps),
             "/oauth/token": .json(issued),
@@ -98,6 +100,14 @@ enum MastodonFixture {
     static let token = MastodonToken(
         host: host, accessToken: "tok-123", clientID: "cid", clientSecret: "csecret"
     )
+
+    /// The same token, carrying what its sign-in asked for.
+    static func token(scopes: String?) -> MastodonToken {
+        MastodonToken(
+            host: host, accessToken: "tok-123", clientID: "cid", clientSecret: "csecret",
+            scopes: scopes
+        )
+    }
     static let app = MastodonApp(host: host, clientID: "cid", clientSecret: "csecret")
 }
 
@@ -112,7 +122,7 @@ struct MastodonAuthTests {
         let server = MastodonFixture.server()
         let app = try await MastodonOAuth(host: host, sender: server).register()
         #expect(app == MastodonApp(
-            host: host, clientID: "cid", clientSecret: "csecret", scopes: MastodonOAuth.scopes
+            host: host, clientID: "cid", clientSecret: "csecret", scopes: MastodonOAuth.reading
         ), "a registration records the scopes it was made for")
 
         let request = try #require(await server.requests.first)
@@ -227,7 +237,11 @@ struct MastodonAuthTests {
         let server = MastodonFixture.server()
         let browser = await FixtureBrowser.approving()
         let token = try await signIn(server, browser)
-        #expect(token == MastodonFixture.token)
+        // **The scopes it asked for travel with it** (#69). The registration in hand records
+        // none — it is one kept before they were written down — so the sign-in falls to the
+        // reading pair and the token says so.
+        #expect(token == MastodonFixture.token(scopes: MastodonOAuth.reading))
+        #expect(token.grant == .reading)
         #expect(token.app == MastodonFixture.app)
         #expect(await server.paths == ["/oauth/token", "/api/v1/accounts/verify_credentials"])
 
@@ -247,11 +261,44 @@ struct MastodonAuthTests {
         #expect(check.value(forHTTPHeaderField: "Authorization") == "Bearer tok-123")
     }
 
+    /// **What a token records is what the server granted** (#69). A server may issue a narrower
+    /// grant than the page asked for, and a token keeping the asked string would leave every row
+    /// on Account answering from this device's intent — "read and write" over a token that cannot
+    /// write. It cannot go the other way: the page the reader answered asked for `asked`, and a
+    /// server cannot grant past it.
+    @Test("A server granting less than was asked for is taken at its word")
+    func granted() async throws {
+        let asked = MastodonOAuth.scopes(writing: true)
+        let server = MastodonFixture.server(
+            issued: #"{"access_token":"tok-123","scope":"\#(MastodonOAuth.reading)"}"#
+        )
+        let app = MastodonApp(host: host, clientID: "cid", clientSecret: "csecret", scopes: asked)
+        let token = try await MastodonOAuth(host: host, sender: server)
+            .signIn(as: app, through: await FixtureBrowser.approving())
+        #expect(await server.form("/oauth/token")["scope"] == asked, "the page asked for both parts")
+        #expect(token.scopes == MastodonOAuth.reading)
+        #expect(token.grant == .reading, "a token that cannot write read as one that can")
+    }
+
+    /// The other arm: RFC 6749 lets a server leave `scope` out when the grant is exactly the
+    /// request, so nothing back means what was asked for.
+    @Test("A server that answers with no scope leaves the asked string standing", arguments: [
+        MastodonFixture.issued, #"{"access_token":"tok-123","scope":""}"#,
+    ])
+    func grantedNothingSaid(issued: String) async throws {
+        let asked = MastodonOAuth.scopes(writing: true)
+        let app = MastodonApp(host: host, clientID: "cid", clientSecret: "csecret", scopes: asked)
+        let token = try await MastodonOAuth(host: host, sender: MastodonFixture.server(issued: issued))
+            .signIn(as: app, through: await FixtureBrowser.approving())
+        #expect(token.scopes == asked)
+        #expect(token.grant == .writing)
+    }
+
     @Test("A registration made without read:search records it, and its page and exchange ask only for that")
     func withoutSearch() async throws {
         let server = MastodonFixture.server()
         let oauth = MastodonOAuth(host: host, sender: server)
-        let app = try await oauth.register(scopes: MastodonOAuth.scopesWithoutSearch)
+        let app = try await oauth.register(scopes: MastodonOAuth.readingWithoutSearch)
         #expect(app.scopes == "read:statuses read:lists read:accounts")
         #expect(await server.form("/api/v1/apps")["scopes"] == "read:statuses read:lists read:accounts")
         let browser = await FixtureBrowser.approving()
@@ -474,9 +521,9 @@ struct MastodonAuthTests {
         #expect(MastodonKeychain.Wire.decodeApp(app, host: host) == MastodonFixture.app)
         // The scopes a registration was made for go with it; one kept before they were recorded
         // reads back with none.
-        let scoped = MastodonApp(host: host, clientID: "cid", clientSecret: "csecret", scopes: MastodonOAuth.scopes)
+        let scoped = MastodonApp(host: host, clientID: "cid", clientSecret: "csecret", scopes: MastodonOAuth.reading)
         let scopedData = try #require(MastodonKeychain.attributes(for: scoped)[kSecValueData as String] as? Data)
-        #expect(MastodonKeychain.Wire.decodeApp(scopedData, host: host)?.scopes == MastodonOAuth.scopes)
+        #expect(MastodonKeychain.Wire.decodeApp(scopedData, host: host)?.scopes == MastodonOAuth.reading)
         let older = Data(#"{"clientID":"cid","clientSecret":"csecret"}"#.utf8)
         #expect(MastodonKeychain.Wire.decodeApp(older, host: host)?.scopes == nil)
         #expect(MastodonKeychain.Wire.decodeApp(Data("junk".utf8), host: host) == nil)

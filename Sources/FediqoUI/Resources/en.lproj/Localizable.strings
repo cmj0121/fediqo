@@ -413,6 +413,21 @@
 "account.sources.held"           = "What each one has left on this device is on Usage.";
 /* M1 tail rev 4 — the compact row. What the marks on a row mean, said once for the list. */
 "account.sources.marks"          = "A row carries only the marks its own server has: sign in, change boards or lists, clear what it left here, and remove it.";
+/* #69 — what may be done on a source, said on its row and explained once for the list. */
+"account.sources.writing"        = "A row also says what may be done on that source: read, read and write, or read only where the protocol has no writing in Fediqo at all. Write refused means a write was turned away; sign in to that source again.";
+"account.source.writing.never"   = "read only";
+"account.source.writing.read"    = "read";
+"account.source.writing.write"   = "read and write";
+"account.source.writing.refused" = "write refused";
+/* Said in the open, for as long as it is true, to a reader who agreed to something narrower. */
+"account.sources.writing.again"  = "Fediqo now asks to write as well as read when you sign in. %@ signed in before it did: reading there is exactly as it was, and Fediqo writes nothing. Choose below, without signing out first.";
+"account.sources.writing.again.choose" = "Choose what %@ may do";
+/* The choice itself, put before the server's own page opens. */
+"account.signin.ask.title"       = "Sign in to %@?";
+"account.signin.ask.detail"      = "Reading brings in your Home and your lists. Writing lets you post, reply, boost and favourite from Fediqo, and take any of them back. Reading is the same whichever you choose, and you can sign out at any time.";
+"account.signin.ask.read"        = "Sign in to read";
+"account.signin.ask.write"       = "Sign in to read and write";
+
 "account.source.boards"          = "%1$d boards: %2$@";
 "account.source.unread"          = "Its description could not be read.";
 "account.source.remove.label"    = "Remove %@ and everything it left here";
@@ -481,3 +496,7 @@
 "link.reader.browser"                 = "Open in your browser";
 "link.reader.close"                   = "Done";
 "link.reader.refused"                 = "That link goes somewhere Fediqo will not open. It was not followed.";
+
+/* #64 — the one way of saying something is on its way. Spoken only: the plate itself is what a
+   reader sees, and it carries no words. */
+"shell.waiting"                       = "Loading…";

@@ -1002,7 +1002,9 @@ struct ForumPostBand: View {
 /// inks between them. They are one vocabulary now: this view, at every site that has a sentence,
 /// in `ShellType.meta` and `ShellChrome.inkDim`, with the words first and the motion trailing them.
 /// `RemoteImage` keeps its bare plate and is not a fourth: a picture-shaped hole where a picture
-/// will be is a different statement from a sentence about an errand, and it has no words.
+/// will be is a different statement from a sentence about an errand, and it has no words. That
+/// wordless half is `ShellWaiting` now, and this view is its sentence-carrying sibling — the
+/// clock, the wave and the still frame are read from there so the two cannot drift apart.
 ///
 /// **The plates are the ellipsis, moving.** Every one of those sentences already ends in `…`, so
 /// words-then-motion is the reading order the sentence has; a `ProgressView` in front of the words
@@ -1051,16 +1053,19 @@ struct ForumWaiting: View {
     /// much is coming.
     static let plates = 3
 
-    /// How long one pass takes. Slow enough not to read as an alarm, quick enough that a reader
-    /// who glances at it sees it move.
-    static let period: TimeInterval = 1.2
+    /// The rhythm, which is `ShellWaiting`'s and no longer this view's own. Two copies of one
+    /// cosine is how a shell ends up with two ways of waiting; these read the one.
+    static var period: TimeInterval { ShellWaiting.period }
+    static var tick: TimeInterval { ShellWaiting.tick }
 
-    /// How often the clock ticks. `EmojiClock.fastestTick` is the ceiling this app already set for
-    /// how fast anything here is allowed to ask for a redraw, and three plates fading need nothing
-    /// near it.
-    static let tick: TimeInterval = 1.0 / 20
-
-    /// How bright one plate is at one instant, between banked and lit.
+    /// How bright one plate is at one instant, between banked and lit. Deeper than
+    /// `ShellWaiting`'s ends for the reason written there: these plates trail a sentence that
+    /// already says what is happening, so one of them may go nearly out.
+    ///
+    /// Both ends are this view's own numbers, and the agreement with `ShellWaiting.lit` is a
+    /// coincidence of full being full rather than a coupling. Reading the ceiling from there
+    /// would mean a change made for the bare plate silently moved these, which is the drift the
+    /// shared *rhythm* above is meant to prevent, not to cause.
     static let banked: Double = 0.3
     static let lit: Double = 1.0
 
@@ -1113,24 +1118,14 @@ struct ForumWaiting: View {
     }
 
     /// A clock only where one is wanted — nothing for a reader who asked for less movement.
-    ///
-    /// The same shape and the same answer as `EmojiText.clock(for:reduceMotion:)`, deliberately:
-    /// a `nil` here is what makes the still branch above structural rather than a matter of the
-    /// animation running at zero speed.
+    /// `ShellWaiting`'s answer, so one preference cannot stop one waiting state and not the other.
     static func clock(reduceMotion: Bool) -> TimeInterval? {
-        reduceMotion ? nil : tick
+        ShellWaiting.clock(reduceMotion: reduceMotion)
     }
 
-    /// How lit one plate is at one instant, in `banked...lit`.
-    ///
-    /// A cosine rather than a step, so the three never all sit at one brightness and the run never
-    /// reads as a stutter. `instant` is a wall clock — the same one `EmojiClock.frame` folds — so
-    /// it is taken modulo the period, and the result is finite for every input a `TimelineView`
-    /// can hand it.
+    /// How lit one plate is at one instant, in `banked...lit`: the shell's one wave, over this
+    /// view's own ends.
     static func glow(_ index: Int, at instant: TimeInterval) -> Double {
-        let phase = (instant / period - Double(index) / Double(plates))
-            .truncatingRemainder(dividingBy: 1)
-        let wave = (1 + cos(2 * .pi * phase)) / 2
-        return banked + (lit - banked) * wave
+        banked + (lit - banked) * ShellWaiting.wave(index, of: plates, at: instant)
     }
 }
