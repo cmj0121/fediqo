@@ -361,19 +361,26 @@ private struct ProseLinks: ViewModifier {
                         }
                     }
                 }
-                // How a reader finds the second gesture at the moment they are looking for it.
-                // A tooltip is a pointer's affordance, which is the platform where the gesture
-                // needs announcing — on a phone a long press on something pressable is the
-                // gesture people already make.
-                .help(L10n.t(Self.hintKey))
+                .linkHint()
         }
     }
+}
 
-    private static var hintKey: String {
+private extension View {
+    /// How a reader finds the second gesture at the moment they are looking for it.
+    ///
+    /// **Two platforms, two surfaces, and that is the fix rather than the split.** A tooltip is a
+    /// pointer's affordance and reaches nobody on a phone, so `link.hint.touch` shipped, was
+    /// translated three times, and was never once said out loud: `.help` on iOS draws nothing and
+    /// a reader was told about a long press only if they had a mouse. On touch the sentence goes
+    /// on the accessibility element `EmojiText` already builds for this line, which is where a
+    /// reader who cannot see the underline is standing when they need it.
+    @ViewBuilder
+    func linkHint() -> some View {
         #if os(macOS)
-        "link.hint.pointer"
+        help(L10n.t("link.hint.pointer"))
         #else
-        "link.hint.touch"
+        accessibilityHint(Text(L10n.t("link.hint.touch")))
         #endif
     }
 }
