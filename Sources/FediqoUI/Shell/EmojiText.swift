@@ -95,6 +95,26 @@ struct EmojiText: View {
         linked = true
     }
 
+    /// A post's own words, drawn as prose where the reader can read them and as plain letters
+    /// where a cover stands in front of them.
+    ///
+    /// **A cover must never draw a control.** Behind the blur the letters are still laid out and
+    /// still hit-tested, so prose under a cover is a covered post whose links are live: a press
+    /// meant to lift the cover lands on the text layer and opens the author's page instead, and a
+    /// secondary press opens a menu naming the very hosts the warning was put in front of.
+    /// `accessibilityHidden` answers for VoiceOver and for nothing else. So the cut itself is what
+    /// changes — the label cut grows no `.link` run, and with no links there is no menu, no
+    /// tooltip and no `openURL` override to land in. The whole rectangle is the way in again.
+    ///
+    /// The role is `.body` either way, which is what keeps the cover the same shape as the words
+    /// under it: this chooses which cut the line is drawn from, never what size it is set in.
+    static func words(_ text: String, emojis: [CustomEmoji], host: String,
+                      covered: Bool) -> EmojiText {
+        covered
+            ? EmojiText(text, emojis: emojis, host: host)
+            : EmojiText(prose: text, emojis: emojis, host: host)
+    }
+
     var body: some View {
         let request = request
         let pictures = pictures(for: request)

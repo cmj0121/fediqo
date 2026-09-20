@@ -571,6 +571,14 @@ struct DummyItemRow: View {
     /// reader using assistive technology. Without this, a covered post on a phone could not be
     /// opened at all.
     ///
+    /// **And the words under it are letters, not prose.** `words` draws them from the label cut
+    /// while the cover is on — see `EmojiText.words` — so there is no link run, no context menu
+    /// and no tooltip behind the blur. Without that the sentence above was not true: a `Text`
+    /// carrying an address is hit-tested by the text layer before the `Button` round it, so a
+    /// press meant to lift the cover opened the author's page, and a secondary press listed the
+    /// hosts the warning was put in front of and offered to open them. Both are the author's
+    /// choice, made out of a post the reader had said they were not ready to read.
+    ///
     /// **Pressed but not spoken.** The band above is already one element carrying the whole of
     /// `spokenCover` and the action that works it, so announcing this too would offer the same
     /// cover twice over. The blur keeps `accessibilityHidden` for its own reason — the words
@@ -781,13 +789,16 @@ struct DummyItemRow: View {
             // post is an address a reader wants to follow exactly as much as one in a microblog
             // post, and #34 says so in as many words.
             if let thread {
-                ForumPostBand(thread: thread, posts: posts, lines: wordLines)
+                ForumPostBand(thread: thread, posts: posts, lines: wordLines, linked: !covered)
             } else {
-                // **`prose:`, which is the initialiser that grows links.** This is the one line
-                // on the row the author wrote as writing; the name, the handle and the cover
-                // line above are labels they chose, and `EmojiText`'s other initialiser says why
-                // that difference is not a matter of taste.
-                EmojiText(prose: item.body, emojis: written.body, host: host)
+                // **Prose, which is the cut that grows links — unless a cover stands in front of
+                // these words.** This is the one line on the row the author wrote as writing; the
+                // name, the handle and the cover line above are labels they chose, and
+                // `EmojiText`'s two initialisers say why that difference is not a matter of
+                // taste. `covered` is read here rather than passed in because every call site of
+                // this function already agrees with it: `cover` draws only while it is true and
+                // `stitched` only while it is false.
+                EmojiText.words(item.body, emojis: written.body, host: host, covered: covered)
                     .foregroundStyle(
                         item.title == nil ? ShellChrome.ink(colorScheme) : ShellChrome.inkDim(colorScheme)
                     )

@@ -805,6 +805,13 @@ struct ForumPostBand: View {
     /// complaint this unit exists to answer. See `DummyItemRow.inFull`.
     let lines: Int?
 
+    /// Whether an address in these words is drawn as a link. **False means a cover is in front of
+    /// them**, and a cover must never draw a control — `EmojiText.words` states the whole of that
+    /// argument. Only a microblog post carries a warning today, so a covered band is a shape the
+    /// wire does not make; the row decides it all the same, because the row is where the cover is
+    /// and a rule kept only where it currently cannot be broken is not a rule.
+    let linked: Bool
+
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.shellPlaceIsActive) private var placeIsActive
 
@@ -856,7 +863,7 @@ struct ForumPostBand: View {
                 // finds none and there is nothing to fetch; what it does find is the addresses
                 // the author wrote, which is what #34 asks for in an open thread as much as in
                 // the stream. The font is the same token: `EmojiTextRole.body` is `ShellType.body`.
-                EmojiText(prose: text, emojis: [], host: thread.host)
+                EmojiText.words(text, emojis: [], host: thread.host, covered: !linked)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .lineLimit(lines)
                     .multilineTextAlignment(.leading)
@@ -877,8 +884,10 @@ struct ForumPostBand: View {
         .accessibilityLabel(Text(Self.spoken(reading)))
         // **Here rather than inside the words**, because `.ignore` above throws away everything
         // the children offered, the actions `EmojiText` hangs on its own element included. See
-        // `SpokenLinks`. Nothing to offer in the four states that have no words.
-        .spokenLinks(in: Self.words(of: reading))
+        // `SpokenLinks`. Nothing to offer in the four states that have no words — and nothing
+        // under a cover either, for `linked`'s reason: an action is a control, and a reader using
+        // VoiceOver is not an exception to "the cover draws none".
+        .spokenLinks(in: linked ? Self.words(of: reading) : "")
         .task(
             id: Wanting(
                 thread: thread,
