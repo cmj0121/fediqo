@@ -125,12 +125,16 @@ write at all, so refusing the writing part changes nothing about reading. Signin
 how you change your answer.
 
 If you signed in before Fediqo could write, that sign-in still only reads, and Fediqo writes
-nothing with it. Account says so, names the source, and asks you to sign out and in again to
-choose. What you already agreed to is never widened behind your back.
+nothing with it. Account says so, names the source, and puts the choice there beside it: one
+press asks the same question, without signing you out first. Cancel on the server's page and
+the sign-in you already had is still the one in use. What you already agreed to is never
+widened behind your back.
 
 Every row on Account says what may be done on that source — read, read and write, or read only
-where the protocol has no writing in Fediqo at all, which is every forum. A source that turns a
-write away says so on its row and keeps saying it until you sign in to it again.
+where the protocol has no writing in Fediqo at all, which is every forum. What it says is the
+server's own answer: a server that grants less than Fediqo asked for is taken at its word, and
+the row says what may be done rather than what was asked. A source that turns a write away says
+so on its row and keeps saying it until you sign in to it again.
 
 The secret is kept in this device's Keychain. It is not in the
 store, it is not copied to iCloud, and it does not follow your Apple account to another
