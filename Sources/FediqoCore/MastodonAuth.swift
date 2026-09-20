@@ -167,19 +167,27 @@ public struct MastodonOAuth: Sendable {
         ) else { throw MastodonSignInError.unreadable }
         let callback = try await browser.authorize(page, callbackScheme: Self.callbackScheme)
         let code = try Self.code(from: callback, state: state)
+        let issued = try await exchange(
+            code: code, verifier: pkce.verifier, clientID: app.clientID,
+            clientSecret: app.clientSecret, scopes: scopes
+        )
         let token = MastodonToken(
             host: host,
-            accessToken: try await exchange(
-                code: code, verifier: pkce.verifier, clientID: app.clientID,
-                clientSecret: app.clientSecret, scopes: scopes
-            ),
+            accessToken: issued.accessToken,
             clientID: app.clientID,
             clientSecret: app.clientSecret,
-            // What this sign-in actually asked for, kept with the token — the one record of what
-            // the reader agreed to. Without it a token kept by an earlier build and a token whose
-            // reader refused the writing part are the same thing, and one of them has been asked
-            // and the other has not.
-            scopes: scopes
+            // What this token may actually do, kept with it — the one record of what the reader
+            // agreed to. Without it a token kept by an earlier build and a token whose reader
+            // refused the writing part are the same thing, and one of them has been asked and the
+            // other has not.
+            //
+            // **The server's own answer where it sent one, and what was asked for only where it
+            // did not.** A server may issue a narrower grant than it was asked for, and a row
+            // reading back the asked string would say "read and write" about a token that cannot
+            // write — the row's job is to say what may be done on the source, not what this
+            // device intended. It cannot widen what the reader agreed to: the page they answered
+            // asked for `scopes` and a server cannot grant past it.
+            scopes: issued.scope.flatMap { $0.isEmpty ? nil : $0 } ?? scopes
         )
         do {
             try await verify(token)
@@ -236,11 +244,17 @@ public struct MastodonOAuth: Sendable {
         return code
     }
 
+    /// The token, and **what the server says it granted** — which is not always what was asked
+    /// for. `scope` is nothing where the server sent none; RFC 6749 lets it out only when the
+    /// grant is exactly the request.
     func exchange(
         code: String, verifier: String, clientID: String, clientSecret: String,
         scopes: String = MastodonOAuth.reading
-    ) async throws -> String {
-        struct Issued: Decodable { let access_token: String }
+    ) async throws -> (accessToken: String, scope: String?) {
+        struct Issued: Decodable {
+            let access_token: String
+            let scope: String?
+        }
         let answer: Issued = try await post("/oauth/token", [
             ("grant_type", "authorization_code"),
             ("code", code),
@@ -251,7 +265,7 @@ public struct MastodonOAuth: Sendable {
             ("scope", scopes),
         ])
         guard !answer.access_token.isEmpty else { throw MastodonSignInError.unreadable }
-        return answer.access_token
+        return (answer.access_token, answer.scope)
     }
 
     func verify(_ token: MastodonToken) async throws {
