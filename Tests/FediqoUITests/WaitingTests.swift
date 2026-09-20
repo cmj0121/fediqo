@@ -75,6 +75,19 @@ struct WaitingTests {
         }
     }
 
+    /// **One waiting place, one sentence — whatever it is built out of.** A plate standing alone
+    /// is the place and says so. A plate that is one shape inside a place its surface speaks for
+    /// says nothing at all, so a row of them is one utterance rather than one per plate, and that
+    /// is the switch rather than a doc comment asking the next surface to be careful. `nil` and
+    /// not an empty sentence: silence is a plate a reader never lands on.
+    @Test("A plate speaks for itself by default, and is silent where the surface speaks")
+    func aPlateSpeaksOnlyWhenItIsTheWaitingPlace() {
+        #expect(ShellWaiting.voice(speaks: true) == ShellWaiting.spoken)
+        #expect(ShellWaiting.voice(speaks: false) == nil)
+        #expect(ShellWaiting().speaks, "a plate standing alone is its own waiting place")
+        #expect(ShellWaiting(speaks: false).speaks == false)
+    }
+
     /// **The plate says it; the sentence is only ever heard.** A screen reader gets one line in
     /// whichever language the shell is in, and it is a translation rather than the key falling
     /// through — the key on screen is exactly the failure this app's `value:` fallback hides.

@@ -39,10 +39,23 @@ import SwiftUI
 ///
 /// One element, one sentence, once. `children: .ignore` closes the same trap `EmojiText`
 /// documents: without it a reader is free to walk into the `TimelineView` and read whatever a
-/// container happens to name. A surface that stands **several** of these in one place — a row of
-/// plates standing for a row of words — wraps the group the same way and labels it with `spoken`,
-/// so the sentence is said for the place and not once per plate.
+/// container happens to name.
+///
+/// A surface that stands **several** of these in one place — a row of plates standing for a row
+/// of words — is one waiting place and owes the reader one sentence, not one per plate. That is
+/// `speaks`, and it is the API rather than a warning: `ShellWaiting(speaks: false)` is a plate
+/// that is `.accessibilityHidden` outright, so the group its surface wraps and labels with
+/// `spoken` is the only thing a reader can land on. A plate standing alone is its own place and
+/// speaks by default; a surface only has to say so when it is taking the sentence over.
 struct ShellWaiting: View {
+    /// Whether this plate is the waiting place, or one shape inside a place the surface speaks
+    /// for. False is silence, not an empty label — see `voice(speaks:)`.
+    let speaks: Bool
+
+    init(speaks: Bool = true) {
+        self.speaks = speaks
+    }
+
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -99,8 +112,18 @@ struct ShellWaiting: View {
     /// group with. Nowhere on screen: a plate says this by being a plate.
     static var spoken: String { L10n.t("shell.waiting") }
 
+    /// What one plate is given to say — the sentence when it is the waiting place, and `nil` when
+    /// its surface speaks for the group.
+    ///
+    /// The same shape and the same reason as `clock(reduceMotion:)`: `nil` makes the silent
+    /// branch structural. A plate that is hidden is not a plate with an empty label, which a
+    /// reader can still land on and be told nothing by.
+    static func voice(speaks: Bool) -> String? {
+        speaks ? spoken : nil
+    }
+
     var body: some View {
-        Group {
+        let shape = Group {
             if let tick = Self.clock(reduceMotion: reduceMotion) {
                 TimelineView(.periodic(from: .now, by: tick)) { instant in
                     plate(at: instant.date.timeIntervalSinceReferenceDate)
@@ -110,9 +133,15 @@ struct ShellWaiting: View {
             }
         }
         .frame(minWidth: floor, minHeight: floor)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text(Self.spoken))
-        .accessibilityAddTraits(.updatesFrequently)
+
+        if let sentence = Self.voice(speaks: speaks) {
+            shape
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text(sentence))
+                .accessibilityAddTraits(.updatesFrequently)
+        } else {
+            shape.accessibilityHidden(true)
+        }
     }
 
     /// The milled recess, which is the token for a container rather than for ink: what is drawn
