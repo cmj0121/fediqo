@@ -200,7 +200,77 @@ struct LinkTests {
         let reader = ShellReader()
         reader.open(URL(string: "https://one.test/a")!)
         reader.open(URL(string: "https://two.test/b")!)
-        #expect(try #require(reader.reading).host == "two.test")
+        let reading = try #require(reader.reading)
+        #expect(reading.host == "two.test")
+        // And the sheet's web view is built for the second address rather than updated over the
+        // first: the identity moved, which is what `.id(reading.id)` is read for.
+        #expect(reading.id == "https://two.test/b")
+    }
+
+    // MARK: - Where the reader is, once the page has moved
+
+    /// **The one fact this sheet promises.** There is no address bar, no back button and no
+    /// history, so the name beside the padlock is the whole of what a reader has to go on — and
+    /// onward navigation is allowed by design. Fixed at open time it named the first host while a
+    /// second one was on the screen, at a moment the author picks.
+    @Test("The header follows the main frame: a redirect renames the host")
+    func theHeaderFollowsARedirect() throws {
+        let reader = ShellReader()
+        reader.open(URL(string: "https://one.test/a")!)
+        reader.arrived(at: URL(string: "https://two.test/landed")!)
+
+        let reading = try #require(reader.reading)
+        #expect(reading.host == "two.test")
+        #expect(reading.showing.absoluteString == "https://two.test/landed")
+        // The address the sheet was opened on does not move with it. It is what the web view was
+        // built for, and a value that changed on every hop would rebuild the web view at each one.
+        #expect(reading.url.absoluteString == "https://one.test/a")
+        #expect(reading.id == "https://one.test/a")
+    }
+
+    /// A `target="_blank"` link is loaded back into the same view, so it arrives here as one more
+    /// main-frame landing — the header follows it exactly as it follows a redirect, and a second
+    /// hop from there is not the first one's host either.
+    @Test("A second hop renames it again, rather than sticking at the first")
+    func theHeaderFollowsEveryHop() throws {
+        let reader = ShellReader()
+        reader.open(URL(string: "https://one.test/a")!)
+        reader.arrived(at: URL(string: "https://two.test/b")!)
+        reader.arrived(at: URL(string: "https://three.test/c")!)
+        #expect(try #require(reader.reading).host == "three.test")
+    }
+
+    /// Naming the old host is the defect this closes, so an address that names no host moves
+    /// nothing — keeping the last true name is the failure rather than a safe fallback.
+    @Test("An address with no host of its own renames nothing")
+    func nothingToName() throws {
+        let reader = ShellReader()
+        reader.open(URL(string: "https://one.test/a")!)
+        reader.arrived(at: URL(string: "about:blank")!)
+        #expect(try #require(reader.reading).host == "one.test")
+    }
+
+    @Test("Nothing has arrived anywhere while nothing is open")
+    func arrivingWithNothingOpen() {
+        let reader = ShellReader()
+        reader.arrived(at: URL(string: "https://two.test/b")!)
+        reader.refuse()
+        #expect(reader.reading == nil)
+    }
+
+    /// A cancelled navigation used to be silent: a link the reader pressed simply did nothing,
+    /// which is a control on the screen that is not a control in the app.
+    @Test("A refused move is said, and the next move that lands takes the notice away")
+    func aRefusalIsSaid() throws {
+        let reader = ShellReader()
+        reader.open(URL(string: "https://one.test/a")!)
+        #expect(try #require(reader.reading).refused == false)
+
+        reader.refuse()
+        #expect(try #require(reader.reading).refused)
+
+        reader.arrived(at: URL(string: "https://one.test/b")!)
+        #expect(try #require(reader.reading).refused == false)
     }
 
     // MARK: - A forum's words
@@ -223,7 +293,7 @@ struct LinkTests {
 
     @Test("Both ways to follow an address are sentences this app actually ships", arguments: [
         "link.open.here", "link.open.browser", "link.hint.pointer", "link.hint.touch",
-        "link.reader.label", "link.reader.browser", "link.reader.close",
+        "link.reader.label", "link.reader.browser", "link.reader.close", "link.reader.refused",
     ])
     func theSentencesExist(_ key: String) {
         // `L10n.t` answers with the key itself where there is no string for it, which is what
