@@ -412,7 +412,8 @@
 "account.source.writing.write"   = "讀與寫";
 "account.source.writing.refused" = "寫入被拒";
 /* Said in the open, for as long as it is true, to a reader who agreed to something narrower. */
-"account.sources.writing.again"  = "Fediqo 現在登入時會連「寫」一起要求。%@ 是在那之前登入的：在那裡讀到的和以前完全一樣，Fediqo 什麼也不寫。登出再登入一次就可以選。";
+"account.sources.writing.again"  = "Fediqo 現在登入時會連「寫」一起要求。%@ 是在那之前登入的：在那裡讀到的和以前完全一樣，Fediqo 什麼也不寫。不用先登出，在下面選就好。";
+"account.sources.writing.again.choose" = "選擇 %@ 可以做什麼";
 /* The choice itself, put before the server's own page opens. */
 "account.signin.ask.title"       = "登入 %@？";
 "account.signin.ask.detail"      = "讀會把你的首頁與你的列表帶進來。寫讓你在 Fediqo 裡發文、回覆、轉發、收藏，也可以把它們收回。兩種選擇讀到的都一樣，而且你隨時可以登出。";

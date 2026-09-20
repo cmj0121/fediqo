@@ -656,16 +656,34 @@ struct AccountPane: View {
     ///
     /// **`ShellNotice` is deliberately not used**: that is a whole page with nothing on it, and
     /// this is a line in a page that is full.
+    ///
+    /// **It carries the question as well as the news, one control per source it names.** Being
+    /// told without being asked is half of what the sentence promises: the only way to the choice
+    /// was to sign out and in again, and a sign-out revokes the token at the server — so reaching
+    /// the question cost a working sign-in, and cancelling on the server's page left the reader
+    /// worse off than before the question existed. One press puts the question instead.
     @ViewBuilder
     private var askedAgain: some View {
         let hosts = Self.askedAgain(session.sources, in: session.mastodon)
         if !hosts.isEmpty {
-            Text(String(
-                format: L10n.t("account.sources.writing.again"), hosts.joined(separator: ", ")
-            ))
-            .font(ShellType.meta)
-            .foregroundStyle(ShellChrome.ink(colorScheme))
-            .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                Text(String(
+                    format: L10n.t("account.sources.writing.again"), hosts.joined(separator: ", ")
+                ))
+                .font(ShellType.meta)
+                .foregroundStyle(ShellChrome.ink(colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+                // One per source and not one for the list: the question is about one server's
+                // sign-in, and a single control would have to ask which — which is the dialog
+                // asked twice.
+                ForEach(hosts, id: \.self) { host in
+                    Button(String(format: L10n.t("account.sources.writing.again.choose"), host)) {
+                        askWriting(host)
+                    }
+                    .font(ShellType.meta)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -773,6 +791,19 @@ struct AccountPane: View {
                 host: row.source.host, through: WebAuthBrowser(session: webAuthenticationSession)
             )
         }
+    }
+
+    /// The standing sentence's own control (#69): it puts the row's question to a reader who is
+    /// **already signed in**, and signs nobody out to do it.
+    ///
+    /// The dialog and `MastodonSessions.signIn` both cope with a host that already holds a token —
+    /// the new token replaces it here and the one it supersedes is revoked at the server — so a
+    /// reader who cancels on the server's page still has the sign-in they had before they asked.
+    ///
+    /// **The row's own toggle is untouched**: it is two-state and stays two-state. This is the
+    /// second surface for the question and not a third behaviour on the first.
+    func askWriting(_ host: String) {
+        session.signInChoice = host
     }
 
     /// The reader answered the scope question: sign in on the server's page, asking for what they

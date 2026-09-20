@@ -79,6 +79,18 @@ public final class MastodonSessions {
     /// again. A server that refuses the writing part outright fails the sign-in and says so —
     /// it is **never** quietly retried for reading alone, because a reader who asked to write
     /// and was handed a read-only sign-in without being told has been answered for.
+    ///
+    /// **What that reader actually sees, said plainly:** a server that refuses the writing part
+    /// answers `invalid_scope`, which is indistinguishable here from a server that refuses
+    /// `read:search`, so decision 32's one retry runs first — the reader is sent to the server's
+    /// page a second time, on a registration that drops `read:search` and still carries the
+    /// writing part, and is refused there too before the sign-in fails and says so. Two pages for
+    /// one refusal. Telling the two apart needs something the callback does not carry.
+    ///
+    /// **A sign-in made while a token is already held replaces it here and revokes it there**
+    /// (#69). `tokens.save` is delete-then-add, so the superseded token would otherwise stay live
+    /// on the server — and a reader narrowing their answer from writing back to reading would
+    /// have left a write-capable grant behind, which is the opposite of what they just asked for.
     func signIn(
         host raw: String, through browser: any OAuthBrowser, writing: Bool = false
     ) async -> MastodonSignInError? {
@@ -126,11 +138,20 @@ public final class MastodonSessions {
             await oauth.revoke(token)
             return nil
         }
+        // The token this one supersedes, read before `save` deletes it.
+        let superseded = (try? tokens.token(host: host)) ?? nil
         do {
             try tokens.save(token)
         } catch {
             await oauth.revoke(token)
             return .keychain
+        }
+        // **After the new one is safely kept, and never a token with the same string**: what is
+        // held now is what a write will use, and revoking it would sign the reader out of a
+        // sign-in the row says they have. The keychain arm above leaves the superseded token
+        // alone for the same reason — nothing there knows whether it is still the one held.
+        if let superseded, superseded.accessToken != token.accessToken {
+            await oauth.revoke(superseded)
         }
         // A fresh sign-in is a fresh answer from the server about what this device may do, so
         // whatever it turned away before this is spent.

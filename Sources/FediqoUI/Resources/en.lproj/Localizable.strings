@@ -420,7 +420,8 @@
 "account.source.writing.write"   = "read and write";
 "account.source.writing.refused" = "write refused";
 /* Said in the open, for as long as it is true, to a reader who agreed to something narrower. */
-"account.sources.writing.again"  = "Fediqo now asks to write as well as read when you sign in. %@ signed in before it did: reading there is exactly as it was, and Fediqo writes nothing. Sign out and in again to choose.";
+"account.sources.writing.again"  = "Fediqo now asks to write as well as read when you sign in. %@ signed in before it did: reading there is exactly as it was, and Fediqo writes nothing. Choose below, without signing out first.";
+"account.sources.writing.again.choose" = "Choose what %@ may do";
 /* The choice itself, put before the server's own page opens. */
 "account.signin.ask.title"       = "Sign in to %@?";
 "account.signin.ask.detail"      = "Reading brings in your Home and your lists. Writing lets you post, reply, boost and favourite from Fediqo, and take any of them back. Reading is the same whichever you choose, and you can sign out at any time.";
