@@ -134,8 +134,13 @@ public enum MastodonKeychain {
 
     /// **The scopes ride as an attribute as well as inside the value** (#69), so that what may be
     /// done on a source is readable without reading the secret — see `MastodonTokenStore.grants()`
-    /// for why that distinction is the whole point. `kSecAttrGeneric` comes back from the
-    /// attributes-only query, verified against the real Keychain because no test here may touch it.
+    /// for why that distinction is the whole point.
+    ///
+    /// **What this rests on, and what no test here can see:** that `kSecAttrGeneric` written with
+    /// `SecItemAdd` comes back from an attributes-only `SecItemCopyMatching`. That round trip was
+    /// verified by hand against the real Keychain on macOS and iOS; `swift test` may not touch the
+    /// Keychain at all, so the suite pins only the dictionary this file builds and CI can never
+    /// prove the other half. `KeychainMastodonTokens.grants()` says which way it fails.
     ///
     /// **Absent, and not empty, for a token kept before the question** — see `MastodonGrant`. The
     /// attribute and the value cannot drift: both are written from one token in one call, and
@@ -259,6 +264,18 @@ public struct KeychainMastodonTokens: MastodonTokenStore {
         return true
     }
 
+    /// **The one unproven step in the grant model, named here rather than left to be found.**
+    /// Every row's answer to what may be done on its source comes from `kSecAttrGeneric` arriving
+    /// back in these rows — see `MastodonKeychain.attributes(for:)`, which writes it. The round
+    /// trip was verified by hand against the real Keychain on macOS and iOS and **cannot be
+    /// verified by CI**: `swift test` may not touch the Keychain, so what the suite pins is the
+    /// dictionary handed to `SecItemAdd`, not what `SecItemCopyMatching` hands back.
+    ///
+    /// **Which way it fails, if that attribute ever stops coming back:** `MastodonKeychain.grant`
+    /// reads a missing one as `.unasked`, so every host degrades together — Account names every
+    /// source as one that signed in before the question, every row says read, and nothing writes.
+    /// No token is lost, no reading changes, and nothing is widened; the app asks the question
+    /// again. That is the safe direction, and it is the reason this rests where it does.
     public func grants() throws -> [String: MastodonGrant] {
         var item: CFTypeRef?
         let status = SecItemCopyMatching(MastodonKeychain.allItems() as CFDictionary, &item)
