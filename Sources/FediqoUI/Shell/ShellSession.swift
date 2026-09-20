@@ -94,6 +94,19 @@ final class ShellSession {
     /// different things two panes apart. `UsagePane` sets this too.
     var clearing: String?
 
+    /// The Mastodon whose sign-in has been pressed and whose scope question has not been answered
+    /// yet, or nothing (#69).
+    ///
+    /// **Nothing is asked of the server while this is set.** The question is put before the
+    /// browser opens, not after it comes back, because what it decides is what the server's own
+    /// page will ask the reader to agree to — a choice made afterwards would be this app deciding
+    /// and the server reporting. Cancelling it opens nothing and changes nothing.
+    ///
+    /// `removing`'s shape, and a host for its reason: the dialog names it, and a copy of the
+    /// source held here would be one that goes stale. **Not `signingIn`**, which is the forum
+    /// sign-in already running in a web view — this is a question, and nothing is running.
+    var signInChoice: String?
+
     /// Which stage of adding a source the reader is being shown, or nothing.
     ///
     /// **Nothing has been added at any of the three.** Browsing is a list, previewing is what a
@@ -144,7 +157,11 @@ final class ShellSession {
             SourceRow(
                 source: source,
                 profile: profiles[source.host] ?? .unasked(host: source.host, kind: source.kind),
-                signedIn: isSignedIn(host: source.host)
+                signedIn: isSignedIn(host: source.host),
+                // From the session and never from the row, because two of the three facts that
+                // decide it — what the sign-in bought and what the source has refused since —
+                // are held here.
+                writing: mastodon.writing(host: source.host, kind: source.kind)
             )
         }
     }
@@ -1412,14 +1429,21 @@ final class ShellSession {
     /// Closing the page, or saying no on it, says nothing. Any other failure is one sentence under
     /// the row, through `rowRefusal`, the row's one slot for a sentence about its own press.
     /// A source removed while its page is up is not signed in to.
-    func signIn(host raw: String, through browser: any OAuthBrowser) async {
+    ///
+    /// **`writing` is the reader's answer to the question the row asked before this was called**
+    /// (#69) — `askSignIn(_:)` raises it and only a button in it reaches here. It is never assumed
+    /// and never remembered from a previous sign-in: a reader who did not say yes this time signs
+    /// in to read, on exactly the scopes this app asked for before it could write at all.
+    func signIn(host raw: String, through browser: any OAuthBrowser, writing: Bool = false) async {
         guard let host = try? Host.parse(raw) else { return }
         guard kind(of: host) == .mastodon else {
             await signIn(host: host)
             return
         }
         if rowRefusal?.host == host { rowRefusal = nil }
-        guard let failure = await mastodon.signIn(host: host, through: browser) else {
+        guard let failure = await mastodon.signIn(
+            host: host, through: browser, writing: writing
+        ) else {
             if mastodon.isSignedIn(host: host) { await readAsYou(host: host) }
             return
         }
