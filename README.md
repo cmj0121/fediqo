@@ -116,8 +116,23 @@ choose a forum's boards. Home is always read once you are signed in.
 ### Signing in to Mastodon
 
 A Mastodon source can be signed in to from its row on Account, so its Home and your lists can
-be read. You sign in on the server's own page, and Fediqo asks only to read — never to post,
-follow, or change anything. The secret is kept in this device's Keychain. It is not in the
+be read. Before the server's page opens, Fediqo asks which sign-in you want, and says which
+part is which: reading alone, or reading and writing. Reading brings in your Home and your
+lists. Writing lets you post, reply, boost and favourite from Fediqo, and take any of them
+back — and nothing else: Fediqo never asks to follow anybody, change your profile, or touch
+your filters. Choosing reading alone asks for exactly what Fediqo asked for before it could
+write at all, so refusing the writing part changes nothing about reading. Signing in again is
+how you change your answer.
+
+If you signed in before Fediqo could write, that sign-in still only reads, and Fediqo writes
+nothing with it. Account says so, names the source, and asks you to sign out and in again to
+choose. What you already agreed to is never widened behind your back.
+
+Every row on Account says what may be done on that source — read, read and write, or read only
+where the protocol has no writing in Fediqo at all, which is every forum. A source that turns a
+write away says so on its row and keeps saying it until you sign in to it again.
+
+The secret is kept in this device's Keychain. It is not in the
 store, it is not copied to iCloud, and it does not follow your Apple account to another
 device. It survives a relaunch.
 
