@@ -86,7 +86,9 @@ enum MastodonFixture {
     static let issued = #"{"access_token":"tok-123","token_type":"Bearer"}"#
     static let me = #"{"id":"1","acct":"reader"}"#
 
-    static func server(verify: FixtureSender.Outcome = .json(me)) -> FixtureSender {
+    static func server(
+        verify: FixtureSender.Outcome = .json(me), issued: String = issued
+    ) -> FixtureSender {
         FixtureSender([
             "/api/v1/apps": .json(apps),
             "/oauth/token": .json(issued),
@@ -257,6 +259,39 @@ struct MastodonAuthTests {
 
         let check = try #require(await server.requests.last)
         #expect(check.value(forHTTPHeaderField: "Authorization") == "Bearer tok-123")
+    }
+
+    /// **What a token records is what the server granted** (#69). A server may issue a narrower
+    /// grant than the page asked for, and a token keeping the asked string would leave every row
+    /// on Account answering from this device's intent — "read and write" over a token that cannot
+    /// write. It cannot go the other way: the page the reader answered asked for `asked`, and a
+    /// server cannot grant past it.
+    @Test("A server granting less than was asked for is taken at its word")
+    func granted() async throws {
+        let asked = MastodonOAuth.scopes(writing: true)
+        let server = MastodonFixture.server(
+            issued: #"{"access_token":"tok-123","scope":"\#(MastodonOAuth.reading)"}"#
+        )
+        let app = MastodonApp(host: host, clientID: "cid", clientSecret: "csecret", scopes: asked)
+        let token = try await MastodonOAuth(host: host, sender: server)
+            .signIn(as: app, through: await FixtureBrowser.approving())
+        #expect(await server.form("/oauth/token")["scope"] == asked, "the page asked for both parts")
+        #expect(token.scopes == MastodonOAuth.reading)
+        #expect(token.grant == .reading, "a token that cannot write read as one that can")
+    }
+
+    /// The other arm: RFC 6749 lets a server leave `scope` out when the grant is exactly the
+    /// request, so nothing back means what was asked for.
+    @Test("A server that answers with no scope leaves the asked string standing", arguments: [
+        MastodonFixture.issued, #"{"access_token":"tok-123","scope":""}"#,
+    ])
+    func grantedNothingSaid(issued: String) async throws {
+        let asked = MastodonOAuth.scopes(writing: true)
+        let app = MastodonApp(host: host, clientID: "cid", clientSecret: "csecret", scopes: asked)
+        let token = try await MastodonOAuth(host: host, sender: MastodonFixture.server(issued: issued))
+            .signIn(as: app, through: await FixtureBrowser.approving())
+        #expect(token.scopes == asked)
+        #expect(token.grant == .writing)
     }
 
     @Test("A registration made without read:search records it, and its page and exchange ask only for that")

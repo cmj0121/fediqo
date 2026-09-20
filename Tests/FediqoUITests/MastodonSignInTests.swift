@@ -9,6 +9,11 @@ private actor MastodonServer: HTTPSender {
     enum Outcome: Sendable {
         case json(String, status: Int = 200)
         case fail
+        /// A fresh access token per exchange, as a server issues one: `tok-123`, then `tok-124`.
+        /// **What makes a sign-in made in place tell itself apart from the one it supersedes** —
+        /// with one string for every exchange, a token revoked and a token kept are the same
+        /// bytes and no test can say which went.
+        case issuesToken
     }
 
     private let routes: [String: Outcome]
@@ -16,12 +21,13 @@ private actor MastodonServer: HTTPSender {
     private(set) var requests: [URLRequest] = []
     /// Whether a token was held for the request's host when it was sent, per request.
     private(set) var heldWhenSent: [Bool] = []
+    private var issued = 0
 
     init(tokens: MemoryMastodonTokens, _ overrides: [String: Outcome] = [:]) {
         self.tokens = tokens
         self.routes = [
             "/api/v1/apps": .json(#"{"client_id":"cid","client_secret":"csecret"}"#),
-            "/oauth/token": .json(#"{"access_token":"tok-123"}"#),
+            "/oauth/token": .issuesToken,
             "/api/v1/accounts/verify_credentials": .json(#"{"id":"1"}"#),
             "/oauth/revoke": .json("{}"),
             "/api/v1/timelines/home": .json("[]"),
@@ -39,13 +45,28 @@ private actor MastodonServer: HTTPSender {
         }
         switch outcome {
         case .json(let body, let status):
-            let response = HTTPURLResponse(
-                url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil
-            )!
-            return (Data(body.utf8), response)
+            return (Data(body.utf8), Self.answered(url, status))
+        case .issuesToken:
+            issued += 1
+            return (
+                Data(#"{"access_token":"tok-\#(122 + issued)"}"#.utf8), Self.answered(url, 200)
+            )
         case .fail:
             throw URLError(.notConnectedToInternet)
         }
+    }
+
+    /// Which tokens this server was asked to forget, in the order it was asked.
+    var revoked: [String] {
+        requests.filter { $0.url?.path == "/oauth/revoke" }.map {
+            let form = String(decoding: $0.httpBody ?? Data(), as: UTF8.self)
+            return form.split(separator: "&").first { $0.hasPrefix("token=") }
+                .map { String($0.dropFirst("token=".count)) } ?? ""
+        }
+    }
+
+    private static func answered(_ url: URL, _ status: Int) -> HTTPURLResponse {
+        HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil)!
     }
 }
 
@@ -585,6 +606,74 @@ struct MastodonSignInTests {
         #expect(row(session, host).writing == .writes)
     }
 
+    /// **Being told is not being asked.** The only route to the question was sign out → sign in,
+    /// and a sign-out revokes the token at the server — so reaching the choice cost a working
+    /// read-only sign-in, and cancelling on the server's page left the reader with less than they
+    /// had before the question existed. The sentence carries the question now.
+    @Test("The standing sentence asks in place: nobody is signed out and nothing is asked of the server")
+    func theSentenceAsksInPlace() async throws {
+        let (session, server, tokens) = await shell()
+        try tokens.save(MastodonToken(
+            host: host, accessToken: "tok-old", clientID: "cid", clientSecret: "csecret"
+        ))
+        session.mastodon.refresh()
+        #expect(AccountPane.askedAgain(session.sources, in: session.mastodon) == [host])
+
+        AccountPane(session: session).askWriting(host)
+        #expect(session.signInChoice == host, "the question was not put")
+        #expect(session.isSignedIn(host: host), "asking signed the reader out")
+        #expect(await server.paths.isEmpty, "the server heard about a question the reader has not answered")
+
+        // Cancelling it costs nothing, which is the whole of why it is asked in place.
+        session.signInChoice = nil
+        #expect(try tokens.token(host: host)?.accessToken == "tok-old")
+        #expect(await server.paths.isEmpty)
+        #expect(AccountPane.askedAgain(session.sources, in: session.mastodon) == [host])
+
+        // Answering it: the new token replaces the old one here, and revokes it there.
+        await session.signIn(host: host, through: Page(), writing: true)
+        #expect(try tokens.token(host: host)?.accessToken == "tok-123")
+        #expect(session.mastodon.grants[host] == .writing)
+        #expect(row(session, host).writing == .writes)
+        #expect(await server.revoked == ["tok-old"], "the sign-in it replaced is still live")
+        #expect(AccountPane.askedAgain(session.sources, in: session.mastodon).isEmpty)
+    }
+
+    /// **A sign-in made in place must not leave the token it replaces alive**, and narrowing is
+    /// the case that proves it: a reader going from writing back to reading who left a
+    /// write-capable token honoured by the server has been given the opposite of what they asked
+    /// for. `tokens.save` is delete-then-add, so this is the only thing that revokes it.
+    @Test("Signing in again without signing out revokes the token it supersedes")
+    func supersededTokenIsRevoked() async throws {
+        let (session, server, tokens) = await shell()
+        await session.signIn(host: host, through: Page(), writing: true)
+        #expect(try tokens.token(host: host)?.accessToken == "tok-123")
+        #expect(await server.revoked.isEmpty, "a first sign-in revoked something")
+
+        await session.signIn(host: host, through: Page(), writing: false)
+        #expect(try tokens.token(host: host)?.accessToken == "tok-124", "the new token was not kept")
+        #expect(session.mastodon.grants[host] == .reading)
+        #expect(row(session, host).writing == .reads)
+        #expect(await server.revoked == ["tok-123"], "the write-capable token is still live")
+        #expect(session.isSignedIn(host: host), "narrowing signed the reader out")
+    }
+
+    /// **The row answers from the server and not from this device's intent** (#69). A server may
+    /// issue a narrower grant than the page asked for; a row reading back the asked string would
+    /// say "read and write" over a token that cannot write.
+    @Test("A server granting less than was asked for is what the row says")
+    func theRowSaysWhatWasGranted() async throws {
+        let (session, _, tokens) = await shell([
+            "/oauth/token": .json(#"{"access_token":"tok-123","scope":"\#(MastodonOAuth.reading)"}"#),
+        ])
+        await session.signIn(host: host, through: Page(), writing: true)
+        #expect(try tokens.token(host: host)?.scopes == MastodonOAuth.reading)
+        #expect(session.mastodon.grants[host] == .reading)
+        #expect(row(session, host).writing == .reads)
+        #expect(AccountPane.askedAgain(session.sources, in: session.mastodon).isEmpty,
+                "a reader who answered is asked again")
+    }
+
     /// A token left behind for a server the reader has since removed must not put a stranger's
     /// name on the page: the line is drawn from the rows.
     @Test("The line names only sources this page draws")
@@ -640,6 +729,7 @@ struct MastodonSignInTests {
         #expect(keys.count == SourceWriting.allCases.count, "two states share a word")
         keys.formUnion([
             "account.sources.writing", "account.sources.writing.again",
+            "account.sources.writing.again.choose",
             "account.signin.ask.title", "account.signin.ask.detail",
             "account.signin.ask.read", "account.signin.ask.write",
         ])
