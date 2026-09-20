@@ -1038,8 +1038,13 @@ struct ForumWaiting: View {
     /// How bright one plate is at one instant, between banked and lit. Deeper than
     /// `ShellWaiting`'s ends for the reason written there: these plates trail a sentence that
     /// already says what is happening, so one of them may go nearly out.
+    ///
+    /// Both ends are this view's own numbers, and the agreement with `ShellWaiting.lit` is a
+    /// coincidence of full being full rather than a coupling. Reading the ceiling from there
+    /// would mean a change made for the bare plate silently moved these, which is the drift the
+    /// shared *rhythm* above is meant to prevent, not to cause.
     static let banked: Double = 0.3
-    static let lit: Double = ShellWaiting.lit
+    static let lit: Double = 1.0
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
