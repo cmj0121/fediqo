@@ -243,7 +243,11 @@ struct ThreadReadingTests {
         let still = (0..<ForumWaiting.plates).map { ForumWaiting.glow($0, at: 0) }
         #expect(still[0] == ForumWaiting.lit)
         #expect(still.dropFirst().allSatisfy { $0 < ForumWaiting.lit })
-        #expect(Set(still).count == ForumWaiting.plates, "three plates, three brightnesses")
+        // Two brightnesses, not three: a third of a pass either side of the lit plate is the same
+        // point of the cosine, so plates 1 and 2 are equal and differ only by the ~2.8e-16 that a
+        // `Set(still).count == 3` was quietly passing on.
+        #expect(abs(still[1] - still[2]) < 1e-9,
+                "the still frame is one lit plate and two equally banked ones")
     }
 
     /// Bounded from **both** sides, which is this branch's first convention — a ceiling asserted
