@@ -380,6 +380,9 @@ struct ForumReplyRow: View {
         // has to hang its action on the headline for exactly the opposite reason.
         .accessibilityElement(children: .combine)
         .accessibilityActions { outwardAction }
+        // **Here rather than inside the words**, for `SpokenLinks`' reason: `.combine` above
+        // makes this reply one element, and what its children offered goes with the rest of them.
+        .spokenLinks(in: post.isWithheld ? "" : post.body)
     }
 
     // MARK: - The way out
@@ -532,8 +535,10 @@ struct ForumReplyRow: View {
             // who posted a photograph.
             EmptyView()
         } else {
-            Text(post.body)
-                .font(ShellType.body)
+            // Prose with no picture list, exactly as `ForumPostBand` draws the opening post: a
+            // forum sends no custom emoji, and an address in a reply is one a reader wants to
+            // follow. The font is the same token — `EmojiTextRole.body` is `ShellType.body`.
+            EmojiText(prose: post.body, emojis: [], host: host)
                 .foregroundStyle(ShellChrome.ink(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)

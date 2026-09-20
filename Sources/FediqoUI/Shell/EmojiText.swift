@@ -36,9 +36,21 @@ struct EmojiText: View {
     /// `CustomEmoji` carries no source of its own, so the call site has to say.
     let host: String
 
+    /// Whether this line is a post's **own words** rather than a label somebody chose. Only prose
+    /// grows links — see the two initialisers below.
+    let linked: Bool
+
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.displayScale) private var displayScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
+    /// Where a press on a link goes. Nothing outside the shell, in which case the system browser
+    /// takes it — see `EnvironmentValues.shellReader`.
+    @Environment(\.shellReader) private var reader
+    /// The way **out** of the app, read here at the top of this view so that the browser item in
+    /// the menu below reaches the system rather than the override this view installs for the
+    /// press. The two gestures must not be able to become the same gesture.
+    @Environment(\.openURL) private var openURL
 
     /// Not `@State`: the cache is one object for the whole app, and this view owns none of it.
     /// What it watches is `arrived` — its own state, filled by its own task — so one emoji
@@ -49,12 +61,12 @@ struct EmojiText: View {
 
     /// A line of somebody's writing, drawn in one of the type scale's roles.
     ///
-    /// **This initialiser does not turn an address in `text` into a link, and when link handling
-    /// arrives it must not start to.** A name, a handle and a spoiler line are labels written by
-    /// a stranger: a person may call themselves `example.com`, and a row that quietly turns that
-    /// into a control the reader can press is a row inventing something about a post. The
-    /// previous incarnation of this app did exactly that in five places. Linking, when it comes,
-    /// belongs to a second `init(prose:)` that a call site has to ask for by name.
+    /// **This initialiser does not turn an address in `text` into a link, and it has not
+    /// started to.** A name, a handle and a spoiler line are labels written by a stranger: a
+    /// person may call themselves `example.com`, and a row that quietly turns that into a control
+    /// the reader can press is a row inventing something about a post. The previous incarnation
+    /// of this app did exactly that in five places. Linking belongs to `init(prose:)` below,
+    /// which a call site has to ask for by name.
     init(_ text: String, emojis: [CustomEmoji], host: String, role: EmojiTextRole = .body,
          cache: EmojiCache = .shared) {
         self.text = text
@@ -62,6 +74,25 @@ struct EmojiText: View {
         self.host = host
         self.role = role
         self.cache = cache
+        linked = false
+    }
+
+    /// A post's **own words** — the one line on a row that the author wrote as writing rather
+    /// than chose as a label, and therefore the one line an address in it means to be followed.
+    ///
+    /// Asked for by name, which is the whole arrangement: a call site that wants links says so,
+    /// and the four other lines this view draws cannot grow one by being edited near it.
+    ///
+    /// The role is `.body` and is not a parameter. Prose is prose; a name set in the body scale
+    /// would be the type scale being decided at a call site, and the roles this view offers are
+    /// the three places a stranger's words are drawn.
+    init(prose text: String, emojis: [CustomEmoji], host: String, cache: EmojiCache = .shared) {
+        self.text = text
+        self.emojis = emojis
+        self.host = host
+        role = .body
+        self.cache = cache
+        linked = true
     }
 
     var body: some View {
@@ -70,17 +101,19 @@ struct EmojiText: View {
         // Once per pass of this line, never once per tick: the `TimelineView` below re-runs its
         // own content and not this body, so the cut is captured rather than remade at 25 a
         // second — and the cache remembers it across passes of the row as well.
-        let cut = cache.runs(in: text, from: emojis)
+        let cut = linked ? cache.proseRuns(in: text, from: emojis) : cache.runs(in: text, from: emojis)
         let baseline = request.metrics.baseline
+        let links = Self.links(in: cut)
+        let ink = ShellChrome.selectInk(colorScheme)
 
         Group {
             if let clock = Self.clock(for: pictures, reduceMotion: reduceMotion) {
                 TimelineView(.periodic(from: .now, by: clock)) { instant in
                     Self.line(cut, pictures, at: instant.date.timeIntervalSinceReferenceDate,
-                              baseline: baseline)
+                              baseline: baseline, linkInk: ink)
                 }
             } else {
-                Self.line(cut, pictures, at: 0, baseline: baseline)
+                Self.line(cut, pictures, at: 0, baseline: baseline, linkInk: ink)
             }
         }
         .font(role.font)
@@ -89,10 +122,25 @@ struct EmojiText: View {
         // and a screen reader would be free to read the interpolated `Text` inside it instead.
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityText)
+        // **Both ways in, named, on the element the reader lands on.** A press on the drawn link
+        // and a secondary press on the words are both gestures, and a reader who makes neither
+        // would otherwise be read an address and given no way to follow it. `DummyItemRow`'s way
+        // out already keeps this rule for the same reason.
+        .accessibilityActions { LinkWays(links: links, reader: reader, browser: openURL) }
+        .modifier(ProseLinks(links: links, reader: reader, browser: openURL))
         .task(id: request) {
             await cache.fetch(request)
             arrived = Arrived(request: request, frames: cache.held(request))
         }
+    }
+
+    /// The addresses in a cut line, in the order they were written.
+    static func links(in cut: [EmojiRun]) -> [PostLink] {
+        var links: [PostLink] = []
+        for run in cut {
+            if case .link(let link) = run { links.append(link) }
+        }
+        return links
     }
 
     // MARK: - What this line asks the cache for
@@ -138,11 +186,14 @@ struct EmojiText: View {
     /// The line itself. Static and given everything it needs, so the thing this file exists to
     /// build can be compared against an expected `Text` without a screen.
     static func line(_ cut: [EmojiRun], _ pictures: [String: EmojiCache.Frames],
-                     at instant: TimeInterval, baseline: CGFloat) -> Text {
+                     at instant: TimeInterval, baseline: CGFloat,
+                     linkInk: Color = .accentColor) -> Text {
         cut.reduce(Text(verbatim: "")) { line, run in
             switch run {
             case .text(let words):
                 return line + Text(verbatim: words)
+            case .link(let link):
+                return line + Self.drawn(link, in: linkInk)
             case .emoji(let emoji):
                 // Until the picture is here the shortcode stands in for it, which is what the
                 // reader would have seen anyway and is never a blank.
@@ -154,6 +205,156 @@ struct EmojiText: View {
                 return line + Text(image).baselineOffset(baseline)
             }
         }
+    }
+
+    /// An address, drawn as one.
+    ///
+    /// **Hue and an underline, not hue alone.** The lamp's colour against the body ink is a
+    /// difference some readers cannot see at all, and this app's own contrast note already says
+    /// hierarchy is worth less than legibility; the underline is what makes a link read as a link
+    /// in both schemes and in neither colour. `selectInk` is the phosphor — the shell's one hue
+    /// for "this is a way somewhere" — and it is passed in rather than read here so that this
+    /// stays a function of its arguments and can be compared against an expected `Text`.
+    ///
+    /// The letters are `link.text`: what the author typed, unaltered. `link.url` is that same
+    /// string parsed. A reader looking at this is looking at the address.
+    static func drawn(_ link: PostLink, in ink: Color) -> Text {
+        var address = AttributedString(link.text)
+        address.link = link.url
+        address.foregroundColor = ink
+        address.underlineStyle = .single
+        return Text(address)
+    }
+}
+
+/// Both ways to follow each address in a line, said rather than gestured.
+///
+/// **A gesture is not an affordance for everybody.** The press is the link's own and the browser
+/// is a secondary press; a reader using VoiceOver makes neither, and would otherwise be read an
+/// address out of a post with no way at all to follow it. Each address is named by its host,
+/// which is the fact a reader checks before following one and the one this app parsed rather than
+/// read out of anybody's markup.
+///
+/// `browser` is handed in rather than read here, and that is load-bearing: `ProseLinks` overrides
+/// `openURL` for the line's own subtree so a press lands inside the app, and an action that read
+/// the environment where it is drawn would pick up that override and quietly make the two ways
+/// one way. The call site reads it above the override and passes it down.
+struct LinkWays: View {
+    let links: [PostLink]
+    let reader: ShellReader?
+    let browser: OpenURLAction
+
+    var body: some View {
+        ForEach(links, id: \.self) { link in
+            Button(String(format: L10n.t("link.open.here"), link.host)) {
+                // Told no — or asked outside the shell — the address goes to the browser rather
+                // than nowhere. The same fallback the press makes, in the same order.
+                if reader?.open(link.url) != true { browser(link.url) }
+            }
+            Button(String(format: L10n.t("link.open.browser"), link.host)) {
+                browser(link.url)
+            }
+        }
+    }
+}
+
+/// The same two ways, for a surface that draws a post's words inside an accessibility element of
+/// its own.
+///
+/// `ForumPostBand` and `ForumReplyRow` are each one element by design — a band that names what
+/// state the post is in, a reply that is read as one thing — so the actions `EmojiText` offers
+/// inside them are thrown away with the rest of their children. The words are the same words, so
+/// the addresses are found from the same text and offered on the element the reader lands on.
+struct SpokenLinks: ViewModifier {
+    let text: String
+
+    @Environment(\.shellReader) private var reader
+    @Environment(\.openURL) private var openURL
+
+    func body(content: Content) -> some View {
+        content.accessibilityActions {
+            LinkWays(links: PostLink.found(in: text), reader: reader, browser: openURL)
+        }
+    }
+}
+
+extension View {
+    func spokenLinks(in text: String) -> some View { modifier(SpokenLinks(text: text)) }
+}
+
+/// The two ways a link in a post's words can be followed.
+///
+/// ## A press opens it here, and a secondary press opens it in the browser
+///
+/// **The press is the link's own.** A `Text` carrying an address hands it to `openURL`, so the
+/// way to make a press land inside this app is to say what `openURL` means for this line — and
+/// for this line only. The override is installed on the words and nowhere above them, which is
+/// what keeps `DummyItemRow.wayOut` and `DummyThreadPane.outward` leaving the app as they always
+/// have: they read the environment their own ancestors set, not this one.
+///
+/// **The secondary press is a context menu, which is one gesture with two names.** On iOS it is a
+/// long press; on macOS it is a right or control click. That is the same argument `WayOut` makes
+/// one file over, and it is the answer to "a long press is not the natural gesture on macOS": the
+/// gesture is *the secondary press*, and each platform already spells it its own way. Nothing
+/// platform-specific is written here, and neither platform is given the lesser affordance.
+///
+/// **What it costs, stated.** Over the words of a post that carries a link, this menu stands in
+/// front of the row's own way-out menu. That is the right way round — the reader's pointer is on
+/// an address, and the menu is about that address — and the row's menu is still a secondary press
+/// away anywhere else on the row. A post with no links installs no menu at all, so the row's is
+/// reached over its words as before.
+///
+/// ## Absent, not disabled
+///
+/// No links, no menu, no tooltip, no override: `decision 4`'s rule, and the same shape `WayOut`
+/// uses — the condition is on the modifier rather than inside the menu's builder, because an
+/// empty menu builder is still a menu and a right click that opens an empty grey rectangle is a
+/// disabled control wearing a different hat.
+private struct ProseLinks: ViewModifier {
+    let links: [PostLink]
+    /// Where a press goes. Nothing outside the shell.
+    let reader: ShellReader?
+    /// The way out of the app, taken from above this view — see `EmojiText.openURL`.
+    let browser: OpenURLAction
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if links.isEmpty {
+            content
+        } else {
+            content
+                .environment(\.openURL, OpenURLAction { url in
+                    // **Decision 9 once more, at the one place a press becomes a navigation.**
+                    // Everything drawn as a link came through `PostLink` and is already checked;
+                    // what this refuses is anything that reaches this action by another route.
+                    guard Host.allowsFetch(url) else { return .discarded }
+                    guard let reader else { return .systemAction }
+                    return reader.open(url) ? .handled : .discarded
+                })
+                .contextMenu {
+                    ForEach(links, id: \.self) { link in
+                        Button {
+                            browser(link.url)
+                        } label: {
+                            Label(String(format: L10n.t("link.open.browser"), link.host),
+                                  systemImage: "arrow.up.forward.app")
+                        }
+                    }
+                }
+                // How a reader finds the second gesture at the moment they are looking for it.
+                // A tooltip is a pointer's affordance, which is the platform where the gesture
+                // needs announcing — on a phone a long press on something pressable is the
+                // gesture people already make.
+                .help(L10n.t(Self.hintKey))
+        }
+    }
+
+    private static var hintKey: String {
+        #if os(macOS)
+        "link.hint.pointer"
+        #else
+        "link.hint.touch"
+        #endif
     }
 }
 
@@ -288,9 +489,12 @@ enum EmojiTextRole: CaseIterable, Sendable {
         EmojiText("Ada :blobcat: Lovelace", emojis: emojis, host: "example.test", role: .name)
         EmojiText("@ada@example.test", emojis: emojis, host: "example.test", role: .meta)
         EmojiText(
-            "A line long enough to wrap, so that a picture standing in it wraps with the words "
-                + "rather than beside them :blob-cat-wave: — and a colon that opens nothing, 12:30, "
-                + "stays exactly as it was typed.",
+            prose: "A line long enough to wrap, so that a picture standing in it wraps with the "
+                + "words rather than beside them :blob-cat-wave: — and a colon that opens nothing, "
+                + "12:30, stays exactly as it was typed. The address in it, "
+                + "https://example.test/a, is drawn as one: press it to read it here, and press it "
+                + "the other way for the browser. http://example.test/b is not, and neither is "
+                + "example.test on its own.",
             emojis: emojis,
             host: "example.test"
         )

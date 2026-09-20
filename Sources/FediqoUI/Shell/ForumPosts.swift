@@ -852,8 +852,11 @@ struct ForumPostBand: View {
             case .coming:
                 plates
             case .words(let text):
-                Text(text)
-                    .font(ShellType.body)
+                // **Prose, with no picture list.** A forum sends no custom emoji, so the scan
+                // finds none and there is nothing to fetch; what it does find is the addresses
+                // the author wrote, which is what #34 asks for in an open thread as much as in
+                // the stream. The font is the same token: `EmojiTextRole.body` is `ShellType.body`.
+                EmojiText(prose: text, emojis: [], host: thread.host)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .lineLimit(lines)
                     .multilineTextAlignment(.leading)
@@ -872,6 +875,10 @@ struct ForumPostBand: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(Self.spoken(reading)))
+        // **Here rather than inside the words**, because `.ignore` above throws away everything
+        // the children offered, the actions `EmojiText` hangs on its own element included. See
+        // `SpokenLinks`. Nothing to offer in the four states that have no words.
+        .spokenLinks(in: Self.words(of: reading))
         .task(
             id: Wanting(
                 thread: thread,
@@ -951,6 +958,13 @@ struct ForumPostBand: View {
                 .frame(width: space.size.width * fraction, alignment: .leading)
         }
         .frame(height: ShellSpace.snug)
+    }
+
+    /// The author's own words, where this band has any. **Not `spoken`**, which also answers with
+    /// one of this app's own sentences — and an address this app wrote is not one a post carries.
+    static func words(of reading: ForumReading) -> String {
+        if case .words(let text) = reading { return text }
+        return ""
     }
 
     /// What the band says out loud. A screen reader is given every character of the post, never

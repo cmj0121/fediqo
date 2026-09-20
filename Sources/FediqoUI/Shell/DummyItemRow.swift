@@ -773,15 +773,21 @@ struct DummyItemRow: View {
             // and a thread's is one of five states — not here yet, the words, withheld, no words
             // at all, or a reason there are none. See `ForumPostBand`.
             //
-            // **Plain `Text` inside that band, not `EmojiText`.** A Discuz! post carries no
-            // custom-emoji list and the forum has no `/api/v1/custom_emojis` for a catalogue to
-            // answer out of, so scanning a stranger's post for shortcodes that can never resolve
-            // would be work with no possible result — and would put a picture in a line on the
-            // strength of a colon somebody typed.
+            // **No custom-emoji list inside that band.** A Discuz! post carries none and the
+            // forum has no `/api/v1/custom_emojis` for a catalogue to answer out of, so scanning
+            // a stranger's post for shortcodes that can never resolve would be work with no
+            // possible result — and would put a picture in a line on the strength of a colon
+            // somebody typed. It draws the words as prose all the same: an address in a forum
+            // post is an address a reader wants to follow exactly as much as one in a microblog
+            // post, and #34 says so in as many words.
             if let thread {
                 ForumPostBand(thread: thread, posts: posts, lines: wordLines)
             } else {
-                EmojiText(item.body, emojis: written.body, host: host)
+                // **`prose:`, which is the initialiser that grows links.** This is the one line
+                // on the row the author wrote as writing; the name, the handle and the cover
+                // line above are labels they chose, and `EmojiText`'s other initialiser says why
+                // that difference is not a matter of taste.
+                EmojiText(prose: item.body, emojis: written.body, host: host)
                     .foregroundStyle(
                         item.title == nil ? ShellChrome.ink(colorScheme) : ShellChrome.inkDim(colorScheme)
                     )

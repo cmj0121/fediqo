@@ -39,6 +39,11 @@ public struct FediqoRootView: View {
     /// What is playing, and the one `AVPlayer` in the app. See `ShellPlayback`.
     @State private var playback = ShellPlayback()
     @State private var prefs = DummyPrefs()
+    /// The page the reader opened out of a post's words, where there is one (#34). Held here
+    /// beside `viewing` and for its reason: a layer over the shell belongs to the shell, and a
+    /// pane that owned it would be a pane the next surface to draw a post's words could not
+    /// reach.
+    @State private var linkReader = ShellReader()
     /// Up once at launch when the index on disk was written by a newer build and this run left it
     /// alone: without it the reader sees an empty app and nothing to say why.
     @State private var storeIsNewer: Bool
@@ -122,6 +127,20 @@ public struct FediqoRootView: View {
         )
     }
 
+    /// What the link reader is showing, as a sheet can drive it. Written out here rather than
+    /// inline for the reason `stagePresented` is: a `Binding` built inside the modifier chain
+    /// pushes `body` past what the type-checker will solve in reasonable time.
+    ///
+    /// Dismissed by any route at all — the button, a swipe, Escape — it is closed, and closing it
+    /// takes nothing away: the timeline underneath was never torn down, so the reader is back at
+    /// the post they left because they never left it. See `ShellReader`.
+    private var linkReading: Binding<ShellReading?> {
+        Binding(
+            get: { linkReader.reading },
+            set: { shown in if shown == nil { linkReader.close() } }
+        )
+    }
+
     public var body: some View {
         layout
             // The reader's time window is set on the store once at launch, before the store is
@@ -157,6 +176,19 @@ public struct FediqoRootView: View {
                     #if os(iOS)
                     .presentationDetents([.medium, .large])
                     #endif
+            }
+            // **A link the reader pressed in somebody's words, drawn over the shell** (#34). On
+            // the root beside the other presenters and for their stated reason: one presenter
+            // driven by one piece of state survives a second call site, and this one has three
+            // already — a timeline row, a row in an open thread, and a row of the search's
+            // results.
+            //
+            // **Over, and never instead of.** A sheet leaves the page under it standing, so the
+            // list, where it is scrolled to and which post is selected are all exactly as they
+            // were when it closes. That is the whole of "the reader comes back to the post they
+            // left": there is nothing to restore, because nothing was taken away.
+            .sheet(item: linkReading) { reading in
+                LinkReaderSheet(reading: reading) { linkReader.close() }
             }
             // **On the root, beside the composer's, and not on a pane.** A sign-in is asked for
             // from Account, where a refusal is reported, and it will be asked for from a timeline
@@ -396,6 +428,13 @@ public struct FediqoRootView: View {
             // session, so it is the only place that can put it there. See `PLAN.md`, Cross-worktree
             // hand-offs.
             .environment(session)
+            // **Where a link in a post's words goes, handed down once from the one place that
+            // can.** Every line of every post reads this, and it reaches a timeline row, a row in
+            // an open thread and a row of the search's results by the same hand-off — they are
+            // all drawn under here. The object is handed down rather than a closure: a closure
+            // has no identity, so it would differ on every pass of this view and invalidate every
+            // line on the screen with it. See `ShellReader`.
+            .environment(\.shellReader, linkReader)
             .environment(\.locale, prefs.language.locale)
             .preferredColorScheme(prefs.theme.colorScheme)
             .dynamicTypeSize(prefs.fontSize.dynamicType)
