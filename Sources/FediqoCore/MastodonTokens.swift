@@ -14,12 +14,24 @@ public struct MastodonToken: Sendable, Equatable, CustomStringConvertible,
     public let accessToken: String
     public let clientID: String
     public let clientSecret: String
+    /// What the sign-in that issued it asked for, or **nothing for a token kept before this app
+    /// asked the reader anything about writing** (#69).
+    ///
+    /// The two are not the same fact and must not be spelt the same way: a token with the reading
+    /// scopes written down is one whose reader was offered the writing part and said no, and a
+    /// token with nothing written down is one whose reader was never asked. Both read and neither
+    /// writes; only the second is owed the question.
+    public let scopes: String?
 
-    public init(host: String, accessToken: String, clientID: String, clientSecret: String) {
+    public init(
+        host: String, accessToken: String, clientID: String, clientSecret: String,
+        scopes: String? = nil
+    ) {
         self.host = host.lowercased()
         self.accessToken = accessToken
         self.clientID = clientID
         self.clientSecret = clientSecret
+        self.scopes = scopes
     }
 
     public var app: MastodonApp {
@@ -40,7 +52,8 @@ public struct MastodonApp: Sendable, Equatable, CustomStringConvertible,
     public let clientID: String
     public let clientSecret: String
     /// The scopes it was registered for, or nothing for one kept before they were recorded. A
-    /// registration whose scopes are not `MastodonOAuth.scopes` is registered again.
+    /// registration made for scopes the sign-in in hand does not ask for — including the other
+    /// answer to #69's writing question — is registered again; see `MastodonOAuth.known(writing:)`.
     public let scopes: String?
 
     public init(host: String, clientID: String, clientSecret: String, scopes: String? = nil) {
@@ -64,12 +77,27 @@ public protocol MastodonTokenStore: Sendable {
     /// Forgets `token` only while it is still the one held for its host, and says whether it was.
     /// A late 401 for a token the reader has since replaced must not take the new one with it.
     func forget(_ token: MastodonToken) throws -> Bool
-    /// Which hosts hold a token, **without reading one**.
-    func signedInHosts() throws -> Set<String>
+    /// What each held token's sign-in bought, **without reading one** (#69).
+    ///
+    /// **The scopes ride as an item attribute rather than inside the value, and that is the whole
+    /// reason this is a separate question from `token(host:)`.** Reading a generic password's
+    /// *data* is what makes macOS ask the reader to allow access; reading its attributes does not.
+    /// A source page that had to open every token to say what may be done on its rows would put an
+    /// access prompt in front of the launch screen, once per source — and in `swift test` it hangs
+    /// on the first one. The scopes are not a secret; the token is.
+    func grants() throws -> [String: MastodonGrant]
 
     func app(host: String) throws -> MastodonApp?
     func save(_ app: MastodonApp) throws
     func forgetApp(host: String) throws
+}
+
+extension MastodonTokenStore {
+    /// Which hosts hold a token, **without reading one** — the keys of `grants()`, so that the two
+    /// answers are one query and cannot come to disagree about who is signed in.
+    public func signedInHosts() throws -> Set<String> {
+        Set(try grants().keys)
+    }
 }
 
 /// The query dictionaries, built where a test can read them back.
@@ -104,8 +132,22 @@ public enum MastodonKeychain {
         ]
     }
 
+    /// **The scopes ride as an attribute as well as inside the value** (#69), so that what may be
+    /// done on a source is readable without reading the secret — see `MastodonTokenStore.grants()`
+    /// for why that distinction is the whole point. `kSecAttrGeneric` comes back from the
+    /// attributes-only query, verified against the real Keychain because no test here may touch it.
+    ///
+    /// **Absent, and not empty, for a token kept before the question** — see `MastodonGrant`. The
+    /// attribute and the value cannot drift: both are written from one token in one call, and
+    /// `save` deletes before it adds, so no second item with a stale one can exist.
     public static func attributes(for token: MastodonToken) -> [String: Any] {
-        item(lookup(host: token.host), label: token.host, value: Wire.encode(token))
+        var attributes = item(
+            lookup(host: token.host), label: token.host, value: Wire.encode(token)
+        )
+        if let scopes = token.scopes {
+            attributes[kSecAttrGeneric as String] = Data(scopes.utf8)
+        }
+        return attributes
     }
 
     public static func attributes(for app: MastodonApp) -> [String: Any] {
@@ -121,6 +163,12 @@ public enum MastodonKeychain {
         attributes[kSecAttrAccessible as String] = ForumKeychain.accessibility
         attributes[kSecValueData as String] = value
         return attributes
+    }
+
+    /// What one item's attributes say its sign-in bought.
+    public static func grant(_ row: [String: Any]) -> MastodonGrant {
+        guard let data = row[kSecAttrGeneric as String] as? Data else { return .unasked }
+        return MastodonGrant.of(scopes: String(decoding: data, as: UTF8.self))
     }
 
     /// Every host this app holds a token for, attributes only — no `kSecReturnData`.
@@ -140,6 +188,9 @@ public enum MastodonKeychain {
             var accessToken: String
             var clientID: String
             var clientSecret: String
+            /// Absent in an item kept before a sign-in asked about writing — which is what makes
+            /// that reader one this app still owes the question to.
+            var scopes: String?
         }
 
         private struct App: Codable {
@@ -152,7 +203,7 @@ public enum MastodonKeychain {
         static func encode(_ token: MastodonToken) -> Data {
             let value = Token(
                 accessToken: token.accessToken, clientID: token.clientID,
-                clientSecret: token.clientSecret
+                clientSecret: token.clientSecret, scopes: token.scopes
             )
             return (try? JSONEncoder().encode(value)) ?? Data()
         }
@@ -168,7 +219,7 @@ public enum MastodonKeychain {
             else { return nil }
             return MastodonToken(
                 host: host, accessToken: value.accessToken, clientID: value.clientID,
-                clientSecret: value.clientSecret
+                clientSecret: value.clientSecret, scopes: value.scopes
             )
         }
 
@@ -208,13 +259,18 @@ public struct KeychainMastodonTokens: MastodonTokenStore {
         return true
     }
 
-    public func signedInHosts() throws -> Set<String> {
+    public func grants() throws -> [String: MastodonGrant] {
         var item: CFTypeRef?
         let status = SecItemCopyMatching(MastodonKeychain.allItems() as CFDictionary, &item)
-        if status == errSecItemNotFound { return [] }
+        if status == errSecItemNotFound { return [:] }
         guard status == errSecSuccess else { throw ForumCredentialError.keychain(status) }
-        guard let rows = item as? [[String: Any]] else { return [] }
-        return Set(rows.compactMap { ($0[kSecAttrAccount as String] as? String)?.lowercased() })
+        guard let rows = item as? [[String: Any]] else { return [:] }
+        return rows.reduce(into: [:]) { grants, row in
+            guard let host = (row[kSecAttrAccount as String] as? String)?.lowercased() else {
+                return
+            }
+            grants[host] = MastodonKeychain.grant(row)
+        }
     }
 
     public func app(host: String) throws -> MastodonApp? {
@@ -284,8 +340,8 @@ public final class MemoryMastodonTokens: MastodonTokenStore, @unchecked Sendable
         }
     }
 
-    public func signedInHosts() throws -> Set<String> {
-        lock.withLock { Set(held.keys) }
+    public func grants() throws -> [String: MastodonGrant] {
+        lock.withLock { held.mapValues(\.grant) }
     }
 
     public func app(host: String) throws -> MastodonApp? {

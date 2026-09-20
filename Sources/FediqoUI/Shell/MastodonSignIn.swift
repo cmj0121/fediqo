@@ -7,8 +7,9 @@ import SwiftUI
 /// Every Mastodon this device is signed in to.
 ///
 /// **Signed in is "a token is in the Keychain for that host"** and nothing else — no store
-/// column, no flag beside it. `signedInHosts` is that fact held for view bodies to read, refreshed
-/// at the three places it can change: a sign-in saved, a sign-out, and a server ending one.
+/// column, no flag beside it. `grants` is that fact held for view bodies to read — who, and what
+/// their sign-in bought (#69) — refreshed at the three places it can change: a sign-in saved, a
+/// sign-out, and a server ending one.
 @MainActor
 @Observable
 public final class MastodonSessions {
@@ -18,9 +19,26 @@ public final class MastodonSessions {
     /// is cleared or removed does not save the token it comes back with.
     @ObservationIgnored private var signOuts: [String: Int] = [:]
 
-    private(set) var signedInHosts: Set<String> = []
+    /// What each signed-in host's sign-in bought (#69) — **and, by its keys, who is signed in at
+    /// all.**
+    ///
+    /// **Read from the items' attributes and never from a token**, which is what keeps the source
+    /// page free of a Keychain access prompt per row — see `MastodonTokenStore.grants()`. A host
+    /// with no entry is one this device holds no sign-in for at all.
+    private(set) var grants: [String: MastodonGrant] = [:]
+
+    /// Which hosts this device holds a sign-in for. **Derived and not stored beside `grants`**, so
+    /// that "who is signed in" and "what their sign-in bought" cannot come to disagree by one of
+    /// two assignments being forgotten — the store answers them in one query and this answers them
+    /// from one value.
+    var signedInHosts: Set<String> { Set(grants.keys) }
+
     /// Hosts that ended a sign-in on their own side, not yet told to the reader.
     private(set) var ended: [String] = []
+
+    /// Hosts whose last write was turned away, until they are signed in again — cleared by a
+    /// sign-in and by a sign-out, which are the two acts that replace what a write would use.
+    private(set) var writeRefused: Set<String> = []
 
     public init(
         tokens: any MastodonTokenStore = KeychainMastodonTokens(),
@@ -32,7 +50,7 @@ public final class MastodonSessions {
     }
 
     func isSignedIn(host: String) -> Bool {
-        signedInHosts.contains(host.lowercased())
+        grants[host.lowercased()] != nil
     }
 
     /// Signs in on the server's own page and keeps the token. Nothing where it worked, or where the
@@ -50,33 +68,49 @@ public final class MastodonSessions {
     /// registration made without it and kept with the scopes it was made for, so each later
     /// sign-in reuses it rather than registering again. Only finding an old post again needs
     /// search; the thread says so and asks for a sign-in again.
-    func signIn(host raw: String, through browser: any OAuthBrowser) async -> MastodonSignInError? {
+    ///
+    /// **`writing` is the reader's own answer and is never assumed** (#69). It decides what the
+    /// server's page asks for and what the registration is made for, and it is written down with
+    /// the token. `false` asks for exactly the scopes this app asked for before it could write at
+    /// all, so refusing the writing part leaves reading as it was, down to the string.
+    ///
+    /// **A registration made for the other answer is not reused**: a page asking to write on a
+    /// registration made for reading is `invalid_scope`, so the choice changing means registering
+    /// again. A server that refuses the writing part outright fails the sign-in and says so —
+    /// it is **never** quietly retried for reading alone, because a reader who asked to write
+    /// and was handed a read-only sign-in without being told has been answered for.
+    func signIn(
+        host raw: String, through browser: any OAuthBrowser, writing: Bool = false
+    ) async -> MastodonSignInError? {
         let host = raw.lowercased()
         let before = signOuts[host, default: 0]
         let oauth = MastodonOAuth(host: host, sender: sender)
         var kept = (try? tokens.app(host: host)) ?? nil
-        // A registration made for scopes this build does not ask for is made again: the server
+        // A registration made for scopes this sign-in does not ask for is made again: the server
         // would refuse the page with `invalid_scope`.
-        let asked: Set<String?> = [MastodonOAuth.scopes, MastodonOAuth.scopesWithoutSearch]
-        if let app = kept, !asked.contains(app.scopes) {
+        let asked = MastodonOAuth.known(writing: writing)
+        if let app = kept, !asked.contains(app.scopes ?? "") {
             try? tokens.forgetApp(host: host)
             kept = nil
         }
+        // The one ladder, from the one place that owns it: what this answer registers for, and
+        // what it falls back to where the server refuses `read:search`.
+        let (wide, narrow) = MastodonOAuth.registrations(writing: writing)
         let token: MastodonToken
         do {
             let app: MastodonApp
             if let kept {
                 app = kept
             } else {
-                app = try await oauth.register()
+                app = try await oauth.register(scopes: wide)
                 if signOuts[host, default: 0] == before { try? tokens.save(app) }
             }
             do {
                 token = try await oauth.signIn(as: app, through: browser)
-            } catch MastodonSignInError.invalidScope where app.scopes == MastodonOAuth.scopes {
+            } catch MastodonSignInError.invalidScope where app.scopes == wide {
                 try? tokens.forgetApp(host: host)
                 kept = nil
-                let narrower = try await oauth.register(scopes: MastodonOAuth.scopesWithoutSearch)
+                let narrower = try await oauth.register(scopes: narrow)
                 if signOuts[host, default: 0] == before { try? tokens.save(narrower) }
                 token = try await oauth.signIn(as: narrower, through: browser)
             }
@@ -98,8 +132,30 @@ public final class MastodonSessions {
             await oauth.revoke(token)
             return .keychain
         }
+        // A fresh sign-in is a fresh answer from the server about what this device may do, so
+        // whatever it turned away before this is spent.
+        writeRefused.remove(host)
         refresh()
         return nil
+    }
+
+    /// A write this source turned away (#69). The row says so and keeps saying it until the source
+    /// is signed in again — **it does not sign the reader out**, because reading is untouched by
+    /// it and a 403 is not a revoked token.
+    func refusedWrite(host raw: String) {
+        writeRefused.insert(raw.lowercased())
+    }
+
+    /// What may be done on one source, from what its sign-in bought and what it has refused since.
+    ///
+    /// **The one place the three facts meet**, so the row, its spoken sentence and anything that
+    /// later asks whether a write may be attempted read one answer rather than three derivations
+    /// of it.
+    func writing(host raw: String, kind: ProtocolKind) -> SourceWriting {
+        let host = raw.lowercased()
+        return SourceWriting.of(
+            kind: kind, grant: grants[host], refused: writeRefused.contains(host)
+        )
     }
 
     /// The token leaves this device first; then the server is asked to forget it, and whatever it
@@ -124,6 +180,7 @@ public final class MastodonSessions {
             NetLog.auth.error("\(NetLog.line("sign-out", host: host, error: error), privacy: .public)")
         }
         if forgettingApp { try? tokens.forgetApp(host: host) }
+        writeRefused.remove(host)
         refresh()
         if let token {
             await MastodonOAuth(host: host, sender: sender).revoke(token)
@@ -149,7 +206,7 @@ public final class MastodonSessions {
     /// At launch: asks each server whether it still honours its token. Only a 401 signs out; a
     /// server that cannot be reached leaves the sign-in as it was.
     public func verifyAll() async {
-        for host in signedInHosts.sorted() {
+        for host in grants.keys.sorted() {
             guard let door = authorized(host: host) else { continue }
             do {
                 _ = try await door.get(path: "/api/v1/accounts/verify_credentials")
@@ -166,8 +223,11 @@ public final class MastodonSessions {
     /// Reads who is signed in again. Also asked when the app comes to the front: a Keychain read
     /// at launch on a locked device finds nothing, and that is not a sign-out.
     func refresh() {
-        let hosts = (try? tokens.signedInHosts()) ?? []
-        if hosts != signedInHosts { signedInHosts = hosts }
+        // **One query, one value, and it reads no token** — see `MastodonTokenStore.grants()`. Who
+        // is signed in is this dictionary's keys, so a row can never draw a sign-in this object
+        // does not also have a grant for.
+        let grants = (try? tokens.grants()) ?? [:]
+        if grants != self.grants { self.grants = grants }
     }
 }
 

@@ -3,7 +3,8 @@ import Foundation
 import Security
 
 // Signing in to a Mastodon server: OAuth 2 authorization code with PKCE (S256) and `state`, on
-// the server's own page, asking only to read.
+// the server's own page, asking for what reading needs and — where the reader said so — for what
+// writing needs.
 //
 // The app is registered once per host and its registration kept (`MastodonApp`), so a sign-in
 // after a sign-out does not register again; Mastodon tokens do not expire, so there is no
@@ -83,10 +84,66 @@ public struct MastodonOAuth: Sendable {
     public static let redirect = "fediqo://oauth"
     /// Decision 8: what Home, lists, the account check and finding a post again by its address
     /// (#29) need, and no more. A token issued before `read:search` was asked for lacks it.
-    public static let scopes = "read:statuses read:lists read:accounts read:search"
+    public static let reading = "read:statuses read:lists read:accounts read:search"
     /// Decision 32: what is asked of a server that refuses `read:search` (`invalid_scope`), once.
     /// Everything but finding an old post again works; that says to sign in again.
-    public static let scopesWithoutSearch = "read:statuses read:lists read:accounts"
+    public static let readingWithoutSearch = "read:statuses read:lists read:accounts"
+    /// What writing needs (#69), and no more: `write:statuses` is a post, a boost, a reply and
+    /// taking any of them back; `write:favourites` is a favourite. **Nothing here follows anybody,
+    /// changes a profile or touches a filter** — those are other `write:` scopes and this app asks
+    /// for none of them.
+    ///
+    /// **Asked for only where the reader said so.** It is never part of the reading pair above, so
+    /// a sign-in that refuses the writing part is byte-for-byte the sign-in this app made before
+    /// this existed.
+    public static let writing = "write:statuses write:favourites"
+
+    /// The whole of what one sign-in asks for: reading, and the writing part after it where the
+    /// reader agreed to it.
+    ///
+    /// **Reading first and writing last, always in this order**, because the string is also what a
+    /// registration records and what `known(writing:)` compares against — two spellings of one ask
+    /// would register twice for one choice.
+    public static func scopes(reading: String = reading, writing wanted: Bool) -> String {
+        wanted ? "\(reading) \(Self.writing)" : reading
+    }
+
+    /// The ladder one answer is asked on: what a sign-in registers for, and what it falls back to
+    /// where the server refuses `read:search` (decision 32).
+    ///
+    /// **One owner for both rungs.** `MastodonSessions.signIn` needs them in order and needs to
+    /// know which registrations it may reuse, and those were two derivations of one ladder in two
+    /// files — true together only by inspection. `known(writing:)` is this, as a set.
+    public static func registrations(writing wanted: Bool) -> (wide: String, narrow: String) {
+        (scopes(writing: wanted), scopes(reading: readingWithoutSearch, writing: wanted))
+    }
+
+    /// The registrations this build may reuse for a sign-in that wants `writing`, or not.
+    ///
+    /// **It is per writing choice and not one list of everything.** A registration made for
+    /// reading alone cannot carry a page that asks to write — the server answers `invalid_scope` —
+    /// so a reader who signs in again to add writing must register again. The two rungs inside one
+    /// choice are decision 32's: a host that refused `read:search` keeps its narrower registration
+    /// rather than registering afresh every time.
+    public static func known(writing wanted: Bool) -> Set<String> {
+        let ladder = registrations(writing: wanted)
+        return [ladder.wide, ladder.narrow]
+    }
+
+    /// Whether a scope string bought the writing part.
+    ///
+    /// **Compared scope by scope and never as a substring**, so a server that hands back the
+    /// scopes in another order still reads as writing, and a scope that merely contains one of
+    /// these words does not.
+    public static func writes(_ scopes: String?) -> Bool {
+        guard let scopes else { return false }
+        let granted = Set(scopes.split(separator: " "))
+        return writingScopes.allSatisfy(granted.contains)
+    }
+
+    /// `writing`, split once. This is asked of every held token at launch and again whenever the
+    /// app comes to the front, so the constant is split once rather than once per item.
+    private static let writingScopes: [Substring] = writing.split(separator: " ")
 
     let host: String
     private let sender: any HTTPSender
@@ -104,7 +161,7 @@ public struct MastodonOAuth: Sendable {
     {
         let pkce = PKCE.make()
         let state = PKCE.random(bytes: 16)
-        let scopes = app.scopes ?? Self.scopes
+        let scopes = app.scopes ?? Self.reading
         guard let page = authorizeURL(
             clientID: app.clientID, challenge: pkce.challenge, state: state, scopes: scopes
         ) else { throw MastodonSignInError.unreadable }
@@ -117,7 +174,12 @@ public struct MastodonOAuth: Sendable {
                 clientSecret: app.clientSecret, scopes: scopes
             ),
             clientID: app.clientID,
-            clientSecret: app.clientSecret
+            clientSecret: app.clientSecret,
+            // What this sign-in actually asked for, kept with the token — the one record of what
+            // the reader agreed to. Without it a token kept by an earlier build and a token whose
+            // reader refused the writing part are the same thing, and one of them has been asked
+            // and the other has not.
+            scopes: scopes
         )
         do {
             try await verify(token)
@@ -129,7 +191,7 @@ public struct MastodonOAuth: Sendable {
     }
 
     /// This app, registered on the server with the callback and `scopes`, which it records.
-    public func register(scopes: String = MastodonOAuth.scopes) async throws -> MastodonApp {
+    public func register(scopes: String = MastodonOAuth.reading) async throws -> MastodonApp {
         struct Registered: Decodable {
             let client_id: String
             let client_secret: String
@@ -145,7 +207,7 @@ public struct MastodonOAuth: Sendable {
     }
 
     func authorizeURL(
-        clientID: String, challenge: String, state: String, scopes: String = MastodonOAuth.scopes
+        clientID: String, challenge: String, state: String, scopes: String = MastodonOAuth.reading
     ) -> URL? {
         Host.httpsURL(host: host, path: "/oauth/authorize", query: [
             URLQueryItem(name: "response_type", value: "code"),
@@ -176,7 +238,7 @@ public struct MastodonOAuth: Sendable {
 
     func exchange(
         code: String, verifier: String, clientID: String, clientSecret: String,
-        scopes: String = MastodonOAuth.scopes
+        scopes: String = MastodonOAuth.reading
     ) async throws -> String {
         struct Issued: Decodable { let access_token: String }
         let answer: Issued = try await post("/oauth/token", [

@@ -58,6 +58,26 @@ public enum ProtocolKind: String, Sendable, Hashable, CaseIterable {
 
     /// Whether this is a forum, whose authors are that forum's and nobody else's.
     public var isForum: Bool { self == .discourse || self == .discuz }
+
+    /// Whether Fediqo can write to a source of this kind at all (#69).
+    ///
+    /// **`hasTimelines`' shape and for its reason** — one list per protocol fact, here beside the
+    /// others rather than beside the feature that first needed it, so a protocol added later is
+    /// answered in one place. No `default:`.
+    ///
+    /// **A forum is `false` although it signs in**, and the two are unrelated: a Discuz! sign-in is
+    /// a cookie and a saved password that let this device *read* a board a signed-out reader may
+    /// not, and this app has no way at all to post to a forum. So a forum row says read only, for a
+    /// reason that is about the protocol rather than about anything its reader chose.
+    public var canWrite: Bool {
+        switch self {
+        // Signed in on the server's own page, and the writing part is what #69 lets a reader buy.
+        case .mastodon: true
+        case .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial,
+            .discourse, .discuz, .unknown:
+            false
+        }
+    }
 }
 
 /// One board of a forum the reader subscribed to.
