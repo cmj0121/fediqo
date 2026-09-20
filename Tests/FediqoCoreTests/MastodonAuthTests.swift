@@ -98,6 +98,14 @@ enum MastodonFixture {
     static let token = MastodonToken(
         host: host, accessToken: "tok-123", clientID: "cid", clientSecret: "csecret"
     )
+
+    /// The same token, carrying what its sign-in asked for.
+    static func token(scopes: String?) -> MastodonToken {
+        MastodonToken(
+            host: host, accessToken: "tok-123", clientID: "cid", clientSecret: "csecret",
+            scopes: scopes
+        )
+    }
     static let app = MastodonApp(host: host, clientID: "cid", clientSecret: "csecret")
 }
 
@@ -112,7 +120,7 @@ struct MastodonAuthTests {
         let server = MastodonFixture.server()
         let app = try await MastodonOAuth(host: host, sender: server).register()
         #expect(app == MastodonApp(
-            host: host, clientID: "cid", clientSecret: "csecret", scopes: MastodonOAuth.scopes
+            host: host, clientID: "cid", clientSecret: "csecret", scopes: MastodonOAuth.reading
         ), "a registration records the scopes it was made for")
 
         let request = try #require(await server.requests.first)
@@ -227,7 +235,11 @@ struct MastodonAuthTests {
         let server = MastodonFixture.server()
         let browser = await FixtureBrowser.approving()
         let token = try await signIn(server, browser)
-        #expect(token == MastodonFixture.token)
+        // **The scopes it asked for travel with it** (#69). The registration in hand records
+        // none — it is one kept before they were written down — so the sign-in falls to the
+        // reading pair and the token says so.
+        #expect(token == MastodonFixture.token(scopes: MastodonOAuth.reading))
+        #expect(token.grant == .reading)
         #expect(token.app == MastodonFixture.app)
         #expect(await server.paths == ["/oauth/token", "/api/v1/accounts/verify_credentials"])
 
@@ -251,7 +263,7 @@ struct MastodonAuthTests {
     func withoutSearch() async throws {
         let server = MastodonFixture.server()
         let oauth = MastodonOAuth(host: host, sender: server)
-        let app = try await oauth.register(scopes: MastodonOAuth.scopesWithoutSearch)
+        let app = try await oauth.register(scopes: MastodonOAuth.readingWithoutSearch)
         #expect(app.scopes == "read:statuses read:lists read:accounts")
         #expect(await server.form("/api/v1/apps")["scopes"] == "read:statuses read:lists read:accounts")
         let browser = await FixtureBrowser.approving()
@@ -474,9 +486,9 @@ struct MastodonAuthTests {
         #expect(MastodonKeychain.Wire.decodeApp(app, host: host) == MastodonFixture.app)
         // The scopes a registration was made for go with it; one kept before they were recorded
         // reads back with none.
-        let scoped = MastodonApp(host: host, clientID: "cid", clientSecret: "csecret", scopes: MastodonOAuth.scopes)
+        let scoped = MastodonApp(host: host, clientID: "cid", clientSecret: "csecret", scopes: MastodonOAuth.reading)
         let scopedData = try #require(MastodonKeychain.attributes(for: scoped)[kSecValueData as String] as? Data)
-        #expect(MastodonKeychain.Wire.decodeApp(scopedData, host: host)?.scopes == MastodonOAuth.scopes)
+        #expect(MastodonKeychain.Wire.decodeApp(scopedData, host: host)?.scopes == MastodonOAuth.reading)
         let older = Data(#"{"clientID":"cid","clientSecret":"csecret"}"#.utf8)
         #expect(MastodonKeychain.Wire.decodeApp(older, host: host)?.scopes == nil)
         #expect(MastodonKeychain.Wire.decodeApp(Data("junk".utf8), host: host) == nil)

@@ -420,7 +420,11 @@ struct SourcePageTests {
         let identity = String(
             format: L10n.t("source.spoken"), "f.example", "Discourse", DummyItem.shapeWord(.forum)
         )
-        let expected = ([identity] + SourcePreviewView.figurePieces(profile)
+        // **The writing word is the second part now** (#69) — the row draws it on the hostname's
+        // own line and the sentence says it there. A Discourse reads only, and for a reason that
+        // is about the protocol: this app cannot write to a forum at all.
+        let writing = L10n.t(SourceRow.writingKey(.never))
+        let expected = ([identity, writing] + SourcePreviewView.figurePieces(profile)
             + ["1 boards: General"]).joined(separator: ", ")
 
         #expect(SourceRow.spoken(row) == expected, """
