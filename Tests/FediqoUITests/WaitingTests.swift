@@ -9,7 +9,15 @@ import Testing
 /// view makes — that a reader who asked for less movement gets no second frame, and that the run
 /// stays inside its ends at every instant — which is the shape `EmojiText` and `ForumWaiting`
 /// already established here.
+///
+/// **The suite is `@MainActor`, and the whole suite rather than the tests inside it.** Everything
+/// it reads belongs to a `View` — `ShellWaiting`'s own statics and `ForumWaiting`'s — and a
+/// `View` is isolated to the main actor, so a synchronous test cannot reach them. The Swift this
+/// was written on allows it; the Swift CI runs refuses it, as a build error rather than a failing
+/// test, so the whole bundle stops compiling. Annotating each test instead compiles and then
+/// kills the bundle with signal 5 as it starts, which is why it is here and not below.
 @Suite("One way of saying something is on its way")
+@MainActor
 struct WaitingTests {
     /// **Nothing moves, and it still reads as waiting.** `nil` is not a slow clock; it is the
     /// branch of `body` with no `TimelineView` in it, so there is nothing left that could tick.
