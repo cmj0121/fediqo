@@ -101,11 +101,26 @@ struct PostLinkTests {
         // Either nothing, or the ASCII part before the letter that stopped it — never the whole
         // of what was typed.
         #expect(found.first?.text != raw)
+        // **And the part that is left is an address with its host whole.** That is the shape the
+        // cost takes, and it is why the cost is payable: `https://example.test/ä` draws an
+        // underlined `https://example.test/` and then a plain `ä`, so a reader sees a shorter
+        // address than the author typed and the press opens that shorter one — but the host sits
+        // at the head of the underlined run and cannot be the half of a name, because a scan that
+        // stops inside a host has already stopped before the path as well.
+        if let link = found.first {
+            #expect(raw.hasPrefix(link.text))
+            #expect(link.text.hasPrefix("https://\(link.host)"))
+        }
     }
 
     /// `U+202E` reverses everything drawn after it, which is how an address is made to read as a
     /// different one. It is not an address character, so it ends the address instead of joining
     /// it.
+    ///
+    /// **What this does not hold**, because the claim is easy to over-read: an override written
+    /// *earlier* in the post sits in a `.text` run and still reaches the link, since the runs are
+    /// concatenated into one `Text` and one paragraph. `PostLink.addressEnd` writes down why that
+    /// is documented rather than stripped, and what is left of it.
     @Test("A bidirectional override cannot get into an address")
     func bidiOverrideStopsTheAddress() throws {
         let found = PostLink.found(in: "https://example.test/a\u{202E}gpj.exe ")
