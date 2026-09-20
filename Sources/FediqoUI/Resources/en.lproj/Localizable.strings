@@ -471,3 +471,7 @@
 "list.choose.done"                    = "Done";
 "list.choose.hint.on"                 = "Read this list";
 "list.choose.hint.off"                = "Stop reading this list";
+
+/* #64 — the one way of saying something is on its way. Spoken only: the plate itself is what a
+   reader sees, and it carries no words. */
+"shell.waiting"                       = "Loading…";

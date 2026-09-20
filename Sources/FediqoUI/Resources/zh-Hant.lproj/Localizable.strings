@@ -463,3 +463,7 @@
 "list.choose.done"                    = "完成";
 "list.choose.hint.on"                 = "讀這個列表";
 "list.choose.hint.off"                = "不再讀這個列表";
+
+/* #64 — the one way of saying something is on its way. Spoken only: the plate itself is what a
+   reader sees, and it carries no words. */
+"shell.waiting"                       = "正在讀取…";
