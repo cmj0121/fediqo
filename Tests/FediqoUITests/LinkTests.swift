@@ -10,6 +10,15 @@ import Testing
 /// the object a press hands the address to. What it cannot: the press itself, the menu the
 /// secondary press opens, and the web view — all three are `View` bodies, and this package cannot
 /// execute one. They are named in the report rather than claimed here.
+///
+/// **`@MainActor` belongs on the suite and nowhere else — this cost an afternoon.** `ShellReader`
+/// and `EmojiCache` are main-actor types, so their isolation has to come from somewhere. Moving
+/// the annotation onto the individual `@Test` functions *compiles clean*, and then the whole
+/// `FediqoUITests` bundle dies with signal 5 — SIGTRAP — the moment this suite starts: no failing
+/// assertion, no test name, nothing but `exited with unexpected signal code 5` after the last
+/// suite that ran. Leaving it off entirely is the friendly failure of the two; that one is a
+/// compile error naming every line. If this file ever starts trapping with nothing to show for
+/// it, look at this annotation before looking at anything else.
 @MainActor
 @Suite("Following a link in a post")
 struct LinkTests {
@@ -83,6 +92,42 @@ struct LinkTests {
         #expect(EmojiText.links(in: cut).isEmpty)
         #expect(EmojiText.line(cut, [:], at: 0, baseline: -4)
             == Text(verbatim: "") + Text(verbatim: "https://example.test/a"))
+    }
+
+    // MARK: - What a cover draws
+
+    /// **The cover's cut is the label cut.** A blurred `Text` is still laid out and still
+    /// hit-tested, so prose behind a cover is a covered post whose links are live: the press that
+    /// should lift the cover lands on the text layer and opens the author's page, and the
+    /// secondary press lists the hosts the warning was put in front of. The fix is the cut, so
+    /// this is what the test holds — the line the cover draws is one the scanner never opened.
+    @Test("A covered post's words are cut as a label, so the cover draws no control")
+    func theCoverDrawsNoControl() {
+        let body = "see https://example.test/a"
+        let covered = EmojiText.words(body, emojis: [], host: "first.example", covered: true)
+        let lifted = EmojiText.words(body, emojis: [], host: "first.example", covered: false)
+
+        #expect(covered.linked == false)
+        #expect(lifted.linked)
+
+        // And the two cuts those answers pick: nothing to press under the cover, the address
+        // once it is off. Asked of the cache, which is where the line itself asks.
+        let cache = EmojiCache(http: FixtureHTTP())
+        #expect(EmojiText.links(in: cache.runs(in: body, from: [])).isEmpty)
+        #expect(EmojiText.links(in: cache.proseRuns(in: body, from: [])).map(\.host)
+            == ["example.test"])
+    }
+
+    /// The row's other half of the same rule: a forum band under a cover offers no spoken action
+    /// either. A reader using VoiceOver is not an exception to "the cover draws no control".
+    @Test("A covered band offers no address to speak, and an uncovered one offers the words'")
+    func aCoveredBandSpeaksNoAddress() {
+        let words = ForumPostBand.words(of: .words("see https://example.test/a"))
+        #expect(EmojiText.links(in: EmojiCache.shared.proseRuns(in: words, from: []))
+            .map(\.host) == ["example.test"])
+        // What the band hands `spokenLinks` while covered is the empty string, and an empty
+        // string has no addresses in it however it is cut.
+        #expect(EmojiText.links(in: EmojiCache.shared.proseRuns(in: "", from: [])).isEmpty)
     }
 
     // MARK: - The memo keeps the two cuts apart
