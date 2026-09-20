@@ -65,6 +65,15 @@ public extension PostLink {
     /// host of `evil.example` and reads, to a person, as Apple's. Nothing honest can be done with
     /// it — stripping the userinfo would open a different address from the one on the screen, and
     /// keeping it would hand a password to a web view — so it is not a link at all.
+    ///
+    /// **What it does not refuse, and this is the one to know.** `Host.allowsFetch` is the scheme
+    /// and a non-empty host, and that is the whole of it: there is **no private-address rule**.
+    /// `https://127.0.0.1/`, `https://192.168.1.1/` and `https://[::1]:8443/` are links, in a
+    /// stranger's post, and pressing one is followed. For a `URLSession` fetch that is a request
+    /// this app chose to make and it reads as such; through `ShellReader` it is somebody else's
+    /// page — with its scripts — pointed at the reader's own device or the network it is on, one
+    /// press away. Decision 9 never claimed otherwise and this is not a regression, but it is
+    /// cited often enough in this unit that what it covers should not be guessed at.
     static func followable(_ raw: String) -> URL? {
         guard !raw.isEmpty, let url = URL(string: raw), Host.allowsFetch(url) else { return nil }
         guard url.user() == nil, url.password() == nil else { return nil }
@@ -133,11 +142,38 @@ public extension PostLink {
     /// **RFC 3986's own set, and nothing outside it.** That is one rule doing four jobs: it ends
     /// the address at a space, it ends it at the CJK sentence it is embedded in
     /// (`https://example.test/a這個` is an address and then two words), it keeps a bidirectional
-    /// override such as `U+202E` — which makes an address read backwards on the screen — out of
-    /// a link entirely, and it means a host is only ever the ASCII name the wire uses. A person
-    /// who writes `https://台灣.tw` is not given a link; the punycode spelling of the same host
-    /// is. The cost is real and it is the one worth paying: what is drawn as a link is what the
-    /// device will reach, character for character, with no script anybody can read two ways.
+    /// override such as `U+202E` out of a link entirely, and it means a host is only ever the
+    /// ASCII name the wire uses. A person who writes `https://台灣.tw` is not given a link; the
+    /// punycode spelling of the same host is. The cost is real and it is the one worth paying:
+    /// what is drawn as a link is what the device will reach, character for character, with no
+    /// script anybody can read two ways.
+    ///
+    /// **What a stopped address looks like, since the shape surprises people.** The link ends at
+    /// the first character it is not spelled with and the rest stays as letters, so
+    /// `https://example.test/ä` draws an underlined `https://example.test/` followed by a plain
+    /// `ä`. That is safe rather than merely tolerable — the host sits at the head of the
+    /// underlined run and is whole in every case, because the scan cannot stop inside a host
+    /// without stopping before the path as well — but the reader sees a shorter address than the
+    /// author typed, and what the press opens is the shorter one. It is the address that is
+    /// drawn, which is this type's only promise.
+    ///
+    /// **Bidi is kept out of a link, not out of the paragraph round it, and the difference is
+    /// real.** `U+202E` cannot be *inside* a link because it is not in `allowed`; it can sit in a
+    /// `.text` run earlier in the same post, and `EmojiText.line` concatenates the runs into one
+    /// `Text`, which is one paragraph — so the override reaches the link as it reaches everything
+    /// after it, and the drawn characters are re-ordered.
+    ///
+    /// It is documented here rather than stripped, on three counts. The characters of the link
+    /// are still exactly the address (that property is about the string, not its drawing order);
+    /// an override *before* a link reverses the whole of it, `https://` included, which produces
+    /// a visibly broken string rather than a plausible second address — there is no `U+202C` to
+    /// end the override part-way, because that character cannot be inside the link either; and
+    /// stripping the formatting scalars from `.text` runs would silently rewrite honest
+    /// right-to-left writing, where `U+200F` and the isolates are how a sentence is spelled. The
+    /// residue is an ordering trick — two links can be made to draw in the opposite order — and
+    /// it is smaller than the harm of editing a stranger's Hebrew. The claim this file makes is
+    /// therefore that a link's letters are its address, and **not** that a post cannot influence
+    /// the order they are drawn in.
     private static func addressEnd(_ text: String, from start: String.Index) -> String.Index {
         var cursor = start
         while cursor < text.endIndex, allowed(text[cursor]) {
