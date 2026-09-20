@@ -188,7 +188,7 @@ public struct FediqoRootView: View {
             // were when it closes. That is the whole of "the reader comes back to the post they
             // left": there is nothing to restore, because nothing was taken away.
             .sheet(item: linkReading) { reading in
-                LinkReaderSheet(reading: reading) { linkReader.close() }
+                LinkReaderSheet(presented: reading, reader: linkReader) { linkReader.close() }
             }
             // **On the root, beside the composer's, and not on a pane.** A sign-in is asked for
             // from Account, where a refusal is reported, and it will be asked for from a timeline

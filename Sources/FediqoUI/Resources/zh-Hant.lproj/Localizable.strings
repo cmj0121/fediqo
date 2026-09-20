@@ -472,3 +472,4 @@
 "link.reader.label"                   = "%@，在 Fediqo 裡讀";
 "link.reader.browser"                 = "用瀏覽器開啟";
 "link.reader.close"                   = "完成";
+"link.reader.refused"                 = "這個連結要去的地方 Fediqo 不會開啟，已停住沒有前往。";

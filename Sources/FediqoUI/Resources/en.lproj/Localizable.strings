@@ -480,3 +480,4 @@
 "link.reader.label"                   = "%@, read inside Fediqo";
 "link.reader.browser"                 = "Open in your browser";
 "link.reader.close"                   = "Done";
+"link.reader.refused"                 = "That link goes somewhere Fediqo will not open. It was not followed.";
