@@ -75,6 +75,12 @@ typing its hostname. It names the protocol; only those two join this session. Wh
 sends lands in this device's store, and every timeline is a query of that store. Notices and
 compose stay off until they have something.
 
+### Writing a post
+
+From a timeline, `c` or the compose control opens writing over the page. You pick a source
+you may write on, and how far the post goes from what that source offers. A send that fails
+keeps the text. What landed is in the timeline it belongs to, without reloading everything.
+
 ### Timelines you write
 
 All and Trends are built in. Beside them you write your own. The header is `+`, then the
