@@ -163,6 +163,12 @@ public actor ItemStore {
     /// carried here. Each source is its own rows, so this host's copy goes and the other source's
     /// copy of the same content stays (#10).
     ///
+    /// **Nothing here knows about merged rows, and that is what makes letting go right** (#115).
+    /// A post two sources carried is drawn as one row but held as two, so taking one server's
+    /// copies away leaves the other's exactly as it arrived, and the row it was merged into is
+    /// drawn again from what is left — as that source carried it. A merge stores nothing of its
+    /// own, so nothing of one outlives the copies it was drawn from.
+    ///
     /// Silent where the host is not here, for the reason `subscribe(host:to:)` is: nothing in this
     /// package puts a source in the list, or takes one out of it, by a side door.
     public func remove(host raw: String) {
