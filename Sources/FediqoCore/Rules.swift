@@ -152,11 +152,15 @@ public struct TimelineDefinition: Hashable, Sendable, Identifiable {
     public let id: TimelineID
     public var name: String
     public var rules: [Rule]
+    /// Empty or whitespace is none, so a kept timeline never invents a description.
+    public var desc: String?
 
-    public init(id: TimelineID = UUID(), name: String, rules: [Rule]) {
+    public init(id: TimelineID = UUID(), name: String, rules: [Rule], desc: String? = nil) {
         self.id = id
         self.name = name
         self.rules = rules
+        let trimmed = desc?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        self.desc = trimmed.isEmpty ? nil : trimmed
     }
 
     /// Everything held. No rules.
