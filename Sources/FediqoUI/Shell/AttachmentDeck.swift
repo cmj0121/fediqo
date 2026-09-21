@@ -210,7 +210,11 @@ struct AttachmentDeck: View {
         // those names itself — so a button taking its name from its contents would be announced
         // as "button", with nothing said, for exactly as long as the film runs. This is the same
         // sentence the picture carries: which one of how many, and what the author said it is.
-        .accessibilityLabel(Text(spoken ?? ""))
+        // Said about the card in hand rather than about `showing`, so there is no empty label to
+        // fall back to. An empty one erases a `Button`'s name outright — the card announces
+        // itself as "button" and nothing else — and `spoken` is only ever nil on an empty deck,
+        // which is a deck that draws no card. Unreachable is not the same as impossible.
+        .accessibilityLabel(Text(spoken(attachment)))
         .accessibilityHint(Text(L10n.t("shortcut.view")))
         .frame(width: face, height: face)
         .overlay(alignment: .topTrailing) { counter }
@@ -337,8 +341,13 @@ struct AttachmentDeck: View {
     /// deck nobody can turn blind, and an attachment whose author wrote no alt text still has a
     /// kind — "a video" is little, and it is more than silence.
     private var spoken: String? {
-        guard let showing else { return nil }
-        let described = showing.alt.isEmpty ? Self.kind(of: showing) : showing.alt
+        showing.map(spoken)
+    }
+
+    /// The same sentence about a card the caller already has, which is every caller that is
+    /// drawing one. Nothing here can be nil, so nothing downstream needs a fallback.
+    private func spoken(_ attachment: Attachment) -> String {
+        let described = attachment.alt.isEmpty ? Self.kind(of: attachment) : attachment.alt
         return Self.positioned(described, index: index, of: attachments.count)
     }
 
