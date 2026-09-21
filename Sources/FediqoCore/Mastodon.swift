@@ -126,7 +126,13 @@ public struct MastodonClient: Sendable {
     }
 }
 
-enum MastodonRequestError: Error, Equatable {
+/// What a read of a Mastodon server, made without a token, ended in.
+///
+/// **Public because a pane has to tell a refusal from the dark.** A thread that the server said
+/// no to and a thread that nothing answered are two different sentences and only one of them is
+/// worth a second press — `ShellConversations.Absence` is where that judgement is made, and it
+/// cannot make it against an error it cannot name.
+public enum MastodonRequestError: Error, Equatable, Sendable {
     case invalidURL
     case http(Int)
 }
@@ -429,11 +435,11 @@ struct StatusDTO: Decodable, Sendable {
     }
 
     private static func reply(inReplyToId: String?, mentions: [Mention]?, host: String) -> Reply? {
-        guard inReplyToId != nil else { return nil }
+        guard let inReplyToId else { return nil }
         if let acct = mentions?.first?.acct {
-            return Reply(handle: handle(acct, host: host))
+            return Reply(handle: handle(acct, host: host), inReplyToId: inReplyToId)
         }
-        return Reply(handle: nil)
+        return Reply(handle: nil, inReplyToId: inReplyToId)
     }
 
     private static func audience(_ visibility: String?) -> Audience? {
