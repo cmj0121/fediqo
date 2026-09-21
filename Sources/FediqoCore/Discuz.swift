@@ -1333,6 +1333,48 @@ enum DiscuzPage {
 /// would put a stranger's words, or the forum's, under this person's name. So `body` is what is
 /// left after the furniture is taken out, and each thing taken out is either kept somewhere it
 /// can be told apart (`quoted`, `isWithheld`) or is not somebody's words at all.
+/// Somebody else's words inside a post — and, where that somebody was quoting in turn, theirs.
+///
+/// **A tree and not a string, because Discuz! nests and a reader can see that it does.** A
+/// `<div class="quote">` holding another is how a forum argument three replies deep arrives, and
+/// the plain text of the outer one contains the inner one's words with nothing to mark where one
+/// person stops and the next begins. Flattened, a reply that quoted a quote reads as one
+/// undifferentiated paragraph behind one border — which is the thing #94 is about.
+///
+/// **Depth is bounded**, at `DiscuzQuotation.deepest`. See `DiscuzThreadPage.quotation(of:)`.
+public struct DiscuzQuotation: Hashable, Sendable {
+    /// How many levels are read apart before the rest is taken as one.
+    ///
+    /// A page is a stranger's, and `quotation(of:)` recurses over what it finds in one; a few
+    /// thousand nested `<div>`s is a stack this device does not have. Eight is past any argument
+    /// a person will hold — the deepest measured on the four open installs is three — and what
+    /// lies below it is not dropped, it is read as the words of the eighth.
+    ///
+    /// Counted in quotation levels. `DummyThreadPane.deepestIndent` is the other ceiling in this
+    /// feature, in indent steps over a different tree; neither derives from the other.
+    static let deepest = 8
+
+    /// This level's own words, with anything **it** quoted taken out of them. Empty where the
+    /// level is only a wrapper around what it quoted, which some templates write.
+    public let words: String
+    /// What this level quoted, in the order the page wrote them. Empty at the innermost.
+    public let quoting: [DiscuzQuotation]
+
+    public init(words: String, quoting: [DiscuzQuotation] = []) {
+        self.words = words
+        self.quoting = quoting
+    }
+
+    /// What every level of this quotation weighs, in the bytes its strings are stored as.
+    ///
+    /// The whole tree, because every level is text off a stranger's page and every level is
+    /// held. The shape costs nothing worth counting; the words are what somebody else chooses
+    /// the length of, which is what a cache has to budget for.
+    public var byteCount: Int {
+        words.utf8.count + quoting.reduce(0) { $0 + $1.byteCount }
+    }
+}
+
 public struct DiscuzPost: Identifiable, Hashable, Sendable {
     public var id: Int { pid }
     /// Discuz!'s own post number, unique on the forum. The key, because a post is what repeats
@@ -1359,14 +1401,19 @@ public struct DiscuzPost: Identifiable, Hashable, Sendable {
     public let postedAt: Date?
     /// The author's words. Empty where the post was a picture, or where it was withheld.
     public let body: String
-    /// What this post reproduced of somebody else's, where it quoted one.
+    /// What this post reproduced of somebody else's, where it quoted one — **with the levels
+    /// still apart**, because a quotation that itself quotes is two people and not one.
     ///
     /// Kept out of `body` and kept rather than dropped. Out of `body` because a reply that opens
     /// by quoting the whole post above it would fill a line-limited row with a stranger's
     /// sentence and never show its own; kept because a deletion nobody can see is the kind of
     /// thing that looks right on a fixture, and because the quotation is real content a reader
     /// may want drawn as a quotation.
-    public let quoted: String?
+    ///
+    /// **A list, because a post can quote twice.** Two `<div class="quote">` siblings in one
+    /// message is two quotations, and joining them into one string — which is what this field
+    /// used to be — makes one person appear to have written both.
+    public let quoted: [DiscuzQuotation]
     /// The forum answered with a notice where the words should have been — `游客请登录后查看回复内容`,
     /// Discuz!'s `<div class="locked">`. Measured on `install-a.example`, where 19 of 20 replies on
     /// one thread are withheld from a signed-out reader.
@@ -1401,7 +1448,7 @@ public struct DiscuzPost: Identifiable, Hashable, Sendable {
         handle: String,
         postedAt: Date? = nil,
         body: String,
-        quoted: String? = nil,
+        quoted: [DiscuzQuotation] = [],
         isWithheld: Bool = false,
         avatarURL: URL? = nil
     ) {
@@ -1976,7 +2023,7 @@ enum DiscuzPostLayout: CaseIterable, Sendable {
     private static func words(
         in message: String,
         patterns: DiscuzThreadPage.Patterns
-    ) -> (body: String, quoted: String?, isWithheld: Bool) {
+    ) -> (body: String, quoted: [DiscuzQuotation], isWithheld: Bool) {
         let quotes = DiscuzMarkup.extract(patterns.quote, nesting: patterns.divs, in: message)
         let locked = DiscuzMarkup.extract(patterns.locked, nesting: patterns.divs, in: quotes.remainder)
         var text = locked.remainder
@@ -1985,11 +2032,45 @@ enum DiscuzPostLayout: CaseIterable, Sendable {
         text = DiscuzMarkup.extract(patterns.signature, nesting: patterns.divs, in: text).remainder
         text = DiscuzMarkup.extract(patterns.control, nesting: patterns.emphasis, in: text).remainder
         text = DiscuzMarkup.extract(patterns.scripted, nesting: patterns.anchors, in: text).remainder
-        let quoted = quotes.removed
-            .map { tidy(HTMLText.plain($0)) }
-            .filter { !$0.isEmpty }
-            .joined(separator: "\n")
-        return (tidy(HTMLText.plain(text)), quoted.isEmpty ? nil : quoted, !locked.removed.isEmpty)
+        let quoted = quotes.removed.compactMap { quotation(of: $0, patterns: patterns) }
+        return (tidy(HTMLText.plain(text)), quoted, !locked.removed.isEmpty)
+    }
+
+    /// One `<div class="quote">`'s contents as a quotation: this level's own words, and
+    /// whatever it quoted in turn.
+    ///
+    /// **The same extraction, one level down.** `DiscuzMarkup.extract` counts `<div>`s, so an
+    /// inner quotation comes out whole from an outer one exactly as the outer one came out of
+    /// the message; what is left is this level's own words with the inner block's text no longer
+    /// in them. That is the whole of the fix: the text used to be flattened here.
+    ///
+    /// **Nothing where the level has neither words nor a quotation.** An empty `<div
+    /// class="quote">` is a template's wrapper, and a border drawn around nothing is chrome
+    /// claiming somebody said something.
+    ///
+    /// **Bounded by `DiscuzQuotation.deepest`.** `levelsLeft` counts down so the floor is the
+    /// plain `levelsLeft <= 1` rather than a depth compared against a ceiling, which is one
+    /// off-by-one nobody has to hold in their head. At the floor the block is read as words,
+    /// inner markup and all, rather than recursed into — nothing is dropped and the stack is
+    /// finite however deeply a stranger's page nests. Each level is strictly shorter than the
+    /// one above it, so this terminates on its own too; the bound is for the page written to
+    /// make it not.
+    private static func quotation(
+        of block: String,
+        patterns: DiscuzThreadPage.Patterns,
+        levelsLeft: Int = DiscuzQuotation.deepest
+    ) -> DiscuzQuotation? {
+        guard levelsLeft > 1 else {
+            let words = tidy(HTMLText.plain(block))
+            return words.isEmpty ? nil : DiscuzQuotation(words: words)
+        }
+        let inner = DiscuzMarkup.extract(patterns.quote, nesting: patterns.divs, in: block)
+        let words = tidy(HTMLText.plain(inner.remainder))
+        let quoting = inner.removed.compactMap {
+            quotation(of: $0, patterns: patterns, levelsLeft: levelsLeft - 1)
+        }
+        guard !words.isEmpty || !quoting.isEmpty else { return nil }
+        return DiscuzQuotation(words: words, quoting: quoting)
     }
 
     /// The blank the removals left behind, closed up.
@@ -2027,12 +2108,20 @@ enum DiscuzMarkup {
         from start: String.Index
     ) -> (range: Range<String.Index>, after: String.Index)? {
         var depth = 1
+        var closed: (range: Range<String.Index>, after: String.Index)?
         let tail = NSRange(start..<text.endIndex, in: text)
-        for match in nesting.matches(in: text, range: tail) {
-            guard let range = Range(match.range, in: text) else { continue }
+        // **Enumerated rather than matched**, so the walk stops at the close it is looking for.
+        // `matches(in:range:)` builds a result object for every remaining tag in the page first
+        // and cannot be told to stop; a quotation early in a long thread paid for every `<div>`
+        // after it, and #94 made this run once per nested level rather than once per post.
+        nesting.enumerateMatches(in: text, range: tail) { match, _, stop in
+            guard let match, let range = Range(match.range, in: text) else { return }
             depth += text[range].hasPrefix("</") ? -1 : 1
-            if depth == 0 { return (start..<range.lowerBound, range.upperBound) }
+            guard depth == 0 else { return }
+            closed = (start..<range.lowerBound, range.upperBound)
+            stop.pointee = true
         }
+        if let closed { return closed }
         // Unclosed. Nothing rather than the rest of the page, which is the same choice this file
         // makes everywhere: a wrong answer that parses is worse than no answer.
         return nil

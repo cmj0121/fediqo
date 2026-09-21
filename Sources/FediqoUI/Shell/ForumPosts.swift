@@ -607,7 +607,9 @@ final class ForumPosts {
         posts.reduce(0) { running, post in
             running
                 + post.body.utf8.count
-                + (post.quoted?.utf8.count ?? 0)
+                // Every level of it: `DiscuzQuotation.byteCount` walks its own tree, so this
+                // stays the one sum it was before a quotation had levels.
+                + post.quoted.reduce(0) { $0 + $1.byteCount }
                 + post.author.utf8.count
                 + post.handle.utf8.count
         }

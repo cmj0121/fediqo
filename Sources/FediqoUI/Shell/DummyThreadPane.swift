@@ -41,7 +41,11 @@ struct DummyThreadPane: View {
     @Environment(\.openURL) private var openURL
 
     private let step: CGFloat = 16
-    private let deepest = 4
+    /// How many steps a reply is indented by at most — **the conversation's depth, not a
+    /// quotation's**. `DiscuzQuotation.deepest` is the other ceiling in this feature and counts
+    /// a different tree in different units; the two are unrelated and neither derives from the
+    /// other, which is worth the longer name to say.
+    private let deepestIndent = 4
 
     /// What this pane draws: the conversation the source handed back, or this post alone until
     /// one has. Built each pass rather than held, for `ShellConversationStanding.loaded`'s reason.
@@ -414,7 +418,7 @@ struct DummyThreadPane: View {
     }
 
     private func indent(_ depth: Int) -> CGFloat {
-        CGFloat(min(depth, deepest)) * step
+        CGFloat(min(depth, deepestIndent)) * step
     }
 
     @ViewBuilder
@@ -465,7 +469,14 @@ struct ForumReplyRow: View {
             avatar
             VStack(alignment: .leading, spacing: ShellSpace.tight) {
                 who
-                if let quoted = post.quoted, !quoted.isEmpty { quotation(quoted) }
+                // **Keyed by position, because a quotation has no id and does not need one.**
+                // Nothing reorders this list: it is the order the page wrote, read once, and
+                // rebuilt whole whenever the post is. Over the indices rather than over
+                // `enumerated()`, which would allocate a fresh array of pairs every time a body
+                // is evaluated to arrive at the same identity.
+                ForEach(post.quoted.indices, id: \.self) { level in
+                    ForumQuotation(quotation: post.quoted[level])
+                }
                 words
             }
         }
@@ -590,26 +601,6 @@ struct ForumReplyRow: View {
         }
     }
 
-    /// What this reply reproduced of somebody else's, drawn as a quotation.
-    ///
-    /// Core keeps it out of `body` and keeps it rather than dropping it, and says why: a reply
-    /// that opens by quoting the whole post above it would fill the words with a stranger's
-    /// sentence and never show its own. Drawn behind a rule and dimmed, so whose words are whose
-    /// is a thing the reader can see rather than infer.
-    private func quotation(_ text: String) -> some View {
-        Text(text)
-            .font(ShellType.meta)
-            .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.leading, ShellSpace.snug)
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(ShellChrome.hairline(colorScheme))
-                    .frame(width: ShellSpace.hair)
-            }
-            .accessibilityLabel(Text(String(format: L10n.t("thread.reply.quoted"), text)))
-    }
-
     /// The three things a reply's words can be, and they are three rather than two.
     ///
     /// **Withheld is not empty.** `install-a.example` answers a signed-out reader
@@ -641,6 +632,70 @@ struct ForumReplyRow: View {
                 .foregroundStyle(ShellChrome.ink(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
+        }
+    }
+}
+
+/// What a reply reproduced of somebody else's, drawn as a quotation — **and, where they quoted
+/// somebody in turn, that one inside it** (#94).
+///
+/// Core keeps a quotation out of `body` and keeps it rather than dropping it, and says why: a
+/// reply that opens by quoting the whole post above it would fill the words with a stranger's
+/// sentence and never show its own. Drawn behind a rule and dimmed, so whose words are whose is
+/// a thing the reader can see rather than infer.
+///
+/// ## Why this is a type and not a function
+///
+/// It draws itself. A `private func quotation(_:) -> some View` that called itself would be an
+/// opaque return type defined in terms of itself, which does not compile — the recursion has to
+/// go through a nominal type, and this is it. The same shape `DummyThreadPane` uses for its own
+/// nesting one level up, where `threaded(_:dimmed:)` indents by a depth the conversation
+/// carries; here the depth **is** the view tree, because a quotation's depth is its structure
+/// rather than a number beside it.
+///
+/// ## One rule per level, and it is the same rule
+///
+/// Each level gets its own rule and its own inset, so three nested quotations read as three
+/// rules stepping right rather than as one border drawn thicker. The inset is `ShellSpace.snug`
+/// at every level rather than growing: the rules are what say how deep this is, and a widening
+/// step would run a deep quotation off a phone's screen for no more information.
+///
+/// **No cap here.** `DiscuzQuotation.deepest` bounds the tree where it is read, so what arrives
+/// is already shallow enough to draw; a second ceiling in the view would be a rule that could
+/// disagree with the one in Core.
+///
+/// ## What it says out loud
+///
+/// Every level carries the same "Quoted: …" label over its own words, so a reader using
+/// VoiceOver hears each person's sentence introduced as a quotation instead of one label over
+/// everybody's. A level that is only a wrapper — words empty, one quotation inside it, which
+/// some templates write — draws no text and no label, only its rule.
+struct ForumQuotation: View {
+    let quotation: DiscuzQuotation
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: ShellSpace.tight) {
+            if !quotation.words.isEmpty {
+                Text(quotation.words)
+                    .font(ShellType.meta)
+                    .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel(
+                        Text(String(format: L10n.t("thread.reply.quoted"), quotation.words))
+                    )
+            }
+            ForEach(quotation.quoting.indices, id: \.self) { level in
+                ForumQuotation(quotation: quotation.quoting[level])
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.leading, ShellSpace.snug)
+        .overlay(alignment: .leading) {
+            Rectangle()
+                .fill(ShellChrome.hairline(colorScheme))
+                .frame(width: ShellSpace.hair)
         }
     }
 }
