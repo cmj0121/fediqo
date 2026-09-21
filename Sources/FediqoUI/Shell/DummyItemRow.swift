@@ -96,7 +96,10 @@ struct DummyItemRow: View {
     /// largest size a row was big text wrapped around small furniture.
     @ShellMetric(relativeTo: .body) private var avatarSide: CGFloat = Box.avatar
     @ShellMetric(relativeTo: .body) private var thumbSide: CGFloat = Box.thumb
-    @ShellMetric(relativeTo: .caption) private var vis: CGFloat = 16
+    /// The box the audience mark stands in. Tied to the mark's own role rather than to the
+    /// caption beside it, so the box and the glyph in it climb together — `ShellMetric`'s
+    /// whole point.
+    @ShellMetric(relativeTo: .callout) private var vis: CGFloat = Box.vis
     @ShellMetric(relativeTo: .caption) private var glyph: CGFloat = 17
     @ShellMetric(relativeTo: .caption) private var countBox: CGFloat = 20
     /// What a finger gets, whatever the glyph drawn inside it measures.
@@ -129,7 +132,27 @@ struct DummyItemRow: View {
         /// portrait sizes the words band to the words, as it did before any of this.
         static let avatar: CGFloat = 36
         static let thumb: CGFloat = 96
+        /// What the audience mark is given. Named beside the two above and for the same
+        /// reason: a test measures it, and it has to stay wide enough for the glyph the role
+        /// below draws — a box that did not grow with the mark would clip it.
+        static let vis: CGFloat = 20
     }
+
+    /// The role the audience mark is drawn in — **a rung up the scale from the line it stands
+    /// in, and that is the whole of #97's first half.**
+    ///
+    /// It was `.meta`, which is the caption the handle beside it takes, at a medium weight. A
+    /// glyph drawn at the size of the smallest writing on the row is a fact a reader has to hunt
+    /// for, and who a post was written for is not a footnote to it.
+    ///
+    /// `.name` is the row's own callout — the size the author's name is set in — so the mark
+    /// reads at a glance and still sits inside the avatar's band, which is what keeps it on the
+    /// meta line rather than making the line taller.
+    ///
+    /// Named here rather than written into the view, because a test cannot reach inside a `View`
+    /// body to ask what size something was drawn at, and "larger than the caption beside it" is
+    /// an acceptance line that has to be measurable.
+    static let visRole: ShellType = .name
 
     /// Four bands, and every row has all four whether or not it has anything to put
     /// in them:
@@ -435,17 +458,33 @@ struct DummyItemRow: View {
         item.postedAt.formatted(.dateTime.year().month().day().hour().minute().second())
     }
 
+    /// Who the author wrote it for: the glyph says which audience, the colour says how far the
+    /// post travels, and the name of it is what a pointer and a screen reader are given.
+    ///
+    /// **The name is said twice on purpose and read from one place.** `help` is the pointer's
+    /// and `accessibilityLabel` is VoiceOver's, and neither can be dropped in favour of the
+    /// other — but a glyph is nothing to a listener, so the two must never be allowed to say
+    /// different things. `spokenAudience(_:)` is where they both get the string.
     private var visibility: some View {
         Group {
             if let audience = item.audience {
                 Image(systemName: audience.symbolName)
-                    .shellFont(.meta, weight: .medium)
+                    .shellFont(Self.visRole)
                     .foregroundStyle(ShellChrome.vis(audience, colorScheme))
-                    .help(L10n.t("item.visibility.\(audience.rawValue)"))
-                    .accessibilityLabel(L10n.t("item.visibility.\(audience.rawValue)"))
+                    .help(Self.spokenAudience(audience))
+                    .accessibilityLabel(Self.spokenAudience(audience))
             }
         }
         .frame(width: vis, height: vis)
+    }
+
+    /// What the audience mark is called, in the shell's own language.
+    ///
+    /// A named function rather than a string built in the view body, for the reason the way out
+    /// is one: a label spelled inside a `View` is reachable from no test, and "VoiceOver still
+    /// names the audience" is something this branch has to be able to prove rather than assert.
+    static func spokenAudience(_ audience: DummyAudience) -> String {
+        L10n.t("item.visibility.\(audience.rawValue)")
     }
 
     /// The one server this row came through. A post two servers carry is two rows (#10), each
