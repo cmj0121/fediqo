@@ -1481,6 +1481,14 @@ struct ShellPicturesTests {
         await relaunched.fetch(address(1), scale: 2, tier: .deck, host: alpha)
         #expect(await offline.requests == 0, "a copy on this device went to the network anyway")
         #expect(relaunched.picture(address(1), scale: 2, tier: .deck, host: alpha) != nil)
+        #expect(
+            RemoteImage.fill(
+                have: relaunched.picture(address(1), scale: 2, tier: .deck, host: alpha) != nil,
+                url: address(1),
+                missing: relaunched.isMissing(address(1), scale: 2, tier: .deck)
+            ) == .held,
+            "a copy on this device must skip waiting, including with the network off"
+        )
     }
 
     @Test("A copy kept under one host is not drawn for another")
