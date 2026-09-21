@@ -147,6 +147,34 @@ final class ShellConversations {
         await ask(item, in: session)
     }
 
+    /// The note behind a row drawn in a conversation, where one of the loaded halves holds it.
+    ///
+    /// **An answer read in a thread is not a store row** — see this file's header — so an act
+    /// pressed on one has to find its note here, or the mark under it would be a control that is
+    /// drawn and does nothing.
+    func note(_ rowID: String) -> Note? {
+        for standing in standings.values {
+            guard case .loaded(let ancestors, let descendants, _) = standing else { continue }
+            if let found = (ancestors + descendants).first(where: { $0.key.rowID == rowID }) {
+                return found
+            }
+        }
+        return nil
+    }
+
+    /// What a source answered to an act on a row held here, laid in where the row was, in every
+    /// thread that holds it — so the mark under an answer in an open conversation says what the
+    /// source said, as the timeline's does (#106).
+    func replace(_ note: Note) {
+        for (id, standing) in standings {
+            guard case .loaded(let ancestors, let descendants, let rootID) = standing else { continue }
+            let swap = { (held: Note) in held.key == note.key ? note : held }
+            standings[id] = .loaded(
+                ancestors: ancestors.map(swap), descendants: descendants.map(swap), rootID: rootID
+            )
+        }
+    }
+
     /// Lets go of one server's threads: `Remove`, and `Clear`. Keyed by host rather than swept by
     /// reading the notes back, because the notes may be gone by the time this is called.
     func forget(host raw: String) {

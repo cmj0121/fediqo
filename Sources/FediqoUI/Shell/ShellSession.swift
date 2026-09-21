@@ -514,12 +514,15 @@ final class ShellSession {
         _ body: @escaping (MastodonAuthorized, Note) async throws -> Note
     ) async {
         guard acts(on: item).offers(act) else { return }
-        guard let note = notes.first(where: { $0.key.rowID == item.id }),
+        // A store row, or an answer read in an open conversation, which #90 keeps out of the store.
+        guard let note = notes.first(where: { $0.key.rowID == item.id })
+                ?? conversations.note(item.id),
               let door = mastodon.authorized(host: item.source.host)
         else { return }
         guard acts.begin(item.id, act) else { return }
         do {
-            _ = try await body(door, note)
+            let answered = try await body(door, note)
+            conversations.replace(answered)
             acts.landed(item.id, act)
             await adopt()
             await persist?()

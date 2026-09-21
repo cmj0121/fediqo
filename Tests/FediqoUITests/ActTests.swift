@@ -366,4 +366,40 @@ struct ActTests {
         #expect(DummyMarks() == DummyMarks(bookmarked: false, kept: false),
                 "the device-local marks no longer carry a favourite")
     }
+
+    // MARK: - An answer read inside a conversation
+
+    static func answer(id: String, favourited: Bool? = nil) -> String {
+        let flag = favourited.map { #","favourited":\#($0)"# } ?? ""
+        return """
+        {"id":"\(id)","uri":"https://social.example/users/bo/statuses/\(id)",
+         "created_at":"2024-06-01T01:00:00.000Z","content":"<p>an answer</p>",
+         "visibility":"public","in_reply_to_id":"9"\(flag),
+         "account":{"username":"bo","acct":"bo","display_name":"Bo"}}
+        """
+    }
+
+    @Test("An act on an answer read in an open conversation reaches the source and the thread says so")
+    func anActOnAnAnswerInAThread() async throws {
+        let (session, server) = try await shell(
+            scopes: writing, holding: note(boosted: false, favourited: false),
+            routes: [
+                "/api/v1/statuses/9/context": .json(
+                    #"{"ancestors":[],"descendants":["# + Self.answer(id: "12", favourited: false) + "]}"
+                ),
+                "/api/v1/statuses/12/favourite": .json(Self.answer(id: "12", favourited: true)),
+            ]
+        )
+        let root = try row(session)
+        await session.conversations.open(root, in: session)
+        let reply = try #require(session.conversations.conversation(around: root).descendants.first?.item)
+        #expect(!session.notes.contains { $0.key.rowID == reply.id }, "the answer is not a store row")
+        #expect(session.acts(on: reply).offers(.favourite))
+
+        await session.favourite(reply)
+        #expect(await server.paths.last == "/api/v1/statuses/12/favourite")
+        #expect(session.acts.standings.isEmpty)
+        let after = try #require(session.conversations.conversation(around: root).descendants.first?.item)
+        #expect(after.favourited == true, "the thread draws what the source answered")
+    }
 }

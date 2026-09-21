@@ -101,7 +101,10 @@ public struct MastodonWrite: Sendable {
     ///
     /// **The store's copy is the one returned**, not the one decoded. `Note.refreshed(over:)` is
     /// what keeps the categories this copy arrived through and its booster, and a caller handed
-    /// the bare decode would be holding a row that disagrees with the store about both.
+    /// the bare decode would be holding a row that disagrees with the store about both. A post the
+    /// store does not hold — an answer read in an open conversation, which #90 keeps out of the
+    /// store's rows — is laid over the copy the caller handed in by the same rule, so the two
+    /// kinds of row come back shaped alike.
     private func act(on note: Note, path: String) async throws -> Note {
         guard await store.sources().contains(where: { $0.host == host }) else {
             throw MastodonWriteError.noSource
@@ -117,6 +120,6 @@ public struct MastodonWrite: Sendable {
         }
         try Task.checkCancellation()
         await store.refresh([answered], ifSourceHere: host)
-        return await store.note(answered.key) ?? answered
+        return await store.note(answered.key) ?? answered.refreshed(over: note)
     }
 }
