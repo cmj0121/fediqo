@@ -2,6 +2,24 @@ import AVKit
 import FediqoCore
 import SwiftUI
 
+/// The two marks in the timeline's header, and whether either has anything to do (#33).
+///
+/// **Handed down rather than worked out here.** Whether the search may open and whether there is
+/// anything to reload are the two functions `FediqoRootView` asks before it lets `/` and `r`
+/// do anything, and a pane that decided it for itself would be the same rule written twice —
+/// which is how a mark and the key it stands for come to disagree. This carries the answers and
+/// the presses together, so a call site cannot pass one without the other.
+struct TimelineWays {
+    /// Whether the search can be opened from where the reader is. False draws no mark at all:
+    /// decision 4's rule is a control that is absent rather than dead.
+    var canSearch: Bool
+    var onSearch: () -> Void
+    /// Whether there is anything for `r` to ask for. A reload already running is still `true` —
+    /// the mark stays where it is, and the line under the tabs says what is on the wire.
+    var canReload: Bool
+    var onReload: () -> Void
+}
+
 /// The timeline place: named queries, a brief rule, then the stream or a thread.
 struct TimelinePane: View {
     @Bindable var session: ShellSession
@@ -15,8 +33,16 @@ struct TimelinePane: View {
     let playback: ShellPlayback
     /// A press on a card's own play mark, which the root answers under the same rule as `a`.
     var onPlayRow: (DummyItem) -> Void
+    /// A press on a card, and a press on the counter in its corner: `v` and `m`, answered by the
+    /// root under the same rules the keys are (#33).
+    var onViewRow: (DummyItem) -> Void
+    var onTurnRow: (DummyItem) -> Void
+    /// A second press on the row the lamp is already on: `Return`. See `DummyCommand.tapped`.
+    var onOpenThread: () -> Void
     var jumpToTop: Int
     var onPopThread: () -> Void
+    /// The search and the reload, as a finger reaches them.
+    var ways: TimelineWays
     /// While open, its results are the list and the timeline waits under it (#32).
     var search: ShellSearch?
     @State private var marks: [String: DummyMarks] = [:]
@@ -25,6 +51,9 @@ struct TimelinePane: View {
     @State private var settledHosts: Set<String> = []
     @State private var toast: String?
     @State private var toastTick = 0
+    /// What a finger gets on the header's marks, whatever the glyph inside measures. The row's
+    /// own marks are held open the same way — see `DummyItemRow.touch`.
+    @ScaledMetric(relativeTo: .caption) private var touch: CGFloat = 32
     @Environment(\.colorScheme) private var colorScheme
     @Environment(DummyPrefs.self) private var prefs
 
@@ -59,6 +88,9 @@ struct TimelinePane: View {
                     decks: $decks,
                     playback: playback,
                     onPlayRow: onPlayRow,
+                    onViewRow: onViewRow,
+                    onTurnRow: onTurnRow,
+                    onOpenThread: onOpenThread,
                     jumpToTop: jumpToTop,
                     onToast: showToast,
                     onBack: onPopThread
@@ -186,9 +218,24 @@ struct TimelinePane: View {
                             top: decks.top(of: item.id, of: item.attachments.count),
                             lifted: decks.isLifted(item.id),
                             player: player(of: item),
-                            onSelect: { selectedID = item.id },
+                            // A press lights the row; a second press on the row it is already on
+                            // opens the conversation, which is what `Return` does (#33). The rule
+                            // is `DummyCommand.tapped` and is read by both lists.
+                            onSelect: {
+                                switch DummyCommand.tapped(item.id, selected: selectedID) {
+                                case .select: selectedID = item.id
+                                case .open: onOpenThread()
+                                }
+                            },
+                            // Lit and opened in one, for the reader who activates a row once.
+                            onOpen: {
+                                selectedID = item.id
+                                onOpenThread()
+                            },
                             onToggleCover: { _ = decks.toggleCover(item.id) },
                             onPlay: { onPlayRow(item) },
+                            onView: { onViewRow(item) },
+                            onTurn: { onTurnRow(item) },
                             onEnded: { playback.stop() },
                             onToast: showToast
                         )
@@ -287,6 +334,8 @@ struct TimelinePane: View {
                         .foregroundStyle(ShellChrome.inkDim(colorScheme))
                         .lineLimit(1)
                 }
+                searchMark
+                reloadMark
             }
             if session.timelinesUnreadable {
                 Text(L10n.t("timeline.unreadable"))
@@ -357,6 +406,49 @@ struct TimelinePane: View {
         .accessibilityAction(named: Text(L10n.t("shortcut.edit"))) {
             session.editTimeline(query)
         }
+    }
+
+    /// `/` and `r`, for the reader holding no keyboard (#33).
+    ///
+    /// **On the trailing edge of the header, where the rule already is.** They are about the
+    /// whole timeline rather than about any one tab, and the tabs themselves scroll — a mark
+    /// among them would scroll off with them. `[+]` is pinned at the other end for that reason
+    /// and these are its pair.
+    ///
+    /// **Absent rather than dead**, which is decision 4 and is why each of them is a `Bool` the
+    /// root worked out with the same function the key asks: under an open thread there is no
+    /// search to open, with no sources there is nothing to reload, and a mark that is drawn and
+    /// refuses is a question about this app rather than an answer.
+    ///
+    /// **Both say what the keys list says.** The sentence on each is `shortcut.search` and
+    /// `shortcut.reload` — the same string the written-down key is explained with, not a second
+    /// wording of it, so the press and the key cannot come to describe themselves differently.
+    @ViewBuilder
+    private var searchMark: some View {
+        if ways.canSearch {
+            headerMark("magnifyingglass", says: "shortcut.search", action: ways.onSearch)
+        }
+    }
+
+    @ViewBuilder
+    private var reloadMark: some View {
+        if ways.canReload {
+            headerMark("arrow.clockwise", says: "shortcut.reload", action: ways.onReload)
+        }
+    }
+
+    /// One glyph, quiet, with a finger's worth of room round it whatever size the glyph is drawn.
+    private func headerMark(_ symbol: String, says key: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(ShellType.meta.weight(.medium))
+                .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                .frame(minWidth: touch, minHeight: touch)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(L10n.t(key))
+        .accessibilityLabel(L10n.t(key))
     }
 
     /// `[+]`: a new timeline. A press, not a selected tab.

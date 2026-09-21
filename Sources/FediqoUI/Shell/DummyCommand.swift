@@ -233,6 +233,15 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         return (Array(stack.dropLast()), opened)
     }
 
+    /// What a press of a finger on a row means: the lamp, or the conversation (#33).
+    ///
+    /// Pure, and separate from the acting, for the reason `focused(in:selected:)` is: inside a
+    /// view neither case can be asserted. Both lists that draw a row read this one function, so
+    /// the stream and an open thread cannot come to answer a press differently.
+    public static func tapped(_ id: String, selected: String?) -> DummyRowTap {
+        selected == id ? .open : .select
+    }
+
     /// Which post a list centres on when it is drawn afresh.
     ///
     /// A list is not drawn while a thread covers it, and it centres on a selection *change*, so
@@ -281,6 +290,49 @@ public enum DummyReveal: Hashable, Sendable, CaseIterable {
     case nothing
 }
 
+/// What a press of a finger on a row means (#33).
+///
+/// **The keyboard says this in two keys and a finger has one press.** `j` lights a row and
+/// `Return` opens it, which is two presses of two different keys; a finger only ever presses the
+/// row itself, so the second press on the row it is already on is the one that opens it. It is
+/// the same shape `focused(in:selected:)` already gives a press that lands with nothing selected
+/// — the first press puts the reader somewhere, the second one acts — and it is here, beside
+/// that rule, because both are the answer to "what does this press do given what is lit".
+public enum DummyRowTap: Hashable, Sendable, CaseIterable {
+    /// The lamp moves to this row, which is what `j` and `k` do.
+    case select
+    /// The row is already lit, so this press is `Return`: the conversation opens.
+    case open
+}
+
+/// How a key's own job is done with no keyboard to do it on (#33).
+///
+/// **One case per line of the written-down keys, and not optional.** A key added to
+/// `DummyShortcut.all` has to say how a finger reaches it, and `.keysOnly` is the answer only
+/// where there is honestly nothing — which `TouchTests` refuses for the Timeline group, because
+/// that is the whole of what #33 accepts. A field that could be left off would be a promise the
+/// next key is free to break silently.
+///
+/// **It says how, not what.** Nothing dispatches on this: it is the written-down answer to "and
+/// without a keyboard?", kept next to the key so the two are read in one place. What it cannot do
+/// is prove the control is drawn — a line claiming `.press` over a surface with no mark on it is
+/// a lie this type cannot catch, and the test that it *is* drawn is the one every `View` body in
+/// this package is missing for the same reason.
+public enum DummyTouch: String, Hashable, Sendable, CaseIterable {
+    /// A control drawn on the surface and pressed once: a pill, a mark on a card, a mark in a
+    /// header, the button a cover is.
+    case press
+    /// A press on the thing the lamp is already on. See `DummyRowTap`.
+    case pressAgain
+    /// The secondary press — a long press on a phone, a right or control click on a Mac. The one
+    /// gesture with two names this app already argues for in `WayOut` and in `ProseLinks`.
+    case hold
+    /// The finger on the list itself.
+    case scroll
+    /// No touch path at all: this key is reachable only from a keyboard.
+    case keysOnly
+}
+
 /// What a press on the focused post has to work with. See `DummyCommand.focused(in:selected:)`.
 public enum DummyFocus: Equatable, Sendable {
     /// No list to press on at all.
@@ -312,6 +364,9 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
     public let keys: [String]
     public let name: String
     public let commands: [DummyCommand]
+    /// How this line is done with no keyboard (#33). Named on every line, so a key added later
+    /// cannot be added without an answer. See `DummyTouch`.
+    public let touch: DummyTouch
 
     public var id: String { name }
     public var detail: String { L10n.t("shortcut.\(name)") }
@@ -321,26 +376,51 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
     }
 
     public static let all: [DummyShortcut] = [
+        // The named pills along the top of the timeline, pressed.
         DummyShortcut(group: .timeline, keys: ["Tab", "⇧Tab"], name: "tabs",
-                      commands: [.nextTab, .previousTab]),
+                      commands: [.nextTab, .previousTab], touch: .press),
+        // A press on a row lights it, which is where `j` and `k` leave the lamp.
         DummyShortcut(group: .timeline, keys: ["j", "k", "↓", "↑"], name: "posts",
-                      commands: [.nextPost, .previousPost]),
-        DummyShortcut(group: .timeline, keys: ["g"], name: "top", commands: [.goTop]),
+                      commands: [.nextPost, .previousPost], touch: .press),
+        // **The list under a finger, and no mark of our own.** `g` is a shortcut for a scroll,
+        // and a phone already has the scroll; a "top" button would be chrome on every row of
+        // every timeline for something the reader's thumb does. What `g` does besides — light
+        // the first post — is `.press` on that post, which is the line above.
+        DummyShortcut(group: .timeline, keys: ["g"], name: "top", commands: [.goTop], touch: .scroll),
         DummyShortcut(group: .timeline, keys: ["Return", "Space"], name: "expand",
-                      commands: [.expandPost]),
-        DummyShortcut(group: .timeline, keys: ["v"], name: "view", commands: [.viewAttachment]),
-        DummyShortcut(group: .timeline, keys: ["a"], name: "play", commands: [.playAttachment]),
-        DummyShortcut(group: .timeline, keys: ["m"], name: "turn", commands: [.nextAttachment]),
-        DummyShortcut(group: .timeline, keys: ["s"], name: "reveal", commands: [.reveal]),
-        DummyShortcut(group: .timeline, keys: ["q"], name: "back", commands: [.back]),
-        DummyShortcut(group: .timeline, keys: ["e"], name: "edit", commands: [.editTimeline]),
-        DummyShortcut(group: .timeline, keys: ["/"], name: "search", commands: [.search]),
-        DummyShortcut(group: .timeline, keys: ["r"], name: "reload", commands: [.reload]),
+                      commands: [.expandPost], touch: .pressAgain),
+        // The card itself, pressed. The mark on it is `a`'s and takes its own press.
+        DummyShortcut(group: .timeline, keys: ["v"], name: "view",
+                      commands: [.viewAttachment], touch: .press),
+        DummyShortcut(group: .timeline, keys: ["a"], name: "play",
+                      commands: [.playAttachment], touch: .press),
+        // The counter in the card's corner, which is drawn exactly where there is more than one
+        // card to turn to.
+        DummyShortcut(group: .timeline, keys: ["m"], name: "turn",
+                      commands: [.nextAttachment], touch: .press),
+        // The cover is a button over its whole face — `DummyItemRow.cover`.
+        DummyShortcut(group: .timeline, keys: ["s"], name: "reveal", commands: [.reveal], touch: .press),
+        // Back in the thread's own header, and the close mark on the viewer.
+        DummyShortcut(group: .timeline, keys: ["q"], name: "back", commands: [.back], touch: .press),
+        // A tab held, or double-clicked — `TimelinePane.queryPill`.
+        DummyShortcut(group: .timeline, keys: ["e"], name: "edit",
+                      commands: [.editTimeline], touch: .hold),
+        DummyShortcut(group: .timeline, keys: ["/"], name: "search", commands: [.search], touch: .press),
+        DummyShortcut(group: .timeline, keys: ["r"], name: "reload", commands: [.reload], touch: .press),
+        // The rail on a Mac, the tab bar on a phone.
         DummyShortcut(group: .app, keys: ["⌃Tab", "⌃⇧Tab"], name: "pages",
-                      commands: [.nextPage, .previousPage]),
-        DummyShortcut(group: .app, keys: ["c"], name: "compose", commands: [.compose]),
-        DummyShortcut(group: .app, keys: ["?"], name: "list", commands: [.showShortcuts]),
-        DummyShortcut(group: .app, keys: ["Escape"], name: "dismiss", commands: [.dismiss]),
-        DummyShortcut(group: .app, keys: ["⌘R"], name: "landing", commands: [.replayLanding]),
+                      commands: [.nextPage, .previousPage], touch: .press),
+        DummyShortcut(group: .app, keys: ["c"], name: "compose", commands: [.compose], touch: .press),
+        // **This list is the one thing in this app a finger cannot ask for**, which is the honest
+        // answer and not a resting place: a reader with no keyboard has no way to the written-down
+        // keys, and needs none, because #33 is the promise that they never have to read them.
+        DummyShortcut(group: .app, keys: ["?"], name: "list",
+                      commands: [.showShortcuts], touch: .keysOnly),
+        // Everything this closes has its own control — the ground behind a pop-up, Back, the
+        // close mark. What it does that none of them do is stop a running reload and put the lamp
+        // out, and neither of those has a touch path.
+        DummyShortcut(group: .app, keys: ["Escape"], name: "dismiss", commands: [.dismiss], touch: .press),
+        DummyShortcut(group: .app, keys: ["⌘R"], name: "landing",
+                      commands: [.replayLanding], touch: .keysOnly),
     ]
 }

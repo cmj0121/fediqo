@@ -21,6 +21,12 @@ struct DummyThreadPane: View {
     let playback: ShellPlayback
     /// A press on a card's own play mark, which the root answers under the same rule as `a`.
     var onPlayRow: (DummyItem) -> Void
+    /// A press on a card, and on the counter in its corner: `v` and `m` (#33).
+    var onViewRow: (DummyItem) -> Void
+    var onTurnRow: (DummyItem) -> Void
+    /// A second press on the row the lamp is already on: `Return`, which from inside a thread
+    /// opens the conversation around the reply that was pressed. See `DummyCommand.tapped`.
+    var onOpenThread: () -> Void
     var jumpToTop: Int
     var onToast: (String) -> Void
     var onBack: () -> Void
@@ -178,9 +184,25 @@ struct DummyThreadPane: View {
             top: decks.top(of: item.id, of: item.attachments.count),
             lifted: decks.isLifted(item.id),
             player: player(of: item),
-            onSelect: { selectedID = item.id },
+            // The same one rule the stream's rows read: a press lights the row, and a second
+            // press on the row already lit is `Return` (#33).
+            onSelect: {
+                switch DummyCommand.tapped(item.id, selected: selectedID) {
+                case .select: selectedID = item.id
+                case .open: onOpenThread()
+                }
+            },
+            // **Nothing on the post this pane is already about.** Opening it again is refused —
+            // `FediqoRootView.openThread` says so — and an action announced and then refused is
+            // worse than one never announced.
+            onOpen: item.id == root.id ? nil : {
+                selectedID = item.id
+                onOpenThread()
+            },
             onToggleCover: { _ = decks.toggleCover(item.id) },
             onPlay: { onPlayRow(item) },
+            onView: { onViewRow(item) },
+            onTurn: { onTurnRow(item) },
             onEnded: { playback.stop() },
             onToast: onToast
         )

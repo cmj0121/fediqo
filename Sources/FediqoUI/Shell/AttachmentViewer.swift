@@ -40,6 +40,9 @@ struct AttachmentViewer: View {
     let player: AVPlayer?
     var onToggleCover: () -> Void
     var onPlay: () -> Void
+    /// The next card, which is `m` — pressed rather than typed (#33). Nothing is drawn for it on
+    /// a deck of one: see `turnMark`.
+    var onTurn: () -> Void = {}
     /// That the playing rectangle has left the screen.
     var onGone: () -> Void = {}
     var onClose: () -> Void
@@ -274,11 +277,7 @@ struct AttachmentViewer: View {
     @ViewBuilder
     private func caption(_ attachment: Attachment) -> some View {
         VStack(spacing: ShellSpace.snug) {
-            if attachments.count > 1 {
-                Text(position)
-                    .font(ShellType.mark)
-                    .foregroundStyle(ShellChrome.overPicture.opacity(0.65))
-            }
+            turnMark
             if !covered, !attachment.alt.isEmpty {
                 EmojiText(attachment.alt, emojis: emojis, host: host, role: .body)
                     .foregroundStyle(ShellChrome.overPicture.opacity(0.88))
@@ -290,6 +289,36 @@ struct AttachmentViewer: View {
             }
         }
         .accessibilityElement(children: .combine)
+        // **Said as well as drawn, because combining the children throws their actions away with
+        // them** — the trap `DummyItemRow.notice` documents. Without this the one control on this
+        // screen that turns the deck is offered to nobody, and a reader using VoiceOver on a
+        // phone is left on card one of four.
+        .accessibilityActions { if attachments.count > 1 { Button(L10n.t("shortcut.turn"), action: onTurn) } }
+    }
+
+    /// Which of how many, and the press that turns to the next one — `m` for a reader holding no
+    /// keyboard (#33).
+    ///
+    /// **The line that was already here, made pressable.** It is drawn exactly where there is
+    /// more than one card, which is exactly where turning does something, so this cannot become
+    /// the control that lies about what it can do — the same rule that keeps the row's deck from
+    /// looking turnable when it holds one picture.
+    @ViewBuilder
+    private var turnMark: some View {
+        if attachments.count > 1 {
+            Button(action: onTurn) {
+                Text(position)
+                    .font(ShellType.mark)
+                    .foregroundStyle(ShellChrome.overPicture.opacity(0.65))
+                    .padding(.horizontal, ShellSpace.snug)
+                    .padding(.vertical, ShellSpace.tight)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(L10n.t("shortcut.turn"))
+            .accessibilityLabel(position)
+            .accessibilityHint(Text(L10n.t("shortcut.turn")))
+        }
     }
 
     private var position: String {

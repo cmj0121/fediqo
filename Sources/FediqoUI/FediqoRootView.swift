@@ -514,20 +514,7 @@ public struct FediqoRootView: View {
         case .expandPost:
             return openThread()
         case .nextAttachment:
-            let inViewer = viewedItem != nil
-            return onActedItem { item in
-                let turned = decks.turn(item.id, of: item.attachments.count)
-                guard turned else { return false }
-                // Sound out of a card the reader has just turned away from is a fault, and so is
-                // a thumbnail still moving after it has stopped being the thumbnail. Only where
-                // something actually turned: a deck of one leaves nothing behind to stop.
-                playback.stop()
-                // And the viewer stops holding the card it has turned away from. Without this,
-                // `v` and three presses of `m` on a post carrying four pictures hold four
-                // addresses at viewer tier, which is the contract broken by ordinary use.
-                if inViewer { ShellPictures.shared.releaseViewerTier() }
-                return true
-            }
+            return onActedItem(turn)
         case .reveal:
             return revealFocused()
         case .viewAttachment:
@@ -626,23 +613,67 @@ public struct FediqoRootView: View {
         }
     }
 
+    /// Whether a picture may be opened over the app at all right now. Read by `v` and by a press
+    /// on a card, which is `v`'s touch path (#33) — one expression, so the key and the press
+    /// cannot come to disagree about when the viewer may open.
+    private var canOpenViewer: Bool {
+        viewedItem == nil && DummyCommand.canOpen(.viewer, whenOpen: openLayers)
+    }
+
     /// Opens what is on top of the focused row's deck, over the whole app.
     ///
     /// A second `v` while it is open does nothing. `Escape` and `q` are how this is left, and one
     /// key that both opens and closes a layer is the conditional rule the order above is kept
     /// free of. The letter is still ours either way — see `DummyCommand.consumes`.
+    ///
+    /// The guard is here as well as in `view(_:)` so that `v` under the keys list moves nothing:
+    /// `onFocusedItem` lights the first row when nothing is lit, and a press that cannot open
+    /// anything must not do that either.
     private func openViewer() -> Bool {
-        guard viewedItem == nil,
-              DummyCommand.canOpen(.viewer, whenOpen: openLayers) else { return false }
-        return onFocusedItem { item in
-            guard decks.showing(item.attachments, of: item.id) != nil else { return false }
-            // Whatever the row was playing stops. It would go on playing behind an opaque ground
-            // where nobody can see it or stop it, which is the "sound from a row that has scrolled
-            // off" fault arriving by another route.
-            playback.stop()
-            viewing = item.id
-            return true
-        }
+        guard canOpenViewer else { return false }
+        return onFocusedItem(view)
+    }
+
+    /// One post's picture, opened over the app. What `v` does, and what a press on a card does.
+    private func view(_ item: DummyItem) -> Bool {
+        guard canOpenViewer, decks.showing(item.attachments, of: item.id) != nil else { return false }
+        // Whatever the row was playing stops. It would go on playing behind an opaque ground
+        // where nobody can see it or stop it, which is the "sound from a row that has scrolled
+        // off" fault arriving by another route.
+        playback.stop()
+        viewing = item.id
+        return true
+    }
+
+    /// One post's deck, turned. What `m` does, and what a press on the counter in a card's corner
+    /// does.
+    private func turn(_ item: DummyItem) -> Bool {
+        let inViewer = viewedItem != nil
+        guard decks.turn(item.id, of: item.attachments.count) else { return false }
+        // Sound out of a card the reader has just turned away from is a fault, and so is a
+        // thumbnail still moving after it has stopped being the thumbnail. Only where something
+        // actually turned: a deck of one leaves nothing behind to stop.
+        playback.stop()
+        // And the viewer stops holding the card it has turned away from. Without this, `v` and
+        // three presses of `m` on a post carrying four pictures hold four addresses at viewer
+        // tier, which is the contract broken by ordinary use.
+        if inViewer { ShellPictures.shared.releaseViewerTier() }
+        return true
+    }
+
+    /// A press on a card, which is the touch path to `v` (#33) — and a press on the counter in
+    /// its corner, which is the one to `m`.
+    ///
+    /// **The rules live here and not in the pane**, exactly as `playRow` says: a mark and the key
+    /// it stands for must not come to mean two different things, so both read the same function
+    /// the key reads. On the row that was pressed rather than on the focused one — a press says
+    /// which row it means.
+    private func viewRow(_ item: DummyItem) {
+        _ = view(item)
+    }
+
+    private func turnRow(_ item: DummyItem) {
+        _ = turn(item)
     }
 
     /// Says whether a viewer a reader could see was closed — and tidies up either way.
@@ -742,6 +773,7 @@ public struct FediqoRootView: View {
                 ),
                 onToggleCover: { _ = apply(.reveal) },
                 onPlay: { _ = apply(.playAttachment) },
+                onTurn: { _ = apply(.nextAttachment) },
                 onGone: { playback.stop() },
                 onClose: { _ = closeViewer() }
             )
@@ -854,10 +886,24 @@ public struct FediqoRootView: View {
         )
     }
 
+    /// Whether `/` — and the mark in the header that is its touch path (#33) — can do anything
+    /// now.
+    ///
+    /// **One expression, two readers.** The key asks it before opening, and the timeline's header
+    /// asks it to decide whether to draw the mark at all: decision 4's rule is a control that is
+    /// absent rather than dead, and the only way a mark and a key cannot come to disagree about
+    /// when the search may open is for both to read this.
+    ///
+    /// An open search is still searchable — `canOpen` of a layer that is already the outermost is
+    /// true — because that is exactly what a second `/` does: it hands the field the keys again.
+    static func canSearch(place: ShellPlace, open: Set<DummyLayer>) -> Bool {
+        place == .timeline && DummyCommand.canOpen(.search, whenOpen: open)
+    }
+
     /// `/` on the timeline: an empty search over what this device holds, or the field again if
     /// one is open. The selection is put aside, to come back when the search closes.
     private func openSearch() -> Bool {
-        guard place == .timeline, DummyCommand.canOpen(.search, whenOpen: openLayers) else { return false }
+        guard Self.canSearch(place: place, open: openLayers) else { return false }
         if search.isOpen {
             search.focus()
         } else {
@@ -973,17 +1019,38 @@ public struct FediqoRootView: View {
         return true
     }
 
+    /// Whether `r` — and the mark in the header that is its touch path (#33) — has anything to
+    /// ask for now.
+    ///
+    /// **One expression, two readers**, for the reason `canSearch` gives. It is the whole of the
+    /// old guard, moved out of the acting half and given the arguments it used to read off a
+    /// view, so both the key and the mark are answered by one function and a test can ask it.
+    ///
+    /// It says nothing about a reload already running: `r` pressed then is taken and does
+    /// nothing, so the mark stays where it is rather than blinking out from under the finger
+    /// that pressed it. What is on the wire is said in words on the line below the tabs.
+    ///
+    /// **No `default:`**, for `.back`'s reason: a sixth layer has to say what `r` does about it.
+    static func canReload(place: ShellPlace, editing: Bool, hasSources: Bool, open: Set<DummyLayer>) -> Bool {
+        guard place == .timeline, !editing, hasSources else { return false }
+        switch DummyCommand.outermost(of: open) {
+        // A search's results are what this device holds, found without asking anybody.
+        case .viewer, .shortcuts, .search: return false
+        case .thread, .selection, nil: return true
+        }
+    }
+
     /// `r`: the open thread, or else the selected timeline — and only on what the reader can see,
     /// so not under the viewer, the keys list or the timeline editor. A second press while one
     /// runs is taken and does nothing; Esc is what stops it.
     private func reload() -> Bool {
-        guard place == .timeline, session.editing == nil, !session.sources.isEmpty else { return false }
+        guard Self.canReload(
+            place: place,
+            editing: session.editing != nil,
+            hasSources: !session.sources.isEmpty,
+            open: openLayers
+        ) else { return false }
         if session.reload.running { return true }
-        switch DummyCommand.outermost(of: openLayers) {
-        // A search's results are what this device holds, found without asking anybody.
-        case .viewer, .shortcuts, .search: return false
-        case .thread, .selection, nil: break
-        }
         // The thread as `TimelinePane` draws it: one it cannot find draws the timeline instead.
         let opened = threadStack.last.flatMap { opened in streamItems.first { $0.id == opened } }
         session.reload.press(thread: opened, timeline: session.currentTimeline, in: session)
@@ -1117,8 +1184,24 @@ public struct FediqoRootView: View {
                 decks: $decks,
                 playback: playback,
                 onPlayRow: playRow,
+                onViewRow: viewRow,
+                onTurnRow: turnRow,
+                onOpenThread: { _ = openThread() },
                 jumpToTop: jumpToTop,
                 onPopThread: { _ = popThread() },
+                // The two marks in the timeline's header, and whether there is anything for them
+                // to do — the same two functions the keys ask (#33).
+                ways: TimelineWays(
+                    canSearch: Self.canSearch(place: place, open: openLayers),
+                    onSearch: { _ = openSearch() },
+                    canReload: Self.canReload(
+                        place: place,
+                        editing: session.editing != nil,
+                        hasSources: !session.sources.isEmpty,
+                        open: openLayers
+                    ),
+                    onReload: { _ = reload() }
+                ),
                 search: search
             )
             .safeAreaInset(edge: .bottom, spacing: 0) {
