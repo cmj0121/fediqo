@@ -176,6 +176,16 @@ public actor ItemStore {
         notes.values.sorted(by: Self.storeOrder)
     }
 
+    /// One row, or nothing where this store does not hold it.
+    ///
+    /// **So that an act can hand back the row as the store has it** rather than as it decoded it
+    /// (#106): `refresh` lays the server's answer over what was held, and a caller reading its own
+    /// decode back would be holding a note that disagrees with the store about the categories the
+    /// row arrived through and about who boosted it.
+    public func note(_ key: NoteKey) -> Note? {
+        notes[key]
+    }
+
     public func trends() -> [Note] {
         all().filter { $0.categories.contains(.trends) }
     }

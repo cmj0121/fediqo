@@ -352,6 +352,15 @@ private struct NoteFacts: Codable {
     /// `Note.statusID`. Additive and optional, so no migration id (Decision 11): a row written
     /// before 0.2.0 learned it reads as none, and an older build ignores the key.
     var statusID: String?
+    /// `Note.boosted` — what the source last said about this reader having boosted it (#106).
+    /// Additive and optional, so no migration id, and a row written before 0.4.0 learned it reads
+    /// as a source that never said, which is what it is.
+    ///
+    /// **Kept here because the acceptance turns on it.** A boost that landed has to show as
+    /// boosted after a relaunch, and it is the *server's* answer that is being written down —
+    /// every later read of the post overwrites it with what the server says then, and nothing
+    /// here records that a button was pressed.
+    var boosted: Bool?
 }
 
 private struct ReplyRow: Codable {
@@ -438,7 +447,8 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             attachments: note.attachments.map(AttachmentRow.init),
             emojis: note.emojis.map(EmojiRow.init),
             url: note.url,
-            statusID: note.statusID
+            statusID: note.statusID,
+            boosted: note.boosted
         )
     }
 
@@ -463,6 +473,7 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             reply: facts.reply.map { Reply(handle: $0.handle, inReplyToId: $0.inReplyToId) },
             boostedBy: facts.boostedBy,
             boosterHandle: facts.boosterHandle,
+            boosted: facts.boosted,
             avatarURL: facts.avatarURL,
             attachments: facts.attachments.map(\.attachment),
             sensitive: facts.sensitive,
