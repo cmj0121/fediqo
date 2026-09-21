@@ -20,7 +20,11 @@ public enum DummyItemKind: String, Sendable, Hashable {
 }
 
 /// Who the author wrote it for, where the dummy said so. Nothing means the shape has no such idea.
-public enum DummyAudience: String, Sendable, Hashable {
+///
+/// `CaseIterable` so that what is drawn for an audience can be asserted over all of them rather
+/// than over the four somebody remembered to write down: an audience added here and left out of
+/// the colour ramp is then a test that stops, not a mark that quietly takes a neighbour's hue.
+public enum DummyAudience: String, Sendable, Hashable, CaseIterable {
     case everyone
     case unlisted
     case followers
