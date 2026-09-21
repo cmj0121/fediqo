@@ -294,29 +294,41 @@ struct BackFromThreadTests {
     @Test("Esc selects and centres the post the thread was opened from, whichever post it is")
     func escSelectsTheOpeningPost() {
         for id in Self.ids {
-            let popped = DummyCommand.poppedThread([id])
-            #expect(popped?.stack == [])
-            #expect(popped?.selected == id)
+            var walk = ShellWalk()
+            // The press lights the post first, which is why the lamp it is walked from is the
+            // post itself — see `FediqoRootView.openThread(_:)`.
+            let walked = walk.walk(to: .thread(id), from: id)
+            #expect(walked)
+            let left = walk.back()
+            #expect(walk.isEmpty)
+            #expect(left?.lamp == id)
             // The timeline is drawn afresh with that selection, and centres on it.
-            #expect(DummyCommand.centredOnAppear(selected: popped?.selected) == id)
+            #expect(DummyCommand.centredOnAppear(selected: left?.lamp) == id)
         }
     }
 
     @Test("Back from a nested thread selects and centres its post in the outer one")
     func nestedThreadCentresItsPost() {
-        let popped = DummyCommand.poppedThread(["outer", "reply"])
-        #expect(popped?.stack == ["outer"])
-        #expect(popped?.selected == "reply")
+        var walk = ShellWalk()
+        let outer = walk.walk(to: .thread("outer"), from: "outer")
+        let reply = walk.walk(to: .thread("reply"), from: "reply")
+        #expect(outer)
+        #expect(reply)
+        let backToOuter = walk.back()
+        #expect(backToOuter?.lamp == "reply")
+        #expect(walk.standing == .thread("outer"))
         #expect(DummyCommand.centredOnAppear(selected: "reply", opening: "outer") == "reply")
 
-        let out = DummyCommand.poppedThread(["outer"])
-        #expect(out?.stack == [])
-        #expect(out?.selected == "outer")
+        let backToStream = walk.back()
+        #expect(backToStream?.lamp == "outer")
+        #expect(walk.isEmpty)
     }
 
     @Test("Nothing to pop with no thread open")
     func noThreadNoPop() {
-        #expect(DummyCommand.poppedThread([]) == nil)
+        var walk = ShellWalk()
+        let nothing = walk.back()
+        #expect(nothing == nil)
     }
 
     @Test("A thread just opened reads from the top, and no selection centres nothing")
