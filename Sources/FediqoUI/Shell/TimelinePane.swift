@@ -15,7 +15,8 @@ struct TimelineWays {
     var canSearch: Bool
     var onSearch: () -> Void
     /// Whether there is anything for `r` to ask for. A reload already running is still `true` —
-    /// the mark stays where it is, and the line under the tabs says what is on the wire.
+    /// the mark keeps its place rather than blinking out from under the finger that pressed it,
+    /// and what it draws while it waits is `TimelinePane.reloadMark`'s business.
     var canReload: Bool
     var onReload: () -> Void
 }
@@ -430,10 +431,27 @@ struct TimelinePane: View {
         }
     }
 
+    /// `r`'s mark — or, while a reload is running, the plate every waiting thing in this app
+    /// wears (#64) in the same box.
+    ///
+    /// **A control that cannot act stops looking like one.** `canReload` stays true while a
+    /// reload runs on purpose: a mark that blinked out from under the finger that pressed it is
+    /// worse than one that stays. But `r` pressed then is taken and does nothing, so a glyph that
+    /// looks live and answers nothing is exactly the dead control decision 4 rules out — the one
+    /// case where "absent rather than dead" has no absence to offer. The box keeps its place and
+    /// its size and what is in it changes: a plate is not a button, a press on it does nothing,
+    /// and nothing moves under the finger. That is `r`'s own answer while one runs, drawn.
+    ///
+    /// A screen reader is told "on its way" rather than offered a Reload button that would refuse
+    /// it. What is *on* the wire is still said in words on the line below the tabs.
     @ViewBuilder
     private var reloadMark: some View {
         if ways.canReload {
-            headerMark("arrow.clockwise", says: "shortcut.reload", action: ways.onReload)
+            if session.reload.running {
+                ShellWaiting().frame(width: touch, height: touch)
+            } else {
+                headerMark("arrow.clockwise", says: "shortcut.reload", action: ways.onReload)
+            }
         }
     }
 

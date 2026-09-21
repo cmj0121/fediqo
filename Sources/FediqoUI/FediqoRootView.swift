@@ -1028,7 +1028,9 @@ public struct FediqoRootView: View {
     ///
     /// It says nothing about a reload already running: `r` pressed then is taken and does
     /// nothing, so the mark stays where it is rather than blinking out from under the finger
-    /// that pressed it. What is on the wire is said in words on the line below the tabs.
+    /// that pressed it — and wears the waiting plate while it waits, so that it is not a live
+    /// glyph refusing presses. See `TimelinePane.reloadMark`. What is on the wire is said in
+    /// words on the line below the tabs.
     ///
     /// **No `default:`**, for `.back`'s reason: a sixth layer has to say what `r` does about it.
     static func canReload(place: ShellPlace, editing: Bool, hasSources: Bool, open: Set<DummyLayer>) -> Bool {
