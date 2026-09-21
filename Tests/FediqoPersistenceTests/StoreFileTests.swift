@@ -88,6 +88,28 @@ struct StoreFileTests {
         #expect(loaded.first { $0.id == "2" }?.statusID == nil)
     }
 
+    /// #106: a boost that landed shows as boosted after a relaunch. What is written down is the
+    /// source's own answer, carried on the note; a source that never said reads back as never
+    /// having said, and a no reads back as a no.
+    @Test("What the source said about a boost survives a relaunch, and silence stays silence")
+    func boostedSurvivesRelaunch() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        func said(_ id: String, _ boosted: Bool?) -> Note {
+            Note(
+                id: id, source: mastodon, author: "Ada", handle: "@ada@first.example", body: "hello",
+                postedAt: origin, categories: [.home], boosted: boosted, statusID: id
+            )
+        }
+        try await StoreFile(at: dir).save(
+            sources: [mastodon], notes: [said("1", true), said("2", false), said("3", nil)]
+        )
+        let loaded = StoreFile.open(at: dir).notes
+        #expect(loaded.first { $0.id == "1" }?.boosted == true)
+        #expect(loaded.first { $0.id == "2" }?.boosted == false)
+        #expect(loaded.first { $0.id == "3" }?.boosted == nil)
+    }
+
     @Test("A reply whose parent's handle is unknown comes back a reply")
     func replyWithoutHandle() async throws {
         let file = try StoreFile(database: DatabaseQueue())
