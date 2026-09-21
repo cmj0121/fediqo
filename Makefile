@@ -1,6 +1,6 @@
 SUBDIR := Apps
 
-.PHONY: all clean test run build publish shots version upgrade help $(SUBDIR)
+.PHONY: all clean test run build publish shots version upgrade help servers servers-down $(SUBDIR)
 
 all: $(SUBDIR) 		# default action
 	@[ -f .git/hooks/pre-commit ] || pre-commit install --install-hooks
@@ -30,6 +30,12 @@ version:			# show the version a build made here would report
 
 upgrade:			# upgrade all the necessary packages
 	pre-commit autoupdate
+
+servers:			# bring up a real server of every protocol this app can join
+	@scripts/servers-up.sh
+
+servers-down:			# throw the local protocol servers away
+	@scripts/servers-down.sh
 
 help:				# show this message
 	@printf "Usage: make [OPTION]\n"

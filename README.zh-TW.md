@@ -52,6 +52,19 @@ Fediqo 是你的時間軸。你加入來源，寫下規則，讀一條依時間�
 `make test` 跑測試。`make -C Apps run` 打開 macOS app。兩者都不需要這份 checkout 以外的東西。
 [`docs/release.md`](docs/release.md) 寫的是那一個需要更多的指令——幫兩個 app 簽名並送到 TestFlight 的那一個。
 
+開 pull request 之前，不論那個 PR 改的是什麼，都要在這台機器上跑完整套件。
+那是先把各協定的伺服器帶起來，再解鎖對它們的測試：
+
+```text
+make servers
+FEDIQO_SERVERS=1 make test
+make servers-down
+```
+
+`make servers` 需要 Docker。沒有把伺服器帶起來時，單獨跑 `make test` 仍然會過，
+而 pull request 檢查的就是那一部分。伺服器、它們解鎖的案例、以及一份 release
+建置，會在工作進到 `main` 時跑。
+
 ## 怎麼用
 
 空的啟動會打開帳號頁。加入一個 Mastodon 主機或一個 Discuz 論壇當來源——從目錄挑，或自己輸入主機名稱。

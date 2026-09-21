@@ -55,6 +55,19 @@ arrived and what you see is a rule you wrote.
 checkout does not already carry. [`docs/release.md`](docs/release.md) covers the one command
 that does need more — the one that signs both apps and sends them to TestFlight.
 
+A pull request is opened only after the full suite has been run on this machine, whatever
+the pull request is for. That is the protocol servers, then the suite with them unlocked:
+
+```text
+make servers
+FEDIQO_SERVERS=1 make test
+make servers-down
+```
+
+`make servers` needs Docker. `make test` alone still passes on a machine that has not
+brought the servers up, and that is the part a pull request checks. The servers, the
+cases they unlock, and a release build run when work lands on `main`.
+
 ## Using it
 
 An empty launch opens Account. Add a Mastodon host or a Discuz forum from the catalog or by
