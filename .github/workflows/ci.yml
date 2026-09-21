@@ -84,3 +84,35 @@ jobs:
           python-version: "3.12"
       - run: pip install pre-commit
       - run: pre-commit run --all-files --show-diff-on-failure
+
+  # The three jobs above are what green means on a pull request. This one is
+  # the rest of the check: real protocol servers on the runner, the suite
+  # against them, and a release build. It is `push` to `main` only — a feature
+  # branch spends none of it. GitHub's macos-15 image has no Docker Desktop;
+  # `scripts/ci-docker.sh` tries colima and **fails closed** if a daemon never
+  # comes up, so a green job is never one that skipped the servers.
+  servers:
+    name: Servers, the slow suite, and a release build
+    if: github.event_name == "push" && github.ref == "refs/heads/main"
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show the toolchain
+        run: swift --version
+
+      - name: Docker, or this job is not honest
+        run: scripts/ci-docker.sh
+
+      - name: Bring the servers up
+        run: make servers
+
+      - name: The suite, including what talks to those servers
+        run: FEDIQO_SERVERS=1 swift test --only-use-versions-from-resolved-file
+
+      - name: The same code, built the way a release is
+        run: swift build -c release
+
+      - name: Throw the servers away
+        if: always()
+        run: make servers-down
