@@ -308,10 +308,10 @@ public enum DummyRowTap: Hashable, Sendable, CaseIterable {
 /// How a key's own job is done with no keyboard to do it on (#33).
 ///
 /// **One case per line of the written-down keys, and not optional.** A key added to
-/// `DummyShortcut.all` has to say how a finger reaches it, and `.keysOnly` is the answer only
-/// where there is honestly nothing — which `TouchTests` refuses for the Timeline group, because
-/// that is the whole of what #33 accepts. A field that could be left off would be a promise the
-/// next key is free to break silently.
+/// `DummyShortcut.all` has to say how a finger reaches it. `.keysOnly` is the answer where there
+/// is honestly nothing and `.partly` where there is some of it, and `TouchTests` refuses both for
+/// the Timeline group, because a way in for most of a key is not what #33 accepts. A field that
+/// could be left off would be a promise the next key is free to break silently.
 ///
 /// **It says how, not what.** Nothing dispatches on this: it is the written-down answer to "and
 /// without a keyboard?", kept next to the key so the two are read in one place. What it cannot do
@@ -329,6 +329,12 @@ public enum DummyTouch: String, Hashable, Sendable, CaseIterable {
     case hold
     /// The finger on the list itself.
     case scroll
+    /// Some of what this key does is reachable and some of it is not.
+    ///
+    /// The answer for a key that is several jobs at once, where writing either `.press` or
+    /// `.keysOnly` would be a claim about the other half. `TouchTests` refuses it for the
+    /// Timeline group exactly as it refuses `.keysOnly`: "partly" is not what #33 accepts there.
+    case partly
     /// No touch path at all: this key is reachable only from a keyboard.
     case keysOnly
 }
@@ -418,8 +424,9 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
                       commands: [.showShortcuts], touch: .keysOnly),
         // Everything this closes has its own control — the ground behind a pop-up, Back, the
         // close mark. What it does that none of them do is stop a running reload and put the lamp
-        // out, and neither of those has a touch path.
-        DummyShortcut(group: .app, keys: ["Escape"], name: "dismiss", commands: [.dismiss], touch: .press),
+        // out, and neither of those has a touch path: hence `.partly` rather than `.press`, which
+        // would be this list claiming a way in that is not drawn anywhere.
+        DummyShortcut(group: .app, keys: ["Escape"], name: "dismiss", commands: [.dismiss], touch: .partly),
         DummyShortcut(group: .app, keys: ["⌘R"], name: "landing",
                       commands: [.replayLanding], touch: .keysOnly),
     ]
