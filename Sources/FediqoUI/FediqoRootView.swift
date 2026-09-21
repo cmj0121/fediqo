@@ -1182,7 +1182,7 @@ public struct FediqoRootView: View {
     private var composeButton: some View {
         Button { composing = true } label: {
             Image(systemName: "square.and.pencil")
-                .font(.title3.weight(.semibold))
+                .shellFont(.pane)
                 .frame(width: Compact.button, height: Compact.button)
                 .background(Circle().fill(ShellChrome.ink(colorScheme)))
                 .foregroundStyle(ShellChrome.page(colorScheme))

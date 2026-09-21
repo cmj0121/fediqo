@@ -475,7 +475,9 @@ struct EmojiEverywhereTests {
     }
 
     private static func lineHeight(_ text: Text, role: EmojiTextRole) -> CGFloat {
-        let host = NSHostingView(rootView: text.font(role.font).frame(width: 720))
+        // The standard rung: this measures whether a picture changes a line's height, not what
+        // the reader's type-size preference does to it.
+        let host = NSHostingView(rootView: text.font(role.font(at: .large)).frame(width: 720))
         host.layoutSubtreeIfNeeded()
         return host.fittingSize.height
     }

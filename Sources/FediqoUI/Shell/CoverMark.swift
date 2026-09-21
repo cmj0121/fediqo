@@ -35,7 +35,7 @@ struct CoverChip: View {
 
     var body: some View {
         Image(systemName: "eye.slash")
-            .font(ShellType.mark.weight(.medium))
+            .shellFont(.mark, weight: .medium)
             .foregroundStyle(onPicture ? ShellChrome.overPicture : ShellChrome.inkDim(colorScheme))
             .padding(.horizontal, ShellSpace.tight)
             .padding(.vertical, ShellSpace.hair * 2)

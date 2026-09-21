@@ -942,7 +942,7 @@ struct ForumPostBand: View {
                 .multilineTextAlignment(.leading)
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .font(ShellType.meta)
+        .shellFont(.meta)
         .foregroundStyle(ShellChrome.inkFaint(colorScheme))
     }
 
@@ -1074,7 +1074,7 @@ struct ForumWaiting: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
             Text(line)
-                .font(ShellType.meta)
+                .shellFont(.meta)
                 // **`inkDim` and not `inkFaint`, which is a small declared change.** Six sites
                 // said this fact in two inks; `inkDim` is the token for *present, read second*,
                 // which is what a sentence about an errand in progress is — and `inkFaint` is the

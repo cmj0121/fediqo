@@ -60,7 +60,7 @@ struct TimelinePane: View {
     @State private var toastTick = 0
     /// What a finger gets on the header's marks, whatever the glyph inside measures. The row's
     /// own marks are held open the same way — see `DummyItemRow.touch`.
-    @ScaledMetric(relativeTo: .caption) private var touch: CGFloat = 32
+    @ShellMetric(relativeTo: .caption) private var touch: CGFloat = 32
     @Environment(\.colorScheme) private var colorScheme
     @Environment(DummyPrefs.self) private var prefs
 
@@ -388,7 +388,7 @@ struct TimelinePane: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 if session.timelineID != nil {
                     Text(session.rule(of: timeline))
-                        .font(ShellType.meta)
+                        .shellFont(.meta)
                         .foregroundStyle(ShellChrome.inkDim(colorScheme))
                         .lineLimit(1)
                 }
@@ -397,7 +397,7 @@ struct TimelinePane: View {
             }
             if session.timelinesUnreadable {
                 Text(L10n.t("timeline.unreadable"))
-                    .font(ShellType.meta)
+                    .shellFont(.meta)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -413,7 +413,7 @@ struct TimelinePane: View {
     private func latestMark(_ latest: LatestDate) -> some View {
         let day = latest.start().formatted(.dateTime.year().month().day().locale(L10n.locale()))
         return Label(String(format: L10n.t("timeline.latest"), day), systemImage: "calendar")
-            .font(ShellType.meta)
+            .shellFont(.meta)
             .foregroundStyle(ShellChrome.inkDim(colorScheme))
             .lineLimit(1)
             .accessibilityLabel(String(format: L10n.t("timeline.latest.label"), day))
@@ -436,7 +436,7 @@ struct TimelinePane: View {
                         .accessibilityHidden(true)
                 }
             }
-            .font(ShellType.meta.weight(selected ? .semibold : .regular))
+            .shellFont(.meta, weight: selected ? .semibold : .regular)
             .foregroundStyle(selected ? ShellChrome.selectInk(colorScheme) : ShellChrome.inkDim(colorScheme))
             .padding(.horizontal, ShellSpace.snug)
             .padding(.vertical, ShellSpace.tight)
@@ -495,7 +495,7 @@ struct TimelinePane: View {
     private func headerMark(_ symbol: String, says key: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(ShellType.meta.weight(.medium))
+                .shellFont(.meta, weight: .medium)
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .frame(minWidth: touch, minHeight: touch)
                 .contentShape(Rectangle())
@@ -511,7 +511,7 @@ struct TimelinePane: View {
             session.newTimeline()
         } label: {
             Image(systemName: "plus")
-                .font(ShellType.meta.weight(.semibold))
+                .shellFont(.meta, weight: .semibold)
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .padding(.horizontal, ShellSpace.snug)
                 .padding(.vertical, ShellSpace.tight)

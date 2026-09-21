@@ -56,17 +56,17 @@ struct DummyThreadPane: View {
             HStack(spacing: ShellSpace.snug) {
                 Button(action: onBack) {
                     Label(L10n.t("thread.back"), systemImage: "chevron.left")
-                        .font(ShellType.meta.weight(.medium))
+                        .shellFont(.meta, weight: .medium)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(ShellChrome.selectInk(colorScheme))
                 Text(L10n.t("thread.title"))
-                    .font(ShellType.pane)
+                    .shellFont(.pane)
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                 Spacer()
                 outward
                 Text(L10n.t("thread.leaveHint"))
-                    .font(ShellType.meta)
+                    .shellFont(.meta)
                     .foregroundStyle(ShellChrome.inkFaint(colorScheme))
             }
             .padding(.horizontal, ShellSpace.pad)
@@ -174,7 +174,7 @@ struct DummyThreadPane: View {
                 openURL(url)
             } label: {
                 Label(root.outwardName, systemImage: "arrow.up.forward.app")
-                    .font(ShellType.meta.weight(.medium))
+                    .shellFont(.meta, weight: .medium)
                     .lineLimit(1)
             }
             .buttonStyle(.plain)
@@ -295,7 +295,7 @@ struct DummyThreadPane: View {
                 }
             case .loaded(let replies):
                 Text(String(format: L10n.t("thread.replies.count"), replies.count))
-                    .font(ShellType.name)
+                    .shellFont(.name)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 ForEach(replies) { reply in
                     ForumReplyRow(post: reply, host: thread.host)
@@ -368,7 +368,7 @@ struct DummyThreadPane: View {
     private var wayAround: some View {
         Button(action: onAskAround) {
             Label(L10n.t("thread.around.again"), systemImage: "arrow.clockwise")
-                .font(ShellType.meta.weight(.medium))
+                .shellFont(.meta, weight: .medium)
         }
         .buttonStyle(.plain)
         .foregroundStyle(ShellChrome.selectInk(colorScheme))
@@ -392,9 +392,9 @@ struct DummyThreadPane: View {
         } label: {
             HStack(spacing: ShellSpace.snug) {
                 Label(L10n.t("thread.replies.load"), systemImage: "arrow.down.circle")
-                    .font(ShellType.meta.weight(.medium))
+                    .shellFont(.meta, weight: .medium)
                 Text(verbatim: "s")
-                    .font(ShellType.mark.monospaced())
+                    .shellFont(.mark, monospaced: true)
                     .foregroundStyle(ShellChrome.inkFaint(colorScheme))
                     .padding(.horizontal, ShellSpace.tight)
                     .background(
@@ -412,7 +412,7 @@ struct DummyThreadPane: View {
 
     private func quiet(_ text: String) -> some View {
         Text(text)
-            .font(ShellType.meta)
+            .shellFont(.meta)
             .foregroundStyle(ShellChrome.inkFaint(colorScheme))
             .fixedSize(horizontal: false, vertical: true)
     }
@@ -462,7 +462,7 @@ struct ForumReplyRow: View {
     /// `DummyItemRow` at the top is what the reader opened, and twenty replies each carrying a
     /// full-size avatar would read as twenty more of those. Scaled with the type, for the reason
     /// every other fitting in this shell is — the alternative is big text beside small furniture.
-    @ScaledMetric(relativeTo: .body) private var side: CGFloat = 24
+    @ShellMetric(relativeTo: .body) private var side: CGFloat = 24
 
     var body: some View {
         HStack(alignment: .top, spacing: ShellSpace.snug) {
@@ -584,16 +584,16 @@ struct ForumReplyRow: View {
         HStack(spacing: ShellSpace.snug) {
             if let floor = post.floor {
                 Text(String(format: L10n.t("thread.reply.floor"), floor))
-                    .font(ShellType.reading)
+                    .shellFont(.reading)
                     .foregroundStyle(ShellChrome.inkFaint(colorScheme))
             }
             Text(post.author)
-                .font(ShellType.name)
+                .shellFont(.name)
                 .foregroundStyle(ShellChrome.ink(colorScheme))
                 .lineLimit(1)
             if let at = post.postedAt {
                 Text(at, format: .relative(presentation: .named))
-                    .font(ShellType.meta)
+                    .shellFont(.meta)
                     .foregroundStyle(ShellChrome.inkFaint(colorScheme))
                     .lineLimit(1)
             }
@@ -616,7 +616,7 @@ struct ForumReplyRow: View {
                 Image(systemName: "lock")
                 Text(L10n.t("item.forum.withheld"))
             }
-            .font(ShellType.meta)
+            .shellFont(.meta)
             .foregroundStyle(ShellChrome.inkFaint(colorScheme))
         } else if post.body.isEmpty {
             // The forum answered, the post was not withheld, and there were no words in it: a
@@ -679,7 +679,7 @@ struct ForumQuotation: View {
         VStack(alignment: .leading, spacing: ShellSpace.tight) {
             if !quotation.words.isEmpty {
                 Text(quotation.words)
-                    .font(ShellType.meta)
+                    .shellFont(.meta)
                     .foregroundStyle(ShellChrome.inkFaint(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityLabel(

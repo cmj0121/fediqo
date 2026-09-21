@@ -175,7 +175,7 @@ struct UsagePane: View {
                     Text(L10n.t(tab.titleKey))
                         .lineLimit(1)
                         .fixedSize()
-                        .font(ShellType.meta.weight(selected ? .semibold : .regular))
+                        .shellFont(.meta, weight: selected ? .semibold : .regular)
                         .foregroundStyle(
                             selected
                                 ? ShellChrome.selectInk(colorScheme)
@@ -230,7 +230,7 @@ struct UsagePane: View {
             Text(L10n.t("prefs.cache"))
         } footer: {
             Text(L10n.t("prefs.cache.footer"))
-                .font(ShellType.mark)
+                .shellFont(.mark)
                 .foregroundStyle(ShellChrome.inkFaint(colorScheme))
         }
     }
@@ -241,7 +241,7 @@ struct UsagePane: View {
         let disk = onDisk.map { $0.values.reduce(0, +) }
         return VStack(alignment: .leading, spacing: ShellSpace.tight) {
             Text(L10n.t("prefs.held.total"))
-                .font(ShellType.name)
+                .shellFont(.name)
                 .foregroundStyle(ShellChrome.ink(colorScheme))
             reading(Text(Self.postsLine(holdings.posts)))
             reading(Self.picturesText(count: memory.count, bytes: memory.bytes, disk: disk))
@@ -304,7 +304,7 @@ struct UsagePane: View {
             Button(L10n.t("prefs.drop.copies")) { droppingCopies = true }
         } footer: {
             Text(L10n.t("prefs.drop.footer"))
-                .font(ShellType.mark)
+                .shellFont(.mark)
                 .foregroundStyle(ShellChrome.inkFaint(colorScheme))
         }
     }
@@ -370,7 +370,7 @@ struct UsagePane: View {
         HStack(alignment: .firstTextBaseline, spacing: ShellSpace.step) {
             VStack(alignment: .leading, spacing: ShellSpace.tight) {
                 Text(source.host)
-                    .font(ShellType.name)
+                    .shellFont(.name)
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                 catalogueLine(for: source)
                 reading(Text(Self.postsLine(holdings.posts(host: source.host))))
@@ -477,7 +477,7 @@ struct UsagePane: View {
                 Button(L10n.t("prefs.password.forget")) {
                     session.forums.forgetPassword(host: source.host)
                 }
-                .font(ShellType.mark)
+                .shellFont(.mark)
                 .buttonStyle(.plain)
                 .foregroundStyle(ShellChrome.phosphor(colorScheme))
                 .accessibilityLabel(
@@ -489,7 +489,7 @@ struct UsagePane: View {
 
     private func reading(_ text: Text) -> some View {
         text
-            .font(ShellType.reading)
+            .shellFont(.reading)
             .foregroundStyle(ShellChrome.inkFaint(colorScheme))
     }
 

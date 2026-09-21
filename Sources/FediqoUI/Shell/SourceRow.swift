@@ -498,7 +498,7 @@ extension SourceRow {
     /// The width at which a row stops stacking: its furniture, plus the room the hostname is owed.
     ///
     /// **`mark` and `host` are passed in because they scale and `SourceRow` cannot read the type
-    /// size.** `SourceRowView` holds both as `@ScaledMetric(relativeTo: .callout)` and hands them
+    /// size.** `SourceRowView` holds both as `@ShellMetric(relativeTo: .callout)` and hands them
     /// here. That is a reversal of the shipped `Regime`'s deletion of the type gate, and it is
     /// deliberate: the deleted gate was about the *controls*, which are glyphs with no string
     /// length, and QA was right that it restacked a 791pt iPad wrongly. The content column now
@@ -677,15 +677,15 @@ struct SourceRowView: View {
     @Environment(\.displayScale) private var displayScale
     /// The leading mark's drawn size, before the ceiling. Scaled so the mark grows with the
     /// hostname beside it; capped by `symbolPoints(_:)`, which the control glyphs already read.
-    @ScaledMetric(relativeTo: .callout) private var markScaled: CGFloat = SourceRow.markBase
+    @ShellMetric(relativeTo: .callout) private var markScaled: CGFloat = SourceRow.markBase
     /// The room the hostname is owed, scaled. **This is the term that brings the type size back
     /// into the threshold**, and it is a different term from the gate QA deleted: that one was
     /// about the controls, which are glyphs with no string length. The content column now holds
     /// nothing but text.
-    @ScaledMetric(relativeTo: .callout) private var hostFloorScaled: CGFloat = SourceRow.hostFloor
+    @ShellMetric(relativeTo: .callout) private var hostFloorScaled: CGFloat = SourceRow.hostFloor
     /// Half a callout's cap height, scaling with it, so both ends' anchors hold across the rungs
     /// the trailing regime exists in. See `actionsTrailing`.
-    @ScaledMetric(relativeTo: .callout) private var capHalf: CGFloat = 6
+    @ShellMetric(relativeTo: .callout) private var capHalf: CGFloat = 6
     /// A control glyph's drawn size, before the ceiling. Scaled so the marks grow with the words
     /// beside them; capped by `symbolPoints(_:)` so they can never grow out of their targets.
     ///
@@ -694,7 +694,7 @@ struct SourceRowView: View {
     /// number on three surfaces, and a bare literal here is exactly how the 20pt gutter came to be
     /// written twice and changed once. The rail reads it through `well - snug` and a test pins the
     /// two equal.
-    @ScaledMetric(relativeTo: .callout) private var glyph: CGFloat = SourceRow.markBase
+    @ShellMetric(relativeTo: .callout) private var glyph: CGFloat = SourceRow.markBase
 
     /// The leading mark's size as it is actually drawn, which is also the term `threshold` reads.
     /// **One symbol for both**, so the frame and the arithmetic cannot drift apart — the mistake
@@ -882,7 +882,7 @@ struct SourceRowView: View {
     private var said: some View {
         HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
             Text(row.source.host)
-                .font(ShellType.name)
+                .shellFont(.name)
                 .foregroundStyle(ShellChrome.ink(colorScheme))
                 .lineLimit(1)
                 .truncationMode(.tail)
@@ -911,7 +911,7 @@ struct SourceRowView: View {
     /// reader who cannot see this is told the same word rather than a second wording of it.
     private var writingWord: some View {
         Text(L10n.t(SourceRow.writingKey(row.writing)))
-            .font(ShellType.mark)
+            .shellFont(.mark)
             .foregroundStyle(writingInk)
             .lineLimit(1)
             .truncationMode(.tail)
@@ -947,7 +947,7 @@ struct SourceRowView: View {
         }
         if let refusal, refusal.host == row.source.host {
             Text(String(format: L10n.t(refusal.key), row.source.host))
-                .font(ShellType.mark)
+                .shellFont(.mark)
                 // **Not `alarm`.** That colour is spent on the line that says a host was not added
                 // and why; this host was added. Two of this row's marks are alarm-coloured, which
                 // is what keeps the distinction readable: alarm on a glyph is a control, alarm on

@@ -228,11 +228,11 @@ struct AccountPane: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: ShellSpace.snug) {
                 Text(L10n.t("account.hero.promise"))
-                    .font(ShellType.display)
+                    .shellFont(.display)
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
                 Text(L10n.t("account.hero.detail"))
-                    .font(ShellType.body)
+                    .shellFont(.body)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -250,7 +250,7 @@ struct AccountPane: View {
     private var standing: some View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
             Text(L10n.t("shell.account.title"))
-                .font(ShellType.pane)
+                .shellFont(.pane)
                 .foregroundStyle(ShellChrome.ink(colorScheme))
             if let glance { SourceMarkRow(marks: glance) }
         }
@@ -279,7 +279,7 @@ struct AccountPane: View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
             if !session.sources.isEmpty {
                 Text(L10n.t("account.add.detail"))
-                    .font(ShellType.meta)
+                    .shellFont(.meta)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
             }
             fieldRow
@@ -296,7 +296,7 @@ struct AccountPane: View {
             searchField
                 .layoutPriority(1)
             Button(L10n.t("account.browse")) { browse() }
-                .font(ShellType.body)
+                .shellFont(.body)
                 .disabled(busy)
                 .help(L10n.t("account.browse.label"))
                 .accessibilityLabel(L10n.t("account.browse.label"))
@@ -351,7 +351,7 @@ struct AccountPane: View {
     private var searchField: some View {
         HStack(alignment: .center, spacing: ShellSpace.snug) {
             TextField(L10n.t("account.search.placeholder"), text: $session.hostname)
-                .font(ShellType.body)
+                .shellFont(.body)
                 .textFieldStyle(.plain)
                 .focused($searchFocused)
                 .disabled(busy)
@@ -366,7 +366,7 @@ struct AccountPane: View {
                 Task { await typedHost() }
             } label: {
                 Image(systemName: "magnifyingglass")
-                    .font(ShellType.body.weight(.semibold))
+                    .shellFont(.body, weight: .semibold)
                     .frame(width: Metrics.icon, height: Metrics.icon)
                     .foregroundStyle(searchInk)
             }
@@ -443,14 +443,14 @@ struct AccountPane: View {
         } else if let refuse = session.refuse {
             VStack(alignment: .leading, spacing: ShellSpace.snug) {
                 Text(refuse)
-                    .font(ShellType.meta)
+                    .shellFont(.meta)
                     .foregroundStyle(ShellChrome.alarm(colorScheme))
                 // Where *every* board failed there is no list to draw — Core threw the first
                 // board's reason and kept none — so what can still be said is how much the
                 // sentence above is about.
                 if session.unreadAll > 0 {
                     Text(String(format: L10n.t("board.unread.all"), session.unreadAll))
-                        .font(ShellType.mark)
+                        .shellFont(.mark)
                         .foregroundStyle(ShellChrome.inkDim(colorScheme))
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -476,12 +476,12 @@ struct AccountPane: View {
     private var unreadReport: some View {
         VStack(alignment: .leading, spacing: ShellSpace.tight) {
             Text(String(format: L10n.t("board.unread.some"), session.unread.count))
-                .font(ShellType.meta)
+                .shellFont(.meta)
                 .foregroundStyle(ShellChrome.ink(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
             ForEach(session.unread, id: \.board.fid) { entry in
                 Text(ShellSession.unreadMessage(entry))
-                    .font(ShellType.mark)
+                    .shellFont(.mark)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -502,7 +502,7 @@ struct AccountPane: View {
             Button(String(format: L10n.t("account.refuse.signin"), host)) {
                 Task { await offeredSignIn(host) }
             }
-            .font(ShellType.meta)
+            .shellFont(.meta)
             .accessibilityLabel(Text(String(format: L10n.t("account.refuse.signin.label"), host)))
         }
     }
@@ -533,12 +533,12 @@ struct AccountPane: View {
             // `name` and not `pane`: `pane` is documented as a page's own title, one per page, and
             // this page's is "Account".
             Text(L10n.t("account.sources.title"))
-                .font(ShellType.name)
+                .shellFont(.name)
                 .foregroundStyle(ShellChrome.ink(colorScheme))
             // The sentence that says which question this list answers and what Remove costs,
             // before the reader meets a Remove button.
             Text(L10n.t("account.sources.detail"))
-                .font(ShellType.meta)
+                .shellFont(.meta)
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
             askedAgain
@@ -625,7 +625,7 @@ struct AccountPane: View {
             // `prefs.cache.clear.label` and `account.source.remove.label`, so an act keeps its
             // name through the whole surface.
             Text(L10n.t("account.sources.marks"))
-                .font(ShellType.mark)
+                .shellFont(.mark)
                 .foregroundStyle(ShellChrome.inkFaint(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
             // **The word each row carries, and the one reason a row cannot say for itself.** That
@@ -633,11 +633,11 @@ struct AccountPane: View {
             // every forum row for ever, so it is said once for the list — the same argument the
             // line above it is drawn on.
             Text(L10n.t("account.sources.writing"))
-                .font(ShellType.mark)
+                .shellFont(.mark)
                 .foregroundStyle(ShellChrome.inkFaint(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
             Text(L10n.t("account.sources.held"))
-                .font(ShellType.mark)
+                .shellFont(.mark)
                 .foregroundStyle(ShellChrome.inkFaint(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -670,7 +670,7 @@ struct AccountPane: View {
                 Text(String(
                     format: L10n.t("account.sources.writing.again"), hosts.joined(separator: ", ")
                 ))
-                .font(ShellType.meta)
+                .shellFont(.meta)
                 .foregroundStyle(ShellChrome.ink(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
                 // One per source and not one for the list: the question is about one server's
@@ -680,7 +680,7 @@ struct AccountPane: View {
                     Button(String(format: L10n.t("account.sources.writing.again.choose"), host)) {
                         askWriting(host)
                     }
-                    .font(ShellType.meta)
+                    .shellFont(.meta)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

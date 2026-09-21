@@ -187,7 +187,7 @@ struct RuleRowView: View {
                 .accessibilityHidden(true)
             Button(action: onToggle) {
                 Text(RuleText.effect(rule.effect))
-                    .font(ShellType.meta.weight(.semibold))
+                    .shellFont(.meta, weight: .semibold)
                     .foregroundStyle(ShellChrome.selectInk(colorScheme))
                     .padding(.horizontal, ShellSpace.snug)
                     .padding(.vertical, ShellSpace.hair)
@@ -197,20 +197,20 @@ struct RuleRowView: View {
             target
             if missing {
                 Text(L10n.t("rule.missing"))
-                    .font(ShellType.mark)
+                    .shellFont(.mark)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .help(L10n.t("rule.missing.help"))
             }
             Spacer(minLength: ShellSpace.snug)
             if let scope = RuleText.scope(rule) {
                 Text(scope)
-                    .font(ShellType.meta)
+                    .shellFont(.meta)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .lineLimit(1)
             }
             Button(action: onRemove) {
                 Image(systemName: "xmark")
-                    .font(ShellType.meta)
+                    .shellFont(.meta)
                     .foregroundStyle(ShellChrome.inkFaint(colorScheme))
             }
             .buttonStyle(.plain)
@@ -233,7 +233,7 @@ struct RuleRowView: View {
     @ViewBuilder
     private var target: some View {
         let text = Text(RuleText.target(rule, sources: sources))
-            .font(ShellType.body)
+            .shellFont(.body)
             .lineLimit(1)
         if missing {
             // An empty socket: the part is not seated on the plate, and the rule still works.

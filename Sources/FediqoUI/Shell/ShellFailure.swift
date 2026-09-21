@@ -69,11 +69,11 @@ struct ShellFailure: View {
     private var full: some View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
             Text(Self.spoken(sources))
-                .font(ShellType.pane)
+                .shellFont(.pane)
                 .foregroundStyle(ShellChrome.ink(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
             Text(Self.retryName)
-                .font(ShellType.meta.weight(.medium))
+                .shellFont(.meta, weight: .medium)
                 .foregroundStyle(ShellChrome.selectInk(colorScheme))
                 .accessibilityHidden(true)
         }
@@ -88,7 +88,7 @@ struct ShellFailure: View {
             .fill(ShellChrome.well(colorScheme))
             .overlay {
                 Image(systemName: "arrow.clockwise")
-                    .font(ShellType.meta.weight(.medium))
+                    .shellFont(.meta, weight: .medium)
                     .foregroundStyle(ShellChrome.inkFaint(colorScheme))
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

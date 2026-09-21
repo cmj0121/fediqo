@@ -503,12 +503,12 @@ struct JoinSheet: View {
     private func titled(_ title: String, _ detail: String) -> some View {
         VStack(alignment: .leading, spacing: ShellSpace.tight) {
             Text(title)
-                .font(ShellType.pane)
+                .shellFont(.pane)
                 .foregroundStyle(ShellChrome.ink(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityFocused($headerFocused)
             Text(detail)
-                .font(ShellType.meta)
+                .shellFont(.meta)
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -628,13 +628,13 @@ struct JoinSheet: View {
                 picked.wrappedValue.count,
                 offer.boards.count
             ))
-                .font(ShellType.reading)
+                .shellFont(.reading)
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
         } else if case .choosingLists(let choice) = session.stage {
             Text(String(
                 format: L10n.t("board.choose.count"), choice.ticked.count, choice.offered.count
             ))
-                .font(ShellType.reading)
+                .shellFont(.reading)
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
         }
     }
@@ -806,7 +806,7 @@ struct JoinSheet: View {
                     .frame(width: Metrics.mark, height: Metrics.mark)
                     .foregroundStyle(markInk(kind))
                 Text(kind.displayName)
-                    .font(ShellType.name)
+                    .shellFont(.name)
                     .foregroundStyle(ShellChrome.ink(colorScheme))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -888,7 +888,7 @@ struct JoinSheet: View {
 
     private func note<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         content()
-            .font(ShellType.body)
+            .shellFont(.body)
             .foregroundStyle(ShellChrome.inkDim(colorScheme))
             .padding(ShellSpace.pad)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -919,10 +919,10 @@ struct JoinSheet: View {
         } label: {
             VStack(alignment: .leading, spacing: ShellSpace.tight) {
                 Text(server.domain)
-                    .font(ShellType.name)
+                    .shellFont(.name)
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                 Text(added ? L10n.t("account.catalog.added") : server.summary)
-                    .font(ShellType.meta)
+                    .shellFont(.meta)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .lineLimit(2)
                 if !added { rowFoot(readings) }
@@ -960,7 +960,7 @@ struct JoinSheet: View {
                 Text(reading)
             }
         }
-        .font(ShellType.mark)
+        .shellFont(.mark)
         .foregroundStyle(ShellChrome.inkFaint(colorScheme))
         .lineLimit(1)
     }

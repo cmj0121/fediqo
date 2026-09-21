@@ -31,9 +31,17 @@ struct PreferencesPane: View {
                 }
             } footer: {
                 Text(L10n.t("prefs.latest.footer"))
+                    .shellFont(.meta)
             }
         }
         .formStyle(.grouped)
+        // **The pane the type size is chosen on has to move with it** (#96). A `Form`'s rows
+        // take the platform's own font unless they are told otherwise, and on a Mac that font
+        // does not follow the preference — so the one screen where a reader can see what they
+        // just chose was the one screen that would not have shown it. Set on the `Form` rather
+        // than on each row: a label, a picker's rows and a toggle all inherit it, and a control
+        // added later inherits it too rather than being forgotten.
+        .shellFont(.body)
         // The page's own colour, as on the timeline and Account, and no scroll bar.
         .scrollContentBackground(.hidden)
         .scrollIndicators(.never)

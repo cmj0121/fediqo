@@ -60,7 +60,7 @@ struct ShellWaiting: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// The smallest a plate may be, scaled to the type it stands among.
-    @ScaledMetric(relativeTo: .body) private var floor: CGFloat = ShellSpace.snug
+    @ShellMetric(relativeTo: .body) private var floor: CGFloat = ShellSpace.snug
 
     // MARK: - The one rhythm
 

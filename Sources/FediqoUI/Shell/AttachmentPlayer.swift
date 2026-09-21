@@ -162,7 +162,7 @@ struct AttachmentPlayer: View {
     private var badge: some View {
         if let mark {
             Image(systemName: mark)
-                .font(ShellType.mark.weight(.medium))
+                .shellFont(.mark, weight: .medium)
                 .foregroundStyle(ShellChrome.overPicture)
                 .padding(ShellSpace.tight)
                 .background(Circle().fill(ShellChrome.scrim))

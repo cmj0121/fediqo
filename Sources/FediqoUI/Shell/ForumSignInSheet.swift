@@ -57,17 +57,17 @@ struct ForumSignInSheet: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: ShellSpace.tight) {
             Text(String(format: L10n.t("forum.signin.title"), request.host))
-                .font(ShellType.pane)
+                .shellFont(.pane)
                 .foregroundStyle(ShellChrome.ink(colorScheme))
             Text(L10n.t(request.stop.explanationKey))
-                .font(ShellType.meta)
+                .shellFont(.meta)
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
             // The forum's own words, on their own line. Not this app talking, and never
             // rephrased into this app's voice — a stranger's server saying "wrong password" is
             // information, and putting it in our own sentence would make us the ones claiming it.
             if let said = request.stop.forumSaid {
                 Text(said)
-                    .font(ShellType.mark)
+                    .shellFont(.mark)
                     .foregroundStyle(ShellChrome.inkFaint(colorScheme))
                     .textSelection(.disabled)
             }
@@ -79,9 +79,9 @@ struct ForumSignInSheet: View {
     private var footer: some View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
             Toggle(L10n.t("forum.signin.save"), isOn: $saving)
-                .font(ShellType.body)
+                .shellFont(.body)
             Text(L10n.t(saving ? "forum.signin.save.on" : "forum.signin.save.off"))
-                .font(ShellType.mark)
+                .shellFont(.mark)
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: ShellSpace.step) {

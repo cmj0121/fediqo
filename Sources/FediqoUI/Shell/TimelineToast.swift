@@ -81,7 +81,7 @@ struct TimelineToastBanner: View {
                 waitMark
             }
             Text(toast.text)
-                .font(ShellType.meta)
+                .shellFont(.meta)
         }
         .padding(.horizontal, ShellSpace.step)
         .padding(.vertical, ShellSpace.snug)
@@ -101,7 +101,7 @@ struct TimelineToastBanner: View {
                 .accessibilityHidden(true)
         case .hourglass:
             Image(systemName: "hourglass")
-                .font(ShellType.meta)
+                .shellFont(.meta)
                 .accessibilityHidden(true)
         }
     }

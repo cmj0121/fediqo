@@ -271,7 +271,7 @@ struct AttachmentDeck: View {
         if player == nil, let symbol = Self.playSymbol(of: attachment) {
             Button(action: onPlay) {
                 Image(systemName: symbol)
-                    .font(ShellType.mark.weight(.semibold))
+                    .shellFont(.mark, weight: .semibold)
                     .foregroundStyle(ShellChrome.overPicture)
                     .padding(ShellSpace.tight)
                     .background(Circle().fill(ShellChrome.scrim))
@@ -329,7 +329,7 @@ struct AttachmentDeck: View {
         if attachments.count > 1 {
             Button(action: onTurn) {
                 Text(verbatim: "\(index + 1)/\(attachments.count)")
-                    .font(ShellType.mark.weight(.medium))
+                    .shellFont(.mark, weight: .medium)
                     .foregroundStyle(ShellChrome.overPicture)
                     .padding(.horizontal, ShellSpace.hair * 3)
                     .padding(.vertical, ShellSpace.hair)
