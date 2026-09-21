@@ -120,6 +120,7 @@
 "timeline.edit.fixed" = "「全部」和「趨勢」不能編輯。要加你自己的時間軸，按 +，或用 Tab 移到 + 再按 e。";
 "timeline.unreadable" = "這台裝置上的時間軸在這裡讀不了。它們原封不動地留著，這裡不會存任何東西蓋過去。";
 "timeline.name.placeholder" = "替這條時間軸取名";
+"timeline.desc.placeholder" = "一句簡短說明，可留空";
 "timeline.done" = "完成";
 "timeline.place" = "你的時間軸中的第 %1$d 條，共 %2$d 條";
 "timeline.earlier" = "‹ 往前";
