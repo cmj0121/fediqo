@@ -110,6 +110,28 @@ struct StoreFileTests {
         #expect(loaded.first { $0.id == "3" }?.boosted == nil)
     }
 
+    /// #107: a favourite is kept the way a boost is, and apart from it.
+    @Test("What the source said about a favourite survives a relaunch, apart from the boost")
+    func favouritedSurvivesRelaunch() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        func said(_ id: String, _ favourited: Bool?) -> Note {
+            Note(
+                id: id, source: mastodon, author: "Ada", handle: "@ada@first.example", body: "hello",
+                postedAt: origin, categories: [.home], boosted: false, favourited: favourited,
+                statusID: id
+            )
+        }
+        try await StoreFile(at: dir).save(
+            sources: [mastodon], notes: [said("1", true), said("2", false), said("3", nil)]
+        )
+        let loaded = StoreFile.open(at: dir).notes
+        #expect(loaded.first { $0.id == "1" }?.favourited == true)
+        #expect(loaded.first { $0.id == "2" }?.favourited == false)
+        #expect(loaded.first { $0.id == "3" }?.favourited == nil)
+        #expect(loaded.allSatisfy { $0.boosted == false })
+    }
+
     @Test("A reply whose parent's handle is unknown comes back a reply")
     func replyWithoutHandle() async throws {
         let file = try StoreFile(database: DatabaseQueue())
