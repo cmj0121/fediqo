@@ -298,6 +298,9 @@ struct StatusDTO: Decodable, Sendable {
     /// read, which Mastodon does not send this field on at all — see `Note.boosted`, which keeps
     /// absent and `false` apart for that reason.
     let reblogged: Bool?
+    /// Whether the account this was fetched as has favourited it (#107). Absent on an unsigned
+    /// read, as `reblogged` is.
+    let favourited: Bool?
     let mediaAttachments: [MediaAttachment]?
     /// Whether the author covered it, and the line they covered it with. Optional because a
     /// server that did not send them has told us nothing, which is not the same as telling us
@@ -426,6 +429,7 @@ struct StatusDTO: Decodable, Sendable {
             // wrapper's own `reblogged` is about the wrapper. On anything but a boost the two are
             // one value, because `subject` is `self`.
             boosted: subject.reblogged,
+            favourited: subject.favourited,
             audience: Self.audience(subject.visibility),
             avatarURL: Host.fetchableURL(subject.account.avatar),
             attachments: subject.mediaAttachments?.compactMap { $0.asAttachment } ?? [],
