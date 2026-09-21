@@ -626,9 +626,11 @@ public struct FediqoRootView: View {
     /// key that both opens and closes a layer is the conditional rule the order above is kept
     /// free of. The letter is still ours either way — see `DummyCommand.consumes`.
     ///
-    /// The guard is here as well as in `view(_:)` so that `v` under the keys list moves nothing:
-    /// `onFocusedItem` lights the first row when nothing is lit, and a press that cannot open
-    /// anything must not do that either.
+    /// The guard is here as well as in `view(_:)` so that a second `v` while the viewer is up
+    /// moves nothing: `onFocusedItem` lights the first row when nothing is lit, and a press that
+    /// is about to be refused must not do that either. That is the whole of what it covers — the
+    /// viewer is the outermost layer there is, so it may open over anything, the keys list
+    /// included.
     private func openViewer() -> Bool {
         guard canOpenViewer else { return false }
         return onFocusedItem(view)
