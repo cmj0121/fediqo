@@ -580,6 +580,8 @@ public struct FediqoRootView: View {
             return openSearch()
         case .boost:
             return boostFocused()
+        case .favourite:
+            return favouriteFocused()
         case .compose:
             guard availability.canCompose else { return false }
             showingShortcuts = false
@@ -1049,6 +1051,16 @@ public struct FediqoRootView: View {
         onFocusedItem { item in
             guard session.acts(on: item).offers(.boost) else { return false }
             Task { await session.boost(item) }
+            return true
+        }
+    }
+
+    /// `f` — the post the lamp is on, favourited on its source or the favourite taken back (#107).
+    /// `boostFocused`'s acting half, for its reasons.
+    private func favouriteFocused() -> Bool {
+        onFocusedItem { item in
+            guard session.acts(on: item).offers(.favourite) else { return false }
+            Task { await session.favourite(item) }
             return true
         }
     }

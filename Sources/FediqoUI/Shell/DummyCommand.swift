@@ -47,6 +47,8 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     /// boost back. **One key for both directions**, because the reader is doing one thing and the
     /// post itself says which way round it goes.
     case boost
+    /// `f` — favourite the post the lamp is on on its source, or take it back (#107). `b`'s shape.
+    case favourite
     case showShortcuts
     /// `/` — search what this device holds (#32). `?` is still the keys list; see `typed`.
     case search
@@ -98,6 +100,7 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         case "?": return .showShortcuts
         case "/": return .search
         case "b": return .boost
+        case "f": return .favourite
         case "c": return .compose
         case "j", KeyEquivalent.downArrow.character: return .nextPost
         case "k", KeyEquivalent.upArrow.character: return .previousPost
@@ -435,6 +438,8 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
         // mark is missing the key does nothing either, so there is no half of this a finger
         // cannot reach.
         DummyShortcut(group: .timeline, keys: ["b"], name: "boost", commands: [.boost], touch: .press),
+        // The star under the post, for `b`'s reason.
+        DummyShortcut(group: .timeline, keys: ["f"], name: "favourite", commands: [.favourite], touch: .press),
         // The rail on a Mac, the tab bar on a phone.
         DummyShortcut(group: .app, keys: ["⌃Tab", "⌃⇧Tab"], name: "pages",
                       commands: [.nextPage, .previousPage], touch: .press),

@@ -1007,12 +1007,7 @@ struct DummyItemRow: View {
             mark("quote.bubble", label: "item.act.quote", on: false) {
                 onToast(L10n.t("item.toast.quote"))
             }
-            counted(marks.favourited ? "star.fill" : "star",
-                    count: item.counts.favourites,
-                    label: "item.act.favourite", on: marks.favourited) {
-                marks.favourited.toggle()
-                onToast(L10n.t(marks.favourited ? "item.toast.favourite.on" : "item.toast.favourite.off"))
-            }
+            favouriteMark
         }
     }
 
@@ -1058,6 +1053,28 @@ struct DummyItemRow: View {
                 spoken: ItemActs.spoken(.boost, done: done, standing: standing)
             ) {
                 acting.boost?()
+            }
+        }
+    }
+
+    /// Favouriting this post on the source it was read through, or taking it back (#107).
+    ///
+    /// `boostMark`'s rule in every particular — absent rather than disabled, done as the source
+    /// said and never as pressed — because the two marks are one shape with two meanings, and a
+    /// reader who learns one should not have to learn the other.
+    @ViewBuilder
+    private var favouriteMark: some View {
+        if acting.acts.offers(.favourite) {
+            let done = item.favourited == true
+            let standing = acting.standings[.favourite]
+            counted(
+                ItemActs.symbol(.favourite, done: done, standing: standing),
+                count: item.counts.favourites,
+                label: "item.act.favourite",
+                on: done,
+                spoken: ItemActs.spoken(.favourite, done: done, standing: standing)
+            ) {
+                acting.favourite?()
             }
         }
     }

@@ -74,6 +74,7 @@
 "shortcut.list" = "這份清單";
 "shortcut.back" = "回到清單";
 "shortcut.boost" = "把這則貼文轉發到它的來源，或收回轉發";
+"shortcut.favourite" = "在這則貼文的來源收藏它，或取消收藏";
 "shortcut.reload" = "重新載入這條時間軸，或打開的討論串";
 "shortcut.dismiss" = "關掉眼前的東西，或取消選取";
 "shortcut.search" = "搜尋這台裝置上的貼文";
@@ -223,6 +224,7 @@
 "item.act.no.signIn" = "登入後才能在這裡動作";
 "item.act.no.turnedAway" = "這個來源拒絕了寫入";
 "item.act.no.unnameable" = "這則貼文在它的來源上沒有名字";
+"item.act.unfavourite" = "取消收藏";
 "item.act.reply" = "回覆";
 "item.act.quote" = "引用";
 "item.act.favourite" = "收藏";
@@ -231,8 +233,6 @@
 "item.act.more" = "更多";
 "item.toast.reply" = "回覆只在這台機器上。";
 "item.toast.quote" = "引用會開啟編輯器。這次工作階段還不行。";
-"item.toast.favourite.on" = "已收藏，在這台機器上。";
-"item.toast.favourite.off" = "已取消收藏。";
 "item.toast.bookmark.on" = "已加書籤，dummy。";
 "item.toast.bookmark.off" = "已取消書籤。";
 "item.toast.kept.on" = "已留在這台機器上。";

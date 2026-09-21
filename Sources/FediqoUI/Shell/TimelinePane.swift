@@ -419,7 +419,8 @@ struct TimelinePane: View {
         return ItemActing(
             acts: session.acts(on: item),
             standings: standings,
-            boost: { Task { await session.boost(item) } }
+            boost: { Task { await session.boost(item) } },
+            favourite: { Task { await session.favourite(item) } }
         )
     }
 
