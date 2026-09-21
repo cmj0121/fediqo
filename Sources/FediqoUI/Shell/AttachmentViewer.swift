@@ -176,6 +176,7 @@ struct AttachmentViewer: View {
             host: host,
             contentMode: .fit,
             alt: covered ? nil : spoken(attachment),
+            speaks: !covered,
             radius: Box.corner
         )
         .aspectRatio(attachment.aspect.map { 1 / $0 }, contentMode: .fit)
