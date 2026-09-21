@@ -56,6 +56,15 @@ struct AttachmentDeck: View {
     /// not holding one.
     var onPlay: () -> Void = {}
 
+    /// Opens the card on top over the whole app: the key `v`, pressed (#33). The card itself is
+    /// the control, which is the gesture a reader arrives already knowing — the same argument the
+    /// row's cover makes about its own rectangle.
+    var onOpen: () -> Void = {}
+
+    /// The next card: the key `m`, pressed. The counter in the corner is the control, and it is
+    /// drawn exactly where there is more than one card — see `counter`.
+    var onTurn: () -> Void = {}
+
     /// That the playing rectangle has left the screen.
     var onEnded: () -> Void = {}
 
@@ -181,7 +190,38 @@ struct AttachmentDeck: View {
     }
 
     /// The one on top: the picture, its edge, and which one of how many it is.
+    ///
+    /// **The card is a press, and the press is `v`** (#33). A reader holding no keyboard could
+    /// otherwise see a photograph at 96 points and have no way to see it at the size of the app.
+    /// The picture itself is the control — the gesture every other client of this network uses,
+    /// and the same argument the row's cover makes about its own rectangle — so nothing is drawn
+    /// over the photograph to say so.
+    ///
+    /// **The two marks on it keep their own presses.** They are overlays, so they are in front:
+    /// the counter turns the deck and the play mark starts the film, and neither falls through to
+    /// this. What is left of the card is the picture, which is what this press is about.
     private func card(_ attachment: Attachment) -> some View {
+        Button(action: onOpen) {
+            picture(attachment)
+        }
+        .buttonStyle(.plain)
+        // **Said here rather than left to be derived from what is inside.** The card draws a
+        // picture most of the time and a playing rectangle the rest of it, and only the first of
+        // those names itself — so a button taking its name from its contents would be announced
+        // as "button", with nothing said, for exactly as long as the film runs. This is the same
+        // sentence the picture carries: which one of how many, and what the author said it is.
+        // Said about the card in hand rather than about `showing`, so there is no empty label to
+        // fall back to. An empty one erases a `Button`'s name outright — the card announces
+        // itself as "button" and nothing else — and `spoken` is only ever nil on an empty deck,
+        // which is a deck that draws no card. Unreachable is not the same as impossible.
+        .accessibilityLabel(Text(spoken(attachment)))
+        .accessibilityHint(Text(L10n.t("shortcut.view")))
+        .frame(width: face, height: face)
+        .overlay(alignment: .topTrailing) { counter }
+        .overlay(alignment: .bottomLeading) { playMark(attachment) }
+    }
+
+    private func picture(_ attachment: Attachment) -> some View {
         Group {
             if let player {
                 // In the rectangle the still was in, so starting and stopping moves nothing else
@@ -203,8 +243,6 @@ struct AttachmentDeck: View {
             }
         }
         .frame(width: face, height: face)
-        .overlay(alignment: .topTrailing) { counter }
-        .overlay(alignment: .bottomLeading) { playMark(attachment) }
     }
 
     /// The mark that says this one plays, and plays it.
@@ -268,17 +306,34 @@ struct AttachmentDeck: View {
     /// Set close, without spaces around the slash. On the card this was drawn for first it was a
     /// lozenge a third of the card wide, competing with the photograph it was a footnote to;
     /// closed up it is a mark in the corner, which is what it is.
+    /// **And it is the press that turns the deck** — `m`, for the reader holding no keyboard
+    /// (#33). A counter that says "1/4" is the one mark on this card that is already about there
+    /// being another one, and it is drawn exactly where there *is* another one, so pressing it
+    /// can never be the control that lies about what it can do. Nothing new is drawn: what was a
+    /// footnote is now a footnote you can press.
+    ///
+    /// **Spoken now, where the numerals were hidden.** They were hidden because `spoken` says the
+    /// same fact in a sentence on the picture — which is still true of the *fact*, and was never
+    /// true of the *press*: a control nobody can land on is a control this app did not ship. The
+    /// label is that sentence rather than the numerals, so nothing reads out "one slash four".
     @ViewBuilder
     private var counter: some View {
         if attachments.count > 1 {
-            Text(verbatim: "\(index + 1)/\(attachments.count)")
-                .font(ShellType.mark.weight(.medium))
-                .foregroundStyle(ShellChrome.overPicture)
-                .padding(.horizontal, ShellSpace.hair * 3)
-                .padding(.vertical, ShellSpace.hair)
-                .background(Capsule(style: .continuous).fill(ShellChrome.scrim))
-                .padding(ShellSpace.tight)
-                .accessibilityHidden(true)
+            Button(action: onTurn) {
+                Text(verbatim: "\(index + 1)/\(attachments.count)")
+                    .font(ShellType.mark.weight(.medium))
+                    .foregroundStyle(ShellChrome.overPicture)
+                    .padding(.horizontal, ShellSpace.hair * 3)
+                    .padding(.vertical, ShellSpace.hair)
+                    .background(Capsule(style: .continuous).fill(ShellChrome.scrim))
+                    .padding(ShellSpace.tight)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(L10n.t("shortcut.turn"))
+            .accessibilityLabel(Self.positioned(
+                L10n.t("shortcut.turn"), index: index, of: attachments.count
+            ))
         }
     }
 
@@ -286,8 +341,13 @@ struct AttachmentDeck: View {
     /// deck nobody can turn blind, and an attachment whose author wrote no alt text still has a
     /// kind — "a video" is little, and it is more than silence.
     private var spoken: String? {
-        guard let showing else { return nil }
-        let described = showing.alt.isEmpty ? Self.kind(of: showing) : showing.alt
+        showing.map(spoken)
+    }
+
+    /// The same sentence about a card the caller already has, which is every caller that is
+    /// drawing one. Nothing here can be nil, so nothing downstream needs a fallback.
+    private func spoken(_ attachment: Attachment) -> String {
+        let described = attachment.alt.isEmpty ? Self.kind(of: attachment) : attachment.alt
         return Self.positioned(described, index: index, of: attachments.count)
     }
 

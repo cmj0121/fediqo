@@ -56,9 +56,22 @@ struct DummyItemRow: View {
     /// top of it. See `ShellPlayback`.
     var player: AVPlayer?
     var onSelect: (() -> Void)?
+    /// Opening the conversation around this post — `Return`, and the second press of a finger on
+    /// a row already lit (#33).
+    ///
+    /// **Held apart from `onSelect` for the one reader who cannot press twice.** A press is what
+    /// the list decides between lighting and opening; a reader using VoiceOver lands on the row
+    /// and activates it once, so the open has to be offered as a named action of its own. Nothing
+    /// where there is nothing to open — the post an open thread is already about says so by
+    /// passing nothing, rather than by announcing an action that would be refused.
+    var onOpen: (() -> Void)?
     var onToggleCover: () -> Void = {}
     /// Starts or stops what is on top of the deck — the mark on the card's own way to the key `a`.
     var onPlay: () -> Void = {}
+    /// Opens what is on top of the deck over the app: the card's own way to the key `v` (#33).
+    var onView: () -> Void = {}
+    /// Turns the deck: the counter's own way to the key `m` (#33).
+    var onTurn: () -> Void = {}
     /// That the playing rectangle has left the screen, which the owner answers by stopping.
     var onEnded: () -> Void = {}
     var onToast: (String) -> Void
@@ -256,7 +269,10 @@ struct DummyItemRow: View {
                 // the row is a container, and a container is not an element. A custom action put
                 // there is offered to nobody, which is a control that exists in the source and
                 // not on the screen — the exact defect this milestone has shipped three times.
-                .accessibilityActions { outwardAction }
+                .accessibilityActions {
+                    outwardAction
+                    openAction
+                }
             mainBox(written)
             actions
         }
@@ -848,6 +864,8 @@ struct DummyItemRow: View {
                 radius: Box.plate,
                 player: player,
                 onPlay: onPlay,
+                onOpen: onView,
+                onTurn: onTurn,
                 onEnded: onEnded
             )
             .frame(width: thumbSide, height: thumbSide)
@@ -953,6 +971,19 @@ struct DummyItemRow: View {
     ///
     /// **Nothing where there is nowhere to go**, which is the same rule the menu keeps: an action
     /// announced and then refused is worse than an action never announced.
+    /// The conversation, as a reader using VoiceOver reaches it.
+    ///
+    /// The press a finger makes is the row's own and is decided by `DummyCommand.tapped`: one
+    /// press lights, the next opens. A reader landing on this element activates it once, so the
+    /// second half is offered here by name — the same shape `outwardAction` above uses, and for
+    /// the same reason. It says what the written-down key says.
+    @ViewBuilder
+    private var openAction: some View {
+        if let onOpen {
+            Button(L10n.t("shortcut.expand"), action: onOpen)
+        }
+    }
+
     @ViewBuilder
     private var outwardAction: some View {
         if item.outwardURL != nil {
