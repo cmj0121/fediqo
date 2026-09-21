@@ -4,10 +4,9 @@ import Testing
 
 /// #82 — what is on its way, and what went wrong, is said in the bottom toast.
 ///
-/// What is assertable without a screen is the kind the capsule decides from, that
-/// loading reuses the launch flip's numbers, and that Reduce Motion takes the clock
-/// away. The suite is `@MainActor` for the reason `WaitingTests` is: `TimelinePane`
-/// and `LandingMascot` belong to a `View`.
+/// What is assertable without a screen is the kind the capsule decides from, and
+/// that a wait is a spinner or an hourglass, not the launch mascot. The suite is
+/// `@MainActor` for the reason `WaitingTests` is: `TimelinePane` belongs to a `View`.
 @Suite("The bottom toast carries wait and miss")
 @MainActor
 struct TimelineToastTests {
@@ -114,54 +113,12 @@ struct TimelineToastTests {
         ) == nil)
     }
 
-    @Test("Loading uses the launch flip, duration, and hold")
-    func loadingUsesTheLaunchFlip() {
-        #expect(Landing.toastMark < Landing.mark)
-        #expect(Landing.toastMark > 0)
-        #expect(Landing.flip == 360)
-        #expect(Landing.duration == 0.45)
-        #expect(Landing.hold == 0.2)
-        #expect(Landing.pass == Landing.hold + Landing.duration * 2)
-
-        let rest = Landing.orientation(at: 0, looping: true)
-        #expect(rest.pitch == 0)
-        #expect(rest.yaw == 0)
-        let held = Landing.orientation(at: Landing.hold, looping: true)
-        #expect(held.pitch == 0)
-        #expect(held.yaw == 0)
-
-        let midPitch = Landing.orientation(
-            at: Landing.hold + Landing.duration / 2, looping: true
-        )
-        #expect(abs(midPitch.pitch - Landing.flip / 2) < 1e-9)
-        #expect(midPitch.yaw == 0)
-
-        let afterPitch = Landing.orientation(
-            at: Landing.hold + Landing.duration, looping: true
-        )
-        #expect(abs(afterPitch.pitch - Landing.flip) < 1e-9)
-        #expect(afterPitch.yaw == 0)
-
-        let done = Landing.orientation(at: Landing.pass, looping: true)
-        #expect(abs(done.pitch - Landing.flip) < 1e-9)
-        #expect(abs(done.yaw - Landing.flip) < 1e-9)
-
-        let again = Landing.orientation(at: Landing.pass * 2, looping: true)
-        #expect(abs(again.pitch - Landing.flip * 2) < 1e-9)
-        #expect(abs(again.yaw - Landing.flip * 2) < 1e-9)
-    }
-
-    @Test("Reduce Motion shows the mascot still, with no clock")
-    func reduceMotionShowsTheMascotStill() {
-        let still = Landing.loading(reduceMotion: true)
-        #expect(still.showing)
-        #expect(still.pitch == 0)
-        #expect(still.yaw == 0)
-        #expect(Landing.clock(reduceMotion: true) == nil)
-        #expect(Landing.clock(reduceMotion: false) == EmojiClock.fastestTick)
-        let turned = Landing.orientation(at: 5, looping: true, reduceMotion: true)
-        #expect(turned.pitch == 0)
-        #expect(turned.yaw == 0)
+    @Test("A wait is a spinner, or an hourglass when motion is asked to stop")
+    func aWaitIsASpinnerOrAnHourglass() {
+        #expect(TimelineToast.waitMark(reduceMotion: false) == .spinner)
+        #expect(TimelineToast.waitMark(reduceMotion: false).symbol == nil)
+        #expect(TimelineToast.waitMark(reduceMotion: true) == .hourglass)
+        #expect(TimelineToast.waitMark(reduceMotion: true).symbol == "hourglass")
     }
 
     @Test("The toast sentences exist in both languages")

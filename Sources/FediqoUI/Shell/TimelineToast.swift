@@ -3,8 +3,9 @@ import SwiftUI
 /// One sentence at the bottom of the timeline: a wait, a miss, a warning, or a brief note.
 ///
 /// **One chrome, not a second banner.** The capsule that already sat on
-/// `TimelinePane` is this fact for every kind; loading adds the launch mascot at
-/// toast size, and nothing else grows a plate or a line of its own.
+/// `TimelinePane` is this fact for every kind; loading adds a spinner (or an
+/// hourglass when motion is asked to stop), and nothing else grows a plate or a
+/// line of its own.
 struct TimelineToast: Equatable, Sendable {
     enum Kind: Equatable, Sendable {
         /// A reload is on the wire. Stays until the wait ends; not a 2s flash.
@@ -46,18 +47,38 @@ struct TimelineToast: Equatable, Sendable {
         }
         return nil
     }
+
+    /// The mark beside a wait: a spinner while motion is allowed, an hourglass at rest
+    /// when it is not. A wait is not a launch, so this is not the mascot.
+    static func waitMark(reduceMotion: Bool) -> WaitMark {
+        reduceMotion ? .hourglass : .spinner
+    }
+
+    enum WaitMark: Equatable, Sendable {
+        case spinner
+        case hourglass
+
+        /// The SF Symbol for the still mark. Spinner is a `ProgressView`, not a glyph.
+        var symbol: String? {
+            switch self {
+            case .spinner: nil
+            case .hourglass: "hourglass"
+            }
+        }
+    }
 }
 
-/// The capsule itself. VoiceOver hears the sentence; the mascot is decoration.
+/// The capsule itself. VoiceOver hears the sentence; the wait mark is decoration.
 struct TimelineToastBanner: View {
     let toast: TimelineToast
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: ShellSpace.snug) {
             if toast.kind == .loading {
-                LandingMascot(size: Landing.toastMark, looping: true)
+                waitMark
             }
             Text(toast.text)
                 .font(ShellType.meta)
@@ -69,5 +90,19 @@ struct TimelineToastBanner: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(toast.text))
         .accessibilityAddTraits(toast.kind == .loading ? .updatesFrequently : [])
+    }
+
+    @ViewBuilder
+    private var waitMark: some View {
+        switch TimelineToast.waitMark(reduceMotion: reduceMotion) {
+        case .spinner:
+            ProgressView()
+                .controlSize(.small)
+                .accessibilityHidden(true)
+        case .hourglass:
+            Image(systemName: "hourglass")
+                .font(ShellType.meta)
+                .accessibilityHidden(true)
+        }
     }
 }
