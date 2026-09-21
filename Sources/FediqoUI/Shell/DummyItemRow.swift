@@ -41,9 +41,11 @@ struct DummyItemRow: View {
     /// *expand* and the guide says "Open the thread"; before this, expanding a post showed the
     /// reader exactly the same three lines the row already had.
     ///
-    /// Two things and no third: the words lose their line limit, and the band stops being pinned
-    /// to `Box.thumb` and clipped. Everything else about the row — the four bands, the slot, the
-    /// marks, the cover — is identical, because none of it was ever the problem.
+    /// Three things and no fourth: the words lose their line limit, the band stops being pinned
+    /// to `Box.thumb` and clipped, and a forum post's quotation is drawn above them (#104) — all
+    /// three for the one reason, that a list under a thumb and a post opened to be read are not
+    /// the same surface. Everything else about the row — the four bands, the slot, the marks, the
+    /// cover — is identical, because none of it was ever the problem.
     var inFull: Bool = false
     /// Which attachment is on top. It belongs to the app rather than to this view, so that a
     /// refresh that replaces the list leaves a reader who turned to the third one looking at the
@@ -898,7 +900,10 @@ struct DummyItemRow: View {
             // post is an address a reader wants to follow exactly as much as one in a microblog
             // post, and #34 says so in as many words.
             if let thread {
-                ForumPostBand(thread: thread, posts: posts, lines: wordLines, linked: !covered)
+                ForumPostBand(
+                    thread: thread, posts: posts, lines: wordLines, inFull: inFull,
+                    linked: !covered
+                )
             } else {
                 // **Prose, which is the cut that grows links — unless a cover stands in front of
                 // these words.** This is the one line on the row the author wrote as writing; the
