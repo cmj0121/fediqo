@@ -118,6 +118,18 @@ struct TimelineEmptyTests {
         #expect(held.detail != answered.detail)
         #expect(none.title != held.title)
         #expect(answered.spoken.contains("asked") || answered.detail.contains("asked"))
+        #expect(
+            L10n.t("timeline.empty.held.detail", language: .english)
+                == "This device has not kept a note from your sources. Add a source on Account, or reload to ask them."
+        )
+        #expect(!held.detail.contains("press r"))
+        #expect(held.detail.contains("reload"))
+        #expect(
+            !L10n.t("timeline.empty.held.detail", language: .taiwanese).contains("按 r")
+        )
+        #expect(
+            L10n.t("timeline.empty.held.detail", language: .taiwanese).contains("重新載入")
+        )
     }
 
     /// Trends keeps its own words; an answered Trends is still trending-empty, not All's
