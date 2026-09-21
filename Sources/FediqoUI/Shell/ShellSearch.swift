@@ -137,7 +137,9 @@ final class ShellSearch {
         let key = Key(pattern: pattern, revision: revision, sources: sources, latest: latest)
         if let cached, cached.key == key { return cached.items }
         let found = search.found(notes, index)
-        let items = (latest?.shown(found) ?? found).map { DummyItem($0) }
+        // One post is one row here as it is on the timeline (#114): a search that drew a merged
+        // row twice would be the complaint #10 left for later, arriving through the search field.
+        let items = DummyItem.merged(latest?.shown(found) ?? found)
         cached = (key, items)
         return items
     }
