@@ -464,6 +464,18 @@ final class ShellPictures {
         await work(for: key, host: Self.tag(host)).value
     }
 
+    /// A press asking again: lifts the mark of nothing for this address and runs the same
+    /// `fetch` a first ask does. Does not bump `generation`, so a retry of one picture is not
+    /// a cohort of every other miss. A nil URL is still nothing to try. A second miss writes
+    /// over the first — `note` replaces, it does not append.
+    func retry(_ url: URL?, scale: CGFloat, tier: Tier, host: String) async {
+        guard let url else { return }
+        let key = Key(url: url, scale: scale, tier: tier)
+        missing.removeValue(forKey: key)
+        missingSources.removeValue(forKey: key)
+        await fetch(url, scale: scale, tier: tier, host: host)
+    }
+
     private func work(for key: Key, host: String) -> Task<Void, Never> {
         if let running = inFlight[key] {
             // A second source wanting the same picture joins this fetch rather than starting
@@ -1162,10 +1174,12 @@ struct RemoteImage: View {
 
     /// What fills the frame this view was handed. The frame itself belongs to the call site —
     /// an avatar side, a thumb side — and none of these is an empty view that would let it
-    /// collapse. Held is a copy already in hand: no plate, no flicker.
+    /// collapse. Held is a copy already in hand: no plate, no flicker. Failed is a wait that
+    /// ended with nothing, in the same frame, with a press to ask again.
     enum Fill: Equatable, Sendable {
         case held
         case waiting
+        case failed
         case absent
     }
 
@@ -1184,22 +1198,27 @@ struct RemoteImage: View {
     }
 
     /// Held wins: a copy this device already has is drawn at once, even if a mark says it was
-    /// once gone. Still coming is a URL that has not been answered yet. Everything else is
-    /// today's absent mark — a nil URL included, so the frame still has a place.
+    /// once gone. Still coming is a URL that has not been answered yet. A URL that was asked
+    /// for and came back with nothing is failed — the wait ended, and a press asks again. A
+    /// nil URL is still absent: there is nothing to try.
     static func fill(have: Bool, url: URL?, missing: Bool) -> Fill {
         if have { return .held }
-        if url != nil, !missing { return .waiting }
-        return .absent
+        guard url != nil else { return .absent }
+        return missing ? .failed : .waiting
     }
 
     /// What a screen reader is told. Waiting reuses the shell's one sentence; arrived keeps
-    /// the author's alt; missing stays silent unless it already had one. No new string.
-    static func voice(fill: Fill, alt: String?, speaks: Bool) -> String? {
+    /// the author's alt; a nil URL stays silent unless it already had one. Failed names the
+    /// source that did not answer, even when this view is one picture inside a row — the
+    /// retry has to be reachable.
+    static func voice(fill: Fill, alt: String?, speaks: Bool, source: String = "") -> String? {
         switch fill {
         case .held, .absent:
             return alt
         case .waiting:
             return ShellWaiting.voice(speaks: speaks)
+        case .failed:
+            return ShellFailure.spoken([source])
         }
     }
 
@@ -1216,28 +1235,33 @@ struct RemoteImage: View {
             url: url,
             missing: cache.isMissing(url, scale: displayScale, tier: tier)
         )
-        let sentence = Self.voice(fill: fill, alt: alt, speaks: speaks)
-        return Group {
-            if let picture {
-                // The well sits behind it rather than only where a picture is absent: fitted
-                // inside a fixed slot, a picture leaves the rest of that slot over, and what is
-                // left over is this colour and not whatever happens to be under the row.
-                ShellChrome.well(colorScheme).overlay {
-                    picture.resizable().aspectRatio(contentMode: contentMode)
+        let sentence = Self.voice(fill: fill, alt: alt, speaks: speaks, source: host)
+        return voiced(
+            Group {
+                if let picture {
+                    // The well sits behind it rather than only where a picture is absent: fitted
+                    // inside a fixed slot, a picture leaves the rest of that slot over, and what is
+                    // left over is this colour and not whatever happens to be under the row.
+                    ShellChrome.well(colorScheme).overlay {
+                        picture.resizable().aspectRatio(contentMode: contentMode)
+                    }
+                } else if fill == .waiting {
+                    // Still coming, and there is somewhere for it to come from. The shell's plate
+                    // fills the same frame the picture will, so text around it never moves.
+                    Self.waitingPlate()
+                } else if fill == .failed {
+                    // The wait ended and nothing came. The same failure place a timeline uses,
+                    // filling this frame; a press runs the same fetch a first ask does.
+                    ShellFailure(source: host) {
+                        Task { await cache.retry(url, scale: displayScale, tier: tier, host: host) }
+                    }
+                } else {
+                    absent
                 }
-            } else if fill == .waiting {
-                // Still coming, and there is somewhere for it to come from. The shell's plate
-                // fills the same frame the picture will, so text around it never moves.
-                Self.waitingPlate()
-            } else {
-                absent
-            }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text(sentence ?? ""))
-        .accessibilityHidden(sentence == nil)
-        .accessibilityAddTraits(fill == .waiting && sentence != nil ? .updatesFrequently : [])
+            },
+            fill: fill,
+            sentence: sentence
+        )
         .task(
             id: Wanted(
                 url: url,
@@ -1263,9 +1287,35 @@ struct RemoteImage: View {
         }
     }
 
+    /// VoiceOver on the place itself. Failed keeps the retry as an action a reader can activate;
+    /// the inner `ShellFailure` button is the finger's path and is ignored here so the sentence
+    /// is said once.
+    private func voiced<V: View>(_ view: V, fill: Fill, sentence: String?) -> some View {
+        let clipped = view.clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        return Group {
+            if fill == .failed {
+                clipped
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(Text(sentence ?? ""))
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityHint(Text(ShellFailure.retryName))
+                    .accessibilityAction(named: Text(ShellFailure.retryName)) {
+                        Task { await cache.retry(url, scale: displayScale, tier: tier, host: host) }
+                    }
+            } else {
+                clipped
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(Text(sentence ?? ""))
+                    .accessibilityHidden(sentence == nil)
+                    .accessibilityAddTraits(fill == .waiting && sentence != nil ? .updatesFrequently : [])
+            }
+        }
+    }
+
     /// Nothing to come, or nothing came. To a reader those are one thing — there is no picture
     /// here — so they get one mark, and it says which kind of nothing it is. Quiet: it is a fact
-    /// about the row, not a fault anyone has to do something about.
+    /// about the row, not a fault anyone has to do something about. A wait that ended with
+    /// nothing is `Fill.failed`, not this.
     private var absent: some View {
         ShellChrome.well(colorScheme)
             .overlay {

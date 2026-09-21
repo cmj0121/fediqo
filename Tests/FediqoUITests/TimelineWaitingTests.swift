@@ -19,6 +19,10 @@ struct TimelineWaitingTests {
         #expect(TimelinePane.standing(
             running: true, hasItems: false, searching: false, hasSources: true
         ) == .arriving)
+        #expect(TimelinePane.standing(
+            running: true, hasItems: false, searching: false, hasSources: true,
+            failed: ["one.example"]
+        ) == .arriving)
     }
 
     /// What is already held is read at once. A skeleton on top of real posts would hide them
@@ -30,7 +34,8 @@ struct TimelineWaitingTests {
         ) == .held)
     }
 
-    /// Nothing on the wire and nothing in the list is empty, not a wait that never ends.
+    /// Nothing on the wire and nothing in the list is empty, not a wait that never ends —
+    /// unless the wait ended in failure, which is a different place.
     @Test("Empty and not running is not arriving")
     func emptyAndNotRunningIsEmpty() {
         #expect(TimelinePane.standing(
@@ -38,8 +43,46 @@ struct TimelineWaitingTests {
         ) == .empty)
     }
 
+    /// Empty, not running, somebody was asked, and they did not answer: the place the rows
+    /// would have taken, not a wait that goes on and not today's empty notice.
+    @Test("Empty, not running, and a source that did not answer is failed")
+    func emptyAndFailedIsFailed() {
+        #expect(TimelinePane.standing(
+            running: false, hasItems: false, searching: false, hasSources: true,
+            failed: ["one.example"]
+        ) == .failed)
+        #expect(TimelinePane.standing(
+            running: false, hasItems: false, searching: false, hasSources: true,
+            failed: ["one.example", "two.example"]
+        ) == .failed)
+    }
+
+    /// Held still wins: rows already here are read at once, and the quiet line is whose
+    /// turn it is to say who did not answer.
+    @Test("Held items and a failed source still draw the items")
+    func heldItemsAreNotAFailurePlace() {
+        #expect(TimelinePane.standing(
+            running: false, hasItems: true, searching: false, hasSources: true,
+            failed: ["one.example"]
+        ) == .held)
+    }
+
+    /// A second miss replaces: standing reads the list it is handed, and a longer list is
+    /// still one failed place.
+    @Test("A second failed source does not make a second standing")
+    func failedDoesNotStack() {
+        #expect(TimelinePane.standing(
+            running: false, hasItems: false, searching: false, hasSources: true,
+            failed: ["one.example"]
+        ) == TimelinePane.standing(
+            running: false, hasItems: false, searching: false, hasSources: true,
+            failed: ["one.example", "two.example"]
+        ))
+    }
+
     /// Search already has indexing and empty notices. Waiting rows would be a second
-    /// vocabulary for a miss this device already knows is a miss.
+    /// vocabulary for a miss this device already knows is a miss. Search asks no source,
+    /// so a failed reload is not a search failure either.
     @Test("An empty search is not timeline waiting rows")
     func emptySearchIsNotArriving() {
         #expect(TimelinePane.standing(
@@ -47,6 +90,10 @@ struct TimelineWaitingTests {
         ) == .empty)
         #expect(TimelinePane.standing(
             running: false, hasItems: false, searching: true, hasSources: true
+        ) == .empty)
+        #expect(TimelinePane.standing(
+            running: false, hasItems: false, searching: true, hasSources: true,
+            failed: ["one.example"]
         ) == .empty)
     }
 
@@ -59,6 +106,10 @@ struct TimelineWaitingTests {
         ) == .empty)
         #expect(TimelinePane.standing(
             running: true, hasItems: false, searching: false, hasSources: false
+        ) == .empty)
+        #expect(TimelinePane.standing(
+            running: false, hasItems: false, searching: false, hasSources: false,
+            failed: ["one.example"]
         ) == .empty)
     }
 
@@ -74,6 +125,12 @@ struct TimelineWaitingTests {
         #expect(ShellWaiting.voice(speaks: TimelinePane.headerWaitingSpeaks(standing: .arriving)) == nil)
         #expect(TimelinePane.headerWaitingSpeaks(standing: .held))
         #expect(TimelinePane.headerWaitingSpeaks(standing: .empty))
+        #expect(TimelinePane.headerWaitingSpeaks(standing: .failed))
+        #expect(!TimelinePane.headerShowsReloadLine(standing: .failed, threadFailed: false))
+        #expect(!TimelinePane.headerShowsReloadLine(standing: .held, threadFailed: true))
+        #expect(TimelinePane.headerShowsReloadLine(standing: .held, threadFailed: false))
+        #expect(TimelinePane.headerShowsReloadLine(standing: .arriving, threadFailed: false))
+        #expect(TimelinePane.headerShowsReloadLine(standing: .empty, threadFailed: false))
     }
 
     /// The place is DummyItemRow's height, wide and compact: the same fittings, and compact

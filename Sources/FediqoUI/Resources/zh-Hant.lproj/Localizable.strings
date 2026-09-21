@@ -492,3 +492,7 @@
 /* #64 — the one way of saying something is on its way. Spoken only: the plate itself is what a
    reader sees, and it carries no words. */
 "shell.waiting"                       = "正在讀取…";
+
+/* #67 — what did not arrive, said in the place it would have taken. */
+"shell.failed"                        = "%@ 沒有回應。";
+"shell.failed.retry"                  = "再試一次";

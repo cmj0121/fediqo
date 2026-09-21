@@ -80,6 +80,9 @@ struct TimelinePane: View {
         /// Posts this device already holds. Drawn at once — a skeleton on top of them would hide
         /// what is already here.
         case held
+        /// The wait ended and nothing came: the place the rows would have taken, named as a
+        /// failure, with a way to ask again from here.
+        case failed
         /// Nothing on the wire, or a search, or nobody joined: today's empty notice.
         case empty
     }
@@ -87,19 +90,24 @@ struct TimelinePane: View {
     /// Arriving only while a reload is on the wire and the list in front is empty.
     ///
     /// **Held wins.** What is already here is read at once; only what has not arrived waits.
-    /// **Search is not a timeline wait.** An empty search already has its own indexing and empty
-    /// notices; turning it into waiting rows would be a second vocabulary for a local miss.
-    /// **No sources is empty, never waiting.** There is nobody to ask, so a plate standing for a
-    /// row that will never come is a wait that never ends.
+    /// **Search is not a timeline wait, and not a timeline failure.** An empty search already
+    /// has its own indexing and empty notices; it asks no source, so a network miss here would
+    /// be a second vocabulary for a local miss.
+    /// **No sources is empty, never waiting or failed.** There is nobody to ask, so a plate
+    /// standing for a row that will never come is a wait that never ends.
+    /// **Failed is the wait that ended.** Empty, not running, somebody was asked, and they did
+    /// not answer: the place the rows would have taken says so, rather than going on waiting.
     static func standing(
         running: Bool,
         hasItems: Bool,
         searching: Bool,
-        hasSources: Bool
+        hasSources: Bool,
+        failed: [String] = []
     ) -> Standing {
         if hasItems { return .held }
         if searching || !hasSources { return .empty }
-        return running ? .arriving : .empty
+        if running { return .arriving }
+        return failed.isEmpty ? .empty : .failed
     }
 
     /// The header plate is silent while the stream is arriving: the group below is already that
@@ -108,12 +116,20 @@ struct TimelinePane: View {
         standing != .arriving
     }
 
+    /// The quiet reload line is folded into the failure place when that place is showing, so
+    /// the same words are not said twice. Held-plus-failed keeps the line: the rows are the
+    /// content, and the line is the one quiet fact about who did not answer.
+    static func headerShowsReloadLine(standing: Standing, threadFailed: Bool) -> Bool {
+        standing != .failed && !threadFailed
+    }
+
     private var stream: Standing {
         Self.standing(
             running: session.reload.running,
             hasItems: !items.isEmpty,
             searching: search?.isSearching == true,
-            hasSources: !session.sources.isEmpty
+            hasSources: !session.sources.isEmpty,
+            failed: session.reload.failed
         )
     }
 
@@ -144,7 +160,9 @@ struct TimelinePane: View {
                     onOpenThread: onOpenThread,
                     jumpToTop: jumpToTop,
                     onToast: showToast,
-                    onBack: onPopThread
+                    onBack: onPopThread,
+                    failed: session.reload.failed,
+                    onReload: ways.onReload
                 )
                 // One pane per thread, so going back from a nested one draws its parent afresh.
                 .id(opened.id)
@@ -152,6 +170,8 @@ struct TimelinePane: View {
                 switch stream {
                 case .held: list
                 case .arriving: TimelineWaiting()
+                case .failed:
+                    ShellFailure(sources: session.reload.failed, retry: ways.onReload)
                 case .empty: empty
                 }
             }
@@ -397,7 +417,11 @@ struct TimelinePane: View {
             if let latest = prefs.latestDate {
                 latestMark(latest)
             }
-            if let line = session.reload.line {
+            if let line = session.reload.line,
+               Self.headerShowsReloadLine(
+                standing: stream,
+                threadFailed: openedItem != nil && !session.reload.failed.isEmpty
+               ) {
                 Text(line)
                     .font(ShellType.meta)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
