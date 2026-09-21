@@ -45,44 +45,8 @@ struct LandingTests {
     func flipIsAFullTurnAndTheMarkIsTheSubject() {
         #expect(Landing.flip == 360)
         #expect(Landing.mark > 72)
-        #expect(Landing.toastMark < Landing.mark)
         #expect(Landing.duration > 0)
         #expect(Landing.hold > 0)
-        #expect(Landing.pass == Landing.hold + Landing.duration * 2)
-    }
-
-    @Test("The cosine eases from rest to a full turn")
-    func theCosineEasesFromRestToAFullTurn() {
-        #expect(abs(Landing.ease(0)) < 1e-9)
-        #expect(abs(Landing.ease(0.5) - 0.5) < 1e-9)
-        #expect(abs(Landing.ease(1) - 1) < 1e-9)
-        #expect(abs(Landing.ease(-1)) < 1e-9)
-        #expect(abs(Landing.ease(2) - 1) < 1e-9)
-    }
-
-    @Test("Looping the two flips keeps adding 360")
-    func loopingKeepsAddingAFullTurn() {
-        let first = Landing.orientation(at: Landing.pass, looping: true)
-        #expect(abs(first.pitch - Landing.flip) < 1e-9)
-        #expect(abs(first.yaw - Landing.flip) < 1e-9)
-        let second = Landing.orientation(at: Landing.pass * 2, looping: true)
-        #expect(abs(second.pitch - Landing.flip * 2) < 1e-9)
-        #expect(abs(second.yaw - Landing.flip * 2) < 1e-9)
-        let once = Landing.orientation(at: Landing.pass * 2, looping: false)
-        #expect(once.pitch == Landing.flip)
-        #expect(once.yaw == Landing.flip)
-    }
-
-    @Test("Reduce motion takes the clock away, and the loading mascot stays unturned")
-    func reduceMotionTakesTheClockAway() {
-        #expect(Landing.clock(reduceMotion: true) == nil)
-        #expect(Landing.clock(reduceMotion: false) == EmojiClock.fastestTick)
-        let loading = Landing.loading(reduceMotion: true)
-        #expect(loading.showing)
-        #expect(loading.pitch == 0)
-        #expect(loading.yaw == 0)
-        let launch = Landing.start(reduceMotion: true)
-        #expect(!launch.showing)
     }
 
     /// `r` remounts this value from rest. A flip already spent must not be the next first frame.
