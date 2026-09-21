@@ -187,7 +187,10 @@ final class ShellConversations {
         // The pane draws an unasked standing as coming, so a post this returns from in silence
         // would wait for an answer nothing is going to bring.
         guard let held = session.notes.first(where: { $0.key.rowID == item.id }),
-              held.source.kind == .mastodon
+              // The server's own answer where it has given one — #86. A host that has stopped
+              // being a Mastodon has no conversation this unit can ask it for, whatever the row
+              // was stored as.
+              session.flavours.speaking(held.source.host, storedAs: held.source.kind) == .mastodon
         else {
             standings[item.id] = ShellConversationStanding.none
             return

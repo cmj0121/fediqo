@@ -97,6 +97,7 @@
 "timeline.latest.label" = "Showing posts up to %@; newer posts are hidden";
 "timeline.reload.progress" = "Reloading…";
 "timeline.reload.failed" = "Could not reload %@.";
+"timeline.reload.unspoken" = "%1$@ now answers as %2$@, which Fediqo does not read. What it brought here is still here.";
 "timeline.reload.stopped" = "Reload stopped.";
 "thread.reload.unfindable" = "This post can't be reloaded: sign in to %@ to find it there.";
 "thread.reload.notfound" = "This post can't be reloaded: %@ did not find it.";

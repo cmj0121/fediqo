@@ -60,6 +60,10 @@ final class ShellSession {
     /// Nothing it holds is in the store's list of rows; see its own doc.
     let conversations = ShellConversations()
 
+    /// What each server says it is, asked of that server rather than read off what was written
+    /// down when it was joined — #86. On the session for `conversations`' reason.
+    let flavours = ShellFlavours()
+
     /// `r` (#29): one reload at a time, and what the last one could not read.
     let reload = ShellReload()
 
@@ -1311,7 +1315,11 @@ final class ShellSession {
 
     /// What the store now holds, and the queries that draw it.
     private func adopt() async {
-        sources = await store.sources()
+        // **Projected through what each server says it is** — #86. One place, so the row, the
+        // tabs, a rule and a read all speak to a host under the name its own server gave rather
+        // than the one written down when it was joined. Identity where nothing has been said,
+        // which is every host until a read asks one.
+        sources = await store.sources().map(flavours.spoken)
         notes = await store.all()
         rebuildQueries()
     }
@@ -1448,6 +1456,9 @@ final class ShellSession {
         // Seven became eight, for the same reason: an open thread's answers are this device's
         // copy of that server's words too.
         conversations.forget(host: host)
+        // And nine: what the server last said it was is that server's word, not this device's
+        // note. Dropped with the rest, so the next read asks it again.
+        flavours.forget(host: host)
         await forums.forget(host: host)
         // Decision 10: a Mastodon's sign-in goes with a Clear as a forum's does. Signing out
         // drops nothing that Home or a list brought in.

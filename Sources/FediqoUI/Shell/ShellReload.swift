@@ -26,6 +26,10 @@ final class ShellReload {
     private(set) var landed = 0
     /// An open post the last reload could not find on its server, and why. Never guessed at.
     private(set) var unfindable: Unfindable?
+    /// A source the last reload found speaking something this app does not read (#86). One, not
+    /// a list, for `unfindable`'s reason: the sentence names one host and there is one line to
+    /// say it on.
+    private(set) var unspoken: Unspoken?
     /// The last reload was stopped by the reader before it finished.
     private(set) var stopped = false
 
@@ -40,6 +44,22 @@ final class ShellReload {
     @ObservationIgnored private var generation = 0
     /// Work read as the reader, per host, so `stop(host:)` can end it.
     @ObservationIgnored private var asYou: [String: [UUID: () -> Void]] = [:]
+
+    /// A source this device holds as a Mastodon whose **own server now answers as something this
+    /// app does not read** — #86.
+    ///
+    /// Not a failure and not a guess. The host answered, it named itself, and the name is one
+    /// `SourceJoin.reads` says no to; what was written down when the reader joined it is simply
+    /// no longer what is there. The source stays, its rows stay, and this run does not go on
+    /// speaking Mastodon to a server that has stopped being one.
+    struct Unspoken: Equatable, Sendable {
+        let host: String
+        let kind: ProtocolKind
+
+        var sentence: String {
+            String(format: L10n.t("timeline.reload.unspoken"), host, kind.displayName)
+        }
+    }
 
     /// Why an open Mastodon post, held without its server id, could not be read again.
     enum Unfindable: Equatable, Sendable {
@@ -65,6 +85,10 @@ final class ShellReload {
         if running { return L10n.t("timeline.reload.progress") }
         if stopped { return L10n.t("timeline.reload.stopped") }
         if let unfindable { return unfindable.sentence }
+        // **Before the failures, because it is the more particular fact.** A server that told
+        // this app what it now speaks answered perfectly well; saying "did not answer" about it
+        // would be this device reporting its own refusal to read as the server's silence.
+        if let unspoken { return unspoken.sentence }
         guard !failed.isEmpty else { return nil }
         return String(format: L10n.t("timeline.reload.failed"), failed.joined(separator: ", "))
     }
@@ -78,10 +102,36 @@ final class ShellReload {
             let sources = session.sources
             let asks = CompiledTimeline(query.definition(among: session.written), sources: sources)
                 .sourcesToAsk()
+            // What the last run found is not this run's fact about any server. Cleared here
+            // rather than at the end, so a run that is stopped halfway leaves nothing standing.
+            self.unspoken = nil
+
+            // **Every server is asked what it is before any of them is spoken to** — #86.
+            //
+            // Here and not inside each read, for two reasons. They go out together, so the whole
+            // reload waits one round trip rather than each source waiting its own; and the
+            // answers are in before `reloadFromStore` below projects them onto the sources, so
+            // the reads under it work from what the servers just said. A host answers this once
+            // and is not asked again until a Clear or a Remove.
+            await withTaskGroup(of: Void.self) { group in
+                for ask in asks where sources.first(where: { $0.host == ask.host })?.kind.hasTimelines == true {
+                    group.addTask { await session.flavours.ask(ask.host, through: self.timed(session.http)) }
+                }
+            }
+            guard !Task.isCancelled else { return }
+            await session.reloadFromStore()
+            let spoken = session.sources
+
             var unread: Set<String> = []
             await withTaskGroup(of: (String, Bool).self) { group in
                 for ask in asks {
-                    guard let source = sources.first(where: { $0.host == ask.host }) else { continue }
+                    guard let source = spoken.first(where: { $0.host == ask.host }) else { continue }
+                    // It answered, and it answered as something this app does not read. Nothing
+                    // failed, so it is not reported silent; it is its own sentence, said once.
+                    guard SourceJoin.reads(source.kind) else {
+                        self.unspoken = self.unspoken ?? Unspoken(host: source.host, kind: source.kind)
+                        continue
+                    }
                     group.addTask { (ask.host, await self.read(source, for: ask.categories, in: session)) }
                 }
                 for await (host, read) in group {
@@ -215,7 +265,10 @@ final class ShellReload {
         let host = held.source.host
         let stamp = Source(host: host, kind: held.source.kind)
         do {
-            switch held.source.kind {
+            // **What the server says it is, not what the note remembers** — #86. The stamp above
+            // keeps the stored kind, because what a note records is where it came from and this
+            // device is not rewriting that; what is switched on is who to speak to now.
+            switch session.flavours.speaking(host, storedAs: held.source.kind) {
             case .mastodon:
                 return try await againOnMastodon(held, stamp: stamp, in: session)
             case .discourse:

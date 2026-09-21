@@ -534,8 +534,14 @@ struct TimelinePane: View {
             sources: session.sources,
             index: session.textIndex,
             latest: prefs.latestDate,
+            // **"Asked, and there is genuinely nothing"** — which a run that skipped a source
+            // cannot claim. A host that answered as something this app does not read leaves
+            // `failed` empty (it did not fail to answer), so without the third clause an empty
+            // timeline would read as settled under a toast saying one of its sources was never
+            // spoken to (#86).
             asked: session.reload.landed > 0
                 && session.reload.failed.isEmpty
+                && session.reload.unspoken == nil
                 && !session.reload.stopped
         ))
     }

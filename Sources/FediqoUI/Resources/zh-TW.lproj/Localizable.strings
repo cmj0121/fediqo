@@ -97,6 +97,7 @@
 "timeline.latest.label" = "只顯示 %@ 以前的貼文，較新的貼文已隱藏";
 "timeline.reload.progress" = "重新載入中…";
 "timeline.reload.failed" = "無法重新載入 %@。";
+"timeline.reload.unspoken" = "%1$@ 現在自稱是 %2$@，Fediqo 讀不了。它先前帶來的東西仍然都在。";
 "timeline.reload.stopped" = "已停止重新載入。";
 "thread.reload.unfindable" = "這篇無法重新載入：登入 %@ 才能在那裡找到它。";
 "thread.reload.notfound" = "這篇無法重新載入：%@ 找不到它。";
