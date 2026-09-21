@@ -62,27 +62,46 @@ struct TimelineWaitingTests {
         ) == .empty)
     }
 
-    /// One waiting place, one sentence. The plates are silent so a reader is not told
-    /// "Loading…" once per band.
+    /// One waiting place, one sentence. The plates in a row are silent, and so is the header
+    /// plate while the stream is arriving — that sentence is already the group's.
     @Test("VoiceOver is owed the waiting sentence once, not once per plate")
     func voiceOverSpeaksOnce() {
         #expect(TimelineWaiting.plateSpeaks == false)
         #expect(ShellWaiting.voice(speaks: TimelineWaiting.plateSpeaks) == nil)
         #expect(TimelineWaiting.spoken == ShellWaiting.spoken)
         #expect(TimelineWaiting.spoken == L10n.t("shell.waiting"))
+        #expect(TimelinePane.headerWaitingSpeaks(standing: .arriving) == false)
+        #expect(ShellWaiting.voice(speaks: TimelinePane.headerWaitingSpeaks(standing: .arriving)) == nil)
+        #expect(TimelinePane.headerWaitingSpeaks(standing: .held))
+        #expect(TimelinePane.headerWaitingSpeaks(standing: .empty))
     }
 
-    /// The place is DummyItemRow's height: headline at the avatar, words at the thumb, the
-    /// marks at a finger's floor, the row's own padding and the gaps between bands. A second
-    /// guessed height would move the list when the row arrived.
+    /// The place is DummyItemRow's height, wide and compact: the same fittings, and compact
+    /// drops the thumb column the way the row does. `rowHeight` is what the view frames to —
+    /// a sum that is not that function would leave this green while the list jumped.
     @Test("A waiting row's height is DummyItemRow's fittings")
     func waitingRowHeightIsTheRows() {
-        #expect(TimelineWaiting.rowHeight == DummyItemRow.Box.avatar
+        let wide = TimelineWaiting.rowHeight(narrow: false)
+        #expect(wide == DummyItemRow.Box.avatar
             + DummyItemRow.Box.thumb
             + TimelineWaiting.marks
             + ShellSpace.snug * 2
             + ShellSpace.step * 2)
-        #expect(TimelineWaiting.rowHeight > DummyItemRow.Box.thumb)
+        #expect(TimelineWaiting.wordsHeight(narrow: false) == DummyItemRow.Box.thumb)
+
+        let compact = TimelineWaiting.rowHeight(narrow: true)
+        #expect(compact == DummyItemRow.Box.avatar
+            + TimelineWaiting.compactWords
+            + TimelineWaiting.marks
+            + ShellSpace.snug * 2
+            + ShellSpace.step * 2)
+        #expect(TimelineWaiting.compactWords
+            == ShellSpace.snug * 3 + ShellSpace.tight * 2)
+        #expect(TimelineWaiting.wordsHeight(narrow: true) == TimelineWaiting.compactWords)
+        #expect(TimelineWaiting.wordsHeight(narrow: true) != DummyItemRow.Box.thumb)
+        #expect(compact == wide - DummyItemRow.Box.thumb + TimelineWaiting.compactWords)
+        #expect(compact < wide)
+
         #expect(TimelineWaiting.places > 0)
         #expect(TimelineWaiting.places < 40)
     }
