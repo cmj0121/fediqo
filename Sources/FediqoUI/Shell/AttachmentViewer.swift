@@ -51,7 +51,7 @@ struct AttachmentViewer: View {
 
     /// What a finger gets on the mark that turns the deck, whatever the numerals in it measure.
     /// The same floor and the same scale as `TimelinePane.touch` and `DummyItemRow.touch`.
-    @ScaledMetric(relativeTo: .caption) private var touch: CGFloat = 32
+    @ShellMetric(relativeTo: .caption) private var touch: CGFloat = 32
 
     /// How far the reader has magnified the picture, and what a pinch in progress is adding.
     ///
@@ -323,7 +323,7 @@ struct AttachmentViewer: View {
         if attachments.count > 1 {
             Button(action: onTurn) {
                 Text(position)
-                    .font(ShellType.mark)
+                    .shellFont(.mark)
                     .foregroundStyle(ShellChrome.overPicture.opacity(0.65))
                     .padding(.horizontal, ShellSpace.snug)
                     .padding(.vertical, ShellSpace.tight)
@@ -361,7 +361,7 @@ struct AttachmentViewer: View {
                 CoverChip(lifted: !covered, onPicture: true)
                 if let coverLine {
                     Text(coverLine)
-                        .font(ShellType.body.weight(.medium))
+                        .shellFont(.body, weight: .medium)
                         .foregroundStyle(ShellChrome.overPicture)
                         .multilineTextAlignment(.center)
                         .lineLimit(Box.captionLines)
@@ -384,12 +384,12 @@ struct AttachmentViewer: View {
         Button(action: onToggleCover) {
             HStack(spacing: ShellSpace.snug) {
                 Text(verbatim: "s")
-                    .font(ShellType.keycap)
+                    .shellFont(.keycap)
                     .padding(.horizontal, ShellSpace.snug)
                     .padding(.vertical, ShellSpace.hair * 2)
                     .background(Capsule(style: .continuous).fill(ShellChrome.scrim))
                 Text(L10n.t("item.covered.show"))
-                    .font(ShellType.meta)
+                    .shellFont(.meta)
             }
             .foregroundStyle(ShellChrome.overPicture)
             .contentShape(Rectangle())
@@ -430,7 +430,7 @@ struct AttachmentViewer: View {
         if !covered, let symbol = AttachmentDeck.playSymbol(of: attachment) {
             Button(action: onPlay) {
                 Image(systemName: symbol)
-                    .font(ShellType.pane)
+                    .shellFont(.pane)
                     .foregroundStyle(ShellChrome.overPicture)
                     .padding(ShellSpace.pad)
                     .background(Circle().fill(ShellChrome.scrim))
@@ -450,7 +450,7 @@ struct AttachmentViewer: View {
     private var closeMark: some View {
         Button(action: onClose) {
             Image(systemName: "xmark")
-                .font(ShellType.name)
+                .shellFont(.name)
                 .foregroundStyle(ShellChrome.overPicture)
                 .padding(ShellSpace.step)
                 .background(Circle().fill(ShellChrome.scrim))

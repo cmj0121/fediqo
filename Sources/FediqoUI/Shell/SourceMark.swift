@@ -193,7 +193,7 @@ struct SourceMarkRow: View {
     /// the 64-unit grid was made for, and a 3x phone reaches the fine one.
     @Environment(\.displayScale) private var displayScale
     /// Scaling, unlike the 28pt avatar it replaces, because it sits beside text that scales.
-    @ScaledMetric(relativeTo: .callout) private var glyph: CGFloat = 16
+    @ShellMetric(relativeTo: .callout) private var glyph: CGFloat = 16
 
     /// How many glyphs are drawn before the line stops growing. **The sentence carries a seventh**,
     /// which is the whole reason a cap is affordable: nothing is hidden by it, because the count is
@@ -246,7 +246,7 @@ struct SourceMarkRow: View {
                 }
             }
             Text(line)
-                .font(ShellType.mark)
+                .shellFont(.mark)
                 .foregroundStyle(ShellChrome.inkFaint(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
         }

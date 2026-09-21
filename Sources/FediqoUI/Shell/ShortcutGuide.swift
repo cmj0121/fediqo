@@ -23,17 +23,17 @@ struct ShortcutGuide: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text(L10n.t("shortcut.title"))
-                    .font(ShellType.pane)
+                    .shellFont(.pane)
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                 Spacer()
                 Button(L10n.t("shortcut.close"), action: onClose)
                     .buttonStyle(.plain)
-                    .font(ShellType.meta)
+                    .shellFont(.meta)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
             }
 
             Text(L10n.t("shortcut.note"))
-                .font(ShellType.meta)
+                .shellFont(.meta)
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -73,7 +73,7 @@ struct ShortcutGuide: View {
                     Text(L10n.t(group.titleKey))
                         .lineLimit(1)
                         .fixedSize()
-                        .font(ShellType.meta.weight(selected ? .semibold : .regular))
+                        .shellFont(.meta, weight: selected ? .semibold : .regular)
                         .foregroundStyle(
                             selected
                                 ? ShellChrome.selectInk(colorScheme)
@@ -114,7 +114,7 @@ struct ShortcutGuide: View {
                 GridRow {
                     keys(of: line)
                     Text(line.detail)
-                        .font(ShellType.body)
+                        .shellFont(.body)
                         .foregroundStyle(ShellChrome.ink(colorScheme))
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -127,7 +127,7 @@ struct ShortcutGuide: View {
         HStack(spacing: 4) {
             ForEach(line.keys, id: \.self) { cap in
                 Text(cap)
-                    .font(ShellType.keycap)
+                    .shellFont(.keycap)
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                     .padding(.horizontal, ShellSpace.snug)
                     .padding(.vertical, ShellSpace.tight)

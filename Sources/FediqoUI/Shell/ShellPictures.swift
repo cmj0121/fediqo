@@ -1320,7 +1320,7 @@ struct RemoteImage: View {
         ShellChrome.well(colorScheme)
             .overlay {
                 Image(systemName: standing == .avatar ? "person.fill" : "photo")
-                    .font(standing == .avatar ? ShellType.meta : ShellType.body)
+                    .shellFont(standing == .avatar ? .meta : .body)
                     .foregroundStyle(ShellChrome.inkFaint(colorScheme))
             }
     }

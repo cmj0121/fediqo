@@ -83,7 +83,7 @@ struct ComposerSheet: View {
                 } else {
                     if offered.isEmpty, failedHost == nil {
                         Text(L10n.t("compose.none.detail"))
-                            .font(ShellType.meta)
+                            .shellFont(.meta)
                             .foregroundStyle(ShellChrome.inkDim(colorScheme))
                             .fixedSize(horizontal: false, vertical: true)
                     } else if !offered.isEmpty {
@@ -93,6 +93,7 @@ struct ComposerSheet: View {
                                     Text(source.host).tag(Optional(source.host))
                                 }
                             }
+                            .shellFont(.meta)
                             .accessibilityLabel(L10n.t("compose.source"))
                             Picker(L10n.t("compose.visibility"), selection: $session.composeAudience)
                             {
@@ -100,19 +101,20 @@ struct ComposerSheet: View {
                                     Text(L10n.t(Self.visibilityKey(audience))).tag(audience)
                                 }
                             }
+                            .shellFont(.meta)
                             .accessibilityLabel(L10n.t("compose.visibility"))
                         }
                         .pickerStyle(.menu)
                         .disabled(sending)
                     }
                     Text(Self.limitLine(remaining: remaining, limit: limit))
-                        .font(ShellType.reading)
+                        .shellFont(.reading)
                         .foregroundStyle(ShellChrome.inkFaint(colorScheme))
                         .accessibilityLabel(
                             Text(Self.limitLine(remaining: remaining, limit: limit))
                         )
                     TextEditor(text: $session.composeDraft)
-                        .font(ShellType.body)
+                        .shellFont(.body)
                         .scrollContentBackground(.hidden)
                         .scrollIndicators(.never)
                         .foregroundStyle(ShellChrome.ink(colorScheme))

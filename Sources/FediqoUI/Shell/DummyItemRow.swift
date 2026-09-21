@@ -94,26 +94,26 @@ struct DummyItemRow: View {
     /// They used to be fixed: the words grew with the reader's preference and the
     /// avatar, the thumbnail and every mark stayed exactly where they were, so at the
     /// largest size a row was big text wrapped around small furniture.
-    @ScaledMetric(relativeTo: .body) private var avatarSide: CGFloat = Box.avatar
-    @ScaledMetric(relativeTo: .body) private var thumbSide: CGFloat = Box.thumb
-    @ScaledMetric(relativeTo: .caption) private var vis: CGFloat = 16
-    @ScaledMetric(relativeTo: .caption) private var glyph: CGFloat = 17
-    @ScaledMetric(relativeTo: .caption) private var countBox: CGFloat = 20
+    @ShellMetric(relativeTo: .body) private var avatarSide: CGFloat = Box.avatar
+    @ShellMetric(relativeTo: .body) private var thumbSide: CGFloat = Box.thumb
+    @ShellMetric(relativeTo: .caption) private var vis: CGFloat = 16
+    @ShellMetric(relativeTo: .caption) private var glyph: CGFloat = 17
+    @ShellMetric(relativeTo: .caption) private var countBox: CGFloat = 20
     /// What a finger gets, whatever the glyph drawn inside it measures.
-    @ScaledMetric(relativeTo: .caption) private var touch: CGFloat = 32
+    @ShellMetric(relativeTo: .caption) private var touch: CGFloat = 32
     /// How far a covered row is smeared. Scaled with the words for the same reason every other
     /// fitting here is, and here the reason is not proportion but correctness: a fixed radius that
     /// hides the default size leaves the largest size legible, and a cover that can be read
     /// through is not a cover.
-    @ScaledMetric(relativeTo: .body) private var smear: CGFloat = 10
+    @ShellMetric(relativeTo: .body) private var smear: CGFloat = 10
     /// How tall the cover is. **A fixed size, and that is the point of it**: a cover drawn around
     /// its contents is a cover that tells the reader how much is underneath, and it would be
     /// server text sizing a band again — the same defect as a row that grows with its post, one
     /// layer down. Whatever the author wrote and however long the post is, the cover is this.
-    @ScaledMetric(relativeTo: .body) private var coverBox: CGFloat = 44
+    @ShellMetric(relativeTo: .body) private var coverBox: CGFloat = 44
     /// One body line: the least the notice line takes, so the cover mark standing alone with no
     /// warning beside it leaves the band where a one-line warning would.
-    @ScaledMetric(relativeTo: .body) private var noticeLine: CGFloat = 22
+    @ShellMetric(relativeTo: .body) private var noticeLine: CGFloat = 22
 
     enum Box {
         /// The lamp is a lamp at every type size, and a corner is a corner.
@@ -289,7 +289,7 @@ struct DummyItemRow: View {
                 if item.answering != .nothing { answered }
                 if let who = item.boostedBy { boosted(by: who) }
             }
-            .font(ShellType.mark)
+            .shellFont(.mark)
             .foregroundStyle(ShellChrome.inkFaint(colorScheme))
             .lineLimit(1)
         }
@@ -424,7 +424,7 @@ struct DummyItemRow: View {
 
     private var postedAgo: some View {
         Text(item.postedAt, format: .relative(presentation: .numeric, unitsStyle: .abbreviated))
-            .font(ShellType.reading)
+            .shellFont(.reading)
             .foregroundStyle(ShellChrome.inkFaint(colorScheme))
             .lineLimit(1)
             .help(exactPostedAt)
@@ -439,7 +439,7 @@ struct DummyItemRow: View {
         Group {
             if let audience = item.audience {
                 Image(systemName: audience.symbolName)
-                    .font(ShellType.meta.weight(.medium))
+                    .shellFont(.meta, weight: .medium)
                     .foregroundStyle(ShellChrome.vis(audience, colorScheme))
                     .help(L10n.t("item.visibility.\(audience.rawValue)"))
                     .accessibilityLabel(L10n.t("item.visibility.\(audience.rawValue)"))
@@ -452,7 +452,7 @@ struct DummyItemRow: View {
     /// naming its own, so there is never a second host to count here.
     private var sourcePill: some View {
         Text(item.source.host)
-            .font(ShellType.mark)
+            .shellFont(.mark)
             .foregroundStyle(ShellChrome.inkDim(colorScheme))
             .lineLimit(1)
             .padding(.horizontal, ShellSpace.tight)
@@ -784,12 +784,12 @@ struct DummyItemRow: View {
         VStack(alignment: .leading, spacing: ShellSpace.tight) {
             if item.source.kind == .board, let board = item.board {
                 Text(board)
-                    .font(ShellType.meta)
+                    .shellFont(.meta)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
             }
             if let title = item.title {
                 Text(title)
-                    .font(ShellType.name)
+                    .shellFont(.name)
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                     .lineLimit(1)
             }
@@ -1099,7 +1099,7 @@ private struct DummyMarkButton: View {
                     .frame(width: glyph, height: glyph)
                 if let count {
                     Text(String(count))
-                        .font(ShellType.reading)
+                        .shellFont(.reading)
                         .frame(minWidth: countWidth, alignment: .leading)
                 }
             }

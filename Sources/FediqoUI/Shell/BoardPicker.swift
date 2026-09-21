@@ -46,10 +46,10 @@ struct BoardPickerList: View {
     /// `ShellType.name` that reaches `.accessibility1`, where the box read as a bullet rather than
     /// as a control. 20 at the default rung, one point over the name's cap height, so the box is
     /// the loudest thing on the row at every rung rather than only at the smallest.
-    @ScaledMetric(relativeTo: .callout) private var tickSize: CGFloat = 20
+    @ShellMetric(relativeTo: .callout) private var tickSize: CGFloat = 20
     /// Half a callout's cap height, scaling with it — `SourceRowView.capHalf`'s value and its
     /// reason, one file over. See `row(_:)`.
-    @ScaledMetric(relativeTo: .callout) private var capHalf: CGFloat = 6
+    @ShellMetric(relativeTo: .callout) private var capHalf: CGFloat = 6
 
     var body: some View {
         list
@@ -79,7 +79,7 @@ struct BoardPickerList: View {
 
     private func categoryHeader(_ category: DiscuzCategory) -> some View {
         Text(category.name)
-            .font(ShellType.name)
+            .shellFont(.name)
             .foregroundStyle(ShellChrome.inkDim(colorScheme))
             .lineLimit(2)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -149,7 +149,7 @@ struct BoardPickerList: View {
                         }
                     VStack(alignment: .leading, spacing: ShellSpace.tight) {
                         Text(board.name)
-                            .font(ShellType.name)
+                            .shellFont(.name)
                             .foregroundStyle(
                                 on
                                     ? ShellChrome.selectInk(colorScheme)
@@ -229,11 +229,11 @@ struct BoardPickerList: View {
     private func figures(_ board: DiscuzBoard) -> some View {
         if board.threads == nil, board.posts == nil, board.lastPostAt == nil {
             Text(L10n.t("board.choose.unstated"))
-                .font(ShellType.reading)
+                .shellFont(.reading)
                 .foregroundStyle(ShellChrome.inkFaint(colorScheme))
         } else {
             stated(board)
-                .font(ShellType.reading)
+                .shellFont(.reading)
                 .foregroundStyle(ShellChrome.inkFaint(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -314,14 +314,14 @@ struct ListPickerList: View {
     @Binding var picked: Set<String>
 
     @Environment(\.colorScheme) private var colorScheme
-    @ScaledMetric(relativeTo: .callout) private var tickSize: CGFloat = 20
+    @ShellMetric(relativeTo: .callout) private var tickSize: CGFloat = 20
 
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if offered.isEmpty {
                     Text(L10n.t("list.choose.none"))
-                        .font(ShellType.meta)
+                        .shellFont(.meta)
                         .foregroundStyle(ShellChrome.inkDim(colorScheme))
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(ShellSpace.pad)
@@ -345,7 +345,7 @@ struct ListPickerList: View {
             HStack(alignment: .center, spacing: ShellSpace.step) {
                 PickTick(on: on, size: tickSize)
                 Text(list.name)
-                    .font(ShellType.name)
+                    .shellFont(.name)
                     .foregroundStyle(
                         on ? ShellChrome.selectInk(colorScheme) : ShellChrome.ink(colorScheme)
                     )

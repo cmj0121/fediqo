@@ -45,9 +45,9 @@ struct RailView: View {
     /// was fine while the label was one line of the system's default; a step up the
     /// type ladder made two lines of it, and two lines do not fit in 32 points — the
     /// rows overlapped each other rather than the bar getting taller.
-    @ScaledMetric(relativeTo: .callout) private var well: CGFloat = Metrics.well
-    @ScaledMetric(relativeTo: .callout) private var glyph: CGFloat = Metrics.iconSize
-    @ScaledMetric(relativeTo: .callout) private var labelWidth: CGFloat = 148
+    @ShellMetric(relativeTo: .callout) private var well: CGFloat = Metrics.well
+    @ShellMetric(relativeTo: .callout) private var glyph: CGFloat = Metrics.iconSize
+    @ShellMetric(relativeTo: .callout) private var labelWidth: CGFloat = 148
 
     private var collapsedWidth: CGFloat { Metrics.side + well + Metrics.side }
     private var expandedWidth: CGFloat {
@@ -189,10 +189,13 @@ private struct RailButton: View {
     private var labels: some View {
         VStack(alignment: .leading, spacing: ShellSpace.hair) {
             Text(title)
-                .font(selected ? ShellType.name : .callout)
+                // `name` is `callout` at semibold, so the selected/unselected pair is one role
+                // at two weights rather than two fonts — which is also what lets it move with
+                // the type-size preference (#96).
+                .shellFont(.name, weight: selected ? .semibold : .regular)
                 .lineLimit(1)
             Text(summary)
-                .font(ShellType.meta)
+                .shellFont(.meta)
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .lineLimit(1)
         }

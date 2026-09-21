@@ -190,10 +190,10 @@ struct LinkReaderSheet: View {
     private var header: some View {
         HStack(spacing: ShellSpace.snug) {
             Image(systemName: "lock")
-                .font(ShellType.meta)
+                .shellFont(.meta)
                 .foregroundStyle(ShellChrome.inkFaint(colorScheme))
             Text(reading.host)
-                .font(ShellType.pane)
+                .shellFont(.pane)
                 .foregroundStyle(ShellChrome.ink(colorScheme))
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -214,9 +214,9 @@ struct LinkReaderSheet: View {
     private var refusal: some View {
         HStack(spacing: ShellSpace.snug) {
             Image(systemName: "exclamationmark.triangle")
-                .font(ShellType.meta)
+                .shellFont(.meta)
             Text(L10n.t("link.reader.refused"))
-                .font(ShellType.meta)
+                .shellFont(.meta)
                 .lineLimit(2)
             Spacer(minLength: ShellSpace.snug)
         }
@@ -236,7 +236,7 @@ struct LinkReaderSheet: View {
                 openURL(reading.showing)
             } label: {
                 Label(L10n.t("link.reader.browser"), systemImage: "arrow.up.forward.app")
-                    .font(ShellType.meta.weight(.medium))
+                    .shellFont(.meta, weight: .medium)
             }
             .buttonStyle(.plain)
             .foregroundStyle(ShellChrome.selectInk(colorScheme))

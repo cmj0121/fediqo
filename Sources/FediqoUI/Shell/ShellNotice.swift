@@ -16,7 +16,7 @@ struct ShellNotice: View {
 
     @Environment(\.colorScheme) private var colorScheme
 
-    @ScaledMetric(relativeTo: .title3) private var glyph: CGFloat = 28
+    @ShellMetric(relativeTo: .title3) private var glyph: CGFloat = 28
 
     private enum Metrics {
         /// An empty page is prose. It wraps where a sentence should.
@@ -43,10 +43,10 @@ struct ShellNotice: View {
                 .foregroundStyle(ShellChrome.inkFaint(colorScheme))
                 .accessibilityHidden(true)
             Text(title)
-                .font(ShellType.pane)
+                .shellFont(.pane)
                 .foregroundStyle(ShellChrome.ink(colorScheme))
             Text(detail)
-                .font(ShellType.body)
+                .shellFont(.body)
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
         }

@@ -24,13 +24,13 @@ struct SearchBar: View {
                 .frame(height: ShellSpace.hair)
             HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
                 Text(verbatim: "/")
-                    .font(ShellType.keycap.weight(.semibold))
+                    .shellFont(.keycap, weight: .semibold)
                     .foregroundStyle(focused ? ShellChrome.phosphor(colorScheme) : ShellChrome.inkDim(colorScheme))
                     .accessibilityHidden(true)
                 field
                 if let found {
                     Text(String(format: L10n.t("search.found"), found))
-                        .font(ShellType.meta)
+                        .shellFont(.meta)
                         .monospacedDigit()
                         .foregroundStyle(ShellChrome.inkDim(colorScheme))
                         .lineLimit(1)
@@ -58,7 +58,7 @@ struct SearchBar: View {
 
     private var field: some View {
         TextField(L10n.t("search.placeholder"), text: $search.text)
-            .font(ShellType.keycap)
+            .shellFont(.keycap)
             .textFieldStyle(.plain)
             .foregroundStyle(ShellChrome.ink(colorScheme))
             .focused($focused)
