@@ -14,6 +14,30 @@ struct ComposerSheet: View {
         rows.filter { $0.writing == .writes }.map(\.source)
     }
 
+    /// What the sheet draws: empty is only when there is nothing to write to **and** nothing
+    /// unsent and no failure in hand. A 403 or 401 that spends the last writable source must
+    /// not swallow the draft into that notice.
+    enum Surface: Equatable {
+        case empty
+        case composing
+    }
+
+    static func surface(offered: [Source], draft: String, failed: String?) -> Surface {
+        if !offered.isEmpty { return .composing }
+        if failed != nil { return .composing }
+        if !trimmed(draft).isEmpty { return .composing }
+        return .empty
+    }
+
+    /// Cancel is refused while a send is on the wire, so a late success cannot land on a
+    /// sheet the reader already left.
+    static func canDismiss(sending: Bool) -> Bool { !sending }
+
+    /// A landing clears the draft only where it is still the snapshot that was sent.
+    static func draftAfterLanding(current: String, sent: String) -> String {
+        trimmed(current) == sent ? "" : current
+    }
+
     static func trimmed(_ text: String) -> String {
         text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -48,29 +72,39 @@ struct ComposerSheet: View {
         let remaining = Self.remaining(session.composeDraft, limit: limit)
         NavigationStack {
             VStack(alignment: .leading, spacing: ShellSpace.step) {
-                if offered.isEmpty {
+                if Self.surface(offered: offered, draft: session.composeDraft, failed: failedHost)
+                    == .empty
+                {
                     ShellNotice(
                         symbol: "square.and.pencil",
                         title: L10n.t("compose.none.title"),
                         detail: L10n.t("compose.none.detail")
                     )
                 } else {
-                    HStack(alignment: .firstTextBaseline, spacing: ShellSpace.step) {
-                        Picker(L10n.t("compose.source"), selection: $session.composeHost) {
-                            ForEach(offered, id: \.host) { source in
-                                Text(source.host).tag(Optional(source.host))
+                    if offered.isEmpty, failedHost == nil {
+                        Text(L10n.t("compose.none.detail"))
+                            .font(ShellType.meta)
+                            .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else if !offered.isEmpty {
+                        HStack(alignment: .firstTextBaseline, spacing: ShellSpace.step) {
+                            Picker(L10n.t("compose.source"), selection: $session.composeHost) {
+                                ForEach(offered, id: \.host) { source in
+                                    Text(source.host).tag(Optional(source.host))
+                                }
                             }
-                        }
-                        .accessibilityLabel(L10n.t("compose.source"))
-                        Picker(L10n.t("compose.visibility"), selection: $session.composeAudience) {
-                            ForEach(Audience.allCases, id: \.self) { audience in
-                                Text(L10n.t(Self.visibilityKey(audience))).tag(audience)
+                            .accessibilityLabel(L10n.t("compose.source"))
+                            Picker(L10n.t("compose.visibility"), selection: $session.composeAudience)
+                            {
+                                ForEach(Audience.allCases, id: \.self) { audience in
+                                    Text(L10n.t(Self.visibilityKey(audience))).tag(audience)
+                                }
                             }
+                            .accessibilityLabel(L10n.t("compose.visibility"))
                         }
-                        .accessibilityLabel(L10n.t("compose.visibility"))
+                        .pickerStyle(.menu)
+                        .disabled(sending)
                     }
-                    .pickerStyle(.menu)
-                    .disabled(sending)
                     Text(Self.limitLine(remaining: remaining, limit: limit))
                         .font(ShellType.reading)
                         .foregroundStyle(ShellChrome.inkFaint(colorScheme))
@@ -106,7 +140,11 @@ struct ComposerSheet: View {
             #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(L10n.t("compose.cancel")) { dismiss() }
+                    Button(L10n.t("compose.cancel")) {
+                        guard Self.canDismiss(sending: sending) else { return }
+                        dismiss()
+                    }
+                    .disabled(!Self.canDismiss(sending: sending))
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(L10n.t("compose.post")) {
@@ -122,6 +160,7 @@ struct ComposerSheet: View {
         #else
         .frame(minWidth: 600, minHeight: 400)
         #endif
+        .interactiveDismissDisabled(!Self.canDismiss(sending: sending))
         .onAppear { session.prepareCompose() }
         .task(id: session.composeHost) { await session.refreshPostLimit() }
     }

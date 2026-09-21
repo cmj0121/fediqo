@@ -411,7 +411,7 @@ final class ShellSession {
         do {
             _ = try await MastodonWrite(door: door, store: store)
                 .post(text, visibility: composeAudience)
-            composeDraft = ""
+            composeDraft = ComposerSheet.draftAfterLanding(current: composeDraft, sent: text)
             await adopt()
             await persist?()
         } catch MastodonAuthError.signedOut {
