@@ -339,8 +339,88 @@ final class ShellSession {
         }
     }
 
+    /// The unsent text, kept when the composer closes without sending (#56). In-session only.
+    var composeDraft = ""
+    /// The source the composer will write to, among those that may be written on.
+    var composeHost: String?
+    /// How far the post goes. Default public, which is what a Mastodon calls everyone.
+    var composeAudience: Audience = .everyone
+    /// Ceilings already asked for this run, so opening compose twice does not ask twice.
+    @ObservationIgnored private var postLimits: [String: Int] = [:]
+
     var availability: ShellAvailability {
-        ShellAvailability(queryIDs: Set(queries.map(\.id)), signedIn: false)
+        ShellAvailability(
+            queryIDs: Set(queries.map(\.id)),
+            signedIn: sources.contains { isSignedIn(host: $0.host) }
+        )
+    }
+
+    /// Sources `SourceWriting.writes` names — forums, a read-only sign-in and a refused write
+    /// are not offered.
+    var writableSources: [Source] {
+        rows.filter { $0.writing == .writes }.map(\.source)
+    }
+
+    /// Chooses a source they may write on, if the one held is no longer offered.
+    func prepareCompose() {
+        let offered = writableSources
+        if let host = composeHost, offered.contains(where: { $0.host == host }) { return }
+        composeHost = offered.first?.host
+    }
+
+    func postLimit(of host: String) -> Int {
+        if let held = postLimits[host] { return held }
+        if case .stated(let profile) = profiles[host] {
+            return MastodonWrite.limit(advertised: profile.statusLimit)
+        }
+        return MastodonWrite.defaultLimit
+    }
+
+    /// Asks the instance where this run has not already been told, and remembers the answer.
+    func refreshPostLimit() async {
+        guard let host = composeHost else { return }
+        if postLimits[host] != nil { return }
+        if case .stated(let profile) = profiles[host] {
+            postLimits[host] = MastodonWrite.limit(advertised: profile.statusLimit)
+            return
+        }
+        postLimits[host] = await MastodonClient(http: http, host: host).statusLimit()
+    }
+
+    var canPost: Bool {
+        ComposerSheet.canSend(
+            text: composeDraft,
+            limit: composeHost.map(postLimit(of:)) ?? MastodonWrite.defaultLimit,
+            hasSource: composeHost.map { host in writableSources.contains { $0.host == host } }
+                ?? false
+        )
+    }
+
+    /// Writes the draft to the chosen source and takes the returned post into the store.
+    /// Empty or over-long text is not sent. A failure keeps the draft.
+    func post() async throws {
+        let text = composeDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, let host = composeHost else { return }
+        guard writableSources.contains(where: { $0.host == host }) else {
+            throw MastodonWriteError.noSource
+        }
+        guard text.count <= postLimit(of: host) else { return }
+        guard let door = mastodon.authorized(host: host) else {
+            throw MastodonWriteError.noSource
+        }
+        do {
+            _ = try await MastodonWrite(door: door, store: store)
+                .post(text, visibility: composeAudience)
+            composeDraft = ""
+            await adopt()
+            await persist?()
+        } catch MastodonAuthError.signedOut {
+            mastodon.endedByServer(host: host)
+            throw MastodonAuthError.signedOut
+        } catch MastodonAuthError.http(let status) where status == 403 {
+            mastodon.refusedWrite(host: host)
+            throw MastodonAuthError.http(403)
+        }
     }
 
     func isAdded(_ domain: String) -> Bool {
