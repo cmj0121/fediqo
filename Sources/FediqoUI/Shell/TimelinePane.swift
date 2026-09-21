@@ -102,6 +102,21 @@ struct TimelinePane: View {
         return running ? .arriving : .empty
     }
 
+    /// The header plate is silent while the stream is arriving: the group below is already that
+    /// sentence, and saying it twice is two waiting places for one wait.
+    static func headerWaitingSpeaks(standing: Standing) -> Bool {
+        standing != .arriving
+    }
+
+    private var stream: Standing {
+        Self.standing(
+            running: session.reload.running,
+            hasItems: !items.isEmpty,
+            searching: search?.isSearching == true,
+            hasSources: !session.sources.isEmpty
+        )
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
@@ -134,12 +149,7 @@ struct TimelinePane: View {
                 // One pane per thread, so going back from a nested one draws its parent afresh.
                 .id(opened.id)
             } else {
-                switch Self.standing(
-                    running: session.reload.running,
-                    hasItems: !items.isEmpty,
-                    searching: search?.isSearching == true,
-                    hasSources: !session.sources.isEmpty
-                ) {
+                switch stream {
                 case .held: list
                 case .arriving: TimelineWaiting()
                 case .empty: empty
@@ -483,12 +493,14 @@ struct TimelinePane: View {
     /// and nothing moves under the finger. That is `r`'s own answer while one runs, drawn.
     ///
     /// A screen reader is told "on its way" rather than offered a Reload button that would refuse
-    /// it. What is *on* the wire is still said in words on the line below the tabs.
+    /// it — unless the stream itself is arriving, in which case that sentence is the group's
+    /// below. What is *on* the wire is still said in words on the line below the tabs.
     @ViewBuilder
     private var reloadMark: some View {
         if ways.canReload {
             if session.reload.running {
-                ShellWaiting().frame(width: touch, height: touch)
+                ShellWaiting(speaks: Self.headerWaitingSpeaks(standing: stream))
+                    .frame(width: touch, height: touch)
             } else {
                 headerMark("arrow.clockwise", says: "shortcut.reload", action: ways.onReload)
             }
@@ -561,7 +573,7 @@ struct TimelinePane: View {
 /// DummyItemRow names four bands; the decorator is drawn only when a post has something to say
 /// there. A waiting place that held it open would be taller than the typical row that replaces
 /// it, which is the one thing this place is not allowed to be. Headline, words and marks are
-/// the three that every row keeps, sized from the same fittings.
+/// the three that every row keeps. Compact drops the thumb column, because DummyItemRow does.
 struct TimelineWaiting: View {
     /// A small run of places, not a list of forty.
     static let places = 6
@@ -569,6 +581,9 @@ struct TimelineWaiting: View {
     static let plateSpeaks = false
     /// DummyItemRow's finger floor at the standard type size, so this place is that row's height.
     static let marks: CGFloat = 32
+    /// Three placeholder lines, the typical compact words band: not the thumb, which that
+    /// layout does not keep.
+    static let compactWords: CGFloat = ShellSpace.snug * 3 + ShellSpace.tight * 2
 
     static var spoken: String { ShellWaiting.spoken }
 
@@ -577,11 +592,22 @@ struct TimelineWaiting: View {
         ShellWaiting.clock(reduceMotion: reduceMotion)
     }
 
-    /// Headline at the avatar, words at the thumb, marks at a finger's floor, the row's padding
-    /// and the gaps between bands.
-    static var rowHeight: CGFloat {
-        DummyItemRow.Box.avatar
-            + DummyItemRow.Box.thumb
+    /// Compact sizes words to the lines, not the thumb slot DummyItemRow drops there.
+    static func wordsHeight(narrow: Bool, thumb: CGFloat = DummyItemRow.Box.thumb) -> CGFloat {
+        narrow ? compactWords : thumb
+    }
+
+    /// Headline at the avatar, words at `wordsHeight`, marks at a finger's floor, the row's
+    /// padding and the gaps between bands. The view frames to this, so the place is this
+    /// number rather than whatever the plates measure.
+    static func rowHeight(
+        narrow: Bool,
+        avatar: CGFloat = DummyItemRow.Box.avatar,
+        thumb: CGFloat = DummyItemRow.Box.thumb,
+        marks: CGFloat = marks
+    ) -> CGFloat {
+        avatar
+            + wordsHeight(narrow: narrow, thumb: thumb)
             + marks
             + ShellSpace.snug * 2
             + ShellSpace.step * 2
@@ -591,6 +617,13 @@ struct TimelineWaiting: View {
     @ScaledMetric(relativeTo: .body) private var thumb: CGFloat = DummyItemRow.Box.thumb
     @ScaledMetric(relativeTo: .caption) private var touch: CGFloat = 32
     @Environment(\.colorScheme) private var colorScheme
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    /// DummyItemRow's split: a phone upright has no room for the thumb column.
+    private var narrow: Bool { sizeClass == .compact }
+    #else
+    private var narrow: Bool { false }
+    #endif
 
     var body: some View {
         ScrollView {
@@ -617,11 +650,9 @@ struct TimelineWaiting: View {
             mainBox
             marksBand
         }
-        // The place is taken at the row's height, not at whatever the plates measure: a plate
-        // that grew with type cannot move the list when the row arrives.
-        .frame(height: avatar + thumb + touch + ShellSpace.snug * 2)
         .padding(.horizontal, ShellSpace.pad)
         .padding(.vertical, ShellSpace.step)
+        .frame(height: Self.rowHeight(narrow: narrow, avatar: avatar, thumb: thumb, marks: touch))
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -640,20 +671,32 @@ struct TimelineWaiting: View {
         .frame(height: avatar)
     }
 
+    @ViewBuilder
     private var mainBox: some View {
-        HStack(alignment: .top, spacing: ShellSpace.step) {
-            VStack(alignment: .leading, spacing: ShellSpace.tight) {
-                plate(height: ShellSpace.snug)
-                plate(height: ShellSpace.snug)
-                    .frame(maxWidth: 220, alignment: .leading)
-                plate(height: ShellSpace.snug)
-                    .frame(maxWidth: 160, alignment: .leading)
+        let words = Self.wordsHeight(narrow: narrow, thumb: thumb)
+        if narrow {
+            wordPlates
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(height: words, alignment: .top)
+        } else {
+            HStack(alignment: .top, spacing: ShellSpace.step) {
+                wordPlates
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                plate(width: thumb, height: thumb)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            plate(width: thumb, height: thumb)
+            .frame(height: words, alignment: .top)
+            .clipped()
         }
-        .frame(height: thumb, alignment: .top)
-        .clipped()
+    }
+
+    private var wordPlates: some View {
+        VStack(alignment: .leading, spacing: ShellSpace.tight) {
+            plate(height: ShellSpace.snug)
+            plate(height: ShellSpace.snug)
+                .frame(maxWidth: 220, alignment: .leading)
+            plate(height: ShellSpace.snug)
+                .frame(maxWidth: 160, alignment: .leading)
+        }
     }
 
     private var marksBand: some View {
