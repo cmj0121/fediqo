@@ -523,3 +523,10 @@
 /* #67 — what did not arrive, said in the place it would have taken. */
 "shell.failed"                        = "%@ 沒有回應。";
 "shell.failed.retry"                  = "再試一次";
+
+"person.back" = "返回";
+"person.leaveHint" = "Esc 或 q";
+"person.through" = "從 %@ 讀到的";
+"person.held" = "這裡有 %d 則";
+"person.none" = "這台裝置上還沒有他們的貼文。";
+"item.person.open" = "打開 %@";

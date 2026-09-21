@@ -65,6 +65,13 @@ struct DummyItemRow: View {
     /// where there is nothing to open — the post an open thread is already about says so by
     /// passing nothing, rather than by announcing an action that would be refused.
     var onOpen: (() -> Void)?
+    /// Opening whoever wrote this post — a press on their face, or on their name (#99).
+    ///
+    /// **Optional, and nothing is the honest answer twice over.** A row that names nobody has no
+    /// person to open, and a list that is already this person's own page has nowhere to go: both
+    /// pass nothing, and what the reader gets is a face that is a picture rather than a control
+    /// they can press and be refused. Decision 4's rule — absent, not disabled.
+    var onOpenPerson: ((DummyPerson) -> Void)?
     var onToggleCover: () -> Void = {}
     /// Starts or stops what is on top of the deck — the mark on the card's own way to the key `a`.
     var onPlay: () -> Void = {}
@@ -316,6 +323,7 @@ struct DummyItemRow: View {
                 .accessibilityActions {
                     outwardAction
                     openAction
+                    personAction
                 }
             mainBox(written)
             actions
@@ -362,10 +370,15 @@ struct DummyItemRow: View {
     /// name gives up letters before the line gives up the meta: where a post came from
     /// and when is what a reader scans down the list for, and a name they can only
     /// half read is still a name they recognise.
+    ///
+    /// **The face and the name are one control each, and the meta line is not** (#99). Who wrote
+    /// a post is a person the reader can open; where it came through and when are facts about the
+    /// post, and a press on the host that opened somebody would be the row answering a question
+    /// nobody asked.
     private func headline(_ written: Written) -> some View {
         HStack(alignment: .center, spacing: ShellSpace.snug) {
-            avatar
-            names(written)
+            pressingPerson(avatar)
+            pressingPerson(names(written))
             Spacer(minLength: ShellSpace.snug)
             meta
         }
@@ -1068,6 +1081,65 @@ struct DummyItemRow: View {
     private var outwardAction: some View {
         if item.outwardURL != nil {
             Button(item.outwardName) { openOutward() }
+        }
+    }
+
+    // MARK: - Whoever wrote it
+
+    /// Whoever wrote this post, where the row names somebody. Nothing where it does not, which is
+    /// what makes the face a picture rather than a dead control on such a row.
+    var person: DummyPerson? { DummyPerson(item) }
+
+    /// Whether a press on the face or the name goes anywhere — both halves in one place, so the
+    /// picture, the letters and the spoken action cannot come to disagree about it.
+    private var opensPerson: Bool { onOpenPerson != nil && person != nil }
+
+    /// The press itself. Named rather than written inline at three call sites, for the reason
+    /// `openOutward` is named: a control wired inside a `View` body is a control no test can
+    /// press, and this milestone has shipped three of them wired to the wrong thing.
+    private func openPerson() {
+        guard let person, let onOpenPerson else { return }
+        onOpenPerson(person)
+    }
+
+    /// What opening them is called, to a pointer and to a listener alike: their own name, in a
+    /// sentence of ours. A bare "Open" beside forty faces says which verb and never which person.
+    static func spokenPerson(_ person: DummyPerson) -> String {
+        String(format: L10n.t("item.person.open"), person.name.isEmpty ? person.handle ?? "" : person.name)
+    }
+
+    /// Opening them, as a reader using VoiceOver reaches it.
+    ///
+    /// **A named action and not a button they land on.** The headline is `.combine`d into one
+    /// element, so the two buttons inside it are not separately reachable — a face wired only as
+    /// a `Button` would be a control that exists for a pointer and for nobody else, which is the
+    /// defect this file records shipping three times.
+    @ViewBuilder
+    private var personAction: some View {
+        if opensPerson, let person {
+            Button(Self.spokenPerson(person)) { openPerson() }
+        }
+    }
+
+    /// Whatever is handed in, made pressable where there is somebody to open and left exactly as
+    /// it was where there is not.
+    ///
+    /// **Nothing is hidden and nothing is relabelled.** What goes through here is the face and
+    /// the author's own name, and the name is most of what the headline says out loud — a wrapper
+    /// that took it out of the tree would buy a press at the price of a row that no longer names
+    /// its author. `.plain` keeps the letters and the picture exactly as they were drawn, so the
+    /// control is a press and not a new appearance.
+    ///
+    /// The pointer is told whose page this is; a listener is told by `personAction`, which is the
+    /// one announced on the combined element a reader actually lands on.
+    @ViewBuilder
+    private func pressingPerson(_ content: some View) -> some View {
+        if opensPerson, let person {
+            Button(action: openPerson) { content }
+                .buttonStyle(.plain)
+                .help(Self.spokenPerson(person))
+        } else {
+            content
         }
     }
 }

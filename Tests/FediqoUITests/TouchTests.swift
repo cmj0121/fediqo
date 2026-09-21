@@ -184,6 +184,12 @@ struct TouchTests {
             case .thread:
                 #expect(!searchable)
                 #expect(reloadable)
+            // Somebody's page is what this device already holds of theirs, so neither mark has
+            // anything to do there — the search is under it in the order, and a reload that went
+            // and asked their server for more would be 0.5.0 arriving through `r` (#99).
+            case .person:
+                #expect(!searchable)
+                #expect(!reloadable)
             case .viewer, .shortcuts:
                 #expect(!searchable)
                 #expect(!reloadable)

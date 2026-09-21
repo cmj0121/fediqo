@@ -34,6 +34,10 @@ struct DummyThreadPane: View {
     /// opens the conversation around the reply that was pressed. See `DummyCommand.tapped`.
     /// The press carries the post it means, for the reason `TimelinePane.onOpenThread` gives.
     var onOpenThread: (String) -> Void
+    /// A press on a face or a name in this conversation (#99). A person opens **over** the
+    /// thread, which `DummyLayer.person` argues, so a reader who follows somebody out of a
+    /// conversation is given the conversation back when they leave them.
+    var onOpenPerson: (DummyPerson) -> Void
     var jumpToTop: Int
     var onToast: (String) -> Void
     var onBack: () -> Void
@@ -213,6 +217,9 @@ struct DummyThreadPane: View {
             // `FediqoRootView.openThread` says so — and an action announced and then refused is
             // worse than one never announced.
             onOpen: item.id == root.id ? nil : { onOpenThread(item.id) },
+            // **On every row here, the root included.** Opening this post again is refused;
+            // opening whoever wrote it is not the same act and is not refused.
+            onOpenPerson: onOpenPerson,
             onToggleCover: { _ = decks.toggleCover(item.id) },
             onPlay: { onPlayRow(item) },
             onView: { onViewRow(item) },

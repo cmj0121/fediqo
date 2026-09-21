@@ -163,7 +163,7 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     public static func canEditTimeline(whenOpen open: Set<DummyLayer>) -> Bool {
         switch outermost(of: open) {
         case .selection, nil: true
-        case .viewer, .shortcuts, .thread, .search: false
+        case .viewer, .shortcuts, .person, .thread, .search: false
         }
     }
 
@@ -268,6 +268,18 @@ public enum DummyLayer: Hashable, Sendable, CaseIterable {
     case viewer
     /// The written-down keys.
     case shortcuts
+    /// Somebody's page, opened by pressing their face or their name on a row (#99).
+    ///
+    /// **Over the thread, and that is the load-bearing half of the order.** A face is on every
+    /// row a thread draws as well as on every row of the stream, so a person has to be able to
+    /// open from inside a conversation — and a press to leave then gives the conversation back,
+    /// which is where the reader was. Under the thread it would be a control the entry rule
+    /// refuses, which is a face that does nothing on half the rows in the app.
+    ///
+    /// What it costs, stated: a row on a person's page lights but does not open a conversation,
+    /// because a thread may not open underneath them. #99 asks that what this device holds of
+    /// theirs is *there*, and the page is a list to read rather than a place to navigate out of.
+    case person
     /// The conversation opened over the stream.
     case thread
     /// A search's results in place of the stream (#32). Under a thread, because a result can be
