@@ -206,6 +206,14 @@ final class ShellSession {
     /// The query in front. Nothing only while nothing is joined; not persisted.
     var timelineID: TimelineQuery?
 
+    /// The post the reader was standing on in each timeline they have left this run (#100).
+    ///
+    /// **Here, because `timelineID` is here.** The lamp itself is the root view's — one list, one
+    /// selection, which the thread and the reload both read — and what each query remembers
+    /// belongs beside the query it is remembered against. Nothing redraws when it changes, so it
+    /// is out of observation: it is read exactly once, on the pass that answers a tab press.
+    @ObservationIgnored var timelinePlaces = TimelinePlaces()
+
     /// The timelines the reader wrote, in their tab order (#27). Changed only through
     /// `commit(_:)` and `removeTimeline(_:)`, which keep them on this device.
     var written: [TimelineDefinition] = []

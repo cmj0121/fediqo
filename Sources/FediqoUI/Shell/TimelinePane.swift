@@ -210,8 +210,21 @@ struct TimelinePane: View {
         .onChange(of: session.toast) { _, toast in
             if let toast { showToast(toast.text) }
         }
-        .onChange(of: session.timelineID) { _, _ in
-            if let selectedID, !items.contains(where: { $0.id == selectedID }) {
+        // Each timeline keeps the post the reader was on (#100). The one left writes down where
+        // they were standing; the one arrived at lights what it wrote down last time, among the
+        // posts it holds now — nothing at all for a timeline this run has not opened, which is
+        // also the answer the old line gave on every switch.
+        //
+        // **Not while the search is open** (#32). The lamp is then the search's own, and the
+        // post the timeline underneath was on is parked inside `ShellSearch` waiting to be
+        // handed back. Writing a result's id into the timeline's place would lose that post and
+        // put a result in its stead.
+        .onChange(of: session.timelineID) { left, arrived in
+            if search == nil {
+                selectedID = session.timelinePlaces.switched(
+                    from: left, to: arrived, standingOn: selectedID, among: items.map(\.id)
+                )
+            } else if let selectedID, !items.contains(where: { $0.id == selectedID }) {
                 self.selectedID = nil
             }
             openedID = nil
@@ -347,6 +360,21 @@ struct TimelinePane: View {
             .onChange(of: selectedID) { _, id in
                 guard let id else { return }
                 withAnimation(.easeInOut(duration: 0.18)) {
+                    proxy.scrollTo(id, anchor: .center)
+                }
+            }
+            // Coming back to a timeline, the post it kept is centred again (#100) — "still
+            // focused" and "still in view" are two halves of one sentence, and lighting a row
+            // the reader would have to scroll to find is only the first half.
+            //
+            // **A tick later, and read through the binding rather than captured.** The stack has
+            // just been rebuilt for this query and has not laid out the row yet, which is the
+            // same wait `onAppear` takes; and by the time the tick comes round the pane's own
+            // handler has lit the row, so the id asked for is the one that was restored rather
+            // than the one this pass was built with.
+            .onChange(of: session.timelineID) { _, _ in
+                Task { @MainActor in
+                    guard let id = selectedID else { return }
                     proxy.scrollTo(id, anchor: .center)
                 }
             }
