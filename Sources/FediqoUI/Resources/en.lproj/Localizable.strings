@@ -500,3 +500,7 @@
 /* #64 — the one way of saying something is on its way. Spoken only: the plate itself is what a
    reader sees, and it carries no words. */
 "shell.waiting"                       = "Loading…";
+
+/* #67 — what did not arrive, said in the place it would have taken. */
+"shell.failed"                        = "%@ did not answer.";
+"shell.failed.retry"                  = "Try again";
