@@ -34,6 +34,10 @@ struct ReloadTests {
         "https://\(host)/api/v1/trends/statuses?limit=20"
     }
 
+    /// What a Mastodon is asked before it is spoken to (#86). One per host, whatever the
+    /// timeline in front asks of it, and unsigned — the document is public.
+    private static func flavourAddress(_ host: String) -> String { MastodonInstance.address(host) }
+
     private static let boardAddress = "https://\(forum)/forum.php?mod=forumdisplay&fid=34&filter=author&orderby=dateline"
     private static let threadAddress = "https://\(forum)/forum.php?mod=viewthread&tid=\(tid)&mobile=2"
 
@@ -67,6 +71,8 @@ struct ReloadTests {
             trendsAddress(two): timeline(two, "4"),
             boardAddress: board,
             threadAddress: thread,
+            flavourAddress(one): MastodonInstance.mastodon(one),
+            flavourAddress(two): MastodonInstance.mastodon(two),
         ]
     }
 
@@ -105,6 +111,7 @@ struct ReloadTests {
             Self.publicAddress(Self.one), Self.trendsAddress(Self.one),
             Self.publicAddress(Self.two), Self.trendsAddress(Self.two),
             Self.boardAddress,
+            Self.flavourAddress(Self.one), Self.flavourAddress(Self.two),
         ])
         #expect(session.notes.count == 5)
         #expect(session.reload.failed.isEmpty)
@@ -115,7 +122,10 @@ struct ReloadTests {
     func trendsAsksTrends() async {
         let (session, http) = await shell()
         await session.reload.timeline(.trends, in: session)
-        #expect(await asked(http) == [Self.trendsAddress(Self.one), Self.trendsAddress(Self.two)])
+        #expect(await asked(http) == [
+            Self.trendsAddress(Self.one), Self.trendsAddress(Self.two),
+            Self.flavourAddress(Self.one), Self.flavourAddress(Self.two),
+        ])
         #expect(await !http.requested.contains { $0.host == Self.forum }, "a forum has no trends")
     }
 
@@ -127,13 +137,15 @@ struct ReloadTests {
         ])
         session.written = [publicOfOne]
         await session.reload.timeline(.written(publicOfOne.id), in: session)
-        #expect(await asked(http) == [Self.publicAddress(Self.one)])
+        #expect(await asked(http) == [Self.publicAddress(Self.one), Self.flavourAddress(Self.one)])
 
         let (other, otherHTTP) = await shell()
         let two = TimelineDefinition(name: "Two", rules: [try #require(Rule.source(Self.two))])
         other.written = [two]
         await other.reload.timeline(.written(two.id), in: other)
-        #expect(await asked(otherHTTP) == [Self.publicAddress(Self.two), Self.trendsAddress(Self.two)])
+        #expect(await asked(otherHTTP) == [
+            Self.publicAddress(Self.two), Self.trendsAddress(Self.two), Self.flavourAddress(Self.two),
+        ])
     }
 
     @Test("A rule for every source asks every source; a board rule asks that board alone")
@@ -144,7 +156,10 @@ struct ReloadTests {
         ])
         session.written = [everyPublic]
         await session.reload.timeline(.written(everyPublic.id), in: session)
-        #expect(await asked(http) == [Self.publicAddress(Self.one), Self.publicAddress(Self.two)])
+        #expect(await asked(http) == [
+            Self.publicAddress(Self.one), Self.publicAddress(Self.two),
+            Self.flavourAddress(Self.one), Self.flavourAddress(Self.two),
+        ])
 
         let (other, otherHTTP) = await shell()
         let board = TimelineDefinition(name: "Board", rules: [
@@ -181,7 +196,8 @@ struct ReloadTests {
         session.written = [mine]
         await session.reload.timeline(.written(mine.id), in: session)
         #expect(await signedIn.paths == ["/api/v1/timelines/home", "/api/v1/timelines/list/42"])
-        #expect(await http.requested.isEmpty, "nothing public was named")
+        #expect(await asked(http) == [Self.flavourAddress(Self.one)],
+                "nothing public was named; the one unsigned ask is what the server says it is")
         #expect(session.notes.first?.categories == [.home, .list(id: "42")])
     }
 
@@ -197,6 +213,7 @@ struct ReloadTests {
             Self.publicAddress(Self.one), Self.trendsAddress(Self.one),
             Self.publicAddress(Self.two), Self.trendsAddress(Self.two),
             Self.boardAddress,
+            Self.flavourAddress(Self.one), Self.flavourAddress(Self.two),
         ])
     }
 
@@ -216,7 +233,7 @@ struct ReloadTests {
         session.timelineID = .written(friends.id)
         await session.reload.timeline(session.currentTimeline, in: session)
         #expect(await signedIn.paths == ["/api/v1/timelines/list/42"])
-        #expect(await http.requested.isEmpty)
+        #expect(await asked(http) == [Self.flavourAddress(Self.one)], "the flavour ask, and nothing else")
         #expect(session.notes.first?.categories == [.list(id: "42")])
     }
 

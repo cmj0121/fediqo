@@ -171,7 +171,16 @@ struct LinkReaderSheet: View {
             Divider()
             footer
         }
-        .frame(minWidth: 380, minHeight: 480)
+        // **The sheet opens at a size somebody's page was written for.** The web view asks for
+        // 800×600 and used to ask alone, which a sheet does not honour: `LinkWebView` is an
+        // `NSViewRepresentable` with no intrinsic size, so the only numbers that reached the
+        // window were the floors on this line and the reader got a 380-point column with a
+        // desktop layout squeezed into it. The ideal belongs on the thing being sized.
+        //
+        // The floors stay what they were. They are the phone's case — a floor wide enough for a
+        // desktop would be wider than the screen — and an ideal is a preference a small screen
+        // is free to ignore, which is exactly the difference wanted here.
+        .frame(minWidth: 380, idealWidth: 800, minHeight: 480, idealHeight: 600)
     }
 
     /// The host, and nothing else. **What a reader checks before following a link is where it
