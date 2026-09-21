@@ -100,6 +100,10 @@ struct DummyItemRow: View {
     /// caption beside it, so the box and the glyph in it climb together — `ShellMetric`'s
     /// whole point.
     @ShellMetric(relativeTo: .callout) private var vis: CGFloat = Box.vis
+    /// The room inside the source pill, on the pill's own rung so the capsule grows with the
+    /// host in it rather than closing round it as the letters climb.
+    @ShellMetric(relativeTo: .caption2) private var pillSideways: CGFloat = Box.pillSideways
+    @ShellMetric(relativeTo: .caption2) private var pillUpright: CGFloat = Box.pillUpright
     @ShellMetric(relativeTo: .caption) private var glyph: CGFloat = 17
     @ShellMetric(relativeTo: .caption) private var countBox: CGFloat = 20
     /// What a finger gets, whatever the glyph drawn inside it measures.
@@ -136,6 +140,23 @@ struct DummyItemRow: View {
         /// reason: a test measures it, and it has to stay wide enough for the glyph the role
         /// below draws — a box that did not grow with the mark would clip it.
         static let vis: CGFloat = 20
+        /// The room inside the source pill, sideways and upright.
+        ///
+        /// **Two numbers and not one, because the ends of a capsule are round.** Equal room on
+        /// all four sides puts the first and last letters of the host under the curve, where
+        /// the shape has already taken the room back — so a pill padded evenly still reads as
+        /// a host against the wall. Twice as much sideways is what makes the room look equal.
+        ///
+        /// Both are steps off the shell's own scale rather than numbers chosen here. The pill
+        /// carried `tight` sideways and two hairs upright, which is a capsule drawn round the
+        /// letters rather than round the word.
+        ///
+        /// **The upright figure is the one with a ceiling.** The meta line stands in the
+        /// avatar's band, and a pill taller than the face beside it makes the headline taller
+        /// and every row in the list with it. `SourcePillTests` measures that rather than
+        /// trusting it.
+        static let pillSideways: CGFloat = ShellSpace.snug
+        static let pillUpright: CGFloat = ShellSpace.tight
     }
 
     /// The role the audience mark is drawn in — **a rung up the scale from the line it stands
@@ -489,18 +510,36 @@ struct DummyItemRow: View {
 
     /// The one server this row came through. A post two servers carry is two rows (#10), each
     /// naming its own, so there is never a second host to count here.
+    ///
+    /// **The room inside it is `Box.pillSideways` and `Box.pillUpright`** — see there for why
+    /// the two are different numbers. What is worth saying here is what the room must not do:
+    /// the padding is applied to the letters and the capsule is drawn behind the result, so a
+    /// row too narrow for the whole host takes it out of the host and never out of the room.
+    /// That order is what keeps `lineLimit(1)`'s truncation the thing that gives way.
+    ///
+    /// **No width and no `fixedSize`, deliberately.** The pill hugs the host it names, so a
+    /// short one is not stretched to a size it has nothing to put in, and a long one gives way
+    /// before the age does — which is what `layoutPriority(0)` on the meta line says.
     private var sourcePill: some View {
-        Text(item.source.host)
+        Text(Self.spokenSource(item))
             .shellFont(.mark)
             .foregroundStyle(ShellChrome.inkDim(colorScheme))
             .lineLimit(1)
-            .padding(.horizontal, ShellSpace.tight)
-            .padding(.vertical, ShellSpace.hair * 2)
+            .padding(.horizontal, pillSideways)
+            .padding(.vertical, pillUpright)
             .background(
                 Capsule(style: .continuous)
                     .fill(ShellChrome.well(colorScheme))
             )
     }
+
+    /// What the pill names, and so what a listener hears where the headline combines it in.
+    ///
+    /// The host and nothing else — not the board a forum row sits in, not the protocol drawn as
+    /// a page. A named function rather than a string reached for inside the view body, so that
+    /// "the pill still names the source" is a sentence a test can put a question to; the same
+    /// reason `spokenAudience(_:)` is one.
+    static func spokenSource(_ item: DummyItem) -> String { item.source.host }
 
     /// What came attached sits beside the words, never under them, and against the
     /// right edge of the row. A picture below the text pushes the next post off the
