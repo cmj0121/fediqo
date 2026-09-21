@@ -355,6 +355,25 @@ final class ForumPosts {
         return entries[key]?.posts.first?.avatarURL
     }
 
+    /// What the opening post reproduced of somebody else's — **and a stamp, like `reading`** (#104).
+    ///
+    /// **Free in the same way the avatar is.** It came off the page D30 already fetched, Core
+    /// already keeps it out of `body` rather than dropping it, and `cost(of:)` has counted every
+    /// level of it since #94. Until now nothing read it back for the first post of a topic, so a
+    /// thread that opened by answering another drew the answer and never what it answered, while
+    /// the reply below it — quoting the same person — drew both.
+    ///
+    /// Separate from `reading` rather than folded into it, for `avatar`'s reason: a **withheld**
+    /// post has no words and its quotation is still whatever the page carried, and a state that
+    /// held both would have to say so in all five of its cases. Empty where the post quoted
+    /// nothing, and empty where the post has not arrived — which is the same answer, and is meant
+    /// to be: there is nothing to draw either way.
+    func quoted(of ref: ForumThreadRef) -> [DiscuzQuotation] {
+        let key = Key(ref, .opening)
+        wanted(key)
+        return entries[key]?.posts.first?.quoted ?? []
+    }
+
     /// The rest of the topic, and how it got there — D31.
     ///
     /// One reader rather than a `replies()` beside a `hasReplies`, so the pane cannot draw a
@@ -796,6 +815,14 @@ enum ForumRepliesStanding: Equatable, Sendable {
 /// words — deliberately, and since before any of this — so `mainBox` pins **this** kind of row
 /// there too. The rule that separates the two is written down in `mainBox`: a post that arrives
 /// with the list may size its row, and a post that arrives after the row is on screen may not.
+///
+/// ## What it quoted, in the pane only
+///
+/// An opening post can quote somebody exactly as a reply can, and Core has kept that out of the
+/// words and kept it since #94. This band draws it above them, through the same `ForumQuotation`
+/// every reply's goes through, so a topic that opens by answering another shows what it answered
+/// instead of reading as though its author began from nothing. **Only where `inFull`** — the one
+/// height a timeline row keeps is not something a stranger's quotation gets to spend.
 struct ForumPostBand: View {
     let thread: ForumThreadRef
     let posts: ForumPosts
@@ -806,6 +833,21 @@ struct ForumPostBand: View {
     /// the one post the reader opened *in order to read*, and truncating it there was the
     /// complaint this unit exists to answer. See `DummyItemRow.inFull`.
     let lines: Int?
+
+    /// Whether this is the pane rather than a row in a list — **what decides whether the post's
+    /// quotation is drawn at all** (#104).
+    ///
+    /// The row's own `inFull`, handed down rather than read back out of `lines == nil`. The two
+    /// come from the one flag and so cannot disagree, and keeping them apart is the split
+    /// `DummyItemRow.wordLines` already makes between a fitting and the decision to apply it: a
+    /// line count is arithmetic about a slot, and this is the one question a call site answers.
+    ///
+    /// **Why the quotation is the pane's and not the row's.** A timeline row is one height,
+    /// whatever the post it stands for quoted — that invariant is the row's whole design and a
+    /// defence besides, and a stranger's quotation is exactly the kind of unbounded text that
+    /// would test it. The pane is what the reader opened in order to read; `ForumReplyRow` has
+    /// drawn every reply's quotation there since F6, and this is the opening post joining them.
+    let inFull: Bool
 
     /// Whether an address in these words is drawn as a link. **False means a cover is in front of
     /// them**, and a cover must never draw a control — `EmojiText.words` states the whole of that
@@ -854,7 +896,47 @@ struct ForumPostBand: View {
         // stops reading looks infinitely stale to the eviction predicate however recently it was
         // drawn. Do not move this, and do not wrap this view in an `EquatableView`.
         let reading = posts.reading(thread)
-        return Group {
+        // Read in `body` for the same reason, and drawn above the words the way `ForumReplyRow`
+        // draws a reply's: whoever was quoted spoke first, so their sentence comes first.
+        let quoted = Self.quotations(posts.quoted(of: thread), inFull: inFull)
+        return VStack(alignment: .leading, spacing: ShellSpace.tight) {
+            // **Keyed by position**, for the reason `ForumReplyRow` states: a quotation has no id,
+            // nothing reorders the list, and it is rebuilt whole whenever the post is.
+            ForEach(quoted.indices, id: \.self) { level in
+                ForumQuotation(quotation: quoted[level])
+            }
+            words(reading)
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .task(
+            id: Wanting(
+                thread: thread,
+                settled: reading != .coming,
+                generation: posts.generation,
+                active: placeIsActive
+            )
+        ) {
+            // Decision 20: a post is fetched only for the place the reader is in. **Only the
+            // fetch is gated** — `posts.reading(…)` above still runs and still stamps interest on
+            // every pass, on every page, or I8 breaks.
+            guard placeIsActive, reading == .coming else { return }
+            // Cancelled by the row going away, which is the whole point of it. A thrown
+            // cancellation here means this row did not stay, so nothing is asked for.
+            do { try await Task.sleep(for: Self.settle) } catch { return }
+            await posts.fetch(thread)
+        }
+    }
+
+    /// The author's own words, or this app's sentence about why there are none — **one element,
+    /// and the quotation above it is not part of it**.
+    ///
+    /// Apart from `body` so that `.accessibilityElement(children: .ignore)` stays over the words
+    /// alone. Put round the whole band it would throw away the label every level of
+    /// `ForumQuotation` gives itself, and a reader using VoiceOver would be read the author's
+    /// answer with no sign of what it was answering.
+    @ViewBuilder
+    private func words(_ reading: ForumReading) -> some View {
+        Group {
             // **No `default:`.** A sixth state added to `ForumReading` has to be given a shape
             // here, and the build is where that should be noticed.
             switch reading {
@@ -890,23 +972,6 @@ struct ForumPostBand: View {
         // under a cover either, for `linked`'s reason: an action is a control, and a reader using
         // VoiceOver is not an exception to "the cover draws none".
         .spokenLinks(in: linked ? Self.words(of: reading) : "")
-        .task(
-            id: Wanting(
-                thread: thread,
-                settled: reading != .coming,
-                generation: posts.generation,
-                active: placeIsActive
-            )
-        ) {
-            // Decision 20: a post is fetched only for the place the reader is in. **Only the
-            // fetch is gated** — `posts.reading(…)` above still runs and still stamps interest on
-            // every pass, on every page, or I8 breaks.
-            guard placeIsActive, reading == .coming else { return }
-            // Cancelled by the row going away, which is the whole point of it. A thrown
-            // cancellation here means this row did not stay, so nothing is asked for.
-            do { try await Task.sleep(for: Self.settle) } catch { return }
-            await posts.fetch(thread)
-        }
     }
 
     /// The waiting state: two plates, the longer one over the shorter, the way a paragraph sits.
@@ -969,6 +1034,16 @@ struct ForumPostBand: View {
                 .frame(width: space.size.width * fraction, alignment: .leading)
         }
         .frame(height: ShellSpace.snug)
+    }
+
+    /// Which of the opening post's quotations this band draws — all of them in the pane, none of
+    /// them in a list (#104).
+    ///
+    /// A function rather than a condition spelled inline, so the rule can be asserted without a
+    /// screen: **a timeline row is one height, whatever the post it stands for quoted**, and that
+    /// is a sentence about this app rather than about a layout. See `inFull`.
+    static func quotations(_ quoted: [DiscuzQuotation], inFull: Bool) -> [DiscuzQuotation] {
+        inFull ? quoted : []
     }
 
     /// The author's own words, where this band has any. **Not `spoken`**, which also answers with
