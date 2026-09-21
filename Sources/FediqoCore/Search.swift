@@ -201,31 +201,14 @@ public struct SearchIndex: Sendable {
                 && boostedBy == note.boostedBy && boosterHandle == note.boosterHandle
         }
 
-        /// `#` then a run of letters, digits, marks or `_`, where the `#` does not follow one of
-        /// those itself — so `a#b` is no tag and `#swift` in `(#swift)` is.
+        /// The tags in the words, each with its `#` — `PostTag`'s rule, and not a second spelling
+        /// of it, so a post is found by exactly the tags its row draws as pills. The row reads
+        /// the words as written and this reads them folded, and folding changes case and width
+        /// and never whether a character is a letter. The one place it reaches the rule is a
+        /// full-width `＃`, which folds to `#`: search finds `＃台灣` as `#台灣` and the row
+        /// draws it as the letters typed, which is the generous side for a search to err on.
         static func hashtags(in text: String) -> [String] {
-            guard text.contains("#") else { return [] }
-            var tags: [String] = []
-            var tag: String?
-            var previous: Character?
-            for character in text {
-                defer { previous = character }
-                if tag != nil, isTagCharacter(character) {
-                    tag!.append(character)
-                    continue
-                }
-                if let done = tag, done.count > 1 { tags.append(done) }
-                tag = nil
-                if character == "#", previous.map(isTagCharacter) != true { tag = "#" }
-            }
-            if let done = tag, done.count > 1 { tags.append(done) }
-            return tags
-        }
-
-        private static func isTagCharacter(_ character: Character) -> Bool {
-            character == "_" || character.unicodeScalars.first.map {
-                $0.properties.isAlphabetic || $0.properties.numericType != nil
-            } == true
+            PostTag.found(in: text).map(\.text)
         }
     }
 

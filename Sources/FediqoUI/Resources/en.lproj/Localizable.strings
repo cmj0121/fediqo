@@ -523,6 +523,7 @@
 "link.reader.browser"                 = "Open in your browser";
 "link.reader.close"                   = "Done";
 "link.reader.refused"                 = "That link goes somewhere Fediqo will not open. It was not followed.";
+"post.tag.spoken"                     = "hashtag %@";
 
 /* #64 — the one way of saying something is on its way. Spoken only: the plate itself is what a
    reader sees, and it carries no words. */

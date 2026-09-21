@@ -121,19 +121,20 @@ struct EmojiText: View {
         // Once per pass of this line, never once per tick: the `TimelineView` below re-runs its
         // own content and not this body, so the cut is captured rather than remade at 25 a
         // second — and the cache remembers it across passes of the row as well.
-        let cut = linked ? cache.proseRuns(in: text, from: emojis) : cache.runs(in: text, from: emojis)
+        let cut = self.cut
         let baseline = request.metrics.baseline
         let links = Self.links(in: cut)
         let ink = ShellChrome.selectInk(colorScheme)
+        let plate = ShellChrome.well(colorScheme)
 
         Group {
             if let clock = Self.clock(for: pictures, reduceMotion: reduceMotion) {
                 TimelineView(.periodic(from: .now, by: clock)) { instant in
                     Self.line(cut, pictures, at: instant.date.timeIntervalSinceReferenceDate,
-                              baseline: baseline, linkInk: ink)
+                              baseline: baseline, linkInk: ink, tagPlate: plate)
                 }
             } else {
-                Self.line(cut, pictures, at: 0, baseline: baseline, linkInk: ink)
+                Self.line(cut, pictures, at: 0, baseline: baseline, linkInk: ink, tagPlate: plate)
             }
         }
         .font(role.font(at: typeSize))
@@ -141,7 +142,7 @@ struct EmojiText: View {
         // `TimelineView` whenever a clock is running — a container rather than a piece of text —
         // and a screen reader would be free to read the interpolated `Text` inside it instead.
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(accessibilityText)
+        .accessibilityLabel(Self.spoken(cut))
         // **Both ways in, named, on the element the reader lands on.** A press on the drawn link
         // and a secondary press on the words are both gestures, and a reader who makes neither
         // would otherwise be read an address and given no way to follow it. `DummyItemRow`'s way
@@ -179,9 +180,40 @@ struct EmojiText: View {
         let frames: [String: EmojiCache.Frames]
     }
 
+    /// The cut this line is drawn from: the prose cut where the call site asked for a post's own
+    /// words, the label cut everywhere else. Both are remembered by the cache.
+    @MainActor
+    private var cut: [EmojiRun] {
+        linked ? cache.proseRuns(in: text, from: emojis) : cache.runs(in: text, from: emojis)
+    }
+
+    /// What a screen reader is given for this line — see `spoken(_:)`.
+    @MainActor
+    var accessibilityText: Text { Self.spoken(cut) }
+
     /// What a screen reader is given: what the author typed, shortcodes and all. It cannot see a
     /// picture, and `:blobcat:` is at least the name of one.
-    var accessibilityText: Text { Text(verbatim: text) }
+    ///
+    /// **Read back from the cut rather than from `text`**, and that is what makes one sentence
+    /// true: a word is said to be a hashtag exactly where a pill is drawn round it, and nowhere
+    /// else. A name with a `#` in it, a covered post and a `#` inside an address are all cut
+    /// without a `.tag`, so they are read as the letters they are. The cut concatenated is the
+    /// words exactly — `EmojiRun.prose` promises it — so a line with no tag is read as it always
+    /// was, and reading it costs a walk of runs the cache already holds rather than a second scan.
+    ///
+    /// A tag is read as the word the author wrote, named as a tag, and **named rather than
+    /// actioned**: there is no action on it, because there is nothing yet for one to do, and an
+    /// action that did nothing would be the control the drawing refuses to look like.
+    static func spoken(_ cut: [EmojiRun]) -> Text {
+        Text(verbatim: cut.reduce(into: "") { spoken, run in
+            switch run {
+            case .text(let words): spoken += words
+            case .link(let link): spoken += link.text
+            case .emoji(let emoji): spoken += ":\(emoji.shortcode):"
+            case .tag(let tag): spoken += String(format: L10n.t("post.tag.spoken"), tag.name)
+            }
+        })
+    }
 
     /// What the task brought back, or — before it has run — whatever the cache already holds, so
     /// a line whose emoji another row has already fetched draws them on its first pass rather
@@ -207,13 +239,15 @@ struct EmojiText: View {
     /// build can be compared against an expected `Text` without a screen.
     static func line(_ cut: [EmojiRun], _ pictures: [String: EmojiCache.Frames],
                      at instant: TimeInterval, baseline: CGFloat,
-                     linkInk: Color = .accentColor) -> Text {
+                     linkInk: Color = .accentColor, tagPlate: Color = .secondary) -> Text {
         cut.reduce(Text(verbatim: "")) { line, run in
             switch run {
             case .text(let words):
                 return line + Text(verbatim: words)
             case .link(let link):
                 return line + Self.drawn(link, in: linkInk)
+            case .tag(let tag):
+                return line + Self.drawn(tag, on: tagPlate)
             case .emoji(let emoji):
                 // Until the picture is here the shortcode stands in for it, which is what the
                 // reader would have seen anyway and is never a blank.
@@ -245,6 +279,40 @@ struct EmojiText: View {
         address.underlineStyle = .single
         return Text(address)
     }
+
+    /// A hashtag, drawn as one: the word on a plate of the shell's grey, with a little room
+    /// either side of it inside the plate.
+    ///
+    /// **A label, and drawn so that it cannot be taken for a control.** `ShellChrome.well` is the
+    /// milled recess the shell puts a pill or a keycap in — neutral on purpose, because a
+    /// container that borrows the lamp's hue makes every container look selected. The letters
+    /// keep the line's own ink, carry no underline and no `link`, so nothing about the run says
+    /// *press here*: an address is the phosphor and a line under it, a tag is the grey and the
+    /// ordinary ink, and the two are told apart by colour, by edge and by whether there is a
+    /// line under the word, which is three differences and not one. There is no press for it to
+    /// have — that is a later unit — and a pill that looked pressable and did nothing would be
+    /// worse than the plain word it replaced.
+    ///
+    /// **Square corners, and that is the cost of staying one `Text`.** A background inside a
+    /// line is a rectangle on both platforms; nothing inside a `Text` can be given a radius. A
+    /// rounded capsule would mean drawing the tag as a picture interpolated into the line, which
+    /// gives up exactly what this file keeps a line for — it no longer wraps as words, is not
+    /// selected as words and is not the letters the author typed. So it is the plate, square.
+    ///
+    /// **The room is a narrow no-break space each side**, inside the run so the plate is drawn
+    /// behind it. No-break, so the plate cannot be split from its word at the end of a line and
+    /// the line breaks round the pill as it would round the word. A background changes neither
+    /// the glyphs' metrics nor the line's height, so a row is the same height whatever a post
+    /// tagged. The spaces are drawing only: `tag.text` is still exactly what was typed, and
+    /// what a screen reader hears is built from the tag and not from this.
+    static func drawn(_ tag: PostTag, on plate: Color) -> Text {
+        var pill = AttributedString(tagRoom + tag.text + tagRoom)
+        pill.backgroundColor = plate
+        return Text(pill)
+    }
+
+    /// The room inside a tag's plate, each side: `U+202F NARROW NO-BREAK SPACE`.
+    static let tagRoom = "\u{202F}"
 }
 
 /// Both ways to follow each address in a line, said rather than gestured.
