@@ -31,11 +31,6 @@ struct DummyThreadPane: View {
     var jumpToTop: Int
     var onToast: (String) -> Void
     var onBack: () -> Void
-    /// Hosts the last thread reload could not read. Empty is none; a second miss replaces.
-    var failed: [String] = []
-    /// `r`, and the failure place's press: the same reload the key does, so a finger does not
-    /// leave the thread to ask again.
-    var onReload: () -> Void = {}
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openURL) private var openURL
 
@@ -81,15 +76,10 @@ struct DummyThreadPane: View {
                         }
                         if let thread {
                             rest(of: thread)
-                        } else if let sources = Self.failureSources(failed: failed, standing: nil) {
-                            ShellFailure(sources: sources, retry: onReload)
-                                .frame(maxHeight: 160, alignment: .topLeading)
-                                .padding(.horizontal, ShellSpace.pad)
                         } else if let notice = EmptyNotice.thread(
                             descendantCount: conversation.descendants.count,
                             replyCount: root.counts.replies,
-                            standing: nil,
-                            failed: failed
+                            standing: nil
                         ) {
                             ShellNotice(notice)
                         }
@@ -242,14 +232,6 @@ struct DummyThreadPane: View {
     /// The thread this pane is standing on, where it is a Discuz! one there is more of to read.
     private var thread: ForumThreadRef? { ForumThreadRef(root) }
 
-    /// The sources a thread failure place names. A wait still on the wire is not a failure.
-    /// A reload that named hosts is that failure, one list, so a second miss replaces. Replies
-    /// that never came keep today's way in (`s`); this is `r`'s place.
-    static func failureSources(failed: [String], standing: ForumRepliesStanding?) -> [String]? {
-        if standing == .coming { return nil }
-        return failed.isEmpty ? nil : failed
-    }
-
     /// **Where "load other threads" lives, and why it is here rather than on the row.**
     ///
     /// The reader asked for "the options to load other threads" and, asked directly, said that
@@ -289,7 +271,7 @@ struct DummyThreadPane: View {
             // **No `default:`.** A sixth standing has to be given a shape here.
             switch standing {
             case .unasked:
-                if failed.isEmpty { way(in: thread) }
+                way(in: thread)
             case .coming:
                 // **The reader pressed something and is owed a sign that it took.** A static
                 // "Loading the replies…" is indistinguishable from the same sentence a minute
@@ -299,8 +281,7 @@ struct DummyThreadPane: View {
                 if let notice = EmptyNotice.thread(
                     descendantCount: 0,
                     replyCount: 0,
-                    standing: ForumRepliesStanding.none,
-                    failed: failed
+                    standing: ForumRepliesStanding.none
                 ) {
                     ShellNotice(notice)
                 }
@@ -312,17 +293,8 @@ struct DummyThreadPane: View {
                     ForumReplyRow(post: reply, host: thread.host)
                 }
             case .absent(let absence):
-                // Folded into the failure place while `r` already named who did not answer, so
-                // the same miss is not said twice. Today's sentence and the `s` way in stay
-                // when that place is not showing.
-                if failed.isEmpty {
-                    quiet(ForumPostBand.sentence(for: absence))
-                    if standing.wantsPressing { way(in: thread) }
-                }
-            }
-            if let sources = Self.failureSources(failed: failed, standing: standing) {
-                ShellFailure(sources: sources, retry: onReload)
-                    .frame(maxHeight: 160, alignment: .topLeading)
+                quiet(ForumPostBand.sentence(for: absence))
+                if standing.wantsPressing { way(in: thread) }
             }
         }
         .padding(.top, ShellSpace.snug)
