@@ -56,14 +56,23 @@ struct PictureWaitingTests {
     }
 
     /// The call site already frames RemoteImage. A nil URL is still absent, not a collapsed
-    /// view and not a wait that never ends. The row's fittings are the place that frame is.
+    /// view, not a wait that never ends, and not a failure with nothing to try.
     @Test("A missing URL still has a place, and it is absent rather than waiting")
     func nilURLStillHasAPlace() {
         #expect(RemoteImage.fill(have: false, url: nil, missing: false) == .absent)
         #expect(RemoteImage.fill(have: false, url: nil, missing: true) == .absent)
-        #expect(RemoteImage.fill(have: false, url: url, missing: true) == .absent)
         #expect(DummyItemRow.Box.avatar > 0)
         #expect(DummyItemRow.Box.thumb > 0)
+    }
+
+    /// A URL that was asked for and came back with nothing is failed, in the frame the
+    /// picture would have filled. Held still wins over a mark that it was once gone.
+    @Test("A wait that ended with nothing is failed, not absent and not still waiting")
+    func missingAfterAFetchIsFailed() {
+        #expect(RemoteImage.fill(have: false, url: url, missing: false) == .waiting)
+        #expect(RemoteImage.fill(have: false, url: url, missing: true) == .failed)
+        #expect(RemoteImage.fill(have: true, url: url, missing: true) == .held)
+        #expect(RemoteImage.fill(have: false, url: nil, missing: true) == .absent)
     }
 
     /// Reduce Motion is the shell's clock, not a second one. A waiting picture that kept its
@@ -94,15 +103,22 @@ struct PictureWaitingTests {
         #expect(RemoteImage(url: nil, tier: .deck, host: host, speaks: false).speaks == false)
     }
 
-    /// What arrived keeps the author's alt. Missing keeps today's absent mark: no new
-    /// failure sentence, no retry. #67 owns that look.
-    @Test("What arrived is named by its alt, and missing stays the absent mark")
-    func arrivedUsesAltAndMissingStaysAbsent() {
+    /// What arrived keeps the author's alt. A nil URL stays the absent mark. A wait that
+    /// ended names the source, even when this view is one picture inside a row that already
+    /// speaks — the retry has to be reachable.
+    @Test("What arrived is named by its alt, and a failed wait names the source")
+    func arrivedUsesAltAndFailedNamesTheSource() {
         #expect(RemoteImage.voice(fill: .held, alt: "a cat", speaks: true) == "a cat")
         #expect(RemoteImage.voice(fill: .held, alt: nil, speaks: true) == nil)
         #expect(RemoteImage.voice(fill: .absent, alt: "a cat", speaks: true) == "a cat")
         #expect(RemoteImage.voice(fill: .absent, alt: nil, speaks: true) == nil)
         #expect(RemoteImage.voice(fill: .absent, alt: nil, speaks: true)
+            != ShellWaiting.spoken)
+        #expect(RemoteImage.voice(fill: .failed, alt: "a cat", speaks: true, source: host)
+            == ShellFailure.spoken([host]))
+        #expect(RemoteImage.voice(fill: .failed, alt: nil, speaks: false, source: host)
+            == ShellFailure.spoken([host]))
+        #expect(RemoteImage.voice(fill: .failed, alt: nil, speaks: true, source: host)
             != ShellWaiting.spoken)
     }
 }
