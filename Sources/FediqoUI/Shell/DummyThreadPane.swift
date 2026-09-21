@@ -473,6 +473,7 @@ struct ForumReplyRow: View {
                     host: host,
                     standing: .avatar,
                     alt: nil,
+                    speaks: false,
                     radius: ShellSpace.tight
                 )
             } else {

@@ -777,8 +777,8 @@ enum ForumRepliesStanding: Equatable, Sendable {
 /// nothing to mark the difference. The title alone is the screen the reader wrote in to complain
 /// about; keeping it as the waiting state means the complaint is still on screen every time.
 ///
-/// A plate is the right third answer because it is **not a sentence**. `RemoteImage` draws a bare
-/// `ShellChrome.well` while a picture is on its way and this is the same vocabulary one band
+/// A plate is the right third answer because it is **not a sentence**. `RemoteImage` draws
+/// `ShellWaiting` while a picture is on its way and this is the same vocabulary one band
 /// over, so a reader who has learned what a waiting slot looks like already knows what this is.
 /// And nothing is attributed to anybody: `DiscuzPost`'s own doc refuses to put the forum's notice
 /// in `body` because a row drawing it would attribute the forum's sentence to the author, and a
@@ -1001,7 +1001,7 @@ struct ForumPostBand: View {
 /// these plates at one, and `RemoteImage`'s bare plate at the sixth — with three type roles and two
 /// inks between them. They are one vocabulary now: this view, at every site that has a sentence,
 /// in `ShellType.meta` and `ShellChrome.inkDim`, with the words first and the motion trailing them.
-/// `RemoteImage` keeps its bare plate and is not a fourth: a picture-shaped hole where a picture
+/// `RemoteImage` waits as `ShellWaiting` and is not a fourth: a picture-shaped hole where a picture
 /// will be is a different statement from a sentence about an errand, and it has no words. That
 /// wordless half is `ShellWaiting` now, and this view is its sentence-carrying sibling — the
 /// clock, the wave and the still frame are read from there so the two cannot drift apart.
@@ -1011,7 +1011,7 @@ struct ForumPostBand: View {
 /// puts a platform control where the reader's eye starts.
 ///
 /// This shell already has a word for "asked for, not here yet", and it is a plate: `RemoteImage`
-/// draws a bare `ShellChrome.well` while a picture is on its way, and `ForumPostBand` draws two of
+/// waits as `ShellWaiting` while a picture is on its way, and `ForumPostBand` draws two of
 /// them where a post is. A reader who has scrolled one timeline has already learned what a waiting
 /// slot looks like here, and a `ProgressView` would be a second, unrelated vocabulary for the same
 /// fact — borrowed from the platform rather than from the app the reader is in. So this is the

@@ -1151,7 +1151,57 @@ struct RemoteImage: View {
     /// What the author said this picture is. Given one, this stops being decoration and becomes
     /// something a reader who cannot see it can still be told about.
     var alt: String?
+
+    /// Whether this view is the waiting place, or one picture inside a place the surface speaks
+    /// for. False is silence, not an empty label — the same switch `ShellWaiting(speaks:)` is.
+    /// A plate standing alone speaks; a row that already speaks as a post passes false so every
+    /// arriving avatar does not shout "on its way".
+    var speaks: Bool = true
+
     var radius: CGFloat = ShellSpace.tight
+
+    /// What fills the frame this view was handed. The frame itself belongs to the call site —
+    /// an avatar side, a thumb side — and none of these is an empty view that would let it
+    /// collapse. Held is a copy already in hand: no plate, no flicker.
+    enum Fill: Equatable, Sendable {
+        case held
+        case waiting
+        case absent
+    }
+
+    /// Silent so this view is the only thing a reader lands on, the way a waiting row's plates
+    /// stay silent while the group speaks.
+    static let plateSpeaks = false
+
+    /// The still-coming branch is the shell's plate filling this frame, not a second well.
+    static func waitingPlate() -> ShellWaiting {
+        ShellWaiting(speaks: plateSpeaks)
+    }
+
+    /// Reduce Motion is the shell's clock, so a waiting picture stops with the rest of the app.
+    static func clock(reduceMotion: Bool) -> TimeInterval? {
+        ShellWaiting.clock(reduceMotion: reduceMotion)
+    }
+
+    /// Held wins: a copy this device already has is drawn at once, even if a mark says it was
+    /// once gone. Still coming is a URL that has not been answered yet. Everything else is
+    /// today's absent mark — a nil URL included, so the frame still has a place.
+    static func fill(have: Bool, url: URL?, missing: Bool) -> Fill {
+        if have { return .held }
+        if url != nil, !missing { return .waiting }
+        return .absent
+    }
+
+    /// What a screen reader is told. Waiting reuses the shell's one sentence; arrived keeps
+    /// the author's alt; missing stays silent unless it already had one. No new string.
+    static func voice(fill: Fill, alt: String?, speaks: Bool) -> String? {
+        switch fill {
+        case .held, .absent:
+            return alt
+        case .waiting:
+            return ShellWaiting.voice(speaks: speaks)
+        }
+    }
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.displayScale) private var displayScale
@@ -1161,6 +1211,12 @@ struct RemoteImage: View {
 
     var body: some View {
         let picture = cache.picture(url, scale: displayScale, tier: tier, host: host)
+        let fill = Self.fill(
+            have: picture != nil,
+            url: url,
+            missing: cache.isMissing(url, scale: displayScale, tier: tier)
+        )
+        let sentence = Self.voice(fill: fill, alt: alt, speaks: speaks)
         return Group {
             if let picture {
                 // The well sits behind it rather than only where a picture is absent: fitted
@@ -1169,19 +1225,19 @@ struct RemoteImage: View {
                 ShellChrome.well(colorScheme).overlay {
                     picture.resizable().aspectRatio(contentMode: contentMode)
                 }
-            } else if url != nil, !cache.isMissing(url, scale: displayScale, tier: tier) {
-                // Still coming, and there is somewhere for it to come from. The bare plate is the
-                // same one the shell draws under every glyph, and the mark below is what tells a
-                // picture on its way from one that is never arriving.
-                ShellChrome.well(colorScheme)
+            } else if fill == .waiting {
+                // Still coming, and there is somewhere for it to come from. The shell's plate
+                // fills the same frame the picture will, so text around it never moves.
+                Self.waitingPlate()
             } else {
                 absent
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text(alt ?? ""))
-        .accessibilityHidden(alt == nil)
+        .accessibilityLabel(Text(sentence ?? ""))
+        .accessibilityHidden(sentence == nil)
+        .accessibilityAddTraits(fill == .waiting && sentence != nil ? .updatesFrequently : [])
         .task(
             id: Wanted(
                 url: url,

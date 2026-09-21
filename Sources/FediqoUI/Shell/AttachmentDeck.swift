@@ -157,7 +157,13 @@ struct AttachmentDeck: View {
         ForEach(0..<sheetCount, id: \.self) { depth in
             Group {
                 if let next = beneath(depth) {
-                    RemoteImage(url: next.displayURL, tier: .deck, host: host, radius: radius)
+                    RemoteImage(
+                        url: next.displayURL,
+                        tier: .deck,
+                        host: host,
+                        speaks: false,
+                        radius: radius
+                    )
                 } else {
                     ShellChrome.well(colorScheme)
                         .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
@@ -238,6 +244,8 @@ struct AttachmentDeck: View {
                     tier: .deck,
                     host: host,
                     alt: spoken,
+                    // The card already names the attachment; waiting here must not shout too.
+                    speaks: false,
                     radius: radius
                 )
             }

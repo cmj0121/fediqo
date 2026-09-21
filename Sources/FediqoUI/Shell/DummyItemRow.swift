@@ -408,6 +408,8 @@ struct DummyItemRow: View {
                     host: item.source.host,
                     standing: .avatar,
                     alt: nil,
+                    // The row already speaks as a post; an arriving face must not shout too.
+                    speaks: false,
                     radius: Box.plate
                 )
             } else {
