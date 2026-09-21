@@ -14,6 +14,12 @@ struct DummyThreadPane: View {
     /// Where the opening post and the rest of the topic are kept. Passed through to every row,
     /// and read here for D31's list.
     let posts: ForumPosts
+    /// Where the conversation around a microblog post is kept — the other half of the same
+    /// question, for the sources that answer it in one request (#90).
+    let conversations: ShellConversations
+    /// The reader pressing for the conversation again, after one that could not be had. The ask
+    /// itself is the pane above's, which is the one place that has the session to ask through.
+    var onAskAround: () -> Void = {}
     @Binding var selectedID: String?
     var marks: (DummyItem) -> Binding<DummyMarks>
     @Binding var decks: ShellDecks
@@ -37,7 +43,9 @@ struct DummyThreadPane: View {
     private let step: CGFloat = 16
     private let deepest = 4
 
-    private var conversation: DummyConversation { root.dummyConversation() }
+    /// What this pane draws: the conversation the source handed back, or this post alone until
+    /// one has. Built each pass rather than held, for `ShellConversationStanding.loaded`'s reason.
+    private var conversation: DummyConversation { conversations.conversation(around: root) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -76,12 +84,8 @@ struct DummyThreadPane: View {
                         }
                         if let thread {
                             rest(of: thread)
-                        } else if let notice = EmptyNotice.thread(
-                            descendantCount: conversation.descendants.count,
-                            replyCount: root.counts.replies,
-                            standing: nil
-                        ) {
-                            ShellNotice(notice)
+                        } else {
+                            around
                         }
                     }
                     .padding(.vertical, 8)
@@ -299,6 +303,71 @@ struct DummyThreadPane: View {
         }
         .padding(.top, ShellSpace.snug)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: - The conversation around a microblog post — #90
+
+    /// What is under the post where the source answers for a whole thread in one request.
+    ///
+    /// **The mirror of `rest(of:)`, and deliberately not the same view.** A forum topic's
+    /// replies are a list this pane draws itself, under a rule of their own; a microblog's
+    /// answers *are* rows of this conversation and are already drawn above, nested, by the same
+    /// `threaded(_:dimmed:)` every other post in the pane goes through. So what is left down
+    /// here is only what the rows cannot say: that the thread is still coming, that it could not
+    /// be had, or that there is genuinely nobody else in it.
+    ///
+    /// **`unasked` waits rather than saying "nothing".** The ask is the pane opening — one turn
+    /// away, not a state the reader can be left in — and drawing the empty notice for that turn
+    /// would say "nothing under this post" about a post whose thread is about to arrive.
+    /// `ShellConversations` never leaves a standing unasked once it has looked at a post: a
+    /// source with no conversation to read is settled as `none` there rather than left waiting
+    /// here, which is what makes this branch safe.
+    ///
+    /// **No `default:`.** A sixth standing has to be given a shape.
+    @ViewBuilder
+    private var around: some View {
+        switch conversations.standing(of: root.id) {
+        case .unasked, .coming:
+            ForumWaiting(line: L10n.t("thread.replies.loading"))
+                .padding(.top, ShellSpace.snug)
+        case .none:
+            // The forum's own sentence for the same fact, so one thing is worded one way: the
+            // post arrived, the source answered, and nobody has said anything under it. It is
+            // told over `root.counts.replies`, which is the server's own count and may claim
+            // answers this reader is not allowed to see.
+            if let notice = EmptyNotice.thread(
+                descendantCount: 0, replyCount: 0, standing: ForumRepliesStanding.none
+            ) {
+                ShellNotice(notice)
+            }
+        case .loaded:
+            // The answers are the rows above. Nothing belongs down here.
+            EmptyView()
+        case .absent(let absence):
+            let standing = conversations.standing(of: root.id)
+            VStack(alignment: .leading, spacing: ShellSpace.snug) {
+                quiet(absence.sentence(host: root.source.host))
+                if standing.wantsPressing { wayAround }
+            }
+            .padding(.top, ShellSpace.snug)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// The way in to the thread again — `way(in:)`'s twin, and the same bargain: drawn exactly
+    /// where `ShellConversationStanding.wantsPressing` is true, so a reader never finds a button
+    /// for an answer that cannot change.
+    ///
+    /// No key cap beside it. `s` is the forum's press and means the rest of a topic that was
+    /// never asked for; this is a second attempt at one that was, and giving it the same cap
+    /// would teach the letter for a thing it does not do here.
+    private var wayAround: some View {
+        Button(action: onAskAround) {
+            Label(L10n.t("thread.around.again"), systemImage: "arrow.clockwise")
+                .font(ShellType.meta.weight(.medium))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(ShellChrome.selectInk(colorScheme))
     }
 
     /// The way in to the rest of the topic — **the pointer's half of the key `s`**.

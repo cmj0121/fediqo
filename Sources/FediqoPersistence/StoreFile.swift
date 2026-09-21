@@ -356,6 +356,9 @@ private struct NoteFacts: Codable {
 
 private struct ReplyRow: Codable {
     var handle: String?
+    /// Absent in a row written before 0.4.0 learned it, which reads as a reply whose parent was
+    /// never named — the same thing `handle` says about who. See `Note.boosterHandle`.
+    var inReplyToId: String?
 }
 
 /// One attachment as `NoteFacts` writes it: every field, so what a row drew before a relaunch
@@ -426,7 +429,7 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             body: note.body,
             title: note.title,
             board: note.board,
-            reply: note.reply.map { ReplyRow(handle: $0.handle) },
+            reply: note.reply.map { ReplyRow(handle: $0.handle, inReplyToId: $0.inReplyToId) },
             boostedBy: note.boostedBy,
             boosterHandle: note.boosterHandle,
             sensitive: note.sensitive,
@@ -457,7 +460,7 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             board: facts.board,
             postedAt: posted_at,
             categories: Set(categories.compactMap(\.category)),
-            reply: facts.reply.map { Reply(handle: $0.handle) },
+            reply: facts.reply.map { Reply(handle: $0.handle, inReplyToId: $0.inReplyToId) },
             boostedBy: facts.boostedBy,
             boosterHandle: facts.boosterHandle,
             avatarURL: facts.avatarURL,

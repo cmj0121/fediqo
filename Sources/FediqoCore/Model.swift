@@ -212,9 +212,20 @@ public enum Audience: String, Sendable, Hashable, CaseIterable {
 
 public struct Reply: Hashable, Sendable {
     public let handle: String?
+    /// The id **that post's own server** gave the post this one answers, where it named one.
+    ///
+    /// The same spelling as `Note.statusID` and for the same reason: a thread is nested by
+    /// matching a post's parent against the parents already placed, and a URI cannot do that —
+    /// `in_reply_to_id` is a status id and the two are different strings for one post.
+    ///
+    /// **Nothing where the source has no such idea.** A forum reply is not a `Note` at all and a
+    /// microblog that does not send one leaves this nil, which reads as "answered something this
+    /// device cannot name" — the same thing `handle: nil` says about who.
+    public let inReplyToId: String?
 
-    public init(handle: String? = nil) {
+    public init(handle: String? = nil, inReplyToId: String? = nil) {
         self.handle = handle
+        self.inReplyToId = inReplyToId
     }
 }
 

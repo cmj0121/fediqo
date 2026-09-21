@@ -368,6 +368,10 @@
 
 /* Unit F6 — the rest of the topic. */
 "thread.replies.load" = "Load the replies";
+"thread.around.again" = "Try the thread again";
+"thread.around.unreachable" = "The thread around this post did not arrive.";
+"thread.around.refused" = "%@ would not let this app read the thread around this post.";
+"thread.around.unfindable" = "This post cannot be named on %@, so the thread around it cannot be read.";
 "thread.replies.loading" = "Loading the replies…";
 "thread.replies.none" = "Nobody has answered this one yet.";
 "thread.empty.title" = "Nothing under this post";

@@ -19,6 +19,16 @@ struct ReadAgainTests {
         """
     }
 
+    /// The same status, answering `parent` — what nests a thread.
+    private static func answer(_ id: String, _ text: String, to parent: String) -> String {
+        """
+        {"id":"\(id)","uri":"https://social.example/users/ada/statuses/\(id)",
+         "in_reply_to_id":"\(parent)",
+         "created_at":"2024-01-01T00:00:00.000Z","content":"<p>\(text)</p>",
+         "account":{"username":"ada","acct":"ada","display_name":"Ada"}}
+        """
+    }
+
     private static let context = """
         {"ancestors":[\(status("7", "before"))],"descendants":[\(status("11", "after"))]}
         """
@@ -61,6 +71,38 @@ struct ReadAgainTests {
         ])
         #expect(notes.map(\.body) == ["edited", "before", "after"])
         #expect(notes.allSatisfy { $0.categories.isEmpty })
+    }
+
+    @Test("A thread keeps its two halves apart, and each post says what it answers")
+    func conversationHalves() async throws {
+        let http = FixtureHTTP([
+            "https://social.example/api/v1/statuses/9/context": .text("""
+                {"ancestors":[\(Self.status("7", "before"))],
+                 "descendants":[\(Self.answer("11", "after", to: "9")),
+                                \(Self.answer("12", "deeper", to: "11"))]}
+                """),
+        ])
+        let thread = try await MastodonPost(http: http, host: host).conversation(id: "9", source: source)
+        #expect(thread.ancestors.map(\.body) == ["before"])
+        #expect(thread.descendants.map(\.body) == ["after", "deeper"])
+        #expect(thread.descendants.map { $0.reply?.inReplyToId } == ["9", "11"])
+        #expect(!thread.isAlone)
+        #expect(thread.ancestors.first?.reply == nil, "a post that answers nothing carries no reply")
+        // The flat read is the same answer with the halves run together.
+        #expect(
+            try await MastodonPost(http: http, host: host).context(id: "9", source: source).map(\.body)
+                == ["before", "after", "deeper"]
+        )
+    }
+
+    @Test("A post alone in its thread says so, and neither half is guessed at")
+    func conversationAlone() async throws {
+        let http = FixtureHTTP([
+            "https://social.example/api/v1/statuses/9/context": .text(#"{"ancestors":[],"descendants":[]}"#),
+        ])
+        let thread = try await MastodonPost(http: http, host: host).conversation(id: "9", source: source)
+        #expect(thread.isAlone)
+        #expect(thread.ancestors.isEmpty && thread.descendants.isEmpty)
     }
 
     @Test("Without an id, a signed-in reader finds it by its URI through search, as themselves")

@@ -96,6 +96,22 @@ struct StoreFileTests {
         #expect(Set(try file.load().notes) == Set(saved))
     }
 
+    @Test("What a reply answers, as its own server names it, survives a relaunch")
+    func inReplyToIDSurvivesRelaunch() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let saved = [
+            note(id: "1", reply: Reply(handle: "@ada@first.example", inReplyToId: "10941")),
+            note(id: "2", reply: Reply(handle: "@ada@first.example")),
+            note(id: "3"),
+        ]
+        try await StoreFile(at: dir).save(sources: [mastodon], notes: saved)
+        let loaded = StoreFile.open(at: dir).notes
+        #expect(loaded.first { $0.id == "1" }?.reply?.inReplyToId == "10941")
+        #expect(loaded.first { $0.id == "2" }?.reply?.inReplyToId == nil, "a parent nobody named")
+        #expect(loaded.first { $0.id == "3" }?.reply == nil, "not a reply at all")
+    }
+
     @Test("Unset sensitive and spoiler stay unset, apart from false and empty", arguments: [
         (Bool?.none, String?.none), (false, ""), (true, "cover"),
     ])

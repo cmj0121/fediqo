@@ -58,10 +58,33 @@ public struct MastodonPost: Sendable {
     /// The posts before and after it in its thread. Asked after the post, and separately: on a
     /// busy thread this is the large answer, and the post must not wait on it or fail with it.
     public func context(id: String, source: Source) async throws -> [Note] {
+        let thread = try await conversation(id: id, source: source)
+        return thread.ancestors + thread.descendants
+    }
+
+    /// The same read, with the two halves still told apart — which is what drawing a thread
+    /// needs and what `context(id:source:)` throws away.
+    ///
+    /// **Two halves and not one list, because the server's own answer is two lists and the
+    /// difference is not recoverable afterwards.** What a post answers stands above it and what
+    /// answered it stands below, and a reader handed one flat list cannot tell which is which:
+    /// `in_reply_to_id` chains an ancestor to the post as surely as it chains an answer to it,
+    /// so rebuilding the split from the ids alone would need the post's own parent, which is the
+    /// one thing a post held before 0.4.0 does not carry. The server already said it. This keeps
+    /// what it said.
+    ///
+    /// Each half is left **in the order the server wrote it** — ancestors oldest first, up to the
+    /// post's own parent; answers in the order that instance walks its tree. Nothing is sorted
+    /// here: the order a thread reads in is the source's fact about the thread, and a second
+    /// opinion about it belongs to whatever draws it, if anywhere.
+    public func conversation(id: String, source: Source) async throws -> MastodonThread {
         let context = try MastodonJSON.decoder.decode(
             ContextDTO.self, from: try await get(Self.path(id) + "/context")
         )
-        return (context.ancestors + context.descendants).map { $0.asNote(source: source, categories: []) }
+        return MastodonThread(
+            ancestors: context.ancestors.map { $0.asNote(source: source, categories: []) },
+            descendants: context.descendants.map { $0.asNote(source: source, categories: []) }
+        )
     }
 
     /// Checked as a list id is: this came out of a stranger's JSON or the store.
@@ -85,6 +108,23 @@ public struct MastodonPost: Sendable {
             return data
         }
     }
+}
+
+/// One post's thread: what it answers, and what answered it. Neither half includes the post.
+public struct MastodonThread: Hashable, Sendable {
+    /// Oldest first, up to the post's own parent.
+    public let ancestors: [Note]
+    /// In the order the server walked them, deepest chains kept beside their parents.
+    public let descendants: [Note]
+
+    public init(ancestors: [Note], descendants: [Note]) {
+        self.ancestors = ancestors
+        self.descendants = descendants
+    }
+
+    /// Whether the post is alone in its thread. Both halves, because a post that answers
+    /// something nobody else answered is no more alone than one nobody answered at all.
+    public var isAlone: Bool { ancestors.isEmpty && descendants.isEmpty }
 }
 
 /// `/api/v1/statuses/:id/context`.

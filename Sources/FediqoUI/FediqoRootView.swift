@@ -932,7 +932,7 @@ public struct FediqoRootView: View {
     /// Whichever list is in front: the open conversation, or the stream under it.
     private var currentListItems: [DummyItem] {
         if let opened = threadStack.last, let item = streamItems.first(where: { $0.id == opened }) {
-            return item.dummyConversation().inOrder
+            return session.conversations.conversation(around: item).inOrder
         }
         return streamItems
     }

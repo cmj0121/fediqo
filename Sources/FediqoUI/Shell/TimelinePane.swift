@@ -139,6 +139,8 @@ struct TimelinePane: View {
                     catalogues: session.emoji,
                     catalogueSettled: settledHosts.contains(opened.source.host),
                     posts: session.posts,
+                    conversations: session.conversations,
+                    onAskAround: { Task { await session.conversations.again(opened, in: session) } },
                     selectedID: $selectedID,
                     marks: markBinding,
                     decks: $decks,
@@ -153,6 +155,12 @@ struct TimelinePane: View {
                 )
                 // One pane per thread, so going back from a nested one draws its parent afresh.
                 .id(opened.id)
+                // **The ask is the pane opening** — #90. A microblog thread is one request about
+                // the post the reader has just pressed Return on, so nothing asks them a second
+                // time for a thing they have already said they want. It is the pane's own
+                // `.task`, so closing the thread cancels a read still on the wire, and asked
+                // once per post per run: reopening draws what is already held.
+                .task(id: opened.id) { await session.conversations.open(opened, in: session) }
             } else {
                 switch stream {
                 case .held: list

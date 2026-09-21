@@ -360,6 +360,10 @@
 
 /* Unit F6 — the rest of the topic. */
 "thread.replies.load" = "讀其他回覆";
+"thread.around.again" = "再讀一次討論串";
+"thread.around.unreachable" = "這篇的討論串沒有送達。";
+"thread.around.refused" = "%@ 不讓這個 app 讀這篇的討論串。";
+"thread.around.unfindable" = "在 %@ 上無法指認這篇，因此讀不到它的討論串。";
 "thread.replies.loading" = "正在讀回覆…";
 "thread.replies.none" = "還沒有人回這一篇。";
 "thread.empty.title" = "這則下面沒有東西";

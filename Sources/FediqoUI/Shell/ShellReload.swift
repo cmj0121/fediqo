@@ -113,7 +113,18 @@ final class ShellReload {
             let again = await self.again(held, in: session)
             guard !Task.isCancelled else { return }
             switch again {
-            case .read: await session.reloadFromStore()
+            case .read:
+                // The post's own words, and then the thread around it — one ask each, and the
+                // thread's is `ShellConversations`', which is the one place that reads it (#90).
+                // Its failure is its own sentence in the pane and does not fail the reload: a
+                // post read again is a post read again whatever its thread did.
+                // The store first, then the thread. A post held without its server id has just
+                // been found by its URI and the id kept; asking the store for the rows again
+                // before the thread is read is what lets the thread read use that id instead of
+                // paying for the same search a second time. What the thread read itself lands is
+                // adopted by that read — see `ShellConversations.read`.
+                await session.reloadFromStore()
+                await session.conversations.again(item, in: session)
             case .failed: self.failed = [held.source.host]
             case .unfindable(let why): self.unfindable = why
             }
@@ -266,17 +277,11 @@ final class ShellReload {
         let note = try await post.post(id: id, source: stamp)
         try Task.checkCancellation()
         await session.store.refresh([note], ifSourceHere: host)
-        do {
-            let context = try await post.context(id: id, source: stamp)
-            try Task.checkCancellation()
-            await session.store.refresh(context, ifSourceHere: host)
-        } catch MastodonAuthError.signedOut {
-            throw MastodonAuthError.signedOut
-        } catch let error where Cancellation.happened(error) {
-            throw error
-        } catch {
-            // The post itself was read again; the thread around it is what could not come.
-        }
+        // **The thread around it is not asked for here.** It was, until #90 gave the conversation
+        // a home of its own: the pane reads it, holds it and says for itself when it could not be
+        // had, and a second copy of the request living here would put the same page on the wire
+        // twice for one press of `r`. What that read landed in the store — held rows refreshed,
+        // nothing admitted — it still lands; see `ShellConversations.read`.
         return .read
     }
 

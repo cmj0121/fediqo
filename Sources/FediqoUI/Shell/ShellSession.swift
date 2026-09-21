@@ -53,6 +53,13 @@ final class ShellSession {
     /// to comes back withheld.
     let posts: ForumPosts
 
+    /// The conversation around each post the reader has opened — #90.
+    ///
+    /// Beside `posts` and for its reason: the forum half of "what is around this post" is that
+    /// object and the microblog half is this one, and both have to be the object a Clear presses.
+    /// Nothing it holds is in the store's list of rows; see its own doc.
+    let conversations = ShellConversations()
+
     /// `r` (#29): one reload at a time, and what the last one could not read.
     let reload = ShellReload()
 
@@ -1438,6 +1445,9 @@ final class ShellSession {
         // words, held for exactly the reason the pictures are, and a Clear that reached the
         // pictures and left the posts would empty half of what the reader was looking at.
         posts.forget(host: host)
+        // Seven became eight, for the same reason: an open thread's answers are this device's
+        // copy of that server's words too.
+        conversations.forget(host: host)
         await forums.forget(host: host)
         // Decision 10: a Mastodon's sign-in goes with a Clear as a forum's does. Signing out
         // drops nothing that Home or a list brought in.
