@@ -1,14 +1,17 @@
+import FediqoCore
 import Foundation
+import SwiftUI
 import Testing
 @testable import FediqoUI
 
 /// #33 — what the keys do on a timeline, done by touch.
 ///
-/// What a test can reach: the written-down list itself, and the three rules the new controls read
-/// — what a press on a row means, whether the search may open, and whether there is anything to
-/// reload. What it cannot: the presses. Every mark added here lives in a `View` body, and this
-/// package cannot execute one, so "the mark is drawn where this says it is" is named in the
-/// report rather than claimed here.
+/// What a test can reach: the written-down list itself, the four rules the new controls read —
+/// what a press on a row means, whether the search may open, whether there is anything to reload,
+/// and whether a conversation may open — and the surfaces' own shapes, which is what
+/// `everySurfaceStillTakesItsPress` is for. What it cannot: the presses. Every mark added here
+/// lives in a `View` body, and this package cannot execute one, so "the mark is drawn where this
+/// says it is" is named in the report rather than claimed here.
 ///
 /// **The suite is `@MainActor`, and the whole suite rather than the tests inside it.**
 /// `FediqoRootView`'s statics belong to a `View`, which is isolated to the main actor. The Swift
@@ -27,14 +30,14 @@ struct TouchTests {
     /// **This is #33's acceptance line, executable.** Every key the guide names for the timeline
     /// has a way in that needs no keyboard — and because `touch` is not optional, a thirteenth
     /// key cannot be added to the list without answering the question. A key that genuinely has
-    /// no touch path would have to write `.keysOnly` here, which fails this test rather than
-    /// passing quietly.
+    /// no touch path, or only part of one, would have to write `.keysOnly` or `.partly` here,
+    /// either of which fails this test rather than passing quietly.
     @Test("Every key the guide names for the timeline can be done without one")
     func everyTimelineKeyHasATouchPath() {
         let timeline = DummyShortcut.lines(in: .timeline)
         #expect(timeline.count == 12)
-        let keysOnly = timeline.filter { $0.touch == .keysOnly }.map(\.name)
-        #expect(keysOnly.isEmpty, "no touch path for: \(keysOnly.joined(separator: ", "))")
+        let short = timeline.filter { $0.touch == .keysOnly || $0.touch == .partly }.map(\.name)
+        #expect(short.isEmpty, "no touch path for: \(short.joined(separator: ", "))")
     }
 
     /// The answers themselves, line by line, so that changing one is a change to this file too.
@@ -60,11 +63,20 @@ struct TouchTests {
     }
 
     /// The other tab, recorded rather than wished for: two of its five keys are a keyboard's
-    /// alone. #33 asks for the timeline, and this says in one place what it did not ask for.
-    @Test("Two of the app's own keys stay a keyboard's, and the list says which")
+    /// alone, and a third is one in part. #33 asks for the timeline, and this says in one place
+    /// what it did not ask for.
+    ///
+    /// `Escape` is the partial one and is the reason `.partly` exists. Everything it closes has a
+    /// control of its own, and the two things it does that none of them do — stopping a running
+    /// reload, putting the lamp out — have no touch path at all, so `.press` was this list
+    /// claiming a way in that is drawn nowhere.
+    @Test("Two of the app's own keys stay a keyboard's, one is partly, and the list says which")
     func theAppTabSaysWhatIsStillKeysOnly() {
         let keysOnly = DummyShortcut.lines(in: .app).filter { $0.touch == .keysOnly }.map(\.name)
         #expect(keysOnly == ["list", "landing"])
+        #expect(Self.line("dismiss").touch == .partly)
+        let partly = DummyShortcut.all.filter { $0.touch == .partly }.map(\.name)
+        #expect(partly == ["dismiss"])
     }
 
     /// The sentence each new mark wears is the sentence the guide explains its key with — one
@@ -87,6 +99,26 @@ struct TouchTests {
         #expect(DummyCommand.tapped("a", selected: nil) == .select)
         #expect(DummyCommand.tapped("a", selected: "b") == .select)
         #expect(DummyCommand.tapped("a", selected: "a") == .open)
+    }
+
+    /// The rule that press now reads, which is `Return`'s own. A press on a row carries the post
+    /// it means and the root lights it and opens it together — so this is what stands between a
+    /// press and a conversation, and it is the same function `Return` is refused by.
+    @Test("A press opens a conversation exactly where Return would")
+    func aPressOpensAThreadWhereReturnWould() {
+        func can(_ place: ShellPlace = .timeline, open: Set<DummyLayer> = []) -> Bool {
+            FediqoRootView.canOpenThread(place: place, open: open)
+        }
+        #expect(can(open: [.selection]))
+        // A reply inside an open thread opens its own conversation: the thread is still what is
+        // outermost afterwards.
+        #expect(can(open: [.thread, .selection]))
+        // A result found on this device can be opened, which is what puts search under thread.
+        #expect(can(open: [.search]))
+        // Nothing opens *under* the picture or the keys list.
+        #expect(!can(open: [.viewer]))
+        #expect(!can(open: [.shortcuts]))
+        #expect(!can(.account))
     }
 
     // MARK: - The two marks in the header
@@ -157,5 +189,58 @@ struct TouchTests {
                 #expect(!reloadable)
             }
         }
+    }
+
+    // MARK: - The surfaces the marks are on
+
+    /// **The one check here that a control going missing can fail.** Everything above this line
+    /// reads the written-down list or a rule beside it, and none of it notices a mark deleted
+    /// from a `View` body — which is #33's only real failure mode, and was being counted as
+    /// acceptance.
+    ///
+    /// This does not prove a mark is drawn: a body is still not something this package can
+    /// execute. What it does is make each surface's way in part of a type — the callback exists,
+    /// it is spelled this way, and it takes what a press has to hand it. Delete the entry point
+    /// and this file stops compiling, which is a build error instead of a string comparison that
+    /// goes on passing.
+    @Test("Every surface #33 put a way in on still takes one")
+    func everySurfaceStillTakesItsPress() {
+        let deck = [Attachment(kind: .image), Attachment(kind: .image)]
+        // The card is `v`, the counter is `m`, the mark on it is `a`.
+        _ = AttachmentDeck(
+            attachments: deck, top: 0, side: 96, host: Self.host,
+            onPlay: {}, onOpen: {}, onTurn: {}
+        )
+        // Inside the viewer, the counter under the picture is the only way to `m`.
+        _ = AttachmentViewer(
+            attachments: deck, top: 0, covered: false, hasCover: false, coverLine: nil,
+            emojis: [], host: Self.host, player: nil,
+            onToggleCover: {}, onPlay: {}, onTurn: {}, onClose: {}
+        )
+        // The row: a press that opens the conversation, and the deck's three, passed through.
+        // `onOpen` carries the post, which is what keeps the root off a state read.
+        _ = DummyItemRow(
+            item: Self.post, catalogues: EmojiCatalogueStore(), posts: ForumPosts(),
+            marks: .constant(DummyMarks()),
+            onOpen: {}, onView: {}, onTurn: {}, onToast: { _ in }
+        )
+        // The header's two, which cannot be handed a press without the answer that goes with it.
+        let ways = TimelineWays(canSearch: true, onSearch: {}, canReload: true, onReload: {})
+        #expect(ways.canSearch)
+        #expect(ways.canReload)
+    }
+
+    private static let host = "example.social"
+
+    private static var post: DummyItem {
+        DummyItem(Note(
+            id: "n1",
+            source: Source(host: host, kind: .mastodon),
+            author: "Ada",
+            handle: "@ada@\(host)",
+            body: "hello",
+            postedAt: .distantPast,
+            categories: [.public]
+        ))
     }
 }
