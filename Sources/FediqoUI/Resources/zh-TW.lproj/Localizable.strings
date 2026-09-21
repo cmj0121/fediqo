@@ -44,6 +44,16 @@
 "compose.disabled.summary" = "發文需要已登入的來源";
 "compose.cancel" = "取消";
 "compose.post" = "發佈";
+"compose.body" = "你的貼文";
+"compose.source" = "來源";
+"compose.visibility" = "可見範圍";
+"compose.visibility.public" = "公開";
+"compose.visibility.unlisted" = "不公開列出";
+"compose.visibility.private" = "私人";
+"compose.visibility.direct" = "限提及";
+"compose.limit" = "%d / %d";
+"compose.none.title" = "沒有可以發文的來源";
+"compose.none.detail" = "你已登入的來源裡，沒有可以從這裡發文的。";
 
 "shortcut.title" = "快捷鍵";
 "shortcut.note" = "沒有在寫的時候，這些鍵會動。";
