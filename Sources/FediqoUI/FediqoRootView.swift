@@ -578,6 +578,8 @@ public struct FediqoRootView: View {
             return true
         case .search:
             return openSearch()
+        case .boost:
+            return boostFocused()
         case .compose:
             guard availability.canCompose else { return false }
             showingShortcuts = false
@@ -1029,6 +1031,25 @@ public struct FediqoRootView: View {
             case .nothing:
                 return false
             }
+        }
+    }
+
+    /// `b` — the post the lamp is on, boosted to the source it was read through, or the boost
+    /// taken back (#106).
+    ///
+    /// **The acting half only.** Whether this post offers the act at all is `session.acts(on:)`,
+    /// read here and by the mark under the post from the one place, so a key that acted where no
+    /// mark is drawn — or a mark drawn over a key that refuses — cannot happen. A post that does
+    /// not offer it moves nothing and says so, which is what leaves the press available to the
+    /// platform.
+    ///
+    /// `onFocusedItem` and not `onActedItem`: the viewer is a picture over a post, and the post
+    /// it is over is the one the lamp is on, so there is no second post for this key to mean.
+    private func boostFocused() -> Bool {
+        onFocusedItem { item in
+            guard session.acts(on: item).offers(.boost) else { return false }
+            Task { await session.boost(item) }
+            return true
         }
     }
 

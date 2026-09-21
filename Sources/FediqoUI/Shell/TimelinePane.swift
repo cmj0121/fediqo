@@ -151,6 +151,7 @@ struct TimelinePane: View {
                     posts: session.posts,
                     selectedID: $selectedID,
                     marks: markBinding,
+                    acting: acting,
                     decks: $decks,
                     playback: playback,
                     onPlayRow: onPlayRow,
@@ -172,6 +173,7 @@ struct TimelinePane: View {
                     onAskAround: { Task { await session.conversations.again(opened, in: session) } },
                     selectedID: $selectedID,
                     marks: markBinding,
+                    acting: acting,
                     decks: $decks,
                     playback: playback,
                     onPlayRow: onPlayRow,
@@ -317,6 +319,7 @@ struct TimelinePane: View {
                             catalogueSettled: settledHosts.contains(item.source.host),
                             posts: session.posts,
                             marks: markBinding(item),
+                            acting: acting(item),
                             selected: item.id == selectedID,
                             top: decks.top(of: item.id, of: item.attachments.count),
                             lifted: decks.isLifted(item.id),
@@ -399,6 +402,24 @@ struct TimelinePane: View {
             for: ShellPlaying.playable(decks.showing(item.attachments, of: item.id)),
             of: item.id,
             on: .row
+        )
+    }
+
+    /// One row's share of #54's acts (#106).
+    ///
+    /// **Built here and handed down**, so the timeline, a conversation and somebody's page all
+    /// draw one answer: the session holds what the sign-in bought and what the source has turned
+    /// away since, and three panes working it out for themselves would be three derivations free
+    /// to disagree about one post.
+    private func acting(_ item: DummyItem) -> ItemActing {
+        var standings: [PostAct: ShellActStanding] = [:]
+        for act in PostAct.allCases {
+            standings[act] = session.acts.standing(of: item.id, act)
+        }
+        return ItemActing(
+            acts: session.acts(on: item),
+            standings: standings,
+            boost: { Task { await session.boost(item) } }
         )
     }
 
