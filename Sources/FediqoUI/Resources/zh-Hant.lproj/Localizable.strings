@@ -97,7 +97,7 @@
 "timeline.empty.trends.detail" = "來源標為趨勢的貼文會落在這裡，依發文時間排列。";
 "timeline.empty.trends.answered.detail" = "已問過你的來源，沒有標為趨勢的貼文。";
 "timeline.empty.held.title" = "還沒有收過貼文";
-"timeline.empty.held.detail" = "來源已在，這台裝置還沒有留下它們的貼文。到「帳號」再加一個來源，或按 r 再問一次。";
+"timeline.empty.held.detail" = "來源已在，這台裝置還沒有留下它們的貼文。到「帳號」再加一個來源，或重新載入再問一次。";
 "timeline.empty.answered.title" = "問過了，沒有東西回來";
 "timeline.empty.answered.detail" = "已問過你的來源，它們沒有貼文可留。換一個來源才會填滿這裡。";
 "timeline.empty.rules.title" = "這條時間軸什麼都不讓過";

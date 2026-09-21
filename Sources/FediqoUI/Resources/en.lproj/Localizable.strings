@@ -97,7 +97,7 @@
 "timeline.empty.trends.detail" = "Notes your sources hand over as trending land here, in the order they were posted.";
 "timeline.empty.trends.answered.detail" = "Your sources were asked, and none handed over a trending note.";
 "timeline.empty.held.title" = "Nothing held yet";
-"timeline.empty.held.detail" = "This device has not kept a note from your sources. Add a source on Account, or press r to ask them.";
+"timeline.empty.held.detail" = "This device has not kept a note from your sources. Add a source on Account, or reload to ask them.";
 "timeline.empty.answered.title" = "Nothing came back";
 "timeline.empty.answered.detail" = "Your sources were asked, and had no notes to keep. Another source is what would fill this.";
 "timeline.empty.rules.title" = "This timeline lets nothing through";
