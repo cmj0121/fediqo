@@ -183,11 +183,31 @@ public enum Category: Hashable, Sendable {
     case board(id: String)
 }
 
-public enum Audience: String, Sendable, Hashable {
+public enum Audience: String, Sendable, Hashable, CaseIterable {
     case everyone
     case unlisted
     case followers
     case mentioned
+
+    /// What a Mastodon source calls this on the wire.
+    public var mastodon: String {
+        switch self {
+        case .everyone: "public"
+        case .unlisted: "unlisted"
+        case .followers: "private"
+        case .mentioned: "direct"
+        }
+    }
+
+    public init?(mastodon raw: String) {
+        switch raw {
+        case "public": self = .everyone
+        case "unlisted": self = .unlisted
+        case "private": self = .followers
+        case "direct": self = .mentioned
+        default: return nil
+        }
+    }
 }
 
 public struct Reply: Hashable, Sendable {

@@ -369,32 +369,62 @@ public struct MastodonAuthorized: Sendable {
     static let accountCheck = "/api/v1/accounts/verify_credentials"
 
     public func get(path: String, query: [URLQueryItem] = []) async throws -> Data {
-        let (body, status) = try await send(path: path, query: query)
-        switch status {
+        try await finish(try await send(path: path, query: query), path: path)
+    }
+
+    /// A form POST through the same door: the token, the 401 rule, and never off this host.
+    public func post(path: String, form: [(String, String)]) async throws -> Data {
+        try await finish(try await send(path: path, method: "POST", form: form), path: path)
+    }
+
+    private func finish(_ result: (Data, status: Int), path: String) async throws -> Data {
+        switch result.status {
         case 200..<300:
-            return body
+            return result.0
         case 401:
             if path != Self.accountCheck,
-               (try? await send(path: Self.accountCheck, query: []))?.status != 401
+               (try? await send(path: Self.accountCheck))?.status != 401
             {
                 throw MastodonAuthError.http(401)
             }
             guard (try? store.forget(token)) == true else { throw MastodonAuthError.http(401) }
             throw MastodonAuthError.signedOut
         default:
-            throw MastodonAuthError.http(status)
+            throw MastodonAuthError.http(result.status)
         }
     }
 
-    private func send(path: String, query: [URLQueryItem]) async throws -> (Data, status: Int) {
+    private func send(
+        path: String,
+        method: String = "GET",
+        query: [URLQueryItem] = [],
+        form: [(String, String)]? = nil
+    ) async throws -> (Data, status: Int) {
         guard let url = Host.httpsURL(host: token.host, path: path, query: query) else {
             throw URLError(.badURL)
         }
         var request = URLRequest(url: url)
-        request.httpMethod = "GET"
+        request.httpMethod = method
         request.setValue("Bearer \(token.accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let form {
+            request.setValue(
+                "application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type"
+            )
+            request.httpBody = Data(
+                form.map { "\(Self.escape($0.0))=\(Self.escape($0.1))" }.joined(separator: "&")
+                    .utf8
+            )
+        }
         let (body, response) = try await sender.send(request)
         return (body, response.statusCode)
+    }
+
+    /// Form encoding: everything but RFC 3986's unreserved characters is escaped, so a `+`, `&`
+    /// or `=` inside the status stays inside it.
+    private static func escape(_ value: String) -> String {
+        var unreserved = CharacterSet.alphanumerics
+        unreserved.insert(charactersIn: "-._~")
+        return value.addingPercentEncoding(withAllowedCharacters: unreserved) ?? ""
     }
 }

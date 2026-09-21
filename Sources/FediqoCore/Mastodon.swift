@@ -84,6 +84,25 @@ public struct MastodonClient: Sendable {
         return try MastodonJSON.decoder.decode(InstanceDTO.self, from: data).asProfile(host: host)
     }
 
+    /// How many characters a status on this server may be, or Mastodon's 500 where it did not
+    /// say. Unauthenticated, the same document a preview already fetches.
+    public func statusLimit() async -> Int {
+        guard let url = Host.httpsURL(host: host, path: "/api/v2/instance") else {
+            return MastodonWrite.defaultLimit
+        }
+        do {
+            let (data, response) = try await http.data(from: url)
+            guard (200..<300).contains(response.statusCode) else {
+                return MastodonWrite.defaultLimit
+            }
+            let advertised = (try? MastodonJSON.decoder.decode(InstanceDTO.self, from: data))?
+                .configuration?.statuses?.maxCharacters
+            return MastodonWrite.limit(advertised: advertised)
+        } catch {
+            return MastodonWrite.defaultLimit
+        }
+    }
+
     private func statuses(
         path: String,
         limit: Int,
@@ -149,6 +168,7 @@ struct InstanceDTO: Decodable, Sendable {
     let description: String?
     let thumbnail: Thumbnail?
     let usage: Usage?
+    let configuration: Configuration?
     let registrations: Registrations?
     let rules: [Rule]?
 
@@ -163,6 +183,14 @@ struct InstanceDTO: Decodable, Sendable {
             /// The only count v2 carries. There is no total here: the registered-account number
             /// left with v1's `stats` block and did not come back.
             let activeMonth: Int?
+        }
+    }
+
+    struct Configuration: Decodable, Sendable {
+        let statuses: Statuses?
+
+        struct Statuses: Decodable, Sendable {
+            let maxCharacters: Int?
         }
     }
 
@@ -188,11 +216,19 @@ struct InstanceDTO: Decodable, Sendable {
             // is admitted under.
             thumbnail: Host.fetchableURL(thumbnail?.url),
             activeMonth: usage?.users?.activeMonth,
+            statusLimit: Self.statusLimit(configuration?.statuses?.maxCharacters),
             registration: Self.registration(registrations),
             // The rules a server did not send and the rules a server has none of are the same
             // nothing to draw. See `SourceProfile.rules`.
             rules: (rules ?? []).compactMap(\.text)
         )
+    }
+
+    /// A positive advertised ceiling, or nothing — zero and below are a server that said
+    /// something useless, not a status that may be no characters at all.
+    private static func statusLimit(_ advertised: Int?) -> Int? {
+        guard let advertised, advertised > 0 else { return nil }
+        return advertised
     }
 
     /// Two booleans into the three answers a reader can act on.
@@ -401,13 +437,7 @@ struct StatusDTO: Decodable, Sendable {
     }
 
     private static func audience(_ visibility: String?) -> Audience? {
-        switch visibility {
-        case "public": .everyone
-        case "unlisted": .unlisted
-        case "private": .followers
-        case "direct": .mentioned
-        default: nil
-        }
+        visibility.flatMap(Audience.init(mastodon:))
     }
 }
 

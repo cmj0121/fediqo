@@ -44,6 +44,16 @@
 "compose.disabled.summary" = "Compose needs a signed-in source";
 "compose.cancel" = "Cancel";
 "compose.post" = "Post";
+"compose.body" = "Your post";
+"compose.source" = "Source";
+"compose.visibility" = "Visibility";
+"compose.visibility.public" = "public";
+"compose.visibility.unlisted" = "unlisted";
+"compose.visibility.private" = "private";
+"compose.visibility.direct" = "direct";
+"compose.limit" = "%d / %d";
+"compose.none.title" = "Nothing to write to";
+"compose.none.detail" = "None of the sources you are signed in to can be written to from here.";
 
 "shortcut.title" = "Keys";
 "shortcut.note" = "These work while you are not writing.";

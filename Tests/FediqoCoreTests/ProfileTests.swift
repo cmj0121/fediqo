@@ -77,8 +77,32 @@ struct ProfileTests {
         #expect(profile.thumbnail?.absoluteString
             == "https://install-g.example/system/site_uploads/thumb.png")
         #expect(profile.activeMonth == 1482)
+        #expect(profile.statusLimit == 500)
         #expect(profile.registration == .open)
         #expect(profile.rules == ["Be kind"])
+    }
+
+    @Test("A Mastodon that advertises another ceiling is taken at its word")
+    func aMastodonAdvertisesItsCeiling() async throws {
+        let long = Self.instance().replacingOccurrences(
+            of: #""max_characters": 500"#, with: #""max_characters": 2000"#
+        )
+        let (answer, _) = try await Self.answer(
+            ["/api/v2/instance": .text(long)],
+            host: Self.mastodonHost,
+            kind: .mastodon
+        )
+        #expect(try Self.stated(answer).statusLimit == 2000)
+    }
+
+    @Test("A Mastodon that said nothing about a ceiling leaves it unguessed")
+    func aMastodonWithoutACeilingSaysNothing() async throws {
+        let (answer, _) = try await Self.answer(
+            ["/api/v2/instance": .text(#"{"title":"Install G"}"#)],
+            host: Self.mastodonHost,
+            kind: .mastodon
+        )
+        #expect(try Self.stated(answer).statusLimit == nil)
     }
 
     @Test("A Mastodon has no idea how many accounts it holds, and says nothing rather than zero")
