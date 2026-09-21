@@ -85,6 +85,13 @@ struct DummyThreadPane: View {
                             ShellFailure(sources: sources, retry: onReload)
                                 .frame(maxHeight: 160, alignment: .topLeading)
                                 .padding(.horizontal, ShellSpace.pad)
+                        } else if let notice = EmptyNotice.thread(
+                            descendantCount: conversation.descendants.count,
+                            replyCount: root.counts.replies,
+                            standing: nil,
+                            failed: failed
+                        ) {
+                            ShellNotice(notice)
                         }
                     }
                     .padding(.vertical, 8)
@@ -289,7 +296,14 @@ struct DummyThreadPane: View {
                 // later, which is what the reader wrote in about first. See `ForumWaiting`.
                 ForumWaiting(line: L10n.t("thread.replies.loading"))
             case .none:
-                quiet(L10n.t("thread.replies.none"))
+                if let notice = EmptyNotice.thread(
+                    descendantCount: 0,
+                    replyCount: 0,
+                    standing: ForumRepliesStanding.none,
+                    failed: failed
+                ) {
+                    ShellNotice(notice)
+                }
             case .loaded(let replies):
                 Text(String(format: L10n.t("thread.replies.count"), replies.count))
                     .font(ShellType.name)

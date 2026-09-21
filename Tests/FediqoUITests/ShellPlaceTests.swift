@@ -187,7 +187,7 @@ struct EmptySessionTests {
         )
         #expect(
             L10n.t("timeline.empty.detail", language: .english)
-                == "Public notes from the sources you added land here, newest first."
+                == "Add a source on Account. Public notes from it land here, newest first."
         )
         #expect(
             L10n.t("timeline.empty.trends.title", language: .english) == "Nothing is trending"

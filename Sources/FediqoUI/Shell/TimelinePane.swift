@@ -83,7 +83,9 @@ struct TimelinePane: View {
         /// The wait ended and nothing came: the place the rows would have taken, named as a
         /// failure, with a way to ask again from here.
         case failed
-        /// Nothing on the wire, or a search, or nobody joined: today's empty notice.
+        /// Nothing on the wire, or a search, or nobody joined: `EmptyNotice`, never a wait
+        /// and never a failure. The distinctions inside empty — rules, held, answered,
+        /// search — live on that notice, not on a fifth standing.
         case empty
     }
 
@@ -564,31 +566,20 @@ struct TimelinePane: View {
         .accessibilityLabel(L10n.t("timeline.new.title"))
     }
 
-    @ViewBuilder
     private var empty: some View {
-        if let search, search.isSearching, !search.isIndexed {
-            ShellNotice(
-                symbol: "magnifyingglass",
-                title: L10n.t("search.indexing.title"),
-                detail: L10n.t("search.indexing.detail")
-            )
-        } else if search?.isSearching == true {
-            ShellNotice(
-                symbol: "magnifyingglass",
-                title: L10n.t("search.empty.title"),
-                detail: L10n.t("search.empty.detail")
-            )
-        } else {
-            timelineEmpty
-        }
-    }
-
-    private var timelineEmpty: some View {
-        ShellNotice(
-            symbol: "list.bullet.rectangle",
-            title: L10n.t("\(timeline.emptyKey).title"),
-            detail: L10n.t("\(timeline.emptyKey).detail")
-        )
+        ShellNotice(EmptyNotice.timeline(
+            searching: search?.isSearching == true,
+            indexed: search?.isIndexed ?? false,
+            query: timeline,
+            notes: session.notes,
+            written: session.written,
+            sources: session.sources,
+            index: session.textIndex,
+            latest: prefs.latestDate,
+            asked: session.reload.landed > 0
+                && session.reload.failed.isEmpty
+                && !session.reload.stopped
+        ))
     }
 }
 
