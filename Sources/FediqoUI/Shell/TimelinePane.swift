@@ -39,7 +39,13 @@ struct TimelinePane: View {
     var onViewRow: (DummyItem) -> Void
     var onTurnRow: (DummyItem) -> Void
     /// A second press on the row the lamp is already on: `Return`. See `DummyCommand.tapped`.
-    var onOpenThread: () -> Void
+    ///
+    /// **The press says which post it means.** It used to say so by writing the lamp and calling
+    /// this, which made the open depend on a `@State` write being readable by the very next
+    /// statement — and where it is not, the root opens whatever was lit *before*, which is the
+    /// wrong post on the one path built for a reader who cannot press twice. The id travels with
+    /// the press instead, and the root lights it and opens it together.
+    var onOpenThread: (String) -> Void
     var jumpToTop: Int
     var onPopThread: () -> Void
     /// The search and the reload, as a finger reaches them.
@@ -225,14 +231,12 @@ struct TimelinePane: View {
                             onSelect: {
                                 switch DummyCommand.tapped(item.id, selected: selectedID) {
                                 case .select: selectedID = item.id
-                                case .open: onOpenThread()
+                                case .open: onOpenThread(item.id)
                                 }
                             },
-                            // Lit and opened in one, for the reader who activates a row once.
-                            onOpen: {
-                                selectedID = item.id
-                                onOpenThread()
-                            },
+                            // Lit and opened in one, for the reader who activates a row once —
+                            // done by the root, in one turn, on the id this press carries.
+                            onOpen: { onOpenThread(item.id) },
                             onToggleCover: { _ = decks.toggleCover(item.id) },
                             onPlay: { onPlayRow(item) },
                             onView: { onViewRow(item) },

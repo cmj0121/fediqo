@@ -26,7 +26,8 @@ struct DummyThreadPane: View {
     var onTurnRow: (DummyItem) -> Void
     /// A second press on the row the lamp is already on: `Return`, which from inside a thread
     /// opens the conversation around the reply that was pressed. See `DummyCommand.tapped`.
-    var onOpenThread: () -> Void
+    /// The press carries the post it means, for the reason `TimelinePane.onOpenThread` gives.
+    var onOpenThread: (String) -> Void
     var jumpToTop: Int
     var onToast: (String) -> Void
     var onBack: () -> Void
@@ -189,16 +190,13 @@ struct DummyThreadPane: View {
             onSelect: {
                 switch DummyCommand.tapped(item.id, selected: selectedID) {
                 case .select: selectedID = item.id
-                case .open: onOpenThread()
+                case .open: onOpenThread(item.id)
                 }
             },
             // **Nothing on the post this pane is already about.** Opening it again is refused —
             // `FediqoRootView.openThread` says so — and an action announced and then refused is
             // worse than one never announced.
-            onOpen: item.id == root.id ? nil : {
-                selectedID = item.id
-                onOpenThread()
-            },
+            onOpen: item.id == root.id ? nil : { onOpenThread(item.id) },
             onToggleCover: { _ = decks.toggleCover(item.id) },
             onPlay: { onPlayRow(item) },
             onView: { onViewRow(item) },

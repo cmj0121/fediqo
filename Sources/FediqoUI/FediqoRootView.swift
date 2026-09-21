@@ -1011,11 +1011,35 @@ public struct FediqoRootView: View {
         return session.posts.standing(of: thread).wantsPressing
     }
 
+    /// Whether `Return` — and the press of a finger on a row that is its touch path (#33) — may
+    /// open a conversation now. One expression, two readers, for the reason `canSearch` gives.
+    ///
+    /// Nothing here is about *which* post: the lamp is the key's business and the press carries
+    /// its own id. **No `default:`**, for `canReload`'s reason.
+    static func canOpenThread(place: ShellPlace, open: Set<DummyLayer>) -> Bool {
+        place == .timeline && DummyCommand.canOpen(.thread, whenOpen: open)
+    }
+
+    /// `Return`: the conversation around the post the lamp is on.
     private func openThread() -> Bool {
-        guard place == .timeline, let selectedItemID,
-              DummyCommand.canOpen(.thread, whenOpen: openLayers) else { return false }
-        if threadStack.last == selectedItemID { return false }
-        threadStack.append(selectedItemID)
+        guard let selectedItemID else { return false }
+        return openThread(selectedItemID)
+    }
+
+    /// The same thing on the post a finger named — a press on a row, which is `Return`'s touch
+    /// path (#33), and the one action a reader using VoiceOver activates a row with.
+    ///
+    /// **The lamp and the push happen here, in one turn, under one guard.** The pane used to
+    /// write the selection and then call the no-argument half, which read that write back out of
+    /// `@State` on the very next statement — true today, and where it is not, the root opens the
+    /// post that *was* lit instead of the one pressed. An id in hand needs no such reading. The
+    /// lamp moves only where the open is allowed, for `openViewer`'s reason: a press that can
+    /// open nothing must not move anything either.
+    private func openThread(_ id: String) -> Bool {
+        guard Self.canOpenThread(place: place, open: openLayers) else { return false }
+        selectedItemID = id
+        if threadStack.last == id { return false }
+        threadStack.append(id)
         return true
     }
 
@@ -1188,7 +1212,7 @@ public struct FediqoRootView: View {
                 onPlayRow: playRow,
                 onViewRow: viewRow,
                 onTurnRow: turnRow,
-                onOpenThread: { _ = openThread() },
+                onOpenThread: { _ = openThread($0) },
                 jumpToTop: jumpToTop,
                 onPopThread: { _ = popThread() },
                 // The two marks in the timeline's header, and whether there is anything for them
