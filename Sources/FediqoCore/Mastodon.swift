@@ -68,39 +68,69 @@ public struct MastodonClient: Sendable {
     /// `people`, `posts` and `readsWithoutAccount` come back nothing, because Mastodon has no such
     /// idea — see `SourceProfile.activeMonth`.
     public func profile() async throws -> SourceProfile {
-        guard let url = Host.httpsURL(host: host, path: "/api/v2/instance") else {
+        let data: Data
+        do {
+            data = try await instanceDocument()
+        } catch MastodonRequestError.invalidURL {
             // Nothing was asked, so nothing answered badly. `unreadable` would claim a
             // server sent something unreadable when no request was ever built.
             throw ProfileError.unreachable
-        }
-        let (data, response) = try await http.data(from: url)
-        // **The status is read before the body is, and that ordering is the whole guard.** A
-        // Mastodon older than 4.0 does not have this endpoint and answers 404 with a page of
-        // HTML; a decoder handed that reports a corrupt profile for a server whose only fault is
-        // its age. Nothing non-2xx reaches `JSONDecoder` from here.
-        guard (200..<300).contains(response.statusCode) else {
-            throw ProfileError.of(status: response.statusCode)
+        } catch MastodonRequestError.http(let status) {
+            throw ProfileError.of(status: status)
         }
         return try MastodonJSON.decoder.decode(InstanceDTO.self, from: data).asProfile(host: host)
+    }
+
+    /// `/api/v2/instance`, fetched — **the one place its address is built and its status read**.
+    ///
+    /// Three readers want this document for three different things: what the server says about
+    /// itself, what it says it is, and how long a post on it may be. They wanted it through
+    /// three copies of the same four lines, each of which had to remember the same rule.
+    ///
+    /// **The status is read before the body is, and that ordering is the whole guard.** A
+    /// Mastodon older than 4.0 does not have this endpoint and answers 404 with a page of HTML;
+    /// a decoder handed that reports a corrupt profile for a server whose only fault is its age.
+    /// Nothing non-2xx reaches `JSONDecoder` from here.
+    ///
+    /// The failure is spelled in this type's own error, and the one caller that owes its reader
+    /// a different vocabulary — `profile()`, which speaks `ProfileError` — translates it at the
+    /// call. That is one translation rather than three spellings of one rule.
+    private func instanceDocument() async throws -> Data {
+        guard let url = Host.httpsURL(host: host, path: "/api/v2/instance") else {
+            throw MastodonRequestError.invalidURL
+        }
+        let (data, response) = try await http.data(from: url)
+        guard (200..<300).contains(response.statusCode) else {
+            throw MastodonRequestError.http(response.statusCode)
+        }
+        return data
+    }
+
+    /// **What this server says it is, now** — the flavour, asked of the server rather than read
+    /// off what was written down when it was joined.
+    ///
+    /// The same document, the same rule and the same one endpoint the detector's probe reads:
+    /// `Probe.kind(from:)` is shared rather than spelled again here, so a server that a join
+    /// would name one thing cannot be named another by a read. A host is joined once and read
+    /// for as long as the reader keeps it, and in between it can be migrated, replaced, or
+    /// upgraded into a different program — the name is the server's to tell, and this is the
+    /// asking.
+    ///
+    /// **Non-2xx throws rather than answering `.unknown`.** "It would not say" and "it said
+    /// something this app does not know" are different facts about a server and only one of them
+    /// is the server's own answer; a caller that cannot tell them apart would start treating an
+    /// outage as a migration.
+    public func flavour() async throws -> ProtocolKind {
+        Probe.kind(from: try await instanceDocument())
     }
 
     /// How many characters a status on this server may be, or Mastodon's 500 where it did not
     /// say. Unauthenticated, the same document a preview already fetches.
     public func statusLimit() async -> Int {
-        guard let url = Host.httpsURL(host: host, path: "/api/v2/instance") else {
-            return MastodonWrite.defaultLimit
-        }
-        do {
-            let (data, response) = try await http.data(from: url)
-            guard (200..<300).contains(response.statusCode) else {
-                return MastodonWrite.defaultLimit
-            }
-            let advertised = (try? MastodonJSON.decoder.decode(InstanceDTO.self, from: data))?
-                .configuration?.statuses?.maxCharacters
-            return MastodonWrite.limit(advertised: advertised)
-        } catch {
-            return MastodonWrite.defaultLimit
-        }
+        guard let data = try? await instanceDocument() else { return MastodonWrite.defaultLimit }
+        let advertised = (try? MastodonJSON.decoder.decode(InstanceDTO.self, from: data))?
+            .configuration?.statuses?.maxCharacters
+        return MastodonWrite.limit(advertised: advertised)
     }
 
     private func statuses(
