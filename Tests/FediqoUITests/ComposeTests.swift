@@ -11,16 +11,23 @@ private actor WriteServer: HTTPSender {
     }
 
     private let routes: [String: Outcome]
+    private let held: String?
+    private let gate: Gate?
     private(set) var requests: [URLRequest] = []
 
-    init(_ routes: [String: Outcome]) {
+    init(_ routes: [String: Outcome], holding held: String? = nil, gate: Gate? = nil) {
         self.routes = routes
+        self.held = held
+        self.gate = gate
     }
 
     var paths: [String] { requests.compactMap { $0.url?.path } }
 
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         requests.append(request)
+        if let held, request.url?.path == held {
+            await gate?.wait()
+        }
         guard let url = request.url, let outcome = routes[url.path] else {
             throw FixtureHTTPError.unmapped
         }
@@ -81,11 +88,13 @@ struct ComposeTests {
     private func shell(
         scopes: String?,
         routes: [String: WriteServer.Outcome] = [:],
-        http: FixtureHTTP = FixtureHTTP()
+        http: FixtureHTTP = FixtureHTTP(),
+        holding: String? = nil,
+        gate: Gate? = nil
     ) async throws -> (ShellSession, WriteServer, MemoryMastodonTokens) {
         let tokens = MemoryMastodonTokens()
         try tokens.save(token(host, scopes: scopes))
-        let server = WriteServer(routes)
+        let server = WriteServer(routes, holding: holding, gate: gate)
         let store = ItemStore()
         await store.add(Source(host: host, kind: .mastodon))
         await store.add(Source(host: forum, kind: .discuz))
@@ -96,6 +105,16 @@ struct ComposeTests {
         session.sources = await store.sources()
         session.mastodon.refresh()
         return (session, server, tokens)
+    }
+
+    private func surface(
+        _ session: ShellSession, failed: String? = nil
+    ) -> ComposerSheet.Surface {
+        ComposerSheet.surface(
+            offered: ComposerSheet.offered(session.rows),
+            draft: session.composeDraft,
+            failed: failed
+        )
     }
 
     @Test("A source they may not write on is not offered")
@@ -172,6 +191,64 @@ struct ComposeTests {
         #expect(session.rows.first { $0.source.host == host }?.writing == .refused)
         #expect(ComposerSheet.offered(session.rows).isEmpty)
         #expect(session.isSignedIn(host: host))
+        #expect(surface(session, failed: host) == .composing, "the failure is not the empty notice")
+        #expect(surface(session) == .composing, "the draft alone keeps the editor")
+    }
+
+    @Test("A 401 that signs out keeps the draft and the failure, not the empty notice")
+    func aSignOutOnWriteKeepsTheComposer() async throws {
+        let (session, _, _) = try await shell(
+            scopes: writing,
+            routes: [
+                "/api/v1/statuses": .json("{}", status: 401),
+                "/api/v1/accounts/verify_credentials": .json("{}", status: 401),
+            ]
+        )
+        session.prepareCompose()
+        session.composeDraft = "kept"
+        await #expect(throws: MastodonAuthError.signedOut) {
+            try await session.post()
+        }
+        #expect(session.composeDraft == "kept")
+        #expect(!session.isSignedIn(host: host))
+        #expect(ComposerSheet.offered(session.rows).isEmpty)
+        #expect(surface(session, failed: host) == .composing)
+        #expect(
+            ComposerSheet.surface(offered: [], draft: "", failed: nil) == .empty,
+            "empty is only when there is nothing unsent and no failure"
+        )
+    }
+
+    @Test("Cancel is refused while a send is on the wire")
+    func cancelIsRefusedWhileSending() {
+        #expect(ComposerSheet.canDismiss(sending: false))
+        #expect(!ComposerSheet.canDismiss(sending: true))
+    }
+
+    @Test("A late success clears only the snapshot that was sent")
+    func lateSuccessClearsOnlyTheSnapshot() async throws {
+        #expect(ComposerSheet.draftAfterLanding(current: "hello", sent: "hello").isEmpty)
+        #expect(ComposerSheet.draftAfterLanding(current: "hello\n", sent: "hello").isEmpty)
+        #expect(ComposerSheet.draftAfterLanding(current: "newer", sent: "hello") == "newer")
+
+        let gate = Gate()
+        let watchdog = hangGuard(gate)
+        defer { watchdog.cancel() }
+        let (session, server, _) = try await shell(
+            scopes: writing,
+            routes: ["/api/v1/statuses": .json(Self.status())],
+            holding: "/api/v1/statuses",
+            gate: gate
+        )
+        session.prepareCompose()
+        session.composeDraft = "hello"
+        let task = Task { try await session.post() }
+        #expect(await spun { await server.paths.contains("/api/v1/statuses") })
+        session.composeDraft = "newer"
+        await gate.open()
+        try await task.value
+        #expect(session.composeDraft == "newer")
+        #expect(session.notes.contains { $0.body == "hello" })
     }
 
     @Test("Text longer than the source will take cannot be sent; the limit is visible")
