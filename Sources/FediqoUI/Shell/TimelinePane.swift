@@ -73,6 +73,35 @@ struct TimelinePane: View {
             ?? session.timelineItems(latest: prefs.latestDate)
     }
 
+    /// What the stream in front is, from facts a test can name without drawing the pane.
+    enum Standing: Equatable, Sendable {
+        /// A fetch for this timeline is on the wire, and the list in front has no rows yet.
+        case arriving
+        /// Posts this device already holds. Drawn at once — a skeleton on top of them would hide
+        /// what is already here.
+        case held
+        /// Nothing on the wire, or a search, or nobody joined: today's empty notice.
+        case empty
+    }
+
+    /// Arriving only while a reload is on the wire and the list in front is empty.
+    ///
+    /// **Held wins.** What is already here is read at once; only what has not arrived waits.
+    /// **Search is not a timeline wait.** An empty search already has its own indexing and empty
+    /// notices; turning it into waiting rows would be a second vocabulary for a local miss.
+    /// **No sources is empty, never waiting.** There is nobody to ask, so a plate standing for a
+    /// row that will never come is a wait that never ends.
+    static func standing(
+        running: Bool,
+        hasItems: Bool,
+        searching: Bool,
+        hasSources: Bool
+    ) -> Standing {
+        if hasItems { return .held }
+        if searching || !hasSources { return .empty }
+        return running ? .arriving : .empty
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
@@ -104,10 +133,17 @@ struct TimelinePane: View {
                 )
                 // One pane per thread, so going back from a nested one draws its parent afresh.
                 .id(opened.id)
-            } else if items.isEmpty {
-                empty
             } else {
-                list
+                switch Self.standing(
+                    running: session.reload.running,
+                    hasItems: !items.isEmpty,
+                    searching: search?.isSearching == true,
+                    hasSources: !session.sources.isEmpty
+                ) {
+                case .held: list
+                case .arriving: TimelineWaiting()
+                case .empty: empty
+                }
             }
         }
         .overlay(alignment: .bottom) {
@@ -517,5 +553,124 @@ struct TimelinePane: View {
             title: L10n.t("\(timeline.emptyKey).title"),
             detail: L10n.t("\(timeline.emptyKey).detail")
         )
+    }
+}
+
+/// DummyItemRow's place, taken before the row is there, at the height that row will have.
+///
+/// DummyItemRow names four bands; the decorator is drawn only when a post has something to say
+/// there. A waiting place that held it open would be taller than the typical row that replaces
+/// it, which is the one thing this place is not allowed to be. Headline, words and marks are
+/// the three that every row keeps, sized from the same fittings.
+struct TimelineWaiting: View {
+    /// A small run of places, not a list of forty.
+    static let places = 6
+    /// Silent so the group is the only thing a reader lands on.
+    static let plateSpeaks = false
+    /// DummyItemRow's finger floor at the standard type size, so this place is that row's height.
+    static let marks: CGFloat = 32
+
+    static var spoken: String { ShellWaiting.spoken }
+
+    /// The plates' clock is the shell's, so Reduce Motion stops them the same way.
+    static func clock(reduceMotion: Bool) -> TimeInterval? {
+        ShellWaiting.clock(reduceMotion: reduceMotion)
+    }
+
+    /// Headline at the avatar, words at the thumb, marks at a finger's floor, the row's padding
+    /// and the gaps between bands.
+    static var rowHeight: CGFloat {
+        DummyItemRow.Box.avatar
+            + DummyItemRow.Box.thumb
+            + marks
+            + ShellSpace.snug * 2
+            + ShellSpace.step * 2
+    }
+
+    @ScaledMetric(relativeTo: .body) private var avatar: CGFloat = DummyItemRow.Box.avatar
+    @ScaledMetric(relativeTo: .body) private var thumb: CGFloat = DummyItemRow.Box.thumb
+    @ScaledMetric(relativeTo: .caption) private var touch: CGFloat = 32
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                ForEach(0..<Self.places, id: \.self) { index in
+                    row
+                    if index < Self.places - 1 {
+                        Rectangle()
+                            .fill(ShellChrome.hairline(colorScheme))
+                            .frame(height: ShellSpace.hair)
+                    }
+                }
+            }
+        }
+        .scrollIndicators(.never)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(Self.spoken))
+        .accessibilityAddTraits(.updatesFrequently)
+    }
+
+    private var row: some View {
+        VStack(alignment: .leading, spacing: ShellSpace.snug) {
+            headline
+            mainBox
+            marksBand
+        }
+        // The place is taken at the row's height, not at whatever the plates measure: a plate
+        // that grew with type cannot move the list when the row arrives.
+        .frame(height: avatar + thumb + touch + ShellSpace.snug * 2)
+        .padding(.horizontal, ShellSpace.pad)
+        .padding(.vertical, ShellSpace.step)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var headline: some View {
+        HStack(alignment: .center, spacing: ShellSpace.snug) {
+            plate(width: avatar, height: avatar)
+            VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                plate(height: ShellSpace.snug)
+                    .frame(maxWidth: 160, alignment: .leading)
+                plate(height: ShellSpace.snug)
+                    .frame(maxWidth: 96, alignment: .leading)
+            }
+            Spacer(minLength: ShellSpace.snug)
+            plate(width: 72, height: ShellSpace.snug)
+        }
+        .frame(height: avatar)
+    }
+
+    private var mainBox: some View {
+        HStack(alignment: .top, spacing: ShellSpace.step) {
+            VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                plate(height: ShellSpace.snug)
+                plate(height: ShellSpace.snug)
+                    .frame(maxWidth: 220, alignment: .leading)
+                plate(height: ShellSpace.snug)
+                    .frame(maxWidth: 160, alignment: .leading)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            plate(width: thumb, height: thumb)
+        }
+        .frame(height: thumb, alignment: .top)
+        .clipped()
+    }
+
+    private var marksBand: some View {
+        HStack(spacing: ShellSpace.snug) {
+            ForEach(0..<4, id: \.self) { _ in
+                plate(width: ShellSpace.room, height: ShellSpace.snug)
+            }
+            Spacer(minLength: 0)
+            ForEach(0..<3, id: \.self) { _ in
+                plate(width: ShellSpace.room, height: ShellSpace.snug)
+            }
+        }
+        .frame(height: touch, alignment: .center)
+    }
+
+    private func plate(width: CGFloat? = nil, height: CGFloat) -> some View {
+        ShellWaiting(speaks: Self.plateSpeaks)
+            .frame(width: width, height: height)
     }
 }
