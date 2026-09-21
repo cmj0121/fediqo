@@ -7,6 +7,21 @@ public struct FediqoRootView: View {
     @State private var place: ShellPlace = .launch
     @State private var selectedItemID: String?
     @State private var threadStack: [String] = []
+    /// Whoever the reader pressed the face of, where they have pressed one (#99).
+    ///
+    /// **One person and not a stack.** A thread opens a thread, and the stack is what a
+    /// conversation inside a conversation needs. A person's page is every row already theirs, so
+    /// it offers no face to press and there is never a second person to keep. Held here beside
+    /// the thread because leaving it is `Escape` and `q`, and the keys are read here.
+    @State private var openedPerson: DummyPerson?
+    /// The row the lamp was on when a face was pressed, so leaving them gives it back.
+    ///
+    /// `poppedThread` does the same job for a conversation by remembering the post it was opened
+    /// from; a person's page is not opened *from* a post it can name — it is opened from a face,
+    /// and every row of theirs is a different list — so the lamp's place is kept here instead.
+    /// Without it, a reader who walked their posts with `j` and then left would come back to the
+    /// timeline standing on a row that is not in it.
+    @State private var personReturn: String?
     /// What `/` opened (#32). Its results stand in for the stream while it is open.
     @State private var search = ShellSearch()
     @State private var jumpToTop = 0
@@ -535,6 +550,7 @@ public struct FediqoRootView: View {
             // `q` does about it.
             switch DummyCommand.outermost(of: openLayers) {
             case .viewer: return closeViewer()
+            case .person: return closePerson()
             case .thread: return popThread()
             case .search, .shortcuts, .selection, nil: return false
             }
@@ -575,6 +591,7 @@ public struct FediqoRootView: View {
             case .shortcuts:
                 showingShortcuts = false
                 return true
+            case .person: return closePerson()
             case .thread: return popThread()
             case .search:
                 closeSearch()
@@ -607,6 +624,7 @@ public struct FediqoRootView: View {
         switch layer {
         case .viewer: viewedItem != nil
         case .shortcuts: showingShortcuts
+        case .person: openedPerson != nil
         case .thread: !threadStack.isEmpty
         case .search: search.isOpen
         case .selection: selectedItemID != nil
@@ -929,8 +947,16 @@ public struct FediqoRootView: View {
         }
     }
 
-    /// Whichever list is in front: the open conversation, or the stream under it.
+    /// Whichever list is in front: somebody's own posts, the open conversation, or the stream
+    /// under both.
+    ///
+    /// **A person is asked about first, because they are the layer in front** — the same order
+    /// `TimelinePane` draws in and `Escape` leaves by, read out of `DummyLayer` once and applied
+    /// here rather than restated. `j` and `k` walk what the reader is looking at.
     private var currentListItems: [DummyItem] {
+        if let openedPerson {
+            return DummyPerson.held(of: openedPerson, in: session.notes)
+        }
         if let opened = threadStack.last, let item = streamItems.first(where: { $0.id == opened }) {
             return session.conversations.conversation(around: item).inOrder
         }
@@ -944,6 +970,14 @@ public struct FediqoRootView: View {
 
     private func jumpListOrThreadToTop() -> Bool {
         guard place == .timeline else { return false }
+        // Somebody's page first, for `currentListItems`' reason: `g` goes to the top of the list
+        // the reader is looking at.
+        if openedPerson != nil {
+            guard let first = currentListItems.first else { return false }
+            selectedItemID = first.id
+            jumpToTop += 1
+            return true
+        }
         if let opened = threadStack.last, let item = streamItems.first(where: { $0.id == opened }) {
             selectedItemID = item.id
         } else {
@@ -1062,6 +1096,10 @@ public struct FediqoRootView: View {
         switch DummyCommand.outermost(of: open) {
         // A search's results are what this device holds, found without asking anybody.
         case .viewer, .shortcuts, .search: return false
+        // **Nothing to ask for on somebody's page**, and that is the whole of 0.4.0's boundary
+        // rather than an oversight: what is drawn there is what this device already holds, and a
+        // reload that went and got more of the world would be 0.5.0 arriving through `r`.
+        case .person: return false
         case .thread, .selection, nil: return true
         }
     }
@@ -1083,11 +1121,59 @@ public struct FediqoRootView: View {
         return true
     }
 
+    // MARK: - Whoever wrote it — #99
+
+    /// Whether a face may be pressed into a page now. **One expression, and the press is its one
+    /// reader today** — there is no key for this, so there is no second reader to disagree with.
+    ///
+    /// It is the layer order's own question and nothing more: a person opens over a conversation
+    /// and under the guide and the viewer, exactly as `DummyLayer.person` states it.
+    static func canOpenPerson(place: ShellPlace, open: Set<DummyLayer>) -> Bool {
+        place == .timeline && DummyCommand.canOpen(.person, whenOpen: open)
+    }
+
+    /// A press on a face or a name: that person's page, over whatever is under it.
+    ///
+    /// **A named method, not a closure written into the pane's call site.** Three controls in
+    /// this milestone were wired inside a `View` body where no test could call them, and all
+    /// three stayed green while doing the wrong thing. This is the guard and the act together,
+    /// where a test can press it.
+    private func openPerson(_ person: DummyPerson) -> Bool {
+        guard Self.canOpenPerson(place: place, open: openLayers) else { return false }
+        if openedPerson == person { return false }
+        personReturn = selectedItemID
+        openedPerson = person
+        return true
+    }
+
+    /// Leaving them: whatever was under the page is what the reader gets back — the conversation
+    /// they pressed the face inside, or the stream. Nothing here touches the thread stack or the
+    /// lamp, because a person's page was drawn over both rather than in place of them.
+    private func closePerson() -> Bool {
+        guard openedPerson != nil else { return false }
+        openedPerson = nil
+        selectedItemID = personReturn
+        personReturn = nil
+        return true
+    }
+
     private func popThread() -> Bool {
         guard let popped = DummyCommand.poppedThread(threadStack) else { return false }
         threadStack = popped.stack
         selectedItemID = popped.selected
         return true
+    }
+
+    /// The open person, as the pane holds it. A write of nothing is the pane's own `Back` button,
+    /// which has to leave by the same door `Escape` does — so it goes through `closePerson` and
+    /// the lamp comes back with it, rather than clearing the state and stranding the selection.
+    private var openedSomebody: Binding<DummyPerson?> {
+        Binding(
+            get: { openedPerson },
+            set: { newValue in
+                if newValue == nil { _ = closePerson() } else { openedPerson = newValue }
+            }
+        )
     }
 
     private var openedThread: Binding<String?> {
@@ -1207,6 +1293,8 @@ public struct FediqoRootView: View {
                 session: session,
                 selectedID: $selectedItemID,
                 openedID: openedThread,
+                openedPerson: openedSomebody,
+                onOpenPerson: { _ = openPerson($0) },
                 decks: $decks,
                 playback: playback,
                 onPlayRow: playRow,

@@ -26,6 +26,12 @@ struct TimelinePane: View {
     @Bindable var session: ShellSession
     @Binding var selectedID: String?
     @Binding var openedID: String?
+    /// Whoever the reader pressed the face of, where they have pressed one (#99). Held by the
+    /// app, like the open thread beside it, because leaving it is `Escape` and `q` — which are
+    /// read where the keys are.
+    @Binding var openedPerson: DummyPerson?
+    /// A press on a face or a name, answered by the root under the layer order's own rule.
+    var onOpenPerson: (DummyPerson) -> Void
     /// Where every deck in this pane is turned to, and which rows the reader uncovered. Held by
     /// the app rather than here, because `m` and `s` are pressed where the keys are read.
     @Binding var decks: ShellDecks
@@ -133,7 +139,30 @@ struct TimelinePane: View {
                 .fill(ShellChrome.hairline(colorScheme))
                 .frame(height: ShellSpace.hair)
 
-            if let opened = openedItem {
+            // **Somebody's page is asked about first, because it is the layer in front.** A face
+            // pressed inside a conversation opens over it and `Escape` gives the conversation
+            // back, which is `DummyLayer.person`'s own order read out in this one `if`.
+            if let person = openedPerson {
+                PersonPane(
+                    person: person,
+                    items: DummyPerson.held(of: person, in: session.notes),
+                    catalogues: session.emoji,
+                    catalogueSettled: settledHosts.contains(person.host),
+                    posts: session.posts,
+                    selectedID: $selectedID,
+                    marks: markBinding,
+                    decks: $decks,
+                    playback: playback,
+                    onPlayRow: onPlayRow,
+                    onViewRow: onViewRow,
+                    onTurnRow: onTurnRow,
+                    jumpToTop: jumpToTop,
+                    onToast: showToast,
+                    onBack: { openedPerson = nil }
+                )
+                // One pane per person, so opening a second face from inside one draws afresh.
+                .id(person.id)
+            } else if let opened = openedItem {
                 DummyThreadPane(
                     root: opened,
                     catalogues: session.emoji,
@@ -149,6 +178,7 @@ struct TimelinePane: View {
                     onViewRow: onViewRow,
                     onTurnRow: onTurnRow,
                     onOpenThread: onOpenThread,
+                    onOpenPerson: onOpenPerson,
                     jumpToTop: jumpToTop,
                     onToast: showToast,
                     onBack: onPopThread
@@ -290,6 +320,8 @@ struct TimelinePane: View {
                             // Lit and opened in one, for the reader who activates a row once —
                             // done by the root, in one turn, on the id this press carries.
                             onOpen: { onOpenThread(item.id) },
+                            // The face and the name, as a press (#99).
+                            onOpenPerson: onOpenPerson,
                             onToggleCover: { _ = decks.toggleCover(item.id) },
                             onPlay: { onPlayRow(item) },
                             onView: { onViewRow(item) },

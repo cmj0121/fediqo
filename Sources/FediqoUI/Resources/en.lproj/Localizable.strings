@@ -531,3 +531,11 @@
 /* #67 — what did not arrive, said in the place it would have taken. */
 "shell.failed"                        = "%@ did not answer.";
 "shell.failed.retry"                  = "Try again";
+
+"person.back" = "Back";
+"person.leaveHint" = "Esc or q";
+"person.through" = "Read through %@";
+"person.held" = "%d posts here";
+"person.held.one" = "%d post here";
+"person.none" = "Nothing of theirs has reached this device yet.";
+"item.person.open" = "Open %@";

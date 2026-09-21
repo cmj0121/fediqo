@@ -13,9 +13,9 @@ import Testing
 struct ViewerTests {
     // MARK: The layer order
 
-    @Test("The order is viewer, shortcuts, thread, search, selection")
+    @Test("The order is viewer, shortcuts, person, thread, search, selection")
     func theOrderIsTheOrder() {
-        #expect(DummyLayer.allCases == [.viewer, .shortcuts, .thread, .search, .selection])
+        #expect(DummyLayer.allCases == [.viewer, .shortcuts, .person, .thread, .search, .selection])
     }
 
     @Test("A dismissing press closes the outermost thing that is open, and only that")
@@ -75,6 +75,39 @@ struct ViewerTests {
                 #expect(DummyCommand.canOpen(layer, whenOpen: open) == nothingInFront)
             }
         }
+    }
+
+    /// #99's half of the order, pressed rather than reasoned about. The face is not a key, so it
+    /// is not a `DummyCommand` — `Shell.pressFace` is the press, and it asks the product's own
+    /// guard rather than restating it.
+    @Test("A face pressed inside a conversation opens over it, and leaving gives it back")
+    func aFaceOpensOverAConversationAndGivesItBack() {
+        let shell = Shell(items: Self.list, selected: Self.a)
+        #expect(shell.press(.expandPost))
+        #expect(shell.threadOpen)
+        let ada = DummyPerson(Self.list[0])
+        #expect(ada != nil)
+        #expect(shell.pressFace(ada!))
+        #expect(shell.personOpen == ada)
+        // The conversation is still open underneath, and leaving takes the person off it.
+        #expect(shell.threadOpen)
+        #expect(shell.press(.dismiss))
+        #expect(shell.personOpen == nil)
+        #expect(shell.threadOpen)
+        // `q` says the same thing about a person a second press says about the thread.
+        #expect(shell.press(.back))
+        #expect(!shell.threadOpen)
+    }
+
+    /// The entry rule, from the press's own side: a face under the guide opens nobody, and does
+    /// not close the guide to make room for itself.
+    @Test("A face under the guide opens nobody, and leaves the guide alone")
+    func aFaceDoesNotOpenUnderTheGuide() {
+        let shell = Shell(items: Self.list, selected: Self.a)
+        #expect(shell.press(.showShortcuts))
+        #expect(!shell.pressFace(DummyPerson(Self.list[0])!))
+        #expect(shell.personOpen == nil)
+        #expect(shell.shortcutsOpen)
     }
 
     @Test("? under an open viewer does nothing, and leaves the viewer alone")
@@ -411,6 +444,8 @@ struct ViewerTests {
         var selected: String?
         var viewing: String?
         var threadOpen = false
+        /// Whoever the reader pressed a face into, as the root holds it (#99).
+        var personOpen: DummyPerson?
         var shortcutsOpen = false
         var searchOpen = false
         var shortcutTab = DummyShortcutGroup.timeline
@@ -431,6 +466,7 @@ struct ViewerTests {
             switch layer {
             case .viewer: viewedItem != nil
             case .shortcuts: shortcutsOpen
+            case .person: personOpen != nil
             case .thread: threadOpen
             case .search: searchOpen
             case .selection: selected != nil
@@ -439,6 +475,19 @@ struct ViewerTests {
 
         var openLayers: Set<DummyLayer> {
             Set(DummyLayer.allCases.filter(isOpen))
+        }
+
+        /// A press on a face or a name, which has no key and so is not a `DummyCommand` (#99).
+        ///
+        /// **The entry rule and nothing else**, which is the whole of what `openPerson` adds to
+        /// it once the place is the timeline — and the place is the half `PersonTests` asks about
+        /// directly. `canOpen` is read here for the reason every other branch of this harness
+        /// reads it: the order lives in one list and no surface re-expresses it.
+        @discardableResult
+        func pressFace(_ person: DummyPerson) -> Bool {
+            guard DummyCommand.canOpen(.person, whenOpen: openLayers) else { return false }
+            personOpen = person
+            return true
         }
 
         /// What the app does when the reader walks to another page.
@@ -510,6 +559,9 @@ struct ViewerTests {
                     guard command == .dismiss else { return false }
                     shortcutsOpen = false
                     return true
+                // A face is left by both keys, exactly as a conversation is: the page is
+                // something the reader opened, and both `q` and `Escape` take it away.
+                case .person: personOpen = nil; return true
                 case .thread: threadOpen = false; return true
                 case .search:
                     guard command == .dismiss else { return false }
