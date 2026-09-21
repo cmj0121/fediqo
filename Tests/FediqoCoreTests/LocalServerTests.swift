@@ -70,6 +70,31 @@ struct LocalServerTests {
             #expect(bodies.contains { $0.contains(marker) })
         }
 
+        @Test("A post written through the Core write lands in the store without a second join")
+        func mastodonWriteIngests() async throws {
+            try await LocalServers.requireHealthy()
+            let http = try client()
+            let store = ItemStore()
+            try await SourceJoin(
+                http: http, store: store, catalogues: EmojiCatalogueStore()
+            ).join(host: LocalServers.mastodon)
+            let tokens = MemoryMastodonTokens()
+            let token = MastodonToken(
+                host: LocalServers.mastodon,
+                accessToken: try LocalServers.writerToken(),
+                clientID: "x",
+                clientSecret: "x"
+            )
+            try tokens.save(token)
+            let marker = "fediqo-56-\(UUID().uuidString.prefix(8))"
+            let note = try await MastodonWrite(
+                door: MastodonAuthorized(token: token, sender: http, store: tokens),
+                store: store
+            ).post(marker, visibility: .everyone)
+            #expect(note.body.contains(marker))
+            #expect(await store.all().contains { $0.id == note.id })
+        }
+
         @Test("Registering this app on the Mastodon server is answered with a client id")
         func mastodonRegisters() async throws {
             try await LocalServers.requireHealthy()

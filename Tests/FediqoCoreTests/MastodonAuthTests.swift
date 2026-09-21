@@ -383,6 +383,26 @@ struct MastodonAuthTests {
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer tok-123")
     }
 
+    @Test("A signed-in POST carries the token and the form to its own host only")
+    func authorizedPost() async throws {
+        let server = FixtureSender(["/api/v1/statuses": .json("{}")])
+        let store = MemoryMastodonTokens()
+        try store.save(MastodonFixture.token)
+        let door = MastodonAuthorized(token: MastodonFixture.token, sender: server, store: store)
+        let body = try await door.post(path: "/api/v1/statuses", form: [
+            ("status", "hello+world"),
+            ("visibility", "public"),
+        ])
+        #expect(body == Data("{}".utf8))
+        let request = try #require(await server.requests.first)
+        #expect(request.url?.absoluteString == "https://social.example/api/v1/statuses")
+        #expect(request.httpMethod == "POST")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer tok-123")
+        #expect(await server.form("/api/v1/statuses") == [
+            "status": "hello+world", "visibility": "public",
+        ])
+    }
+
     @Test("A 401 the account check confirms means the server ended it: the token goes")
     func revokedByServer() async throws {
         let server = FixtureSender([
