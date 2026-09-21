@@ -136,7 +136,7 @@ struct EmojiText: View {
                 Self.line(cut, pictures, at: 0, baseline: baseline, linkInk: ink)
             }
         }
-        .font(role.font)
+        .font(role.font(at: typeSize))
         // One element carrying one label. Without `.ignore` the label would be landing on a
         // `TimelineView` whenever a clock is running — a container rather than a piece of text —
         // and a screen reader would be free to read the interpolated `Text` inside it instead.
@@ -411,51 +411,26 @@ enum EmojiTextRole: CaseIterable, Sendable {
     case body
     case meta
 
-    var textStyle: Font.TextStyle {
+    /// The shell role this is drawn in — **one statement, not a second copy of the scale.**
+    ///
+    /// The style and the weight used to be spelled again here, beside a test asserting the two
+    /// tables agreed. Naming the role instead makes them the same table: a role moved to a
+    /// different style in `ShellType` moves the picture's ink with it by construction, which is
+    /// what the test was there to catch after the fact.
+    var shellRole: ShellType {
         switch self {
-        case .name: .callout
+        case .name: .name
         case .body: .body
-        case .meta: .caption
+        case .meta: .meta
         }
     }
 
-    var weight: Font.Weight {
-        switch self {
-        case .name: .semibold
-        case .body, .meta: .regular
-        }
-    }
+    /// The letters this role is set in, at the size the reader chose — the same resolution
+    /// `shellFont(_:)` makes, because it is the same role.
+    func font(at size: DynamicTypeSize) -> Font { shellRole.font(at: size) }
 
-    /// Built from the style above, which is the same statement `platformStyle` is derived from.
-    /// The weight is applied only where it is not the default, because `.weight(.regular)` wraps
-    /// the font in a modifier and `ShellType.body` is the bare style — equal fonts that are not
-    /// `==`, and the test below compares them.
-    var font: Font {
-        let base = Font.system(textStyle)
-        return weight == .regular ? base : base.weight(weight)
-    }
-
-    #if os(macOS)
-    var platformStyle: NSFont.TextStyle { EmojiTextRole.appKitStyle(textStyle) }
-
-    private static func appKitStyle(_ style: Font.TextStyle) -> NSFont.TextStyle {
-        switch style {
-        case .largeTitle: .largeTitle
-        case .title: .title1
-        case .title2: .title2
-        case .title3: .title3
-        case .headline: .headline
-        case .subheadline: .subheadline
-        case .body: .body
-        case .callout: .callout
-        case .footnote: .footnote
-        case .caption: .caption1
-        case .caption2: .caption2
-        @unknown default: .body
-        }
-    }
-    #else
-    var platformStyle: UIFont.TextStyle { EmojiTextRole.uiKitStyle(textStyle) }
+    #if !os(macOS)
+    var platformStyle: UIFont.TextStyle { EmojiTextRole.uiKitStyle(shellRole.style) }
 
     private static func uiKitStyle(_ style: Font.TextStyle) -> UIFont.TextStyle {
         switch style {
@@ -477,21 +452,26 @@ enum EmojiTextRole: CaseIterable, Sendable {
 
     /// How many points this role is set in at the reader's chosen text size.
     ///
-    /// On macOS the reader's chosen size is **not applied**, because the letters do not move
-    /// either. SwiftUI on macOS does not scale a semantic `Font` with `dynamicTypeSize`:
-    /// measured through `NSHostingView.fittingSize`, `Font.body` renders at 16.0 at every rung
-    /// from xSmall to accessibility5, while an explicit `.system(size:)` moves correctly — and
-    /// `NSFont.preferredFont(forTextStyle: .body).pointSize` is a constant 13.0. Stepping that
-    /// constant by the text size therefore grew the picture alone: 1.9× the letters at
-    /// `.accessibility1` and 3.1× at `.accessibility5`. **The picture matches the letters beside
-    /// it, whatever the letters are doing**, so where they are pinned it is pinned too.
+    /// **The picture matches the letters beside it, whatever the letters are doing** — which is
+    /// the rule this has always stated, and which now means the opposite of what it used to on
+    /// a Mac.
     ///
-    /// That the font-size preference does nothing on macOS at all is a defect of its own and not
-    /// this view's to fix — no supported route makes Dynamic Type work there, so closing it
-    /// means `ShellType`'s tokens stop being static constants.
+    /// It used to ignore the chosen size there, and said why: SwiftUI on macOS does not scale a
+    /// semantic `Font` with `dynamicTypeSize` — measured through `NSHostingView.fittingSize`,
+    /// `Font.body` rendered at 16.0 at every rung from xSmall to accessibility5. The letters
+    /// were pinned, so the picture was pinned with them; stepping it by the text size would
+    /// have grown the picture alone.
+    ///
+    /// #96 unpinned the letters: `ShellType` resolves a role to points itself on that platform,
+    /// by the platform's size for the style times `ShellType.multiple(at:)`. So the picture
+    /// steps by exactly the same product, and the rule is kept by following rather than by
+    /// standing still.
     static func points(for role: EmojiTextRole, at size: DynamicTypeSize) -> CGFloat {
         #if os(macOS)
-        NSFont.preferredFont(forTextStyle: role.platformStyle).pointSize
+        // **The letters' own arithmetic, called rather than repeated.** `ShellType.font(at:)`
+        // sets this role at exactly this product on this platform, so asking it is what makes
+        // "the picture matches the letters" true by construction instead of by agreement.
+        ShellType.platformPoints(role.shellRole.style) * ShellType.multiple(at: size)
         #else
         // UIKit answers exactly, for this style at this size, which is better than a multiple:
         // the ladder is not one curve — caption grows more slowly than body does.
