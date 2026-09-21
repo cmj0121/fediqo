@@ -203,16 +203,20 @@ struct EmojiMetricsTests {
 
     @Test("A role's font, its ink and its token are one statement")
     func theRolePinsBothEdges() {
-        // One edge: the role is drawn in the token the type scale sets.
-        #expect(EmojiTextRole.name.font == ShellType.name)
-        #expect(EmojiTextRole.body.font == ShellType.body)
-        #expect(EmojiTextRole.meta.font == ShellType.meta)
+        // One edge: the role is drawn in the token the type scale sets — now by naming it
+        // rather than by restating it, so this is an identity and no longer an agreement two
+        // tables have to keep (#96).
+        #expect(EmojiTextRole.name.shellRole == .name)
+        #expect(EmojiTextRole.body.shellRole == .body)
+        #expect(EmojiTextRole.meta.shellRole == .meta)
         // Those three are the whole guard, and they bite: `font` is *built from* `textStyle`,
         // which is also what `platformStyle` — and so the ink the picture is decoded at — is
         // derived from. Move a role to a different style in `ShellType` alone and they fail.
         // Restating that construction here would only be asserting the implementation against
         // itself, so it is not restated.
-        #expect(Set(EmojiTextRole.allCases.map(\.textStyle)).count == EmojiTextRole.allCases.count)
+        #expect(
+            Set(EmojiTextRole.allCases.map(\.shellRole.style)).count == EmojiTextRole.allCases.count
+        )
     }
 
     @Test("The picture is set in the same points as the letters beside it")
@@ -221,23 +225,65 @@ struct EmojiMetricsTests {
             #expect(EmojiTextRole.points(for: role, at: .large) > 0)
         }
         #expect(EmojiTextRole.points(for: .name, at: .large) > EmojiTextRole.points(for: .meta, at: .large))
-        #if os(macOS)
-        // SwiftUI on macOS pins a semantic `Font` at every rung — `Font.body` renders at 16.0
-        // from xSmall to accessibility5 — so a picture that grew with the reader's setting grew
-        // alone, up to 3.1× the letters. Where the letters do not move, the picture does not.
-        for role in EmojiTextRole.allCases {
-            let smallest = EmojiTextRole.points(for: role, at: .xSmall)
-            for size in DynamicTypeSize.allCases {
-                #expect(EmojiTextRole.points(for: role, at: size) == smallest)
-            }
-        }
-        #else
-        // UIKit does move, and is asked exactly rather than approximated by a single multiple.
+        // **Both platforms move now, and that is the point of #96.** macOS used to pin these,
+        // and said why: a semantic `Font` did not move there, so a picture that grew with the
+        // reader's setting grew alone. `ShellType` resolves the letters to points on that
+        // platform itself, so the picture follows them again rather than standing still.
         for role in EmojiTextRole.allCases {
             #expect(EmojiTextRole.points(for: role, at: .accessibility1)
                 > EmojiTextRole.points(for: role, at: .large))
+            #expect(EmojiTextRole.points(for: role, at: .xSmall)
+                < EmojiTextRole.points(for: role, at: .large))
+        }
+    }
+
+    @Test("A box grows by the same ladder the letters do, so the two cannot come apart")
+    func metricsFollowTheLetters() {
+        // #96's other half. `@ScaledMetric` is inert on macOS for the reason a semantic `Font`
+        // was, so moving the letters and leaving the boxes would have been the same defect the
+        // other way up — a 148-point rail label with `lineLimit(1)` truncates the moment the
+        // name in it grows. `ShellMetric` reads the one ladder `ShellType` sets the letters by.
+        // `ShellMetric` and `ShellType.font(at:)` both read `multiple(at:)`, so there is one
+        // ladder and this is it. A rung out of order, or two rungs that land on one number,
+        // would be a box and the words in it stepping differently.
+        let rungs = DynamicTypeSize.allCases.map(ShellType.multiple(at:))
+        #expect(rungs == rungs.sorted(), "the ladder climbs")
+        #expect(Set(rungs).count == rungs.count, "and every rung is its own step")
+        #expect(ShellType.multiple(at: .large) == 1, "the standard rung leaves a base as authored")
+    }
+
+    @Test("Every rung of the preference is a different size, Default included")
+    func everyRungIsItsOwnSize() {
+        // #96's own acceptance, as a test: the control is five rungs and the reader must be
+        // able to tell them apart. The scale is what the preference moves; that a Mac applies
+        // it is `ShellType`'s job and is asserted above.
+        let rungs = DummyFontSize.allCases.map { ShellType.multiple(at: $0.dynamicType) }
+        #expect(Set(rungs).count == DummyFontSize.allCases.count)
+        #expect(rungs == rungs.sorted(), "the ladder climbs in the order the control offers it")
+        // Default sits a rung above the system's standard, which is what `DummyFontSize` says.
+        #expect(ShellType.multiple(at: DummyFontSize.standard.dynamicType) > 1)
+    }
+
+    @Test("A role is one statement about style, weight and design")
+    func aRoleIsOneStatement() {
+        // The modifier resolves a role; nothing else in the shell names a font.
+        #if os(macOS)
+        // Every role moves with the rung — the whole of #96, asserted over the whole scale
+        // rather than over the three roles a picture can stand in.
+        for role in ShellType.allCases {
+            #expect(
+                ShellType.platformPoints(role.style) * ShellType.multiple(at: .accessibility1)
+                    > ShellType.platformPoints(role.style)
+            )
         }
         #endif
+        #expect(ShellType.reading.design == .monospaced)
+        #expect(ShellType.keycap.design == .monospaced)
+        #expect(ShellType.body.design == .default)
+        #expect(ShellType.name.weight == .semibold)
+        #expect(ShellType.body.weight == .regular)
+        // The standard rung is the identity, so nothing is scaled where nothing was chosen.
+        #expect(ShellType.multiple(at: .large) == 1)
     }
 
     @Test("How tall a picture is decoded is clamped whatever the screen says")
