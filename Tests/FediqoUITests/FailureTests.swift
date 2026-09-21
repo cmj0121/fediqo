@@ -46,14 +46,15 @@ struct FailureTests {
         #expect(tw == hant)
     }
 
-    /// Arriving ends in failed; failed plus a retry that lands is held. Search never becomes
-    /// a network failure: it reads the store and asks no source.
-    @Test("Arriving becomes failed, and a retry that lands is held")
-    func arrivingBecomesFailedAndRetryLandsHeld() {
-        let arriving = TimelinePane.standing(
+    /// A wait and a miss are the toast; the stream is held or empty. Search never becomes
+    /// a network failure: it reads the store and asks no source. Pictures still use this
+    /// place — that is not this task.
+    @Test("A wait and a miss leave the stream empty or held")
+    func aWaitAndAMissLeaveTheStream() {
+        let waiting = TimelinePane.standing(
             running: true, hasItems: false, searching: false, hasSources: true
         )
-        let failed = TimelinePane.standing(
+        let missed = TimelinePane.standing(
             running: false, hasItems: false, searching: false, hasSources: true,
             failed: ["one.example"]
         )
@@ -61,31 +62,27 @@ struct FailureTests {
             running: false, hasItems: true, searching: false, hasSources: true,
             failed: ["one.example"]
         )
-        #expect(arriving == .arriving)
-        #expect(failed == .failed)
+        #expect(waiting == .empty)
+        #expect(missed == .empty)
         #expect(held == .held)
         #expect(ShellFailure.spoken(["one.example"]) == String(
             format: L10n.t("shell.failed"), "one.example"
         ))
     }
 
-    /// An open thread uses the same place and the same reload. A wait still on the wire is
-    /// not a failure. A second host in the list is still one place.
-    @Test("A thread reload miss is one failure place, and a wait is not")
-    func threadReloadMissIsOneFailurePlace() {
-        #expect(DummyThreadPane.failureSources(failed: [], standing: nil) == nil)
-        #expect(DummyThreadPane.failureSources(failed: ["one.example"], standing: nil)
-            == ["one.example"])
-        #expect(DummyThreadPane.failureSources(
-            failed: ["one.example", "two.example"], standing: nil
-        ) == ["one.example", "two.example"])
-        #expect(DummyThreadPane.failureSources(failed: ["one.example"], standing: .coming) == nil)
-        #expect(DummyThreadPane.failureSources(failed: ["one.example"], standing: .unasked)
-            == ["one.example"])
-        #expect(DummyThreadPane.failureSources(
-            failed: ["one.example"], standing: .absent(.unreachable)
-        ) == ["one.example"])
-        #expect(DummyThreadPane.failureSources(failed: [], standing: .absent(.unreachable)) == nil)
+    /// An open thread's miss is the toast; the thread stays the thread, or the
+    /// empty-thread notice. A wait still on the wire is still the replies wait.
+    @Test("A thread reload miss is not a pane-sized failure")
+    func threadReloadMissIsNotAFailurePlace() {
+        #expect(EmptyNotice.thread(
+            descendantCount: 0, replyCount: 0, standing: nil
+        )?.kind == .thread)
+        #expect(EmptyNotice.thread(
+            descendantCount: 0, replyCount: 0, standing: ForumRepliesStanding.none
+        )?.kind == .thread)
+        #expect(EmptyNotice.thread(
+            descendantCount: 0, replyCount: 0, standing: .coming
+        ) == nil)
     }
 
     /// `r` stays the reload key. The failure place does not remap it.

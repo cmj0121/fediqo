@@ -52,25 +52,22 @@ struct TimelineEmptyTests {
         )
     }
 
-    /// Standing stays three places. Empty is not a wait, and not a miss.
+    /// Standing stays two places. Empty is not a wait, and not a miss: those are the toast.
     @Test("Empty is not arriving and not failed")
     func emptyIsNotArrivingOrFailed() {
         let emptyStanding = TimelinePane.standing(
             running: false, hasItems: false, searching: false, hasSources: true
         )
-        let arriving = TimelinePane.standing(
+        let running = TimelinePane.standing(
             running: true, hasItems: false, searching: false, hasSources: true
         )
-        let failed = TimelinePane.standing(
+        let missed = TimelinePane.standing(
             running: false, hasItems: false, searching: false, hasSources: true,
             failed: ["one.example"]
         )
         #expect(emptyStanding == .empty)
-        #expect(arriving == .arriving)
-        #expect(failed == .failed)
-        #expect(emptyStanding != arriving)
-        #expect(emptyStanding != failed)
-        #expect(arriving != failed)
+        #expect(running == .empty)
+        #expect(missed == .empty)
 
         let notice = empty(sources: [source])
         #expect(notice.kind == .held)
@@ -199,14 +196,15 @@ struct TimelineEmptyTests {
     }
 
     /// A thread with nothing under it has its own words, not the timeline's, and is not
-    /// drawn while the replies are still on the wire or a miss is showing.
+    /// drawn while the replies are still on the wire. A miss is the toast, so it does
+    /// not suppress this notice.
     @Test("An empty thread is not the timeline's empty")
     func emptyThreadIsNotTimelineEmpty() {
         let none = EmptyNotice.thread(
-            descendantCount: 0, replyCount: 0, standing: ForumRepliesStanding.none, failed: []
+            descendantCount: 0, replyCount: 0, standing: ForumRepliesStanding.none
         )
         let zero = EmptyNotice.thread(
-            descendantCount: 0, replyCount: 0, standing: nil, failed: []
+            descendantCount: 0, replyCount: 0, standing: nil
         )
         let timeline = empty(sources: [source])
         #expect(none?.kind == .thread)
@@ -222,29 +220,22 @@ struct TimelineEmptyTests {
         #expect(none?.spoken.contains(none?.detail ?? "") == true)
 
         #expect(EmptyNotice.thread(
-            descendantCount: 0, replyCount: 3, standing: nil, failed: []
+            descendantCount: 0, replyCount: 3, standing: nil
         ) == nil)
         #expect(EmptyNotice.thread(
-            descendantCount: 0, replyCount: nil, standing: nil, failed: []
+            descendantCount: 0, replyCount: nil, standing: nil
         ) == nil)
         #expect(EmptyNotice.thread(
-            descendantCount: 1, replyCount: 0, standing: nil, failed: []
+            descendantCount: 1, replyCount: 0, standing: nil
         ) == nil)
         #expect(EmptyNotice.thread(
-            descendantCount: 0, replyCount: 0, standing: .coming, failed: []
+            descendantCount: 0, replyCount: 0, standing: .coming
         ) == nil)
         #expect(EmptyNotice.thread(
-            descendantCount: 0, replyCount: 0, standing: .unasked, failed: []
+            descendantCount: 0, replyCount: 0, standing: .unasked
         ) == nil)
         #expect(EmptyNotice.thread(
-            descendantCount: 0, replyCount: 0, standing: .absent(.unreachable), failed: []
-        ) == nil)
-        #expect(EmptyNotice.thread(
-            descendantCount: 0, replyCount: 0, standing: ForumRepliesStanding.none,
-            failed: ["one.example"]
-        ) == nil)
-        #expect(EmptyNotice.thread(
-            descendantCount: 0, replyCount: 0, standing: nil, failed: ["one.example"]
+            descendantCount: 0, replyCount: 0, standing: .absent(.unreachable)
         ) == nil)
     }
 

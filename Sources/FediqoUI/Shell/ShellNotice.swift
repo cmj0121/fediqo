@@ -5,8 +5,8 @@ import SwiftUI
 /// here, and it names the next thing to do rather than describing the emptiness.
 ///
 /// **Empty is this view, not a wait and not a failure.** `ShellWaiting` is still on the
-/// wire; `ShellFailure` is a miss that can be tried again. A place with nothing to show
-/// draws this, so the three cannot be mistaken for one another.
+/// wire in a place; `ShellFailure` is a miss in a place (a picture, the composer). A
+/// wait or miss of the stream is the toast. A place with nothing to show draws this.
 struct ShellNotice: View {
     let symbol: String
     let title: String
@@ -182,17 +182,16 @@ struct EmptyNotice: Equatable, Sendable {
         return Self.queryEmpty(.held, query: query, language: language)
     }
 
-    /// A thread with nothing under it, or nothing where this is still a wait, a miss, or
-    /// a way in. Conversation fetch is out of this pane; a microblog with a reply count
-    /// above zero is not told as empty just because the descendants list is.
+    /// A thread with nothing under it, or nothing where this is still a wait or a
+    /// way in. A miss is the toast, so it does not suppress this notice. Conversation
+    /// fetch is out of this pane; a microblog with a reply count above zero is not
+    /// told as empty just because the descendants list is.
     static func thread(
         descendantCount: Int,
         replyCount: Int?,
         standing: ForumRepliesStanding?,
-        failed: [String],
         language: DummyLanguage? = nil
     ) -> EmptyNotice? {
-        if !failed.isEmpty { return nil }
         let forumNone: Bool
         if let standing {
             switch standing {

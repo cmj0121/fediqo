@@ -16,7 +16,7 @@ struct TimelineWays {
     var onSearch: () -> Void
     /// Whether there is anything for `r` to ask for. A reload already running is still `true` —
     /// the mark keeps its place rather than blinking out from under the finger that pressed it,
-    /// and what it draws while it waits is `TimelinePane.reloadMark`'s business.
+    /// and stays the mark: a plate there would be a second loading animation beside the toast.
     var canReload: Bool
     var onReload: () -> Void
 }
@@ -75,54 +75,29 @@ struct TimelinePane: View {
 
     /// What the stream in front is, from facts a test can name without drawing the pane.
     enum Standing: Equatable, Sendable {
-        /// A fetch for this timeline is on the wire, and the list in front has no rows yet.
-        case arriving
         /// Posts this device already holds. Drawn at once — a skeleton on top of them would hide
         /// what is already here.
         case held
-        /// The wait ended and nothing came: the place the rows would have taken, named as a
-        /// failure, with a way to ask again from here.
-        case failed
-        /// Nothing on the wire, or a search, or nobody joined: `EmptyNotice`, never a wait
-        /// and never a failure. The distinctions inside empty — rules, held, answered,
-        /// search — live on that notice, not on a fifth standing.
+        /// Nothing in the list: `EmptyNotice`. A wait and a miss are the toast, not this
+        /// standing; the distinctions inside empty — rules, held, answered, search — live on
+        /// that notice.
         case empty
     }
 
-    /// Arriving only while a reload is on the wire and the list in front is empty.
+    /// Held or empty. A wait and a miss are the bottom toast, so they do not take the stream.
     ///
-    /// **Held wins.** What is already here is read at once; only what has not arrived waits.
-    /// **Search is not a timeline wait, and not a timeline failure.** An empty search already
-    /// has its own indexing and empty notices; it asks no source, so a network miss here would
-    /// be a second vocabulary for a local miss.
-    /// **No sources is empty, never waiting or failed.** There is nobody to ask, so a plate
-    /// standing for a row that will never come is a wait that never ends.
-    /// **Failed is the wait that ended.** Empty, not running, somebody was asked, and they did
-    /// not answer: the place the rows would have taken says so, rather than going on waiting.
+    /// **Held wins.** What is already here is read at once, including while a reload runs.
+    /// **Empty stays empty.** Running, a failed source, a search, and nobody joined are all
+    /// empty when there are no rows: waiting rows would be a wait that never ended, and a
+    /// pane-sized failure would hide that this timeline has nothing to show.
     static func standing(
-        running: Bool,
+        running _: Bool,
         hasItems: Bool,
-        searching: Bool,
-        hasSources: Bool,
-        failed: [String] = []
+        searching _: Bool,
+        hasSources _: Bool,
+        failed _: [String] = []
     ) -> Standing {
-        if hasItems { return .held }
-        if searching || !hasSources { return .empty }
-        if running { return .arriving }
-        return failed.isEmpty ? .empty : .failed
-    }
-
-    /// The header plate is silent while the stream is arriving: the group below is already that
-    /// sentence, and saying it twice is two waiting places for one wait.
-    static func headerWaitingSpeaks(standing: Standing) -> Bool {
-        standing != .arriving
-    }
-
-    /// The quiet reload line is folded into the failure place when that place is showing, so
-    /// the same words are not said twice. Held-plus-failed keeps the line: the rows are the
-    /// content, and the line is the one quiet fact about who did not answer.
-    static func headerShowsReloadLine(standing: Standing, threadFailed: Bool) -> Bool {
-        standing != .failed && !threadFailed
+        hasItems ? .held : .empty
     }
 
     private var stream: Standing {
@@ -132,6 +107,18 @@ struct TimelinePane: View {
             searching: search?.isSearching == true,
             hasSources: !session.sources.isEmpty,
             failed: session.reload.failed
+        )
+    }
+
+    /// Running first; a live note replaces a leftover line; otherwise the reload
+    /// line. Loading and a miss do not auto-dismiss: a 2s flash is a fact the
+    /// reader has to act on, gone.
+    private var banner: TimelineToast? {
+        TimelineToast.shown(
+            running: session.reload.running,
+            line: session.reload.line,
+            stopped: session.reload.stopped,
+            note: toast
         )
     }
 
@@ -162,35 +149,25 @@ struct TimelinePane: View {
                     onOpenThread: onOpenThread,
                     jumpToTop: jumpToTop,
                     onToast: showToast,
-                    onBack: onPopThread,
-                    failed: session.reload.failed,
-                    onReload: ways.onReload
+                    onBack: onPopThread
                 )
                 // One pane per thread, so going back from a nested one draws its parent afresh.
                 .id(opened.id)
             } else {
                 switch stream {
                 case .held: list
-                case .arriving: TimelineWaiting()
-                case .failed:
-                    ShellFailure(sources: session.reload.failed, retry: ways.onReload)
                 case .empty: empty
                 }
             }
         }
         .overlay(alignment: .bottom) {
-            if let toast {
-                Text(toast)
-                    .font(ShellType.meta)
-                    .padding(.horizontal, ShellSpace.step)
-                    .padding(.vertical, ShellSpace.snug)
-                    .background(ShellChrome.well(colorScheme), in: Capsule())
-                    .foregroundStyle(ShellChrome.ink(colorScheme))
+            if let banner {
+                TimelineToastBanner(toast: banner)
                     .padding(.bottom, ShellSpace.pad)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: toast)
+        .animation(.easeInOut(duration: 0.2), value: banner)
         .task(id: catalogueHosts) { await waitForCatalogues() }
         .onChange(of: session.toast) { _, toast in
             if let toast { showToast(toast.text) }
@@ -419,17 +396,6 @@ struct TimelinePane: View {
             if let latest = prefs.latestDate {
                 latestMark(latest)
             }
-            if let line = session.reload.line,
-               Self.headerShowsReloadLine(
-                standing: stream,
-                threadFailed: openedItem != nil && !session.reload.failed.isEmpty
-               ) {
-                Text(line)
-                    .font(ShellType.meta)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                    .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
         }
         .accessibilityElement(children: .contain)
     }
@@ -507,29 +473,13 @@ struct TimelinePane: View {
         }
     }
 
-    /// `r`'s mark — or, while a reload is running, the plate every waiting thing in this app
-    /// wears (#64) in the same box.
-    ///
-    /// **A control that cannot act stops looking like one.** `canReload` stays true while a
-    /// reload runs on purpose: a mark that blinked out from under the finger that pressed it is
-    /// worse than one that stays. But `r` pressed then is taken and does nothing, so a glyph that
-    /// looks live and answers nothing is exactly the dead control decision 4 rules out — the one
-    /// case where "absent rather than dead" has no absence to offer. The box keeps its place and
-    /// its size and what is in it changes: a plate is not a button, a press on it does nothing,
-    /// and nothing moves under the finger. That is `r`'s own answer while one runs, drawn.
-    ///
-    /// A screen reader is told "on its way" rather than offered a Reload button that would refuse
-    /// it — unless the stream itself is arriving, in which case that sentence is the group's
-    /// below. What is *on* the wire is still said in words on the line below the tabs.
+    /// `r`'s mark. Stays the mark while a reload runs: a plate here would be a second
+    /// loading animation, and blinking the control out from under the finger that pressed
+    /// it is the thing decision 4 refuses. A press then still does nothing (`r` already).
     @ViewBuilder
     private var reloadMark: some View {
         if ways.canReload {
-            if session.reload.running {
-                ShellWaiting(speaks: Self.headerWaitingSpeaks(standing: stream))
-                    .frame(width: touch, height: touch)
-            } else {
-                headerMark("arrow.clockwise", says: "shortcut.reload", action: ways.onReload)
-            }
+            headerMark("arrow.clockwise", says: "shortcut.reload", action: ways.onReload)
         }
     }
 
@@ -580,155 +530,5 @@ struct TimelinePane: View {
                 && session.reload.failed.isEmpty
                 && !session.reload.stopped
         ))
-    }
-}
-
-/// DummyItemRow's place, taken before the row is there, at the height that row will have.
-///
-/// DummyItemRow names four bands; the decorator is drawn only when a post has something to say
-/// there. A waiting place that held it open would be taller than the typical row that replaces
-/// it, which is the one thing this place is not allowed to be. Headline, words and marks are
-/// the three that every row keeps. Compact drops the thumb column, because DummyItemRow does.
-struct TimelineWaiting: View {
-    /// A small run of places, not a list of forty.
-    static let places = 6
-    /// Silent so the group is the only thing a reader lands on.
-    static let plateSpeaks = false
-    /// DummyItemRow's finger floor at the standard type size, so this place is that row's height.
-    static let marks: CGFloat = 32
-    /// Three placeholder lines, the typical compact words band: not the thumb, which that
-    /// layout does not keep.
-    static let compactWords: CGFloat = ShellSpace.snug * 3 + ShellSpace.tight * 2
-
-    static var spoken: String { ShellWaiting.spoken }
-
-    /// The plates' clock is the shell's, so Reduce Motion stops them the same way.
-    static func clock(reduceMotion: Bool) -> TimeInterval? {
-        ShellWaiting.clock(reduceMotion: reduceMotion)
-    }
-
-    /// Compact sizes words to the lines, not the thumb slot DummyItemRow drops there.
-    static func wordsHeight(narrow: Bool, thumb: CGFloat = DummyItemRow.Box.thumb) -> CGFloat {
-        narrow ? compactWords : thumb
-    }
-
-    /// Headline at the avatar, words at `wordsHeight`, marks at a finger's floor, the row's
-    /// padding and the gaps between bands. The view frames to this, so the place is this
-    /// number rather than whatever the plates measure.
-    static func rowHeight(
-        narrow: Bool,
-        avatar: CGFloat = DummyItemRow.Box.avatar,
-        thumb: CGFloat = DummyItemRow.Box.thumb,
-        marks: CGFloat = marks
-    ) -> CGFloat {
-        avatar
-            + wordsHeight(narrow: narrow, thumb: thumb)
-            + marks
-            + ShellSpace.snug * 2
-            + ShellSpace.step * 2
-    }
-
-    @ScaledMetric(relativeTo: .body) private var avatar: CGFloat = DummyItemRow.Box.avatar
-    @ScaledMetric(relativeTo: .body) private var thumb: CGFloat = DummyItemRow.Box.thumb
-    @ScaledMetric(relativeTo: .caption) private var touch: CGFloat = 32
-    @Environment(\.colorScheme) private var colorScheme
-    #if os(iOS)
-    @Environment(\.horizontalSizeClass) private var sizeClass
-    /// DummyItemRow's split: a phone upright has no room for the thumb column.
-    private var narrow: Bool { sizeClass == .compact }
-    #else
-    private var narrow: Bool { false }
-    #endif
-
-    var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(0..<Self.places, id: \.self) { index in
-                    row
-                    if index < Self.places - 1 {
-                        Rectangle()
-                            .fill(ShellChrome.hairline(colorScheme))
-                            .frame(height: ShellSpace.hair)
-                    }
-                }
-            }
-        }
-        .scrollIndicators(.never)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text(Self.spoken))
-        .accessibilityAddTraits(.updatesFrequently)
-    }
-
-    private var row: some View {
-        VStack(alignment: .leading, spacing: ShellSpace.snug) {
-            headline
-            mainBox
-            marksBand
-        }
-        .padding(.horizontal, ShellSpace.pad)
-        .padding(.vertical, ShellSpace.step)
-        .frame(height: Self.rowHeight(narrow: narrow, avatar: avatar, thumb: thumb, marks: touch))
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var headline: some View {
-        HStack(alignment: .center, spacing: ShellSpace.snug) {
-            plate(width: avatar, height: avatar)
-            VStack(alignment: .leading, spacing: ShellSpace.tight) {
-                plate(height: ShellSpace.snug)
-                    .frame(maxWidth: 160, alignment: .leading)
-                plate(height: ShellSpace.snug)
-                    .frame(maxWidth: 96, alignment: .leading)
-            }
-            Spacer(minLength: ShellSpace.snug)
-            plate(width: 72, height: ShellSpace.snug)
-        }
-        .frame(height: avatar)
-    }
-
-    @ViewBuilder
-    private var mainBox: some View {
-        let words = Self.wordsHeight(narrow: narrow, thumb: thumb)
-        if narrow {
-            wordPlates
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .frame(height: words, alignment: .top)
-        } else {
-            HStack(alignment: .top, spacing: ShellSpace.step) {
-                wordPlates
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                plate(width: thumb, height: thumb)
-            }
-            .frame(height: words, alignment: .top)
-            .clipped()
-        }
-    }
-
-    private var wordPlates: some View {
-        VStack(alignment: .leading, spacing: ShellSpace.tight) {
-            plate(height: ShellSpace.snug)
-            plate(height: ShellSpace.snug)
-                .frame(maxWidth: 220, alignment: .leading)
-            plate(height: ShellSpace.snug)
-                .frame(maxWidth: 160, alignment: .leading)
-        }
-    }
-
-    private var marksBand: some View {
-        HStack(spacing: ShellSpace.snug) {
-            ForEach(0..<4, id: \.self) { _ in
-                plate(width: ShellSpace.room, height: ShellSpace.snug)
-            }
-            Spacer(minLength: 0)
-            ForEach(0..<3, id: \.self) { _ in
-                plate(width: ShellSpace.room, height: ShellSpace.snug)
-            }
-        }
-        .frame(height: touch, alignment: .center)
-    }
-
-    private func plate(width: CGFloat? = nil, height: CGFloat) -> some View {
-        ShellWaiting(speaks: Self.plateSpeaks)
-            .frame(width: width, height: height)
     }
 }
