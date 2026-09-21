@@ -10,7 +10,9 @@ public enum ShellPlace: String, CaseIterable, Identifiable, Hashable, Sendable {
 
     public var id: String { rawValue }
 
-    /// Empty launch lands here. Timeline is off until All and Trends exist.
+    /// Where the shell stands before the store has answered, and where a launch holding nothing
+    /// stays. A reader holding a source is moved to the timeline once the store has been read;
+    /// see `ShellLaunch`.
     public static let launch: ShellPlace = .account
 
     var title: String {
@@ -70,6 +72,17 @@ struct ShellAvailability: Hashable, Sendable {
         queryIDs.contains("all")
     }
 
+    /// Where this launch lands (#101): the timeline where there is something in it to read, and
+    /// the place a source is added where there is not.
+    ///
+    /// **`timelineEnabled` and not `sources.isEmpty`**, so the launch cannot land on a place the
+    /// rail has turned off. The two say the same thing today — All exists exactly when a source
+    /// is held — and if they ever stop agreeing, this one is the answer that leaves the reader
+    /// somewhere they can be.
+    var launchPlace: ShellPlace {
+        timelineEnabled ? .timeline : .account
+    }
+
     var enabledPlaces: [ShellPlace] {
         ShellPlace.allCases.filter(allows)
     }
@@ -109,6 +122,36 @@ struct ShellAvailability: Hashable, Sendable {
 
     var composeHintKey: String {
         canCompose ? "compose.summary" : "compose.disabled.summary"
+    }
+}
+
+/// The one question a launch asks about where to land, and the record that it has been asked
+/// (#101).
+///
+/// **The store answers late, so the question cannot be asked in `init`.** Sources are read off
+/// disk by `ShellSession.reloadFromStore`, which is awaited; until it returns, a session that
+/// holds five servers is indistinguishable from one that holds none. So the shell starts on
+/// `ShellPlace.launch` and this moves it, once, when the store has said what is there.
+///
+/// **A value with the asking in it, rather than a flag beside the state it guards.** The rule is
+/// that the answer is given once and never revised — a first source added an hour later must not
+/// pull the reader out of the page they are on, and the last one let go of must not be a second
+/// launch. Written as a `mutating` method that stops answering, that rule is a thing a test can
+/// hold; written as `if !decided { … }` in a view, it is a thing a test can only hope for.
+struct ShellLaunch: Hashable, Sendable {
+    private(set) var settled = false
+
+    /// Where the launch should move to, or nothing at all.
+    ///
+    /// Nothing is the answer to every call after the first, to a launch that is already standing
+    /// where it belongs, and to a reader who has walked somewhere else while the store was being
+    /// read — that last one is theirs, and a launch does not overrule it.
+    mutating func settle(_ availability: ShellAvailability, standingOn place: ShellPlace) -> ShellPlace? {
+        guard !settled else { return nil }
+        settled = true
+        guard place == .launch else { return nil }
+        let landing = availability.launchPlace
+        return landing == place ? nil : landing
     }
 }
 

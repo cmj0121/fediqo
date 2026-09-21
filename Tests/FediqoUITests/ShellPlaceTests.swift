@@ -16,6 +16,57 @@ struct ShellPlaceTests {
         #expect(ShellPlace.launch == .account)
     }
 
+    /// #101. The two halves of the decision, read off what the session holds.
+    @Test("A launch holding a source lands on the timeline, and one holding none lands on Account")
+    func launchLandsOnWhatIsHeld() {
+        #expect(ShellAvailability(queryIDs: ["all"]).launchPlace == .timeline)
+        #expect(ShellAvailability(queryIDs: ["all", "trends"], signedIn: true).launchPlace == .timeline)
+        #expect(ShellAvailability.empty.launchPlace == .account)
+        // Never a place the rail has turned off.
+        for availability in [ShellAvailability(queryIDs: ["all"]), .empty] {
+            #expect(availability.allows(availability.launchPlace))
+        }
+    }
+
+    /// #101. Decided once, at launch. A source joined an hour later is not a second launch, and
+    /// the last one let go of is not one either — the next launch is what changes.
+    @Test("The launch answers once and then stops answering")
+    func launchAnswersOnce() {
+        var launch = ShellLaunch()
+        #expect(!launch.settled)
+        #expect(launch.settle(ShellAvailability(queryIDs: ["all"]), standingOn: .launch) == .timeline)
+        #expect(launch.settled)
+        // The first source added after that, and the last one let go of, both say nothing.
+        #expect(launch.settle(ShellAvailability(queryIDs: ["all"]), standingOn: .account) == nil)
+        #expect(launch.settle(.empty, standingOn: .timeline) == nil)
+    }
+
+    /// #101. A launch that is already where it belongs, and a reader who walked off while the
+    /// store was being read, are both left alone.
+    @Test("A launch moves nobody who is already placed or has moved themselves")
+    func launchMovesNobodyElse() {
+        var empty = ShellLaunch()
+        #expect(empty.settle(.empty, standingOn: .launch) == nil)
+
+        var walked = ShellLaunch()
+        #expect(walked.settle(ShellAvailability(queryIDs: ["all"]), standingOn: .preferences) == nil)
+    }
+
+    /// #101. Wherever the launch lands, the rail and Tab still reach everything they reached
+    /// before: the set of places is what a session holds, and the landing is drawn from it.
+    @Test("The rail reaches every place from either landing")
+    func everyPlaceIsStillReachable() {
+        let held = ShellAvailability(queryIDs: ["all", "trends"], signedIn: true)
+        #expect(held.enabledPlaces == ShellPlace.allCases)
+        var walk: Set<ShellPlace> = [held.launchPlace]
+        var step = held.launchPlace
+        for _ in ShellPlace.allCases {
+            step = held.rotate(from: step, by: 1)
+            walk.insert(step)
+        }
+        #expect(walk == Set(ShellPlace.allCases))
+    }
+
     @Test("Every place can say what the action is for")
     func everyPlaceHasASummary() {
         for place in ShellPlace.allCases {

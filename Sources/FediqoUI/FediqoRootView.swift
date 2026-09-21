@@ -5,6 +5,10 @@ import SwiftUI
 public struct FediqoRootView: View {
     @State private var session: ShellSession
     @State private var place: ShellPlace = .launch
+    /// The launch's one decision about where to land (#101), and the record that it has been
+    /// made. Held here because `place` is held here, and asked in the `.task` below — the first
+    /// moment the store has said whether anything is joined.
+    @State private var launch = ShellLaunch()
     @State private var selectedItemID: String?
     @State private var threadStack: [String] = []
     /// What `/` opened (#32). Its results stand in for the stream while it is open.
@@ -149,6 +153,12 @@ public struct FediqoRootView: View {
             .task {
                 await session.keep(months: prefs.keepMonths)
                 await session.reloadFromStore()
+                // The store has now said what is held, which is the first moment this launch can
+                // be asked where it lands (#101). Asked here and nowhere else, so it is asked
+                // once.
+                if let landing = launch.settle(availability, standingOn: place) {
+                    place = landing
+                }
             }
             .onChange(of: prefs.keepMonths) { _, months in
                 Task { await session.keep(months: months) }
