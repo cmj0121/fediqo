@@ -235,7 +235,12 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// Not the live stream. Named queries do not read this.
     public static let stored: [DummyItem] = []
 
-    /// One note as root; conversation fetch is out of this branch.
+    /// This post alone — **what a thread reads as before its conversation is here, and where
+    /// there is no conversation to be had.**
+    ///
+    /// Not a placeholder and not a failure: a forum thread's answers are `ForumPosts`', a post
+    /// nobody answered really is one post, and a microblog thread that has not landed yet says
+    /// so for itself. The pane draws whichever of the three it is; this is the shape they share.
     public func dummyConversation() -> DummyConversation {
         DummyConversation(ancestors: [], post: self, descendants: [])
     }
@@ -365,7 +370,56 @@ public struct DummyConversation: Hashable, Sendable {
     }
 }
 
+extension DummyConversation {
+    /// The conversation a source handed back, around the post the reader opened.
+    ///
+    /// **The post itself is the one the pane was already given, not the one the thread carries.**
+    /// A source's answer to "the thread around this post" may or may not include the post, and
+    /// where it does it is a second copy of a row this device already holds — with its own marks,
+    /// its own deck and its own id. Drawing that copy would move the lamp off the row the reader
+    /// pressed. So `root` stands, and anything in either half that *is* the root is dropped.
+    ///
+    /// **Ancestors keep the source's order and are not nested.** They are one chain by
+    /// construction — each answers the one before it — so a rail per generation says nothing a
+    /// reader cannot already see, and `DummyConversation.depth(of:)` reads their depth off their
+    /// position for exactly that reason.
+    ///
+    /// **Answers are nested by who they answer, and the chain is walked in one pass.** An answer
+    /// whose parent has already been placed is one deeper than it; an answer whose parent this
+    /// device cannot name — no `inReplyToId`, or a parent the source did not send — is a direct
+    /// answer to the post. That fallback is the honest one: the source says it belongs to this
+    /// thread, and the only place left to put it is under the post. It is also what keeps the
+    /// pass linear, since the order a server walks its own tree already puts parents first.
+    ///
+    /// `rootID` is the id **the post's own server** gave the post — `Note.statusID`, which the
+    /// row itself does not carry. Nothing where it could not be known, and then every answer
+    /// stands at the first generation, which is the same fallback for the same reason.
+    public static func around(
+        _ root: DummyItem, rootID: String?, ancestors: [Note], descendants: [Note]
+    ) -> DummyConversation {
+        var depths: [String: Int] = [:]
+        if let rootID { depths[rootID] = 0 }
+        var entries: [DummyThreadEntry] = []
+        for note in descendants where note.key.rowID != root.id {
+            let parent = note.reply?.inReplyToId.flatMap { depths[$0] }
+            let depth = (parent ?? 0) + 1
+            if let id = note.statusID { depths[id] = depth }
+            entries.append(DummyThreadEntry(item: DummyItem(note), depth: depth))
+        }
+        return DummyConversation(
+            ancestors: ancestors.filter { $0.key.rowID != root.id }.map(DummyItem.init),
+            post: root,
+            descendants: entries
+        )
+    }
+}
+
 public struct DummyThreadEntry: Hashable, Sendable {
     public let item: DummyItem
     public let depth: Int
+
+    public init(item: DummyItem, depth: Int) {
+        self.item = item
+        self.depth = depth
+    }
 }
