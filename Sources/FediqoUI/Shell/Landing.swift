@@ -42,8 +42,8 @@ struct Landing: Equatable, Sendable {
         Landing(pitch: 0, yaw: 0, showing: true)
     }
 
-    /// Cosine ease-in-out in `0...1`, the same curve the launch flips use.
-    /// One function so the toast does not grow a second interpolation.
+    /// Cosine ease-in-out in `0...1` for the toast's sampled flip; launch still
+    /// uses `withAnimation(.easeInOut)`.
     static func ease(_ t: Double) -> Double {
         0.5 - 0.5 * cos(.pi * min(max(t, 0), 1))
     }
