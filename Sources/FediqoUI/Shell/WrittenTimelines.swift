@@ -7,10 +7,11 @@ import Foundation
 /// or the keep window, and the GRDB index holds what servers sent; keeping it beside `DummyPrefs`
 /// adds no migration to the one 0.2.0 has (Decision 2).
 ///
-/// **The shape is frozen** — `{"version":1,"timelines":[…]}`, and the kind, effect and category
-/// strings are what a later build reads. **Any later shape change bumps `version`.** The load
-/// **fails closed** (Decision 15): a missing or other version, a field or a kind this build does not
-/// know, is reported as unreadable and never written over, because dropping one rule would widen a
+/// **The shape is versioned** — this build writes `{"version":2,"timelines":[…]}` (`desc` on a
+/// timeline) and still reads version 1, which has none. Kind, effect and category strings stay
+/// what a later build reads. **Any later shape change bumps `version`.** The load **fails closed**
+/// (Decision 15): a missing or other version, a field or a kind this build does not know, is
+/// reported as unreadable and never written over, because dropping one rule would widen a
 /// timeline or bring back what the reader hid.
 struct WrittenTimelineStore {
     enum Loaded: Equatable {
@@ -18,7 +19,7 @@ struct WrittenTimelineStore {
         case unreadable
     }
 
-    static let version = 1
+    static let version = 2
 
     let defaults: UserDefaults
     var key = "fediqo.timelines"
@@ -30,7 +31,7 @@ struct WrittenTimelineStore {
         guard let data = value as? Data,
               Self.knowsEveryField(data),
               let kept = try? JSONDecoder().decode(Kept.self, from: data),
-              kept.version == Self.version
+              (1...Self.version).contains(kept.version)
         else { return .unreadable }
         var timelines: [TimelineDefinition] = []
         for row in kept.timelines {
@@ -56,7 +57,7 @@ struct WrittenTimelineStore {
               let timelines = top["timelines"] as? [[String: Any]]
         else { return false }
         for timeline in timelines {
-            guard Set(timeline.keys).isSubset(of: ["id", "name", "rules"]),
+            guard Set(timeline.keys).isSubset(of: ["id", "name", "rules", "desc"]),
                   let rules = timeline["rules"] as? [[String: Any]]
             else { return false }
             for rule in rules {
@@ -83,11 +84,13 @@ private struct TimelineRow: Codable {
     var id: UUID
     var name: String
     var rules: [RuleRow]
+    var desc: String?
 
     init(_ timeline: TimelineDefinition) {
         id = timeline.id
         name = timeline.name
         rules = timeline.rules.map(RuleRow.init)
+        desc = timeline.desc
     }
 
     /// Nothing where any one rule cannot be read.
@@ -97,7 +100,7 @@ private struct TimelineRow: Codable {
             guard let rule = row.rule else { return nil }
             read.append(rule)
         }
-        return TimelineDefinition(id: id, name: name, rules: read)
+        return TimelineDefinition(id: id, name: name, rules: read, desc: desc)
     }
 }
 

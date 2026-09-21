@@ -23,6 +23,7 @@ struct TimelineEditor: View {
     enum Focus: Hashable {
         case keys
         case name
+        case desc
         case text
     }
 
@@ -39,6 +40,10 @@ struct TimelineEditor: View {
             TextField(L10n.t("timeline.name.placeholder"), text: $draft.name)
                 .textFieldStyle(.roundedBorder)
                 .focused($focus, equals: .name)
+                .onSubmit { focus = .keys }
+            TextField(L10n.t("timeline.desc.placeholder"), text: $draft.desc)
+                .textFieldStyle(.roundedBorder)
+                .focused($focus, equals: .desc)
                 .onSubmit { focus = .keys }
             placeLine
             Rectangle().fill(ShellChrome.hairline(colorScheme)).frame(height: ShellSpace.hair)
@@ -73,7 +78,7 @@ struct TimelineEditor: View {
                 command: press.modifiers.contains(.command),
                 option: press.modifiers.contains(.option),
                 stage: stage,
-                fieldFocused: focus == .name || focus == .text
+                fieldFocused: focus == .name || focus == .desc || focus == .text
             )
             guard let action else { return .ignored }
             perform(action)

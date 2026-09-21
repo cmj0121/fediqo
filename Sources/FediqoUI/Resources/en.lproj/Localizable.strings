@@ -120,6 +120,7 @@
 "timeline.edit.fixed" = "All and Trends can't be edited. To add your own timeline, press + — or Tab to it and press e.";
 "timeline.unreadable" = "Your timelines on this device can't be read here. They are left untouched, and nothing new is saved over them.";
 "timeline.name.placeholder" = "Name this timeline";
+"timeline.desc.placeholder" = "A short description, optional";
 "timeline.done" = "Done";
 "timeline.place" = "%1$d of %2$d of your timelines";
 "timeline.earlier" = "‹ Earlier";

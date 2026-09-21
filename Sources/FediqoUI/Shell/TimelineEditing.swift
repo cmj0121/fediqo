@@ -13,6 +13,7 @@ struct TimelineDraft: Identifiable, Equatable {
     let id: TimelineID
     let isNew: Bool
     var name: String
+    var desc: String
     var rules: [Rule]
     /// Where among the reader's timelines it goes, 0 being first after All and Trends.
     var position: Int
@@ -23,6 +24,7 @@ struct TimelineDraft: Identifiable, Equatable {
         id = UUID()
         isNew = true
         name = ""
+        desc = ""
         rules = []
         position = places - 1
         self.places = places
@@ -32,6 +34,7 @@ struct TimelineDraft: Identifiable, Equatable {
         id = timeline.id
         isNew = false
         name = timeline.name
+        desc = timeline.desc ?? ""
         rules = timeline.rules
         self.position = position
         self.places = places
@@ -130,10 +133,15 @@ extension ShellSession {
         return timeline.name
     }
 
-    /// The line beside the tabs.
+    /// The line beside the tabs. Empty description keeps the generated rule line, so a
+    /// timeline kept before descriptions still has one.
     func rule(of query: TimelineQuery) -> String {
         guard case .written = query else { return query.rule }
-        return L10n.count("timeline.rule.written", definition(of: query).rules.count)
+        let definition = definition(of: query)
+        if let desc = definition.desc?.trimmingCharacters(in: .whitespacesAndNewlines), !desc.isEmpty {
+            return desc
+        }
+        return L10n.count("timeline.rule.written", definition.rules.count)
     }
 
     /// Whether a rule of this query names something this device no longer holds. Asked for every
@@ -201,7 +209,9 @@ extension ShellSession {
     func commit(_ draft: TimelineDraft) {
         guard draft.canSave, !timelinesUnreadable else { return }
         var timelines = written.filter { $0.id != draft.id }
-        let timeline = TimelineDefinition(id: draft.id, name: draft.trimmedName, rules: draft.rules)
+        let timeline = TimelineDefinition(
+            id: draft.id, name: draft.trimmedName, rules: draft.rules, desc: draft.desc
+        )
         timelines.insert(timeline, at: min(draft.position, timelines.count))
         keep(timelines)
         editing = nil
