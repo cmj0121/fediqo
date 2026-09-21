@@ -5,6 +5,25 @@ public actor ItemStore {
     private var sourceList: [Source] = []
     /// One row per `NoteKey`: two hosts carrying the same Mastodon URI are two rows (#10).
     private var notes: [NoteKey: Note] = [:]
+    /// When each row first arrived, as a count that only goes up. Nothing reads the number; what
+    /// is read is which of two is the smaller.
+    ///
+    /// **Which copy a merged row is drawn as** (#114). Two sources carrying one post are two rows
+    /// here and one row on screen, and the row is the copy that arrived first — so the store has
+    /// to be able to say which that was. It could not before: a dictionary hands its values back
+    /// in whatever order it likes, and the two copies agree on the hour they were posted and on
+    /// the name their servers gave the post, which is every other thing `storeOrder` compares.
+    ///
+    /// **Counted, not clocked.** A moment would be a fact about this device's clock, which can go
+    /// backwards; the order two copies were taken in is a fact about this store, and it is the
+    /// only one being asked for.
+    ///
+    /// It survives a relaunch as an order rather than as a number: `snapshot` hands the rows over
+    /// oldest first, a save writes them in that order, and `init(sources:notes:)` counts the rows
+    /// back in the order it is given them. So the numbers a second run uses are not the first
+    /// run's, and the answer they give is.
+    private var arrival: [NoteKey: Int] = [:]
+    private var arrivals = 0
     /// The oldest a note may be posted and still be held, or nil to keep everything forever —
     /// the default. The reader's drop by time (#7), held here so every way in obeys it.
     private(set) var retention: Date?
@@ -28,6 +47,13 @@ public actor ItemStore {
             sourceList.append(source)
         }
         notes = Dictionary(incoming.map { ($0.key, $0) }, uniquingKeysWith: { _, new in new })
+        // The order the rows are handed over is the order they arrived in: the run that wrote
+        // this snapshot wrote them oldest first. A row named twice keeps the first mention's
+        // place, the way `ingest` keeps a row's place when it is met again.
+        for note in incoming where arrival[note.key] == nil {
+            arrival[note.key] = arrivals
+            arrivals += 1
+        }
     }
 
     public func add(_ source: Source) {
@@ -97,7 +123,8 @@ public actor ItemStore {
     /// Takes notes in. The same item through one source stays one row: the first copy wins and
     /// categories grow, so All and Trends of one host share a row. A fetch with fewer takes none
     /// away: a category is what the copy arrived through, and that stays true (#25). The same
-    /// item through two sources is two rows (#10). Merging those into one thread is later.
+    /// item through two sources is two rows (#10) here, whatever the timeline draws them as: a
+    /// merge (#114) is a way of drawing what is held, never a way of holding less of it.
     ///
     /// A note posted before the retention window is refused: the reader chose not to keep it.
     public func ingest(_ incoming: [Note]) {
@@ -110,6 +137,8 @@ public actor ItemStore {
                 notes[key] = existing
             } else {
                 notes[key] = note
+                arrival[key] = arrivals
+                arrivals += 1
             }
         }
     }
@@ -140,6 +169,7 @@ public actor ItemStore {
         let host = raw.lowercased()
         sourceList.removeAll { $0.host == host }
         notes = notes.filter { $0.key.host != host }
+        arrival = arrival.filter { $0.key.host != host }
         revision += 1
     }
 
@@ -157,32 +187,45 @@ public actor ItemStore {
         guard let retention else { return 0 }
         let before = notes.count
         notes = notes.filter { $0.value.postedAt >= retention }
-        if notes.count != before { revision += 1 }
+        if notes.count != before {
+            arrival = arrival.filter { notes[$0.key] != nil }
+            revision += 1
+        }
         return before - notes.count
     }
 
     /// Everything this store holds, read in one hop — what a save writes to disk.
     ///
-    /// **Unsorted, and taken at one moment.** A save does not draw anything, so it has no use for
-    /// `all()`'s order and should not pay for it; and asking for the sources and the notes in two
-    /// awaits would let an ingest or a remove land between them, writing notes whose source is
-    /// gone. This is the counterpart of `init(sources:notes:)`.
-    /// `revision` is the one this snapshot is of, read in the same hop.
+    /// **In the order the rows arrived, and taken at one moment.** A save does not draw anything,
+    /// so it has no use for `all()`'s order; what it does need is the order the rows came in, so
+    /// that the run reading them back knows which copy of a post arrived first (#114). And asking
+    /// for the sources and the notes in two awaits would let an ingest or a remove land between
+    /// them, writing notes whose source is gone. This is the counterpart of
+    /// `init(sources:notes:)`. `revision` is the one this snapshot is of, read in the same hop.
     public func snapshot() -> (sources: [Source], notes: [Note], revision: Int) {
-        (sourceList, Array(notes.values), revision)
+        let arrival = self.arrival
+        let ordered = notes.values.sorted { (arrival[$0.key] ?? 0) < (arrival[$1.key] ?? 0) }
+        return (sourceList, ordered, revision)
     }
 
     public func all() -> [Note] {
-        notes.values.sorted(by: Self.storeOrder)
+        let arrival = self.arrival
+        return notes.values.sorted { Self.storeOrder($0, $1, arrival) }
     }
 
     public func trends() -> [Note] {
         all().filter { $0.categories.contains(.trends) }
     }
 
-    private static func storeOrder(_ a: Note, _ b: Note) -> Bool {
+    private static func storeOrder(_ a: Note, _ b: Note, _ arrival: [NoteKey: Int]) -> Bool {
         if a.postedAt != b.postedAt { return a.postedAt > b.postedAt }
         if a.id != b.id { return a.id < b.id }
+        // Two copies of one post from two sources (#10): the one this store took first comes
+        // first, so a merged row drawn from the first of its copies is the copy that arrived
+        // first (#114). The host stays behind it only so the order is total.
+        let mine = arrival[a.key] ?? 0
+        let theirs = arrival[b.key] ?? 0
+        if mine != theirs { return mine < theirs }
         return a.source.host < b.source.host
     }
 }
