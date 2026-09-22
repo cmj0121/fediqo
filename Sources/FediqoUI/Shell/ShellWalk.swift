@@ -1,6 +1,7 @@
 import Foundation
 
-/// One step away from the stream: a conversation, or somebody's page.
+/// One step away from the stream: a conversation, somebody's page, or on a Mac a page read out of
+/// a post's words.
 ///
 /// **Two kinds and one list**, which is the whole of #122. Before this the app held a stack of
 /// conversations and, beside it, one person — and because they were two pieces of state the
@@ -19,6 +20,14 @@ enum ShellStep: Hashable, Sendable {
     /// marks stopped answering. The row is looked up afresh each pass, which is the same
     /// arrangement `ShellConversationStanding.loaded` gives its reason for.
     case thread(String)
+    /// A page read out of a post's words, drawn in place of the page it was opened from (#169),
+    /// by the address the reader pressed.
+    ///
+    /// **The address pressed, not where the page went.** The page moves as the reader reads it,
+    /// and what it is showing is `ShellReader`'s; this step is only the fact that the reader
+    /// stepped into a page from here, and what leaving it owes them. It is always the innermost
+    /// step: nothing on the page is a row or a face, so nothing walks further from it.
+    case link(URL)
 }
 
 /// How far the reader has walked from the stream, and what each step is owed when it is left.
@@ -60,6 +69,25 @@ struct ShellWalk: Hashable, Sendable {
     var openedPerson: DummyPerson? {
         guard case .person(let person) = standing else { return nil }
         return person
+    }
+
+    /// The page read out of a post that is in front, where one is (#169).
+    var openedLink: URL? {
+        guard case .link(let url) = standing else { return nil }
+        return url
+    }
+
+    /// The step the page under a link is standing on — the conversation, the person or the
+    /// stream a link was pressed on — and so what the timeline place draws beneath it.
+    ///
+    /// **Beneath rather than instead.** The page a link opens fills the place, but what it was
+    /// opened from stays drawn under it, exactly as it was: the list, where it is scrolled to,
+    /// which post is lit. Leaving gives that back without building anything again.
+    var beneath: ShellStep? {
+        taken.last { step in
+            if case .link = step.step { return false }
+            return true
+        }?.step
     }
 
     var isEmpty: Bool { taken.isEmpty }

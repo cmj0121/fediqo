@@ -59,10 +59,27 @@ struct ShellReading: Identifiable, Hashable, Sendable {
 /// That is how "close it and you are back at the post you left" is kept: there is nothing to put
 /// back, because nothing was taken away. Navigating to it instead would have meant restoring the
 /// selection by hand, which is the shape `ShellSearch.selectionBefore` had to grow.
+///
+/// **On a Mac, drawn in place of the page instead** (#169). A sheet on a Mac window is a panel
+/// floating over the reader's page, smaller than the window and apart from it; reading a page
+/// should feel like going somewhere. There, where the page a link was pressed on can take a step
+/// — the timeline, a conversation, somebody's page — the reading is one more step of the walk
+/// and fills that page, and leaving it unwinds the walk like any other step. It is still drawn
+/// over what it was opened from and not instead of it, so what the paragraph above keeps is
+/// kept: the page under it is never torn down.
 @MainActor
 @Observable
 final class ShellReader {
     private(set) var reading: ShellReading?
+
+    /// Whether the reading is drawn in place of the page it was opened from, rather than in a
+    /// sheet over the shell. Decided once, as it opens, by `placing`.
+    private(set) var inPlace = false
+
+    /// Asked as a page opens whether it can be drawn in place, and answered by whoever holds the
+    /// walk — which takes the step in the same answer, so the page is never presented as a sheet
+    /// for a frame first. Nothing here, as on iPad and iPhone, is a sheet.
+    @ObservationIgnored var placing: (@MainActor (URL) -> Bool)?
 
     /// Opens an address inside the app, and answers whether it did.
     ///
@@ -86,7 +103,9 @@ final class ShellReader {
     @discardableResult
     func open(_ url: URL) -> Bool {
         guard Host.allowsFetch(url), let host = url.host(), !host.isEmpty else { return false }
+        let placed = placing?(url) ?? false
         reading = ShellReading(url: url, host: host)
+        inPlace = placed
         return true
     }
 
@@ -107,6 +126,12 @@ final class ShellReader {
 
     func close() {
         reading = nil
+        inPlace = false
+    }
+
+    /// What a sheet over the shell shows: the reading, unless it is drawn in place.
+    var sheet: ShellReading? {
+        inPlace ? nil : reading
     }
 }
 
@@ -141,7 +166,13 @@ struct LinkReaderSheet: View {
     /// chrome says — the host, the notice, which page the browser button leads to — moves while
     /// the sheet is open. A snapshot would be exactly the header that stops being true.
     let reader: ShellReader
+    /// The way out: Done on a sheet, Back where the page is drawn in place of the one it was
+    /// opened from.
     let onClose: () -> Void
+    /// Drawn in place of the page it was opened from (#169), filling it: a visible Back in the
+    /// header where a sheet has Done in its foot, and the place's own size rather than one a
+    /// sheet asks the window for.
+    var inPlace = false
 
     private var reading: ShellReading { reader.reading ?? presented }
 
@@ -151,6 +182,27 @@ struct LinkReaderSheet: View {
     @Environment(\.openURL) private var openURL
 
     var body: some View {
+        if inPlace {
+            page
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(ShellChrome.page(colorScheme))
+        } else {
+            page
+                // **The sheet opens at a size somebody's page was written for.** The web view
+                // asks for 800×600 and used to ask alone, which a sheet does not honour:
+                // `LinkWebView` is an `NSViewRepresentable` with no intrinsic size, so the only
+                // numbers that reached the window were the floors on this line and the reader got
+                // a 380-point column with a desktop layout squeezed into it. The ideal belongs on
+                // the thing being sized.
+                //
+                // The floors stay what they were. They are the phone's case — a floor wide enough
+                // for a desktop would be wider than the screen — and an ideal is a preference a
+                // small screen is free to ignore, which is exactly the difference wanted here.
+                .frame(minWidth: 380, idealWidth: 800, minHeight: 480, idealHeight: 600)
+        }
+    }
+
+    private var page: some View {
         VStack(spacing: 0) {
             header
             if reading.refused { refusal }
@@ -171,16 +223,6 @@ struct LinkReaderSheet: View {
             Divider()
             footer
         }
-        // **The sheet opens at a size somebody's page was written for.** The web view asks for
-        // 800×600 and used to ask alone, which a sheet does not honour: `LinkWebView` is an
-        // `NSViewRepresentable` with no intrinsic size, so the only numbers that reached the
-        // window were the floors on this line and the reader got a 380-point column with a
-        // desktop layout squeezed into it. The ideal belongs on the thing being sized.
-        //
-        // The floors stay what they were. They are the phone's case — a floor wide enough for a
-        // desktop would be wider than the screen — and an ideal is a preference a small screen
-        // is free to ignore, which is exactly the difference wanted here.
-        .frame(minWidth: 380, idealWidth: 800, minHeight: 480, idealHeight: 600)
     }
 
     /// The host, and nothing else. **What a reader checks before following a link is where it
@@ -189,6 +231,7 @@ struct LinkReaderSheet: View {
     /// would be the page naming itself.
     private var header: some View {
         HStack(spacing: ShellSpace.snug) {
+            if inPlace { back }
             Image(systemName: "lock")
                 .shellFont(.meta)
                 .foregroundStyle(ShellChrome.inkFaint(colorScheme))
@@ -198,10 +241,35 @@ struct LinkReaderSheet: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer(minLength: ShellSpace.snug)
+            if inPlace {
+                Text(L10n.t("link.reader.leaveHint"))
+                    .shellFont(.meta)
+                    .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                    .accessibilityHidden(true)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(ShellSpace.pad)
-        .accessibilityElement(children: .combine)
+        // A sheet's header is one sentence, the host; in place it also holds Back, which has to
+        // stay a button of its own for VoiceOver to press.
+        .accessibilityElement(children: inPlace ? .contain : .combine)
+    }
+
+    /// Back to the page the link was pressed on, drawn where a conversation draws its own (#169).
+    ///
+    /// **Escape too, even from inside the page.** The shell's keys are read ahead of any
+    /// responder, but not while somebody's page has the keyboard — a page being typed into owns
+    /// its keys (`dummyWebIsTyping`). The cancel shortcut is the window's, so a reader who
+    /// clicked into the page still has a key that leaves it; `q` is the page's there, as every
+    /// other letter is.
+    private var back: some View {
+        Button(action: onClose) {
+            Label(L10n.t("link.reader.back"), systemImage: "chevron.left")
+                .shellFont(.meta, weight: .medium)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(ShellChrome.selectInk(colorScheme))
+        .keyboardShortcut(.cancelAction)
     }
 
     /// One line, where the page asked to go somewhere this app will not follow.
@@ -242,8 +310,10 @@ struct LinkReaderSheet: View {
             .foregroundStyle(ShellChrome.selectInk(colorScheme))
             .accessibilityHint(Text(L10n.t("thread.open.leaves")))
             Spacer(minLength: ShellSpace.snug)
-            Button(L10n.t("link.reader.close")) { onClose() }
-                .keyboardShortcut(.cancelAction)
+            if !inPlace {
+                Button(L10n.t("link.reader.close")) { onClose() }
+                    .keyboardShortcut(.cancelAction)
+            }
         }
         .padding(ShellSpace.pad)
     }
@@ -362,3 +432,28 @@ extension LinkWebView: UIViewRepresentable {
     func updateUIView(_ view: WKWebView, context: Context) {}
 }
 #endif
+
+/// A page read out of a post, drawn in place of the timeline place it was pressed on (#169):
+/// filling it, over what it was opened from, which stays drawn underneath and so is exactly as
+/// the reader left it when Back is pressed.
+///
+/// **Out of the view it is put on**, for `WithdrawQuestion`'s reason: the chain it joins is long
+/// enough already for the compiler the CI builds with, and one `.modifier` is a call it does not
+/// have to solve against the rest.
+struct LinkInPlace: ViewModifier {
+    let reader: ShellReader
+    let onBack: () -> Void
+
+    func body(content: Content) -> some View {
+        let reading = reader.inPlace ? reader.reading : nil
+        content
+            // What is under the page is not what the reader is on, and VoiceOver must not walk
+            // into rows drawn behind it.
+            .accessibilityHidden(reading != nil)
+            .overlay {
+                if let reading {
+                    LinkReaderSheet(presented: reading, reader: reader, onClose: onBack, inPlace: true)
+                }
+            }
+    }
+}

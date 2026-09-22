@@ -191,7 +191,7 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     public static func canEditTimeline(whenOpen open: Set<DummyLayer>) -> Bool {
         switch outermost(of: open) {
         case .selection, nil: true
-        case .viewer, .shortcuts, .person, .thread, .search: false
+        case .viewer, .shortcuts, .person, .thread, .link, .search: false
         }
     }
 
@@ -254,13 +254,14 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         return items[next]
     }
 
-    /// The two layers that are one walk: somebody's page, and a conversation (#122).
+    /// The layers that are one walk: somebody's page, a conversation (#122), and on a Mac a page
+    /// read out of a post's words (#169).
     ///
     /// They are drawn at the same distance from the stream and only ever one at a time, because
     /// `ShellWalk` holds them in one stack and only its innermost step is open. Their order
     /// relative to each other in `allCases` is therefore never asked — which of them is in front
     /// is what the reader walked, not what this list says.
-    public static let walk: Set<DummyLayer> = [.person, .thread]
+    public static let walk: Set<DummyLayer> = [.person, .thread, .link]
 
     /// Whether the reader may walk one step further out from where they are now.
     ///
@@ -343,6 +344,11 @@ public enum DummyLayer: Hashable, Sendable, CaseIterable {
     /// The conversation opened over whatever it was opened from: the stream, a search's results,
     /// another conversation, or somebody's page. One walk with `.person` — see there.
     case thread
+    /// A page read out of a post's words, drawn on a Mac in place of the page it was opened from
+    /// (#169). One walk with `.person` and `.thread`: leaving it gives back whichever of them, or
+    /// the stream, the link was pressed on. Never open on iPad and iPhone, which read it in a
+    /// sheet over the shell.
+    case link
     /// A search's results in place of the stream (#32). Under a thread, because a result can be
     /// opened; over the selection, because leaving it gives back the one made before it opened.
     case search

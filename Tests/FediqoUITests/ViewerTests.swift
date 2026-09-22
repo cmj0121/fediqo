@@ -13,9 +13,9 @@ import Testing
 struct ViewerTests {
     // MARK: The layer order
 
-    @Test("The order is viewer, shortcuts, person, thread, search, selection")
+    @Test("The order is viewer, shortcuts, person, thread, link, search, selection")
     func theOrderIsTheOrder() {
-        #expect(DummyLayer.allCases == [.viewer, .shortcuts, .person, .thread, .search, .selection])
+        #expect(DummyLayer.allCases == [.viewer, .shortcuts, .person, .thread, .link, .search, .selection])
     }
 
     @Test("A dismissing press closes the outermost thing that is open, and only that")
@@ -168,6 +168,37 @@ struct ViewerTests {
         #expect(shell.pressRow(Self.a))
         #expect(!shell.pressRow(Self.a))
         #expect(shell.walk.depth == 2)
+    }
+
+    // MARK: A link read in place (#169)
+
+    /// timeline → conversation → link → back to the conversation → back to the timeline, by the
+    /// two keys that leave.
+    @Test("q and Escape leave a link read in place, then the conversation it was pressed in")
+    func aLinkIsLeftLikeAnyStep() {
+        let shell = Shell(items: Self.list, selected: Self.d)
+        #expect(shell.press(.expandPost))
+        #expect(shell.walk.standing == .thread(Self.d))
+        shell.selected = Self.b
+        let page = URL(string: "https://example.test/a")!
+        #expect(shell.pressLink(page))
+        #expect(shell.walk.openedLink == page)
+        #expect(!shell.threadOpen, "only the step in front is open")
+        #expect(shell.press(.back))
+        #expect(shell.walk.standing == .thread(Self.d))
+        #expect(shell.selected == Self.b)
+        #expect(shell.press(.dismiss))
+        #expect(shell.walk.isEmpty)
+        #expect(shell.selected == Self.d)
+    }
+
+    @Test("A link pressed under the viewer is not a step")
+    func noLinkStepUnderTheViewer() {
+        let shell = Shell(items: Self.list, selected: Self.a)
+        #expect(shell.press(.viewAttachment))
+        #expect(shell.viewing != nil)
+        #expect(!shell.pressLink(URL(string: "https://example.test/a")!))
+        #expect(shell.walk.isEmpty)
     }
 
     // MARK: `p` — the face's press, by key (#140)
@@ -672,6 +703,7 @@ struct ViewerTests {
             case .shortcuts: shortcutsOpen
             case .person: personOpen != nil
             case .thread: threadOpen
+            case .link: walk.openedLink != nil
             case .search: searchOpen
             case .selection: selected != nil
             }
@@ -699,6 +731,13 @@ struct ViewerTests {
         func pressFace(_ person: DummyPerson) -> Bool {
             guard DummyCommand.canWalk(whenOpen: openLayers) else { return false }
             return walk.walk(to: .person(person), from: selected)
+        }
+
+        /// A link pressed in a post's words on a Mac (#169): the root's own rule for whether it
+        /// is a step of the walk.
+        @discardableResult
+        func pressLink(_ url: URL) -> Bool {
+            FediqoRootView.placeLink(url, on: &walk, from: selected, place: .timeline, open: openLayers)
         }
 
         /// What the app does when the reader walks to another page.
@@ -779,7 +818,7 @@ struct ViewerTests {
                 // A face is left by both keys, exactly as a conversation is: the page is
                 // something the reader opened, and both `q` and `Escape` take it away. One step
                 // back, whichever kind of step it was — the walk says which (#122).
-                case .person, .thread:
+                case .person, .thread, .link:
                     guard let left = walk.back() else { return false }
                     selected = left.lamp
                     return true
