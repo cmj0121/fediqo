@@ -236,4 +236,47 @@ struct AnswerTests {
         #expect(ShellConversations.placed(underRoot, in: held, rootID: "9").last?.statusID == "21")
         #expect(ShellConversations.placed(held[1], in: held, rootID: "9") == held)
     }
+
+    @Test("An answer to a row that stands for two copies names the post as the row's own copy's source does")
+    func aMergedRowIsAnsweredThroughItsOwnCopy() async throws {
+        let tokens = MemoryMastodonTokens()
+        for signed in ["a.example", "b.example"] {
+            try tokens.save(MastodonToken(
+                host: signed, accessToken: "tok-\(signed)", clientID: "cid", clientSecret: "csecret",
+                scopes: writing
+            ))
+        }
+        let server = ActServer(["/api/v1/statuses": .json(Self.status("20", by: "me", answering: "111"))])
+        let store = ItemStore()
+        func copy(on host: String, _ statusID: String) -> Note {
+            Note(
+                id: "https://origin.example/users/ada/statuses/1",
+                source: Source(host: host, kind: .mastodon),
+                author: "Ada", handle: "@ada@origin.example", body: "hello",
+                postedAt: Date(timeIntervalSince1970: 1_700_000_000), categories: [.home],
+                audience: .everyone, statusID: statusID
+            )
+        }
+        for host in ["a.example", "b.example"] { await store.add(Source(host: host, kind: .mastodon)) }
+        await store.ingest([copy(on: "a.example", "111"), copy(on: "b.example", "222")])
+        let session = ShellSession(
+            http: FixtureHTTP(), store: store,
+            mastodon: MastodonSessions(tokens: tokens, sender: server)
+        )
+        session.mastodon.refresh()
+        await session.reloadFromStore()
+        let row = try #require(DummyItem.merged(session.notes).first)
+        let own = row.source.host
+        let ownID = try #require(row.statusID)
+
+        #expect(session.openAnswer(to: row, in: row))
+        let target = try #require(session.answering)
+        session.answerDrafts[target.id] = "yes"
+        try? await session.answer(target)
+        let request = try #require(await server.requests.first)
+        #expect(await server.requests.count == 1)
+        #expect(request.url?.host == own, "the answer goes to the row's own source")
+        #expect(await server.form("/api/v1/statuses")["in_reply_to_id"] == ownID,
+                "named by the id that source gave the post, never the other copy's")
+    }
 }
