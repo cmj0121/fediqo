@@ -397,6 +397,8 @@ struct TimelinePane: View {
                 .scrollTargetLayout()
             }
             .scrollIndicators(.never)
+            // The end of the list stops short of whatever floats over the page (#112).
+            .clearsFloatingCorner()
             .modifier(KeepsTopRow(session: session))
             .onAppear {
                 // A tick later: a lazy stack just built has not laid out the row to scroll to.

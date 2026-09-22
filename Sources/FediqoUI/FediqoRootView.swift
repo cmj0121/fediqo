@@ -1228,7 +1228,7 @@ public struct FediqoRootView: View {
         )
     }
 
-    private enum Compact {
+    enum Compact {
         static let button: CGFloat = 56
         /// Clear of the tab bar, which the overlay knows nothing about. A Mac draws its tabs
         /// across the top rather than the bottom, so there the button only keeps its room.
@@ -1237,6 +1237,23 @@ public struct FediqoRootView: View {
         #else
         static let clearance: CGFloat = ShellSpace.room
         #endif
+    }
+
+    /// The corner of every page the compose button floats over in the narrow arrangement, and
+    /// nothing where it does not float (#112). See `EnvironmentValues.shellFloatingCorner`.
+    ///
+    /// **Measured from the page's own edges, and generous rather than exact.** The button is laid
+    /// against the tabs' whole frame, so on a phone it is `clearance` above the frame's bottom and
+    /// the tab bar is somewhere under that; the page ends at the bar. The room asked for is the
+    /// button, its clearance and a step besides, which is more than the page needs wherever the
+    /// bar is below it — a list that stops a little short, which costs nothing, rather than one
+    /// that stops under the button, which costs its last row's marks.
+    static func composeCorner(canCompose: Bool) -> CGSize {
+        guard canCompose else { return .zero }
+        return CGSize(
+            width: Compact.button + ShellSpace.room + ShellSpace.snug,
+            height: Compact.button + Compact.clearance + ShellSpace.snug
+        )
     }
 
     /// The narrow arrangement: tabs instead of a rail, and only for the places it can enter.
@@ -1253,6 +1270,9 @@ public struct FediqoRootView: View {
             }
         }
         .tint(ShellChrome.phosphor(colorScheme))
+        // Every page under the button is told the corner it takes, so the end of a list and the
+        // search bar leave it clear (#112).
+        .environment(\.shellFloatingCorner, Self.composeCorner(canCompose: availability.canCompose))
         .overlay(alignment: .bottomTrailing) {
             if availability.canCompose { composeButton }
         }
