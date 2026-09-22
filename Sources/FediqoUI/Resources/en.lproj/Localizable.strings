@@ -115,6 +115,9 @@
 "timeline.latest" = "Up to %@";
 "timeline.latest.label" = "Showing posts up to %@; newer posts are hidden";
 "timeline.reload.progress" = "Reloading…";
+"timeline.reload.piece" = "Reloading %1$@ %2$@";
+"timeline.reload.host" = "Reloading %@";
+"timeline.reload.more" = "%1$@ +%2$d";
 "timeline.reload.failed" = "Could not reload %@.";
 "timeline.reload.unspoken" = "%1$@ now answers as %2$@, which Fediqo does not read. What it brought here is still here.";
 "timeline.reload.stopped" = "Reload stopped.";

@@ -362,13 +362,13 @@ struct SourceWorkTests {
     @Test("A board's name is carried from its start to its line, and a blank one is none")
     func theBoardsLine() async {
         let work = SourceWork()
-        let named = work.begin(host: "Forum.Example", for: .timeline, board: "  Child ")
-        let blank = work.begin(host: "forum.example", for: .boards, board: " ")
-        #expect(Set(work.now.values.map(\.board)) == ["Child", nil])
+        let named = work.begin(host: "Forum.Example", for: .timeline, name: .called("  Child "))
+        let blank = work.begin(host: "forum.example", for: .boards, name: .called(" "))
+        #expect(Set(work.now.values.map(\.name)) == [.called("Child"), nil])
         #expect(await spun { work.rows.count == 2 })
         let line = work.rows.first { $0.purpose == .timeline }
         #expect(line?.host == "forum.example")
-        #expect(line?.board == "Child")
+        #expect(line?.name == .called("Child"))
         #expect(line?.purposeText(language: .english) == "Reading a timeline · Child")
         #expect(work.rows.first { $0.purpose == .boards }?.purposeText(language: .english)
             == "Reading a forum's boards")
@@ -389,7 +389,7 @@ struct SourceWorkTests {
         let time = try #require(page.range(of: "SourceWorkRow.elapsed("))
         #expect(host.lowerBound < purpose.lowerBound && purpose.lowerBound < time.lowerBound)
         #expect(page.contains(".accessibilityElement(children: .combine)"))
-        #expect(!page.contains("row.board"), "the board is drawn only through purposeText")
+        #expect(!page.contains("row.name"), "the board is drawn only through purposeText")
     }
 
     @Test("Lines are longest-running first; pictures gather per host; the rest are one each")
@@ -433,7 +433,7 @@ struct SourceWorkTests {
 
         // A board read says which board, after what for — by its name, and by nothing else.
         let board = SourceWorkRow(
-            id: "b", host: "forum.example", purpose: .timeline, board: "Child", count: 1, since: since
+            id: "b", host: "forum.example", purpose: .timeline, name: .called("Child"), count: 1, since: since
         )
         #expect(board.purposeText(language: .english) == "Reading a timeline · Child")
         #expect(board.purposeText(language: .taiwanese) == "讀取時間軸 · Child")
@@ -485,7 +485,7 @@ private actor Witness: HTTPClient {
 
     func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
         let running = work.now.values
-            .map { "\($0.host) \($0.purpose.rawValue) \($0.board ?? "-")" }.sorted()
+            .map { "\($0.host) \($0.purpose.rawValue) \($0.name?.text(language: .english) ?? "-")" }.sorted()
         noted.append((url.absoluteString, running))
         return try await inner.data(from: url)
     }

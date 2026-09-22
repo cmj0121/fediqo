@@ -14,15 +14,16 @@ import os
 /// **Only the host.** An entry holds a host, a purpose from a fixed list, and a start. Never an
 /// address past its host, a body, a header or a token — the same line `NetLog` holds, for the
 /// same reason: what is on screen can be read over a shoulder or screenshotted into a report.
-/// Where the work reads one forum board, it also holds **that board's name** — the name the
-/// reader already sees for it in the picker and the tabs, handed in by the caller that knows
-/// which board it is reading. Never its number, and never anything read off the request.
+/// Where the work reads one timeline or one forum board, it also holds **its name** — the name
+/// the reader already sees for it: Home, Public, Trends, a list's title, a board's name in the
+/// picker and the tabs — handed in by the caller that knows what it is reading (#164, #170).
+/// Never a list's id or a board's number, and never anything read off the request.
 ///
 /// **Where it is fed.** At the one waist every request already goes through — an `HTTPClient` —
 /// by wrapping the client where what it is *for* is still known (`WatchedHTTP`). The waist knows
-/// the host; only the caller knows the purpose — and the board — so the caller builds the wrapper. A job that is
-/// not a request — a forum signing itself in again through its browser — registers itself with
-/// `watching(host:for:_:)`.
+/// the host; only the caller knows the purpose — and the name — so the caller builds the
+/// wrapper. A job that is not a request — a forum signing itself in again through its browser —
+/// registers itself with `watching(host:for:_:)`.
 ///
 /// **Begun and ended without waiting on the main actor.** A request's way out must not queue
 /// behind whatever the main actor is doing: a reload landing while the reader's own press holds
@@ -63,18 +64,39 @@ final class SourceWork {
         var gathers: Bool { self == .picture || self == .emoji }
     }
 
+    /// What one piece of work reads, by the name the reader knows it by. The built-ins are held
+    /// as themselves and worded when drawn, so a line reads in the shell's language of the
+    /// moment; a list's or a board's own name is the reader's, and is drawn as it is.
+    enum Name: Equatable, Hashable, Sendable {
+        case home
+        case `public`
+        case trends
+        /// A list's title or a board's name, as the reader sees it. Never an id or a number.
+        case called(String)
+
+        func text(language: DummyLanguage? = nil) -> String {
+            switch self {
+            case .home: L10n.t("rule.category.home", language: language)
+            case .public: L10n.t("rule.category.public", language: language)
+            case .trends: L10n.t("timeline.tab.trends", language: language)
+            case .called(let name): name
+            }
+        }
+    }
+
     /// One piece of work on the wire.
     struct Running: Equatable, Sendable {
         let host: String
         let purpose: Purpose
-        /// The board it reads, by the name the reader knows it by; nil where it reads no one board.
-        let board: String?
+        /// The timeline or board it reads, by the name the reader knows it by; nil where it reads
+        /// no one of them.
+        let name: Name?
         let since: Date
 
-        init(host: String, purpose: Purpose, board: String? = nil, since: Date) {
+        init(host: String, purpose: Purpose, name: Name? = nil, since: Date) {
             self.host = host
             self.purpose = purpose
-            self.board = board
+            self.name = name
             self.since = since
         }
     }
@@ -99,9 +121,9 @@ final class SourceWork {
 
     nonisolated init() {}
 
-    nonisolated func begin(host: String, for purpose: Purpose, board: String? = nil) -> Token {
+    nonisolated func begin(host: String, for purpose: Purpose, name: Name? = nil) -> Token {
         let entry = Running(
-            host: host.lowercased(), purpose: purpose, board: Self.named(board), since: Date()
+            host: host.lowercased(), purpose: purpose, name: Self.named(name), since: Date()
         )
         let (token, publish) = held.withLock { held -> (Token, Bool) in
             held.next += 1
@@ -127,9 +149,9 @@ final class SourceWork {
 
     /// `body`, registered while it runs and ended on every way out of it.
     func watching<T>(
-        host: String, for purpose: Purpose, board: String? = nil, _ body: () async throws -> T
+        host: String, for purpose: Purpose, name: Name? = nil, _ body: () async throws -> T
     ) async rethrows -> T {
-        let token = begin(host: host, for: purpose, board: board)
+        let token = begin(host: host, for: purpose, name: name)
         defer { end(token) }
         return try await body()
     }
@@ -139,12 +161,11 @@ final class SourceWork {
     /// page to find.
     var rows: [SourceWorkRow] { SourceWorkRow.rows(of: Array(running)) }
 
-    /// A board's name as a line can show it: trimmed, and nothing where nothing is left.
-    private nonisolated static func named(_ board: String?) -> String? {
-        guard let board = board?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !board.isEmpty
-        else { return nil }
-        return board
+    /// A name as a line can show it: a reader's own trimmed, and nothing where nothing is left.
+    private nonisolated static func named(_ name: Name?) -> Name? {
+        guard case .called(let called) = name else { return name }
+        let trimmed = called.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : .called(trimmed)
     }
 
     private nonisolated static func claim(_ held: inout Held) -> Bool {
@@ -173,8 +194,8 @@ struct SourceWorkRow: Identifiable, Equatable {
     let id: String
     let host: String
     let purpose: SourceWork.Purpose
-    /// The board it reads, by the name the reader knows it by. Never on a gathered line.
-    var board: String? = nil
+    /// The timeline or board it reads, by the name the reader knows it. Never on a gathered line.
+    var name: SourceWork.Name? = nil
     /// How many are running under this line: one, except where the purpose gathers.
     let count: Int
     /// When the oldest of them started.
@@ -186,7 +207,7 @@ struct SourceWorkRow: Identifiable, Equatable {
         for (id, work) in running {
             guard work.purpose.gathers else {
                 rows.append(SourceWorkRow(
-                    id: "\(id)", host: work.host, purpose: work.purpose, board: work.board, count: 1,
+                    id: "\(id)", host: work.host, purpose: work.purpose, name: work.name, count: 1,
                     since: work.since
                 ))
                 continue
@@ -214,18 +235,20 @@ struct SourceWorkRow: Identifiable, Equatable {
         )
     }
 
-    /// What the line says it is for: then the board it reads, where it reads one, or the count
-    /// where it gathers more than one. Drawn after the host, and read by VoiceOver in that order.
+    /// What the line says it is for: then the timeline or board it reads, where it names one, or
+    /// the count where it gathers more than one. Drawn after the host, and read by VoiceOver in that order.
     func purposeText(language: DummyLanguage? = nil) -> String {
         let title = L10n.t(purpose.titleKey, language: language)
-        guard purpose.gathers else { return board.map { title + " · " + $0 } ?? title }
+        guard purpose.gathers else {
+            return name.map { title + " · " + $0.text(language: language) } ?? title
+        }
         return title + " · " + L10n.count("work.count", count, language: language)
     }
 }
 
 /// An `HTTPClient` — and a sender — that puts each request on `SourceWork` while it runs: its
-/// host, and the purpose — and the board, where it reads one — that the caller that built it
-/// knows. Nothing else of the request is read.
+/// host, and the purpose — and the name, where it reads one timeline or board — that the caller
+/// that built it knows. Nothing else of the request is read.
 ///
 /// The entry is ended on the way out of every path: an answer, a failure, and a cancellation,
 /// which throws like any failure does.
@@ -233,26 +256,29 @@ struct WatchedHTTP: HTTPClient, HTTPSender {
     private let get: (@Sendable (URL) async throws -> (Data, HTTPURLResponse))?
     private let sender: (any HTTPSender)?
     let purpose: SourceWork.Purpose
-    /// The board its caller is reading through it, by the name the reader knows; nil for none.
-    let board: String?
+    /// What its caller is reading through it, by the name the reader knows; nil for none.
+    let name: SourceWork.Name?
     let work: SourceWork
 
     init(
-        _ inner: any HTTPClient, for purpose: SourceWork.Purpose, board: String? = nil,
+        _ inner: any HTTPClient, for purpose: SourceWork.Purpose, name: SourceWork.Name? = nil,
         in work: SourceWork
     ) {
         get = { try await inner.data(from: $0) }
         sender = inner as? any HTTPSender
         self.purpose = purpose
-        self.board = board
+        self.name = name
         self.work = work
     }
 
-    init(sender inner: any HTTPSender, for purpose: SourceWork.Purpose, in work: SourceWork) {
+    init(
+        sender inner: any HTTPSender, for purpose: SourceWork.Purpose, name: SourceWork.Name? = nil,
+        in work: SourceWork
+    ) {
         get = nil
         sender = inner
         self.purpose = purpose
-        board = nil
+        self.name = name
         self.work = work
     }
 
@@ -270,7 +296,7 @@ struct WatchedHTTP: HTTPClient, HTTPSender {
         _ url: URL, _ body: @Sendable () async throws -> (Data, HTTPURLResponse)
     ) async throws -> (Data, HTTPURLResponse) {
         // Synchronous both ways, and so never behind the main actor: see `SourceWork`.
-        let token = work.begin(host: url.host() ?? "", for: purpose, board: board)
+        let token = work.begin(host: url.host() ?? "", for: purpose, name: name)
         defer { work.end(token) }
         return try await body()
     }

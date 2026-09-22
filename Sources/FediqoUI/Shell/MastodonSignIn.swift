@@ -242,12 +242,14 @@ public final class MastodonSessions {
 
     /// The door a signed-in request goes through, or nothing where no token can be read.
     /// `within` puts a deadline on each request — a reload's (#29). `purpose` is what each request
-    /// through it is shown as while it runs (#164): only the caller knows what it is for.
+    /// through it is shown as while it runs (#164): only the caller knows what it is for — and,
+    /// where it reads one timeline, which, by the name the reader knows it by (#170).
     func authorized(
-        host: String, within limit: Duration? = nil, for purpose: SourceWork.Purpose
+        host: String, within limit: Duration? = nil, for purpose: SourceWork.Purpose,
+        name: SourceWork.Name? = nil
     ) -> MastodonAuthorized? {
         guard let token = (try? tokens.token(host: host)) ?? nil else { return nil }
-        let watched = WatchedHTTP(sender: sender, for: purpose, in: work)
+        let watched = WatchedHTTP(sender: sender, for: purpose, name: name, in: work)
         let wire: any HTTPSender = limit.map { Deadline(watched as any HTTPSender, within: $0) } ?? watched
         return MastodonAuthorized(token: token, sender: wire, store: tokens)
     }

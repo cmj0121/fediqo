@@ -32,6 +32,11 @@ final class ShellReload {
     private(set) var unspoken: Unspoken?
     /// The last reload was stopped by the reader before it finished.
     private(set) var stopped = false
+    /// What the running reload's own pieces of work are listed as on `SourceWork` (#170): a
+    /// timeline's reads, or an open thread's. The toast names one of those and counts the rest,
+    /// and nothing else that happens to be on the wire meanwhile — a picture, an emoji, a
+    /// server asked what it is.
+    private(set) var reading: Set<SourceWork.Purpose> = []
 
     /// How long one request of a reload may take before it counts as failed.
     @ObservationIgnored var deadline: Duration = .seconds(30)
@@ -98,6 +103,7 @@ final class ShellReload {
     /// back none of the others. Nothing while the timeline editor is up: it owns the keys.
     func timeline(_ query: TimelineQuery, in session: ShellSession) async {
         guard !running, session.editing == nil else { return }
+        reading = [.timeline]
         await run {
             let sources = session.sources
             let asks = CompiledTimeline(query.definition(among: session.written), sources: sources)
@@ -154,6 +160,7 @@ final class ShellReload {
     /// edited post shows its new words and a post this device never held does not arrive in All.
     func thread(_ item: DummyItem, in session: ShellSession) async {
         guard !running, session.editing == nil else { return }
+        reading = [.conversation, .forumPost, .forumReplies]
         await run {
             if let ref = ForumThreadRef(item) {
                 let read = await session.posts.reload(ref, within: self.deadline)
@@ -351,9 +358,14 @@ final class ShellReload {
         let stamp = Source(host: host, kind: source.kind)
         switch source.kind {
         case .mastodon:
-            let client = MastodonClient(http: timed(session.http, for: .timeline, in: session), host: host)
-            let publicRead = { try await client.publicTimeline(source: stamp) }
-            let trendsRead = { try await client.trending(source: stamp) }
+            // Each read is shown under the name the reader knows it by while it runs (#170).
+            let client = { (name: SourceWork.Name) in
+                MastodonClient(
+                    http: self.timed(session.http, for: .timeline, name: name, in: session), host: host
+                )
+            }
+            let publicRead = { try await client(.public).publicTimeline(source: stamp) }
+            let trendsRead = { try await client(.trends).trending(source: stamp) }
             var read: Bool
             if let categories {
                 read = true
@@ -371,7 +383,10 @@ final class ShellReload {
             let http = transport(host, in: session)
             let client = { (board: BoardSubscription?) in
                 DiscuzClient(
-                    http: self.timed(http, for: .timeline, board: board?.name, in: session), host: host
+                    http: self.timed(
+                        http, for: .timeline, name: board.map { .called($0.name) }, in: session
+                    ),
+                    host: host
                 )
             }
             let read: Bool
@@ -412,10 +427,22 @@ final class ShellReload {
                 return nil
             })
         }
+        // The door reads the lists' names again, where every list is read; each timeline is read
+        // through a door of its own, shown under the name the reader knows it by (#170).
         guard home || lists?.isEmpty == false,
-              let door = session.mastodon.authorized(host: source.host, within: deadline, for: .timeline)
+              let door = session.mastodon.authorized(host: source.host, within: deadline, for: .lists)
         else { return true }
-        let account = MastodonAccount(door: door, store: session.store)
+        let named = Self.names(of: source)
+        let plain = session.mastodon.authorized(host: source.host, within: deadline, for: .timeline) ?? door
+        var doors: [FediqoCore.Category: MastodonAuthorized] = [:]
+        for category in [.home] + source.lists.map({ FediqoCore.Category.list(id: $0.id) }) {
+            doors[category] = session.mastodon.authorized(
+                host: source.host, within: deadline, for: .timeline, name: named(category)
+            )
+        }
+        let account = MastodonAccount(door: door, store: session.store) { [doors] category in
+            doors[category] ?? plain
+        }
         do {
             return try await asReader(source.host) {
                 if let lists { return try await account.read(home: home, lists: lists) }
@@ -464,15 +491,31 @@ final class ShellReload {
     }
 
     /// Bounded by the reload's deadline, and on `SourceWork` for what it is (#164) while it runs.
-    /// `board` is the board it reads, by the name the reader knows, where it reads one.
+    /// `name` is the timeline or board it reads, by the name the reader knows, where it reads one.
     private func timed(
-        _ http: any HTTPClient, for purpose: SourceWork.Purpose, board: String? = nil,
+        _ http: any HTTPClient, for purpose: SourceWork.Purpose, name: SourceWork.Name? = nil,
         in session: ShellSession
     ) -> any HTTPClient {
         Deadline(
-            WatchedHTTP(http, for: purpose, board: board, in: session.work) as any HTTPClient,
+            WatchedHTTP(http, for: purpose, name: name, in: session.work) as any HTTPClient,
             within: deadline
         )
+    }
+
+    /// The name a reader knows each of a Mastodon source's timelines by, as it stands when the
+    /// reload starts: a list by its own title, and never by its id — a list this source no
+    /// longer names is named nothing.
+    private static func names(of source: Source) -> (FediqoCore.Category) -> SourceWork.Name? {
+        let titles = Dictionary(source.lists.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
+        return { category in
+            switch category {
+            case .home: .home
+            case .public: .public
+            case .trends: .trends
+            case .list(let id): titles[id].map { .called($0) }
+            case .board: nil
+            }
+        }
     }
 
     /// A forum signed in to is read through its own browser, as a join reads it.

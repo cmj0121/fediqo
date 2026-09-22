@@ -48,6 +48,36 @@ struct TimelineToast: Equatable, Sendable {
         return nil
     }
 
+    /// What a running reload's toast says (#170): one piece of it that is on the wire now — the
+    /// source's host and the timeline or board it reads, by the name the reader knows it by —
+    /// and how many more are, as "+2". Nil where none of `reading` is running yet, and the
+    /// toast says its plain word.
+    ///
+    /// **The one named is the one running longest**, so the line holds still while it runs and
+    /// moves on only when it ends. Only the reload's own purposes count: a picture or an emoji
+    /// on the wire meanwhile is not the reload. Built from `SourceWork`'s lines alone, which
+    /// hold a host, a purpose and a name — never an address, a list's id or a board's number.
+    static func reloading(
+        _ running: [Int: SourceWork.Running],
+        reading: Set<SourceWork.Purpose>,
+        language: DummyLanguage? = nil
+    ) -> String? {
+        let pieces = running
+            .filter { reading.contains($0.value.purpose) }
+            .sorted { ($0.value.since, $0.key) < ($1.value.since, $1.key) }
+        guard let first = pieces.first?.value else { return nil }
+        let one = if let name = first.name {
+            String(
+                format: L10n.t("timeline.reload.piece", language: language),
+                first.host, name.text(language: language)
+            )
+        } else {
+            String(format: L10n.t("timeline.reload.host", language: language), first.host)
+        }
+        guard pieces.count > 1 else { return one }
+        return String(format: L10n.t("timeline.reload.more", language: language), one, pieces.count - 1)
+    }
+
     /// The mark beside a wait: a spinner while motion is allowed, an hourglass at rest
     /// when it is not. A wait is not a launch, so this is not the mascot.
     static func waitMark(reduceMotion: Bool) -> WaitMark {
@@ -69,8 +99,16 @@ struct TimelineToast: Equatable, Sendable {
 }
 
 /// The capsule itself. VoiceOver hears the sentence; the wait mark is decoration.
+///
+/// **A wait reads `SourceWork` here, and only here** (#170): what is on the wire changes with
+/// every picture that starts and ends, and the capsule is the one view that redraws for it —
+/// never the timeline's rows under it. Anything but a wait reads nothing of it.
 struct TimelineToastBanner: View {
     let toast: TimelineToast
+    /// Where a reload's pieces are listed while they run, and which of its purposes are the
+    /// reload's own. Nothing, and the wait says its plain word.
+    var work: SourceWork? = nil
+    var reading: Set<SourceWork.Purpose> = []
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -80,7 +118,7 @@ struct TimelineToastBanner: View {
             if toast.kind == .loading {
                 waitMark
             }
-            Text(toast.text)
+            Text(text)
                 .shellFont(.meta)
         }
         .padding(.horizontal, ShellSpace.step)
@@ -88,8 +126,14 @@ struct TimelineToastBanner: View {
         .background(ShellChrome.well(colorScheme), in: Capsule())
         .foregroundStyle(ShellChrome.ink(colorScheme))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text(toast.text))
+        .accessibilityLabel(Text(text))
         .accessibilityAddTraits(toast.kind == .loading ? .updatesFrequently : [])
+    }
+
+    /// The sentence: a wait's names what is running, where the reload's pieces are listed.
+    private var text: String {
+        guard toast.kind == .loading, let work else { return toast.text }
+        return TimelineToast.reloading(work.running, reading: reading) ?? toast.text
     }
 
     @ViewBuilder
