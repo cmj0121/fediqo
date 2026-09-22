@@ -324,11 +324,14 @@ struct ViewerTests {
     func tabUnderTheGuideRotatesTheGuide() {
         let shell = Shell(items: Self.list, selected: Self.a)
         #expect(shell.press(.showShortcuts))
-        #expect(shell.shortcutTab == .timeline)
+        #expect(shell.shortcutTab == .move)
         #expect(shell.press(.nextTab))
-        #expect(shell.shortcutTab == .app)
+        #expect(shell.shortcutTab == .read)
         #expect(shell.press(.nextTab))
-        #expect(shell.shortcutTab == .timeline)
+        #expect(shell.shortcutTab == .act)
+        #expect(shell.press(.previousTab))
+        #expect(shell.shortcutTab == .read)
+        #expect(shell.press(.previousTab))
         #expect(shell.press(.previousTab))
         #expect(shell.shortcutTab == .app)
         #expect(!shell.threadOpen)
@@ -649,7 +652,7 @@ struct ViewerTests {
         var personOpen: DummyPerson? { walk.openedPerson }
         var shortcutsOpen = false
         var searchOpen = false
-        var shortcutTab = DummyShortcutGroup.timeline
+        var shortcutTab = DummyShortcutGroup.move
         var decks = ShellDecks()
         var playing = ShellPlaying()
 

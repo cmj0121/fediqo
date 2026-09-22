@@ -50,7 +50,7 @@ struct PersonKeyTests {
     @Test("The guide names it on the timeline's tab, as the face's press")
     func theGuideNamesIt() throws {
         let line = try #require(DummyShortcut.all.first { $0.commands == [.openAuthor] })
-        #expect(line.group == .timeline)
+        #expect(line.group == .read)
         #expect(line.keys == ["p"])
         #expect(line.name == "person")
         #expect(line.touch == .press)

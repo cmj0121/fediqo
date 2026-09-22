@@ -70,8 +70,10 @@
 "shortcut.title" = "Keys";
 "shortcut.note" = "These work while you are not writing.";
 "shortcut.close" = "Close";
-"shortcut.group.timeline" = "Timeline";
-"shortcut.group.app" = "Every tab";
+"shortcut.group.move" = "Move";
+"shortcut.group.read" = "Read";
+"shortcut.group.act" = "Act";
+"shortcut.group.app" = "App";
 "shortcut.landing" = "Reload from the launch";
 "shortcut.tabs" = "Rotate this page's tabs";
 "shortcut.pages" = "Rotate the places";
