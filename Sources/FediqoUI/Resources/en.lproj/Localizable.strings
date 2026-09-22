@@ -74,6 +74,7 @@
 "shortcut.list" = "This list";
 "shortcut.back" = "Back to the list";
 "shortcut.boost" = "Boost this post to its source, or take the boost back";
+"shortcut.favourite" = "Favourite this post on its source, or take the favourite back";
 "shortcut.reload" = "Reload this timeline, or the open thread";
 "shortcut.dismiss" = "Close what is in front, or unfocus";
 "shortcut.search" = "Search the posts this device holds";
@@ -224,6 +225,7 @@
 "item.act.no.signIn" = "sign in to act here";
 "item.act.no.turnedAway" = "this source turned a write away";
 "item.act.no.unnameable" = "this post cannot be named on its server";
+"item.act.unfavourite" = "Take the favourite back";
 "item.act.reply" = "Reply";
 "item.act.quote" = "Quote";
 "item.act.favourite" = "Favourite";
@@ -232,8 +234,6 @@
 "item.act.more" = "More";
 "item.toast.reply" = "Reply stays on this device.";
 "item.toast.quote" = "A quote opens the composer. Not this session.";
-"item.toast.favourite.on" = "Favourited, on this device.";
-"item.toast.favourite.off" = "Favourite cleared.";
 "item.toast.bookmark.on" = "Bookmarked, dummy.";
 "item.toast.bookmark.off" = "Bookmark cleared.";
 "item.toast.kept.on" = "Kept on this device.";

@@ -3,7 +3,7 @@ import Testing
 @testable import FediqoCore
 
 /// The acts a reader performs on a post someone else wrote, sent to the source it was read
-/// through (#106).
+/// through (#106, #107).
 ///
 /// What this suite holds is the half of "survives a relaunch because the source says so" that
 /// lives in Core: the mark's state is a field the server sends, carried on the note, laid over
@@ -16,8 +16,9 @@ struct MastodonActTests {
 
     /// One status as the server sends it. `reblogged` is left out entirely where it is nil,
     /// because that is what an unsigned read looks like on the wire.
-    static func status(id: String = "9", reblogged: Bool? = nil) -> String {
-        let flag = reblogged.map { #","reblogged":\#($0)"# } ?? ""
+    static func status(id: String = "9", reblogged: Bool? = nil, favourited: Bool? = nil) -> String {
+        let flag = (reblogged.map { #","reblogged":\#($0)"# } ?? "")
+            + (favourited.map { #","favourited":\#($0)"# } ?? "")
         return """
         {"id":"\(id)","uri":"https://social.example/users/ada/statuses/\(id)",
          "created_at":"2024-06-01T00:00:00.000Z","content":"<p>hello</p>",
@@ -164,11 +165,53 @@ struct MastodonActTests {
         #expect(await store.all().isEmpty)
     }
 
+    // MARK: - Favouriting (#107)
+
+    @Test("Whether a post is favourited is the source's word, kept apart from a boost")
+    func favouritedIsTheSourcesWord() throws {
+        #expect(try held(Self.status(favourited: true)).favourited == true)
+        #expect(try held(Self.status(favourited: false)).favourited == false)
+        #expect(try held(Self.status()).favourited == nil)
+        let both = try held(Self.status(reblogged: false, favourited: true))
+        #expect(both.boosted == false && both.favourited == true)
+        let wrapped = try held(Self.wrapper(around: Self.status(favourited: true), reblogged: true))
+        #expect(wrapped.favourited == true)
+        #expect(try held(Self.status()).refreshed(over: both).favourited == true)
+    }
+
+    @Test("A favourite and taking it back go to the post's own id, and the row takes the answer",
+          arguments: [(true, "favourite"), (false, "unfavourite")])
+    func aFavouriteLands(on: Bool, path: String) async throws {
+        let before = try held(Self.status(favourited: !on))
+        let (write, store, server, _) = try await actor(holding: before, [
+            "/api/v1/statuses/9/\(path)": .json(Self.status(favourited: on)),
+        ])
+        let after = try await write.favourite(before, on: on)
+        #expect(after.favourited == on)
+        #expect(after.key == before.key)
+        #expect(await store.all().map(\.favourited) == [on])
+        #expect(await server.paths == ["/api/v1/statuses/9/\(path)"])
+    }
+
+    @Test("A refused favourite leaves the post exactly as it was")
+    func aRefusedFavouriteChangesNothing() async throws {
+        let before = try held(Self.status(favourited: false))
+        let (write, store, _, _) = try await actor(holding: before, [
+            "/api/v1/statuses/9/favourite": .json("{}", status: 403),
+        ])
+        await #expect(throws: MastodonAuthError.http(403)) {
+            _ = try await write.favourite(before, on: true)
+        }
+        #expect(await store.all() == [before])
+    }
+
     // MARK: - What a post offers
 
     @Test("Only a post on a source that writes, and that can be named there, offers the acts")
     func whatAPostOffers() {
         #expect(PostActs.on(.writes, nameable: true).offers(.boost))
+        #expect(PostActs.on(.writes, nameable: true).offers(.favourite))
+        #expect(!PostActs.on(.reads, nameable: true).offers(.favourite))
         #expect(PostActs.on(.writes, nameable: true).refused == nil)
         #expect(PostActs.on(.writes, nameable: false) == PostActs(offered: [], refused: .unnameable))
         #expect(PostActs.on(.reads, nameable: true) == PostActs(offered: [], refused: .notSignedIn))

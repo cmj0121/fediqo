@@ -82,6 +82,14 @@ public struct MastodonWrite: Sendable {
         try await act(on: note, path: on ? "reblog" : "unreblog")
     }
 
+    /// Favourites `note` on this source, or takes the favourite back (#107) — `boost`'s shape, one
+    /// function for both directions, and a different meaning: a note to the author and to oneself
+    /// rather than a carrying-onward.
+    @discardableResult
+    public func favourite(_ note: Note, on: Bool) async throws -> Note {
+        try await act(on: note, path: on ? "favourite" : "unfavourite")
+    }
+
     /// One act on one status, and what the server says the post looks like afterwards.
     ///
     /// **The answer goes through `refresh` and never `ingest`.** The reader is acting on a post

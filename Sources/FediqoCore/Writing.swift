@@ -75,6 +75,8 @@ public enum SourceWriting: Sendable, Equatable, CaseIterable {
 public enum PostAct: Sendable, Hashable, CaseIterable {
     /// Carried onward to whoever follows the reader on that source (#106).
     case boost
+    /// A note to the author and to oneself, kept on that source (#107).
+    case favourite
 }
 
 /// Why a post offers none of the acts. Nothing is a post that offers them.

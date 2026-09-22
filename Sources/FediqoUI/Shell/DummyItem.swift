@@ -68,14 +68,17 @@ public struct DummyCounts: Hashable, Sendable {
     }
 }
 
-/// What this device has done to a dummy item. Remote marks are still local in this mock.
+/// What this device has done to a dummy item, and kept to itself.
+///
+/// **The favourite left this type with #107.** It was a list kept in Fediqo that nobody else could
+/// see and no other app agreed with; it is now `DummyItem.favourited`, which is what the source
+/// says. What is left here is what really is this device's own: a bookmark, which is a different
+/// thing on a source that has both and is not #107's, and what the reader chose to keep.
 public struct DummyMarks: Hashable, Sendable {
-    public var favourited: Bool
     public var bookmarked: Bool
     public var kept: Bool
 
-    public init(favourited: Bool = false, bookmarked: Bool = false, kept: Bool = false) {
-        self.favourited = favourited
+    public init(bookmarked: Bool = false, kept: Bool = false) {
         self.bookmarked = bookmarked
         self.kept = kept
     }
@@ -118,6 +121,9 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// than derived, so the mark under the post and the row in the store cannot come to disagree.
     /// Nothing where the source never said, which is what makes the mark absent rather than off.
     public var boosted: Bool?
+    /// Whether the reader has favourited it, as the source said — `Note.favourited`, in `boosted`'s
+    /// shape and for its reasons (#107).
+    public var favourited: Bool?
     public let audience: DummyAudience?
     /// The author's picture, where the source sent an address for one.
     public let avatarURL: URL?
@@ -316,6 +322,7 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         answering = Self.answering(note.reply)
         boostedBy = note.boostedBy
         boosted = note.boosted
+        favourited = note.favourited
         statusID = note.statusID
         audience = note.audience.map(DummyAudience.init)
         avatarURL = note.avatarURL

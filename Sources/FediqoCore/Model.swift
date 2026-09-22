@@ -374,6 +374,13 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// relaunch honestly: the row is stored with what the server last said, and every later fetch
     /// of the same post overwrites it with what the server says then.
     public let boosted: Bool?
+    /// Whether the reader this copy was fetched as has favourited it, as the source said (#107).
+    ///
+    /// `boosted`'s shape, for `boosted`'s reasons: nothing is a source that never said, which is
+    /// every unsigned read, and it is the server's answer that is kept rather than a press. A
+    /// favourite is a note to the author and to oneself, and a list of them this device kept on
+    /// its own would be a list no other app agrees with.
+    public let favourited: Bool?
     public let audience: Audience?
     public let avatarURL: URL?
     /// What came attached, in the order the server listed it. Empty is a post that brought
@@ -410,6 +417,7 @@ public struct Note: Identifiable, Hashable, Sendable {
         boostedBy: String? = nil,
         boosterHandle: String? = nil,
         boosted: Bool? = nil,
+        favourited: Bool? = nil,
         audience: Audience? = nil,
         avatarURL: URL? = nil,
         attachments: [Attachment] = [],
@@ -433,6 +441,7 @@ public struct Note: Identifiable, Hashable, Sendable {
         self.boostedBy = boostedBy
         self.boosterHandle = boosterHandle
         self.boosted = boosted
+        self.favourited = favourited
         self.audience = audience
         self.avatarURL = avatarURL
         self.attachments = attachments
@@ -448,7 +457,8 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// now — text, cover, attachments, counts — with the categories the held copy arrived through
     /// kept (and grown), its booster kept, and its board where this read names none.
     ///
-    /// **`boosted` falls back to what was held, rather than being overwritten with nothing.** A
+    /// **`boosted` and `favourited` fall back to what was held, rather than being overwritten with
+    /// nothing.** A
     /// re-read made signed out — the public timeline, a thread asked of a host with no token —
     /// carries no such field, and letting that silence replace a yes the same server gave an hour
     /// ago would draw the post as unboosted because nobody asked, which is the one thing #106
@@ -461,6 +471,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             categories: held.categories.union(categories), reply: reply,
             boostedBy: held.boostedBy, boosterHandle: held.boosterHandle,
             boosted: boosted ?? held.boosted,
+            favourited: favourited ?? held.favourited,
             audience: audience, avatarURL: avatarURL, attachments: attachments,
             sensitive: sensitive, spoiler: spoiler, emojis: emojis, url: url, counts: counts,
             statusID: statusID ?? held.statusID

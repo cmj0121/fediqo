@@ -26,6 +26,8 @@ struct ItemActing {
     var standings: [PostAct: ShellActStanding] = [:]
     /// Boosting the post to its source, or taking the boost back (#106).
     var boost: (() -> Void)?
+    /// Favouriting the post on its source, or taking the favourite back (#107).
+    var favourite: (() -> Void)?
 }
 
 /// The vocabulary of the acts a reader performs on a post.
@@ -35,7 +37,8 @@ enum ItemActs {
     /// **The act's own glyph is replaced while the act is not settled, and that is the whole of
     /// "the mark shows the act is on its way".** A mark that kept its shape and changed only its
     /// colour would say nothing to a reader who cannot tell the two colours apart, and a mark that
-    /// kept its shape entirely would say nothing to anybody. Three states, three shapes.
+    /// kept its shape entirely would say nothing to anybody. Three states, three shapes — four
+    /// for the favourite, whose star fills when it is done.
     ///
     /// `done` is what the source last said, never what was pressed: a boost the reader made in
     /// another app reads as done here the moment this device has fetched the post.
@@ -52,6 +55,9 @@ enum ItemActs {
         // it is done — a difference a reader would read as meaning something.
         switch act {
         case .boost: return "arrow.2.squarepath"
+        // The star is the one act that does have a filled twin, and it has always been drawn
+        // filled when done — kept, so the favourite reads as it did before it went to the source.
+        case .favourite: return done ? "star.fill" : "star"
         }
     }
 
@@ -62,6 +68,8 @@ enum ItemActs {
     static func name(_ act: PostAct, done: Bool, language: DummyLanguage? = nil) -> String {
         switch act {
         case .boost: return L10n.t(done ? "item.act.unboost" : "item.act.boost", language: language)
+        case .favourite:
+            return L10n.t(done ? "item.act.unfavourite" : "item.act.favourite", language: language)
         }
     }
 

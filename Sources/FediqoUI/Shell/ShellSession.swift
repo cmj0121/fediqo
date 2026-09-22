@@ -500,6 +500,15 @@ final class ShellSession {
         }
     }
 
+    /// Favourites the post, or takes the favourite back — `boost`'s press with a different meaning
+    /// (#107). Which way it goes is read off what the source last said.
+    func favourite(_ item: DummyItem) async {
+        await perform(.favourite, on: item) { door, note in
+            try await MastodonWrite(door: door, store: self.store)
+                .favourite(note, on: note.favourited != true)
+        }
+    }
+
     /// One act on one post, with everything every act shares: the guard against a second press
     /// while the first is out, the sign-in, the store, and the three sentences #53 sets.
     ///

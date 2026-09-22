@@ -365,6 +365,9 @@ private struct NoteFacts: Codable {
     /// every later read of the post overwrites it with what the server says then, and nothing
     /// here records that a button was pressed.
     var boosted: Bool?
+    /// `Note.favourited` (#107), for `boosted`'s reasons and in its shape: additive, optional, no
+    /// migration id, and the source's answer rather than a press.
+    var favourited: Bool?
 }
 
 private struct ReplyRow: Codable {
@@ -452,7 +455,8 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             emojis: note.emojis.map(EmojiRow.init),
             url: note.url,
             statusID: note.statusID,
-            boosted: note.boosted
+            boosted: note.boosted,
+            favourited: note.favourited
         )
     }
 
@@ -478,6 +482,7 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             boostedBy: facts.boostedBy,
             boosterHandle: facts.boosterHandle,
             boosted: facts.boosted,
+            favourited: facts.favourited,
             avatarURL: facts.avatarURL,
             attachments: facts.attachments.map(\.attachment),
             sensitive: facts.sensitive,

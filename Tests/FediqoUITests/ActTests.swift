@@ -44,14 +44,14 @@ private actor ActServer: HTTPSender {
     }
 }
 
-/// A post is boosted to the source it was read through (#106).
+/// A post is boosted to the source it was read through (#106), and favourited there (#107).
 ///
 /// What a test can reach: which posts offer the mark and what the row says where one does not;
 /// the glyph and the spoken sentence for each state in all three languages; the key; the press
 /// going on its way, failing, being tried again and landing; and that nothing about the press is
 /// remembered once the source has answered. What it cannot: that the mark is drawn where the
 /// rule says, on a Mac and a phone, in light and dark — that lives in a view body.
-@Suite("Boosting a post")
+@Suite("Boosting and favouriting a post")
 @MainActor
 struct ActTests {
     init() {
@@ -62,8 +62,9 @@ struct ActTests {
     private let forum = "bbs.example.org"
     private let writing = MastodonOAuth.scopes(writing: true)
 
-    static func status(reblogged: Bool?) -> String {
-        let flag = reblogged.map { #","reblogged":\#($0)"# } ?? ""
+    static func status(reblogged: Bool? = nil, favourited: Bool? = nil) -> String {
+        let flag = (reblogged.map { #","reblogged":\#($0)"# } ?? "")
+            + (favourited.map { #","favourited":\#($0)"# } ?? "")
         return """
         {"id":"9","uri":"https://social.example/users/ada/statuses/9",
          "created_at":"2024-06-01T00:00:00.000Z","content":"<p>hello</p>",
@@ -72,13 +73,15 @@ struct ActTests {
         """
     }
 
-    private func note(boosted: Bool?, statusID: String? = "9", host: String? = nil) -> Note {
+    private func note(
+        boosted: Bool?, favourited: Bool? = nil, statusID: String? = "9", host: String? = nil
+    ) -> Note {
         Note(
             id: "https://social.example/users/ada/statuses/9",
             source: Source(host: host ?? self.host, kind: .mastodon),
             author: "Ada", handle: "@ada@social.example", body: "hello",
             postedAt: Date(timeIntervalSince1970: 1_700_000_000), categories: [.home],
-            boosted: boosted, statusID: statusID
+            boosted: boosted, favourited: favourited, statusID: statusID
         )
     }
 
@@ -293,6 +296,75 @@ struct ActTests {
         acts.forget(host: host)
         #expect(acts.standing(of: here, .boost) == nil)
         #expect(acts.standing(of: there, .boost) == .failed)
+    }
+
+    // MARK: - Favouriting (#107)
+
+    @Test("The star is offered exactly where the boost is, and says why exactly where it does")
+    func theStarIsOfferedLikeTheBoost() async throws {
+        for scopes in [writing, MastodonOAuth.reading, nil] {
+            let (session, _) = try await shell(scopes: scopes, holding: note(boosted: false, favourited: false))
+            let acts = session.acts(on: try row(session))
+            #expect(acts.offers(.favourite) == acts.offers(.boost))
+        }
+    }
+
+    @Test("The star fills when the source says it is done, and changes shape on its way")
+    func theStar() {
+        #expect(ItemActs.symbol(.favourite, done: false, standing: nil) == "star")
+        #expect(ItemActs.symbol(.favourite, done: true, standing: nil) == "star.fill")
+        #expect(ItemActs.symbol(.favourite, done: true, standing: .onItsWay) != "star.fill")
+        #expect(ItemActs.symbol(.favourite, done: false, standing: .failed) != "star")
+        #expect(ItemActs.spoken(.favourite, done: false, standing: nil) == "Favourite")
+        #expect(ItemActs.spoken(.favourite, done: true, standing: nil) == "Take the favourite back")
+        #expect(ItemActs.spoken(.favourite, done: false, standing: .failed)
+            == "Favourite did not arrive. Press to try again.")
+        for done in [false, true] {
+            let said = ItemActs.spoken(.favourite, done: done, standing: .onItsWay, language: .taiwanese)
+            #expect(!said.contains("item.act."), "untranslated: \(said)")
+        }
+    }
+
+    @Test("f favourites, and is the draft's while composing")
+    func theFavouriteKey() {
+        #expect(DummyCommand.from("f") == .favourite)
+        #expect(DummyCommand.from("f", typing: true) == nil)
+    }
+
+    @Test("A favourite lands as the source's answer and leaves the boost alone")
+    func aFavouriteLands() async throws {
+        let (session, server) = try await shell(
+            scopes: writing, holding: note(boosted: false, favourited: false),
+            routes: ["/api/v1/statuses/9/favourite": .json(Self.status(reblogged: false, favourited: true))]
+        )
+        await session.favourite(try row(session))
+        #expect(await server.paths == ["/api/v1/statuses/9/favourite"])
+        #expect(session.notes.first?.favourited == true)
+        #expect(session.notes.first?.boosted == false)
+        #expect(session.acts.standings.isEmpty, "nothing about the press is kept")
+    }
+
+    @Test("A failed favourite leaves the post as it was and the same press tries again")
+    func aFailedFavourite() async throws {
+        let (session, server) = try await shell(
+            scopes: writing, holding: note(boosted: false, favourited: true),
+            routes: ["/api/v1/statuses/9/unfavourite": .fail]
+        )
+        let item = try row(session)
+        await session.favourite(item)
+        #expect(session.acts.standing(of: item.id, .favourite) == .failed)
+        #expect(session.acts.standing(of: item.id, .boost) == nil, "one act's failure is not another's")
+        #expect(session.notes.first?.favourited == true)
+        await session.favourite(item)
+        #expect(await server.paths == ["/api/v1/statuses/9/unfavourite", "/api/v1/statuses/9/unfavourite"])
+    }
+
+    @Test("A favourite held by another app reads as done here; this device keeps no list of its own")
+    func noLocalFavourites() async throws {
+        let (session, _) = try await shell(scopes: writing, holding: note(boosted: false, favourited: true))
+        #expect(try row(session).favourited == true)
+        #expect(DummyMarks() == DummyMarks(bookmarked: false, kept: false),
+                "the device-local marks no longer carry a favourite")
     }
 
     // MARK: - One post held from two sources (#114)
