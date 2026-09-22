@@ -171,4 +171,90 @@ struct WithdrawTests {
         await session.withdraw(mine)
         #expect(await server.paths.filter { $0 == "/api/v1/statuses/1" }.count == 2)
     }
+
+    // MARK: - One post held from two sources (#114)
+
+    @Test("Taking back a row that stands for two copies asks its own source once, and both copies go")
+    func aMergedRowGoesWhole() async throws {
+        let tokens = MemoryMastodonTokens()
+        for signed in ["a.example", "b.example"] {
+            try tokens.save(MastodonToken(
+                host: signed, accessToken: "tok-\(signed)", clientID: "cid", clientSecret: "csecret",
+                scopes: writing
+            ))
+        }
+        let server = ActServer([
+            "/api/v1/accounts/verify_credentials": .json(#"{"acct":"me@a.example"}"#),
+            "/api/v1/statuses/111": .json("{}"),
+            "/api/v1/statuses/222": .json("{}"),
+        ])
+        let store = ItemStore()
+        func copy(on host: String, _ statusID: String) -> Note {
+            Note(
+                id: "https://a.example/users/me/statuses/111",
+                source: Source(host: host, kind: .mastodon),
+                author: "Me", handle: "@me@a.example", body: "mine",
+                postedAt: Date(timeIntervalSince1970: 1_700_000_000), categories: [.home],
+                statusID: statusID
+            )
+        }
+        for host in ["a.example", "b.example"] { await store.add(Source(host: host, kind: .mastodon)) }
+        await store.ingest([copy(on: "a.example", "111"), copy(on: "b.example", "222")])
+        let session = ShellSession(
+            http: FixtureHTTP(), store: store,
+            mastodon: MastodonSessions(tokens: tokens, sender: server)
+        )
+        session.mastodon.refresh()
+        await session.mastodon.verifyAll()
+        await session.reloadFromStore()
+        let row = try #require(DummyItem.merged(session.notes).first)
+        #expect(row.otherCopies.count == 1)
+        #expect(session.acts(on: row).offers(.withdraw))
+
+        await session.withdraw(row)
+        let deletes = await server.requests.filter { $0.httpMethod == "DELETE" }
+        #expect(deletes.count == 1, "one source is asked")
+        #expect(deletes.first?.url?.host == row.source.host)
+        #expect(deletes.first?.url?.path == "/api/v1/statuses/\(row.statusID ?? "")")
+        #expect(session.notes.isEmpty, "the row does not come back drawn as the other copy")
+        #expect(await session.store.all().isEmpty)
+    }
+
+    @Test("A failed take-back on a row of two copies leaves both where they are")
+    func aMergedRowFailureKeepsBoth() async throws {
+        let tokens = MemoryMastodonTokens()
+        for signed in ["a.example", "b.example"] {
+            try tokens.save(MastodonToken(
+                host: signed, accessToken: "tok-\(signed)", clientID: "cid", clientSecret: "csecret",
+                scopes: writing
+            ))
+        }
+        let server = ActServer([
+            "/api/v1/accounts/verify_credentials": .json(#"{"acct":"me@a.example"}"#),
+            "/api/v1/statuses/111": .fail,
+            "/api/v1/statuses/222": .fail,
+        ])
+        let store = ItemStore()
+        for (host, id) in [("a.example", "111"), ("b.example", "222")] {
+            await store.add(Source(host: host, kind: .mastodon))
+            await store.ingest([Note(
+                id: "https://a.example/users/me/statuses/111",
+                source: Source(host: host, kind: .mastodon),
+                author: "Me", handle: "@me@a.example", body: "mine",
+                postedAt: Date(timeIntervalSince1970: 1_700_000_000), categories: [.home],
+                statusID: id
+            )])
+        }
+        let session = ShellSession(
+            http: FixtureHTTP(), store: store,
+            mastodon: MastodonSessions(tokens: tokens, sender: server)
+        )
+        session.mastodon.refresh()
+        await session.mastodon.verifyAll()
+        await session.reloadFromStore()
+        let row = try #require(DummyItem.merged(session.notes).first)
+        await session.withdraw(row)
+        #expect(session.notes.count == 2)
+        #expect(session.acts.standing(of: row.id, .withdraw) == .failed)
+    }
 }

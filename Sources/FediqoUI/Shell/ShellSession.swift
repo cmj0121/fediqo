@@ -519,11 +519,22 @@ final class ShellSession {
     /// The question answered yes: the post is taken back from its source, and once the source
     /// says so it leaves the timeline, any open thread and the store, so it stays gone after a
     /// relaunch. A failure leaves it where it is and the same act asks again.
+    ///
+    /// **A row that stands for two copies (#114) lets go of both.** The act goes to the copy the
+    /// row is drawn as — its own source, under its own id — and the other copies are that same
+    /// post as other servers carried it. Their author has just taken it back at the source it was
+    /// written through, which is what tells every other server to drop it; leaving them here
+    /// would redraw the row as the next copy and put back the post the reader just watched go.
+    /// They are dropped only after the source has said the post went.
     func withdraw(_ item: DummyItem) async {
         withdrawing = nil
+        let others = item.otherCopies.map { NoteKey(host: $0.source.host, id: $0.noteID) }
         await perform(.withdraw, on: item) { door, note in
             try await MastodonWrite(door: door, store: self.store).withdraw(note)
-            self.conversations.drop(note.key)
+            for key in [note.key] + others {
+                await self.store.forget(key)
+                self.conversations.drop(key)
+            }
             return note
         }
     }
