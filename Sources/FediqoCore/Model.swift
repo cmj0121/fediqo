@@ -362,6 +362,18 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// leaves no booster here and matches on its author alone. Nothing fills it in afterwards,
     /// and a note stored before this existed has none.
     public let boosterHandle: String?
+    /// Whether the reader this copy was fetched as has boosted it, **as the source said** — not
+    /// as this device remembers pressing anything (#106).
+    ///
+    /// **Nothing is not `false`**, `sensitive`'s rule and for its reason. A public timeline read
+    /// signed out carries no such field at all, and reading that silence as a no would draw every
+    /// post in it as one the reader has not boosted — which is a claim nobody made. Nothing means
+    /// the source never said, so the mark is not offered; `false` means it said no.
+    ///
+    /// It is a fact about this copy through this source, which is what makes it survive a
+    /// relaunch honestly: the row is stored with what the server last said, and every later fetch
+    /// of the same post overwrites it with what the server says then.
+    public let boosted: Bool?
     public let audience: Audience?
     public let avatarURL: URL?
     /// What came attached, in the order the server listed it. Empty is a post that brought
@@ -397,6 +409,7 @@ public struct Note: Identifiable, Hashable, Sendable {
         reply: Reply? = nil,
         boostedBy: String? = nil,
         boosterHandle: String? = nil,
+        boosted: Bool? = nil,
         audience: Audience? = nil,
         avatarURL: URL? = nil,
         attachments: [Attachment] = [],
@@ -419,6 +432,7 @@ public struct Note: Identifiable, Hashable, Sendable {
         self.reply = reply
         self.boostedBy = boostedBy
         self.boosterHandle = boosterHandle
+        self.boosted = boosted
         self.audience = audience
         self.avatarURL = avatarURL
         self.attachments = attachments
@@ -433,12 +447,20 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// This copy, read again, laid over the one held for the same row (#29): what the server says
     /// now — text, cover, attachments, counts — with the categories the held copy arrived through
     /// kept (and grown), its booster kept, and its board where this read names none.
+    ///
+    /// **`boosted` falls back to what was held, rather than being overwritten with nothing.** A
+    /// re-read made signed out — the public timeline, a thread asked of a host with no token —
+    /// carries no such field, and letting that silence replace a yes the same server gave an hour
+    /// ago would draw the post as unboosted because nobody asked, which is the one thing #106
+    /// says the mark must never do. A read made as the reader always says something, so it always
+    /// wins.
     func refreshed(over held: Note) -> Note {
         Note(
             id: id, source: source, author: author, handle: handle, body: body, title: title,
             board: board ?? held.board, postedAt: postedAt,
             categories: held.categories.union(categories), reply: reply,
             boostedBy: held.boostedBy, boosterHandle: held.boosterHandle,
+            boosted: boosted ?? held.boosted,
             audience: audience, avatarURL: avatarURL, attachments: attachments,
             sensitive: sensitive, spoiler: spoiler, emojis: emojis, url: url, counts: counts,
             statusID: statusID ?? held.statusID

@@ -21,6 +21,19 @@ struct DummyItemRow: View {
     /// otherwise press one and draw the other.
     let posts: ForumPosts
     @Binding var marks: DummyMarks
+    /// This row's share of #54's acts: what the post offers, where each offered act has got to,
+    /// and the presses themselves (#106).
+    ///
+    /// **Handed in rather than worked out here.** Two of the three facts that decide what is
+    /// offered — what the sign-in bought and what the source has turned away since — live on the
+    /// session, and a row deriving its own answer would be a second derivation free to disagree
+    /// with the word the source page draws. `ItemActing()` is a row in a list that does not act:
+    /// a fixture, a preview.
+    ///
+    /// **One value rather than a property per act**, because it grows: #54 has four acts and
+    /// three panes draw rows, so a property each would be twelve parameters to keep in step
+    /// across three call sites.
+    var acting = ItemActing()
     var selected: Bool = false
     /// Whether this row is the post the reader opened **in order to read** — the thread pane, and
     /// nowhere else.
@@ -1016,10 +1029,7 @@ struct DummyItemRow: View {
                     label: "item.act.reply", on: false) {
                 onToast(L10n.t("item.toast.reply"))
             }
-            counted("arrow.2.squarepath", count: item.counts.reblogs,
-                    label: "item.act.reblog", on: false) {
-                onToast(L10n.t("item.toast.reblog"))
-            }
+            boostMark
             mark("quote.bubble", label: "item.act.quote", on: false) {
                 onToast(L10n.t("item.toast.quote"))
             }
@@ -1047,22 +1057,64 @@ struct DummyItemRow: View {
             mark("ellipsis", label: "item.act.more", on: false) {
                 onToast(L10n.t("item.toast.more"))
             }
+            refusal
+        }
+    }
+
+    /// Boosting this post to the source it was read through, or taking the boost back (#106).
+    ///
+    /// **Absent rather than disabled where the post cannot be boosted**, which is decision 4 on
+    /// this repo's controls and is what `DummyItem.outwardURL` argues at length: a mark the reader
+    /// cannot press is a question about this app, and the honest answer to "you are not signed in
+    /// here" is the sentence `refusal` draws, not a greyed arrow.
+    ///
+    /// Whether it is done is `item.boosted`, which is what the source said — never what this
+    /// device remembers pressing. Nothing is not `false`: a post whose source never said carries
+    /// no mark at all, because `acts` has already refused it as unnameable or unsigned.
+    @ViewBuilder
+    private var boostMark: some View {
+        if acting.acts.offers(.boost) {
+            let done = item.boosted == true
+            let standing = acting.standings[.boost]
+            counted(
+                ItemActs.symbol(.boost, done: done, standing: standing),
+                count: item.counts.reblogs,
+                label: "item.act.boost",
+                on: done,
+                spoken: ItemActs.spoken(.boost, done: done, standing: standing)
+            ) {
+                acting.boost?()
+            }
+        }
+    }
+
+    /// What the row says where it offers none of #54's acts. Nothing where it offers them, and
+    /// nothing where there is no source for a sentence to be about — a fixture, a preview.
+    @ViewBuilder
+    private var refusal: some View {
+        if let refused = acting.acts.refused {
+            Text(ItemActs.refusalLine(refused))
+                .shellFont(.meta)
+                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                .lineLimit(1)
+                .accessibilityLabel(ItemActs.refusalLine(refused))
         }
     }
 
     /// Nothing is not a reading. A count of zero is left off rather than drawn as a
     /// nought beside every glyph in the list.
     private func counted(_ symbol: String, count: Int?, label: String, on: Bool,
+                         spoken: String? = nil,
                          action: @escaping () -> Void) -> some View {
         let shown = (count ?? 0) > 0 ? count : nil
-        return DummyMarkButton(symbol: symbol, count: shown, labelKey: label,
+        return DummyMarkButton(symbol: symbol, count: shown, label: spoken ?? L10n.t(label),
                                on: on, quiet: !reading, glyph: glyph,
                                countWidth: countBox, touch: touch, action: action)
     }
 
     private func mark(_ symbol: String, label: String, on: Bool,
                       action: @escaping () -> Void) -> some View {
-        DummyMarkButton(symbol: symbol, count: nil, labelKey: label,
+        DummyMarkButton(symbol: symbol, count: nil, label: L10n.t(label),
                         on: on, quiet: !reading, glyph: glyph,
                         countWidth: countBox, touch: touch, action: action)
     }
@@ -1258,7 +1310,13 @@ private struct WayOut: ViewModifier {
 private struct DummyMarkButton: View {
     let symbol: String
     let count: Int?
-    let labelKey: String
+    /// The name of the control, already resolved.
+    ///
+    /// **A string and not a key**, since #106: an act's mark is named for what a press will do
+    /// *and* for where the last press got to — "Boost, on its way" — and that is a sentence built
+    /// from two facts rather than one word looked up. `ItemActs.spoken` builds it; the marks that
+    /// are still this device's own pass `L10n.t` of their key and read exactly as they did.
+    let label: String
     let on: Bool
     /// True on every row but the one being read. Emphasis only — the control is always
     /// here, always the same size, and always reachable.
@@ -1290,8 +1348,8 @@ private struct DummyMarkButton: View {
         .buttonStyle(.plain)
         .foregroundStyle(tint)
         .animation(.easeInOut(duration: 0.15), value: quiet)
-        .help(L10n.t(labelKey))
-        .accessibilityLabel(L10n.t(labelKey))
+        .help(label)
+        .accessibilityLabel(label)
         .accessibilityAddTraits(on ? .isSelected : [])
     }
 

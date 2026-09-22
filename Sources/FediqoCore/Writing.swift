@@ -64,3 +64,77 @@ public enum SourceWriting: Sendable, Equatable, CaseIterable {
         return refused ? .refused : .writes
     }
 }
+
+/// One thing a reader does to a post on the source they read it through — #54's acts, named so
+/// that the rule about which of them a post offers is a value rather than a run of conditions
+/// inside a view body.
+///
+/// **`CaseIterable` so the offering can be asserted over all of them** rather than over the ones
+/// somebody remembered: an act added here and left out of `PostActs.on` is then a test that
+/// stops, which is `DummyAudience`'s reason for the same conformance.
+public enum PostAct: Sendable, Hashable, CaseIterable {
+    /// Carried onward to whoever follows the reader on that source (#106).
+    case boost
+}
+
+/// Why a post offers none of the acts. Nothing is a post that offers them.
+///
+/// **Four reasons and not one silence**, because each sends the reader somewhere different: three
+/// are about the source and one is about this row alone, and a row that said "cannot" for all
+/// four would be telling a Mastodon reader to give up where signing in again is the whole answer.
+public enum PostActRefusal: Sendable, Hashable, CaseIterable {
+    /// This protocol has no writing here at all. Nothing the reader does changes it.
+    case protocolCannot
+    /// There is no sign-in carrying the writing part. Signing in again is what changes it.
+    case notSignedIn
+    /// The writing part was bought and the source turned a write away since.
+    case turnedAway
+    /// This device cannot name the post on its own server, so there is nothing to point an act
+    /// at — a row kept before its server id was, and every forum post.
+    case unnameable
+}
+
+/// What may be done to one post, and why not where nothing may.
+///
+/// **The two halves are one value on purpose.** "Which marks are drawn" and "what the row says
+/// instead" are one question with one answer, and the milestone has already shipped three
+/// controls whose *whether* and whose *what* were decided in two places — see
+/// `DummyItem.outwardURL`, which says so at length. Answered here, both can be asserted without
+/// standing a view up.
+public struct PostActs: Sendable, Hashable {
+    /// The acts this post offers. Empty where `refused` says why.
+    public let offered: Set<PostAct>
+    /// Why the acts are absent, where they are. Nothing where they are there to press.
+    public let refused: PostActRefusal?
+
+    public init(offered: Set<PostAct>, refused: PostActRefusal? = nil) {
+        self.offered = offered
+        self.refused = refused
+    }
+
+    public func offers(_ act: PostAct) -> Bool { offered.contains(act) }
+
+    /// What a post read through a source with this standing offers.
+    ///
+    /// `nameable` is whether this device can point at the post on its own server — `Note.statusID`
+    /// present. It is asked last, because a forum row is `.never` before it is unnameable and the
+    /// reader is owed the reason that is about their source rather than the one about our
+    /// bookkeeping.
+    ///
+    /// **No `default:`**, this package's standing rule: a fifth `SourceWriting` has to say what a
+    /// post on such a source offers.
+    public static func on(_ writing: SourceWriting, nameable: Bool) -> PostActs {
+        switch writing {
+        case .never: return PostActs(offered: [], refused: .protocolCannot)
+        case .reads: return PostActs(offered: [], refused: .notSignedIn)
+        case .refused: return PostActs(offered: [], refused: .turnedAway)
+        case .writes:
+            guard nameable else { return PostActs(offered: [], refused: .unnameable) }
+            return PostActs(offered: Set(PostAct.allCases))
+        }
+    }
+
+    /// A post nothing may be done to and nothing to say about it: a fixture, a preview, a row in
+    /// a list that is not the reader's own timeline.
+    public static let none = PostActs(offered: [], refused: nil)
+}

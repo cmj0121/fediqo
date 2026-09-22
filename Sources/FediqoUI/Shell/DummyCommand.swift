@@ -43,6 +43,10 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     /// `r` — reload what is in front: the open thread, or else the selected timeline (#29).
     case reload
     case compose
+    /// `b` — boost the post the lamp is on to the source it was read through (#106), or take the
+    /// boost back. **One key for both directions**, because the reader is doing one thing and the
+    /// post itself says which way round it goes.
+    case boost
     case showShortcuts
     /// `/` — search what this device holds (#32). `?` is still the keys list; see `typed`.
     case search
@@ -93,6 +97,7 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         switch character {
         case "?": return .showShortcuts
         case "/": return .search
+        case "b": return .boost
         case "c": return .compose
         case "j", KeyEquivalent.downArrow.character: return .nextPost
         case "k", KeyEquivalent.upArrow.character: return .previousPost
@@ -442,6 +447,11 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
                       commands: [.editTimeline], touch: .hold),
         DummyShortcut(group: .timeline, keys: ["/"], name: "search", commands: [.search], touch: .press),
         DummyShortcut(group: .timeline, keys: ["r"], name: "reload", commands: [.reload], touch: .press),
+        // The mark under the post, pressed — drawn on every row whose source can be written to
+        // and absent on the rest, which is why the line is `.press` and not `.partly`: where the
+        // mark is missing the key does nothing either, so there is no half of this a finger
+        // cannot reach.
+        DummyShortcut(group: .timeline, keys: ["b"], name: "boost", commands: [.boost], touch: .press),
         // The rail on a Mac, the tab bar on a phone.
         DummyShortcut(group: .app, keys: ["⌃Tab", "⌃⇧Tab"], name: "pages",
                       commands: [.nextPage, .previousPage], touch: .press),
