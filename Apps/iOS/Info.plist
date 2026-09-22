@@ -34,6 +34,10 @@
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>FediqoSourceDirty</key>
+	<string>$(FEDIQO_SOURCE_DIRTY)</string>
+	<key>FediqoSourceRevision</key>
+	<string>$(FEDIQO_SOURCE_REVISION)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSApplicationCategoryType</key>

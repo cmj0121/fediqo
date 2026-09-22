@@ -7,7 +7,7 @@
 "shell.usage.title" = "Usage";
 "shell.usage.summary" = "What this device is keeping";
 "shell.preferences.title" = "Preferences";
-"shell.preferences.summary" = "Language, theme, and type";
+"shell.preferences.summary" = "Language, theme, type, and this build";
 "shell.timeline.disabled" = "Add a source on Account first";
 "shell.notices.disabled" = "Notices need a signed-in source";
 "account.rail.empty" = "Add a source";
@@ -295,6 +295,23 @@
 "prefs.latest" = "Stop at a latest date";
 "prefs.latest.date" = "Latest date";
 "prefs.latest.footer" = "Every timeline shows nothing posted after the end of this day, in this device's time zone. Newer posts stay on this device; turn this off to see them again.";
+
+"prefs.tab.choices" = "Settings";
+"prefs.tab.build" = "This Fediqo";
+"about.title" = "This Fediqo";
+"about.version" = "Version";
+"about.build" = "Build";
+"about.source" = "Source";
+"about.source.none" = "Not recorded: this build was made without its source written into it";
+"about.changes" = "Changes";
+"about.changes.none" = "None: built exactly as committed";
+"about.changes.uncommitted" = "Built with changes not yet committed";
+"about.missing" = "Not recorded";
+"about.line" = "%@: %@";
+"about.copy" = "Copy all";
+"about.copied" = "Copied";
+"about.copy.hint" = "Puts everything in this section on the clipboard as text, for a report.";
+"about.footer" = "Exactly what this build was stamped with when it was made. Nothing here asks the network.";
 
 "prefs.cache" = "Held on this device";
 "prefs.cache.footer" = "Most of this is read again from each server: its emoji names by themselves after a day, and the rest when you ask for it. Two things a sign-in leaves are kept on this device and nowhere else. A forum you signed in to keeps its session cookies here, so you are still signed in the next time Fediqo opens; they are not backed up and do not follow your Apple account. A password you asked Fediqo to save is kept in this device's Keychain and is never copied to iCloud. Clear deletes both along with everything else.";
