@@ -1,5 +1,8 @@
 import FediqoCore
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 /// Places on the left, the current page on the right, compose over it.
 public struct FediqoRootView: View {
@@ -1170,13 +1173,15 @@ public struct FediqoRootView: View {
     /// still happening rather than when it is let go, and a window dragged back over the line
     /// swaps back at the same width, because the rule has one line and no memory.
     ///
-    /// The phone and the iPad still ask the system's size class here; answering the width there
-    /// is #111's, and is not this one's to decide.
+    /// An iPad answers its width the same way, in both orientations and at every size beside
+    /// another app (#111); a phone keeps its size class, for the reason
+    /// `ShellLayout.answering(width:phoneIsCompact:)` gives.
     private func arrangement(for width: CGFloat?) -> ShellLayout {
         #if os(iOS)
-        sizeClass == .compact ? .narrow : .wide
+        let phone = UIDevice.current.userInterfaceIdiom == .phone
+        return ShellLayout.answering(width: width, phoneIsCompact: phone ? sizeClass == .compact : nil)
         #else
-        ShellLayout.answering(width: width)
+        return ShellLayout.answering(width: width)
         #endif
     }
 
