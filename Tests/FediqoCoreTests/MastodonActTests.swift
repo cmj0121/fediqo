@@ -281,4 +281,77 @@ struct MastodonActTests {
             #expect(!lower.isWider(than: higher))
         }
     }
+
+    // MARK: - Taking back (#109)
+
+    @Test("Taking back asks the source to delete the post, then lets go of the row and only it")
+    func aWithdrawLands() async throws {
+        let mine = try held(Self.status())
+        let other = try held(Self.status(id: "10"))
+        let (write, store, server, _) = try await actor(holding: mine, [
+            "/api/v1/statuses/9": .json(Self.status()),
+        ])
+        await store.ingest([other])
+        try await write.withdraw(mine)
+        let request = try #require(await server.requests.first)
+        #expect(request.httpMethod == "DELETE")
+        #expect(request.url?.path == "/api/v1/statuses/9")
+        #expect(await store.all().map(\.key) == [other.key])
+        #expect(await store.snapshot().notes.map(\.key) == [other.key], "a save writes it gone")
+    }
+
+    @Test("A refusal or a miss leaves the post where it is")
+    func aFailedWithdrawKeepsThePost() async throws {
+        let mine = try held(Self.status())
+        let (refused, store, _, _) = try await actor(holding: mine, [
+            "/api/v1/statuses/9": .json("{}", status: 403),
+        ])
+        await #expect(throws: MastodonAuthError.http(403)) { try await refused.withdraw(mine) }
+        #expect(await store.all() == [mine])
+
+        let (missed, kept, _, _) = try await actor(holding: mine, ["/api/v1/statuses/9": .fail])
+        await #expect(throws: URLError.self) { try await missed.withdraw(mine) }
+        #expect(await kept.all() == [mine])
+    }
+
+    @Test("A post the source says is not there is gone here too")
+    func aMissingPostGoes() async throws {
+        let mine = try held(Self.status())
+        let (write, store, _, _) = try await actor(holding: mine, [
+            "/api/v1/statuses/9": .json(#"{"error":"Record not found"}"#, status: 404),
+        ])
+        try await write.withdraw(mine)
+        #expect(await store.all().isEmpty)
+    }
+
+    @Test("Who the reader is comes from the source, spelled as a post's author is")
+    func whoTheReaderIs() async throws {
+        let tokens = MemoryMastodonTokens()
+        try tokens.save(MastodonFixture.token)
+        let local = MastodonAuthorized(
+            token: MastodonFixture.token,
+            sender: FixtureSender(["/api/v1/accounts/verify_credentials": .json(#"{"acct":"ada"}"#)]),
+            store: tokens
+        )
+        #expect(try await local.handle() == "@ada@\(host)")
+        #expect(try await local.handle() == (try held(Self.status())).handle)
+        let odd = MastodonAuthorized(
+            token: MastodonFixture.token,
+            sender: FixtureSender(["/api/v1/accounts/verify_credentials": .json("{}")]),
+            store: tokens
+        )
+        await #expect(throws: MastodonWriteError.unreadable) { _ = try await odd.handle() }
+    }
+
+    @Test("Taking back is offered only on the reader's own post, on a source that writes")
+    func takingBackIsOnlyYours() {
+        #expect(PostActs.on(.writes, nameable: true, mine: true).offers(.withdraw))
+        #expect(!PostActs.on(.writes, nameable: true, mine: false).offers(.withdraw))
+        #expect(!PostActs.on(.writes, nameable: true).offers(.withdraw), "not known is not yours")
+        #expect(PostActs.on(.writes, nameable: true, mine: false).offers(.boost))
+        for writing in [SourceWriting.reads, .never, .refused] {
+            #expect(!PostActs.on(writing, nameable: true, mine: true).offers(.withdraw))
+        }
+        #expect(!PostActs.on(.writes, nameable: false, mine: true).offers(.withdraw))
+    }
 }

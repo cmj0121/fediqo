@@ -175,6 +175,19 @@ final class ShellConversations {
         }
     }
 
+    /// A post taken back (#109), let go of in every thread that drew it. The answers under it
+    /// stay until the thread is read again: whether they went with it is the source's to say.
+    func drop(_ key: NoteKey) {
+        for (id, standing) in standings {
+            guard case .loaded(let ancestors, let descendants, let rootID) = standing else { continue }
+            standings[id] = .loaded(
+                ancestors: ancestors.filter { $0.key != key },
+                descendants: descendants.filter { $0.key != key },
+                rootID: rootID
+            )
+        }
+    }
+
     /// An answer the reader wrote from inside this thread, placed under what it answers (#108).
     ///
     /// **Laid into the halves the source handed back rather than asked for again.** The reader is

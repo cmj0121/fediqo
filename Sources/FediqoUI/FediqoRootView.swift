@@ -201,6 +201,9 @@ public struct FediqoRootView: View {
                     .presentationDetents([.medium, .large])
                     #endif
             }
+            // Taking back what the reader wrote (#109): the one act that asks first. A modifier of
+            // its own rather than the dialog spelled here — see `WithdrawQuestion`.
+            .modifier(WithdrawQuestion(session: session))
             // An answer, over the conversation it belongs to (#108). Driven by the session's one
             // value, so the key and the mark open the same surface by writing the same thing.
             .sheet(item: $session.answering) { target in
@@ -593,6 +596,8 @@ public struct FediqoRootView: View {
             return favouriteFocused()
         case .answer:
             return answerFocused()
+        case .withdraw:
+            return onFocusedItem { session.askToWithdraw($0) }
         case .compose:
             guard availability.canCompose else { return false }
             showingShortcuts = false
@@ -1385,5 +1390,47 @@ public struct FediqoRootView: View {
     private func placedPage(_ item: ShellPlace) -> some View {
         pageFor(item)
             .environment(\.shellPlaceIsActive, item == place)
+    }
+}
+
+/// Taking back what the reader wrote (#109): the one act that asks first. It names what goes, and
+/// nothing goes until it is confirmed; any route that is not the confirm button — Cancel, a click
+/// outside, Escape — is a cancel, and leaves all as it was.
+///
+/// **A modifier of its own, and not the dialog spelled inside `FediqoRootView.body`.** Written
+/// there, a `presenting:` dialog with its two closures took `body` past what Swift 6.0 on the
+/// runner would type-check in reasonable time, while the newer compiler here solved it without a
+/// word — twice, the second time with its binding and title already lifted out. Out here the
+/// chain gains one plain call, which is a cost no compiler has to solve against the rest of it.
+private struct WithdrawQuestion: ViewModifier {
+    let session: ShellSession
+
+    func body(content: Content) -> some View {
+        content.confirmationDialog(
+            title,
+            isPresented: asked,
+            titleVisibility: .visible,
+            presenting: session.withdrawing
+        ) { item in
+            Button(L10n.t("withdraw.confirm"), role: .destructive) {
+                Task { await session.withdraw(item) }
+            }
+            Button(L10n.t("compose.cancel"), role: .cancel) { session.cancelWithdraw() }
+        } message: { item in
+            Text(ItemActs.withdrawQuestion(item).detail)
+        }
+    }
+
+    /// What goes, named. Empty only while nothing is asked, when the dialog is not drawn.
+    private var title: String {
+        guard let item = session.withdrawing else { return "" }
+        return ItemActs.withdrawQuestion(item).title
+    }
+
+    private var asked: Binding<Bool> {
+        Binding(
+            get: { session.withdrawing != nil },
+            set: { shown in if !shown { session.cancelWithdraw() } }
+        )
     }
 }

@@ -61,6 +61,9 @@
 "answer.wider" = "這則回應傳得比它回應的貼文更遠。";
 "answer.body" = "你的回應";
 "answer.send" = "送出";
+"withdraw.title" = "要收回這則貼文嗎？";
+"withdraw.detail" = "「%@」會從 %@ 收回。在多數來源上，別人寫在它底下的回應也會一起消失。收回後無法復原。";
+"withdraw.confirm" = "收回";
 
 "shortcut.title" = "快捷鍵";
 "shortcut.note" = "沒有在寫的時候，這些鍵會動。";
@@ -83,6 +86,7 @@
 "shortcut.boost" = "把這則貼文轉發到它的來源，或收回轉發";
 "shortcut.favourite" = "在這則貼文的來源收藏它，或取消收藏";
 "shortcut.answer" = "在討論串裡回應你所在的這則貼文";
+"shortcut.withdraw" = "收回你所在的這則貼文（限你自己寫的）";
 "shortcut.reload" = "重新載入這條時間軸，或打開的討論串";
 "shortcut.dismiss" = "關掉眼前的東西，或取消選取";
 "shortcut.search" = "搜尋這台裝置上的貼文";
@@ -233,6 +237,7 @@
 "item.act.no.turnedAway" = "這個來源拒絕了寫入";
 "item.act.no.unnameable" = "這則貼文在它的來源上沒有名字";
 "item.act.unfavourite" = "取消收藏";
+"item.act.withdraw" = "收回你寫的貼文";
 "item.act.answer" = "回應";
 "item.act.quote" = "引用";
 "item.act.favourite" = "收藏";

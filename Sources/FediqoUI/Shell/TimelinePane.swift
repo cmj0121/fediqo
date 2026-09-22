@@ -454,7 +454,8 @@ struct TimelinePane: View {
                 } else {
                     onOpenThread(item.id)
                 }
-            }
+            },
+            withdraw: { session.askToWithdraw(item) }
         )
     }
 

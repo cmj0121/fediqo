@@ -53,6 +53,9 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     /// to** (#108). `c` writes a post that answers nothing; this is the same act pointed at
     /// something. Refused on the timeline itself, where the answer's place is not in view.
     case answer
+    /// `d` — ask to take back the post the lamp is on, where the reader wrote it (#109). The key
+    /// asks; it never takes anything back by itself.
+    case withdraw
     case showShortcuts
     /// `/` — search what this device holds (#32). `?` is still the keys list; see `typed`.
     case search
@@ -106,6 +109,7 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         case "b": return .boost
         case "f": return .favourite
         case "w": return .answer
+        case "d": return .withdraw
         case "c": return .compose
         case "j", KeyEquivalent.downArrow.character: return .nextPost
         case "k", KeyEquivalent.upArrow.character: return .previousPost
@@ -465,6 +469,9 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
         // The answer mark under a post in an open conversation. On the timeline the same mark
         // opens the conversation first, which is where the key is answered too.
         DummyShortcut(group: .timeline, keys: ["w"], name: "answer", commands: [.answer], touch: .press),
+        // The take-back mark, drawn on the reader's own posts only — and the key is refused on
+        // everyone else's, so there is no half of it a finger cannot reach.
+        DummyShortcut(group: .timeline, keys: ["d"], name: "withdraw", commands: [.withdraw], touch: .press),
         // The rail on a Mac, the tab bar on a phone.
         DummyShortcut(group: .app, keys: ["⌃Tab", "⌃⇧Tab"], name: "pages",
                       commands: [.nextPage, .previousPage], touch: .press),

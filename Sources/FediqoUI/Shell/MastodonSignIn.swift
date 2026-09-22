@@ -40,6 +40,15 @@ public final class MastodonSessions {
     /// sign-in and by a sign-out, which are the two acts that replace what a write would use.
     private(set) var writeRefused: Set<String> = []
 
+    /// Who the reader is on each signed-in host, as `@user@host`, **as that source said this run**
+    /// (#109) — what tells a post the reader wrote from one they did not.
+    ///
+    /// **Asked, never kept.** It is learnt from the account check at launch and after a sign-in,
+    /// and dropped with the sign-in, so a second account signed in on the same host is never
+    /// handed the first one's posts to take back. A host not yet answered has no entry, and
+    /// then nothing there is offered for taking back — the safe side of not knowing.
+    private(set) var handles: [String: String] = [:]
+
     public init(
         tokens: any MastodonTokenStore = KeychainMastodonTokens(),
         sender: any HTTPSender = URLSessionClient.signedIn()
@@ -156,8 +165,26 @@ public final class MastodonSessions {
         // A fresh sign-in is a fresh answer from the server about what this device may do, so
         // whatever it turned away before this is spent.
         writeRefused.remove(host)
+        handles[host] = nil
         refresh()
+        // Who the reader is matters only to taking back what they wrote, which needs the writing
+        // part — so a sign-in that did not buy it asks nothing more than it always did.
+        if grants[host] == .writing { await learnWho(host: host) }
         return nil
+    }
+
+    /// Asks the source who the reader is on it (#109). Silent on any failure: not knowing offers
+    /// nothing for taking back, which is the one safe answer, and a 401 is told as `verifyAll`
+    /// tells it.
+    func learnWho(host raw: String) async {
+        let host = raw.lowercased()
+        guard let door = authorized(host: host) else { return }
+        do {
+            let handle = try await door.handle()
+            if isSignedIn(host: host) { handles[host] = handle }
+        } catch MastodonAuthError.signedOut {
+            endedByServer(host: host)
+        } catch {}
     }
 
     /// A write this source turned away (#69). The row says so and keeps saying it until the source
@@ -202,6 +229,7 @@ public final class MastodonSessions {
         }
         if forgettingApp { try? tokens.forgetApp(host: host) }
         writeRefused.remove(host)
+        handles[host] = nil
         refresh()
         if let token {
             await MastodonOAuth(host: host, sender: sender).revoke(token)
@@ -226,14 +254,12 @@ public final class MastodonSessions {
 
     /// At launch: asks each server whether it still honours its token. Only a 401 signs out; a
     /// server that cannot be reached leaves the sign-in as it was.
+    ///
+    /// **The same answer says who the reader is there** (#109), so asking it is not a second
+    /// request: `learnWho` reads the account check's own body.
     public func verifyAll() async {
         for host in grants.keys.sorted() {
-            guard let door = authorized(host: host) else { continue }
-            do {
-                _ = try await door.get(path: "/api/v1/accounts/verify_credentials")
-            } catch MastodonAuthError.signedOut {
-                endedByServer(host: host)
-            } catch {}
+            await learnWho(host: host)
         }
     }
 
@@ -249,6 +275,9 @@ public final class MastodonSessions {
         // does not also have a grant for.
         let grants = (try? tokens.grants()) ?? [:]
         if grants != self.grants { self.grants = grants }
+        // Who the reader is goes with the sign-in it was learnt through.
+        let kept = handles.filter { grants[$0.key] != nil }
+        if kept != handles { handles = kept }
     }
 }
 

@@ -377,6 +377,26 @@ public struct MastodonAuthorized: Sendable {
         try await finish(try await send(path: path, method: "POST", form: form), path: path)
     }
 
+    /// Who the reader is on this source, as `@user@host` — the spelling `Note.handle` takes, so a
+    /// post can be told to be theirs by comparing the two (#109).
+    ///
+    /// **Asked of the source and never written down.** It is the account check's own answer, and
+    /// a sign-in to a different account on the same host is a different answer: remembering it
+    /// would be this device deciding whose posts are whose.
+    public func handle() async throws -> String {
+        struct Me: Decodable { let acct: String }
+        let data = try await get(path: Self.accountCheck)
+        guard let me = try? MastodonJSON.decoder.decode(Me.self, from: data) else {
+            throw MastodonWriteError.unreadable
+        }
+        return StatusDTO.handle(me.acct, host: token.host)
+    }
+
+    /// A DELETE through the same door (#109): taking back what the reader wrote.
+    public func delete(path: String) async throws -> Data {
+        try await finish(try await send(path: path, method: "DELETE"), path: path)
+    }
+
     private func finish(_ result: (Data, status: Int), path: String) async throws -> Data {
         switch result.status {
         case 200..<300:

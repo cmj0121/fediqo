@@ -1046,6 +1046,7 @@ struct DummyItemRow: View {
                 marks.kept.toggle()
                 onToast(L10n.t(marks.kept ? "item.toast.kept.on" : "item.toast.kept.off"))
             }
+            withdrawMark
             mark("ellipsis", label: "item.act.more", on: false) {
                 onToast(L10n.t("item.toast.more"))
             }
@@ -1123,6 +1124,22 @@ struct DummyItemRow: View {
         }
     }
 
+    /// Taking back what the reader wrote (#109). **Drawn only on their own posts**, and the press
+    /// is the question and never the act: nothing goes until it is answered.
+    ///
+    /// On its way and failed it changes shape, as every act's mark does; a failure is pressed
+    /// again to be asked again.
+    @ViewBuilder
+    private var withdrawMark: some View {
+        if acting.acts.offers(.withdraw), let withdraw = acting.withdraw {
+            let standing = acting.standings[.withdraw]
+            mark(ItemActs.symbol(.withdraw, done: false, standing: standing),
+                 spoken: ItemActs.spoken(.withdraw, done: false, standing: standing)) {
+                withdraw()
+            }
+        }
+    }
+
     /// What the row says where it offers none of #54's acts. Nothing where it offers them, and
     /// nothing where there is no source for a sentence to be about — a fixture, a preview.
     @ViewBuilder
@@ -1151,6 +1168,13 @@ struct DummyItemRow: View {
                       action: @escaping () -> Void) -> some View {
         DummyMarkButton(symbol: symbol, count: nil, label: L10n.t(label),
                         on: on, quiet: !reading, glyph: glyph,
+                        countWidth: countBox, touch: touch, action: action)
+    }
+
+    /// An act's mark with no count, named by the sentence `ItemActs.spoken` builds.
+    private func mark(_ symbol: String, spoken: String, action: @escaping () -> Void) -> some View {
+        DummyMarkButton(symbol: symbol, count: nil, label: spoken,
+                        on: false, quiet: !reading, glyph: glyph,
                         countWidth: countBox, touch: touch, action: action)
     }
 
