@@ -523,8 +523,14 @@ struct DummyItemRow: View {
         L10n.t("item.visibility.\(audience.rawValue)")
     }
 
-    /// The one server this row came through. A post two servers carry is two rows (#10), each
-    /// naming its own, so there is never a second host to count here.
+    /// The servers this row came through: the one it is drawn as, and how many more (#114).
+    ///
+    /// **Named, and not listed.** A post three servers carried says `first.example +2` rather than
+    /// three capsules, because a row is one height and a list of servers along its meta line is
+    /// the thing #114 said the row must not become. Every one of them is still named — to a
+    /// pointer by `help`, and to a listener by the label — so the count is a shortening of the
+    /// drawing and never of the fact. A post one server carried draws its host alone, as it
+    /// always has.
     ///
     /// **The room inside it is `Box.pillSideways` and `Box.pillUpright`** — see there for why
     /// the two are different numbers. What is worth saying here is what the room must not do:
@@ -536,7 +542,7 @@ struct DummyItemRow: View {
     /// short one is not stretched to a size it has nothing to put in, and a long one gives way
     /// before the age does — which is what `layoutPriority(0)` on the meta line says.
     private var sourcePill: some View {
-        Text(Self.spokenSource(item))
+        Text(Self.drawnSource(item))
             .shellFont(.mark)
             .foregroundStyle(ShellChrome.inkDim(colorScheme))
             .lineLimit(1)
@@ -546,6 +552,8 @@ struct DummyItemRow: View {
                 Capsule(style: .continuous)
                     .fill(ShellChrome.well(colorScheme))
             )
+            .help(Self.spokenSource(item))
+            .accessibilityLabel(Self.spokenSource(item))
     }
 
     /// What the pill names, and so what a listener hears where the headline combines it in.
@@ -554,7 +562,25 @@ struct DummyItemRow: View {
     /// a page. A named function rather than a string reached for inside the view body, so that
     /// "the pill still names the source" is a sentence a test can put a question to; the same
     /// reason `spokenAudience(_:)` is one.
-    static func spokenSource(_ item: DummyItem) -> String { item.source.host }
+    ///
+    /// **Every source, by name, where a post came through more than one** (#114): a listener
+    /// cannot see a count and look further, so what the drawing shortens this says in full.
+    static func spokenSource(_ item: DummyItem, language: DummyLanguage? = nil) -> String {
+        let others = item.otherCopies.map(\.source.host)
+        guard !others.isEmpty else { return item.source.host }
+        return String(
+            format: L10n.t("item.source.also", language: language),
+            item.source.host, others.joined(separator: L10n.t("item.source.join", language: language))
+        )
+    }
+
+    /// What the pill draws: the host, and how many other servers carried the same post.
+    static func drawnSource(_ item: DummyItem, language: DummyLanguage? = nil) -> String {
+        guard !item.otherCopies.isEmpty else { return item.source.host }
+        return String(
+            format: L10n.t("item.source.more", language: language), item.source.host, item.otherCopies.count
+        )
+    }
 
     /// What came attached sits beside the words, never under them, and against the
     /// right edge of the row. A picture below the text pushes the next post off the

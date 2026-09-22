@@ -539,3 +539,10 @@
 "person.held.one" = "%d post here";
 "person.none" = "Nothing of theirs has reached this device yet.";
 "item.person.open" = "Open %@";
+
+/* One post more than one source carried (#114). The row is drawn as the first; these name the rest. */
+"item.source.more" = "%1$@ +%2$d";
+"item.source.also" = "%1$@, also from %2$@";
+"item.source.join" = ", ";
+"thread.copies.title" = "As each source carried it";
+"thread.copies.from" = "From %@";

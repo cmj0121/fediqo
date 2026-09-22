@@ -530,3 +530,10 @@
 "person.held" = "這裡有 %d 則";
 "person.none" = "這台裝置上還沒有他們的貼文。";
 "item.person.open" = "打開 %@";
+
+/* One post more than one source carried (#114). The row is drawn as the first; these name the rest. */
+"item.source.more" = "%1$@ +%2$d";
+"item.source.also" = "%1$@，也來自 %2$@";
+"item.source.join" = "、";
+"thread.copies.title" = "各來源帶來的樣子";
+"thread.copies.from" = "來自 %@";
