@@ -105,4 +105,32 @@ extension EnvironmentValues {
     /// — a row, most of all. Handed down from the one place that measured, so a row does not
     /// guess from the device while the shell answers the width.
     @Entry var shellLayout: ShellLayout = .wide
+
+    /// The corner of the page something is drawn over, where something is: how far it reaches in
+    /// from the trailing edge, and how far up from the bottom (#112). Nothing, everywhere else.
+    ///
+    /// **The narrow arrangement's compose button, and only that.** It floats over every page, so
+    /// the last row of a list stood under it with its marks unreachable by a finger, and the
+    /// search bar's end sat beneath it — acts the wide arrangement never hid. The button stays
+    /// where it is; what is under it is told how much room to leave, and leaves it.
+    @Entry var shellFloatingCorner: CGSize = .zero
+}
+
+/// Leaves the floating corner clear at the end of a list, so its last row can be scrolled out
+/// from under whatever floats there. See `EnvironmentValues.shellFloatingCorner`.
+///
+/// **A margin on the scrolled content and not padding on the view**, so the rows still pass
+/// under the button while the reader scrolls — the button is over the page, not beside it — and
+/// only the end of the list stops short of it.
+struct ClearsFloatingCorner: ViewModifier {
+    @Environment(\.shellFloatingCorner) private var corner
+
+    func body(content: Content) -> some View {
+        content.contentMargins(.bottom, corner.height, for: .scrollContent)
+    }
+}
+
+extension View {
+    /// See `ClearsFloatingCorner`.
+    func clearsFloatingCorner() -> some View { modifier(ClearsFloatingCorner()) }
 }

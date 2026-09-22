@@ -193,6 +193,7 @@ struct PersonPane: View {
                 }
             }
             .scrollIndicators(.never)
+            .clearsFloatingCorner()
             .onChange(of: selectedID) { _, id in
                 guard let id else { return }
                 withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(id, anchor: .center) }

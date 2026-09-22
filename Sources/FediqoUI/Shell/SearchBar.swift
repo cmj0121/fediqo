@@ -16,6 +16,7 @@ struct SearchBar: View {
     var onClose: () -> Void
     @FocusState private var focused: Bool
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.shellFloatingCorner) private var floatingCorner
 
     var body: some View {
         VStack(spacing: 0) {
@@ -38,6 +39,9 @@ struct SearchBar: View {
                 }
             }
             .padding(.horizontal, ShellSpace.pad)
+            // The end of the field and the count stop short of whatever floats over the page's
+            // corner — the narrow arrangement's compose button (#112). Nothing, elsewhere.
+            .padding(.trailing, floatingCorner.width)
             .padding(.vertical, ShellSpace.snug)
         }
         .background(ShellChrome.page(colorScheme))
