@@ -367,13 +367,19 @@ final class ShellReload {
             }
             return await readAsYou(source, for: categories, in: session) && read
         case .discuz:
-            let client = DiscuzClient(http: timed(transport(host, in: session), for: .timeline, in: session), host: host)
+            // A board's read is shown under that board's name (#164); the front page names none.
+            let http = transport(host, in: session)
+            let client = { (board: BoardSubscription?) in
+                DiscuzClient(
+                    http: self.timed(http, for: .timeline, board: board?.name, in: session), host: host
+                )
+            }
             let read: Bool
             if let categories {
                 let asked = source.boards.filter { categories.contains(.board(id: String($0.fid))) }
                 read = await boards(asked, of: stamp, through: client, in: session)
             } else if source.boards.isEmpty {
-                read = await land(host, in: session) { try await client.latest(source: stamp) }
+                read = await land(host, in: session) { try await client(nil).latest(source: stamp) }
             } else {
                 read = await boards(source.boards, of: stamp, through: client, in: session)
             }
@@ -425,8 +431,8 @@ final class ShellReload {
 
     /// One board after another, as a pick reads them: a stranger's forum is not asked in parallel.
     private func boards(
-        _ boards: [BoardSubscription], of source: Source, through client: DiscuzClient,
-        in session: ShellSession
+        _ boards: [BoardSubscription], of source: Source,
+        through client: (BoardSubscription?) -> DiscuzClient, in session: ShellSession
     ) async -> Bool {
         var read = true
         for board in boards {
@@ -434,7 +440,7 @@ final class ShellReload {
             // a sub-board the forum's front page never names is written here, and the picker
             // then offers it with no request of its own.
             read = await land(source.host, in: session) {
-                let page = try await client.boardPage(board.fid, source: source, named: board.name)
+                let page = try await client(board).boardPage(board.fid, source: source, named: board.name)
                 session.learn(page, of: board, host: source.host)
                 return page.notes
             } && read
@@ -458,10 +464,15 @@ final class ShellReload {
     }
 
     /// Bounded by the reload's deadline, and on `SourceWork` for what it is (#164) while it runs.
+    /// `board` is the board it reads, by the name the reader knows, where it reads one.
     private func timed(
-        _ http: any HTTPClient, for purpose: SourceWork.Purpose, in session: ShellSession
+        _ http: any HTTPClient, for purpose: SourceWork.Purpose, board: String? = nil,
+        in session: ShellSession
     ) -> any HTTPClient {
-        Deadline(WatchedHTTP(http, for: purpose, in: session.work) as any HTTPClient, within: deadline)
+        Deadline(
+            WatchedHTTP(http, for: purpose, board: board, in: session.work) as any HTTPClient,
+            within: deadline
+        )
     }
 
     /// A forum signed in to is read through its own browser, as a join reads it.

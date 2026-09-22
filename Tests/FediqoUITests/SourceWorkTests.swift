@@ -179,6 +179,71 @@ struct SourceWorkTests {
         #expect(work.now.isEmpty)
     }
 
+    // MARK: - Which board
+
+    /// A forum of two boards — `SubBoardChoiceTests`' forum — read through a witness that notes
+    /// what is running as each request goes out.
+    private static func boardForum(
+        _ boards: [BoardSubscription], work: SourceWork
+    ) async -> (ShellSession, Witness) {
+        let http = Witness(FixtureHTTP(SubBoardChoiceTests.routes), work: work)
+        let store = ItemStore()
+        await store.add(Source(host: SubBoardChoiceTests.host, kind: .discuz, boards: boards))
+        let session = ShellSession(http: http, store: store)
+        session.work = work
+        await session.reloadFromStore()
+        return (session, http)
+    }
+
+    @Test("Reloading a forum lists each board's read under the board's own name, and nothing else")
+    func aBoardReload() async {
+        let work = SourceWork()
+        let (session, http) = await Self.boardForum([
+            BoardSubscription(fid: 434, name: "Child"),
+            BoardSubscription(fid: 40, name: "Neighbour"),
+        ], work: work)
+
+        await session.reload.timeline(.all, in: session)
+
+        let host = SubBoardChoiceTests.host
+        #expect(await http.seen(SubBoardChoiceTests.read(434)) == ["\(host) timeline Child"])
+        #expect(await http.seen(SubBoardChoiceTests.read(40)) == ["\(host) timeline Neighbour"])
+        #expect(work.now.isEmpty)
+    }
+
+    @Test("A forum with no boards picked reads its front page under no board's name")
+    func aFrontPageReload() async {
+        let work = SourceWork()
+        let (session, http) = await Self.boardForum([], work: work)
+
+        await session.reload.timeline(.all, in: session)
+
+        let running = await http.everything
+        #expect(!running.isEmpty, "the premise: the front page was asked for")
+        #expect(running.allSatisfy { $0 == ["\(SubBoardChoiceTests.host) timeline -"] })
+    }
+
+    @Test("The picker's front page names no board; a board's own page names that board")
+    func thePickersReads() async {
+        let work = SourceWork()
+        let (session, http) = await Self.boardForum(
+            [BoardSubscription(fid: 38, name: "Parent")], work: work
+        )
+        let host = SubBoardChoiceTests.host
+
+        // Opening the picker: the index, then the page of the board already read.
+        await session.changeBoards(host: host)
+        await session.looking?.value
+        #expect(await http.seen("https://\(host)/forum.php") == ["\(host) boards -"])
+        #expect(await http.seen(SubBoardChoiceTests.look(38)) == ["\(host) boards Parent"])
+
+        // A tick: that board's page, under the name the picker shows for it.
+        session.tick([38, 40])
+        await session.looking?.value
+        #expect(await http.seen(SubBoardChoiceTests.look(40)) == ["\(host) boards Neighbour"])
+        #expect(work.now.isEmpty)
+    }
+
     @Test("Listing servers to join is listed as that while it is asked", .timeLimit(.minutes(1)))
     func theDirectory() async {
         let work = SourceWork()
@@ -294,6 +359,39 @@ struct SourceWorkTests {
         #expect(await spun { work.rows.isEmpty }, "the page never saw it end")
     }
 
+    @Test("A board's name is carried from its start to its line, and a blank one is none")
+    func theBoardsLine() async {
+        let work = SourceWork()
+        let named = work.begin(host: "Forum.Example", for: .timeline, board: "  Child ")
+        let blank = work.begin(host: "forum.example", for: .boards, board: " ")
+        #expect(Set(work.now.values.map(\.board)) == ["Child", nil])
+        #expect(await spun { work.rows.count == 2 })
+        let line = work.rows.first { $0.purpose == .timeline }
+        #expect(line?.host == "forum.example")
+        #expect(line?.board == "Child")
+        #expect(line?.purposeText(language: .english) == "Reading a timeline · Child")
+        #expect(work.rows.first { $0.purpose == .boards }?.purposeText(language: .english)
+            == "Reading a forum's boards")
+        work.end(named)
+        work.end(blank)
+    }
+
+    /// No view inspector, so what VoiceOver reads is pinned by what the section draws: the host,
+    /// then `purposeText` — which carries the board — then the time, as one combined element.
+    @Test("VoiceOver reads the board with the line, after what for")
+    func theBoardIsSpoken() throws {
+        let file = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/FediqoUI/Shell/SourceWorkSection.swift")
+        let page = try String(contentsOf: file, encoding: .utf8)
+        let host = try #require(page.range(of: "Text(row.host)"))
+        let purpose = try #require(page.range(of: "Text(row.purposeText())"))
+        let time = try #require(page.range(of: "SourceWorkRow.elapsed("))
+        #expect(host.lowerBound < purpose.lowerBound && purpose.lowerBound < time.lowerBound)
+        #expect(page.contains(".accessibilityElement(children: .combine)"))
+        #expect(!page.contains("row.board"), "the board is drawn only through purposeText")
+    }
+
     @Test("Lines are longest-running first; pictures gather per host; the rest are one each")
     func theLines() {
         let start = Date(timeIntervalSince1970: 1_000)
@@ -333,6 +431,13 @@ struct SourceWorkTests {
         let one = SourceWorkRow(id: "t", host: "a.example", purpose: .timeline, count: 1, since: since)
         #expect(one.purposeText(language: .english) == "Reading a timeline")
 
+        // A board read says which board, after what for — by its name, and by nothing else.
+        let board = SourceWorkRow(
+            id: "b", host: "forum.example", purpose: .timeline, board: "Child", count: 1, since: since
+        )
+        #expect(board.purposeText(language: .english) == "Reading a timeline · Child")
+        #expect(board.purposeText(language: .taiwanese) == "讀取時間軸 · Child")
+
         for language in [DummyLanguage.english, .taiwanese] {
             for key in SourceWork.Purpose.allCases.map(\.titleKey)
                 + ["prefs.tab.work", "work.title", "work.none", "work.footer", "work.count"] {
@@ -356,6 +461,33 @@ struct SourceWorkTests {
         let work = SourceWork()
         _ = SourceWorkSection(work: work)
         #expect(work.now.isEmpty)
+    }
+}
+
+/// What is running, as host, purpose and board ("-" for none), noted as each request goes out
+/// — from inside the watch, so the request's own entry is among it.
+private actor Witness: HTTPClient {
+    private let inner: FixtureHTTP
+    private let work: SourceWork
+    private var noted: [(url: String, running: [String])] = []
+
+    init(_ inner: FixtureHTTP, work: SourceWork) {
+        self.inner = inner
+        self.work = work
+    }
+
+    /// What was running each time `url` was asked for.
+    func seen(_ url: String) -> [String] {
+        noted.filter { $0.url == url }.flatMap(\.running)
+    }
+
+    var everything: [[String]] { noted.map(\.running) }
+
+    func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
+        let running = work.now.values
+            .map { "\($0.host) \($0.purpose.rawValue) \($0.board ?? "-")" }.sorted()
+        noted.append((url.absoluteString, running))
+        return try await inner.data(from: url)
     }
 }
 

@@ -1656,7 +1656,8 @@ final class ShellSession {
                   current.host.lowercased() == host
             else { return }
             do {
-                let page = try await joiner(for: host, for: .boards).around(board.fid, in: offer)
+                let page = try await joiner(for: host, for: .boards, board: board.name)
+                    .around(board.fid, in: offer)
                 subBoards[host, default: DiscuzSubBoards()].learn(page, of: board)
             } catch {
                 lookedUnder[host]?.remove(board.fid)
@@ -1707,7 +1708,8 @@ final class ShellSession {
         let host = offer.host.lowercased()
         let found: [DiscuzBoard]
         do {
-            found = try await joiner(for: offer.host, for: .boards).subBoards(of: board, in: offer)
+            found = try await joiner(for: offer.host, for: .boards, board: board.name)
+                .subBoards(of: board, in: offer)
         } catch {
             lookedUnder[host]?.remove(board.fid)
             return
@@ -1876,13 +1878,17 @@ final class ShellSession {
     /// reader adding an ordinary microblog would silently start a web process for a host that
     /// never needed it, and this app does not spend a reader's battery on a maybe.
     ///
-    /// `purpose` is what its requests are shown as while they run (#164).
-    private func joiner(for host: String, for purpose: SourceWork.Purpose) -> SourceJoin {
+    /// `purpose` is what its requests are shown as while they run (#164), and `board` the one
+    /// board they read, by the name the reader knows it by — nil for a read of no one board,
+    /// such as the forum's front page.
+    private func joiner(
+        for host: String, for purpose: SourceWork.Purpose, board: String? = nil
+    ) -> SourceJoin {
         var client: any HTTPClient = http
         if forums.hasEngine(host: host) {
             client = ForumJoinTransport(forums.transport(host: host))
         }
-        return SourceJoin(http: WatchedHTTP(client, for: purpose, in: work), store: store, catalogues: emoji)
+        return SourceJoin(http: WatchedHTTP(client, for: purpose, board: board, in: work), store: store, catalogues: emoji)
     }
 
     private func report(_ error: JoinError, raw: String, host: String) {

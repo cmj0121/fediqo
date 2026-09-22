@@ -13,14 +13,14 @@ import Testing
 @MainActor
 @Suite("Choosing sub-boards", .serialized)
 struct SubBoardChoiceTests {
-    private static let host = "install-g.example"
+    static let host = "install-g.example"
 
     init() {
         L10n.language = .english
     }
 
     /// The front page: one section, board 38 and board 40, and not a word about 434.
-    private static let index = #"""
+    static let index = #"""
     <html><head><meta name="generator" content="Discuz! X3.2" /></head><body>
     <h2><a href="forum.php?gid=1">Section</a></h2>
     <div id="category_1"><table class="fl_tb">
@@ -32,7 +32,7 @@ struct SubBoardChoiceTests {
     """#
 
     /// A board's page: its trail, its sub-board block where it has one, and one thread.
-    private static func boardPage(_ fid: Int, parent: Int? = nil, children: Bool = false) -> String {
+    static func boardPage(_ fid: Int, parent: Int? = nil, children: Bool = false) -> String {
         let trail = [
             #"<a href="forum.php?gid=1">Section</a>"#,
             parent.map { #"<a href="forum.php?mod=forumdisplay&amp;fid=\#($0)">Parent</a>"# },
@@ -59,15 +59,15 @@ struct SubBoardChoiceTests {
         """#
     }
 
-    private static func look(_ fid: Int) -> String {
+    static func look(_ fid: Int) -> String {
         "https://\(host)/forum.php?mod=forumdisplay&fid=\(fid)"
     }
 
-    private static func read(_ fid: Int) -> String {
+    static func read(_ fid: Int) -> String {
         "https://\(host)/forum.php?mod=forumdisplay&fid=\(fid)&filter=author&orderby=dateline"
     }
 
-    private static var routes: [String: FixtureHTTP.Outcome] {
+    static var routes: [String: FixtureHTTP.Outcome] {
         [
             "/": .text(#"<html><head><meta name="generator" content="Discuz! X3.2" /></head></html>"#),
             "https://\(host)/forum.php": .text(index),

@@ -34,8 +34,8 @@ struct SourceWorkSection: View {
         }
     }
 
-    /// The source, then what for and how long under it — one element to VoiceOver, read in that
-    /// order.
+    /// The source, then what for — and which board, where it reads one — and how long under it:
+    /// one element to VoiceOver, read in that order.
     private func line(_ row: SourceWorkRow) -> some View {
         VStack(alignment: .leading, spacing: ShellSpace.tight) {
             Text(row.host)
