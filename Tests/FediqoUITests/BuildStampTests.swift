@@ -126,25 +126,27 @@ struct BuildStampTests {
         }
     }
 
-    @Test("Preferences has two tabs, what a person chooses and this build, in both languages")
+    @Test("Preferences has three tabs, what a person chooses, this build and what is in flight, in both languages")
     func preferencesTabs() {
-        #expect(PreferencesPane.Purpose.allCases == [.choices, .build])
+        #expect(PreferencesPane.Purpose.allCases == [.choices, .build, .work])
+        #expect(L10n.t("prefs.tab.work", language: .english) == "In flight")
+        #expect(L10n.t("prefs.tab.work", language: .taiwanese) == "連線中")
         #expect(L10n.t("prefs.tab.choices", language: .english) == "Settings")
         #expect(L10n.t("prefs.tab.build", language: .english) == "This Fediqo")
         #expect(L10n.t("prefs.tab.choices", language: .taiwanese) == "設定")
         #expect(L10n.t("prefs.tab.build", language: .taiwanese) == "這個 Fediqo")
     }
 
-    @Test("Tab on Preferences goes Settings, This Fediqo, and round again, as it does on Usage")
+    @Test("Tab on Preferences goes Settings, This Fediqo, In flight, and round again, as it does on Usage")
     func preferencesTabOrder() {
         let session = ShellSession(http: FixtureHTTP())
         #expect(session.preferencesPurpose == .choices)
         var visited: [PreferencesPane.Purpose] = []
-        for _ in 0..<3 {
+        for _ in 0..<4 {
             #expect(session.rotatePreferencesTab(by: 1))
             visited.append(session.preferencesPurpose)
         }
-        #expect(visited == [.build, .choices, .build])
+        #expect(visited == [.build, .work, .choices, .build])
         session.rotatePreferencesTab(by: -1)
         #expect(session.preferencesPurpose == .choices)
         #expect(session.usagePurpose == .source, "Preferences' tabs are its own, not Usage's")
@@ -162,6 +164,7 @@ struct BuildStampTests {
         let root = try String(contentsOf: shell.appendingPathComponent("FediqoRootView.swift"), encoding: .utf8)
         #expect(pane.contains("case .build: BuildStampSection(stamp: stamp)"))
         #expect(pane.contains("case .choices: choices"))
+        #expect(pane.contains("case .work: SourceWorkSection(work: session?.work ?? .shared)"))
         #expect(root.contains("case .preferences: session.rotatePreferencesTab(by: step)"))
     }
 

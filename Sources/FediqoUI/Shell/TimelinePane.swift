@@ -313,7 +313,7 @@ struct TimelinePane: View {
         // the child rather than passed in, because it is a host and a transport and nothing
         // else — the transport is what has to come from out here.
         let store = session.emoji
-        let http = session.http
+        let http = WatchedHTTP(session.http, for: .emoji, in: session.work)
         await withTaskGroup(of: String.self) { group in
             for host in catalogueHosts {
                 group.addTask { await Self.catalogue(host, in: store, over: http); return host }

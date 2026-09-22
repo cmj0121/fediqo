@@ -31,6 +31,9 @@ final class EmojiCache {
     static let shared = EmojiCache()
 
     private let http: HTTPClient
+    /// Where each emoji picture on the wire is shown (#164). The app's own; a test hands in
+    /// another.
+    var work: SourceWork = .shared
     private var entries: [Key: Entry] = [:]
     private var cost = 0
     /// A counter, not a date: what recency needs is an order, and a monotonic tick is one that
@@ -563,7 +566,8 @@ final class EmojiCache {
     /// address out of a stranger's JSON from reaching `URLSession` at all.
     private func download(_ url: URL) -> Task<Data?, Never> {
         if let running = downloads[url] { return running }
-        let http = http
+        // On `SourceWork` while it is on the wire (#164).
+        let http = WatchedHTTP(http, for: .emoji, in: work)
         let started = Task<Data?, Never> { @MainActor [weak self] in
             defer { self?.downloads[url] = nil }
             guard let self else { return nil }

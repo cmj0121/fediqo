@@ -4,10 +4,11 @@ import SwiftUI
 /// Language, theme, type, and the latest date every timeline stops at (#22) — what a person
 /// chooses. What this device holds is on `UsagePane` (#21).
 ///
-/// **Two tabs, in Usage's shape** (#143): what a person chooses, and which Fediqo this is. The
-/// same pills at the head of the same grouped `Form`, and the same key — Tab and ⇧Tab rotate them
-/// (`ShellSession.rotatePreferencesTab`) — so the page is reached and walked on a Mac and on a
-/// phone the way Usage already is. The second tab is `BuildStampSection`, whole.
+/// **Three tabs, in Usage's shape** (#143, #164): what a person chooses, which Fediqo this is, and
+/// what it is asking of the sources right now. The same pills at the head of the same grouped
+/// `Form`, and the same key — Tab and ⇧Tab rotate them (`ShellSession.rotatePreferencesTab`) — so
+/// the page is reached and walked on a Mac and on a phone the way Usage already is. The second
+/// tab is `BuildStampSection`, whole, and the third `SourceWorkSection`.
 struct PreferencesPane: View {
     @Environment(DummyPrefs.self) private var prefs
     @Environment(\.colorScheme) private var colorScheme
@@ -24,6 +25,7 @@ struct PreferencesPane: View {
     enum Purpose: String, CaseIterable, Identifiable {
         case choices
         case build
+        case work
 
         var id: Self { self }
 
@@ -31,6 +33,7 @@ struct PreferencesPane: View {
             switch self {
             case .choices: "prefs.tab.choices"
             case .build: "prefs.tab.build"
+            case .work: "prefs.tab.work"
             }
         }
     }
@@ -43,6 +46,7 @@ struct PreferencesPane: View {
             switch purpose {
             case .choices: choices
             case .build: BuildStampSection(stamp: stamp)
+            case .work: SourceWorkSection(work: session?.work ?? .shared)
             }
         }
         .formStyle(.grouped)

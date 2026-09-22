@@ -74,6 +74,11 @@ final class ShellSession {
     /// `r` (#29): one reload at a time, and what the last one could not read.
     let reload = ShellReload()
 
+    /// What this device is asking of a source right now (#164), for Preferences to list. The
+    /// reads, joins and writes this session starts are put on it while they run; the caches and
+    /// sign-ins it holds carry their own, the same one in the app. A test hands in another.
+    @ObservationIgnored var work: SourceWork = .shared
+
     /// The sheet the reader is being shown the forum's own page in, or nothing.
     var signingIn: ForumSignInRequest?
 
@@ -317,8 +322,8 @@ final class ShellSession {
     /// Which tab Preferences is showing (#143): what a person chooses, or which Fediqo this is.
     var preferencesPurpose: PreferencesPane.Purpose = .choices
 
-    /// Tab and ⇧Tab on Preferences, the way they rotate Usage: Preferences, This Fediqo, and
-    /// round again.
+    /// Tab and ⇧Tab on Preferences, the way they rotate Usage: Settings, This Fediqo, In flight,
+    /// and round again.
     @discardableResult
     func rotatePreferencesTab(by step: Int) -> Bool {
         preferencesPurpose = DummyCommand.advanced(
@@ -448,7 +453,9 @@ final class ShellSession {
             postLimits[host] = MastodonWrite.limit(advertised: profile.statusLimit)
             return
         }
-        postLimits[host] = await MastodonClient(http: http, host: host).statusLimit()
+        postLimits[host] = await MastodonClient(
+            http: WatchedHTTP(http, for: .serverCheck, in: work), host: host
+        ).statusLimit()
     }
 
     var canPost: Bool {
@@ -469,7 +476,7 @@ final class ShellSession {
             throw MastodonWriteError.noSource
         }
         guard text.count <= postLimit(of: host) else { return }
-        guard let door = mastodon.authorized(host: host) else {
+        guard let door = mastodon.authorized(host: host, for: .write) else {
             throw MastodonWriteError.noSource
         }
         do {
@@ -674,7 +681,7 @@ final class ShellSession {
         // A store row, or an answer read in an open conversation, which #90 keeps out of the store.
         guard let note = notes.first(where: { $0.key.rowID == copy.id })
                 ?? conversations.note(copy.id),
-              let door = mastodon.authorized(host: host)
+              let door = mastodon.authorized(host: host, for: .write)
         else { return }
         guard acts.begin(copy.id, act) else { return }
         do {
@@ -759,7 +766,7 @@ final class ShellSession {
         guard acts(on: item).offers(.answer),
               let answered = notes.first(where: { $0.key.rowID == item.id })
                 ?? conversations.note(item.id),
-              let door = mastodon.authorized(host: host)
+              let door = mastodon.authorized(host: host, for: .write)
         else { throw MastodonWriteError.noSource }
         let reach = answerReach[item.id] ?? target.start
         do {
@@ -809,7 +816,7 @@ final class ShellSession {
         defer { fetchingCatalog = false }
         catalog = .loading
         do {
-            let servers = try await ServerDirectory(http: http).servers()
+            let servers = try await ServerDirectory(http: WatchedHTTP(http, for: .directory, in: work)).servers()
             catalog = servers.isEmpty ? .empty : .ready(servers)
         }
         // **The one site in this file a raw `URLError(.cancelled)` still reaches.** Everything
@@ -949,7 +956,7 @@ final class ShellSession {
         progress = ProgressReport(owner: .page, key: "account.detect.progress")
         defer { progress = nil }
         do {
-            let preview = try await joiner(for: parsed).look(host: raw)
+            let preview = try await joiner(for: parsed, for: .joining).look(host: raw)
             guard mine == errand else { return nil }
             profiles[preview.host] = preview.profile
             return preview
@@ -1059,7 +1066,7 @@ final class ShellSession {
             // **No `default:`.** A join step falling through a switch is a silent wrong answer:
             // a forum reported as joined, with no source and no boards behind it, and the
             // compiler saying nothing. Both cases are named, so a third breaks the build here.
-            switch try await joiner(for: preview.host).begin(preview) {
+            switch try await joiner(for: preview.host, for: .joining).begin(preview) {
             case .joined:
                 // **`adopt` is not behind the token and the stage write is.** The store has
                 // already been written by the time this line runs, so a reader who dismissed the
@@ -1284,7 +1291,7 @@ final class ShellSession {
             // of them timing out would drop that board out of `subscribed`, unsubscribing the
             // reader from something they never touched. A join has nothing to keep and says `[]`
             // rather than defaulting to it; see `BoardsOrigin.keeping`.
-            let outcome = try await joiner(for: offer.host)
+            let outcome = try await joiner(for: offer.host, for: .boards)
                 .subscribe(offer, to: picks, keeping: origin.keeping)
             // **The reader removed this server while its boards were being read, so it must not
             // come back.** One request per board means this runs for seconds, which is ample time
@@ -1586,7 +1593,7 @@ final class ShellSession {
             // The front page, and the sub-boards this run has already read off pages it was
             // reading anyway (#161) — so a sub-board the front page never names, and the reader
             // already has, is on the list to stay ticked rather than dropped by the next press.
-            let index = try await joiner(for: host).boards(of: source)
+            let index = try await joiner(for: host, for: .boards).boards(of: source)
             guard mine == errand else { return }
             restating = (host: host, index: index, subscribed: source.boards)
             stage = .choosingBoards(restateOffer(host: host) ?? index, from: .joined(
@@ -1649,7 +1656,7 @@ final class ShellSession {
                   current.host.lowercased() == host
             else { return }
             do {
-                let page = try await joiner(for: host).around(board.fid, in: offer)
+                let page = try await joiner(for: host, for: .boards).around(board.fid, in: offer)
                 subBoards[host, default: DiscuzSubBoards()].learn(page, of: board)
             } catch {
                 lookedUnder[host]?.remove(board.fid)
@@ -1700,7 +1707,7 @@ final class ShellSession {
         let host = offer.host.lowercased()
         let found: [DiscuzBoard]
         do {
-            found = try await joiner(for: offer.host).subBoards(of: board, in: offer)
+            found = try await joiner(for: offer.host, for: .boards).subBoards(of: board, in: offer)
         } catch {
             lookedUnder[host]?.remove(board.fid)
             return
@@ -1868,12 +1875,14 @@ final class ShellSession {
     /// **`hasEngine` rather than `transport`**, because `transport(host:)` would *build* one — a
     /// reader adding an ordinary microblog would silently start a web process for a host that
     /// never needed it, and this app does not spend a reader's battery on a maybe.
-    private func joiner(for host: String) -> SourceJoin {
+    ///
+    /// `purpose` is what its requests are shown as while they run (#164).
+    private func joiner(for host: String, for purpose: SourceWork.Purpose) -> SourceJoin {
         var client: any HTTPClient = http
         if forums.hasEngine(host: host) {
             client = ForumJoinTransport(forums.transport(host: host))
         }
-        return SourceJoin(http: client, store: store, catalogues: emoji)
+        return SourceJoin(http: WatchedHTTP(client, for: purpose, in: work), store: store, catalogues: emoji)
     }
 
     private func report(_ error: JoinError, raw: String, host: String) {
@@ -2094,7 +2103,7 @@ final class ShellSession {
     /// that did not all come back is one sentence under the row; a server that ended the sign-in
     /// is told to `mastodon`, which signs the row out and says so.
     func readAsYou(host: String) async {
-        guard let door = mastodon.authorized(host: host) else { return }
+        guard let door = mastodon.authorized(host: host, for: .timeline) else { return }
         await readingAsYou(host: host, key: "account.mastodon.home.progress") {
             try await MastodonAccount(door: door, store: self.store).read()
         }
@@ -2108,7 +2117,7 @@ final class ShellSession {
         guard Self.rowActsLive(at: stage, checking: checking),
               let source = sources.first(where: { $0.host == host }),
               SourceRow.canChooseLists(source.kind),
-              let door = mastodon.authorized(host: host)
+              let door = mastodon.authorized(host: host, for: .lists)
         else { return }
         rowRefusal = nil
         progressHost = host
@@ -2137,7 +2146,7 @@ final class ShellSession {
         guard case .choosingLists(let choice) = stage, !checking else { return }
         errand += 1
         stage = nil
-        guard let door = mastodon.authorized(host: choice.host) else { return }
+        guard let door = mastodon.authorized(host: choice.host, for: .timeline) else { return }
         progressHost = choice.host
         await readingAsYou(host: choice.host, key: "account.source.lists.reading") {
             try await MastodonAccount(door: door, store: self.store).choose(picks)
@@ -2284,7 +2293,8 @@ final class ShellSession {
     /// reported as a failure, because none of them is one.
     func signIn(host raw: String) async {
         guard let host = try? Host.parse(raw) else { return }
-        switch await forums.signIn(host: host) {
+        let outcome = await work.watching(host: host, for: .signIn) { await forums.signIn(host: host) }
+        switch outcome {
         case .signedIn:
             // The automatic path, and one of the two witnesses of a sign-in — decision 13. The
             // other is the reader closing the forum's own page below.

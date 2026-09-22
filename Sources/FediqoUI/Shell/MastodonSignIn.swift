@@ -15,6 +15,9 @@ import SwiftUI
 public final class MastodonSessions {
     @ObservationIgnored let tokens: any MastodonTokenStore
     @ObservationIgnored let sender: any HTTPSender
+    /// Where each request this makes is shown while it runs (#164). The app's own; a test hands
+    /// in another.
+    @ObservationIgnored var work: SourceWork = .shared
     /// Bumped per host by every sign-out, so a sign-in still on the server's page when the source
     /// is cleared or removed does not save the token it comes back with.
     @ObservationIgnored private var signOuts: [String: Int] = [:]
@@ -105,7 +108,7 @@ public final class MastodonSessions {
     ) async -> MastodonSignInError? {
         let host = raw.lowercased()
         let before = signOuts[host, default: 0]
-        let oauth = MastodonOAuth(host: host, sender: sender)
+        let oauth = MastodonOAuth(host: host, sender: WatchedHTTP(sender: sender, for: .signIn, in: work))
         var kept = (try? tokens.app(host: host)) ?? nil
         // A registration made for scopes this sign-in does not ask for is made again: the server
         // would refuse the page with `invalid_scope`.
@@ -178,7 +181,7 @@ public final class MastodonSessions {
     /// tells it.
     func learnWho(host raw: String) async {
         let host = raw.lowercased()
-        guard let door = authorized(host: host) else { return }
+        guard let door = authorized(host: host, for: .signInCheck) else { return }
         do {
             let handle = try await door.handle()
             if isSignedIn(host: host) { handles[host] = handle }
@@ -232,15 +235,20 @@ public final class MastodonSessions {
         handles[host] = nil
         refresh()
         if let token {
-            await MastodonOAuth(host: host, sender: sender).revoke(token)
+            await MastodonOAuth(host: host, sender: WatchedHTTP(sender: sender, for: .signOut, in: work))
+                .revoke(token)
         }
     }
 
     /// The door a signed-in request goes through, or nothing where no token can be read.
-    /// `within` puts a deadline on each request — a reload's (#29).
-    func authorized(host: String, within limit: Duration? = nil) -> MastodonAuthorized? {
+    /// `within` puts a deadline on each request — a reload's (#29). `purpose` is what each request
+    /// through it is shown as while it runs (#164): only the caller knows what it is for.
+    func authorized(
+        host: String, within limit: Duration? = nil, for purpose: SourceWork.Purpose
+    ) -> MastodonAuthorized? {
         guard let token = (try? tokens.token(host: host)) ?? nil else { return nil }
-        let wire: any HTTPSender = limit.map { Deadline(sender, within: $0) } ?? sender
+        let watched = WatchedHTTP(sender: sender, for: purpose, in: work)
+        let wire: any HTTPSender = limit.map { Deadline(watched as any HTTPSender, within: $0) } ?? watched
         return MastodonAuthorized(token: token, sender: wire, store: tokens)
     }
 

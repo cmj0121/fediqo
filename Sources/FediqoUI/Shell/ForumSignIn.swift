@@ -207,6 +207,10 @@ public final class ForumSessions {
     /// see `ForumCredentialStore`.
     @ObservationIgnored let credentials: any ForumCredentialStore
 
+    /// Where a launch's signing in again is shown while it runs (#164). The app's own; a test
+    /// hands in another.
+    @ObservationIgnored var work: SourceWork = .shared
+
     @ObservationIgnored private var engines: [String: ForumWebEngine] = [:]
     @ObservationIgnored private let makeStore: () -> WKWebsiteDataStore
     @ObservationIgnored private var madeStore: WKWebsiteDataStore?
@@ -568,7 +572,11 @@ public final class ForumSessions {
         }
         for host in Set(hosts.map { $0.lowercased() }) where savedHosts.contains(host) {
             guard relaunching[host] == nil else { continue }
-            relaunching[host] = Task { [weak self] in
+            // On `SourceWork` for the whole of it (#164): the forum's browser is not an
+            // `HTTPClient` a request could be watched through, so the work is registered itself.
+            let token = work.begin(host: host, for: .signIn)
+            relaunching[host] = Task { [weak self, work] in
+                defer { work.end(token) }
                 await self?.relaunch(host: host, attempt: attempt)
                 self?.relaunching[host] = nil
             }
