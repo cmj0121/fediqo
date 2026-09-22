@@ -49,7 +49,15 @@ UITEST_IOS_ID  ?= $(shell xcrun simctl list devices available | grep -m1 -E '^ *
 # rather than by someone remembering to keep two numbers in step.
 VERSION        = $(shell $(ROOT)/scripts/version.sh --marketing)
 BUILD_NUMBER   = $(shell $(ROOT)/scripts/version.sh --build)
-STAMP          = MARKETING_VERSION=$(VERSION) CURRENT_PROJECT_VERSION=$(BUILD_NUMBER)
+# Which commit the build is made from, and whether the checkout differed from it (#143) -- two
+# more settings, `FEDIQO_SOURCE_REVISION` and `FEDIQO_SOURCE_DIRTY`, that project.yml writes into
+# the Info.plist for Preferences to read back. In `STAMP` rather than beside it, so every target
+# below that is handed the version is handed the source too, and a target added later cannot
+# have one without the other. Deferred for the reason the two above are, and for one more: it is
+# expanded when the recipe runs, after `xcodeproj` has rewritten the plists XcodeGen owns, so
+# the dirty flag describes what is actually compiled.
+SOURCE         = $(shell $(ROOT)/scripts/version.sh --source)
+STAMP          = MARKETING_VERSION=$(VERSION) CURRENT_PROJECT_VERSION=$(BUILD_NUMBER) $(SOURCE)
 
 .PHONY: all run mac ios uitest uitest-ios publish shots shots-macos shots-ios shots-widths version xcodeproj sync-assets clean test build upgrade help
 

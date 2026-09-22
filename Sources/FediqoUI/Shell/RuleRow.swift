@@ -33,8 +33,11 @@ enum RuleBuilder {
             switch category {
             case .board, .list:
                 return [.source(host: host)]
-            case .public, .trends, .home:
+            case .public, .home:
                 return [.every] + sources.filter(\.kind.hasTimelines).map { .source(host: $0.host) }
+            // A Discuz!'s ranking lists are its Trends; public and home are still never a forum's.
+            case .trends:
+                return [.every] + sources.filter(\.kind.hasTrends).map { .source(host: $0.host) }
             }
         }
     }
@@ -51,14 +54,15 @@ enum RuleBuilder {
         }
     }
 
-    /// The categories each source can be picked by: public and trends on a Mastodon, Home where
-    /// it is signed in, every list chosen on it, a forum's subscribed boards, and any other its
+    /// The categories each source can be picked by: public and trends on a Mastodon, trends on a
+    /// Discuz! (its ranking lists), Home where it is signed in, every list chosen on it, a forum's subscribed boards, and any other its
     /// held posts arrived through.
     static func categories(
         in sources: [Source], notes: [Note], signedIn: (String) -> Bool
     ) -> [(host: String, categories: [FediqoCore.Category])] {
         sources.compactMap { source in
-            var picked: [FediqoCore.Category] = source.kind.hasTimelines ? [.public, .trends] : []
+            var picked: [FediqoCore.Category] = source.kind.hasTimelines ? [.public] : []
+            if source.kind.hasTrends { picked.append(.trends) }
             if source.kind.hasTimelines, signedIn(source.host) { picked.append(.home) }
             picked += source.lists.map { .list(id: $0.id) }
             picked += source.boards.map { .board(id: String($0.fid)) }
@@ -187,7 +191,7 @@ struct RuleRowView: View {
                 .accessibilityHidden(true)
             Button(action: onToggle) {
                 Text(RuleText.effect(rule.effect))
-                    .font(ShellType.meta.weight(.semibold))
+                    .shellFont(.meta, weight: .semibold)
                     .foregroundStyle(ShellChrome.selectInk(colorScheme))
                     .padding(.horizontal, ShellSpace.snug)
                     .padding(.vertical, ShellSpace.hair)
@@ -197,20 +201,20 @@ struct RuleRowView: View {
             target
             if missing {
                 Text(L10n.t("rule.missing"))
-                    .font(ShellType.mark)
+                    .shellFont(.mark)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .help(L10n.t("rule.missing.help"))
             }
             Spacer(minLength: ShellSpace.snug)
             if let scope = RuleText.scope(rule) {
                 Text(scope)
-                    .font(ShellType.meta)
+                    .shellFont(.meta)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .lineLimit(1)
             }
             Button(action: onRemove) {
                 Image(systemName: "xmark")
-                    .font(ShellType.meta)
+                    .shellFont(.meta)
                     .foregroundStyle(ShellChrome.inkFaint(colorScheme))
             }
             .buttonStyle(.plain)
@@ -233,7 +237,7 @@ struct RuleRowView: View {
     @ViewBuilder
     private var target: some View {
         let text = Text(RuleText.target(rule, sources: sources))
-            .font(ShellType.body)
+            .shellFont(.body)
             .lineLimit(1)
         if missing {
             // An empty socket: the part is not seated on the plate, and the rule still works.

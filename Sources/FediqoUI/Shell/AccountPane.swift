@@ -69,6 +69,7 @@ struct AccountPane: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .scrollIndicators(.never)
+            .clearsFloatingCorner()
             // **The page takes the reader to the block, once, on its appearing.**
             //
             // **Gated on `nil → non-nil` and nothing else.** A reader coming back from the boards
@@ -91,6 +92,35 @@ struct AccountPane: View {
                 session.searchFocused = on
             }
             .onDisappear { session.searchFocused = false }
+            .confirmationDialog(
+                Text(session.signInChoice.map {
+                    String(format: L10n.t("account.signin.ask.title"), $0)
+                } ?? ""),
+                isPresented: Binding(
+                    get: { session.signInChoice != nil },
+                    set: { if !$0 { session.signInChoice = nil } }
+                ),
+                titleVisibility: .visible,
+                presenting: session.signInChoice
+            ) { host in
+                // **Reading first and the wider answer second**, which is `previewActions`' rule
+                // on this page: the narrower act is never the one a reader reaches by reflex.
+                // Neither is `.destructive`; refusing to write is not a loss and agreeing to it is
+                // not a danger, it is a thing to be told about — which the message does.
+                Button(L10n.t("account.signin.ask.read")) {
+                    Task { await chose(host: host, writing: false) }
+                }
+                Button(L10n.t("account.signin.ask.write")) {
+                    Task { await chose(host: host, writing: true) }
+                }
+                Button(L10n.t("board.choose.cancel"), role: .cancel) { session.signInChoice = nil }
+            // **The two halves are named here and not on the buttons**, because a dialog's buttons
+            // are two or three words each and what each half actually buys is a sentence. A
+            // VoiceOver reader is read this message before the buttons, so the choice arrives with
+            // its meaning rather than as two verbs.
+            } message: { _ in
+                Text(L10n.t("account.signin.ask.detail"))
+            }
         }
     }
 
@@ -199,11 +229,11 @@ struct AccountPane: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: ShellSpace.snug) {
                 Text(L10n.t("account.hero.promise"))
-                    .font(ShellType.display)
+                    .shellFont(.display)
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
                 Text(L10n.t("account.hero.detail"))
-                    .font(ShellType.body)
+                    .shellFont(.body)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -221,7 +251,7 @@ struct AccountPane: View {
     private var standing: some View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
             Text(L10n.t("shell.account.title"))
-                .font(ShellType.pane)
+                .shellFont(.pane)
                 .foregroundStyle(ShellChrome.ink(colorScheme))
             if let glance { SourceMarkRow(marks: glance) }
         }
@@ -250,7 +280,7 @@ struct AccountPane: View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
             if !session.sources.isEmpty {
                 Text(L10n.t("account.add.detail"))
-                    .font(ShellType.meta)
+                    .shellFont(.meta)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
             }
             fieldRow
@@ -267,7 +297,7 @@ struct AccountPane: View {
             searchField
                 .layoutPriority(1)
             Button(L10n.t("account.browse")) { browse() }
-                .font(ShellType.body)
+                .shellFont(.body)
                 .disabled(busy)
                 .help(L10n.t("account.browse.label"))
                 .accessibilityLabel(L10n.t("account.browse.label"))
@@ -322,7 +352,7 @@ struct AccountPane: View {
     private var searchField: some View {
         HStack(alignment: .center, spacing: ShellSpace.snug) {
             TextField(L10n.t("account.search.placeholder"), text: $session.hostname)
-                .font(ShellType.body)
+                .shellFont(.body)
                 .textFieldStyle(.plain)
                 .focused($searchFocused)
                 .disabled(busy)
@@ -337,7 +367,7 @@ struct AccountPane: View {
                 Task { await typedHost() }
             } label: {
                 Image(systemName: "magnifyingglass")
-                    .font(ShellType.body.weight(.semibold))
+                    .shellFont(.body, weight: .semibold)
                     .frame(width: Metrics.icon, height: Metrics.icon)
                     .foregroundStyle(searchInk)
             }
@@ -414,14 +444,14 @@ struct AccountPane: View {
         } else if let refuse = session.refuse {
             VStack(alignment: .leading, spacing: ShellSpace.snug) {
                 Text(refuse)
-                    .font(ShellType.meta)
+                    .shellFont(.meta)
                     .foregroundStyle(ShellChrome.alarm(colorScheme))
                 // Where *every* board failed there is no list to draw — Core threw the first
                 // board's reason and kept none — so what can still be said is how much the
                 // sentence above is about.
                 if session.unreadAll > 0 {
                     Text(String(format: L10n.t("board.unread.all"), session.unreadAll))
-                        .font(ShellType.mark)
+                        .shellFont(.mark)
                         .foregroundStyle(ShellChrome.inkDim(colorScheme))
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -447,12 +477,12 @@ struct AccountPane: View {
     private var unreadReport: some View {
         VStack(alignment: .leading, spacing: ShellSpace.tight) {
             Text(String(format: L10n.t("board.unread.some"), session.unread.count))
-                .font(ShellType.meta)
+                .shellFont(.meta)
                 .foregroundStyle(ShellChrome.ink(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
             ForEach(session.unread, id: \.board.fid) { entry in
                 Text(ShellSession.unreadMessage(entry))
-                    .font(ShellType.mark)
+                    .shellFont(.mark)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -473,7 +503,7 @@ struct AccountPane: View {
             Button(String(format: L10n.t("account.refuse.signin"), host)) {
                 Task { await offeredSignIn(host) }
             }
-            .font(ShellType.meta)
+            .shellFont(.meta)
             .accessibilityLabel(Text(String(format: L10n.t("account.refuse.signin.label"), host)))
         }
     }
@@ -504,14 +534,15 @@ struct AccountPane: View {
             // `name` and not `pane`: `pane` is documented as a page's own title, one per page, and
             // this page's is "Account".
             Text(L10n.t("account.sources.title"))
-                .font(ShellType.name)
+                .shellFont(.name)
                 .foregroundStyle(ShellChrome.ink(colorScheme))
             // The sentence that says which question this list answers and what Remove costs,
             // before the reader meets a Remove button.
             Text(L10n.t("account.sources.detail"))
-                .font(ShellType.meta)
+                .shellFont(.meta)
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
+            askedAgain
             // **A plain stack, because the page is the thing that scrolls.** A `ScrollView` here
             // would be the inner one the page comment above is about.
             // Row-independent — `stage == nil && !checking` names no host — so it is asked once
@@ -556,6 +587,7 @@ struct AccountPane: View {
                             session.progress, drawnAs: session.stage, host: row.source.host
                         ),
                         refusal: session.rowRefusal,
+                        notice: session.forums.notice(host: row.source.host)?.sentence(),
                         signIn: { Task { await press(row) } },
                         clear: { askClear(row) },
                         remove: { askRemove(row) },
@@ -595,14 +627,79 @@ struct AccountPane: View {
             // `prefs.cache.clear.label` and `account.source.remove.label`, so an act keeps its
             // name through the whole surface.
             Text(L10n.t("account.sources.marks"))
-                .font(ShellType.mark)
+                .shellFont(.mark)
+                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+            // **The word each row carries, and the one reason a row cannot say for itself.** That
+            // a forum reads only because nothing here can write to a forum is the same sentence on
+            // every forum row for ever, so it is said once for the list — the same argument the
+            // line above it is drawn on.
+            Text(L10n.t("account.sources.writing"))
+                .shellFont(.mark)
                 .foregroundStyle(ShellChrome.inkFaint(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
             Text(L10n.t("account.sources.held"))
-                .font(ShellType.mark)
+                .shellFont(.mark)
                 .foregroundStyle(ShellChrome.inkFaint(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    /// What this build now asks for, said to a reader who signed in before it asked (#69).
+    ///
+    /// **On the page and not in an alert.** Widening what somebody already agreed to is the one
+    /// thing this unit must not do quietly, and the honest opposite of quietly is *standing on the
+    /// page they manage their sources from*, for as long as it is true. An alert would be a
+    /// sentence they can dismiss and never see again, or one that comes back every launch; this
+    /// goes when they answer it and not before.
+    ///
+    /// **It names the sources and what has not changed, in that order.** Nothing about their
+    /// reading moved, and a line about permissions that does not say so reads as one that did.
+    ///
+    /// **`ShellNotice` is deliberately not used**: that is a whole page with nothing on it, and
+    /// this is a line in a page that is full.
+    ///
+    /// **It carries the question as well as the news, one control per source it names.** Being
+    /// told without being asked is half of what the sentence promises: the only way to the choice
+    /// was to sign out and in again, and a sign-out revokes the token at the server — so reaching
+    /// the question cost a working sign-in, and cancelling on the server's page left the reader
+    /// worse off than before the question existed. One press puts the question instead.
+    @ViewBuilder
+    private var askedAgain: some View {
+        let hosts = Self.askedAgain(session.sources, in: session.mastodon)
+        if !hosts.isEmpty {
+            VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                Text(String(
+                    format: L10n.t("account.sources.writing.again"), hosts.joined(separator: ", ")
+                ))
+                .shellFont(.meta)
+                .foregroundStyle(ShellChrome.ink(colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+                // One per source and not one for the list: the question is about one server's
+                // sign-in, and a single control would have to ask which — which is the dialog
+                // asked twice.
+                ForEach(hosts, id: \.self) { host in
+                    Button(String(format: L10n.t("account.sources.writing.again.choose"), host)) {
+                        askWriting(host)
+                    }
+                    .shellFont(.meta)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// The sources on this page whose sign-in predates the question (#69).
+    ///
+    /// **Drawn from the page's own sources and not from the sessions' list of tokens**, so a token
+    /// left behind for a server the reader has since removed cannot put a stranger's name on this
+    /// page — and in join order, which is the order the sentence names them in.
+    ///
+    /// **`session.sources` and not `session.rows`**: this needs hostnames, and `rows` builds a
+    /// fresh `[SourceRow]` the list already builds twice. Internal so a test reads it, on
+    /// `widest`'s grounds.
+    static func askedAgain(_ sources: [Source], in mastodon: MastodonSessions) -> [String] {
+        sources.map(\.host).filter { mastodon.grants[$0] == .unasked }
     }
 
     /// The control set of the widest row in this list — decision 33's one-threshold rule.
@@ -681,14 +778,51 @@ struct AccountPane: View {
     ///
     /// **Which way it goes is `reachedSignIn`'s answer and not this view's** — see its doc comment
     /// for why "signed in" here can only ever mean as far as this device last saw.
+    ///
+    /// **A sign-in that could carry writing asks first** (#69). The question is the reader's to
+    /// answer before the server's page opens, so nothing is asked of the server and nothing is
+    /// opened until they have; a protocol this app cannot write on has no question to put and goes
+    /// straight through, which is decision 4's rule about absent controls applied to a dialog.
     func press(_ row: SourceRow) async {
         if session.isSignedIn(host: row.source.host) {
             await session.signOut(host: row.source.host)
+        } else if row.asksWriting {
+            session.signInChoice = row.source.host
         } else {
             await session.signIn(
                 host: row.source.host, through: WebAuthBrowser(session: webAuthenticationSession)
             )
         }
+    }
+
+    /// The standing sentence's own control (#69): it puts the row's question to a reader who is
+    /// **already signed in**, and signs nobody out to do it.
+    ///
+    /// The dialog and `MastodonSessions.signIn` both cope with a host that already holds a token —
+    /// the new token replaces it here and the one it supersedes is revoked at the server — so a
+    /// reader who cancels on the server's page still has the sign-in they had before they asked.
+    ///
+    /// **The row's own toggle is untouched**: it is two-state and stays two-state. This is the
+    /// second surface for the question and not a third behaviour on the first.
+    func askWriting(_ host: String) {
+        session.signInChoice = host
+    }
+
+    /// The reader answered the scope question: sign in on the server's page, asking for what they
+    /// agreed to and no more.
+    ///
+    /// **The one seam of this choice a test cannot reach** (risk 12), and it is the seam the
+    /// sign-in branch of `press(_:)` already had: a `WebAuthBrowser` built here would open a real
+    /// sheet. What a test drives is `press(_:)` raising the question and
+    /// `ShellSession.signIn(host:through:writing:)` answering it with a page fixture; what nothing
+    /// verifies is that this method hands the reader's own answer to that call. Named here rather
+    /// than left to be discovered.
+    func chose(host: String, writing: Bool) async {
+        session.signInChoice = nil
+        await session.signIn(
+            host: host, through: WebAuthBrowser(session: webAuthenticationSession),
+            writing: writing
+        )
     }
 
     /// A row's Clear. **Empties nothing** — it raises the question, and only the dialog's confirm

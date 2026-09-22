@@ -25,13 +25,29 @@ struct SourceRow: Identifiable, Hashable {
     let canSignIn: Bool
     /// Whether this device holds a sign-in for this source — what decides whether it offers lists.
     let signedIn: Bool
+    /// What may be done on this source (#69): read, read and write, read only because the protocol
+    /// has no writing at all, or a write the source has turned away.
+    ///
+    /// **Handed in rather than looked up**, because two of the three facts that decide it are the
+    /// session's — what the sign-in bought, and what the source has refused since — and a row that
+    /// went and asked for them would be a second derivation of an answer
+    /// `MastodonSessions.writing(host:kind:)` already gives.
+    let writing: SourceWriting
 
-    init(source: Source, profile: ProfileAnswer, signedIn: Bool = false) {
+    /// **`writing` left out is not a second derivation but the same one with nothing to carry**:
+    /// `SourceWriting.of` is asked with no sign-in and no refusal, which is the honest answer for a
+    /// source this device holds neither for — a forum reads only whatever anybody agreed, and a
+    /// signed-out microblog reads.
+    init(
+        source: Source, profile: ProfileAnswer, signedIn: Bool = false,
+        writing: SourceWriting? = nil
+    ) {
         self.source = source
         self.shape = DummyItem.shape(of: source.kind)
         self.profile = profile
         self.canSignIn = Self.canSignIn(source.kind)
         self.signedIn = signedIn
+        self.writing = writing ?? SourceWriting.of(kind: source.kind, grant: nil, refused: false)
     }
 
     /// Whether this protocol has a sign-in for the reader to be offered.
@@ -49,7 +65,8 @@ struct SourceRow: Identifiable, Hashable {
         // A Discuz! behind a login wall is the case the forum sign-in path was built for, and
         // F2's engine is the only transport that reaches it.
         case .discuz: true
-        // Signed in on the server's own page, read-only (#24). Accepted on Mastodon alone.
+        // Signed in on the server's own page (#24), for reading and — where the reader said so
+        // (#69) — for writing. Accepted on Mastodon alone.
         case .mastodon: true
         // Every other protocol this app reads is read signed-out. Pleroma, Akkoma and GoToSocial
         // speak Mastodon's API but are not accepted for its sign-in yet.
@@ -96,6 +113,45 @@ struct SourceRow: Identifiable, Hashable {
         }
     }
 
+    /// What may be done on this source, in the reader's own words (#69).
+    ///
+    /// **A word on every row and not a word on the interesting rows.** A statement that appears
+    /// only where something is unusual is a statement a reader has to know the absence of, and the
+    /// row is the only surface that names a source one at a time. There are four words and no
+    /// silence, so no row has to be read by what is missing from it.
+    ///
+    /// **`never` says only "read only" and the footer legend says why.** The reason is about the
+    /// protocol and is the same reason on every forum row for ever; said per row it is the noise
+    /// `evidenceKey` refuses for `.silent`, and said once for the list it is a fact a reader reads
+    /// when they first wonder.
+    ///
+    /// **No `default:`**, this file's rule everywhere it switches over a closed set.
+    static func writingKey(_ writing: SourceWriting) -> String {
+        switch writing {
+        case .never: "account.source.writing.never"
+        case .reads: "account.source.writing.read"
+        case .writes: "account.source.writing.write"
+        case .refused: "account.source.writing.refused"
+        }
+    }
+
+    /// Whether a sign-in here has a writing question to put to the reader first (#69).
+    ///
+    /// **Read off the row's own `writing` and not from the protocol a second time**: `.never` is
+    /// exactly "this protocol cannot write", the row is already holding that answer, and a
+    /// `canWrite(source.kind)` at the press site would be the `kind == .discuz` at a call site
+    /// `canSignIn`'s own doc forbids.
+    var asksWriting: Bool { writing != .never }
+
+    /// Whether the writing word is the one a reader is meant to notice.
+    ///
+    /// **Only a refusal.** The other three are standing facts about a source and are drawn as
+    /// quietly as the footer legend that explains them; a row that has just had a write turned
+    /// away is reporting something that happened, and it is drawn one ink louder. Not `alarm` —
+    /// that is spent on a host that was not added, and `rowStatus` already declines it for the
+    /// same reason.
+    static func marksWriting(_ writing: SourceWriting) -> Bool { writing == .refused }
+
     /// The boards the reader picked, counted first so the count survives truncation.
     ///
     /// No plural form: this repo ships no `.stringsdict` and `board.choose.threads` = "%d threads"
@@ -124,6 +180,10 @@ struct SourceRow: Identifiable, Hashable {
             row.source.kind.displayName,
             DummyItem.shapeWord(row.shape)
         )]
+        // Straight after the identity and before the figures: it is the second thing the row draws
+        // and it is what decides whether a press on this source can ever write, so it is not left
+        // to the end of a sentence a reader may stop listening to.
+        said.append(L10n.t(writingKey(row.writing)))
         said += figures(row.profile)
         // Said as well as drawn. §5's list stops at the boards, which would leave the one row that
         // has an evidence line the only row whose spoken sentence is shorter than what is on it.
@@ -438,7 +498,7 @@ extension SourceRow {
     /// The width at which a row stops stacking: its furniture, plus the room the hostname is owed.
     ///
     /// **`mark` and `host` are passed in because they scale and `SourceRow` cannot read the type
-    /// size.** `SourceRowView` holds both as `@ScaledMetric(relativeTo: .callout)` and hands them
+    /// size.** `SourceRowView` holds both as `@ShellMetric(relativeTo: .callout)` and hands them
     /// here. That is a reversal of the shipped `Regime`'s deletion of the type gate, and it is
     /// deliberate: the deleted gate was about the *controls*, which are glyphs with no string
     /// length, and QA was right that it restacked a 791pt iPad wrongly. The content column now
@@ -451,6 +511,16 @@ extension SourceRow {
     /// large-type reader back to a 132pt floor showing four characters, with every test still green
     /// because every test states the default rung. The constants are the *base* values the view
     /// scales; this function must be told what they scaled to.
+    ///
+    /// **#69's writing word adds no term here, and that is a decision rather than an omission.**
+    /// The headroom between this threshold and a 393pt phone is 33 points — so *any* element given
+    /// a floor of its own on the host line, a word or a glyph, takes the one-line row off every
+    /// phone, which is the dividend decision 33 was argued for. So the word is drawn in the room
+    /// the content column has spare, behind the hostname's own `layoutPriority`: what gives way
+    /// under a squeeze is the end of the word and never the head of the hostname, and the
+    /// guarantee stated below — trailing means the hostname has at least its floor — is untouched.
+    /// The cost is that at a boundary width with a long hostname the word can truncate; it is said
+    /// whole in `spoken(_:)` at every width, and no test can see a truncation (risk 12).
     static func threshold(_ controls: [Control], mark: CGFloat, host: CGFloat) -> CGFloat {
         furniture(controls, mark: mark) + host
     }
@@ -586,6 +656,10 @@ struct SourceRowView: View {
     /// this row's host here rather than filtered by the caller, so the row stays a function of its
     /// inputs and the comparison is in one place.
     let refusal: (host: String, key: String)?
+    /// What this forum's row owes the reader about its sign-in (#153) — that a launch did not sign
+    /// it in again and why, or that a password was not kept or not deleted — already a sentence.
+    /// The caller asks `ForumSessions.notice(host:)` for this row's host; nothing here looks.
+    var notice: String? = nil
 
     /// Whether the pointer is on this row. **`RailButton`'s own `@State hovering`**, and like it a
     /// seam no test reaches — `.onHover` is delivered by a rendered tree. What a test does reach
@@ -607,15 +681,15 @@ struct SourceRowView: View {
     @Environment(\.displayScale) private var displayScale
     /// The leading mark's drawn size, before the ceiling. Scaled so the mark grows with the
     /// hostname beside it; capped by `symbolPoints(_:)`, which the control glyphs already read.
-    @ScaledMetric(relativeTo: .callout) private var markScaled: CGFloat = SourceRow.markBase
+    @ShellMetric(relativeTo: .callout) private var markScaled: CGFloat = SourceRow.markBase
     /// The room the hostname is owed, scaled. **This is the term that brings the type size back
     /// into the threshold**, and it is a different term from the gate QA deleted: that one was
     /// about the controls, which are glyphs with no string length. The content column now holds
     /// nothing but text.
-    @ScaledMetric(relativeTo: .callout) private var hostFloorScaled: CGFloat = SourceRow.hostFloor
+    @ShellMetric(relativeTo: .callout) private var hostFloorScaled: CGFloat = SourceRow.hostFloor
     /// Half a callout's cap height, scaling with it, so both ends' anchors hold across the rungs
     /// the trailing regime exists in. See `actionsTrailing`.
-    @ScaledMetric(relativeTo: .callout) private var capHalf: CGFloat = 6
+    @ShellMetric(relativeTo: .callout) private var capHalf: CGFloat = 6
     /// A control glyph's drawn size, before the ceiling. Scaled so the marks grow with the words
     /// beside them; capped by `symbolPoints(_:)` so they can never grow out of their targets.
     ///
@@ -624,7 +698,7 @@ struct SourceRowView: View {
     /// number on three surfaces, and a bare literal here is exactly how the 20pt gutter came to be
     /// written twice and changed once. The rail reads it through `well - snug` and a test pins the
     /// two equal.
-    @ScaledMetric(relativeTo: .callout) private var glyph: CGFloat = SourceRow.markBase
+    @ShellMetric(relativeTo: .callout) private var glyph: CGFloat = SourceRow.markBase
 
     /// The leading mark's size as it is actually drawn, which is also the term `threshold` reads.
     /// **One symbol for both**, so the frame and the arithmetic cannot drift apart — the mistake
@@ -775,8 +849,13 @@ struct SourceRowView: View {
         SourceRow.press(hovering: hovering, actsLive: actsLive, scheme: colorScheme)
     }
 
-    /// The hostname — **the whole of what the row states about the server now**, and, since
-    /// decision 31, the label of the row's own press.
+    /// The hostname and what may be done on the source — **the whole of what the row states about
+    /// the server now**, and, since decision 31, the label of the row's own press.
+    ///
+    /// **The writing word joined it with #69**, and it is on this line rather than under it
+    /// because it is a fact about the source and not about an errand — the row is still one line
+    /// at rest. It is given no floor of its own; see `SourceRow.threshold` for what that buys and
+    /// what it costs.
     ///
     /// **One line, tail truncation, and no `fixedSize`.** A hostname is one unbreakable token: it
     /// truncates from the tail and keeps its head, which is what `SourceRow.hostFloor` is a floor
@@ -805,14 +884,53 @@ struct SourceRowView: View {
     /// with no way to act — `UsagePane` records shipping that defect twice, and `.ignore` on
     /// an element that is itself pressable is the same defect with a press attached.
     private var said: some View {
-        Text(row.source.host)
-            .font(ShellType.name)
-            .foregroundStyle(ShellChrome.ink(colorScheme))
+        HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
+            Text(row.source.host)
+                .shellFont(.name)
+                .foregroundStyle(ShellChrome.ink(colorScheme))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                // The hostname takes its room first and the word takes what is left, so a column
+                // squeezed below both loses the end of a word and never the head of a hostname.
+                .layoutPriority(1)
+            writingWord
+            // The pair is leading-aligned inside a column that claims the whole row, so the word
+            // sits beside its hostname rather than opposite it at the far edge, where it would
+            // read as a fifth control.
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(SourceRow.spoken(row))
+    }
+
+    /// What may be done on this source, drawn (#69).
+    ///
+    /// **Quiet, and beside the hostname rather than under it.** It is a standing fact about the
+    /// source and not an errand, so it belongs on the identity line — the row is still one line at
+    /// rest (decision 34), and `rowStatus` below stays what it was: the slot for a sentence about
+    /// a press.
+    ///
+    /// **Said and drawn from the same key.** `SourceRow.spoken(_:)` reads `writingKey` too, so a
+    /// reader who cannot see this is told the same word rather than a second wording of it.
+    private var writingWord: some View {
+        Text(L10n.t(SourceRow.writingKey(row.writing)))
+            .shellFont(.mark)
+            .foregroundStyle(writingInk)
             .lineLimit(1)
             .truncationMode(.tail)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel(SourceRow.spoken(row))
+            // Said by `said`'s own label, which composes the whole row's sentence — an element
+            // spoken twice is a reader hearing the same fact either side of the hostname.
+            .accessibilityHidden(true)
+    }
+
+    /// The writing word's ink. **Internal and pinned**, on the same grounds as `markInk`: a colour
+    /// decided inside a `View` body is reachable from nothing, and this one carries the difference
+    /// between a standing fact and a source that has just turned a write away.
+    var writingInk: Color {
+        SourceRow.marksWriting(row.writing)
+            ? ShellChrome.inkDim(colorScheme)
+            : ShellChrome.inkFaint(colorScheme)
     }
 
     /// What this row's errand is doing, or why the last press about it came to nothing.
@@ -833,11 +951,19 @@ struct SourceRowView: View {
         }
         if let refusal, refusal.host == row.source.host {
             Text(String(format: L10n.t(refusal.key), row.source.host))
-                .font(ShellType.mark)
+                .shellFont(.mark)
                 // **Not `alarm`.** That colour is spent on the line that says a host was not added
                 // and why; this host was added. Two of this row's marks are alarm-coloured, which
                 // is what keeps the distinction readable: alarm on a glyph is a control, alarm on
                 // words is a report.
+                .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        if let notice {
+            // The same weight as a refusal and for its reason: this host was added, and nothing
+            // about it is broken that a press of Sign in on this row does not answer.
+            Text(notice)
+                .shellFont(.mark)
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
         }

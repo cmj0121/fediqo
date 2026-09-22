@@ -26,6 +26,9 @@ struct ForumSignInSheet: View {
     @State private var saving = false
     @State private var checking = false
     @State private var signedIn = false
+    /// Why what the reader asked to keep was not kept, once that has happened. While it is set the
+    /// sheet stays up and says so, and Done closes it — the sign-in itself was reached.
+    @State private var unkept: ForumKeepFailure?
 
     private var engine: ForumWebEngine { sessions.engine(host: request.host) }
 
@@ -57,17 +60,17 @@ struct ForumSignInSheet: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: ShellSpace.tight) {
             Text(String(format: L10n.t("forum.signin.title"), request.host))
-                .font(ShellType.pane)
+                .shellFont(.pane)
                 .foregroundStyle(ShellChrome.ink(colorScheme))
-            Text(L10n.t(request.stop.explanationKey))
-                .font(ShellType.meta)
+            Text(request.stop.explanation())
+                .shellFont(.meta)
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
             // The forum's own words, on their own line. Not this app talking, and never
             // rephrased into this app's voice — a stranger's server saying "wrong password" is
             // information, and putting it in our own sentence would make us the ones claiming it.
             if let said = request.stop.forumSaid {
                 Text(said)
-                    .font(ShellType.mark)
+                    .shellFont(.mark)
                     .foregroundStyle(ShellChrome.inkFaint(colorScheme))
                     .textSelection(.disabled)
             }
@@ -79,11 +82,18 @@ struct ForumSignInSheet: View {
     private var footer: some View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
             Toggle(L10n.t("forum.signin.save"), isOn: $saving)
-                .font(ShellType.body)
+                .shellFont(.body)
+                .modifier(WatchingTyped(host: request.host, sessions: sessions, on: saving))
             Text(L10n.t(saving ? "forum.signin.save.on" : "forum.signin.save.off"))
-                .font(ShellType.mark)
+                .shellFont(.mark)
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
+            if let unkept {
+                Text(unkept.sentence())
+                    .shellFont(.mark)
+                    .foregroundStyle(ShellChrome.ink(colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             HStack(spacing: ShellSpace.step) {
                 Spacer(minLength: ShellSpace.snug)
                 Button(L10n.t("forum.signin.cancel")) { finish(false) }
@@ -118,20 +128,51 @@ struct ForumSignInSheet: View {
     /// and what it says is what is reported upward. Saving happens only on a sign-in that the
     /// page confirms: a password saved from a failed attempt is a password that will fail
     /// silently on every launch afterwards.
+    ///
+    /// **A keep that failed is said here, and the sheet waits** (#153). It used to be ignored, and
+    /// the reader learned only at the next launch — by being signed out — that nothing had been
+    /// kept. Now the sentence says what went wrong, and the next Done closes the sheet on a
+    /// sign-in that was, after all, reached. The row goes on saying it after the sheet is gone.
     private func confirm() async {
+        if unkept != nil {
+            finish(true)
+            return
+        }
         checking = true
         defer { checking = false }
         let reached = await engine.isSignedIn()
         signedIn = reached
-        if reached, saving {
-            await sessions.saveTyped(host: request.host)
+        if reached, saving, case .failed(let failure) = await sessions.saveTyped(host: request.host) {
+            unkept = failure
+            return
         }
         finish(reached)
     }
 
     private func finish(_ reached: Bool) {
+        // Whatever was held for keeping goes with the sheet, kept or not.
+        sessions.watchTyped(host: request.host, on: false)
         finished(reached)
         dismiss()
+    }
+}
+
+/// The sheet's switch, handed to the forum's browser: while it is on, what the reader submits on
+/// the forum's page is held for keeping — #153. A modifier of its own so the sheet's chain carries
+/// no closure (the CI compiler's rule).
+private struct WatchingTyped: ViewModifier {
+    let host: String
+    let sessions: ForumSessions
+    let on: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: on, initial: false) { _, now in
+                sessions.watchTyped(host: host, on: now)
+            }
+            // A sheet swiped away, or the Mac's window closed by its own button, never reaches
+            // `finish`; what was held goes with it all the same.
+            .onDisappear { sessions.watchTyped(host: host, on: false) }
     }
 }
 

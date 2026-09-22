@@ -26,6 +26,34 @@ enum ShellSpace {
     static let room: CGFloat = 24
 }
 
+/// The way back, at the head of whatever the walk stepped onto — a conversation, somebody's page,
+/// a page read out of a post (#169). **One button for the three**, so a reader who has learnt to
+/// leave one has learnt to leave the others, and a fourth is drawn the same without being copied.
+/// What it says is each place's own, and so is any key that leaves it too — `shortcut`, put on
+/// the button itself.
+struct ShellBackButton: View {
+    let titleKey: String
+    let shortcut: KeyboardShortcut?
+    let action: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+
+    init(_ titleKey: String, shortcut: KeyboardShortcut? = nil, action: @escaping () -> Void) {
+        self.titleKey = titleKey
+        self.shortcut = shortcut
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Label(L10n.t(titleKey), systemImage: "chevron.left")
+                .shellFont(.meta, weight: .medium)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(ShellChrome.selectInk(colorScheme))
+        .keyboardShortcut(shortcut)
+    }
+}
+
 /// The shell's one-pixel rule, wherever a surface divides.
 ///
 /// **A view rather than three copies of five lines.** `AccountPane`, `JoinSheet` and

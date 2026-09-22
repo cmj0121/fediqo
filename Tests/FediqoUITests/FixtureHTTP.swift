@@ -151,6 +151,24 @@ actor GatedHTTP: HTTPClient {
     }
 }
 
+/// `/api/v2/instance` — **what a Mastodon is asked before it is spoken to** (#86).
+///
+/// Here rather than private to one suite, which is this file's standing rationale: `ReloadTests`
+/// and `FlavourTests` both need the address and both need a body naming a version, and two
+/// spellings of one fixture are how the two suites come to disagree about what a server said.
+enum MastodonInstance {
+    static func address(_ host: String) -> String { "https://\(host)/api/v2/instance" }
+
+    /// A server answering as `version`. The domain and title are the host's own, so a body
+    /// routed to one host cannot quietly be the body another host served.
+    static func says(_ version: String, host: String) -> FixtureHTTP.Outcome {
+        .text(#"{"domain":"\#(host)","title":"\#(host)","version":"\#(version)"}"#)
+    }
+
+    /// Still a Mastodon, which is every host in a suite that is not about migration.
+    static func mastodon(_ host: String) -> FixtureHTTP.Outcome { says("4.3.1", host: host) }
+}
+
 /// Opens a gate nobody else will, so a test that lost its synchronisation fails instead of
 /// hanging the suite. Armed before anything awaits and cancelled on the passing path.
 ///

@@ -128,6 +128,7 @@ struct UsagePane: View {
         // The page's own colour, as on the timeline and Account, and no scroll bar.
         .scrollContentBackground(.hidden)
         .scrollIndicators(.never)
+        .clearsFloatingCorner()
         .padding(ShellSpace.snug)
         .task(id: Probe(hosts: sources.map(\.host), cleared: session?.cleared ?? 0)) {
             await readCatalogues()
@@ -175,7 +176,7 @@ struct UsagePane: View {
                     Text(L10n.t(tab.titleKey))
                         .lineLimit(1)
                         .fixedSize()
-                        .font(ShellType.meta.weight(selected ? .semibold : .regular))
+                        .shellFont(.meta, weight: selected ? .semibold : .regular)
                         .foregroundStyle(
                             selected
                                 ? ShellChrome.selectInk(colorScheme)
@@ -230,7 +231,7 @@ struct UsagePane: View {
             Text(L10n.t("prefs.cache"))
         } footer: {
             Text(L10n.t("prefs.cache.footer"))
-                .font(ShellType.mark)
+                .shellFont(.mark)
                 .foregroundStyle(ShellChrome.inkFaint(colorScheme))
         }
     }
@@ -241,7 +242,7 @@ struct UsagePane: View {
         let disk = onDisk.map { $0.values.reduce(0, +) }
         return VStack(alignment: .leading, spacing: ShellSpace.tight) {
             Text(L10n.t("prefs.held.total"))
-                .font(ShellType.name)
+                .shellFont(.name)
                 .foregroundStyle(ShellChrome.ink(colorScheme))
             reading(Text(Self.postsLine(holdings.posts)))
             reading(Self.picturesText(count: memory.count, bytes: memory.bytes, disk: disk))
@@ -304,7 +305,7 @@ struct UsagePane: View {
             Button(L10n.t("prefs.drop.copies")) { droppingCopies = true }
         } footer: {
             Text(L10n.t("prefs.drop.footer"))
-                .font(ShellType.mark)
+                .shellFont(.mark)
                 .foregroundStyle(ShellChrome.inkFaint(colorScheme))
         }
     }
@@ -370,7 +371,7 @@ struct UsagePane: View {
         HStack(alignment: .firstTextBaseline, spacing: ShellSpace.step) {
             VStack(alignment: .leading, spacing: ShellSpace.tight) {
                 Text(source.host)
-                    .font(ShellType.name)
+                    .shellFont(.name)
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                 catalogueLine(for: source)
                 reading(Text(Self.postsLine(holdings.posts(host: source.host))))
@@ -435,6 +436,10 @@ struct UsagePane: View {
 
     /// The forum posts this device is holding from this server — D30's cache, in the inventory.
     ///
+    /// **This run's cache, which Clear empties.** An opening post kept with its row (#154) is part
+    /// of the row, and a Clear keeps the rows, so it is not counted here: the figure is what the
+    /// button beside it lets go of.
+    ///
     /// **Drawn only for a forum**, which is the one place this cache can ever hold anything: a
     /// `tid` is Discuz!'s number and `ForumThreadRef` refuses everything else, so a line under
     /// `first.example` reading "no first posts held" would be a true sentence about a thing
@@ -477,7 +482,7 @@ struct UsagePane: View {
                 Button(L10n.t("prefs.password.forget")) {
                     session.forums.forgetPassword(host: source.host)
                 }
-                .font(ShellType.mark)
+                .shellFont(.mark)
                 .buttonStyle(.plain)
                 .foregroundStyle(ShellChrome.phosphor(colorScheme))
                 .accessibilityLabel(
@@ -489,7 +494,7 @@ struct UsagePane: View {
 
     private func reading(_ text: Text) -> some View {
         text
-            .font(ShellType.reading)
+            .shellFont(.reading)
             .foregroundStyle(ShellChrome.inkFaint(colorScheme))
     }
 

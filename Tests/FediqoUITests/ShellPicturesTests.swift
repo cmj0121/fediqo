@@ -1106,6 +1106,68 @@ struct ShellPicturesTests {
         #expect(await http.count == 2)
     }
 
+    /// A press lifts the mark and runs the same fetch. Success replaces the failure with the
+    /// picture; a second miss writes over the first, so nothing stacks. A nil URL is still
+    /// nothing to try, and a refused address is not asked again until the press.
+    @Test("A press asks again, and a second miss replaces rather than stacks")
+    func retryAsksAgainAndDoesNotStack() async throws {
+        let png = try picture(width: 32, height: 32, bits: 8)
+        let flaky = Flaky(png: png)
+        let cache = ShellPictures(http: flaky)
+        let generation = cache.generation
+
+        await cache.fetch(address(1), scale: 2, tier: .deck, host: alpha)
+        #expect(cache.missing[key(1)] == .unreachable)
+        #expect(RemoteImage.fill(
+            have: cache.picture(address(1), scale: 2, tier: .deck, host: alpha) != nil,
+            url: address(1),
+            missing: cache.isMissing(address(1), scale: 2, tier: .deck)
+        ) == .failed)
+
+        await cache.retry(address(1), scale: 2, tier: .deck, host: alpha)
+        #expect(cache.picture(address(1), scale: 2, tier: .deck, host: alpha) != nil)
+        #expect(cache.missing.isEmpty)
+        #expect(cache.generation == generation, "a press on one picture is not a cohort")
+        #expect(RemoteImage.fill(
+            have: true,
+            url: address(1),
+            missing: cache.isMissing(address(1), scale: 2, tier: .deck)
+        ) == .held)
+        #expect(await flaky.count == 2)
+    }
+
+    @Test("A refused picture is asked again only when retry is pressed, and a second refusal replaces")
+    func retryDoesNotStackRefusals() async {
+        let http = FixtureHTTP(["/1.png": .text("gone", status: 404)])
+        let cache = ShellPictures(http: http)
+
+        await cache.fetch(address(1), scale: 2, tier: .deck, host: alpha)
+        #expect(cache.missing[key(1)] == .refused)
+        #expect(cache.missing.count == 1)
+        await cache.fetch(address(1), scale: 2, tier: .deck, host: alpha)
+        #expect(await http.requested.count == 1, "fetch by itself does not retry a refusal")
+
+        await cache.retry(address(1), scale: 2, tier: .deck, host: alpha)
+        #expect(await http.requested.count == 2)
+        #expect(cache.missing.count == 1)
+        #expect(cache.missing[key(1)] == .refused)
+        #expect(RemoteImage.fill(
+            have: false,
+            url: address(1),
+            missing: cache.isMissing(address(1), scale: 2, tier: .deck)
+        ) == .failed)
+    }
+
+    @Test("A nil URL is not a retry")
+    func nilURLRetryDoesNothing() async {
+        let cache = ShellPictures()
+        let generation = cache.generation
+        await cache.retry(nil, scale: 2, tier: .deck, host: alpha)
+        #expect(cache.missing.isEmpty)
+        #expect(cache.generation == generation)
+        #expect(RemoteImage.fill(have: false, url: nil, missing: false) == .absent)
+    }
+
     @Test("An outage is never mistaken for a refusal")
     func outageIsNotRefusal() async {
         let cache = ShellPictures(http: Offline(code: .notConnectedToInternet))
@@ -1481,6 +1543,14 @@ struct ShellPicturesTests {
         await relaunched.fetch(address(1), scale: 2, tier: .deck, host: alpha)
         #expect(await offline.requests == 0, "a copy on this device went to the network anyway")
         #expect(relaunched.picture(address(1), scale: 2, tier: .deck, host: alpha) != nil)
+        #expect(
+            RemoteImage.fill(
+                have: relaunched.picture(address(1), scale: 2, tier: .deck, host: alpha) != nil,
+                url: address(1),
+                missing: relaunched.isMissing(address(1), scale: 2, tier: .deck)
+            ) == .held,
+            "a copy on this device must skip waiting, including with the network off"
+        )
     }
 
     @Test("A copy kept under one host is not drawn for another")

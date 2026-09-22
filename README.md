@@ -55,12 +55,31 @@ arrived and what you see is a rule you wrote.
 checkout does not already carry. [`docs/release.md`](docs/release.md) covers the one command
 that does need more — the one that signs both apps and sends them to TestFlight.
 
+A pull request is opened only after the full suite has been run on this machine, whatever
+the pull request is for. That is the protocol servers, then the suite with them unlocked:
+
+```text
+make servers
+FEDIQO_SERVERS=1 make test
+make servers-down
+```
+
+`make servers` needs Docker. `make test` alone still passes on a machine that has not
+brought the servers up, and that is the part a pull request checks. The servers, the
+cases they unlock, and a release build run when work lands on `main`.
+
 ## Using it
 
 An empty launch opens Account. Add a Mastodon host or a Discuz forum from the catalog or by
 typing its hostname. It names the protocol; only those two join this session. What a source
 sends lands in this device's store, and every timeline is a query of that store. Notices and
 compose stay off until they have something.
+
+### Writing a post
+
+From a timeline, `c` or the compose control opens writing over the page. You pick a source
+you may write on, and how far the post goes from what that source offers. A send that fails
+keeps the text. What landed is in the timeline it belongs to, without reloading everything.
 
 ### Timelines you write
 
@@ -116,8 +135,27 @@ choose a forum's boards. Home is always read once you are signed in.
 ### Signing in to Mastodon
 
 A Mastodon source can be signed in to from its row on Account, so its Home and your lists can
-be read. You sign in on the server's own page, and Fediqo asks only to read — never to post,
-follow, or change anything. The secret is kept in this device's Keychain. It is not in the
+be read. Before the server's page opens, Fediqo asks which sign-in you want, and says which
+part is which: reading alone, or reading and writing. Reading brings in your Home and your
+lists. Writing lets you post, reply, boost and favourite from Fediqo, and take any of them
+back — and nothing else: Fediqo never asks to follow anybody, change your profile, or touch
+your filters. Choosing reading alone asks for exactly what Fediqo asked for before it could
+write at all, so refusing the writing part changes nothing about reading. Signing in again is
+how you change your answer.
+
+If you signed in before Fediqo could write, that sign-in still only reads, and Fediqo writes
+nothing with it. Account says so, names the source, and puts the choice there beside it: one
+press asks the same question, without signing you out first. Cancel on the server's page and
+the sign-in you already had is still the one in use. What you already agreed to is never
+widened behind your back.
+
+Every row on Account says what may be done on that source — read, read and write, or read only
+where the protocol has no writing in Fediqo at all, which is every forum. What it says is the
+server's own answer: a server that grants less than Fediqo asked for is taken at its word, and
+the row says what may be done rather than what was asked. A source that turns a write away says
+so on its row and keeps saying it until you sign in to it again.
+
+The secret is kept in this device's Keychain. It is not in the
 store, it is not copied to iCloud, and it does not follow your Apple account to another
 device. It survives a relaunch.
 

@@ -39,6 +39,10 @@ public enum ForumCredentialError: Error, Equatable, Sendable {
     /// likely to be logged.
     case keychain(OSStatus)
     case incomplete
+    /// An item is there and is not one this build can read back — no password in it, or not
+    /// text. Said rather than read as "nothing kept" (#153): a reader told nothing is kept when
+    /// something is would press Sign in forever and never learn why it does not sign in by itself.
+    case unreadable
 }
 
 /// Where a saved forum password lives.
@@ -166,10 +170,11 @@ public struct KeychainCredentials: ForumCredentialStore {
               let password = String(data: data, encoding: .utf8),
               let username = found[kSecAttrAccount as String] as? String
         else {
-            // An item that is there but unreadable is not an error to show a reader: it is a
-            // stored credential this build cannot use, and the honest thing is to behave as
-            // though there were none and let them sign in again.
-            return nil
+            // An item that is there but unreadable is a stored credential this build cannot use.
+            // It used to be answered as though there were none, which is the silence #153 is
+            // about: the reader was never told why a forum stopped signing in by itself. Said
+            // instead, and the sheet still hands them the forum's own page to sign in on.
+            throw ForumCredentialError.unreadable
         }
         return ForumCredential(host: host, username: username, password: password)
     }

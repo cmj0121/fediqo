@@ -22,6 +22,19 @@ struct ForumThreadRef: Hashable, Sendable {
     /// Folded once, here, where it enters this module's caches — decision 21.
     let host: String
     let tid: Int
+    /// The opening post this device kept with the row, where it has one (#154). **Carried, not
+    /// part of what the thread is**: two refs to one thread are one thread whatever either
+    /// remembers of it, so `==` and the hash read the host and the number only.
+    let kept: ForumOpening?
+    /// The row in the store this thread is, where the ref came from a row — what a read landing
+    /// is kept under. See `ForumPosts.keeping`.
+    let note: NoteKey?
+    /// Whether the forum's ranking lists named this thread — it arrived as its Trends. Carried,
+    /// like `kept`, and not part of what the thread is.
+    let ranked: Bool
+    /// The boards the row says the thread is in, by number: its board's own listing, or the
+    /// ranking list's board cell. Carried, like `kept`.
+    let boards: Set<Int>
 
     /// The thread a row is standing on, or nothing where this row is not a Discuz! thread at all.
     ///
@@ -34,11 +47,40 @@ struct ForumThreadRef: Hashable, Sendable {
         guard let tid = Int(parts[2]), tid > 0, !parts[1].isEmpty else { return nil }
         self.host = String(parts[1]).lowercased()
         self.tid = tid
+        kept = item.opening
+        note = NoteKey(host: item.source.host, id: item.noteID)
+        ranked = item.categories.contains(.trends)
+        boards = Set(item.categories.compactMap { category -> Int? in
+            guard case .board(let id) = category else { return nil }
+            return Int(id)
+        })
     }
 
-    init(host: String, tid: Int) {
+    init(
+        host: String, tid: Int, kept: ForumOpening? = nil,
+        ranked: Bool = false, boards: Set<Int> = []
+    ) {
         self.host = host.lowercased()
         self.tid = tid
+        self.kept = kept
+        note = nil
+        self.ranked = ranked
+        self.boards = boards
+    }
+
+    static func == (a: ForumThreadRef, b: ForumThreadRef) -> Bool {
+        a.host == b.host && a.tid == b.tid
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(host)
+        hasher.combine(tid)
+    }
+
+    /// The row this thread is in the store: the one the ref was read off, or else the spelling
+    /// `DiscuzThread.asNote` writes.
+    var noteKey: NoteKey {
+        note ?? NoteKey(host: host, id: "discuz:\(host):\(tid)")
     }
 }
 
@@ -63,6 +105,10 @@ enum ForumReading: Equatable, Sendable {
     case silent
     /// It cannot be had. Which kind, because the row says different things about them.
     case absent(ForumPosts.Absence)
+    /// Not read, **on purpose, until the reader opens it**: a thread the forum's ranking lists
+    /// named, from a board the reader does not read. See `ForumPosts.readsWhenReached`. Only a row
+    /// in a list says this; the opened thread reads it.
+    case unread
 
     /// What one fetched post is worth to a row: the words, or the reason there are none.
     ///
@@ -89,6 +135,18 @@ enum ForumReading: Equatable, Sendable {
 /// forum, for one press. This package refuses that traffic everywhere else it comes up, so the
 /// post is fetched for the rows the reader actually stopped on and kept for as long as it is
 /// affordable to keep it.
+///
+/// ## And kept with the row once it is read — #154, revising D30
+///
+/// D30 held what was read here and nowhere else, so every relaunch started again from titles and
+/// asked the forum for every row again, and a dark network showed a forum already read as
+/// nothing but titles. **The fetching rule is unchanged** — a row is read when it is reached, and
+/// never ahead — but what the read brings back of the opening post (its words, what it quoted,
+/// the author's picture) is now handed to the session to keep with the row (`keeping`), and a
+/// row that carries it draws it without asking (`ForumThreadRef.kept`, `asks(_:)`). What the
+/// forum withheld is never kept. This cache is still where this run's answers are held first,
+/// and it is still bounded; what is kept with a row is bounded by the rows, and by the reader's
+/// keep-for window, like every other thing a row carries.
 ///
 /// **`ShellPictures` is the model and the resemblance is deliberate**, down to the names. It is
 /// the same problem with a different payload: work commissioned from a view body, deduplicated,
@@ -288,9 +346,15 @@ final class ForumPosts {
     /// to say why.
     @ObservationIgnored private let forums: ForumSessions?
 
+    /// Where each page read is shown while it is on the wire (#164) — as the opening post or as
+    /// the replies, which only this knows. The app's own; a test hands in another.
+    @ObservationIgnored var work: SourceWork = .shared
+
     init(http: any HTTPClient = ForumPosts.live, through forums: ForumSessions? = nil) {
         self.http = http
         self.forums = forums
+        // Weak: `forums` outlives this and holds the listener, and this holds `forums`.
+        forums?.whenSignedIn { [weak self] host in self?.signedIn(host: host) }
     }
 
     /// Built with this caller's own ceiling rather than the transport's default. See `maxBytes`.
@@ -324,8 +388,64 @@ final class ForumPosts {
         if let held = entries[key], let opening = held.posts.first {
             return ForumReading.of(opening)
         }
+        // **What was kept with the row, before any reason there is nothing** (#154). This run's
+        // own answer is above it, so a reload's words replace the kept ones on screen the moment
+        // they land; a failure below it is only this run's, and the words already read are still
+        // the author's.
+        if let kept = ref.kept { return kept.words.isEmpty ? .silent : .words(kept.words) }
         if let absence = missing[key] { return .absent(absence) }
         return .coming
+    }
+
+    /// The boards the reader reads on each forum, by number — what `readsWhenReached` asks. Kept
+    /// here by the session as its sources change; empty until it does.
+    var boardsRead: [String: Set<Int>] = [:]
+
+    /// **Whether reaching this row may read its opening post** — the points guard.
+    ///
+    /// Some forums charge the reader points just to open a thread in some boards, and D30 reads a
+    /// row's opening post the moment it is reached. A reader who chose a board has chosen what
+    /// reading it costs; a thread the forum's ranking lists named from a board they never chose
+    /// has not been chosen by them at all, and scrolling past it must not spend their points. So a
+    /// ranked thread is read when reached **only when one of its boards is one the reader reads**
+    /// — and is otherwise read when they open it, which is them choosing it. Every thread that was
+    /// not ranked is D30's as it always was.
+    ///
+    /// **Strict where it cannot tell.** A ranked thread with no board this device knows of — the
+    /// row wrote none — is not read, and neither is one on a forum read through its front page
+    /// with no board chosen: the front page makes no row a board's.
+    func readsWhenReached(_ ref: ForumThreadRef) -> Bool {
+        guard ref.ranked else { return true }
+        return !ref.boards.isDisjoint(with: boardsRead[ref.host] ?? [])
+    }
+
+    /// Whether a band standing on this thread should read it now: `asks`, and — in a list rather
+    /// than the opened thread — the points guard. The one answer the band's wait and its read
+    /// both ask, so the two cannot disagree.
+    func fetches(_ ref: ForumThreadRef, opened: Bool) -> Bool {
+        asks(ref) && (opened || readsWhenReached(ref))
+    }
+
+    /// `reading(_:)`, as a band in a list or in the opened thread draws it: a row the guard keeps
+    /// from reading says so, where it would otherwise wait for a read that is not coming.
+    func reading(_ ref: ForumThreadRef, opened: Bool) -> ForumReading {
+        let reading = reading(ref)
+        if reading == .coming, !opened, !readsWhenReached(ref) { return .unread }
+        return reading
+    }
+
+    /// Whether a row standing on this thread should ask the forum for its opening post now.
+    ///
+    /// **Only a row that has nothing to draw, or whose board was just read again.** A row kept
+    /// with its words draws them and asks nothing — that is what a relaunch and a dark network
+    /// are owed (#154) — until a reload of its board says the forum may have changed its mind;
+    /// then the row asks once, when it is reached, and what comes back replaces what was kept.
+    /// Everything else is D30's rule as it always was: not asked for, not already held, and not
+    /// already answered with a reason asking again cannot change.
+    func asks(_ ref: ForumThreadRef) -> Bool {
+        let key = Key(ref, .opening)
+        guard entries[key] == nil, missing[key] == nil else { return false }
+        return ref.kept == nil || due.contains(key.host)
     }
 
     /// The author's picture, where the opening post brought one — **and a stamp, like `reading`**.
@@ -352,7 +472,28 @@ final class ForumPosts {
     func avatar(of ref: ForumThreadRef) -> URL? {
         let key = Key(ref, .opening)
         wanted(key)
-        return entries[key]?.posts.first?.avatarURL
+        if let held = entries[key] { return held.posts.first?.avatarURL }
+        return ref.kept?.avatarURL
+    }
+
+    /// What the opening post reproduced of somebody else's — **and a stamp, like `reading`** (#104).
+    ///
+    /// **Free in the same way the avatar is.** It came off the page D30 already fetched, Core
+    /// already keeps it out of `body` rather than dropping it, and `cost(of:)` has counted every
+    /// level of it since #94. Until now nothing read it back for the first post of a topic, so a
+    /// thread that opened by answering another drew the answer and never what it answered, while
+    /// the reply below it — quoting the same person — drew both.
+    ///
+    /// Separate from `reading` rather than folded into it, for `avatar`'s reason: a **withheld**
+    /// post has no words and its quotation is still whatever the page carried, and a state that
+    /// held both would have to say so in all five of its cases. Empty where the post quoted
+    /// nothing, and empty where the post has not arrived — which is the same answer, and is meant
+    /// to be: there is nothing to draw either way.
+    func quoted(of ref: ForumThreadRef) -> [DiscuzQuotation] {
+        let key = Key(ref, .opening)
+        wanted(key)
+        if let held = entries[key] { return held.posts.first?.quoted ?? [] }
+        return ref.kept?.quoted ?? []
     }
 
     /// The rest of the topic, and how it got there — D31.
@@ -391,6 +532,7 @@ final class ForumPosts {
     ///
     /// Returns whether every part asked came back.
     func reload(_ ref: ForumThreadRef, within limit: Duration) async -> Bool {
+        rows[Key(ref, .opening)] = ref.noteKey
         let keys = Part.allCases.map { Key(ref, $0) }.filter { key in
             key.part == .opening || entries[key] != nil || missing[key] != nil || inFlight[key] != nil
         }
@@ -419,6 +561,7 @@ final class ForumPosts {
 
     private func fetch(_ ref: ForumThreadRef, part: Part) async {
         let key = Key(ref, part)
+        if part == .opening { rows[key] = ref.noteKey }
         guard entries[key] == nil, missing[key]?.asksAgain ?? true else { return }
         await work(for: key).value
     }
@@ -428,7 +571,6 @@ final class ForumPosts {
     /// The fetch of one part, started unless one is running. `limit` bounds each request of it.
     private func work(for key: Key, within limit: Duration? = nil) -> Task<Void, Never> {
         if let running = inFlight[key] { return running }
-        let client = self.client(for: key.host, within: limit)
         let tid = key.tid
         let part = key.part
         // Unstructured on purpose, and the reason is `ShellPictures.work`'s: the caller is a
@@ -440,6 +582,13 @@ final class ForumPosts {
         // pause in `ForumPostBand`, before this is ever reached: only a view's own task knows
         // that its row went away.
         let started = Task { @MainActor in
+            // **A forum being signed in again at launch is waited for, boundedly, before it is
+            // read** (#153), and the reader is chosen after the wait rather than before it: read
+            // a moment earlier, the post would be asked for as a guest and come back withheld.
+            // Before the slot is taken, so a forum still signing in holds up nobody else's.
+            if let forums = self.forums { await forums.settled(host: key.host) }
+            let asked = self.forums?.signIns(host: key.host) ?? 0
+            let client = self.client(for: key.host, part: part, within: limit)
             await self.enter()
             let answer: Result<[DiscuzPost], Absence>
             do {
@@ -474,6 +623,23 @@ final class ForumPosts {
             // second time to undo the first one's own wake.
             guard !self.cleared.contains(key) else { return }
 
+            // **A guest's answer that lands after a sign-in is not kept** (#153). It was asked for
+            // before the forum knew who this was, and it is the answer the sign-in changes; kept,
+            // it would sit under a signed-in forum as "withheld" for the rest of the run. The
+            // generation moves, so the band asks again as the member it now is.
+            if asked != (self.forums?.signIns(host: key.host) ?? 0), Self.isGuestShaped(answer) {
+                self.generation += 1
+                return
+            }
+
+            // **An opening post read is kept with its row** (#154) — unless the forum withheld it,
+            // which is its notice and not the author's words. Handed on, not written here: the
+            // row is the store's, and so is when it is saved.
+            if part == .opening, case .success(let posts) = answer,
+               let first = posts.first, let opening = ForumOpening(first) {
+                self.keeping?(self.noteKey(for: key), opening)
+            }
+
             switch answer {
             case .success(let posts):
                 self.keep(
@@ -500,13 +666,13 @@ final class ForumPosts {
     /// this is not an optimisation: a cookie jar is not something a `URLSession` may borrow, so a
     /// thread on a forum the reader signed in to comes back withheld — or as a login page, or a
     /// challenge's 403 — if it is fetched any other way, a relaunch included.
-    /// `readsThroughEngine` rather than `transport`, because `transport(host:)` would *build* one
-    /// for every host and this app does not start a web process for a host that never needed it.
-    private func client(for host: String, within limit: Duration?) -> DiscuzClient {
-        var transport = http
-        if let forums, forums.readsThroughEngine(host: host) {
-            transport = ForumJoinTransport(forums.transport(host: host))
-        }
+    /// `readTransport` rather than `transport`, because `transport(host:)` would *build* one for
+    /// every host and this app does not start a web process for a host that never needed it.
+    private func client(for host: String, part: Part, within limit: Duration?) -> DiscuzClient {
+        var transport = forums?.readTransport(host: host, else: http) ?? http
+        transport = WatchedHTTP(
+            transport, for: part == .opening ? .forumPost : .forumReplies, in: work
+        )
         if let limit { transport = Deadline(transport, within: limit) }
         return DiscuzClient(http: transport, host: host)
     }
@@ -553,6 +719,18 @@ final class ForumPosts {
 
     // MARK: - Admission and eviction
 
+    /// Lets one thread's posts go, and what they cost with them — the one place `heldBytes` is
+    /// taken down for a post that leaves.
+    private func dropEntry(_ key: Key) {
+        if let gone = entries.removeValue(forKey: key) { heldBytes -= gone.cost }
+    }
+
+    /// The store row a thread's posts belong to: the row it was read for, or the spelling
+    /// `DiscuzThread.asNote` writes where no row was.
+    private func noteKey(for key: Key) -> NoteKey {
+        rows[key] ?? ForumThreadRef(host: key.host, tid: key.tid).noteKey
+    }
+
     /// Admits what came back, or declines it.
     ///
     /// Room is made oldest-first and never past something a band has wanted since this fetch
@@ -584,7 +762,7 @@ final class ForumPosts {
             return
         }
         for old in evictable {
-            if let gone = entries.removeValue(forKey: old) { heldBytes -= gone.cost }
+            dropEntry(old)
         }
 
         heldBytes -= already
@@ -607,7 +785,9 @@ final class ForumPosts {
         posts.reduce(0) { running, post in
             running
                 + post.body.utf8.count
-                + (post.quoted?.utf8.count ?? 0)
+                // Every level of it: `DiscuzQuotation.byteCount` walks its own tree, so this
+                // stays the one sum it was before a quotation had levels.
+                + post.quoted.reduce(0) { $0 + $1.byteCount }
                 + post.author.utf8.count
                 + post.handle.utf8.count
         }
@@ -667,7 +847,13 @@ final class ForumPosts {
 
     // MARK: - What a reader clears
 
-    /// Drops every post this device holds from one forum — decision 14, this cache's share.
+    /// Drops every post this run holds in memory from one forum — decision 14, this cache's share.
+    ///
+    /// **What it no longer reaches, since #154: an opening post kept with its row.** Those are in
+    /// the index with the rows, and a Clear keeps the rows (#7) — so it keeps their words too, and
+    /// `ShellSession.clear` hands this run's openings to the rows (`openings(host:)`) before it
+    /// calls this. What goes here is this run's copies: the replies, what was withheld or refused,
+    /// and the opening posts held in memory, which the rows now carry for themselves.
     ///
     /// **One sweep and no reference counting**, which is where this parts company with
     /// `ShellPictures.forget(host:)`. A picture address can be handed out by two servers, so
@@ -691,12 +877,92 @@ final class ForumPosts {
             cleared.insert(key)
         }
         for key in Array(entries.keys) where key.host == host {
-            if let gone = entries.removeValue(forKey: key) { heldBytes -= gone.cost }
+            dropEntry(key)
         }
         for key in Array(missing.keys) where key.host == host {
             missing.removeValue(forKey: key)
         }
+        for key in Array(rows.keys) where key.host == host {
+            rows.removeValue(forKey: key)
+        }
         generation += 1
+    }
+
+    /// A sign-in has just landed on this forum — at launch, on the forum's own page, or by the
+    /// saved password — so every answer here that a signed-in reader could get differently is
+    /// forgotten and asked again (#153).
+    ///
+    /// **Forget and ask again, rather than only hold every read until a sign-in settles.** A
+    /// launch's own sign-in is waited for (`ForumSessions.settled`), but boundedly, and a sign-in
+    /// made by hand an hour into a run has nothing to wait for: the rows the reader already
+    /// scrolled past were read as a guest, and without this they would say "withheld" until the
+    /// app quit. What goes is exactly what a sign-in can change — a withheld post, a refusal,
+    /// and a page that was not a thread (a members-only board answers with its login page) —
+    /// and what stays is words already read, which a sign-in does not make any truer.
+    func signedIn(host raw: String) {
+        let host = raw.lowercased()
+        var dropped = false
+        for (key, held) in entries where key.host == host && held.posts.contains(where: \.isWithheld) {
+            dropEntry(key)
+            dropped = true
+        }
+        for (key, absence) in missing where key.host == host
+            && (absence == .refused || absence == .unreadable) {
+            missing.removeValue(forKey: key)
+            dropped = true
+        }
+        // In flight too: the guard in `work` drops a guest's answer that lands after this.
+        if dropped || inFlight.keys.contains(where: { $0.host == host }) { generation += 1 }
+    }
+
+    /// Whether this is an answer a sign-in could have changed. See `signedIn(host:)`.
+    private static func isGuestShaped(_ answer: Result<[DiscuzPost], Absence>) -> Bool {
+        switch answer {
+        case .success(let posts): posts.contains(where: \.isWithheld)
+        case .failure(let absence): absence == .refused || absence == .unreadable
+        }
+    }
+
+    /// Where an opening post read goes to be kept with its row — the session's store (#154). Set
+    /// by the session that owns this cache; nothing where there is none, which is a test's.
+    @ObservationIgnored var keeping: (@MainActor (NoteKey, ForumOpening) -> Void)?
+
+    /// The row each opening post being read belongs to, so what lands is kept under it.
+    @ObservationIgnored private var rows: [Key: NoteKey] = [:]
+
+    /// Forums whose boards were read again this run: their rows ask for their opening posts once
+    /// more when reached, whatever was kept (#154). See `asks(_:)`.
+    private(set) var due: Set<String> = []
+
+    /// A forum's boards were just read again, so each of its rows should read its opening post
+    /// again when it is reached, and keep what the forum says now (#154).
+    ///
+    /// **When reached, and not now.** Nothing is fetched here: this run's answers are let go and
+    /// the rows on screen are told, so the ones the reader is looking at ask, and a row nobody
+    /// reaches asks nothing — D30's rule, still. Until the new words land the kept ones are
+    /// drawn, and where the forum does not answer they stay.
+    func revisit(host raw: String) {
+        let host = raw.lowercased()
+        due.insert(host)
+        for key in Array(entries.keys) where key.host == host && key.part == .opening {
+            dropEntry(key)
+        }
+        for key in Array(missing.keys) where key.host == host && key.part == .opening {
+            missing.removeValue(forKey: key)
+        }
+        generation += 1
+    }
+
+    /// The opening posts this run read from one forum and holds, by the row each belongs to — what
+    /// a Clear hands to the rows it keeps before it lets this cache go (#154).
+    func openings(host raw: String) -> [NoteKey: ForumOpening] {
+        let host = raw.lowercased()
+        var found: [NoteKey: ForumOpening] = [:]
+        for (key, held) in entries where key.host == host && key.part == .opening {
+            guard let first = held.posts.first, let opening = ForumOpening(first) else { continue }
+            found[noteKey(for: key)] = opening
+        }
+        return found
     }
 
     /// Keys whose fetch was in the air when the reader cleared their forum. Read after the
@@ -777,8 +1043,8 @@ enum ForumRepliesStanding: Equatable, Sendable {
 /// nothing to mark the difference. The title alone is the screen the reader wrote in to complain
 /// about; keeping it as the waiting state means the complaint is still on screen every time.
 ///
-/// A plate is the right third answer because it is **not a sentence**. `RemoteImage` draws a bare
-/// `ShellChrome.well` while a picture is on its way and this is the same vocabulary one band
+/// A plate is the right third answer because it is **not a sentence**. `RemoteImage` draws
+/// `ShellWaiting` while a picture is on its way and this is the same vocabulary one band
 /// over, so a reader who has learned what a waiting slot looks like already knows what this is.
 /// And nothing is attributed to anybody: `DiscuzPost`'s own doc refuses to put the forum's notice
 /// in `body` because a row drawing it would attribute the forum's sentence to the author, and a
@@ -794,6 +1060,14 @@ enum ForumRepliesStanding: Equatable, Sendable {
 /// words — deliberately, and since before any of this — so `mainBox` pins **this** kind of row
 /// there too. The rule that separates the two is written down in `mainBox`: a post that arrives
 /// with the list may size its row, and a post that arrives after the row is on screen may not.
+///
+/// ## What it quoted, in the pane only
+///
+/// An opening post can quote somebody exactly as a reply can, and Core has kept that out of the
+/// words and kept it since #94. This band draws it above them, through the same `ForumQuotation`
+/// every reply's goes through, so a topic that opens by answering another shows what it answered
+/// instead of reading as though its author began from nothing. **Only where `inFull`** — the one
+/// height a timeline row keeps is not something a stranger's quotation gets to spend.
 struct ForumPostBand: View {
     let thread: ForumThreadRef
     let posts: ForumPosts
@@ -804,6 +1078,28 @@ struct ForumPostBand: View {
     /// the one post the reader opened *in order to read*, and truncating it there was the
     /// complaint this unit exists to answer. See `DummyItemRow.inFull`.
     let lines: Int?
+
+    /// Whether this is the pane rather than a row in a list — **what decides whether the post's
+    /// quotation is drawn at all** (#104).
+    ///
+    /// The row's own `inFull`, handed down rather than read back out of `lines == nil`. The two
+    /// come from the one flag and so cannot disagree, and keeping them apart is the split
+    /// `DummyItemRow.wordLines` already makes between a fitting and the decision to apply it: a
+    /// line count is arithmetic about a slot, and this is the one question a call site answers.
+    ///
+    /// **Why the quotation is the pane's and not the row's.** A timeline row is one height,
+    /// whatever the post it stands for quoted — that invariant is the row's whole design and a
+    /// defence besides, and a stranger's quotation is exactly the kind of unbounded text that
+    /// would test it. The pane is what the reader opened in order to read; `ForumReplyRow` has
+    /// drawn every reply's quotation there since F6, and this is the opening post joining them.
+    let inFull: Bool
+
+    /// Whether an address in these words is drawn as a link. **False means a cover is in front of
+    /// them**, and a cover must never draw a control — `EmojiText.words` states the whole of that
+    /// argument. Only a microblog post carries a warning today, so a covered band is a shape the
+    /// wire does not make; the row decides it all the same, because the row is where the cover is
+    /// and a rule kept only where it currently cannot be broken is not a rule.
+    let linked: Bool
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.shellPlaceIsActive) private var placeIsActive
@@ -844,16 +1140,62 @@ struct ForumPostBand: View {
         // band on screen re-stamps its interest between one arrival and the next; a band that
         // stops reading looks infinitely stale to the eviction predicate however recently it was
         // drawn. Do not move this, and do not wrap this view in an `EquatableView`.
-        let reading = posts.reading(thread)
-        return Group {
+        let reading = posts.reading(thread, opened: inFull)
+        // Read in `body` for the same reason, and drawn above the words the way `ForumReplyRow`
+        // draws a reply's: whoever was quoted spoke first, so their sentence comes first.
+        let quoted = Self.quotations(posts.quoted(of: thread), inFull: inFull)
+        return VStack(alignment: .leading, spacing: ShellSpace.tight) {
+            // **Keyed by position**, for the reason `ForumReplyRow` states: a quotation has no id,
+            // nothing reorders the list, and it is rebuilt whole whenever the post is.
+            ForEach(quoted.indices, id: \.self) { level in
+                ForumQuotation(quotation: quoted[level])
+            }
+            words(reading)
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .task(
+            id: Wanting(
+                thread: thread,
+                settled: !posts.fetches(thread, opened: inFull),
+                generation: posts.generation,
+                active: placeIsActive
+            )
+        ) {
+            // Decision 20: a post is fetched only for the place the reader is in. **Only the
+            // fetch is gated** — `posts.reading(…)` above still runs and still stamps interest on
+            // every pass, on every page, or I8 breaks.
+            //
+            // **And in a list, only a thread the reader's boards make theirs** — the points guard,
+            // `ForumPosts.readsWhenReached`. The opened thread (`inFull`) is the reader's choice.
+            guard placeIsActive, posts.fetches(thread, opened: inFull) else { return }
+            // Cancelled by the row going away, which is the whole point of it. A thrown
+            // cancellation here means this row did not stay, so nothing is asked for.
+            do { try await Task.sleep(for: Self.settle) } catch { return }
+            await posts.fetch(thread)
+        }
+    }
+
+    /// The author's own words, or this app's sentence about why there are none — **one element,
+    /// and the quotation above it is not part of it**.
+    ///
+    /// Apart from `body` so that `.accessibilityElement(children: .ignore)` stays over the words
+    /// alone. Put round the whole band it would throw away the label every level of
+    /// `ForumQuotation` gives itself, and a reader using VoiceOver would be read the author's
+    /// answer with no sign of what it was answering.
+    @ViewBuilder
+    private func words(_ reading: ForumReading) -> some View {
+        Group {
             // **No `default:`.** A sixth state added to `ForumReading` has to be given a shape
             // here, and the build is where that should be noticed.
             switch reading {
             case .coming:
                 plates
             case .words(let text):
-                Text(text)
-                    .font(ShellType.body)
+                // **Prose, with no picture list.** A forum sends no custom emoji, so the scan
+                // finds none and there is nothing to fetch; what it does find is the addresses
+                // the author wrote, which is what #34 asks for in an open thread as much as in
+                // the stream. The font is the same token: `EmojiTextRole.body` is `ShellType.body`.
+                EmojiText.words(text, emojis: [], host: thread.host, covered: !linked)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .lineLimit(lines)
                     .multilineTextAlignment(.leading)
@@ -867,28 +1209,19 @@ struct ForumPostBand: View {
                 Color.clear.frame(height: 0)
             case .absent(let absence):
                 said("exclamationmark.triangle", Self.sentence(for: absence))
+            case .unread:
+                said("hand.raised", L10n.t("item.forum.unread"))
             }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(Self.spoken(reading)))
-        .task(
-            id: Wanting(
-                thread: thread,
-                settled: reading != .coming,
-                generation: posts.generation,
-                active: placeIsActive
-            )
-        ) {
-            // Decision 20: a post is fetched only for the place the reader is in. **Only the
-            // fetch is gated** — `posts.reading(…)` above still runs and still stamps interest on
-            // every pass, on every page, or I8 breaks.
-            guard placeIsActive, reading == .coming else { return }
-            // Cancelled by the row going away, which is the whole point of it. A thrown
-            // cancellation here means this row did not stay, so nothing is asked for.
-            do { try await Task.sleep(for: Self.settle) } catch { return }
-            await posts.fetch(thread)
-        }
+        // **Here rather than inside the words**, because `.ignore` above throws away everything
+        // the children offered, the actions `EmojiText` hangs on its own element included. See
+        // `SpokenLinks`. Nothing to offer in the four states that have no words — and nothing
+        // under a cover either, for `linked`'s reason: an action is a control, and a reader using
+        // VoiceOver is not an exception to "the cover draws none".
+        .spokenLinks(in: linked ? Self.words(of: reading) : "")
     }
 
     /// The waiting state: two plates, the longer one over the shorter, the way a paragraph sits.
@@ -905,8 +1238,17 @@ struct ForumPostBand: View {
         .accessibilityHidden(true)
     }
 
+    /// **The waiting plate's own ink, at full** — these are the still form of it, and they were
+    /// `well`, which is 1.14:1 on the page in light and 1.01:1 on a selected row in dark. A band
+    /// the reader cannot tell from the page is the blank band this view exists not to draw
+    /// (#142). Still rather than pulsing, as they always were; `plateInk` is what they wear.
     private func plate(_ fraction: CGFloat) -> some View {
-        Self.plate(ShellChrome.well(colorScheme), fraction: fraction)
+        Self.plate(Self.plateInk(colorScheme), fraction: fraction)
+    }
+
+    /// What the two waiting plates are drawn in, named so its contrast can be measured.
+    static func plateInk(_ scheme: ColorScheme) -> Color {
+        ShellWaiting.ink(scheme, on: .chassis)
     }
 
     /// One of this app's own sentences about the post, drawn so it cannot be mistaken for the
@@ -914,17 +1256,26 @@ struct ForumPostBand: View {
     /// figures in `BoardPickerSheet` use — and the glyph is what says at a glance that this line
     /// is a condition rather than content.
     private func said(_ symbol: String, _ text: String) -> some View {
+        Self.said(symbol, text, lines: lines, colorScheme: colorScheme)
+    }
+
+    /// The same line for any post's words — a reply's in the thread pane included, so the forum
+    /// keeping a post from a signed-out reader reads the same on the row and under it.
+    ///
+    /// One line fewer than the words get, so a long sentence of this app's own cannot fill a band
+    /// meant for somebody's post — and no limit at all where the words have none (`lines` nil),
+    /// because there is no band to overflow.
+    static func said(
+        _ symbol: String, _ text: String, lines: Int?, colorScheme: ColorScheme
+    ) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: ShellSpace.tight) {
             Image(systemName: symbol)
             Text(text)
-                // One line fewer than the words get, so a long sentence of this app's own cannot
-                // fill a band meant for somebody's post — and no limit at all where the words
-                // have none, because there is no band to overflow.
                 .lineLimit(lines.map { max(1, $0 - 1) })
                 .multilineTextAlignment(.leading)
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .font(ShellType.meta)
+        .shellFont(.meta)
         .foregroundStyle(ShellChrome.inkFaint(colorScheme))
     }
 
@@ -953,6 +1304,23 @@ struct ForumPostBand: View {
         .frame(height: ShellSpace.snug)
     }
 
+    /// Which of the opening post's quotations this band draws — all of them in the pane, none of
+    /// them in a list (#104).
+    ///
+    /// A function rather than a condition spelled inline, so the rule can be asserted without a
+    /// screen: **a timeline row is one height, whatever the post it stands for quoted**, and that
+    /// is a sentence about this app rather than about a layout. See `inFull`.
+    static func quotations(_ quoted: [DiscuzQuotation], inFull: Bool) -> [DiscuzQuotation] {
+        inFull ? quoted : []
+    }
+
+    /// The author's own words, where this band has any. **Not `spoken`**, which also answers with
+    /// one of this app's own sentences — and an address this app wrote is not one a post carries.
+    static func words(of reading: ForumReading) -> String {
+        if case .words(let text) = reading { return text }
+        return ""
+    }
+
     /// What the band says out loud. A screen reader is given every character of the post, never
     /// the line-limited string: a visual limit is a fact about this band's height and about
     /// nothing else.
@@ -963,6 +1331,7 @@ struct ForumPostBand: View {
         case .withheld: L10n.t("item.forum.withheld")
         case .silent: L10n.t("item.forum.silent")
         case .absent(let absence): sentence(for: absence)
+        case .unread: L10n.t("item.forum.unread")
         }
     }
 }
@@ -978,15 +1347,17 @@ struct ForumPostBand: View {
 /// these plates at one, and `RemoteImage`'s bare plate at the sixth — with three type roles and two
 /// inks between them. They are one vocabulary now: this view, at every site that has a sentence,
 /// in `ShellType.meta` and `ShellChrome.inkDim`, with the words first and the motion trailing them.
-/// `RemoteImage` keeps its bare plate and is not a fourth: a picture-shaped hole where a picture
-/// will be is a different statement from a sentence about an errand, and it has no words.
+/// `RemoteImage` waits as `ShellWaiting` and is not a fourth: a picture-shaped hole where a picture
+/// will be is a different statement from a sentence about an errand, and it has no words. That
+/// wordless half is `ShellWaiting` now, and this view is its sentence-carrying sibling — the
+/// clock, the wave and the still frame are read from there so the two cannot drift apart.
 ///
 /// **The plates are the ellipsis, moving.** Every one of those sentences already ends in `…`, so
 /// words-then-motion is the reading order the sentence has; a `ProgressView` in front of the words
 /// puts a platform control where the reader's eye starts.
 ///
 /// This shell already has a word for "asked for, not here yet", and it is a plate: `RemoteImage`
-/// draws a bare `ShellChrome.well` while a picture is on its way, and `ForumPostBand` draws two of
+/// waits as `ShellWaiting` while a picture is on its way, and `ForumPostBand` draws two of
 /// them where a post is. A reader who has scrolled one timeline has already learned what a waiting
 /// slot looks like here, and a `ProgressView` would be a second, unrelated vocabulary for the same
 /// fact — borrowed from the platform rather than from the app the reader is in. So this is the
@@ -1028,23 +1399,37 @@ struct ForumWaiting: View {
     /// much is coming.
     static let plates = 3
 
-    /// How long one pass takes. Slow enough not to read as an alarm, quick enough that a reader
-    /// who glances at it sees it move.
-    static let period: TimeInterval = 1.2
+    /// The rhythm, which is `ShellWaiting`'s and no longer this view's own. Two copies of one
+    /// cosine is how a shell ends up with two ways of waiting; these read the one.
+    static var period: TimeInterval { ShellWaiting.period }
+    static var tick: TimeInterval { ShellWaiting.tick }
 
-    /// How often the clock ticks. `EmojiClock.fastestTick` is the ceiling this app already set for
-    /// how fast anything here is allowed to ask for a redraw, and three plates fading need nothing
-    /// near it.
-    static let tick: TimeInterval = 1.0 / 20
-
-    /// How bright one plate is at one instant, between banked and lit.
-    static let banked: Double = 0.3
+    /// How bright one plate is at one instant, between banked and lit. Deeper than
+    /// `ShellWaiting`'s ends for the reason written there: these plates trail a sentence that
+    /// already says what is happening, so they may breathe deeper.
+    ///
+    /// **Not so deep that a plate goes out** (#142). At 0.3 a banked plate measured 1.6:1 on the
+    /// page in light, which is a run of three that reads as one plate and two gaps. 0.65 of
+    /// `inkDim` is the lowest this can bank and still clear `ShellChrome.placeFloor` on every
+    /// ground these are drawn on; the lit plate stays the sentence's own ink.
+    ///
+    /// Both ends are this view's own numbers, and the agreement with `ShellWaiting.lit` is a
+    /// coincidence of full being full rather than a coupling. Reading the ceiling from there
+    /// would mean a change made for the bare plate silently moved these, which is the drift the
+    /// shared *rhythm* above is meant to prevent, not to cause.
+    static let banked: Double = 0.65
     static let lit: Double = 1.0
+
+    /// What the run is drawn in at full, named so its contrast can be measured: the sentence's
+    /// own ink, for the reason the body gives.
+    static func plateInk(_ scheme: ColorScheme) -> Color {
+        ShellChrome.inkDim(scheme)
+    }
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
             Text(line)
-                .font(ShellType.meta)
+                .shellFont(.meta)
                 // **`inkDim` and not `inkFaint`, which is a small declared change.** Six sites
                 // said this fact in two inks; `inkDim` is the token for *present, read second*,
                 // which is what a sentence about an errand in progress is — and `inkFaint` is the
@@ -1082,7 +1467,7 @@ struct ForumWaiting: View {
                 // The same ink as the sentence they trail: one ink for the whole statement, so a
                 // reader meets one way of waiting rather than a sentence in one weight and a run
                 // of plates in another.
-                ForumPostBand.plate(ShellChrome.inkDim(colorScheme))
+                ForumPostBand.plate(Self.plateInk(colorScheme))
                     .frame(width: ShellSpace.snug)
                     .opacity(Self.glow(index, at: instant))
             }
@@ -1090,24 +1475,14 @@ struct ForumWaiting: View {
     }
 
     /// A clock only where one is wanted — nothing for a reader who asked for less movement.
-    ///
-    /// The same shape and the same answer as `EmojiText.clock(for:reduceMotion:)`, deliberately:
-    /// a `nil` here is what makes the still branch above structural rather than a matter of the
-    /// animation running at zero speed.
+    /// `ShellWaiting`'s answer, so one preference cannot stop one waiting state and not the other.
     static func clock(reduceMotion: Bool) -> TimeInterval? {
-        reduceMotion ? nil : tick
+        ShellWaiting.clock(reduceMotion: reduceMotion)
     }
 
-    /// How lit one plate is at one instant, in `banked...lit`.
-    ///
-    /// A cosine rather than a step, so the three never all sit at one brightness and the run never
-    /// reads as a stutter. `instant` is a wall clock — the same one `EmojiClock.frame` folds — so
-    /// it is taken modulo the period, and the result is finite for every input a `TimelineView`
-    /// can hand it.
+    /// How lit one plate is at one instant, in `banked...lit`: the shell's one wave, over this
+    /// view's own ends.
     static func glow(_ index: Int, at instant: TimeInterval) -> Double {
-        let phase = (instant / period - Double(index) / Double(plates))
-            .truncatingRemainder(dividingBy: 1)
-        let wave = (1 + cos(2 * .pi * phase)) / 2
-        return banked + (lit - banked) * wave
+        banked + (lit - banked) * ShellWaiting.wave(index, of: plates, at: instant)
     }
 }

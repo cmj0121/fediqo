@@ -133,7 +133,11 @@ public struct StoreFile: Sendable {
         try db.read { db in
             let sources = try SourceRecord.fetchAll(db).map(\.source)
             let byHost = Dictionary(uniqueKeysWithValues: sources.map { ($0.host, $0) })
-            let notes = try NoteRecord.fetchAll(db).compactMap { record in
+            // In the order they were written, which `ItemStore.snapshot` made the order they
+            // arrived in: the copy of a post a merged row is drawn as is the one that came
+            // first (#114), and a table read in no stated order is read in whatever order
+            // SQLite likes. Stated, so that it is a guarantee rather than a habit.
+            let notes = try NoteRecord.order(Column.rowID).fetchAll(db).compactMap { record in
                 byHost[record.host].map(record.note(from:))
             }
             return (sources, notes)
@@ -352,10 +356,63 @@ private struct NoteFacts: Codable {
     /// `Note.statusID`. Additive and optional, so no migration id (Decision 11): a row written
     /// before 0.2.0 learned it reads as none, and an older build ignores the key.
     var statusID: String?
+    /// `Note.boosted` — what the source last said about this reader having boosted it (#106).
+    /// Additive and optional, so no migration id, and a row written before 0.4.0 learned it reads
+    /// as a source that never said, which is what it is.
+    ///
+    /// **Kept here because the acceptance turns on it.** A boost that landed has to show as
+    /// boosted after a relaunch, and it is the *server's* answer that is being written down —
+    /// every later read of the post overwrites it with what the server says then, and nothing
+    /// here records that a button was pressed.
+    var boosted: Bool?
+    /// `Note.favourited` (#107), for `boosted`'s reasons and in its shape: additive, optional, no
+    /// migration id, and the source's answer rather than a press.
+    var favourited: Bool?
+    /// `Note.opening` (#154): a forum row's opening post as this device last read it. Additive
+    /// and optional, so no migration id, and the refuse-a-newer-store rule is not reached: a row
+    /// written before 0.4.0 learned it reads as a row nobody has reached, which it is to this
+    /// build, and an earlier build decoding this row ignores the key.
+    var opening: OpeningRow?
+}
+
+/// `ForumOpening` as `NoteFacts` writes it.
+private struct OpeningRow: Codable {
+    var words: String
+    var quoted: [QuotationRow]
+    var avatarURL: URL?
+
+    init(_ opening: ForumOpening) {
+        words = opening.words
+        quoted = opening.quoted.map(QuotationRow.init)
+        avatarURL = opening.avatarURL
+    }
+
+    var opening: ForumOpening {
+        ForumOpening(words: words, quoted: quoted.map(\.quotation), avatarURL: avatarURL)
+    }
+}
+
+/// One level of a quotation, and the levels it quoted. As deep as what was read, which Core
+/// bounds at `DiscuzQuotation.deepest` levels before anything is kept.
+private struct QuotationRow: Codable {
+    var words: String
+    var quoting: [QuotationRow]
+
+    init(_ quotation: DiscuzQuotation) {
+        words = quotation.words
+        quoting = quotation.quoting.map(QuotationRow.init)
+    }
+
+    var quotation: DiscuzQuotation {
+        DiscuzQuotation(words: words, quoting: quoting.map(\.quotation))
+    }
 }
 
 private struct ReplyRow: Codable {
     var handle: String?
+    /// Absent in a row written before 0.4.0 learned it, which reads as a reply whose parent was
+    /// never named — the same thing `handle` says about who. See `Note.boosterHandle`.
+    var inReplyToId: String?
 }
 
 /// One attachment as `NoteFacts` writes it: every field, so what a row drew before a relaunch
@@ -426,7 +483,7 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             body: note.body,
             title: note.title,
             board: note.board,
-            reply: note.reply.map { ReplyRow(handle: $0.handle) },
+            reply: note.reply.map { ReplyRow(handle: $0.handle, inReplyToId: $0.inReplyToId) },
             boostedBy: note.boostedBy,
             boosterHandle: note.boosterHandle,
             sensitive: note.sensitive,
@@ -435,7 +492,10 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             attachments: note.attachments.map(AttachmentRow.init),
             emojis: note.emojis.map(EmojiRow.init),
             url: note.url,
-            statusID: note.statusID
+            statusID: note.statusID,
+            boosted: note.boosted,
+            favourited: note.favourited,
+            opening: note.opening.map(OpeningRow.init)
         )
     }
 
@@ -457,16 +517,19 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             board: facts.board,
             postedAt: posted_at,
             categories: Set(categories.compactMap(\.category)),
-            reply: facts.reply.map { Reply(handle: $0.handle) },
+            reply: facts.reply.map { Reply(handle: $0.handle, inReplyToId: $0.inReplyToId) },
             boostedBy: facts.boostedBy,
             boosterHandle: facts.boosterHandle,
+            boosted: facts.boosted,
+            favourited: facts.favourited,
             avatarURL: facts.avatarURL,
             attachments: facts.attachments.map(\.attachment),
             sensitive: facts.sensitive,
             spoiler: facts.spoiler,
             emojis: facts.emojis.map(\.emoji),
             url: facts.url,
-            statusID: facts.statusID
+            statusID: facts.statusID,
+            opening: facts.opening?.opening
         )
     }
 }

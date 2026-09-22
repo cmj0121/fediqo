@@ -18,6 +18,7 @@ import Foundation
 // | `install-c.example` | X5.0. Grid index; canonical `forum.php?mod=forumdisplay&fid=N`; abbreviated counts (`5万`) keeping the exact figure in a `title`; a touch template that **lazy-loads** its avatars into `data-src`; a desktop template whose avatar box is `favatar` and is filled in by script, so there is no `<img>` to read; pinned threads |
 // | `install-d.example` | X3.4 served **GBK** — and UTF-8 on its own mobile page, so one forum is two encodings. The **wide list** index layout: a board's name is an `<h2>`, which is what makes "the heading nearest this section" the wrong rule; sub-boards written as bare links inside a parent's cell; avatars on two hosts, neither of them the forum; a favourite button in the same list as the author's name |
 // | `install-e.example` | X3.4 with **nothing a signed-out reader may see**: a hand-written `id="category_-99999"` block in place of a forum list, Discuz!'s own `messagetext` notice on every board, an empty guide table, and the sign-in page |
+// | `install-g.example` | X3.2 in **Traditional** Chinese, the reader's own forum, behind a managed challenge and read signed in. **No sub-board on its index at all**: a board's sub-boards are written only on that board's own page, in a `subforum_N` block of `list` rows with their figures — beside a board that is only a link elsewhere |
 // | `install-f.example` | Discourse |
 // | `challenge.example` | a forum behind a managed challenge |
 // | `avatars-d.example` | `install-d`'s avatar host on the touch template |
@@ -76,6 +77,48 @@ public struct DiscuzClient: Sendable {
         return try await read(url, source: source)
     }
 
+    /// The threads the forum ranks by replies this week — half of its Trends.
+    ///
+    /// **One page, and the week's.** `orderby=thisweek` is the ranking list's own default span,
+    /// and replies are what a thread's row already counts. Each comes back as the same row its
+    /// board's listing makes (`DiscuzRankedThread.asNote`), with `.trends` beside its board.
+    ///
+    /// **Nothing is an answer here, where it is not on a board's page.** A board with no threads
+    /// is a page this app could not read; a ranking with nothing in it is a quiet week, or a
+    /// forum that switched its ranking lists off — so an empty page is `[]` and not `noThreads`.
+    /// What the page itself refuses (a challenge, a notice, the sign-in page) still throws, for
+    /// the caller to decide what that is worth.
+    public func rankedThreads(source: Source) async throws -> [Note] {
+        let html = try await page(try ranklistURL(type: "thread", view: "replies"))
+        return DiscuzRanklist.threads(in: html).map { $0.asNote(source: source, host: host) }
+    }
+
+    /// The blogs (日誌) the forum ranks by how often they were read this week — the other half of
+    /// its Trends, and a kind of row of its own (`DiscuzRankedBlog`). Empty where there are none;
+    /// `rankedThreads`' reasoning.
+    public func rankedBlogs(source: Source) async throws -> [Note] {
+        let html = try await page(try ranklistURL(type: "blog", view: "heats"))
+        return DiscuzRanklist.blogs(in: html).map { $0.asNote(source: source, host: host) }
+    }
+
+    /// `misc.php?mod=ranklist&type=…&view=…&orderby=thisweek`, built out of the host and words
+    /// this file chose — never lifted off a page.
+    private func ranklistURL(type: String, view: String) throws -> URL {
+        guard let url = Host.httpsURL(
+            host: host,
+            path: "/misc.php",
+            query: [
+                URLQueryItem(name: "mod", value: "ranklist"),
+                URLQueryItem(name: "type", value: type),
+                URLQueryItem(name: "view", value: view),
+                URLQueryItem(name: "orderby", value: "thisweek"),
+            ]
+        ) else {
+            throw DiscuzRequestError.invalidURL
+        }
+        return url
+    }
+
     /// One board's thread list, newest thread first.
     ///
     /// The same page as the guide with one column fewer, and the same parser reads both. A board
@@ -93,7 +136,13 @@ public struct DiscuzClient: Sendable {
     /// spells it today, and a name the reader subscribed to months ago may be stale. It is used
     /// only where the page named no board at all.
     public func board(_ fid: Int, source: Source, named: String? = nil) async throws -> [Note] {
-        guard let url = Host.httpsURL(
+        guard let url = boardURL(fid) else { throw DiscuzRequestError.invalidURL }
+        return try await read(url, source: source, named: named, boardID: String(fid))
+    }
+
+    /// A board's thread list, newest thread first — see `board(_:source:named:)`.
+    private func boardURL(_ fid: Int) -> URL? {
+        Host.httpsURL(
             host: host,
             path: "/forum.php",
             query: [
@@ -102,10 +151,7 @@ public struct DiscuzClient: Sendable {
                 URLQueryItem(name: "filter", value: "author"),
                 URLQueryItem(name: "orderby", value: "dateline"),
             ]
-        ) else {
-            throw DiscuzRequestError.invalidURL
-        }
-        return try await read(url, source: source, named: named, boardID: String(fid))
+        )
     }
 
     /// One subscribed board's thread list — what a reader who picked this board is reading.
@@ -119,6 +165,67 @@ public struct DiscuzClient: Sendable {
     /// standing rule: no address in this file came out of a stranger's markup.
     public func threads(board: DiscuzBoard, source: Source) async throws -> [Note] {
         try await self.board(board.fid, source: source, named: board.name)
+    }
+
+    /// One board's thread list, and what the same page says about the boards around it.
+    ///
+    /// **The same one request as `board(_:source:named:)`**, read for two more facts that were
+    /// already on the page: the boards written under this one in its `subforum_<fid>` block,
+    /// and the board it sits under, where its trail names one. A reload reads every subscribed
+    /// board's page anyway, so this is how a sub-board the index never mentions becomes known
+    /// without a single request being added for it — **D29**, the page half.
+    public func boardPage(
+        _ fid: Int, source: Source, named: String? = nil
+    ) async throws -> DiscuzBoardPage {
+        guard let url = boardURL(fid) else { throw DiscuzRequestError.invalidURL }
+        let html = try await page(url)
+        return DiscuzBoardPage(
+            notes: try rows(html, source: source, named: named, boardID: String(fid)),
+            subBoards: DiscuzIndex.subBoards(in: html, under: fid),
+            parent: DiscuzIndex.parent(of: fid, in: html)
+        )
+    }
+
+    /// The boards a board's own page writes under it, and **nothing else read off it**.
+    ///
+    /// **D29, and the forums whose index does not state them.** Some installs write a board's
+    /// sub-boards only on that board's page, in a `subforum_<fid>` block above its threads; the
+    /// front page never names them, so a reader choosing from the index could not pick one at
+    /// all. This is the read that finds them, and **it is made only when the reader ticks that
+    /// board in the picker** — one page for a board they have just shown they want, never every
+    /// board's page ahead of them choosing.
+    ///
+    /// No threads are required: a parent whose page is only a list of sub-boards is exactly
+    /// the board this read is for, and `noThreads` would throw its answer away. Each board comes
+    /// back filed under `board` — its section, its number as the parent.
+    public func subBoards(of board: DiscuzBoard) async throws -> [DiscuzBoard] {
+        try await around(board.fid).subBoards.map { $0.placed(under: board) }
+    }
+
+    /// One board's own page, read for the boards around it and **not** for its threads: what it
+    /// writes under it, and — from its trail — what it is under. `notes` is always empty.
+    ///
+    /// The read `subBoards(of:)` makes on a tick, and the one a restate makes for each board
+    /// the reader **already reads** when the picker opens: those are boards they chose, so
+    /// reading them is not reading ahead, and it is what files a picked sub-board under its
+    /// parent before any refresh has. No threads are required, for `subBoards(of:)`'s reason.
+    public func around(_ fid: Int) async throws -> DiscuzBoardPage {
+        guard let url = Host.httpsURL(
+            host: host,
+            path: "/forum.php",
+            query: [
+                URLQueryItem(name: "mod", value: "forumdisplay"),
+                URLQueryItem(name: "fid", value: String(fid)),
+            ]
+        ) else {
+            throw DiscuzRequestError.invalidURL
+        }
+        let html = try await page(url)
+        return DiscuzBoardPage(
+            notes: [],
+            subBoards: DiscuzIndex.subBoards(in: html, under: fid),
+            parent: DiscuzIndex.parent(of: fid, in: html)
+        )
     }
 
     /// The forum's index: every category a signed-out — or signed-in — reader may see, and the
@@ -288,8 +395,17 @@ public struct DiscuzClient: Sendable {
         named: String? = nil,
         boardID: String? = nil
     ) async throws -> [Note] {
-        let html = try await page(url)
+        try rows(try await page(url), source: source, named: named, boardID: boardID)
+    }
 
+    /// A page `page` already judged, turned into rows — `read`'s second half, shared with
+    /// `boardPage` so the two cannot come to disagree about what a board's threads are.
+    private func rows(
+        _ html: String,
+        source: Source,
+        named: String?,
+        boardID: String?
+    ) throws -> [Note] {
         let rows = DiscuzPage.threads(in: html)
         // **An empty list is the one answer this must never give.** A parser that meets markup it
         // cannot read and returns `[]` hands the reader a forum that draws nothing, forever, with
@@ -402,7 +518,7 @@ public struct DiscuzBoard: Identifiable, Hashable, Sendable {
     /// When somebody last posted in it, where the page said. Read the way every other Discuz!
     /// date here is read, and UTC for the same reason: see `DiscuzDate`.
     public let lastPostAt: Date?
-    /// The board this one sits under, where the index wrote it under one. **D29.**
+    /// The board this one sits under, where the forum wrote it under one. **D29.**
     ///
     /// A sub-board is a separate `fid` in Discuz! and it is a separate pick here, because a
     /// parent's `forumdisplay` does *not* include its children's threads: a checkbox that quietly
@@ -411,17 +527,48 @@ public struct DiscuzBoard: Identifiable, Hashable, Sendable {
     /// `forum.php?mod=forumdisplay&fid=300` with its own heading and sixty-three threads of its
     /// own, none of which appear under 297.
     ///
-    /// **A sub-board is emptier than a board, and that is the honest cost.** On the index it is a
-    /// bare name: no thread count, no post count, no last-post time. Those stay `nil` rather than
-    /// becoming zeroes, which is this file's standing rule about a figure the forum did not state.
+    /// **Two places write one, and both are read (#161).** `install-d.example` names a board's
+    /// children in the parent's cell on the front page. Other installs never do: the front page
+    /// names the parent alone, and its children are written only on the parent's own page, in a
+    /// `subforum_<fid>` block above its threads — the `list` layout's rows, with their figures.
+    /// That page is read only for a board the reader has chosen, never ahead of them: **when
+    /// they tick it in the picker** (see `DiscuzClient.subBoards(of:)`), **when the picker opens
+    /// on boards they already read** (`DiscuzClient.around(_:)` — which is also what files a
+    /// sub-board picked without its parent, by its own page's trail), and **when a subscribed
+    /// board is read for its threads**, which was going to happen anyway
+    /// (`DiscuzClient.boardPage`). A sub-board both places
+    /// name is listed once — see `JoinOffer.adding(_:under:)`.
+    ///
+    /// **A sub-board is emptier than a board where the forum says less about it.** On the front
+    /// page it is a bare name: no thread count, no post count, no last-post time. Those stay
+    /// `nil` rather than becoming zeroes, which is this file's standing rule about a figure the
+    /// forum did not state. On the parent's page it has all three, and they are kept.
     public let parent: Int?
     /// How far to indent it: `0` for a board, `1` for a board under one.
     ///
     /// Derived from `parent` rather than stored beside it, so the two can never disagree — and it
-    /// stops at one because one level is all a Discuz! index states. A forum may nest deeper in
-    /// its own database; its index page writes a board's *direct* children and no further, so a
-    /// deeper number here would be a claim this device cannot support.
+    /// stops at one because one level is all this device reads. A forum may nest deeper in its
+    /// own database; the front page writes a board's *direct* children and no further, and a
+    /// sub-board's own page is never read for boards under *it*, so a deeper number here would
+    /// be a claim this device cannot support.
     public var depth: Int { parent == nil ? 0 : 1 }
+
+    /// The same board, filed under `parent`: its section, and its number as the parent.
+    ///
+    /// A board read off a parent's own page does not know which section of the index that page
+    /// belongs to — the page is about one board, not the forum — so it takes its parent's.
+    func placed(under parent: DiscuzBoard) -> DiscuzBoard {
+        DiscuzBoard(
+            fid: fid,
+            name: name,
+            category: parent.category,
+            gid: parent.gid,
+            threads: threads,
+            posts: posts,
+            lastPostAt: lastPostAt,
+            parent: parent.fid
+        )
+    }
 
     public init(
         fid: Int,
@@ -440,6 +587,23 @@ public struct DiscuzBoard: Identifiable, Hashable, Sendable {
         self.threads = threads
         self.posts = posts
         self.lastPostAt = lastPostAt
+        self.parent = parent
+    }
+}
+
+/// One board's page, read: its threads, and what it says about the boards around it.
+public struct DiscuzBoardPage: Sendable, Equatable {
+    public let notes: [Note]
+    /// The boards the page writes under this one, each carrying this board's number as its
+    /// parent and **no section of its own** — the page does not say which section it is in.
+    /// `JoinOffer.adding(_:under:)` files them under the parent's.
+    public let subBoards: [DiscuzBoard]
+    /// The board this one sits under, where the page's trail names one.
+    public let parent: Int?
+
+    public init(notes: [Note], subBoards: [DiscuzBoard], parent: Int?) {
+        self.notes = notes
+        self.subBoards = subBoards
         self.parent = parent
     }
 }
@@ -501,7 +665,7 @@ enum DiscuzIndex {
     /// board by permission and still renders its heading, and a section header with nothing
     /// beneath it is not something to put in front of somebody choosing.
     static func categories(in html: String) -> [DiscuzCategory] {
-        guard let patterns = Patterns() else { return [] }
+        guard let patterns = Patterns.shared else { return [] }
         let full = NSRange(html.startIndex..., in: html)
 
         var names: [Int: String] = [:]
@@ -560,6 +724,74 @@ enum DiscuzIndex {
         }
     }
 
+    /// The boards a board's own page writes under it, in the order it writes them — **D29, the
+    /// page half** (#161).
+    ///
+    /// **Matched on the number, as a category is.** The block is `<div id="subforum_<fid>">`
+    /// and it is read only where `<fid>` is the board this page is about: a page that carried a
+    /// second board's block — a sidebar, a template that repeats — would otherwise hand that
+    /// board's children to this one. It ends at its own `</table>`; the thread list below it is
+    /// a table of its own and is never read as boards.
+    ///
+    /// **Both layouts are asked, as on the index.** The one install measured writes these rows
+    /// the `list` way — `fl_tb`, one board to a `<tr>`, `fl_i` and `fl_by` beside the name — and
+    /// Discuz! can be set to draw them as the grid instead, which the same rules already read.
+    /// Their figures are kept where stated and `nil` where not: unlike the front page's bare
+    /// names, a parent's page states them.
+    ///
+    /// One level and no deeper: a board a row names inside its own cell would be a board under a
+    /// sub-board, which `DiscuzBoard.depth` does not draw, so it is dropped rather than promoted
+    /// to a level it is not at. A board only linking elsewhere is not in the answer — see
+    /// `DiscuzBoardLayout.isOnlyALink`. Each board carries `fid` as its parent and **no section
+    /// of its own**: the page does not say which section it sits in, and a caller files it
+    /// under its parent's (`DiscuzBoard.placed(under:)`).
+    static func subBoards(in html: String, under fid: Int) -> [DiscuzBoard] {
+        guard fid > 0, let patterns = Patterns.shared else { return [] }
+        let full = NSRange(html.startIndex..., in: html)
+        let opening = patterns.subforum.matches(in: html, range: full).first { match in
+            guard let range = Range(match.range(at: 1), in: html) else { return false }
+            return Int(html[range]) == fid
+        }
+        guard let opening, let start = Range(opening.range, in: html) else { return [] }
+        let rest = html[start.upperBound...]
+        let end = rest.range(of: "</table>", options: .caseInsensitive)?.upperBound
+            ?? rest.endIndex
+        return boards(in: String(rest[..<end]), gid: 0, category: "", patterns: patterns)
+            .filter { $0.parent == nil && $0.fid != fid }
+            .map { board in
+                DiscuzBoard(
+                    fid: board.fid,
+                    name: board.name,
+                    category: board.category,
+                    gid: board.gid,
+                    threads: board.threads,
+                    posts: board.posts,
+                    lastPostAt: board.lastPostAt,
+                    parent: fid
+                )
+            }
+    }
+
+    /// The board a board's page says it sits under, or nothing.
+    ///
+    /// **Read off the page's trail**, `<div id="pt">`: home, the forum, the section, the parent
+    /// where there is one, then this board — each a link. The board before this one in that
+    /// trail is its parent where it is a *board* address; for a board at the top it is the
+    /// section's `gid=` link, which yields no board number, and the answer is nothing. Needed
+    /// because a reader may have picked a sub-board and not its parent: the parent's page is
+    /// then never read, and this is the one place the sub-board's place is still written.
+    static func parent(of fid: Int, in html: String) -> Int? {
+        guard fid > 0, let patterns = Patterns.shared,
+              let trail = patterns.trail.capture(1, in: html)
+        else { return nil }
+        let boards = patterns.anchor.captures(1, in: trail).compactMap {
+            Self.fid(inHref: $0, patterns: patterns)
+        }
+        guard let own = boards.lastIndex(of: fid), own > 0 else { return nil }
+        let above = boards[own - 1]
+        return above == fid ? nil : above
+    }
+
     /// The boards inside one category's section, in the order the page writes them.
     ///
     /// Both layouts are asked, and the answers are merged **by where they were found** rather
@@ -580,13 +812,19 @@ enum DiscuzIndex {
             .map(\.board)
     }
 
-    /// The patterns, compiled once per page. A value rather than a global, for the reason
-    /// `DiscuzPage.Patterns` gives: `NSRegularExpression` is not `Sendable`.
-    struct Patterns {
+    /// The patterns, compiled once for the life of the process — `DiscuzPage.Patterns`' reason.
+    struct Patterns: @unchecked Sendable {
+        /// Compiled on first use and shared by every page read after it.
+        static let shared = Patterns()
+
         /// `<h2><a href="…gid=N">Name</a>` — the category, and what it is called.
         let heading: NSRegularExpression
         /// `<div id="category_N"` — where that category's boards begin.
         let section: NSRegularExpression
+        /// `<div id="subforum_N"` — where a board's own page writes the boards under it.
+        let subforum: NSRegularExpression
+        /// `<div id="pt">…</div>` — a page's trail, from home to the board it is about.
+        let trail: NSRegularExpression
         /// `<dl>…</dl>` — one board, on the grid layout.
         let definition: NSRegularExpression
         /// `<dt>…</dt>` — its name and its address.
@@ -616,9 +854,7 @@ enum DiscuzIndex {
         let date: NSRegularExpression
 
         init?() {
-            func attribute(_ name: String, _ value: String) -> String {
-                "\(name)\\s*=\\s*[\"'][^\"']*\\b\(value)\\b[^\"']*[\"']"
-            }
+            let attribute = DiscuzMarkup.attribute
             func wrapped(_ tag: String) -> String { "<\(tag)[^>]*>(.*?)</\(tag)>" }
             let options: NSRegularExpression.Options = [
                 .dotMatchesLineSeparators, .caseInsensitive,
@@ -631,6 +867,16 @@ enum DiscuzIndex {
                 ),
                 let section = try? NSRegularExpression(
                     pattern: "<div[^>]*\\bid\\s*=\\s*[\"']category_(\\d+)[\"'][^>]*>",
+                    options: options
+                ),
+                let subforum = try? NSRegularExpression(
+                    pattern: "<div[^>]*\\bid\\s*=\\s*[\"']subforum_(\\d+)[\"'][^>]*>",
+                    options: options
+                ),
+                // To the first `</div>`: the trail's links sit in one inner `<div class="z">`,
+                // and every one of them is before that inner block closes.
+                let trail = try? NSRegularExpression(
+                    pattern: "<div[^>]*\\bid\\s*=\\s*[\"']pt[\"'][^>]*>(.*?)</div>",
                     options: options
                 ),
                 let definition = try? NSRegularExpression(pattern: wrapped("dl"), options: options),
@@ -667,13 +913,12 @@ enum DiscuzIndex {
                 // `37-1/news-feed.html`, `install-b.example`. Anchored to the start of a path
                 // segment so that a number inside a word can never be read as a board.
                 let seo = try? NSRegularExpression(pattern: "(?:^|/)(\\d+)-\\d+/"),
-                let date = try? NSRegularExpression(
-                    pattern:
-                        "(\\d{4})-(\\d{1,2})-(\\d{1,2})(?:[\\s\u{00A0}]+(\\d{1,2}):(\\d{2})(?::(\\d{2}))?)?"
-                )
+                let date = try? NSRegularExpression(pattern: DiscuzDate.pattern)
             else { return nil }
             self.heading = heading
             self.section = section
+            self.subforum = subforum
+            self.trail = trail
             self.definition = definition
             self.term = term
             self.detail = detail
@@ -698,12 +943,19 @@ enum DiscuzIndex {
     /// the one place a stranger's href is looked at at all. An `Int` that does not parse, or a
     /// number that is not positive, is markup doing something rather than a board.
     static func fid(inHref raw: String, patterns: Patterns) -> Int? {
+        number(inHref: raw, shapes: patterns.addresses)
+    }
+
+    /// A positive number out of an address, by the first of `shapes` whose first capture finds
+    /// one — `fid(inHref:patterns:)`'s reading, for any number an address carries. Read for its
+    /// number and never fetched, for the same reason.
+    static func number(inHref raw: String, shapes: [NSRegularExpression]) -> Int? {
         let href = raw.replacingOccurrences(of: "&amp;", with: "&", options: .caseInsensitive)
-        for address in patterns.addresses {
-            guard let found = address.capture(1, in: href), let fid = Int(found), fid > 0 else {
+        for shape in shapes {
+            guard let found = shape.capture(1, in: href), let number = Int(found), number > 0 else {
                 continue
             }
-            return fid
+            return number
         }
         return nil
     }
@@ -865,11 +1117,37 @@ enum DiscuzBoardLayout: CaseIterable, Sendable {
             },
             lastPostAt: lastPostCell.flatMap { DiscuzIndex.lastPost(in: $0, patterns: patterns) }
         )
+        if Self.isOnlyALink(board, lastPost: lastPostCell, patterns: patterns) { return [] }
         return [(origin + headingMatch.range(at: 1).location, board)]
             + self.children(
                 in: body, at: origin, of: board, naming: headingMatch.range(at: 1),
                 patterns: patterns
             )
+    }
+
+    /// Whether this "board" is only a link somewhere else, with no threads of its own (#161).
+    ///
+    /// **Recognised by shape, not by its label.** Discuz! lets an administrator make a board
+    /// that is a link to an address outside the forum; it is drawn in the same row as a board,
+    /// and a reader who picked it would be subscribed to a page with no thread list, forever.
+    /// Its row differs from a real board's in two ways that hold on any template and in any
+    /// language: **it states no figures at all** — no threads, no posts, no last-post time, the
+    /// count cell empty — and **its last-post cell is a link to the board itself**, where a
+    /// real board's links to a thread. The words in that cell (`鏈接到外部地址` on
+    /// `install-g.example`) are the translated half and are not read.
+    ///
+    /// Both are required. A board that has never been posted in states no figures either, and
+    /// its last-post cell says so in words (`install-b.example` writes `...`) — no link to
+    /// itself, so it is kept; and a busy board's cell links to a thread, never to itself.
+    static func isOnlyALink(
+        _ board: DiscuzBoard, lastPost cell: String?, patterns: DiscuzIndex.Patterns
+    ) -> Bool {
+        guard board.threads == nil, board.posts == nil, board.lastPostAt == nil,
+              let cell
+        else { return false }
+        return patterns.anchor.captures(1, in: cell).contains {
+            DiscuzIndex.fid(inHref: $0, patterns: patterns) == board.fid
+        }
     }
 
     /// The boards this board's own cell names underneath it — **D29**.
@@ -1047,6 +1325,11 @@ struct DiscuzThread: Equatable, Sendable {
             // least sometimes carries an excerpt, a Discuz! thread table carries no part of the
             // opening post at all — reading one would be a second request per row against a
             // stranger's server, which is not what the reader pressed a button for.
+            //
+            // Since #154 the opening post, once a row is reached and read, is kept with the row —
+            // but as `Note.opening`, not here: `body` is what a keyword rule and the search read,
+            // and a rule that began matching a thread only after somebody happened to scroll to
+            // it would be a rule that changes its mind about the same post.
             body: "",
             title: title.isEmpty ? nil : title,
             // The row's own board where the page gave one, the page's heading otherwise. Never
@@ -1130,7 +1413,7 @@ enum DiscuzPage {
     /// Getting this wrong is not a parse error, it is a **plausible wrong answer** — the row
     /// would carry a real person's name, spelled correctly, who did not write the thing.
     static func threads(in html: String) -> [DiscuzThread] {
-        guard let patterns = Patterns() else { return [] }
+        guard let patterns = Patterns.shared else { return [] }
         let range = NSRange(html.startIndex..., in: html)
         return patterns.row.matches(in: html, range: range).compactMap { match in
             guard let idRange = Range(match.range(at: 1), in: html),
@@ -1166,7 +1449,7 @@ enum DiscuzPage {
             // nobody can check.
             replies: patterns.numCell.capture(1, in: row)
                 .flatMap { patterns.anchor.capture(1, in: $0) }
-                .flatMap { Int(HTMLText.plain($0).trimmingCharacters(in: .whitespaces)) }
+                .flatMap { Int(HTMLText.plain($0)) }
         )
     }
 
@@ -1177,7 +1460,7 @@ enum DiscuzPage {
     /// no link in it. Taking the heading's plain text instead would file every row of every guide
     /// page under a board that does not exist.
     static func boardHeading(in html: String) -> String? {
-        guard let patterns = Patterns(),
+        guard let patterns = Patterns.shared,
               let heading = patterns.h1.capture(1, in: html),
               let anchor = patterns.anchor.capture(1, in: heading)
         else { return nil }
@@ -1230,12 +1513,17 @@ enum DiscuzPage {
             || html.range(of: "id='messagetext'", options: .caseInsensitive) != nil
     }
 
-    /// The patterns, compiled once per page rather than once per row.
+    /// The patterns, compiled once for the life of the process rather than once per page — or,
+    /// worse, once per row, which would build eight of them fifty times for one page.
     ///
-    /// A value passed down instead of a global: `NSRegularExpression` is not `Sendable`, and a
-    /// `static let` of one would be a shared mutable-looking global this package has no need of.
-    /// Compiling per row instead would build eight of them fifty times for one page.
-    struct Patterns {
+    /// **`@unchecked Sendable`, and it is not a promise made lightly.** `NSRegularExpression` is
+    /// not marked `Sendable`, but it is immutable once compiled and documented as safe to use
+    /// from any thread at once; this struct holds nothing else and has no `var`. So one set is
+    /// compiled on first use and every page, on any task, reads through it.
+    struct Patterns: @unchecked Sendable {
+        /// Compiled on first use and shared by every page read after it.
+        static let shared = Patterns()
+
         let row: NSRegularExpression
         let title: NSRegularExpression
         let byCell: NSRegularExpression
@@ -1268,9 +1556,7 @@ enum DiscuzPage {
             // is filed under is the board it was *read in* rather than the board it is in. The
             // marker that would tell the two apart was found on one skin out of four, which is
             // not enough to start dropping rows on.
-            func attribute(_ name: String, _ value: String) -> String {
-                "\(name)\\s*=\\s*[\"'][^\"']*\\b\(value)\\b[^\"']*[\"']"
-            }
+            let attribute = DiscuzMarkup.attribute
             guard
                 let row = try? NSRegularExpression(
                     pattern: "<tbody[^>]*\\bid\\s*=\\s*[\"'](?:normal|stick)thread_(\\d+)[\"'][^>]*>(.*?)</tbody>",
@@ -1304,9 +1590,7 @@ enum DiscuzPage {
                     pattern: "<h1[^>]*>(.*?)</h1>",
                     options: [.dotMatchesLineSeparators, .caseInsensitive]
                 ),
-                let date = try? NSRegularExpression(
-                    pattern: "(\\d{4})-(\\d{1,2})-(\\d{1,2})(?:[\\s\u{00A0}]+(\\d{1,2}):(\\d{2})(?::(\\d{2}))?)?"
-                )
+                let date = try? NSRegularExpression(pattern: DiscuzDate.pattern)
             else { return nil }
             self.row = row
             self.title = title
@@ -1333,6 +1617,48 @@ enum DiscuzPage {
 /// would put a stranger's words, or the forum's, under this person's name. So `body` is what is
 /// left after the furniture is taken out, and each thing taken out is either kept somewhere it
 /// can be told apart (`quoted`, `isWithheld`) or is not somebody's words at all.
+/// Somebody else's words inside a post — and, where that somebody was quoting in turn, theirs.
+///
+/// **A tree and not a string, because Discuz! nests and a reader can see that it does.** A
+/// `<div class="quote">` holding another is how a forum argument three replies deep arrives, and
+/// the plain text of the outer one contains the inner one's words with nothing to mark where one
+/// person stops and the next begins. Flattened, a reply that quoted a quote reads as one
+/// undifferentiated paragraph behind one border — which is the thing #94 is about.
+///
+/// **Depth is bounded**, at `DiscuzQuotation.deepest`. See `DiscuzThreadPage.quotation(of:)`.
+public struct DiscuzQuotation: Hashable, Sendable {
+    /// How many levels are read apart before the rest is taken as one.
+    ///
+    /// A page is a stranger's, and `quotation(of:)` recurses over what it finds in one; a few
+    /// thousand nested `<div>`s is a stack this device does not have. Eight is past any argument
+    /// a person will hold — the deepest measured on the four open installs is three — and what
+    /// lies below it is not dropped, it is read as the words of the eighth.
+    ///
+    /// Counted in quotation levels. `DummyThreadPane.deepestIndent` is the other ceiling in this
+    /// feature, in indent steps over a different tree; neither derives from the other.
+    static let deepest = 8
+
+    /// This level's own words, with anything **it** quoted taken out of them. Empty where the
+    /// level is only a wrapper around what it quoted, which some templates write.
+    public let words: String
+    /// What this level quoted, in the order the page wrote them. Empty at the innermost.
+    public let quoting: [DiscuzQuotation]
+
+    public init(words: String, quoting: [DiscuzQuotation] = []) {
+        self.words = words
+        self.quoting = quoting
+    }
+
+    /// What every level of this quotation weighs, in the bytes its strings are stored as.
+    ///
+    /// The whole tree, because every level is text off a stranger's page and every level is
+    /// held. The shape costs nothing worth counting; the words are what somebody else chooses
+    /// the length of, which is what a cache has to budget for.
+    public var byteCount: Int {
+        words.utf8.count + quoting.reduce(0) { $0 + $1.byteCount }
+    }
+}
+
 public struct DiscuzPost: Identifiable, Hashable, Sendable {
     public var id: Int { pid }
     /// Discuz!'s own post number, unique on the forum. The key, because a post is what repeats
@@ -1359,14 +1685,19 @@ public struct DiscuzPost: Identifiable, Hashable, Sendable {
     public let postedAt: Date?
     /// The author's words. Empty where the post was a picture, or where it was withheld.
     public let body: String
-    /// What this post reproduced of somebody else's, where it quoted one.
+    /// What this post reproduced of somebody else's, where it quoted one — **with the levels
+    /// still apart**, because a quotation that itself quotes is two people and not one.
     ///
     /// Kept out of `body` and kept rather than dropped. Out of `body` because a reply that opens
     /// by quoting the whole post above it would fill a line-limited row with a stranger's
     /// sentence and never show its own; kept because a deletion nobody can see is the kind of
     /// thing that looks right on a fixture, and because the quotation is real content a reader
     /// may want drawn as a quotation.
-    public let quoted: String?
+    ///
+    /// **A list, because a post can quote twice.** Two `<div class="quote">` siblings in one
+    /// message is two quotations, and joining them into one string — which is what this field
+    /// used to be — makes one person appear to have written both.
+    public let quoted: [DiscuzQuotation]
     /// The forum answered with a notice where the words should have been — `游客请登录后查看回复内容`,
     /// Discuz!'s `<div class="locked">`. Measured on `install-a.example`, where 19 of 20 replies on
     /// one thread are withheld from a signed-out reader.
@@ -1401,7 +1732,7 @@ public struct DiscuzPost: Identifiable, Hashable, Sendable {
         handle: String,
         postedAt: Date? = nil,
         body: String,
-        quoted: String? = nil,
+        quoted: [DiscuzQuotation] = [],
         isWithheld: Bool = false,
         avatarURL: URL? = nil
     ) {
@@ -1473,7 +1804,7 @@ enum DiscuzThreadPage {
     /// it is the number Discuz! itself gives a post, and it is the same number in all three
     /// templates — `id="pid58035493"` and `id="post_58035493"` are the same post.
     static func posts(in html: String, tid: Int, host: String) -> [DiscuzPost] {
-        guard let patterns = Patterns() else { return [] }
+        guard let patterns = Patterns.shared else { return [] }
         var seen: Set<Int> = []
         return DiscuzPostLayout.allCases
             .flatMap { $0.posts(in: html, tid: tid, host: host, patterns: patterns) }
@@ -1482,9 +1813,11 @@ enum DiscuzThreadPage {
             .map(\.post)
     }
 
-    /// The patterns, compiled once per page. A value rather than a global, for the reason
-    /// `DiscuzPage.Patterns` gives: `NSRegularExpression` is not `Sendable`.
-    struct Patterns {
+    /// The patterns, compiled once for the life of the process — `DiscuzPage.Patterns`' reason.
+    struct Patterns: @unchecked Sendable {
+        /// Compiled on first use and shared by every page read after it.
+        static let shared = Patterns()
+
         /// Where one post begins, on each of the three layouts. Each captures the `pid`.
         let touchPost: NSRegularExpression
         let comiisPost: NSRegularExpression
@@ -1552,9 +1885,7 @@ enum DiscuzThreadPage {
             let options: NSRegularExpression.Options = [
                 .dotMatchesLineSeparators, .caseInsensitive,
             ]
-            func attribute(_ name: String, _ value: String) -> String {
-                "\(name)\\s*=\\s*[\"'][^\"']*\\b\(value)\\b[^\"']*[\"']"
-            }
+            let attribute = DiscuzMarkup.attribute
             func opening(_ tag: String, _ value: String) -> String {
                 "<\(tag)[^>]*\(attribute("class", value))[^>]*>"
             }
@@ -1619,10 +1950,7 @@ enum DiscuzThreadPage {
                 let lists = compile(nesting("ul")),
                 let italics = compile(nesting("i")),
                 let emphasis = compile(nesting("em")),
-                let date = try? NSRegularExpression(
-                    pattern:
-                        "(\\d{4})-(\\d{1,2})-(\\d{1,2})(?:[\\s\u{00A0}]+(\\d{1,2}):(\\d{2})(?::(\\d{2}))?)?"
-                )
+                let date = try? NSRegularExpression(pattern: DiscuzDate.pattern)
             else { return nil }
             self.touchPost = touchPost
             self.comiisPost = comiisPost
@@ -1976,7 +2304,7 @@ enum DiscuzPostLayout: CaseIterable, Sendable {
     private static func words(
         in message: String,
         patterns: DiscuzThreadPage.Patterns
-    ) -> (body: String, quoted: String?, isWithheld: Bool) {
+    ) -> (body: String, quoted: [DiscuzQuotation], isWithheld: Bool) {
         let quotes = DiscuzMarkup.extract(patterns.quote, nesting: patterns.divs, in: message)
         let locked = DiscuzMarkup.extract(patterns.locked, nesting: patterns.divs, in: quotes.remainder)
         var text = locked.remainder
@@ -1985,11 +2313,45 @@ enum DiscuzPostLayout: CaseIterable, Sendable {
         text = DiscuzMarkup.extract(patterns.signature, nesting: patterns.divs, in: text).remainder
         text = DiscuzMarkup.extract(patterns.control, nesting: patterns.emphasis, in: text).remainder
         text = DiscuzMarkup.extract(patterns.scripted, nesting: patterns.anchors, in: text).remainder
-        let quoted = quotes.removed
-            .map { tidy(HTMLText.plain($0)) }
-            .filter { !$0.isEmpty }
-            .joined(separator: "\n")
-        return (tidy(HTMLText.plain(text)), quoted.isEmpty ? nil : quoted, !locked.removed.isEmpty)
+        let quoted = quotes.removed.compactMap { quotation(of: $0, patterns: patterns) }
+        return (tidy(HTMLText.plain(text)), quoted, !locked.removed.isEmpty)
+    }
+
+    /// One `<div class="quote">`'s contents as a quotation: this level's own words, and
+    /// whatever it quoted in turn.
+    ///
+    /// **The same extraction, one level down.** `DiscuzMarkup.extract` counts `<div>`s, so an
+    /// inner quotation comes out whole from an outer one exactly as the outer one came out of
+    /// the message; what is left is this level's own words with the inner block's text no longer
+    /// in them. That is the whole of the fix: the text used to be flattened here.
+    ///
+    /// **Nothing where the level has neither words nor a quotation.** An empty `<div
+    /// class="quote">` is a template's wrapper, and a border drawn around nothing is chrome
+    /// claiming somebody said something.
+    ///
+    /// **Bounded by `DiscuzQuotation.deepest`.** `levelsLeft` counts down so the floor is the
+    /// plain `levelsLeft <= 1` rather than a depth compared against a ceiling, which is one
+    /// off-by-one nobody has to hold in their head. At the floor the block is read as words,
+    /// inner markup and all, rather than recursed into — nothing is dropped and the stack is
+    /// finite however deeply a stranger's page nests. Each level is strictly shorter than the
+    /// one above it, so this terminates on its own too; the bound is for the page written to
+    /// make it not.
+    private static func quotation(
+        of block: String,
+        patterns: DiscuzThreadPage.Patterns,
+        levelsLeft: Int = DiscuzQuotation.deepest
+    ) -> DiscuzQuotation? {
+        guard levelsLeft > 1 else {
+            let words = tidy(HTMLText.plain(block))
+            return words.isEmpty ? nil : DiscuzQuotation(words: words)
+        }
+        let inner = DiscuzMarkup.extract(patterns.quote, nesting: patterns.divs, in: block)
+        let words = tidy(HTMLText.plain(inner.remainder))
+        let quoting = inner.removed.compactMap {
+            quotation(of: $0, patterns: patterns, levelsLeft: levelsLeft - 1)
+        }
+        guard !words.isEmpty || !quoting.isEmpty else { return nil }
+        return DiscuzQuotation(words: words, quoting: quoting)
     }
 
     /// The blank the removals left behind, closed up.
@@ -2027,12 +2389,20 @@ enum DiscuzMarkup {
         from start: String.Index
     ) -> (range: Range<String.Index>, after: String.Index)? {
         var depth = 1
+        var closed: (range: Range<String.Index>, after: String.Index)?
         let tail = NSRange(start..<text.endIndex, in: text)
-        for match in nesting.matches(in: text, range: tail) {
-            guard let range = Range(match.range, in: text) else { continue }
+        // **Enumerated rather than matched**, so the walk stops at the close it is looking for.
+        // `matches(in:range:)` builds a result object for every remaining tag in the page first
+        // and cannot be told to stop; a quotation early in a long thread paid for every `<div>`
+        // after it, and #94 made this run once per nested level rather than once per post.
+        nesting.enumerateMatches(in: text, range: tail) { match, _, stop in
+            guard let match, let range = Range(match.range, in: text) else { return }
             depth += text[range].hasPrefix("</") ? -1 : 1
-            if depth == 0 { return (start..<range.lowerBound, range.upperBound) }
+            guard depth == 0 else { return }
+            closed = (start..<range.lowerBound, range.upperBound)
+            stop.pointee = true
         }
+        if let closed { return closed }
         // Unclosed. Nothing rather than the rest of the page, which is the same choice this file
         // makes everywhere: a wrong answer that parses is worse than no answer.
         return nil
@@ -2095,6 +2465,18 @@ enum DiscuzMarkup {
     }
 }
 
+/// The one way every Discuz! pattern in this package names an attribute holding a word.
+extension DiscuzMarkup {
+    /// `name="… value …"`, in either quote, with `value` a whole word of it: `class="bm_c xst"`
+    /// has the class `xst`, and `class="xstx"` does not.
+    static func attribute(_ name: String, _ value: String) -> String {
+        "\(name)\\s*=\\s*[\"'][^\"']*\\b\(value)\\b[^\"']*[\"']"
+    }
+
+    /// `attribute("class", value)`: an element of that class.
+    static func classed(_ value: String) -> String { attribute("class", value) }
+}
+
 /// The date in a thread row, which Discuz! writes two ways in the same table.
 ///
 /// A row posted recently reads `<span title="2026-9-15">5&nbsp;小时前</span>` — the words are
@@ -2111,6 +2493,13 @@ enum DiscuzMarkup {
 /// clock time, so the error is invisible except at a midnight. Said out loud here rather than
 /// discovered in a bug report.
 enum DiscuzDate {
+    /// Every date shape a Discuz! page writes — `2026-9-15`, `2026-06-08 16:45`, seconds or not,
+    /// a space or a no-break space before the clock — for each page's own `Patterns` to compile.
+    /// One spelling, so the thread table, the index, a thread's page and the ranking lists cannot
+    /// come to disagree about what a date looks like.
+    static let pattern =
+        "(\\d{4})-(\\d{1,2})-(\\d{1,2})(?:[\\s\u{00A0}]+(\\d{1,2}):(\\d{2})(?::(\\d{2}))?)?"
+
     static func parse(_ raw: String, using patterns: DiscuzPage.Patterns) -> Date? {
         parse(raw, date: patterns.date)
     }

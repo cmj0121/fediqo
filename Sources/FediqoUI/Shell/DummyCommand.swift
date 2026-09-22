@@ -43,6 +43,29 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     /// `r` — reload what is in front: the open thread, or else the selected timeline (#29).
     case reload
     case compose
+    /// `b` — boost the post the lamp is on to the source it was read through (#106), or take the
+    /// boost back. **One key for both directions**, because the reader is doing one thing and the
+    /// post itself says which way round it goes.
+    case boost
+    /// `f` — favourite the post the lamp is on on its source, or take it back (#107). `b`'s shape.
+    case favourite
+    /// `w` — write an answer to the post the lamp is on, **from inside the conversation it belongs
+    /// to** (#108). `c` writes a post that answers nothing; this is the same act pointed at
+    /// something. Refused on the timeline itself, where the answer's place is not in view.
+    case answer
+    /// `d` — ask to take back the post the lamp is on, where the reader wrote it (#109). The key
+    /// asks; it never takes anything back by itself.
+    case withdraw
+    /// `p` — the page of whoever wrote the post the lamp is on (#140). The key for what a press on
+    /// a face or a name has done since #99: the one thing a row offered that no key reached.
+    ///
+    /// **Why `p`.** It is the person, and it was free: every letter a row already answers to is
+    /// taken, and of the ones left `p` is the one that reads as the thing it opens — a person, a
+    /// profile. The caps on a keyboard are not translated (`DummyShortcut`), so a Latin mnemonic
+    /// is the only kind a key can have. `u` for user was the other candidate and was passed over
+    /// because this app never calls anybody a user; the page is headed with a name, not an
+    /// account.
+    case openAuthor
     case showShortcuts
     /// `/` — search what this device holds (#32). `?` is still the keys list; see `typed`.
     case search
@@ -93,6 +116,11 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         switch character {
         case "?": return .showShortcuts
         case "/": return .search
+        case "b": return .boost
+        case "f": return .favourite
+        case "w": return .answer
+        case "d": return .withdraw
+        case "p": return .openAuthor
         case "c": return .compose
         case "j", KeyEquivalent.downArrow.character: return .nextPost
         case "k", KeyEquivalent.upArrow.character: return .previousPost
@@ -163,7 +191,7 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     public static func canEditTimeline(whenOpen open: Set<DummyLayer>) -> Bool {
         switch outermost(of: open) {
         case .selection, nil: true
-        case .viewer, .shortcuts, .thread, .search: false
+        case .viewer, .shortcuts, .person, .thread, .link, .search: false
         }
     }
 
@@ -226,11 +254,50 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         return items[next]
     }
 
-    /// Leaving the innermost open thread: the stack one shorter, and the post that thread was
-    /// opened from selected again — whatever `j` and `k` moved to inside it.
-    public static func poppedThread(_ stack: [String]) -> (stack: [String], selected: String)? {
-        guard let opened = stack.last else { return nil }
-        return (Array(stack.dropLast()), opened)
+    /// The layers that are one walk: somebody's page, a conversation (#122), and on a Mac a page
+    /// read out of a post's words (#169).
+    ///
+    /// They are drawn at the same distance from the stream and only ever one at a time, because
+    /// `ShellWalk` holds them in one stack and only its innermost step is open. Their order
+    /// relative to each other in `allCases` is therefore never asked — which of them is in front
+    /// is what the reader walked, not what this list says.
+    public static let walk: Set<DummyLayer> = [.person, .thread, .link]
+
+    /// Whether the reader may walk one step further out from where they are now.
+    ///
+    /// **The order is still read once**, out of `DummyLayer.allCases` and through `canOpen`. The
+    /// walk's own two layers are set aside first and the question is asked about `.person`, which
+    /// is the front of the pair: a step may be taken exactly when nothing outside the walk stands
+    /// in front of it. So a conversation still does not open under the viewer or the guide, and
+    /// it now does open from somebody's page — which is #122, and which no second list of layers
+    /// had to be written to say.
+    public static func canWalk(whenOpen open: Set<DummyLayer>) -> Bool {
+        canOpen(.person, whenOpen: open.subtracting(walk))
+    }
+
+    /// Whether `p` may open the author of the row the lamp is on (#140).
+    ///
+    /// **`canWalk`, and one thing more.** A person is a step of the walk like any other, so the
+    /// order is asked the way a face asks it and nothing new about what stands in front of what
+    /// is written here. What is added is the one place a face is not a press at all: somebody's
+    /// own page, where every row is theirs and a key that opened a page would open the page it is
+    /// already on. `PersonPane` leaves the face undrawn as a control there; this is the key saying
+    /// the same thing, and saying it by doing nothing rather than by complaining.
+    ///
+    /// `.person` in the set means the reader is standing on a page, because only the innermost
+    /// step of the walk is ever open. A conversation opened *from* a page is `.thread` and nothing
+    /// else, so `p` works there as it does in every other conversation — a face in it is a press.
+    public static func canOpenAuthor(whenOpen open: Set<DummyLayer>) -> Bool {
+        canWalk(whenOpen: open) && !open.contains(.person)
+    }
+
+    /// What a press of a finger on a row means: the lamp, or the conversation (#33).
+    ///
+    /// Pure, and separate from the acting, for the reason `focused(in:selected:)` is: inside a
+    /// view neither case can be asserted. Both lists that draw a row read this one function, so
+    /// the stream and an open thread cannot come to answer a press differently.
+    public static func tapped(_ id: String, selected: String?) -> DummyRowTap {
+        selected == id ? .open : .select
     }
 
     /// Which post a list centres on when it is drawn afresh.
@@ -259,8 +326,29 @@ public enum DummyLayer: Hashable, Sendable, CaseIterable {
     case viewer
     /// The written-down keys.
     case shortcuts
-    /// The conversation opened over the stream.
+    /// Somebody's page, opened by pressing their face or their name on a row (#99).
+    ///
+    /// **It and `.thread` are one walk, and neither is in front of the other** (#122). The two
+    /// used to be ordered here, a person over a conversation, which is the right answer for the
+    /// press that opens them — a face is on every row a thread draws, so a person has to open
+    /// from inside a conversation — and the wrong one for the press that leaves the page again:
+    /// a row there lit and went no further, because a conversation may not open under the layer
+    /// it is under. Which of the two is in front is now `ShellWalk`, and it is what the reader
+    /// walked rather than what a list decided in advance.
+    ///
+    /// Only the innermost step of that walk is ever open, so these two are never both in a set
+    /// of open layers and the order between them is never asked. What is still asked, and still
+    /// read out of this one list, is what stands in front of *both* — see
+    /// `DummyCommand.canWalk(whenOpen:)`.
+    case person
+    /// The conversation opened over whatever it was opened from: the stream, a search's results,
+    /// another conversation, or somebody's page. One walk with `.person` — see there.
     case thread
+    /// A page read out of a post's words, drawn on a Mac in place of the page it was opened from
+    /// (#169). One walk with `.person` and `.thread`: leaving it gives back whichever of them, or
+    /// the stream, the link was pressed on. Never open on iPad and iPhone, which read it in a
+    /// sheet over the shell.
+    case link
     /// A search's results in place of the stream (#32). Under a thread, because a result can be
     /// opened; over the selection, because leaving it gives back the one made before it opened.
     case search
@@ -281,6 +369,55 @@ public enum DummyReveal: Hashable, Sendable, CaseIterable {
     case nothing
 }
 
+/// What a press of a finger on a row means (#33).
+///
+/// **The keyboard says this in two keys and a finger has one press.** `j` lights a row and
+/// `Return` opens it, which is two presses of two different keys; a finger only ever presses the
+/// row itself, so the second press on the row it is already on is the one that opens it. It is
+/// the same shape `focused(in:selected:)` already gives a press that lands with nothing selected
+/// — the first press puts the reader somewhere, the second one acts — and it is here, beside
+/// that rule, because both are the answer to "what does this press do given what is lit".
+public enum DummyRowTap: Hashable, Sendable, CaseIterable {
+    /// The lamp moves to this row, which is what `j` and `k` do.
+    case select
+    /// The row is already lit, so this press is `Return`: the conversation opens.
+    case open
+}
+
+/// How a key's own job is done with no keyboard to do it on (#33).
+///
+/// **One case per line of the written-down keys, and not optional.** A key added to
+/// `DummyShortcut.all` has to say how a finger reaches it. `.keysOnly` is the answer where there
+/// is honestly nothing and `.partly` where there is some of it, and `TouchTests` refuses both for
+/// every tab but App, because a way in for most of a key is not what #33 accepts. A field that
+/// could be left off would be a promise the next key is free to break silently.
+///
+/// **It says how, not what.** Nothing dispatches on this: it is the written-down answer to "and
+/// without a keyboard?", kept next to the key so the two are read in one place. What it cannot do
+/// is prove the control is drawn — a line claiming `.press` over a surface with no mark on it is
+/// a lie this type cannot catch, and the test that it *is* drawn is the one every `View` body in
+/// this package is missing for the same reason.
+public enum DummyTouch: String, Hashable, Sendable, CaseIterable {
+    /// A control drawn on the surface and pressed once: a pill, a mark on a card, a mark in a
+    /// header, the button a cover is.
+    case press
+    /// A press on the thing the lamp is already on. See `DummyRowTap`.
+    case pressAgain
+    /// The secondary press — a long press on a phone, a right or control click on a Mac. The one
+    /// gesture with two names this app already argues for in `WayOut` and in `ProseLinks`.
+    case hold
+    /// The finger on the list itself.
+    case scroll
+    /// Some of what this key does is reachable and some of it is not.
+    ///
+    /// The answer for a key that is several jobs at once, where writing either `.press` or
+    /// `.keysOnly` would be a claim about the other half. `TouchTests` refuses it for the
+    /// tabs but App exactly as it refuses `.keysOnly`: "partly" is not what #33 accepts there.
+    case partly
+    /// No touch path at all: this key is reachable only from a keyboard.
+    case keysOnly
+}
+
 /// What a press on the focused post has to work with. See `DummyCommand.focused(in:selected:)`.
 public enum DummyFocus: Equatable, Sendable {
     /// No list to press on at all.
@@ -291,9 +428,17 @@ public enum DummyFocus: Equatable, Sendable {
     case post(DummyItem)
 }
 
-/// The tabs of the written-down keys. Timeline is this page's stream; App is every tab.
+/// The tabs of the written-down keys, one per purpose (#152), in the order a reader meets them:
+/// getting to a post, reading it, doing something with it, and the app around all three.
+///
+/// **What the App tab is.** Every key on the other three has a way in that needs no keyboard
+/// (#33), and App holds exactly the three that do not, or not wholly: the guide itself, Escape,
+/// and ⌘R. `⌃Tab` moves between the app's pages and is `Tab`'s kind of key, so it sits under
+/// Move with it rather than here — which is also what keeps that sentence true.
 public enum DummyShortcutGroup: String, CaseIterable, Identifiable, Sendable {
-    case timeline
+    case move
+    case read
+    case act
     case app
 
     public var id: String { rawValue }
@@ -312,6 +457,9 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
     public let keys: [String]
     public let name: String
     public let commands: [DummyCommand]
+    /// How this line is done with no keyboard (#33). Named on every line, so a key added later
+    /// cannot be added without an answer. See `DummyTouch`.
+    public let touch: DummyTouch
 
     public var id: String { name }
     public var detail: String { L10n.t("shortcut.\(name)") }
@@ -320,27 +468,81 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
         all.filter { $0.group == group }
     }
 
+    /// Written tab by tab, in the order each tab draws its lines.
     public static let all: [DummyShortcut] = [
-        DummyShortcut(group: .timeline, keys: ["Tab", "⇧Tab"], name: "tabs",
-                      commands: [.nextTab, .previousTab]),
-        DummyShortcut(group: .timeline, keys: ["j", "k", "↓", "↑"], name: "posts",
-                      commands: [.nextPost, .previousPost]),
-        DummyShortcut(group: .timeline, keys: ["g"], name: "top", commands: [.goTop]),
-        DummyShortcut(group: .timeline, keys: ["Return", "Space"], name: "expand",
-                      commands: [.expandPost]),
-        DummyShortcut(group: .timeline, keys: ["v"], name: "view", commands: [.viewAttachment]),
-        DummyShortcut(group: .timeline, keys: ["a"], name: "play", commands: [.playAttachment]),
-        DummyShortcut(group: .timeline, keys: ["m"], name: "turn", commands: [.nextAttachment]),
-        DummyShortcut(group: .timeline, keys: ["s"], name: "reveal", commands: [.reveal]),
-        DummyShortcut(group: .timeline, keys: ["q"], name: "back", commands: [.back]),
-        DummyShortcut(group: .timeline, keys: ["e"], name: "edit", commands: [.editTimeline]),
-        DummyShortcut(group: .timeline, keys: ["/"], name: "search", commands: [.search]),
-        DummyShortcut(group: .timeline, keys: ["r"], name: "reload", commands: [.reload]),
-        DummyShortcut(group: .app, keys: ["⌃Tab", "⌃⇧Tab"], name: "pages",
-                      commands: [.nextPage, .previousPage]),
-        DummyShortcut(group: .app, keys: ["c"], name: "compose", commands: [.compose]),
-        DummyShortcut(group: .app, keys: ["?"], name: "list", commands: [.showShortcuts]),
-        DummyShortcut(group: .app, keys: ["Escape"], name: "dismiss", commands: [.dismiss]),
-        DummyShortcut(group: .app, keys: ["⌘R"], name: "landing", commands: [.replayLanding]),
+        // MARK: Move — where the reader is
+
+        // A press on a row lights it, which is where `j` and `k` leave the lamp.
+        DummyShortcut(group: .move, keys: ["j", "k", "↓", "↑"], name: "posts",
+                      commands: [.nextPost, .previousPost], touch: .press),
+        // **The list under a finger, and no mark of our own.** `g` is a shortcut for a scroll,
+        // and a phone already has the scroll; a "top" button would be chrome on every row of
+        // every timeline for something the reader's thumb does. What `g` does besides — light
+        // the first post — is `.press` on that post, which is the line above.
+        DummyShortcut(group: .move, keys: ["g"], name: "top", commands: [.goTop], touch: .scroll),
+        // The named pills along the top of the timeline, pressed.
+        DummyShortcut(group: .move, keys: ["Tab", "⇧Tab"], name: "tabs",
+                      commands: [.nextTab, .previousTab], touch: .press),
+        // The rail on a Mac, the tab bar on a phone.
+        DummyShortcut(group: .move, keys: ["⌃Tab", "⌃⇧Tab"], name: "pages",
+                      commands: [.nextPage, .previousPage], touch: .press),
+        // Back in the thread's own header, and the close mark on the viewer.
+        DummyShortcut(group: .move, keys: ["q"], name: "back", commands: [.back], touch: .press),
+
+        // MARK: Read — what is in front of the reader
+
+        DummyShortcut(group: .read, keys: ["Return", "Space"], name: "expand",
+                      commands: [.expandPost], touch: .pressAgain),
+        // The cover is a button over its whole face — `DummyItemRow.cover`.
+        DummyShortcut(group: .read, keys: ["s"], name: "reveal", commands: [.reveal], touch: .press),
+        // The card itself, pressed. The mark on it is `a`'s and takes its own press.
+        DummyShortcut(group: .read, keys: ["v"], name: "view",
+                      commands: [.viewAttachment], touch: .press),
+        DummyShortcut(group: .read, keys: ["a"], name: "play",
+                      commands: [.playAttachment], touch: .press),
+        // The counter in the card's corner, which is drawn exactly where there is more than one
+        // card to turn to.
+        DummyShortcut(group: .read, keys: ["m"], name: "turn",
+                      commands: [.nextAttachment], touch: .press),
+        // The face or the name at the head of the row, pressed (#99) — the press this key was
+        // written for (#140). Absent on somebody's own page, where the key does nothing either.
+        DummyShortcut(group: .read, keys: ["p"], name: "person", commands: [.openAuthor], touch: .press),
+        DummyShortcut(group: .read, keys: ["/"], name: "search", commands: [.search], touch: .press),
+        DummyShortcut(group: .read, keys: ["r"], name: "reload", commands: [.reload], touch: .press),
+
+        // MARK: Act — what the reader does to a post, or writes
+
+        // The mark under the post, pressed — drawn on every row whose source can be written to
+        // and absent on the rest, which is why the line is `.press` and not `.partly`: where the
+        // mark is missing the key does nothing either, so there is no half of this a finger
+        // cannot reach.
+        DummyShortcut(group: .act, keys: ["b"], name: "boost", commands: [.boost], touch: .press),
+        // The star under the post, for `b`'s reason.
+        DummyShortcut(group: .act, keys: ["f"], name: "favourite", commands: [.favourite], touch: .press),
+        // The answer mark under a post in an open conversation. On the timeline the same mark
+        // opens the conversation first, which is where the key is answered too.
+        DummyShortcut(group: .act, keys: ["w"], name: "answer", commands: [.answer], touch: .press),
+        // The take-back mark, drawn on the reader's own posts only — and the key is refused on
+        // everyone else's, so there is no half of it a finger cannot reach.
+        DummyShortcut(group: .act, keys: ["d"], name: "withdraw", commands: [.withdraw], touch: .press),
+        DummyShortcut(group: .act, keys: ["c"], name: "compose", commands: [.compose], touch: .press),
+        // A tab held, or double-clicked — `TimelinePane.queryPill`.
+        DummyShortcut(group: .act, keys: ["e"], name: "edit",
+                      commands: [.editTimeline], touch: .hold),
+
+        // MARK: App — the three a finger cannot wholly reach
+
+        // **This list is the one thing in this app a finger cannot ask for**, which is the honest
+        // answer and not a resting place: a reader with no keyboard has no way to the written-down
+        // keys, and needs none, because #33 is the promise that they never have to read them.
+        DummyShortcut(group: .app, keys: ["?"], name: "list",
+                      commands: [.showShortcuts], touch: .keysOnly),
+        // Everything this closes has its own control — the ground behind a pop-up, Back, the
+        // close mark. What it does that none of them do is stop a running reload and put the lamp
+        // out, and neither of those has a touch path: hence `.partly` rather than `.press`, which
+        // would be this list claiming a way in that is not drawn anywhere.
+        DummyShortcut(group: .app, keys: ["Escape"], name: "dismiss", commands: [.dismiss], touch: .partly),
+        DummyShortcut(group: .app, keys: ["⌘R"], name: "landing",
+                      commands: [.replayLanding], touch: .keysOnly),
     ]
 }

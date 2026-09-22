@@ -34,8 +34,53 @@ struct ReloadTests {
         "https://\(host)/api/v1/trends/statuses?limit=20"
     }
 
+    /// What a Mastodon is asked before it is spoken to (#86). One per host, whatever the
+    /// timeline in front asks of it, and unsigned — the document is public.
+    private static func flavourAddress(_ host: String) -> String { MastodonInstance.address(host) }
+
     private static let boardAddress = "https://\(forum)/forum.php?mod=forumdisplay&fid=34&filter=author&orderby=dateline"
     private static let threadAddress = "https://\(forum)/forum.php?mod=viewthread&tid=\(tid)&mobile=2"
+    /// The forum's Trends: its ranking lists, one page each. **Not in `everything`**, so the
+    /// suites that stop a reload halfway see nothing of them land; they are asked, and answer
+    /// nothing, which is a quiet week and never a failure.
+    private static let threadRanksAddress =
+        "https://\(forum)/misc.php?mod=ranklist&type=thread&view=replies&orderby=thisweek"
+    private static let blogRanksAddress =
+        "https://\(forum)/misc.php?mod=ranklist&type=blog&view=heats&orderby=thisweek"
+
+    /// The week's ranked threads: the board's own thread, and one from a board not read here.
+    private static let threadRanks = FixtureHTTP.Outcome.text(#"""
+    <html><head><meta name="generator" content="Discuz! X3.2" /></head><body>
+    <div class="tl"><table cellspacing="0" cellpadding="0"><tbody>
+    <tr class="th"><td class="icn">&nbsp;</td><th>t</th><td class="frm">b</td><td class="by">a</td><td>n</td></tr>
+    </tbody><tbody><tr>
+    <td class="icn"><img src="rank_1.gif" alt="1"></td>
+    <th><a href="forum.php?mod=viewthread&amp;tid=40125" target="_blank">工具箱一键下载安装</a></th>
+    <td class="frm"><a href="forum.php?mod=forumdisplay&amp;fid=34" class="xg1">工具箱讨论区</a></td>
+    <td class="by"><cite><a href="home.php?mod=space&amp;uid=8">tinbox</a></cite> <em>2026-9-15 13:12</em></td>
+    <td><a href="forum.php?mod=viewthread&amp;tid=40125" class="xi2">9</a></td></tr>
+    <tr>
+    <td class="icn"><img src="rank_2.gif" alt="2"></td>
+    <th><a href="forum.php?mod=viewthread&amp;tid=40300" target="_blank">另一個主題</a></th>
+    <td class="frm"><a href="forum.php?mod=forumdisplay&amp;fid=99" class="xg1">別的版塊</a></td>
+    <td class="by"><cite><a href="home.php?mod=space&amp;uid=9"></a></cite> <em>2026-9-16 08:00</em></td>
+    <td><a href="forum.php?mod=viewthread&amp;tid=40300" class="xi2">5</a></td></tr>
+    </tbody></table></div></body></html>
+    """#)
+
+    /// The week's ranked blogs: one.
+    private static let blogRanks = FixtureHTTP.Outcome.text(#"""
+    <html><head><meta name="generator" content="Discuz! X3.2" /></head><body>
+    <div class="xld xlda hasrank"><dl class="bbda">
+    <dd class="ranknum"><img src="rank_1.gif" alt="1"></dd>
+    <dd class="m"><div class="avt"><a href="home.php?mod=space&amp;uid=8"><img src="a.jpg"></a></div></dd>
+    <dt class="xs2"><a href="home.php?mod=spacecp&amp;ac=share&amp;type=blog&amp;id=40125" class="oshr xs1 xw0">s</a>
+    <a href="home.php?mod=space&amp;uid=8&amp;do=blog&amp;id=40125" target="_blank">一篇日誌</a></dt>
+    <dd><a href="home.php?mod=space&amp;uid=8">tinbox</a> <span class="xg1">2026-9-16 05:10</span></dd>
+    <dd class="cl">日誌的開頭 ...</dd>
+    <dd class="xg1">h: 60</dd>
+    </dl></div></body></html>
+    """#)
 
     private static let board = FixtureHTTP.Outcome.text(#"""
     <html><head><meta name="generator" content="Discuz! X5.0" /></head><body>
@@ -67,6 +112,8 @@ struct ReloadTests {
             trendsAddress(two): timeline(two, "4"),
             boardAddress: board,
             threadAddress: thread,
+            flavourAddress(one): MastodonInstance.mastodon(one),
+            flavourAddress(two): MastodonInstance.mastodon(two),
         ]
     }
 
@@ -104,19 +151,137 @@ struct ReloadTests {
         #expect(await asked(http) == [
             Self.publicAddress(Self.one), Self.trendsAddress(Self.one),
             Self.publicAddress(Self.two), Self.trendsAddress(Self.two),
-            Self.boardAddress,
+            Self.boardAddress, Self.threadRanksAddress, Self.blogRanksAddress,
+            Self.flavourAddress(Self.one), Self.flavourAddress(Self.two),
         ])
         #expect(session.notes.count == 5)
         #expect(session.reload.failed.isEmpty)
         #expect(!session.reload.running)
     }
 
+    /// #154: a board read again means its rows' kept words may be old, so each row asks again when
+    /// it is reached — and only where the forum answered, so a dark reload leaves them standing.
+    @Test("A forum's board read again makes its rows read their opening posts again; one unread does not")
+    func aBoardReadAgainRevisitsItsRows() async {
+        let (session, _) = await shell()
+        await session.reload.timeline(.all, in: session)
+        #expect(session.posts.due.contains(Self.forum), "the board was read and its rows kept their words")
+
+        var dark = Self.everything
+        dark[Self.boardAddress] = nil
+        let (unread, _) = await shell(dark)
+        await unread.reload.timeline(.all, in: unread)
+        #expect(unread.reload.failed.contains(Self.forum), "the premise: the board did not answer")
+        #expect(!unread.posts.due.contains(Self.forum), "a reload that did not get through let the words go")
+    }
+
     @Test("Trends asks only the sources that have trends, and only for their trends")
     func trendsAsksTrends() async {
         let (session, http) = await shell()
         await session.reload.timeline(.trends, in: session)
-        #expect(await asked(http) == [Self.trendsAddress(Self.one), Self.trendsAddress(Self.two)])
-        #expect(await !http.requested.contains { $0.host == Self.forum }, "a forum has no trends")
+        #expect(await asked(http) == [
+            Self.trendsAddress(Self.one), Self.trendsAddress(Self.two),
+            Self.threadRanksAddress, Self.blogRanksAddress,
+            Self.flavourAddress(Self.one), Self.flavourAddress(Self.two),
+        ])
+        // A Discuz!'s Trends are its ranking lists, and nothing else of it: not its board.
+        #expect(await !http.requested.contains { $0.absoluteString == Self.boardAddress })
+        #expect(!session.posts.due.contains(Self.forum), "no board was read, so no row reads again")
+    }
+
+    // MARK: - A forum's Trends
+
+    /// Every route, and the forum's ranking lists answering.
+    private static var ranking: [String: FixtureHTTP.Outcome] {
+        var routes = everything
+        routes[threadRanksAddress] = threadRanks
+        routes[blogRanksAddress] = blogRanks
+        return routes
+    }
+
+    @Test("A forum's ranked thread is its board's row with Trends added, and a blog is a row of its own")
+    func aForumsTrendsLand() async throws {
+        let (session, _) = await shell(Self.ranking)
+        await session.reload.timeline(.all, in: session)
+        #expect(session.reload.failed.isEmpty)
+
+        let forum = session.notes.filter { $0.source.host == Self.forum }
+        #expect(forum.count == 3, "the board's thread once, the other ranked thread, and the blog")
+        let own = try #require(forum.first { $0.id == "discuz:\(Self.forum):\(Self.tid)" })
+        #expect(own.categories == [.board(id: "34"), .trends])
+        let other = try #require(forum.first { $0.id == "discuz:\(Self.forum):40300" })
+        #expect(other.categories == [.board(id: "99"), .trends])
+        let blog = try #require(forum.first { $0.id == "discuz:\(Self.forum):blog:40125" })
+        #expect(blog.categories == [.trends])
+        #expect(blog.body == "日誌的開頭 ...")
+
+        // The Trends tab draws all three; a board rule, only the board's own.
+        #expect(TimelineQuery.trends.items(from: session.notes, latest: nil).count == 5)
+        let board = TimelineDefinition(name: "Board", rules: [
+            try #require(Rule.category(.board(id: "34"), in: .source(host: Self.forum), sources: session.sources)),
+        ])
+        session.written = [board]
+        #expect(TimelineQuery.written(board.id).items(from: session.notes, among: [board], latest: nil)
+            .map(\.noteID) == ["discuz:\(Self.forum):\(Self.tid)"])
+    }
+
+    @Test("Only a timeline that reaches a forum's Trends reads its ranking lists")
+    func onlyTrendReachingTimelinesReadRanks() async throws {
+        func ranksAsked(_ http: FixtureHTTP) async -> Bool {
+            await http.requested.contains {
+                $0.absoluteString == Self.threadRanksAddress || $0.absoluteString == Self.blogRanksAddress
+            }
+        }
+        // A board rule: the board, and no ranking list.
+        let (boardSession, boardHTTP) = await shell(Self.ranking)
+        let board = TimelineDefinition(name: "Board", rules: [
+            try #require(Rule.category(.board(id: "34"), in: .source(host: Self.forum), sources: boardSession.sources)),
+        ])
+        boardSession.written = [board]
+        await boardSession.reload.timeline(.written(board.id), in: boardSession)
+        #expect(await !ranksAsked(boardHTTP))
+
+        // Public of a Mastodon: the forum is not asked at all.
+        let (publicSession, publicHTTP) = await shell(Self.ranking)
+        let everyPublic = TimelineDefinition(name: "Public", rules: [
+            try #require(Rule.category(.public, in: .every, sources: publicSession.sources)),
+        ])
+        publicSession.written = [everyPublic]
+        await publicSession.reload.timeline(.written(everyPublic.id), in: publicSession)
+        #expect(await !publicHTTP.requested.contains { $0.host == Self.forum })
+
+        // Trends of the forum, written: the ranking lists and nothing else of it.
+        let (trendsSession, trendsHTTP) = await shell(Self.ranking)
+        let forumTrends = TimelineDefinition(name: "Forum trends", rules: [
+            try #require(Rule.category(.trends, in: .source(host: Self.forum), sources: trendsSession.sources)),
+        ])
+        trendsSession.written = [forumTrends]
+        await trendsSession.reload.timeline(.written(forumTrends.id), in: trendsSession)
+        #expect(await trendsHTTP.requested.map(\.absoluteString).sorted()
+            == [Self.threadRanksAddress, Self.blogRanksAddress].sorted())
+        #expect(trendsSession.notes.count == 3)
+    }
+
+    @Test("A ranking list that fails, refuses, is a notice or is empty never fails the reload")
+    func aFailingRanklistIsQuiet() async {
+        let answers: [FixtureHTTP.Outcome] = [
+            .fail,
+            .body(Data(), status: 403),
+            .text(#"<html><body><div id="messagetext" class="alert_error"><p>x</p></div></body></html>"#),
+            .text("<html><body>no ranking here</body></html>"),
+            .text("<html><title>Just a moment...</title></html>"),
+        ]
+        for answer in answers {
+            var routes = Self.everything
+            routes[Self.threadRanksAddress] = answer
+            routes[Self.blogRanksAddress] = answer
+            for query in [TimelineQuery.all, .trends] {
+                let (session, _) = await shell(routes)
+                await session.reload.timeline(query, in: session)
+                #expect(session.reload.failed.isEmpty, "\(query.id): \(answer)")
+                #expect(session.reload.line == nil, "\(query.id): \(answer)")
+            }
+        }
     }
 
     @Test("A timeline you wrote asks the sources and categories its rules name, and no other")
@@ -127,13 +292,15 @@ struct ReloadTests {
         ])
         session.written = [publicOfOne]
         await session.reload.timeline(.written(publicOfOne.id), in: session)
-        #expect(await asked(http) == [Self.publicAddress(Self.one)])
+        #expect(await asked(http) == [Self.publicAddress(Self.one), Self.flavourAddress(Self.one)])
 
         let (other, otherHTTP) = await shell()
         let two = TimelineDefinition(name: "Two", rules: [try #require(Rule.source(Self.two))])
         other.written = [two]
         await other.reload.timeline(.written(two.id), in: other)
-        #expect(await asked(otherHTTP) == [Self.publicAddress(Self.two), Self.trendsAddress(Self.two)])
+        #expect(await asked(otherHTTP) == [
+            Self.publicAddress(Self.two), Self.trendsAddress(Self.two), Self.flavourAddress(Self.two),
+        ])
     }
 
     @Test("A rule for every source asks every source; a board rule asks that board alone")
@@ -144,7 +311,10 @@ struct ReloadTests {
         ])
         session.written = [everyPublic]
         await session.reload.timeline(.written(everyPublic.id), in: session)
-        #expect(await asked(http) == [Self.publicAddress(Self.one), Self.publicAddress(Self.two)])
+        #expect(await asked(http) == [
+            Self.publicAddress(Self.one), Self.publicAddress(Self.two),
+            Self.flavourAddress(Self.one), Self.flavourAddress(Self.two),
+        ])
 
         let (other, otherHTTP) = await shell()
         let board = TimelineDefinition(name: "Board", rules: [
@@ -181,7 +351,8 @@ struct ReloadTests {
         session.written = [mine]
         await session.reload.timeline(.written(mine.id), in: session)
         #expect(await signedIn.paths == ["/api/v1/timelines/home", "/api/v1/timelines/list/42"])
-        #expect(await http.requested.isEmpty, "nothing public was named")
+        #expect(await asked(http) == [Self.flavourAddress(Self.one)],
+                "nothing public was named; the one unsigned ask is what the server says it is")
         #expect(session.notes.first?.categories == [.home, .list(id: "42")])
     }
 
@@ -196,7 +367,8 @@ struct ReloadTests {
         #expect(await asked(http) == [
             Self.publicAddress(Self.one), Self.trendsAddress(Self.one),
             Self.publicAddress(Self.two), Self.trendsAddress(Self.two),
-            Self.boardAddress,
+            Self.boardAddress, Self.threadRanksAddress, Self.blogRanksAddress,
+            Self.flavourAddress(Self.one), Self.flavourAddress(Self.two),
         ])
     }
 
@@ -216,7 +388,7 @@ struct ReloadTests {
         session.timelineID = .written(friends.id)
         await session.reload.timeline(session.currentTimeline, in: session)
         #expect(await signedIn.paths == ["/api/v1/timelines/list/42"])
-        #expect(await http.requested.isEmpty)
+        #expect(await asked(http) == [Self.flavourAddress(Self.one)], "the flavour ask, and nothing else")
         #expect(session.notes.first?.categories == [.list(id: "42")])
     }
 
@@ -703,7 +875,7 @@ struct ReloadTests {
         #expect(DummyCommand.from("r", command: true) == .replayLanding)
         let line = DummyShortcut.all.first { $0.commands == [.reload] }
         #expect(line?.keys == ["r"])
-        #expect(line?.group == .timeline)
+        #expect(line?.group == .read)
         for key in ["shortcut.reload", "timeline.reload.progress", "timeline.reload.failed"] {
             for language in [DummyLanguage.english, .taiwanese] {
                 #expect(L10n.t(key, language: language) != key, "\(key) is missing in \(language)")

@@ -14,13 +14,33 @@ struct DummyThreadPane: View {
     /// Where the opening post and the rest of the topic are kept. Passed through to every row,
     /// and read here for D31's list.
     let posts: ForumPosts
+    /// Where the conversation around a microblog post is kept — the other half of the same
+    /// question, for the sources that answer it in one request (#90).
+    let conversations: ShellConversations
+    /// The reader pressing for the conversation again, after one that could not be had. The ask
+    /// itself is the pane above's, which is the one place that has the session to ask through.
+    var onAskAround: () -> Void = {}
     @Binding var selectedID: String?
     var marks: (DummyItem) -> Binding<DummyMarks>
+    /// Each row's share of #54's acts, asked of the pane above rather than worked out here: the
+    /// session holds what decides them and this pane has no session. See `ItemActing`.
+    var acting: (DummyItem) -> ItemActing = { _ in ItemActing() }
     @Binding var decks: ShellDecks
     /// What is playing, and the one player in the app. See `ShellPlayback`.
     let playback: ShellPlayback
     /// A press on a card's own play mark, which the root answers under the same rule as `a`.
     var onPlayRow: (DummyItem) -> Void
+    /// A press on a card, and on the counter in its corner: `v` and `m` (#33).
+    var onViewRow: (DummyItem) -> Void
+    var onTurnRow: (DummyItem) -> Void
+    /// A second press on the row the lamp is already on: `Return`, which from inside a thread
+    /// opens the conversation around the reply that was pressed. See `DummyCommand.tapped`.
+    /// The press carries the post it means, for the reason `TimelinePane.onOpenThread` gives.
+    var onOpenThread: (String) -> Void
+    /// A press on a face or a name in this conversation (#99). A person opens **over** the
+    /// thread, which `DummyLayer.person` argues, so a reader who follows somebody out of a
+    /// conversation is given the conversation back when they leave them.
+    var onOpenPerson: (DummyPerson) -> Void
     var jumpToTop: Int
     var onToast: (String) -> Void
     var onBack: () -> Void
@@ -28,26 +48,31 @@ struct DummyThreadPane: View {
     @Environment(\.openURL) private var openURL
 
     private let step: CGFloat = 16
-    private let deepest = 4
+    /// How many steps a reply is indented by at most — **the conversation's depth, not a
+    /// quotation's**. `DiscuzQuotation.deepest` is the other ceiling in this feature and counts
+    /// a different tree in different units; the two are unrelated and neither derives from the
+    /// other, which is worth the longer name to say.
+    private let deepestIndent = 4
 
-    private var conversation: DummyConversation { root.dummyConversation() }
+    /// What this pane draws: the conversation the source handed back, or this post alone until
+    /// one has. Built each pass rather than held, for `ShellConversationStanding.loaded`'s reason
+    /// — and built **once** a pass: `body` binds it and hands each row the depth its place in
+    /// the conversation already says, rather than every row asking the conversation again.
+    private var conversation: DummyConversation { conversations.conversation(around: root) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let conversation = conversation
+        let above = conversation.ancestors.count
+        return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: ShellSpace.snug) {
-                Button(action: onBack) {
-                    Label(L10n.t("thread.back"), systemImage: "chevron.left")
-                        .font(ShellType.meta.weight(.medium))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(ShellChrome.selectInk(colorScheme))
+                ShellBackButton("thread.back", action: onBack)
                 Text(L10n.t("thread.title"))
-                    .font(ShellType.pane)
+                    .shellFont(.pane)
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                 Spacer()
                 outward
                 Text(L10n.t("thread.leaveHint"))
-                    .font(ShellType.meta)
+                    .shellFont(.meta)
                     .foregroundStyle(ShellChrome.inkFaint(colorScheme))
             }
             .padding(.horizontal, ShellSpace.pad)
@@ -60,19 +85,27 @@ struct DummyThreadPane: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 6) {
-                        ForEach(conversation.ancestors) { above in
-                            threaded(above, dimmed: true)
+                        ForEach(Array(conversation.ancestors.enumerated()), id: \.element.id) { step in
+                            threaded(step.element, dimmed: true, depth: step.offset)
                         }
-                        threaded(conversation.post, dimmed: false)
+                        threaded(conversation.post, dimmed: false, depth: above)
+                        if !root.otherCopies.isEmpty {
+                            carried
+                        }
                         ForEach(conversation.descendants, id: \.item.id) { entry in
-                            threaded(entry.item, dimmed: false)
+                            threaded(entry.item, dimmed: false, depth: above + entry.depth)
                         }
-                        if let thread { rest(of: thread) }
+                        if let thread {
+                            rest(of: thread)
+                        } else {
+                            around
+                        }
                     }
                     .padding(.vertical, 8)
                     .padding(.trailing, 8)
                 }
                 .scrollIndicators(.never)
+                .clearsFloatingCorner()
                 .onAppear {
                     guard let id = DummyCommand.centredOnAppear(selected: selectedID, opening: root.id)
                     else { return }
@@ -151,7 +184,7 @@ struct DummyThreadPane: View {
                 openURL(url)
             } label: {
                 Label(root.outwardName, systemImage: "arrow.up.forward.app")
-                    .font(ShellType.meta.weight(.medium))
+                    .shellFont(.meta, weight: .medium)
                     .lineLimit(1)
             }
             .buttonStyle(.plain)
@@ -161,14 +194,16 @@ struct DummyThreadPane: View {
         }
     }
 
-    private func threaded(_ item: DummyItem, dimmed: Bool) -> some View {
-        let depth = conversation.depth(of: item.id)
-        return DummyItemRow(
+    /// One post of the conversation, `depth` steps in — `DummyConversation.depth(of:)`'s answer,
+    /// read off the post's place rather than looked up by id.
+    private func threaded(_ item: DummyItem, dimmed: Bool, depth: Int) -> some View {
+        DummyItemRow(
             item: item,
             catalogues: catalogues,
             catalogueSettled: catalogueSettled,
             posts: posts,
             marks: marks(item),
+            acting: acting(item),
             selected: item.id == selectedID,
             // **Every row in this pane, not only the root.** The pane is the place a post is read
             // rather than scanned, which is as true of a post the reader arrived through as of
@@ -177,10 +212,26 @@ struct DummyThreadPane: View {
             inFull: true,
             top: decks.top(of: item.id, of: item.attachments.count),
             lifted: decks.isLifted(item.id),
-            player: player(of: item),
-            onSelect: { selectedID = item.id },
+            player: playback.rowPlayer(for: item, decks: decks),
+            // The same one rule the stream's rows read: a press lights the row, and a second
+            // press on the row already lit is `Return` (#33).
+            onSelect: {
+                switch DummyCommand.tapped(item.id, selected: selectedID) {
+                case .select: selectedID = item.id
+                case .open: onOpenThread(item.id)
+                }
+            },
+            // **Nothing on the post this pane is already about.** Opening it again is refused —
+            // `FediqoRootView.openThread` says so — and an action announced and then refused is
+            // worse than one never announced.
+            onOpen: item.id == root.id ? nil : { onOpenThread(item.id) },
+            // **On every row here, the root included.** Opening this post again is refused;
+            // opening whoever wrote it is not the same act and is not refused.
+            onOpenPerson: onOpenPerson,
             onToggleCover: { _ = decks.toggleCover(item.id) },
             onPlay: { onPlayRow(item) },
+            onView: { onViewRow(item) },
+            onTurn: { onTurnRow(item) },
             onEnded: { playback.stop() },
             onToast: onToast
         )
@@ -188,15 +239,6 @@ struct DummyThreadPane: View {
         .padding(.leading, indent(depth))
         .overlay(alignment: .leading) { rail(depth) }
         .id(item.id)
-    }
-
-    /// The player for this row's slot, where this row's card is the thing that is playing.
-    private func player(of item: DummyItem) -> AVPlayer? {
-        playback.player(
-            for: ShellPlaying.playable(decks.showing(item.attachments, of: item.id)),
-            of: item.id,
-            on: .row
-        )
     }
 
     // MARK: - The rest of the topic — D31
@@ -250,26 +292,92 @@ struct DummyThreadPane: View {
                 // later, which is what the reader wrote in about first. See `ForumWaiting`.
                 ForumWaiting(line: L10n.t("thread.replies.loading"))
             case .none:
-                quiet(L10n.t("thread.replies.none"))
+                if let notice = EmptyNotice.thread(
+                    descendantCount: 0,
+                    replyCount: 0,
+                    standing: ForumRepliesStanding.none
+                ) {
+                    ShellNotice(notice)
+                }
             case .loaded(let replies):
                 Text(String(format: L10n.t("thread.replies.count"), replies.count))
-                    .font(ShellType.name)
+                    .shellFont(.name)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 ForEach(replies) { reply in
                     ForumReplyRow(post: reply, host: thread.host)
                 }
             case .absent(let absence):
                 quiet(ForumPostBand.sentence(for: absence))
-                // **A second go, where a second go could change the answer.** The network having
-                // been dark is the one kind of nothing that asking again fixes, and
-                // `Absence.asksAgain` is where that judgement already lives. The other three are
-                // settled facts about the forum and get no button, because a control guaranteed
-                // to change nothing is worse than none.
                 if standing.wantsPressing { way(in: thread) }
             }
         }
         .padding(.top, ShellSpace.snug)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: - The conversation around a microblog post — #90
+
+    /// What is under the post where the source answers for a whole thread in one request.
+    ///
+    /// **The mirror of `rest(of:)`, and deliberately not the same view.** A forum topic's
+    /// replies are a list this pane draws itself, under a rule of their own; a microblog's
+    /// answers *are* rows of this conversation and are already drawn above, nested, by the same
+    /// `threaded(_:dimmed:depth:)` every other post in the pane goes through. So what is left down
+    /// here is only what the rows cannot say: that the thread is still coming, that it could not
+    /// be had, or that there is genuinely nobody else in it.
+    ///
+    /// **`unasked` waits rather than saying "nothing".** The ask is the pane opening — one turn
+    /// away, not a state the reader can be left in — and drawing the empty notice for that turn
+    /// would say "nothing under this post" about a post whose thread is about to arrive.
+    /// `ShellConversations` never leaves a standing unasked once it has looked at a post: a
+    /// source with no conversation to read is settled as `none` there rather than left waiting
+    /// here, which is what makes this branch safe.
+    ///
+    /// **No `default:`.** A sixth standing has to be given a shape.
+    @ViewBuilder
+    private var around: some View {
+        switch conversations.standing(of: root.id) {
+        case .unasked, .coming:
+            ForumWaiting(line: L10n.t("thread.replies.loading"))
+                .padding(.top, ShellSpace.snug)
+        case .none:
+            // The forum's own sentence for the same fact, so one thing is worded one way: the
+            // post arrived, the source answered, and nobody has said anything under it. It is
+            // told over `root.counts.replies`, which is the server's own count and may claim
+            // answers this reader is not allowed to see.
+            if let notice = EmptyNotice.thread(
+                descendantCount: 0, replyCount: 0, standing: ForumRepliesStanding.none
+            ) {
+                ShellNotice(notice)
+            }
+        case .loaded:
+            // The answers are the rows above. Nothing belongs down here.
+            EmptyView()
+        case .absent(let absence):
+            let standing = conversations.standing(of: root.id)
+            VStack(alignment: .leading, spacing: ShellSpace.snug) {
+                quiet(absence.sentence(host: root.source.host))
+                if standing.wantsPressing { wayAround }
+            }
+            .padding(.top, ShellSpace.snug)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// The way in to the thread again — `way(in:)`'s twin, and the same bargain: drawn exactly
+    /// where `ShellConversationStanding.wantsPressing` is true, so a reader never finds a button
+    /// for an answer that cannot change.
+    ///
+    /// No key cap beside it. `s` is the forum's press and means the rest of a topic that was
+    /// never asked for; this is a second attempt at one that was, and giving it the same cap
+    /// would teach the letter for a thing it does not do here.
+    private var wayAround: some View {
+        Button(action: onAskAround) {
+            Label(L10n.t("thread.around.again"), systemImage: "arrow.clockwise")
+                .shellFont(.meta, weight: .medium)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(ShellChrome.selectInk(colorScheme))
     }
 
     /// The way in to the rest of the topic — **the pointer's half of the key `s`**.
@@ -290,9 +398,9 @@ struct DummyThreadPane: View {
         } label: {
             HStack(spacing: ShellSpace.snug) {
                 Label(L10n.t("thread.replies.load"), systemImage: "arrow.down.circle")
-                    .font(ShellType.meta.weight(.medium))
+                    .shellFont(.meta, weight: .medium)
                 Text(verbatim: "s")
-                    .font(ShellType.mark.monospaced())
+                    .shellFont(.mark, monospaced: true)
                     .foregroundStyle(ShellChrome.inkFaint(colorScheme))
                     .padding(.horizontal, ShellSpace.tight)
                     .background(
@@ -308,15 +416,71 @@ struct DummyThreadPane: View {
         .foregroundStyle(ShellChrome.selectInk(colorScheme))
     }
 
+    // MARK: - What each source carried
+
+    /// The post as each source carried it, told apart by source (#114): the row is the copy that
+    /// arrived first, and this is where a reader who wants to know why two copies differ can see
+    /// every one of them side by side.
+    ///
+    /// **Words, and not a second row per copy.** A copy drawn as a full row here would be a row
+    /// the keys cannot reach and a mark that acts on a post the timeline already marks once; what
+    /// a reader is here to compare is what each server said, so that is what is drawn. Each is
+    /// headed by its host, which is what tells them apart and the only thing this app is sure of.
+    private var carried: some View {
+        VStack(alignment: .leading, spacing: ShellSpace.snug) {
+            Text(L10n.t("thread.copies.title"))
+                .shellFont(.meta, weight: .medium)
+                .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                .accessibilityAddTraits(.isHeader)
+            ForEach(root.copies) { copy in
+                VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                    Text(String(format: L10n.t("thread.copies.from"), copy.source.host))
+                        .shellFont(.mark)
+                        .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                    Text(Self.carriedWords(copy))
+                        .shellFont(.body)
+                        .foregroundStyle(ShellChrome.ink(colorScheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+                // One copy, one thing heard: the host it came from, then what it said.
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .padding(.horizontal, ShellSpace.pad)
+        .padding(.vertical, ShellSpace.snug)
+    }
+
+    /// What one copy said, as a line to read: who, then the words.
+    ///
+    /// **A covered copy shows its cover and not its words.** The pane's rows each carry a cover a
+    /// reader lifts on purpose, and a comparison that printed a covered copy's words in plain text
+    /// underneath would lift it for them. So a covered copy says what it was covered with — or
+    /// that it was covered, where the author gave no line — which is also what differs, when one
+    /// server carried a cover the other did not.
+    static func carriedWords(_ copy: DummyItem, language: DummyLanguage? = nil) -> String {
+        let who = copy.handle.map { "\(copy.author) \($0)" } ?? copy.author
+        let said: String
+        if copy.covered {
+            let line = copy.spoiler ?? ""
+            said = line.isEmpty
+                ? L10n.t("item.covered.mark", language: language)
+                : String(format: L10n.t("item.covered.warning", language: language), line)
+        } else {
+            said = [copy.title, copy.body].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
+        }
+        return said.isEmpty ? who : who + "\n" + said
+    }
+
     private func quiet(_ text: String) -> some View {
         Text(text)
-            .font(ShellType.meta)
+            .shellFont(.meta)
             .foregroundStyle(ShellChrome.inkFaint(colorScheme))
             .fixedSize(horizontal: false, vertical: true)
     }
 
     private func indent(_ depth: Int) -> CGFloat {
-        CGFloat(min(depth, deepest)) * step
+        CGFloat(min(depth, deepestIndent)) * step
     }
 
     @ViewBuilder
@@ -360,14 +524,21 @@ struct ForumReplyRow: View {
     /// `DummyItemRow` at the top is what the reader opened, and twenty replies each carrying a
     /// full-size avatar would read as twenty more of those. Scaled with the type, for the reason
     /// every other fitting in this shell is — the alternative is big text beside small furniture.
-    @ScaledMetric(relativeTo: .body) private var side: CGFloat = 24
+    @ShellMetric(relativeTo: .body) private var side: CGFloat = 24
 
     var body: some View {
         HStack(alignment: .top, spacing: ShellSpace.snug) {
             avatar
             VStack(alignment: .leading, spacing: ShellSpace.tight) {
                 who
-                if let quoted = post.quoted, !quoted.isEmpty { quotation(quoted) }
+                // **Keyed by position, because a quotation has no id and does not need one.**
+                // Nothing reorders this list: it is the order the page wrote, read once, and
+                // rebuilt whole whenever the post is. Over the indices rather than over
+                // `enumerated()`, which would allocate a fresh array of pairs every time a body
+                // is evaluated to arrive at the same identity.
+                ForEach(post.quoted.indices, id: \.self) { level in
+                    ForumQuotation(quotation: post.quoted[level])
+                }
                 words
             }
         }
@@ -380,6 +551,9 @@ struct ForumReplyRow: View {
         // has to hang its action on the headline for exactly the opposite reason.
         .accessibilityElement(children: .combine)
         .accessibilityActions { outwardAction }
+        // **Here rather than inside the words**, for `SpokenLinks`' reason: `.combine` above
+        // makes this reply one element, and what its children offered goes with the rest of them.
+        .spokenLinks(in: post.isWithheld ? "" : post.body)
     }
 
     // MARK: - The way out
@@ -450,11 +624,11 @@ struct ForumReplyRow: View {
                     host: host,
                     standing: .avatar,
                     alt: nil,
+                    speaks: false,
                     radius: ShellSpace.tight
                 )
             } else {
-                RoundedRectangle(cornerRadius: ShellSpace.tight, style: .continuous)
-                    .fill(ShellChrome.well(colorScheme))
+                ShellVacant(standing: .avatar, radius: ShellSpace.tight)
             }
         }
         .frame(width: side, height: side)
@@ -471,41 +645,21 @@ struct ForumReplyRow: View {
         HStack(spacing: ShellSpace.snug) {
             if let floor = post.floor {
                 Text(String(format: L10n.t("thread.reply.floor"), floor))
-                    .font(ShellType.reading)
+                    .shellFont(.reading)
                     .foregroundStyle(ShellChrome.inkFaint(colorScheme))
             }
             Text(post.author)
-                .font(ShellType.name)
+                .shellFont(.name)
                 .foregroundStyle(ShellChrome.ink(colorScheme))
                 .lineLimit(1)
             if let at = post.postedAt {
                 Text(at, format: .relative(presentation: .named))
-                    .font(ShellType.meta)
+                    .shellFont(.meta)
                     .foregroundStyle(ShellChrome.inkFaint(colorScheme))
                     .lineLimit(1)
             }
             Spacer(minLength: 0)
         }
-    }
-
-    /// What this reply reproduced of somebody else's, drawn as a quotation.
-    ///
-    /// Core keeps it out of `body` and keeps it rather than dropping it, and says why: a reply
-    /// that opens by quoting the whole post above it would fill the words with a stranger's
-    /// sentence and never show its own. Drawn behind a rule and dimmed, so whose words are whose
-    /// is a thing the reader can see rather than infer.
-    private func quotation(_ text: String) -> some View {
-        Text(text)
-            .font(ShellType.meta)
-            .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.leading, ShellSpace.snug)
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(ShellChrome.hairline(colorScheme))
-                    .frame(width: ShellSpace.hair)
-            }
-            .accessibilityLabel(Text(String(format: L10n.t("thread.reply.quoted"), text)))
     }
 
     /// The three things a reply's words can be, and they are three rather than two.
@@ -519,12 +673,8 @@ struct ForumReplyRow: View {
     @ViewBuilder
     private var words: some View {
         if post.isWithheld {
-            HStack(alignment: .firstTextBaseline, spacing: ShellSpace.tight) {
-                Image(systemName: "lock")
-                Text(L10n.t("item.forum.withheld"))
-            }
-            .font(ShellType.meta)
-            .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+            // `ForumPostBand`'s own line for it, with the whole of a reply to say it in.
+            ForumPostBand.said("lock", L10n.t("item.forum.withheld"), lines: nil, colorScheme: colorScheme)
         } else if post.body.isEmpty {
             // The forum answered, the post was not withheld, and there were no words in it: a
             // picture, an attachment, a poll. Nothing drawn, for the reason `ForumPostBand` draws
@@ -532,11 +682,118 @@ struct ForumReplyRow: View {
             // who posted a photograph.
             EmptyView()
         } else {
-            Text(post.body)
-                .font(ShellType.body)
+            // Prose with no picture list, exactly as `ForumPostBand` draws the opening post: a
+            // forum sends no custom emoji, and an address in a reply is one a reader wants to
+            // follow. The font is the same token — `EmojiTextRole.body` is `ShellType.body`.
+            EmojiText(prose: post.body, emojis: [], host: host)
                 .foregroundStyle(ShellChrome.ink(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
+        }
+    }
+}
+
+/// What a reply reproduced of somebody else's, drawn as a quotation — **and, where they quoted
+/// somebody in turn, that one inside it** (#94).
+///
+/// Core keeps a quotation out of `body` and keeps it rather than dropping it, and says why: a
+/// reply that opens by quoting the whole post above it would fill the words with a stranger's
+/// sentence and never show its own. Drawn behind a rule and dimmed, so whose words are whose is
+/// a thing the reader can see rather than infer.
+///
+/// ## Why this is a type and not a function
+///
+/// It draws itself. A `private func quotation(_:) -> some View` that called itself would be an
+/// opaque return type defined in terms of itself, which does not compile — the recursion has to
+/// go through a nominal type, and this is it. The same shape `DummyThreadPane` uses for its own
+/// nesting one level up, where `threaded(_:dimmed:depth:)` indents by a depth the conversation
+/// carries; here the depth **is** the view tree, because a quotation's depth is its structure
+/// rather than a number beside it.
+///
+/// ## One rule per level, and it is the same rule
+///
+/// Each level gets its own rule and its own inset, so three nested quotations read as three
+/// rules stepping right rather than as one border drawn thicker. The inset is `ShellSpace.snug`
+/// at every level rather than growing: the rules are what say how deep this is, and a widening
+/// step would run a deep quotation off a phone's screen for no more information.
+///
+/// **A level with no words of its own draws no rule (#160).** Some templates write a quotation
+/// that only wraps another — words empty, the real quotation inside. Given a rule, it drew a
+/// second one the full height of the first with nothing between them: one border twice, the
+/// thing #94 set out to remove. It is collapsed here, in the view, and not in Core, because a
+/// tree this device kept before this build (#154) still holds its wrappers, and a quotation read
+/// from what was kept has to draw the same as one read from the forum. One place that decides
+/// it for both, rather than two that could disagree. `drawn(_:)` is the whole of that decision;
+/// two quotations side by side in one level stay two.
+///
+/// ## The order is the page's, on purpose
+///
+/// Inside a level its own words come first and what it quoted after, as the page writes it.
+/// That is deliberately not the order `ForumReplyRow` and `ForumPostBand` (#104) draw a post in,
+/// and is left so: a Discuz! level's words open with its "X 发表于 …" header, and drawing the
+/// quoted part first would put that header below the quotation X was answering, parting a
+/// person's name from their words.
+///
+/// **No cap here.** `DiscuzQuotation.deepest` bounds the tree where it is read, so what arrives
+/// is already shallow enough to draw; a second ceiling in the view would be a rule that could
+/// disagree with the one in Core.
+///
+/// ## What it says out loud
+///
+/// Every level carries the same "Quoted: …" label over its own words, so a reader using
+/// VoiceOver hears each person's sentence introduced as a quotation instead of one label over
+/// everybody's, in the order they are drawn. A wrapper has no words and so no label; what it
+/// wraps is read where it would have been.
+struct ForumQuotation: View {
+    let quotation: DiscuzQuotation
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// The levels drawn for `levels`: every wrapper — a level with no words — replaced, in its
+    /// place, by what it wraps, all the way down. What comes back has words at every level, so
+    /// every rule drawn has somebody's sentence beside it.
+    static func drawn(_ levels: [DiscuzQuotation]) -> [DiscuzQuotation] {
+        levels.flatMap { level in
+            level.words.isEmpty
+                ? drawn(level.quoting)
+                : [DiscuzQuotation(words: level.words, quoting: drawn(level.quoting))]
+        }
+    }
+
+    var body: some View {
+        // A wrapper handed straight to this view — a post's own list arrives as it was read or
+        // kept — draws what it wraps and nothing of its own: no rule, no inset.
+        if quotation.words.isEmpty {
+            quoted
+        } else {
+            VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                Text(quotation.words)
+                    .shellFont(.meta)
+                    .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel(
+                        Text(String(format: L10n.t("thread.reply.quoted"), quotation.words))
+                    )
+                quoted
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, ShellSpace.snug)
+            .overlay(alignment: .leading) {
+                Rectangle()
+                    .fill(ShellChrome.hairline(colorScheme))
+                    .frame(width: ShellSpace.hair)
+            }
+        }
+    }
+
+    /// What this level quoted, wrappers already taken out, one `ForumQuotation` each, under
+    /// the words. Keyed by position, for the reason `ForumReplyRow` states.
+    private var quoted: some View {
+        let levels = Self.drawn(quotation.quoting)
+        return VStack(alignment: .leading, spacing: ShellSpace.tight) {
+            ForEach(levels.indices, id: \.self) { level in
+                ForumQuotation(quotation: levels[level])
+            }
         }
     }
 }

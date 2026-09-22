@@ -1430,9 +1430,11 @@ struct DiscuzTests {
         let (client, _) = Self.threadClient(.text(page), host: "install-c.example", tid: 700100)
         let quoting = try await client.post(tid: 700100)
 
-        let quoted = try #require(quoting.quoted)
-        #expect(quoted.hasPrefix("沙洲电子 发表于 2017-12-15 17:49"))
-        #expect(quoted.contains("论坛运维都要花钱"))
+        let quoted = try #require(quoting.quoted.first)
+        #expect(quoting.quoted.count == 1, "one quotation, and one level of it")
+        #expect(quoted.quoting.isEmpty)
+        #expect(quoted.words.hasPrefix("沙洲电子 发表于 2017-12-15 17:49"))
+        #expect(quoted.words.contains("论坛运维都要花钱"))
         // What this person actually wrote — and nothing of what the other person did.
         #expect(quoting.body == "不如学隔壁，卖点周边")
         #expect(!quoting.body.contains("沙洲电子"))
@@ -1442,9 +1444,98 @@ struct DiscuzTests {
         // one post's.
         let second = try #require(try await client.replies(tid: 700100).first)
         #expect(second.author == "林渡")
-        #expect(try #require(second.quoted).hasPrefix("hexi 发表于 2017-12-15 17:00"))
+        #expect(try #require(second.quoted.first).words.hasPrefix("hexi 发表于 2017-12-15 17:00"))
         #expect(!second.body.contains("hexi"))
         #expect(second.body == "同意楼上")
+    }
+
+    @Test("A quotation that quotes another keeps the two apart, and each keeps its own words")
+    func aQuotationInsideAQuotationStaysNested() async throws {
+        // **What #94 is about.** Discuz! writes an argument three replies deep as a `div.quote`
+        // inside a `div.quote`, and the plain text of the outer one already contains the inner
+        // one's words — so flattened, two people appear to have written one paragraph behind
+        // one border. The levels are what say where one person stops.
+        let page = #"""
+        <div class="plc" id="pid900301">
+          <ul class="authi"><li>3<sup>#</sup></li><li><a href="home.php?mod=space&amp;uid=53">阿灰</a></li></ul>
+          <div class="message">
+            <div class="quote"><blockquote>沙洲电子 发表于 2017-12-15 17:49<br />
+              <div class="quote"><blockquote>hexi 发表于 2017-12-15 17:00<br />
+              论坛运维都要花钱</blockquote></div>
+              这个确实该支持一下</blockquote></div>
+            那就每人出十块
+          </div>
+        </div>
+        """#
+        let (client, _) = Self.threadClient(.text(page), host: "install-c.example", tid: 700200)
+        let post = try await client.post(tid: 700200)
+
+        let outer = try #require(post.quoted.first)
+        #expect(post.quoted.count == 1, "one quotation at the top, however deep it goes")
+        #expect(outer.words.hasPrefix("沙洲电子 发表于 2017-12-15 17:49"))
+        #expect(outer.words.contains("这个确实该支持一下"))
+        #expect(!outer.words.contains("hexi"), "the inner level is not this level's words")
+        #expect(!outer.words.contains("论坛运维都要花钱"))
+
+        let inner = try #require(outer.quoting.first)
+        #expect(outer.quoting.count == 1)
+        #expect(inner.words.hasPrefix("hexi 发表于 2017-12-15 17:00"))
+        #expect(inner.words.contains("论坛运维都要花钱"))
+        #expect(inner.quoting.isEmpty, "and it stops where the page stopped")
+
+        // The author's own words are still the author's, which is the rule the levels sit under.
+        #expect(post.body == "那就每人出十块")
+        #expect(!post.body.contains("沙洲电子"))
+        #expect(!post.body.contains("hexi"))
+        // Weighed whole, for the cache that holds it: both levels, not just the outer one.
+        #expect(outer.byteCount == outer.words.utf8.count + inner.words.utf8.count)
+    }
+
+    @Test("Two quotations side by side are two, not one paragraph with a line between them")
+    func siblingQuotationsStayTwo() async throws {
+        let page = #"""
+        <div class="plc" id="pid900401">
+          <ul class="authi"><li>4<sup>#</sup></li><li><a href="home.php?mod=space&amp;uid=54">丁一</a></li></ul>
+          <div class="message">
+            <div class="quote"><blockquote>甲 说的第一件事</blockquote></div>
+            <div class="quote"><blockquote>乙 说的第二件事</blockquote></div>
+            两件都同意
+          </div>
+        </div>
+        """#
+        let (client, _) = Self.threadClient(.text(page), host: "install-c.example", tid: 700300)
+        let post = try await client.post(tid: 700300)
+
+        #expect(post.quoted.map(\.words) == ["甲 说的第一件事", "乙 说的第二件事"])
+        #expect(post.quoted.allSatisfy { $0.quoting.isEmpty })
+        #expect(post.body == "两件都同意")
+    }
+
+    @Test("A page nested past what anybody argues is read to the floor and no further")
+    func quotationDepthIsBounded() async throws {
+        // A stranger's page, so the recursion is bounded rather than trusted. Below the floor
+        // nothing is dropped: the rest arrives as the words of the deepest level this reads.
+        let deep = (0..<40).reduce("innermost") { inner, level in
+            #"<div class="quote"><blockquote>level \#(level)<br />\#(inner)</blockquote></div>"#
+        }
+        let page = #"""
+        <div class="plc" id="pid900501">
+          <ul class="authi"><li>5<sup>#</sup></li><li><a href="home.php?mod=space&amp;uid=55">戊</a></li></ul>
+          <div class="message">\#(deep)mine</div>
+        </div>
+        """#
+        let (client, _) = Self.threadClient(.text(page), host: "install-c.example", tid: 700400)
+        let post = try await client.post(tid: 700400)
+
+        var levels = 0
+        var here = try #require(post.quoted.first)
+        while let next = here.quoting.first {
+            levels += 1
+            here = next
+        }
+        #expect(levels + 1 == DiscuzQuotation.deepest, "eight levels apart, and the ninth is words")
+        #expect(here.words.contains("innermost"), "the floor keeps what is under it, as words")
+        #expect(post.body == "mine")
     }
 
     @Test("A post the forum withheld is said to be withheld, never drawn as empty words")
@@ -1523,7 +1614,7 @@ struct DiscuzTests {
         #expect(opening.body.contains("langpack-20260320.zip"))
         #expect(opening.body.hasPrefix("On March 20, 2026"))
         // A `[quote]` around something that is not a person works the same way.
-        #expect(opening.quoted == "https://install-b.example/files/langpack-20260320.zip")
+        #expect(opening.quoted.map(\.words) == ["https://install-b.example/files/langpack-20260320.zip"])
         #expect(!opening.body.hasPrefix("https://"))
         // **And a mobile template that writes an absolute date has it read.** The floor here is
         // `<sup>#1</sup>`, which is the English install's spelling of it.

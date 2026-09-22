@@ -23,6 +23,7 @@ struct TimelineEditor: View {
     enum Focus: Hashable {
         case keys
         case name
+        case desc
         case text
     }
 
@@ -36,9 +37,18 @@ struct TimelineEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: ShellSpace.step) {
             header
+            // A field is read and typed into like everything around it, so it moves with the
+            // rest of the scale (#96) — otherwise a rule is composed at one size beside a list
+            // of rules drawn at another.
             TextField(L10n.t("timeline.name.placeholder"), text: $draft.name)
+                .shellFont(.body)
                 .textFieldStyle(.roundedBorder)
                 .focused($focus, equals: .name)
+                .onSubmit { focus = .keys }
+            TextField(L10n.t("timeline.desc.placeholder"), text: $draft.desc)
+                .shellFont(.body)
+                .textFieldStyle(.roundedBorder)
+                .focused($focus, equals: .desc)
                 .onSubmit { focus = .keys }
             placeLine
             Rectangle().fill(ShellChrome.hairline(colorScheme)).frame(height: ShellSpace.hair)
@@ -73,7 +83,7 @@ struct TimelineEditor: View {
                 command: press.modifiers.contains(.command),
                 option: press.modifiers.contains(.option),
                 stage: stage,
-                fieldFocused: focus == .name || focus == .text
+                fieldFocused: focus == .name || focus == .desc || focus == .text
             )
             guard let action else { return .ignored }
             perform(action)
@@ -168,7 +178,7 @@ struct TimelineEditor: View {
             Button(L10n.t("board.choose.cancel")) { perform(.cancel) }
             Spacer()
             Text(L10n.t(draft.isNew ? "timeline.new.title" : "timeline.edit.title"))
-                .font(ShellType.pane)
+                .shellFont(.pane)
                 .foregroundStyle(ShellChrome.ink(colorScheme))
             Spacer()
             Button(L10n.t("timeline.done")) { session.commit(draft) }
@@ -182,7 +192,7 @@ struct TimelineEditor: View {
     private var placeLine: some View {
         HStack(spacing: ShellSpace.snug) {
             Text(String(format: L10n.t("timeline.place"), draft.position + 1, draft.places))
-                .font(ShellType.meta)
+                .shellFont(.meta)
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
             Spacer()
             Button(L10n.t("timeline.earlier")) { perform(.earlier) }
@@ -190,7 +200,7 @@ struct TimelineEditor: View {
             Button(L10n.t("timeline.later")) { perform(.later) }
                 .disabled(!draft.canMoveLater)
         }
-        .font(ShellType.meta)
+        .shellFont(.meta)
     }
 
     private var rulesStage: some View {
@@ -200,7 +210,7 @@ struct TimelineEditor: View {
                     VStack(alignment: .leading, spacing: ShellSpace.snug) {
                         if draft.rules.isEmpty {
                             Text(L10n.t("timeline.rules.empty"))
-                                .font(ShellType.meta)
+                                .shellFont(.meta)
                                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
                         }
                         ForEach(Array(bands.enumerated()), id: \.offset) { index, band in
@@ -217,7 +227,7 @@ struct TimelineEditor: View {
                 if !draft.isNew {
                     Button(L10n.t("timeline.remove")) { perform(.removeTimeline) }
                         .buttonStyle(.plain)
-                        .font(ShellType.meta)
+                        .shellFont(.meta)
                         .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 }
                 Spacer()
@@ -258,7 +268,7 @@ struct TimelineEditor: View {
         return VStack(alignment: .leading, spacing: ShellSpace.tight) {
             Text((joined ? L10n.t("rule.band.and") + " " : "") + L10n.t(band.key))
                 .textCase(.uppercase)
-                .font(ShellType.name)
+                .shellFont(.name)
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .padding(.horizontal, ShellSpace.snug)
                 .padding(.vertical, ShellSpace.tight)
@@ -283,13 +293,13 @@ struct TimelineEditor: View {
         VStack(alignment: .leading, spacing: ShellSpace.step) {
             Button("‹ " + L10n.t("rule.back")) { perform(.back) }
                 .buttonStyle(.plain)
-                .font(ShellType.meta)
+                .shellFont(.meta)
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
             HStack(spacing: ShellSpace.tight) {
                 ForEach(Array(RuleKind.Tag.allCases.enumerated()), id: \.element) { index, tag in
                     Button { perform(.pickKind(tag)) } label: {
                         Text("\(index + 1)  " + L10n.t(Self.kindKey(tag)))
-                            .font(ShellType.meta)
+                            .shellFont(.meta)
                             .foregroundStyle(ShellChrome.ink(colorScheme))
                             .padding(.horizontal, ShellSpace.snug)
                             .padding(.vertical, ShellSpace.tight)
@@ -326,12 +336,12 @@ struct TimelineEditor: View {
         ForEach(EditorAction.strip(for: stage), id: \.caps) { line in
             HStack(spacing: ShellSpace.tight) {
                 Text(line.caps)
-                    .font(ShellType.reading)
+                    .shellFont(.reading)
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                     .padding(.horizontal, ShellSpace.tight)
                     .background(Capsule(style: .continuous).fill(ShellChrome.well(colorScheme)))
                 Text(L10n.t(line.key))
-                    .font(ShellType.mark)
+                    .shellFont(.mark)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
             }
             .fixedSize()
@@ -356,7 +366,7 @@ private struct RuleForm: View {
         VStack(alignment: .leading, spacing: ShellSpace.step) {
             Button("‹ " + L10n.t(TimelineEditor.kindKey(draft.tag))) { onBack() }
                 .buttonStyle(.plain)
-                .font(ShellType.meta)
+                .shellFont(.meta)
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
             if draft.tag == .author || draft.tag == .keyword { field }
             ScrollViewReader { proxy in
@@ -375,6 +385,7 @@ private struct RuleForm: View {
                 draft.tag == .author ? "@user@instance" : L10n.t("rule.keyword.placeholder"),
                 text: Binding(get: { draft.typed }, set: { draft.type($0, sources: sources) })
             )
+            .shellFont(.body)
             .textFieldStyle(.roundedBorder)
             .focused(focus, equals: .text)
             .onSubmit {
@@ -383,7 +394,7 @@ private struct RuleForm: View {
             }
             if draft.tag == .keyword {
                 Text(L10n.t("rule.keyword.hint"))
-                    .font(ShellType.mark)
+                    .shellFont(.mark)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
             }
         }
@@ -402,7 +413,7 @@ private struct RuleForm: View {
             ForEach(Array(choices.enumerated()), id: \.element) { index, choice in
                 if case .category(_, let host) = choice, index == 0 || Self.host(of: choices[index - 1]) != host {
                     Text(host)
-                        .font(ShellType.name)
+                        .shellFont(.name)
                         .foregroundStyle(ShellChrome.inkDim(colorScheme))
                         .accessibilityAddTraits(.isHeader)
                 }
@@ -429,7 +440,7 @@ private struct RuleForm: View {
         let picked = draft.target == choice
         return Button { draft.pick(choice, sources: sources) } label: {
             HStack {
-                Text(label(choice)).font(ShellType.body).foregroundStyle(ShellChrome.ink(colorScheme))
+                Text(label(choice)).shellFont(.body).foregroundStyle(ShellChrome.ink(colorScheme))
                 Spacer()
                 if picked {
                     Image(systemName: "checkmark").foregroundStyle(ShellChrome.phosphor(colorScheme))
@@ -463,7 +474,7 @@ private struct RuleForm: View {
                 .scrollIndicators(.never)
             } else if let only = scopes.first, let host = RuleText.host(of: only) {
                 Text(String(format: L10n.t("rule.scope.forced"), host))
-                    .font(ShellType.meta)
+                    .shellFont(.meta)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
             }
             HStack {
@@ -486,7 +497,7 @@ private struct RuleForm: View {
             Text(label)
                 .lineLimit(1)
                 .fixedSize()
-                .font(ShellType.meta.weight(on ? .semibold : .regular))
+                .shellFont(.meta, weight: on ? .semibold : .regular)
                 .foregroundStyle(on ? ShellChrome.selectInk(colorScheme) : ShellChrome.inkDim(colorScheme))
                 .padding(.horizontal, ShellSpace.snug)
                 .padding(.vertical, ShellSpace.tight)

@@ -57,6 +57,11 @@ public struct SourceProfile: Sendable, Hashable, Identifiable {
     /// nothing on a Discourse because a Discourse has no such idea, and the reverse is true of
     /// `people` below. Neither is ever "we could not find out".
     public let activeMonth: Int?
+    /// How many characters a status may be. **Mastodon only.**
+    ///
+    /// Nothing where the instance did not advertise it. The composer then uses 500, which is
+    /// Mastodon's default, rather than this type guessing a number the server never sent.
+    public let statusLimit: Int?
     /// How many accounts the forum has. **Discourse only** — see `activeMonth`.
     public let people: Int?
     /// How many posts the forum holds. **Discourse only.**
@@ -91,6 +96,7 @@ public struct SourceProfile: Sendable, Hashable, Identifiable {
         summary: String? = nil,
         thumbnail: URL? = nil,
         activeMonth: Int? = nil,
+        statusLimit: Int? = nil,
         people: Int? = nil,
         posts: Int? = nil,
         registration: Registration? = nil,
@@ -103,6 +109,7 @@ public struct SourceProfile: Sendable, Hashable, Identifiable {
         self.summary = summary
         self.thumbnail = thumbnail
         self.activeMonth = activeMonth
+        self.statusLimit = statusLimit
         self.people = people
         self.posts = posts
         self.registration = registration

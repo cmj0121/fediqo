@@ -1,0 +1,35 @@
+{
+	admin off
+	auto_https disable_redirects
+	local_certs
+	skip_install_trust
+	servers {
+		protocols h1 h2
+	}
+}
+
+# Fediqo fetches HTTPS only, and Host.parse has no port. *.localhost is 127.0.0.1
+# on this OS, so 443 is the one port a join can actually use.
+mastodon.localhost {
+	tls internal
+	reverse_proxy mastodon-web:3000 {
+		header_up X-Forwarded-Proto https
+		header_up X-Forwarded-Host {host}
+	}
+}
+
+discourse.localhost {
+	tls internal
+	reverse_proxy discourse:3000 {
+		header_up X-Forwarded-Proto https
+		header_up X-Forwarded-Host {host}
+	}
+}
+
+discuz.localhost {
+	tls internal
+	reverse_proxy discuz:80 {
+		header_up X-Forwarded-Proto https
+		header_up X-Forwarded-Host {host}
+	}
+}

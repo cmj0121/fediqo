@@ -1,18 +1,33 @@
 import FediqoCore
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 /// Places on the left, the current page on the right, compose over it.
 public struct FediqoRootView: View {
     @State private var session: ShellSession
     @State private var place: ShellPlace = .launch
+    /// The launch's one decision about where to land (#101), and the record that it has been
+    /// made. Held here because `place` is held here, and asked in the `.task` below — the first
+    /// moment the store has said whether anything is joined.
+    @State private var launch = ShellLaunch()
     @State private var selectedItemID: String?
-    @State private var threadStack: [String] = []
+    /// How far the reader has walked out from the stream, and by which steps (#122).
+    ///
+    /// **One stack for conversations and people both.** They were two pieces of state — a stack
+    /// of thread ids, and one person with the lamp's place kept beside them — which is what made
+    /// the order between them something `DummyLayer` had to settle once and for all, and what
+    /// made a row on somebody's page a thing that lit and went no further. `ShellWalk` says why
+    /// one stack is the honest shape. Held here because leaving it is `Escape` and `q`, and the
+    /// keys are read here.
+    @State private var walk = ShellWalk()
     /// What `/` opened (#32). Its results stand in for the stream while it is open.
     @State private var search = ShellSearch()
     @State private var jumpToTop = 0
     @State private var composing = false
     @State private var showingShortcuts = false
-    @State private var shortcutTab: DummyShortcutGroup = .timeline
+    @State private var shortcutTab: DummyShortcutGroup = .move
     /// The launch overlay. Starts true; `LandingView` clears it after the flips, and
     /// `playsLanding` is false from the first frame when reduce motion is on.
     @State private var showingLanding = true
@@ -39,6 +54,11 @@ public struct FediqoRootView: View {
     /// What is playing, and the one `AVPlayer` in the app. See `ShellPlayback`.
     @State private var playback = ShellPlayback()
     @State private var prefs = DummyPrefs()
+    /// The page the reader opened out of a post's words, where there is one (#34). Held here
+    /// beside `viewing` and for its reason: a layer over the shell belongs to the shell, and a
+    /// pane that owned it would be a pane the next surface to draw a post's words could not
+    /// reach.
+    @State private var linkReader = ShellReader()
     /// Up once at launch when the index on disk was written by a newer build and this run left it
     /// alone: without it the reader sees an empty app and nothing to say why.
     @State private var storeIsNewer: Bool
@@ -122,14 +142,37 @@ public struct FediqoRootView: View {
         )
     }
 
+    /// What the link reader is showing, as a sheet can drive it. Written out here rather than
+    /// inline for the reason `stagePresented` is: a `Binding` built inside the modifier chain
+    /// pushes `body` past what the type-checker will solve in reasonable time.
+    ///
+    /// Dismissed by any route at all — the button, a swipe, Escape — it is closed, and closing it
+    /// takes nothing away: the timeline underneath was never torn down, so the reader is back at
+    /// the post they left because they never left it. See `ShellReader`.
+    private var linkReading: Binding<ShellReading?> {
+        Binding(
+            get: { linkReader.sheet },
+            set: { shown in if shown == nil { linkReader.close() } }
+        )
+    }
+
     public var body: some View {
         layout
             // The reader's time window is set on the store once at launch, before the store is
             // adopted, so a window chosen last run binds what was kept and everything read after
             // (#7). `prefs` is its one owner; a change is handed on, and written only if it dropped.
             .task {
+                // Before anything can be pressed: a page read out of a post is drawn in place on
+                // a Mac (#169), and the reader asks the walk here where it may be.
+                placeLinksInPage()
                 await session.keep(months: prefs.keepMonths)
                 await session.reloadFromStore()
+                // The store has now said what is held, which is the first moment this launch can
+                // be asked where it lands (#101). Asked here and nowhere else, so it is asked
+                // once.
+                if let landing = launch.settle(availability, standingOn: place) {
+                    place = landing
+                }
             }
             .onChange(of: prefs.keepMonths) { _, months in
                 Task { await session.keep(months: months) }
@@ -152,11 +195,46 @@ public struct FediqoRootView: View {
                 let accepted = new.placing(place, as: place)
                 if accepted != place { place = accepted }
             }
+            // A timeline switched is the list every step of the walk was standing on being
+            // replaced, so the walk ends rather than unwinds: there is no row left to hand the
+            // lamp back to. Where the lamp lands is #100's, and `TimelinePane` answers it on the
+            // same change. Here rather than in the pane because the walk is held here — the pane
+            // used to do it through a binding whose one meaning was "close the thread".
+            .onChange(of: session.timelineID) { _, _ in clearWalk() }
             .sheet(isPresented: $composing) {
                 ComposerSheet()
                     #if os(iOS)
                     .presentationDetents([.medium, .large])
                     #endif
+            }
+            // Taking back what the reader wrote (#109): the one act that asks first. A modifier of
+            // its own rather than the dialog spelled here — see `WithdrawQuestion`.
+            .modifier(WithdrawQuestion(session: session))
+            // An answer, over the conversation it belongs to (#108). Driven by the session's one
+            // value, so the key and the mark open the same surface by writing the same thing.
+            .sheet(item: $session.answering) { target in
+                AnswerSheet(target: target)
+                    #if os(iOS)
+                    .presentationDetents([.medium, .large])
+                    #endif
+            }
+            // **A link the reader pressed in somebody's words, drawn over the shell** (#34). On
+            // the root beside the other presenters and for their stated reason: one presenter
+            // driven by one piece of state survives a second call site, and this one has three
+            // already — a timeline row, a row in an open thread, and a row of the search's
+            // results.
+            //
+            // **Over, and never instead of.** A sheet leaves the page under it standing, so the
+            // list, where it is scrolled to and which post is selected are all exactly as they
+            // were when it closes. That is the whole of "the reader comes back to the post they
+            // left": there is nothing to restore, because nothing was taken away.
+            //
+            // **On a Mac, only where the page cannot be drawn in place** (#169): pressed on the
+            // timeline place, the page is a step of the walk and fills that place instead —
+            // still over the page it came from, which `LinkInPlace` leaves standing — and this
+            // sheet is not presented for it. See `ShellReader.inPlace`.
+            .sheet(item: linkReading) { reading in
+                LinkReaderSheet(presented: reading, reader: linkReader) { linkReader.close() }
             }
             // **On the root, beside the composer's, and not on a pane.** A sign-in is asked for
             // from Account, where a refusal is reported, and it will be asked for from a timeline
@@ -173,30 +251,7 @@ public struct FediqoRootView: View {
             .onChange(of: session.signingIn) { _, request in
                 if let request {
                     signInWindows.show(request, sessions: session.forums) { reached in
-                        // **The same two lines as the sheet below, and they have to be.** A
-                        // sign-in that was reached goes straight back to the join: the reader
-                        // typed a host, was turned away, went and signed in, and the errand was
-                        // always "add this forum". Without the retry the window closes onto the
-                        // refusal it was opened from, which reads as a sign-in that did nothing.
-                        //
-                        // **`resumeAfterSignIn` and not `add`**, because `add` stops at the
-                        // preview — a screen this reader has already read and already answered.
-                        // They pressed Subscribe before they were turned away; this finishes that
-                        // press rather than asking for it again.
-                        //
-                        // **And the `if` is not only "was it reached".** A sign-in pressed on a
-                        // row of a server already joined is an errand that ends with the sign-in
-                        // itself, and `signInFinished` says no to those — see its doc comment for
-                        // what the reader sees instead, and for what this branch shipped without
-                        // it.
-                        //
-                        // This branch lost both the retry and the host when the page moved out of
-                        // the sheet — the window was given the body the sheet had at the time,
-                        // and the sheet grew them afterwards. Whatever is done to one of these
-                        // two callbacks belongs in the other on the same day.
-                        if session.signInFinished(reached: reached, host: request.host) {
-                            Task { await session.resumeAfterSignIn() }
-                        }
+                        signInReturned(reached: reached, host: request.host)
                     }
                 } else {
                     signInWindows.close()
@@ -205,22 +260,7 @@ public struct FediqoRootView: View {
             #else
             .sheet(item: $session.signingIn) { request in
                 ForumSignInSheet(request: request, sessions: session.forums) { reached in
-                    // **A sign-in that was reached goes straight back to the join.** The reader
-                    // typed a host, was turned away, and went and signed in; the errand was
-                    // always "add this forum", and landing them at an empty field having lost
-                    // what they typed would make them start it again. This second pass goes
-                    // through the browser that now holds the session — see `ShellSession.joiner`.
-                    //
-                    // **`resumeAfterSignIn` and not `add`**: the preview is a question this
-                    // reader has already answered, so the retry finishes the press instead of
-                    // asking for it a second time.
-                    //
-                    // **And the `if` is not only "was it reached".** A sign-in pressed on a row
-                    // of a server already joined ends with the sign-in itself, and
-                    // `signInFinished` says no to those — see its doc comment.
-                    if session.signInFinished(reached: reached, host: request.host) {
-                        Task { await session.resumeAfterSignIn() }
-                    }
+                    signInReturned(reached: reached, host: request.host)
                 }
             }
             #endif
@@ -244,89 +284,11 @@ public struct FediqoRootView: View {
             .sheet(item: $session.editing) { draft in
                 TimelineEditor(session: session, draft: draft)
             }
-            // **The Remove question, on the root beside the other three presenters**, and for the
-            // same documented reason: one presenter driven by one piece of session state survives
-            // a second call site. Remove is asked from a source row today and will be asked from
-            // the source page's own header the day that grows one.
-            //
-            // It is asked at all because Remove takes the board picks the reader made, and
-            // `ShellSession.clear`'s comment is the argument: pictures come back by themselves, a
-            // pick of eight boards out of forty does not.
-            .confirmationDialog(
-                Text(session.removing.map { String(format: L10n.t("account.remove.title"), $0) } ?? ""),
-                isPresented: Binding(
-                    get: { session.removing != nil },
-                    set: { if !$0 { session.removing = nil } }
-                ),
-                // Explicit, because macOS draws no title at all on `.automatic` — and the title is
-                // the only line that names which server this is about.
-                titleVisibility: .visible,
-                presenting: session.removing
-            ) { host in
-                Button(L10n.t("account.remove.confirm"), role: .destructive) {
-                    Task { await session.remove(host: host) }
-                }
-                // **Cancel stays the default action.** No `.keyboardShortcut(.defaultAction)` on
-                // the destructive button: Return dismisses this question, it never answers it.
-                Button(L10n.t("board.choose.cancel"), role: .cancel) { session.removing = nil }
-            } message: { host in
-                Text(Self.removeDetail(for: host, in: session.sources))
-            }
-            // **The Clear question, beside Remove's and driven the same way** (decision 29). One
-            // presenter, one piece of session state, two entrances: a source row and
-            // `UsagePane`'s row, which press the same key for the same call and must
-            // therefore ask the same question.
-            //
-            // **It exists because Clear is not reversible, whatever the row looks like.** It drops
-            // the pictures, the emoji names and the first posts, all of which come back — and it
-            // calls `ForumSessions.forget(host:)`, which deletes the saved Keychain password and
-            // signs the reader out of the forum. The Account row says neither of those before the
-            // press, so this is the one place they are said.
-            .confirmationDialog(
-                Text(session.clearing.map { String(format: L10n.t("account.clear.title"), $0) } ?? ""),
-                isPresented: Binding(
-                    get: { session.clearing != nil },
-                    set: { if !$0 { session.clearing = nil } }
-                ),
-                titleVisibility: .visible,
-                presenting: session.clearing
-            ) { host in
-                // **Plain, where Remove's confirm is `.destructive`, and the difference is
-                // deliberate.** The row's icon says *this takes something away*; the dialog says
-                // exactly how much, and the weight of the confirm matches the weight of the act. A
-                // destructive Clear would be the confirmation repeating the row's overstatement,
-                // which is the one thing decision 29 asks not to happen.
-                Button(L10n.t("account.clear.confirm")) {
-                    Task { await session.clear(host: host) }
-                }
-                Button(L10n.t("board.choose.cancel"), role: .cancel) { session.clearing = nil }
-            // **This closure is the one seam of this dialog a test cannot reach** (risk 12).
-            // `clearDetailKey` is pure and is driven across all four combinations; what nothing
-            // verifies is that *this* body asks it with `hasPassword` and `reachedSignIn` for the
-            // host being confirmed, because a `message:` builder only runs inside a presented
-            // dialog. Named here rather than left to be discovered.
-            } message: { host in
-                Text(L10n.t(SourceRow.clearDetailKey(
-                    hasPassword: session.forums.hasPassword(host: host),
-                    reachedSignIn: session.isSignedIn(host: host)
-                )))
-            }
-            // A server ended a sign-in on its own side: the row already reads signed out, and this
-            // says why rather than leaving a timeline to go quiet.
-            .alert(
-                Text(L10n.t("account.mastodon.ended.title")),
-                isPresented: Binding(
-                    get: { !session.mastodon.ended.isEmpty },
-                    set: { if !$0 { session.mastodon.endedSeen() } }
-                )
-            ) {
-                Button(L10n.t("store.newer.ok"), role: .cancel) { session.mastodon.endedSeen() }
-            } message: {
-                Text(String(
-                    format: L10n.t("account.mastodon.ended.detail"),
-                    session.mastodon.ended.joined(separator: ", ")
-                ))
-            }
+            // Remove's question, Clear's, and the notice that a server ended a sign-in: each a
+            // modifier of its own rather than spelled here. See `HostQuestion` for why.
+            .modifier(HostQuestion.remove(session))
+            .modifier(HostQuestion.clear(session))
+            .modifier(EndedSignInNotice(session: session))
             .alert(Text(L10n.t("store.newer.title")), isPresented: $storeIsNewer) {
                 Button(L10n.t("store.newer.ok"), role: .cancel) { storeNoticeSeen?() }
             } message: {
@@ -383,7 +345,7 @@ public struct FediqoRootView: View {
                     session.dismissStage()
                 }
             }
-            .dummyShellKeys { character, shift, control, command in
+            .dummyShellKeys(home: search.submits) { character, shift, control, command in
                 performDummyKey(character, shift: shift, control: control, command: command)
             }
             .environment(prefs)
@@ -396,6 +358,13 @@ public struct FediqoRootView: View {
             // session, so it is the only place that can put it there. See `PLAN.md`, Cross-worktree
             // hand-offs.
             .environment(session)
+            // **Where a link in a post's words goes, handed down once from the one place that
+            // can.** Every line of every post reads this, and it reaches a timeline row, a row in
+            // an open thread and a row of the search's results by the same hand-off — they are
+            // all drawn under here. The object is handed down rather than a closure: a closure
+            // has no identity, so it would differ on every pass of this view and invalidate every
+            // line on the screen with it. See `ShellReader`.
+            .environment(\.shellReader, linkReader)
             .environment(\.locale, prefs.language.locale)
             .preferredColorScheme(prefs.theme.colorScheme)
             .dynamicTypeSize(prefs.fontSize.dynamicType)
@@ -416,6 +385,30 @@ public struct FediqoRootView: View {
         let boards = sources.first { $0.host == host }?.boards.count ?? 0
         guard boards > 0 else { return L10n.t("account.remove.detail") }
         return String(format: L10n.t("account.remove.detail.boards"), boards)
+    }
+
+    /// A forum's own page closed, on the window a Mac opens it in or the sheet elsewhere — **one
+    /// body for both**, because this branch once lost the retry and the host when the page moved
+    /// out of the sheet: the window was given the body the sheet had at the time, and the sheet
+    /// grew them afterwards.
+    ///
+    /// **A sign-in that was reached goes straight back to the join.** The reader typed a host,
+    /// was turned away, and went and signed in; the errand was always "add this forum", and
+    /// without the retry the page closes onto the refusal it was opened from, which reads as a
+    /// sign-in that did nothing. This second pass goes through the browser that now holds the
+    /// session — see `ShellSession.joiner`.
+    ///
+    /// **`resumeAfterSignIn` and not `add`**, because `add` stops at the preview — a screen this
+    /// reader has already read and already answered. They pressed Subscribe before they were
+    /// turned away; this finishes that press rather than asking for it again.
+    ///
+    /// **And the `if` is not only "was it reached".** A sign-in pressed on a row of a server
+    /// already joined is an errand that ends with the sign-in itself, and `signInFinished` says
+    /// no to those — see its doc comment for what the reader sees instead.
+    private func signInReturned(reached: Bool, host: String) {
+        if session.signInFinished(reached: reached, host: host) {
+            Task { await session.resumeAfterSignIn() }
+        }
     }
 
     private func performDummyKey(
@@ -475,20 +468,7 @@ public struct FediqoRootView: View {
         case .expandPost:
             return openThread()
         case .nextAttachment:
-            let inViewer = viewedItem != nil
-            return onActedItem { item in
-                let turned = decks.turn(item.id, of: item.attachments.count)
-                guard turned else { return false }
-                // Sound out of a card the reader has just turned away from is a fault, and so is
-                // a thumbnail still moving after it has stopped being the thumbnail. Only where
-                // something actually turned: a deck of one leaves nothing behind to stop.
-                playback.stop()
-                // And the viewer stops holding the card it has turned away from. Without this,
-                // `v` and three presses of `m` on a post carrying four pictures hold four
-                // addresses at viewer tier, which is the contract broken by ordinary use.
-                if inViewer { ShellPictures.shared.releaseViewerTier() }
-                return true
-            }
+            return onActedItem(turn)
         case .reveal:
             return revealFocused()
         case .viewAttachment:
@@ -509,7 +489,10 @@ public struct FediqoRootView: View {
             // `q` does about it.
             switch DummyCommand.outermost(of: openLayers) {
             case .viewer: return closeViewer()
-            case .thread: return popThread()
+            // One step back, whichever kind of step it was. The two lines used to be two
+            // methods over two pieces of state; they are one walk now, and unwinding it in the
+            // order the reader walked is the whole of what a press to leave does (#122).
+            case .person, .thread, .link: return leaveWalk()
             case .search, .shortcuts, .selection, nil: return false
             }
         case .reload:
@@ -526,6 +509,16 @@ public struct FediqoRootView: View {
             return true
         case .search:
             return openSearch()
+        case .boost:
+            return actFocused(.boost)
+        case .favourite:
+            return actFocused(.favourite)
+        case .answer:
+            return answerFocused()
+        case .withdraw:
+            return onFocusedItem { session.askToWithdraw($0) }
+        case .openAuthor:
+            return openAuthor()
         case .compose:
             guard availability.canCompose else { return false }
             showingShortcuts = false
@@ -549,7 +542,7 @@ public struct FediqoRootView: View {
             case .shortcuts:
                 showingShortcuts = false
                 return true
-            case .thread: return popThread()
+            case .person, .thread, .link: return leaveWalk()
             case .search:
                 closeSearch()
                 return true
@@ -581,10 +574,22 @@ public struct FediqoRootView: View {
         switch layer {
         case .viewer: viewedItem != nil
         case .shortcuts: showingShortcuts
-        case .thread: !threadStack.isEmpty
+        // **Only the innermost step of the walk is open**, so these two are never both true
+        // (#122). That is what lets the order between them go unasked: `outermost` is handed at
+        // most one of them, and `DummyCommand.canWalk` asks about the pair rather than either.
+        case .person: walk.openedPerson != nil
+        case .thread: walk.openedThread != nil
+        case .link: walk.openedLink != nil
         case .search: search.isOpen
         case .selection: selectedItemID != nil
         }
+    }
+
+    /// Whether a picture may be opened over the app at all right now. Read by `v` and by a press
+    /// on a card, which is `v`'s touch path (#33) — one expression, so the key and the press
+    /// cannot come to disagree about when the viewer may open.
+    private var canOpenViewer: Bool {
+        viewedItem == nil && DummyCommand.canOpen(.viewer, whenOpen: openLayers)
     }
 
     /// Opens what is on top of the focused row's deck, over the whole app.
@@ -592,18 +597,57 @@ public struct FediqoRootView: View {
     /// A second `v` while it is open does nothing. `Escape` and `q` are how this is left, and one
     /// key that both opens and closes a layer is the conditional rule the order above is kept
     /// free of. The letter is still ours either way — see `DummyCommand.consumes`.
+    ///
+    /// The guard is here as well as in `view(_:)` so that a second `v` while the viewer is up
+    /// moves nothing: `onFocusedItem` lights the first row when nothing is lit, and a press that
+    /// is about to be refused must not do that either. That is the whole of what it covers — the
+    /// viewer is the outermost layer there is, so it may open over anything, the keys list
+    /// included.
     private func openViewer() -> Bool {
-        guard viewedItem == nil,
-              DummyCommand.canOpen(.viewer, whenOpen: openLayers) else { return false }
-        return onFocusedItem { item in
-            guard decks.showing(item.attachments, of: item.id) != nil else { return false }
-            // Whatever the row was playing stops. It would go on playing behind an opaque ground
-            // where nobody can see it or stop it, which is the "sound from a row that has scrolled
-            // off" fault arriving by another route.
-            playback.stop()
-            viewing = item.id
-            return true
-        }
+        guard canOpenViewer else { return false }
+        return onFocusedItem(view)
+    }
+
+    /// One post's picture, opened over the app. What `v` does, and what a press on a card does.
+    private func view(_ item: DummyItem) -> Bool {
+        guard canOpenViewer, decks.showing(item.attachments, of: item.id) != nil else { return false }
+        // Whatever the row was playing stops. It would go on playing behind an opaque ground
+        // where nobody can see it or stop it, which is the "sound from a row that has scrolled
+        // off" fault arriving by another route.
+        playback.stop()
+        viewing = item.id
+        return true
+    }
+
+    /// One post's deck, turned. What `m` does, and what a press on the counter in a card's corner
+    /// does.
+    private func turn(_ item: DummyItem) -> Bool {
+        let inViewer = viewedItem != nil
+        guard decks.turn(item.id, of: item.attachments.count) else { return false }
+        // Sound out of a card the reader has just turned away from is a fault, and so is a
+        // thumbnail still moving after it has stopped being the thumbnail. Only where something
+        // actually turned: a deck of one leaves nothing behind to stop.
+        playback.stop()
+        // And the viewer stops holding the card it has turned away from. Without this, `v` and
+        // three presses of `m` on a post carrying four pictures hold four addresses at viewer
+        // tier, which is the contract broken by ordinary use.
+        if inViewer { ShellPictures.shared.releaseViewerTier() }
+        return true
+    }
+
+    /// A press on a card, which is the touch path to `v` (#33) — and a press on the counter in
+    /// its corner, which is the one to `m`.
+    ///
+    /// **The rules live here and not in the pane**, exactly as `playRow` says: a mark and the key
+    /// it stands for must not come to mean two different things, so both read the same function
+    /// the key reads. On the row that was pressed rather than on the focused one — a press says
+    /// which row it means.
+    private func viewRow(_ item: DummyItem) {
+        _ = view(item)
+    }
+
+    private func turnRow(_ item: DummyItem) {
+        _ = turn(item)
     }
 
     /// Says whether a viewer a reader could see was closed — and tidies up either way.
@@ -703,6 +747,7 @@ public struct FediqoRootView: View {
                 ),
                 onToggleCover: { _ = apply(.reveal) },
                 onPlay: { _ = apply(.playAttachment) },
+                onTurn: { _ = apply(.nextAttachment) },
                 onGone: { playback.stop() },
                 onClose: { _ = closeViewer() }
             )
@@ -790,17 +835,26 @@ public struct FediqoRootView: View {
 
     /// j/k and the arrows walk whichever list is in front: the stream, or the open conversation.
     private func moveInList(by step: Int) -> Bool {
-        guard place == .timeline, let ids = currentListIDs else { return false }
-        // Entering the selection obeys the entry rule the same as any other layer. Moving an
-        // existing one does not — the lamp is already on, and `j` means move rather than enter.
-        // With a thread or the viewer open the selection is always already on, so in practice
-        // this only ever refuses a first press under the guide.
-        if selectedItemID == nil,
-           !DummyCommand.canOpen(.selection, whenOpen: openLayers) { return false }
-        let next = DummyCommand.stepped(ids, from: selectedItemID, by: step)
-        guard let next else { return false }
+        guard place == .timeline,
+              let next = Self.moved(in: currentListIDs, from: selectedItemID, by: step, open: openLayers)
+        else { return false }
         selectedItemID = next
         return true
+    }
+
+    /// Where `j` or `k` puts the lamp in the list in front, or nothing where the press moves
+    /// nothing. Static so a test that follows the reader's keys presses the rule the root does
+    /// (#168), rather than a copy of it.
+    ///
+    /// Entering the selection obeys the entry rule the same as any other layer. Moving an
+    /// existing one does not — the lamp is already on, and `j` means move rather than enter.
+    /// With a thread or the viewer open the selection is always already on, so in practice
+    /// this only ever refuses a first press under the guide — or under a search, which is why
+    /// Return lights the first result rather than leaving `j` to.
+    static func moved(in ids: [String]?, from selected: String?, by step: Int, open: Set<DummyLayer>) -> String? {
+        guard let ids else { return nil }
+        if selected == nil, !DummyCommand.canOpen(.selection, whenOpen: open) { return nil }
+        return DummyCommand.stepped(ids, from: selected, by: step)
     }
 
     /// The stream `j` and `k` move through: a search's results while one is open, otherwise the
@@ -810,15 +864,27 @@ public struct FediqoRootView: View {
     }
 
     private var searchItems: [DummyItem]? {
-        search.items(
-            from: session.notes, revision: session.notesRevision, sources: session.sources, latest: prefs.latestDate
-        )
+        session.searched(search, latest: prefs.latestDate)
     }
 
-    /// `/` on the timeline: an empty search over what this device holds, or the field again if
-    /// one is open. The selection is put aside, to come back when the search closes.
+    /// Whether `/` — and the mark in the header that is its touch path (#33) — can do anything
+    /// now.
+    ///
+    /// **One expression, two readers.** The key asks it before opening, and the timeline's header
+    /// asks it to decide whether to draw the mark at all: decision 4's rule is a control that is
+    /// absent rather than dead, and the only way a mark and a key cannot come to disagree about
+    /// when the search may open is for both to read this.
+    ///
+    /// An open search is still searchable — `canOpen` of a layer that is already the outermost is
+    /// true — because that is exactly what a second `/` does: it hands the field the keys again.
+    static func canSearch(place: ShellPlace, open: Set<DummyLayer>) -> Bool {
+        place == .timeline && DummyCommand.canOpen(.search, whenOpen: open)
+    }
+
+    /// `/` on the timeline: an empty search over what the timeline in front lets through (#145), or
+    /// the field again if one is open. The selection is put aside, to come back when the search closes.
     private func openSearch() -> Bool {
-        guard place == .timeline, DummyCommand.canOpen(.search, whenOpen: openLayers) else { return false }
+        guard Self.canSearch(place: place, open: openLayers) else { return false }
         if search.isOpen {
             search.focus()
         } else {
@@ -830,24 +896,39 @@ public struct FediqoRootView: View {
 
     /// The timeline back as it was, with the post that was selected before the search.
     private func closeSearch() {
-        threadStack = []
+        clearWalk()
         selectedItemID = search.close()
     }
 
     /// The field emptied: the timeline is back, so the post selected before the search is too.
     private func searchCleared() {
         search.cleared { selection in
-            threadStack = []
+            clearWalk()
             selectedItemID = selection
         }
     }
 
-    /// Whichever list is in front: the open conversation, or the stream under it.
+    /// Whichever list is in front: somebody's own posts, the open conversation, or the stream
+    /// under both.
+    ///
+    /// **Whatever step the walk is standing on**, which is what the reader is looking at and
+    /// what `j` and `k` walk. It used to ask about a person first and a conversation second,
+    /// which was the layer order restated here; the walk answers it once and no surface decides
+    /// it a second time. **No `default:`.**
     private var currentListItems: [DummyItem] {
-        if let opened = threadStack.last, let item = streamItems.first(where: { $0.id == opened }) {
-            return item.dummyConversation().inOrder
+        switch walk.standing {
+        case .person(let person):
+            return session.heldPosts(of: person)
+        case .thread(let opened):
+            guard let item = session.held(opened) else { return streamItems }
+            return session.conversations.conversation(around: item).inOrder
+        // A page read out of a post has no rows: nothing on it is walked with `j` and `k`, and
+        // the list under it is not what the reader is looking at (#169).
+        case .link:
+            return []
+        case nil:
+            return streamItems
         }
-        return streamItems
     }
 
     private var currentListIDs: [String]? {
@@ -857,10 +938,16 @@ public struct FediqoRootView: View {
 
     private func jumpListOrThreadToTop() -> Bool {
         guard place == .timeline else { return false }
-        if let opened = threadStack.last, let item = streamItems.first(where: { $0.id == opened }) {
-            selectedItemID = item.id
-        } else {
-            guard let first = streamItems.first else { return false }
+        // The top of a conversation is its own opening post, which is not the first row of the
+        // list the walk is standing on — every other case is. **No `default:`.**
+        switch walk.standing {
+        case .thread(let opened) where session.held(opened) != nil:
+            selectedItemID = opened
+        // A page read out of a post is somebody else's page, and its top is its own business.
+        case .link:
+            return false
+        case .person, .thread, nil:
+            guard let first = currentListItems.first else { return false }
             selectedItemID = first.id
         }
         jumpToTop += 1
@@ -901,6 +988,39 @@ public struct FediqoRootView: View {
         }
     }
 
+    /// `b` and `f` — the post the lamp is on, boosted to the source it was read through or the
+    /// boost taken back (#106), and favourited there or the favourite taken back (#107).
+    ///
+    /// **The acting half only.** Whether this post offers the act at all is `session.acts(on:)`,
+    /// read here and by the mark under the post from the one place, so a key that acted where no
+    /// mark is drawn — or a mark drawn over a key that refuses — cannot happen. A post that does
+    /// not offer it moves nothing and says so, which is what leaves the press available to the
+    /// platform.
+    ///
+    /// `onFocusedItem` and not `onActedItem`: the viewer is a picture over a post, and the post
+    /// it is over is the one the lamp is on, so there is no second post for this key to mean.
+    private func actFocused(_ act: PostAct) -> Bool {
+        onFocusedItem { item in
+            guard session.acts(on: item).offers(act) else { return false }
+            Task { await session.toggle(act, on: item) }
+            return true
+        }
+    }
+
+    /// `w` — an answer to the post the lamp is on, written from inside its conversation (#108).
+    ///
+    /// **Only with a conversation in front**, because that is where the answer lands and where
+    /// the post being answered is in its place; on the bare timeline, and on somebody's page even
+    /// when it is open over a conversation, the key moves nothing and yields. The conversation is
+    /// the walk's (#122) and its root is looked up among everything held, the pane's own lookup.
+    /// Whether the post offers it is `session.openAnswer`'s one guard, the one the mark reads.
+    private func answerFocused() -> Bool {
+        guard let opened = walk.openedThread, let root = session.held(opened) else { return false }
+        return onFocusedItem { item in
+            session.openAnswer(to: item, in: root)
+        }
+    }
+
     /// Whether pressing for this post's replies could do anything at all.
     ///
     /// Three conditions, and each one is a real state rather than a guard written defensively.
@@ -920,74 +1040,242 @@ public struct FediqoRootView: View {
     /// body makes on every pass; stamping more often can only make an entry look *less* stale to
     /// the eviction predicate. What I8 forbids is a band that stops reading, not one read twice.
     private func repliesWanted(of item: DummyItem) -> Bool {
-        guard place == .timeline, viewedItem == nil, threadStack.last == item.id,
+        guard place == .timeline, viewedItem == nil, walk.openedThread == item.id,
               let thread = ForumThreadRef(item)
         else { return false }
         return session.posts.standing(of: thread).wantsPressing
     }
 
+    /// Whether the reader may walk one step further out from where they are: `Return` and the
+    /// press of a finger on a row that is its touch path (#33), and the press on a face or a
+    /// name that opens somebody (#99). One expression, and now one for both steps.
+    ///
+    /// **Two names for one rule was how #122's gap was written down.** A conversation asked
+    /// `canOpen(.thread,)` and a face asked `canOpen(.person,)`, and because those two layers
+    /// were ordered against each other the first refused wherever the second had already been
+    /// taken. They are one walk, so there is one guard: `DummyCommand.canWalk` reads the order
+    /// out of `DummyLayer` once and asks only what stands in front of the pair.
+    ///
+    /// Nothing here is about *which* post or *which* person: the lamp is the key's business and
+    /// a press carries its own id.
+    static func canWalk(place: ShellPlace, open: Set<DummyLayer>) -> Bool {
+        place == .timeline && DummyCommand.canWalk(whenOpen: open)
+    }
+
+    /// `Return`: the conversation around the post the lamp is on.
     private func openThread() -> Bool {
-        guard place == .timeline, let selectedItemID,
-              DummyCommand.canOpen(.thread, whenOpen: openLayers) else { return false }
-        if threadStack.last == selectedItemID { return false }
-        threadStack.append(selectedItemID)
-        return true
+        guard let selectedItemID else { return false }
+        return openThread(selectedItemID)
+    }
+
+    /// The same thing on the post a finger named — a press on a row, which is `Return`'s touch
+    /// path (#33), and the one action a reader using VoiceOver activates a row with.
+    ///
+    /// **The lamp and the push happen here, in one turn, under one guard.** The pane used to
+    /// write the selection and then call the no-argument half, which read that write back out of
+    /// `@State` on the very next statement — true today, and where it is not, the root opens the
+    /// post that *was* lit instead of the one pressed. An id in hand needs no such reading. The
+    /// lamp moves only where the open is allowed, for `openViewer`'s reason: a press that can
+    /// open nothing must not move anything either.
+    private func openThread(_ id: String) -> Bool {
+        guard Self.canWalk(place: place, open: openLayers) else { return false }
+        selectedItemID = id
+        // **A forum's ranked blog is a page, not a conversation**: opening it reads its page in
+        // the app's own reader, as a link pressed in its words would — on a Mac in place of the
+        // timeline (#169), and Back returns to this row.
+        if let page = session.held(id)?.page { return linkReader.open(page) }
+        // The lamp is read back after the press has moved it, which is how a conversation comes
+        // back to its own opening post and a person's page comes back to the row the lamp was
+        // on: one sentence for what used to be two. See `ShellWalk`.
+        return walk.walk(to: .thread(id), from: selectedItemID)
+    }
+
+    /// Whether `r` — and the mark in the header that is its touch path (#33) — has anything to
+    /// ask for now.
+    ///
+    /// **One expression, two readers**, for the reason `canSearch` gives. It is the whole of the
+    /// old guard, moved out of the acting half and given the arguments it used to read off a
+    /// view, so both the key and the mark are answered by one function and a test can ask it.
+    ///
+    /// It says nothing about a reload already running: `r` pressed then is taken and does
+    /// nothing, so the mark stays where it is rather than blinking out from under the finger
+    /// that pressed it. What is on the wire is the bottom toast, not a plate on the mark.
+    ///
+    /// **No `default:`**, for `.back`'s reason: a sixth layer has to say what `r` does about it.
+    static func canReload(place: ShellPlace, editing: Bool, hasSources: Bool, open: Set<DummyLayer>) -> Bool {
+        guard place == .timeline, !editing, hasSources else { return false }
+        switch DummyCommand.outermost(of: open) {
+        // A search's results are what this device holds, found without asking anybody.
+        case .viewer, .shortcuts, .search: return false
+        // **Nothing to ask for on somebody's page**, and that is the whole of 0.4.0's boundary
+        // rather than an oversight: what is drawn there is what this device already holds, and a
+        // reload that went and got more of the world would be 0.5.0 arriving through `r`.
+        case .person: return false
+        // A page read out of a post is not a timeline; there is nothing of ours on it to ask for.
+        case .link: return false
+        case .thread, .selection, nil: return true
+        }
     }
 
     /// `r`: the open thread, or else the selected timeline — and only on what the reader can see,
     /// so not under the viewer, the keys list or the timeline editor. A second press while one
     /// runs is taken and does nothing; Esc is what stops it.
     private func reload() -> Bool {
-        guard place == .timeline, session.editing == nil, !session.sources.isEmpty else { return false }
+        guard Self.canReload(
+            place: place,
+            editing: session.editing != nil,
+            hasSources: !session.sources.isEmpty,
+            open: openLayers
+        ) else { return false }
         if session.reload.running { return true }
-        switch DummyCommand.outermost(of: openLayers) {
-        // A search's results are what this device holds, found without asking anybody.
-        case .viewer, .shortcuts, .search: return false
-        case .thread, .selection, nil: break
-        }
         // The thread as `TimelinePane` draws it: one it cannot find draws the timeline instead.
-        let opened = threadStack.last.flatMap { opened in streamItems.first { $0.id == opened } }
+        let opened = walk.openedThread.flatMap(session.held)
         session.reload.press(thread: opened, timeline: session.currentTimeline, in: session)
         return true
     }
 
-    private func popThread() -> Bool {
-        guard let popped = DummyCommand.poppedThread(threadStack) else { return false }
-        threadStack = popped.stack
-        selectedItemID = popped.selected
+    // MARK: - Whoever wrote it — #99
+
+    /// A press on a face or a name: that person's page, over whatever is under it.
+    ///
+    /// **A named method, not a closure written into the pane's call site.** Three controls in
+    /// this milestone were wired inside a `View` body where no test could call them, and all
+    /// three stayed green while doing the wrong thing. This is the guard and the act together,
+    /// where a test can press it.
+    ///
+    /// The lamp is not moved. A face is not a row, so pressing one says nothing about which post
+    /// the reader is standing on, and the walk keeps that row to hand back when the page is left.
+    private func openPerson(_ person: DummyPerson) -> Bool {
+        guard Self.canWalk(place: place, open: openLayers) else { return false }
+        return walk.walk(to: .person(person), from: selectedItemID)
+    }
+
+    /// `p` — whoever wrote the post the lamp is on (#140). The face's own press, from the keyboard.
+    ///
+    /// **Through `openPerson` and not beside it**, so the key and the face are one act with one
+    /// guard: the walk remembers the row the lamp is on, and leaving by `Escape` or `q` gives it
+    /// back exactly as leaving a page opened by a finger does.
+    ///
+    /// The guard is asked before `onFocusedItem`, for `openViewer`'s reason: a press that is about
+    /// to be refused must not light the first row on its way to refusing. On somebody's own page
+    /// that is the whole of the answer — nothing moves, nothing is said, and the letter is still
+    /// ours (`DummyCommand.consumes`), so it does not fall through to the platform as a beep. A
+    /// row that names nobody (`DummyPerson(_:)` is nil) is refused the same way its face is:
+    /// there is no page to open, so there is no press.
+    private func openAuthor() -> Bool {
+        guard Self.canOpenAuthor(place: place, open: openLayers) else { return false }
+        return onFocusedItem { item in
+            guard let person = DummyPerson(item) else { return false }
+            return openPerson(person)
+        }
+    }
+
+    /// Whether `p` has anybody to open now: `canWalk`'s place, and `DummyCommand.canOpenAuthor`'s
+    /// order. Static and given its inputs, for `canWalk`'s reason.
+    static func canOpenAuthor(place: ShellPlace, open: Set<DummyLayer>) -> Bool {
+        place == .timeline && DummyCommand.canOpenAuthor(whenOpen: open)
+    }
+
+    /// One step back out of the walk: whatever the reader took that step from is what they get
+    /// back, standing on the row they took it from.
+    ///
+    /// **One method for both kinds of step**, which is #122's whole shape. Leaving a person used
+    /// to restore a lamp kept in a second piece of state and leaving a conversation used to
+    /// restore the post it was opened from, and because they were two methods a walk that
+    /// alternated between them could not unwind in the order it was walked.
+    private func leaveWalk() -> Bool {
+        guard let left = walk.back() else { return false }
+        // The page read out of a post goes with its step, and the page under it — never torn
+        // down — is simply in front again (#169).
+        if case .link = left.step { linkReader.close() }
+        selectedItemID = left.lamp
         return true
     }
 
-    private var openedThread: Binding<String?> {
-        Binding(
-            get: { threadStack.last },
-            set: { newValue in
-                if newValue == nil { threadStack = [] }
-            }
-        )
+    /// The Back on a page read out of a post: one step back out of the walk, which is that page
+    /// wherever the Back can be pressed (#169).
+    private func leaveLink() {
+        guard walk.openedLink != nil else { return }
+        _ = leaveWalk()
     }
 
-    /// Tab rotates this page's tabs: named queries on the timeline, purposes on Usage.
-    /// Elsewhere it is the platform's.
+    /// Back to the stream in one go, for a list that has been replaced. A page read out of a post
+    /// that was one of the steps goes with them: nothing is left for it to be drawn in place of,
+    /// and a reading left open would be presented as a sheet instead.
+    private func clearWalk() {
+        if walk.openedLink != nil { linkReader.close() }
+        walk.clear()
+    }
+
+    /// Hands the link reader the question of where a page opens (#169). On a Mac it is one more
+    /// step of the walk wherever one may be taken, and a sheet elsewhere; on iPad and iPhone it is
+    /// always the sheet.
+    private func placeLinksInPage() {
+        #if os(macOS)
+        linkReader.placing = { url in placeLink(url) }
+        #endif
+    }
+
+    /// A page read out of a post's words, drawn in place of the page it was pressed on: one step
+    /// of the walk, from the row the lamp is on, so leaving it gives that row back (#169).
+    ///
+    /// **Under `canWalk`'s guard**, as a conversation and a person are — so not under the viewer
+    /// or the keys list, and not from another place's page, where there is no walk to take a step
+    /// in. Those read it in the sheet, as before.
+    private func placeLink(_ url: URL) -> Bool {
+        Self.placeLink(url, on: &walk, from: selectedItemID, place: place, open: openLayers)
+    }
+
+    /// `placeLink`'s rule, given what it reads, so a test takes the step the root takes.
+    static func placeLink(
+        _ url: URL, on walk: inout ShellWalk, from lamp: String?, place: ShellPlace, open: Set<DummyLayer>
+    ) -> Bool {
+        guard canWalk(place: place, open: open) else { return false }
+        return walk.walk(to: .link(url), from: lamp) || walk.openedLink == url
+    }
+
+    /// Tab rotates this page's tabs: named queries on the timeline, purposes on Usage and on
+    /// Preferences. Elsewhere it is the platform's.
     private func rotatePlaceTab(by step: Int) -> Bool {
         switch place {
         case .timeline: session.rotateTab(by: step)
         case .usage: session.rotateUsageTab(by: step)
+        case .preferences: session.rotatePreferencesTab(by: step)
         default: false
         }
     }
 
-    @ViewBuilder
-    private var layout: some View {
+    /// The arrangement this window gets for the width it has (#110). See `ShellLayout`.
+    ///
+    /// **Asked on every pass, from a width measured on every change.** A Mac window being dragged
+    /// reports a new width for each step of the edge, so the arrangement swaps while the drag is
+    /// still happening rather than when it is let go, and a window dragged back over the line
+    /// swaps back at the same width, because the rule has one line and no memory.
+    ///
+    /// An iPad answers its width the same way, in both orientations and at every size beside
+    /// another app (#111); a phone keeps its size class, for the reason
+    /// `ShellLayout.answering(width:phoneIsCompact:)` gives.
+    private func arrangement(for width: CGFloat?) -> ShellLayout {
         #if os(iOS)
-        if sizeClass == .compact {
-            tabbed
-        } else {
-            columns
-        }
+        let phone = UIDevice.current.userInterfaceIdiom == .phone
+        return ShellLayout.answering(width: width, phoneIsCompact: phone ? sizeClass == .compact : nil)
         #else
-        columns
+        return ShellLayout.answering(width: width)
         #endif
+    }
+
+    /// **Nothing the reader is standing on is held in either arrangement.** The place, the lamp,
+    /// the walk and the rail's state are all this view's own, so swapping what is drawn around
+    /// the page leaves every one of them where it was; the list drawn afresh centres on the lamp
+    /// as it does coming back from a thread, and on the row that was at the top where there is
+    /// no lamp — see `TimelinePane.list`.
+    private var layout: some View {
+        ShellArranged(answer: arrangement) { layout in
+            switch layout {
+            case .narrow: narrow
+            case .wide: columns
+            }
+        }
     }
 
     private var columns: some View {
@@ -1008,7 +1296,6 @@ public struct FediqoRootView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(ShellChrome.page(colorScheme))
         }
-        .frame(minWidth: 520, minHeight: 360)
         .background(ShellChrome.page(colorScheme))
     }
 
@@ -1020,17 +1307,62 @@ public struct FediqoRootView: View {
         )
     }
 
-    #if os(iOS)
-    private enum Compact {
+    enum Compact {
         static let button: CGFloat = 56
-        /// Clear of the tab bar, which the overlay knows nothing about.
+        /// Clear of the tab bar, which the overlay knows nothing about. A Mac draws its tabs
+        /// across the top rather than the bottom, so there the button only keeps its room.
+        #if os(iOS)
         static let clearance: CGFloat = 72
+        #else
+        static let clearance: CGFloat = ShellSpace.room
+        #endif
     }
 
-    /// A phone gets tabs instead of a rail, and only for the places it can enter.
-    /// A tab bar has no disabled state worth the name: tapping a dead tab selected it,
-    /// the binding put it back, and the reader was told nothing at all. A place that
-    /// is not ready is not a tab yet.
+    /// The corner of every page the compose button floats over in the narrow arrangement, and
+    /// nothing where it does not float (#112). See `EnvironmentValues.shellFloatingCorner`.
+    ///
+    /// **Measured from the page's own edges, and generous rather than exact.** The button is laid
+    /// against the tabs' whole frame, so on a phone it is `clearance` above the frame's bottom and
+    /// the tab bar is somewhere under that; the page ends at the bar. The room asked for is the
+    /// button, its clearance and a step besides, which is more than the page needs wherever the
+    /// bar is below it — a list that stops a little short, which costs nothing, rather than one
+    /// that stops under the button, which costs its last row's marks.
+    static func composeCorner(canCompose: Bool) -> CGSize {
+        guard canCompose else { return .zero }
+        return CGSize(
+            width: Compact.button + ShellSpace.room + ShellSpace.snug,
+            height: Compact.button + Compact.clearance + ShellSpace.snug
+        )
+    }
+
+    /// The narrow arrangement: the places as tabs where their names fit, and as one pop-up named
+    /// for them where a Mac window is too narrow to write them side by side (#141). See
+    /// `ShellFold`.
+    ///
+    /// **The compose button and the corner it takes are the arrangement's, not the tabs'**, so
+    /// they are put on here, around either one. A fold that moved the button to make room for
+    /// its name would be moving something it did not fold.
+    private var narrow: some View {
+        ShellNarrow(titles: availability.enabledPlaces.map(\.title)) {
+            tabbed
+        } folded: {
+            FoldedPlaces(place: placeBinding, places: availability.enabledPlaces) {
+                placedPage(place)
+            }
+        }
+        .tint(ShellChrome.phosphor(colorScheme))
+        // Every page under the button is told the corner it takes, so the end of a list and the
+        // search bar leave it clear (#112).
+        .environment(\.shellFloatingCorner, Self.composeCorner(canCompose: availability.canCompose))
+        .overlay(alignment: .bottomTrailing) {
+            if availability.canCompose { composeButton }
+        }
+    }
+
+    /// Tabs instead of a rail, and only for the places it can enter. Drawn on a Mac as well
+    /// since #110, for a window dragged narrower than the rail allows. A tab bar has no disabled
+    /// state worth the name: tapping a dead tab selected it, the binding put it back, and the
+    /// reader was told nothing at all. A place that is not ready is not a tab yet.
     private var tabbed: some View {
         TabView(selection: $place) {
             ForEach(availability.enabledPlaces) { item in
@@ -1039,10 +1371,6 @@ public struct FediqoRootView: View {
                     .tag(item)
             }
         }
-        .tint(ShellChrome.phosphor(colorScheme))
-        .overlay(alignment: .bottomTrailing) {
-            if availability.canCompose { composeButton }
-        }
     }
 
     /// Solid ink, not phosphor: the lamp says where the reader is, and a button that
@@ -1050,7 +1378,7 @@ public struct FediqoRootView: View {
     private var composeButton: some View {
         Button { composing = true } label: {
             Image(systemName: "square.and.pencil")
-                .font(.title3.weight(.semibold))
+                .shellFont(.pane)
                 .frame(width: Compact.button, height: Compact.button)
                 .background(Circle().fill(ShellChrome.ink(colorScheme)))
                 .foregroundStyle(ShellChrome.page(colorScheme))
@@ -1060,7 +1388,6 @@ public struct FediqoRootView: View {
         .padding(.trailing, ShellSpace.room)
         .padding(.bottom, Compact.clearance)
     }
-    #endif
 
     @ViewBuilder
     private var page: some View {
@@ -1074,18 +1401,38 @@ public struct FediqoRootView: View {
             TimelinePane(
                 session: session,
                 selectedID: $selectedItemID,
-                openedID: openedThread,
+                // What the page under a link stands on: a page read out of a post is drawn over
+                // it by `LinkInPlace`, and it stays drawn (#169).
+                standing: walk.beneath,
+                onOpenPerson: { _ = openPerson($0) },
                 decks: $decks,
                 playback: playback,
                 onPlayRow: playRow,
+                onViewRow: viewRow,
+                onTurnRow: turnRow,
+                onOpenThread: { _ = openThread($0) },
                 jumpToTop: jumpToTop,
-                onPopThread: { _ = popThread() },
+                onBack: { _ = leaveWalk() },
+                // The two marks in the timeline's header, and whether there is anything for them
+                // to do — the same two functions the keys ask (#33).
+                ways: TimelineWays(
+                    canSearch: Self.canSearch(place: place, open: openLayers),
+                    onSearch: { _ = openSearch() },
+                    canReload: Self.canReload(
+                        place: place,
+                        editing: session.editing != nil,
+                        hasSources: !session.sources.isEmpty,
+                        open: openLayers
+                    ),
+                    onReload: { _ = reload() }
+                ),
                 search: search
             )
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if search.isOpen {
                     SearchBar(
                         search: search,
+                        timeline: session.name(of: session.currentTimeline),
                         found: search.isIndexed ? searchItems?.count : nil,
                         onSubmit: { selectedItemID = streamItems.first?.id },
                         onCleared: searchCleared,
@@ -1093,6 +1440,7 @@ public struct FediqoRootView: View {
                     )
                 }
             }
+            .modifier(LinkInPlace(reader: linkReader, onBack: leaveLink))
         case .notices: NoticesPane()
         case .account: AccountPane(session: session)
         case .usage: UsagePane()
@@ -1109,5 +1457,174 @@ public struct FediqoRootView: View {
     private func placedPage(_ item: ShellPlace) -> some View {
         pageFor(item)
             .environment(\.shellPlaceIsActive, item == place)
+    }
+}
+
+/// Taking back what the reader wrote (#109): the one act that asks first. It names what goes, and
+/// nothing goes until it is confirmed; any route that is not the confirm button — Cancel, a click
+/// outside, Escape — is a cancel, and leaves all as it was.
+///
+/// **A modifier of its own, and not the dialog spelled inside `FediqoRootView.body`.** Written
+/// there, a `presenting:` dialog with its two closures took `body` past what Swift 6.0 on the
+/// runner would type-check in reasonable time, while the newer compiler here solved it without a
+/// word — twice, the second time with its binding and title already lifted out. Out here the
+/// chain gains one plain call, which is a cost no compiler has to solve against the rest of it.
+private struct WithdrawQuestion: ViewModifier {
+    let session: ShellSession
+
+    func body(content: Content) -> some View {
+        content.confirmationDialog(
+            title,
+            isPresented: asked,
+            titleVisibility: .visible,
+            presenting: session.withdrawing
+        ) { item in
+            Button(L10n.t("withdraw.confirm"), role: .destructive) {
+                Task { await session.withdraw(item) }
+            }
+            Button(L10n.t("compose.cancel"), role: .cancel) { session.cancelWithdraw() }
+        } message: { item in
+            Text(ItemActs.withdrawQuestion(session.withdrawingCopy ?? item).detail)
+        }
+    }
+
+    /// What goes, named — the copy that goes, on a row two sources carried (#136). Empty only
+    /// while nothing is asked, when the dialog is not drawn.
+    private var title: String {
+        guard let item = session.withdrawingCopy ?? session.withdrawing else { return "" }
+        return ItemActs.withdrawQuestion(item).title
+    }
+
+    private var asked: Binding<Bool> {
+        Binding(
+            get: { session.withdrawing != nil },
+            set: { shown in if !shown { session.cancelWithdraw() } }
+        )
+    }
+}
+
+/// Remove's question and Clear's (decision 29), each as a modifier of its own — one shape for
+/// the two, since they differ only in what they ask about, how heavy the confirm is, what it does
+/// and what the detail says.
+///
+/// **Out of `FediqoRootView`'s chain, and the presenters below with it.** Each built a `Binding`
+/// and a `presenting:` presenter with closures inside one very long modifier chain, and Xcode
+/// 26.6's Swift gave up type-checking that chain on the runner — while the compiler this is
+/// written with solved it in three seconds without a word. A local timing predicts nothing about
+/// another compiler's solver, so the chain is kept to one plain `.modifier(…)` per presenter
+/// instead, which is a cost no compiler has to solve against the rest of it. See
+/// `WithdrawQuestion`.
+///
+/// **On the root beside the other presenters**, and for the same documented reason: one
+/// presenter driven by one piece of session state survives a second call site.
+private struct HostQuestion: ViewModifier {
+    let session: ShellSession
+    /// The host being asked about, where one is; the question is presented from it.
+    let asking: ReferenceWritableKeyPath<ShellSession, String?>
+    let titleKey: String
+    let confirmKey: String
+    let role: ButtonRole?
+    let act: @MainActor (String) async -> Void
+    let detail: @MainActor (String) -> String
+
+    /// **The Remove question.** Remove is asked from a source row today and will be asked from
+    /// the source page's own header the day that grows one.
+    ///
+    /// It is asked at all because Remove takes the board picks the reader made, and
+    /// `ShellSession.clear`'s comment is the argument: pictures come back by themselves, a pick
+    /// of eight boards out of forty does not.
+    static func remove(_ session: ShellSession) -> HostQuestion {
+        HostQuestion(
+            session: session, asking: \.removing,
+            titleKey: "account.remove.title", confirmKey: "account.remove.confirm",
+            role: .destructive,
+            act: { await session.remove(host: $0) },
+            detail: { FediqoRootView.removeDetail(for: $0, in: session.sources) }
+        )
+    }
+
+    /// **The Clear question, beside Remove's and driven the same way.** One presenter, one piece
+    /// of session state, two entrances: a source row and `UsagePane`'s row, which press the same
+    /// key for the same call and must therefore ask the same question.
+    ///
+    /// **It exists because Clear is not reversible, whatever the row looks like.** It drops the
+    /// pictures, the emoji names and the first posts, all of which come back — and it calls
+    /// `ForumSessions.forget(host:)`, which deletes the saved Keychain password and signs the
+    /// reader out of the forum. The Account row says neither of those before the press, so this
+    /// is the one place they are said.
+    ///
+    /// **Plain, where Remove's confirm is `.destructive`, and the difference is deliberate.** The
+    /// row's icon says *this takes something away*; the dialog says exactly how much, and the
+    /// weight of the confirm matches the weight of the act. A destructive Clear would be the
+    /// confirmation repeating the row's overstatement, which is the one thing decision 29 asks
+    /// not to happen.
+    ///
+    /// **The detail is the one seam of this dialog a test cannot reach** (risk 12).
+    /// `clearDetailKey` is pure and is driven across all four combinations; what nothing verifies
+    /// is that *this* closure asks it with `hasPassword` and `reachedSignIn` for the host being
+    /// confirmed, because a `message:` builder only runs inside a presented dialog. Named here
+    /// rather than left to be discovered.
+    static func clear(_ session: ShellSession) -> HostQuestion {
+        HostQuestion(
+            session: session, asking: \.clearing,
+            titleKey: "account.clear.title", confirmKey: "account.clear.confirm",
+            role: nil,
+            act: { await session.clear(host: $0) },
+            detail: { host in
+                L10n.t(SourceRow.clearDetailKey(
+                    hasPassword: session.forums.hasPassword(host: host),
+                    reachedSignIn: session.isSignedIn(host: host)
+                ))
+            }
+        )
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .confirmationDialog(
+                Text(session[keyPath: asking].map { String(format: L10n.t(titleKey), $0) } ?? ""),
+                isPresented: Binding(
+                    get: { session[keyPath: asking] != nil },
+                    set: { if !$0 { session[keyPath: asking] = nil } }
+                ),
+                // Explicit, because macOS draws no title at all on `.automatic` — and the title is
+                // the only line that names which server this is about.
+                titleVisibility: .visible,
+                presenting: session[keyPath: asking]
+            ) { host in
+                Button(L10n.t(confirmKey), role: role) {
+                    Task { await act(host) }
+                }
+                // **Cancel stays the default action.** No `.keyboardShortcut(.defaultAction)` on
+                // the confirm: Return dismisses this question, it never answers it.
+                Button(L10n.t("board.choose.cancel"), role: .cancel) { session[keyPath: asking] = nil }
+            } message: { host in
+                Text(detail(host))
+            }
+    }
+}
+
+/// A server ended a sign-in on its own side, said — out of the chain for `HostQuestion`'s reason.
+private struct EndedSignInNotice: ViewModifier {
+    let session: ShellSession
+
+    func body(content: Content) -> some View {
+        content
+            // A server ended a sign-in on its own side: the row already reads signed out, and this
+            // says why rather than leaving a timeline to go quiet.
+            .alert(
+                Text(L10n.t("account.mastodon.ended.title")),
+                isPresented: Binding(
+                    get: { !session.mastodon.ended.isEmpty },
+                    set: { if !$0 { session.mastodon.endedSeen() } }
+                )
+            ) {
+                Button(L10n.t("store.newer.ok"), role: .cancel) { session.mastodon.endedSeen() }
+            } message: {
+                Text(String(
+                    format: L10n.t("account.mastodon.ended.detail"),
+                    session.mastodon.ended.joined(separator: ", ")
+                ))
+            }
     }
 }

@@ -1,6 +1,7 @@
 import FediqoCore
 import Foundation
 import Observation
+import Security
 import WebKit
 
 /// Why an automatic sign-in stopped and handed the reader the forum's own page.
@@ -25,6 +26,9 @@ public enum ForumSignInStop: Equatable, Sendable {
     case unreadable
     /// The forum did not answer at all.
     case unreachable
+    /// The kept username and password are there and this device could not read them back — #153.
+    /// The Keychain's own reason goes with it, because "it did not work" is not a reason.
+    case keychain(ForumCredentialError)
 
     /// The line drawn under the web view. Named here rather than at the call site so that a new
     /// stop cannot be added without somebody deciding what the reader is told about it — the
@@ -38,6 +42,35 @@ public enum ForumSignInStop: Equatable, Sendable {
         case .refused: "forum.stop.refused"
         case .unreadable: "forum.stop.unreadable"
         case .unreachable: "forum.stop.unreachable"
+        case .keychain: "forum.stop.keychain"
+        }
+    }
+
+    /// The sheet's sentence, with the Keychain's reason put into it where there is one.
+    func explanation(language: DummyLanguage? = nil) -> String {
+        said(explanationKey, language: language)
+    }
+
+    /// The sentence behind `key`, with the Keychain's reason put into it where this stop is the
+    /// Keychain's — the one step the sheet's line and the row's lapsed line share.
+    func said(_ key: String, language: DummyLanguage? = nil) -> String {
+        let said = L10n.t(key, language: language)
+        guard case .keychain(let error) = self else { return said }
+        return String(format: said, ForumKeychainReason.of(error, language: language))
+    }
+
+    /// What the row says when a launch did not sign this forum in again — #153. One per stop, for
+    /// the reason `explanationKey` is one per stop: the compiler asks for each.
+    var lapsedKey: String {
+        switch self {
+        case .noCredential: "forum.lapsed.first"
+        case .wall: "forum.lapsed.wall"
+        case .captcha: "forum.lapsed.captcha"
+        case .question: "forum.lapsed.question"
+        case .refused: "forum.lapsed.refused"
+        case .unreadable: "forum.lapsed.unreadable"
+        case .unreachable: "forum.lapsed.unreachable"
+        case .keychain: "forum.lapsed.keychain"
         }
     }
 
@@ -64,7 +97,93 @@ public enum ForumSignInStop: Equatable, Sendable {
         .refused(nil),
         .unreadable,
         .unreachable,
+        .keychain(.keychain(-25_308)),
     ]
+}
+
+/// Why the Keychain would not keep, read or delete a forum's password, in the reader's words.
+///
+/// **The status is always said, and a few are said in words as well.** An `OSStatus` alone is
+/// nothing a reader can act on, and a sentence alone is nothing anybody can look up; the ones
+/// named here are the ones this app has actually met or can expect to — a locked keychain, a
+/// build not allowed to use it (an ad-hoc Debug build answers `-34018` wherever the
+/// data-protection keychain is asked for; see `MastodonKeychain`), access refused or cancelled at
+/// the system's own prompt, and no keychain there at all. Everything else is "the Keychain
+/// refused", with its number.
+enum ForumKeychainReason {
+    static func key(for status: Int32) -> String {
+        switch status {
+        case errSecInteractionNotAllowed: "forum.keychain.locked"
+        case errSecMissingEntitlement: "forum.keychain.entitlement"
+        case errSecAuthFailed, errSecUserCanceled: "forum.keychain.denied"
+        case errSecNoSuchKeychain, errSecNotAvailable: "forum.keychain.missing"
+        default: "forum.keychain.other"
+        }
+    }
+
+    static func of(_ error: ForumCredentialError, language: DummyLanguage? = nil) -> String {
+        switch error {
+        case .keychain(let status):
+            String(format: L10n.t(key(for: status), language: language), Int(status))
+        case .incomplete: L10n.t("forum.keychain.incomplete", language: language)
+        case .unreadable: L10n.t("forum.keychain.unreadable", language: language)
+        }
+    }
+
+    /// Whatever a store threw, as the one error type a sentence is written for. A store that
+    /// is not the Keychain — none ships — is reported as a Keychain that refused.
+    static func error(_ thrown: any Error) -> ForumCredentialError {
+        thrown as? ForumCredentialError ?? .keychain(errSecInternalComponent)
+    }
+}
+
+/// Why a username and password the reader asked to keep were not kept — #153.
+public enum ForumKeepFailure: Equatable, Sendable {
+    /// Nothing typed could be read from the forum's page, so there was nothing to keep.
+    case nothingTyped
+    /// The Keychain refused to take it.
+    case store(ForumCredentialError)
+
+    func sentence(language: DummyLanguage? = nil) -> String {
+        let reason = switch self {
+        case .nothingTyped: L10n.t("forum.unkept.nothing", language: language)
+        case .store(let error): ForumKeychainReason.of(error, language: language)
+        }
+        return String(format: L10n.t("forum.unkept", language: language), reason)
+    }
+}
+
+/// What a forum's row says about its sign-in that nothing else on the row can — #153.
+///
+/// **Held per host, until the thing it is about changes.** A launch that did not sign a forum
+/// in again, a password that was not kept, and a password that could not be deleted are each a
+/// standing fact about one forum, and a reader who opens Accounts an hour later is owed it then.
+/// A sign-in reached takes the first; a keep that works takes the second; a forget takes all
+/// three and may leave the third.
+enum ForumRowNotice: Equatable, Sendable {
+    case lapsed(ForumSignInStop)
+    case unkept(ForumKeepFailure)
+    case unforgotten(ForumCredentialError)
+
+    func sentence(language: DummyLanguage? = nil) -> String {
+        switch self {
+        case .lapsed(let stop):
+            return stop.said(stop.lapsedKey, language: language)
+        case .unkept(let failure):
+            return failure.sentence(language: language)
+        case .unforgotten(let error):
+            return String(
+                format: L10n.t("forum.unforgotten", language: language),
+                ForumKeychainReason.of(error, language: language)
+            )
+        }
+    }
+}
+
+/// What asking to keep the typed pair came to.
+public enum ForumKeeping: Equatable, Sendable {
+    case kept
+    case failed(ForumKeepFailure)
 }
 
 public enum ForumSignInOutcome: Equatable, Sendable {
@@ -91,6 +210,10 @@ public final class ForumSessions {
     /// Where a saved password lives. Injected so that a test never touches the real Keychain —
     /// see `ForumCredentialStore`.
     @ObservationIgnored let credentials: any ForumCredentialStore
+
+    /// Where a launch's signing in again is shown while it runs (#164). The app's own; a test
+    /// hands in another.
+    @ObservationIgnored var work: SourceWork = .shared
 
     @ObservationIgnored private var engines: [String: ForumWebEngine] = [:]
     @ObservationIgnored private let makeStore: () -> WKWebsiteDataStore
@@ -141,6 +264,29 @@ public final class ForumSessions {
     /// about what this run built: an engine exists the moment the reader is *offered* a sign-in,
     /// including the case where they looked at the forum's page and gave up.
     private(set) var reachedHosts: Set<String> = []
+
+    /// What each forum's row owes the reader about its sign-in. See `ForumRowNotice`.
+    private(set) var notices: [String: ForumRowNotice] = [:]
+
+    /// What the reader typed and submitted on the forum's own page, while they have asked for it
+    /// to be kept — #153. **In memory, one pair per host, never written anywhere** until the
+    /// forum's page confirms the sign-in and `saveTyped` hands it to the Keychain; dropped by the
+    /// switch going off, the sheet closing, and a forget.
+    @ObservationIgnored private var typed: [String: ForumCredential] = [:]
+
+    /// Each forum's sign-in at launch, while it is still running. See `signInAgain(hosts:)`.
+    @ObservationIgnored private var relaunching: [String: Task<Void, Never>] = [:]
+
+    /// How many sign-ins this run has seen land on each host. Read by a post fetch to notice
+    /// that the answer it is carrying was asked for as a guest — see `ForumPosts`.
+    @ObservationIgnored private var landed: [String: Int] = [:]
+
+    /// Who is told when a sign-in lands. See `whenSignedIn(_:)`.
+    @ObservationIgnored private var landings: [@MainActor (String) -> Void] = []
+
+    /// The Keychain could not even say which forums have something kept. Logged at launch, and
+    /// not drawn on any row: which rows it is about is exactly what could not be found out.
+    @ObservationIgnored private(set) var listingFailure: ForumCredentialError?
 
     /// `dataStore` is where every engine keeps its cookies, and is not built until a forum is
     /// among the sources or a browser is asked for: a reader with no forum never opens the
@@ -232,6 +378,19 @@ public final class ForumSessions {
         hasEngine(host: host) || reachedSignIn(host: host)
     }
 
+    /// The client a read of that host goes through: the forum's own browser where
+    /// `readsThroughEngine(host:)` says so, else `plain`.
+    ///
+    /// **One door for every read** — a reload, a post fetch and a join — so that none of them can
+    /// ask a narrower question than the others. A join used to ask `hasEngine` alone, and after a
+    /// relaunch with a sign-in kept on a challenge-fronted forum its board picker read through
+    /// `URLSession` and got back the 403 the rest of the app had stopped getting. Asked without
+    /// building anything, so a microblog still starts no web process.
+    func readTransport(host: String, else plain: any HTTPClient) -> any HTTPClient {
+        guard readsThroughEngine(host: host) else { return plain }
+        return ForumJoinTransport(transport(host: host))
+    }
+
     // MARK: - Signing in
 
     /// Signs in from the saved credential, or says why the reader has to.
@@ -241,7 +400,15 @@ public final class ForumSessions {
     /// something a stored password does not contain.
     func signIn(host: String) async -> ForumSignInOutcome {
         let host = host.lowercased()
-        guard let credential = try? credentials.credential(host: host), credential.isComplete else {
+        let kept: ForumCredential?
+        do {
+            kept = try credentials.credential(host: host)
+        } catch {
+            // Said, and the forum's page is still handed over: a Keychain that will not answer
+            // is no reason the reader cannot sign in by hand.
+            return .handOver(.keychain(ForumKeychainReason.error(error)))
+        }
+        guard let credential = kept, credential.isComplete else {
             return .handOver(.noCredential)
         }
         let engine = engine(host: host)
@@ -287,26 +454,78 @@ public final class ForumSessions {
         }
     }
 
-    /// Reads what the reader typed into the forum's own form and keeps it — **only** when they
-    /// have said so. See `ForumWebEngine.typedCredential`.
-    @discardableResult
-    func saveTyped(host: String) async -> Bool {
-        guard let credential = await engine(host: host).typedCredential() else { return false }
-        do {
-            try credentials.save(credential)
-            refreshSavedHosts()
-            return true
-        } catch {
-            // Deliberately silent about what failed. A Keychain refusal is an `OSStatus` and
-            // nothing else worth a reader's time, and an error path is the likeliest place for a
-            // secret to escape into a log.
-            return false
+    /// Starts or stops holding what the reader submits on the forum's own page — the sheet's
+    /// switch. See `ForumWebEngine.watchTyped`. Off drops whatever was held.
+    func watchTyped(host: String, on: Bool) {
+        let host = host.lowercased()
+        if !on { typed[host] = nil }
+        guard on || hasEngine(host: host) else { return }
+        engine(host: host).watchTyped(on) { [weak self] credential in
+            self?.typed[credential.host] = credential
         }
     }
 
-    func forgetPassword(host: String) {
-        try? credentials.forget(host: host.lowercased())
+    /// Keeps what the reader typed — **only** when they have said so, and only once the forum's
+    /// page has confirmed the sign-in (the sheet asks it first).
+    ///
+    /// **What they submitted, held from the moment they submitted it**, and failing that what is
+    /// still in the form on screen. It used to be only the second, and by the time a sign-in
+    /// can be confirmed the forum has moved the page on, so there was nothing to read and
+    /// nothing was kept, silently (#153; `ForumSignInPageTests` has the sequence).
+    ///
+    /// **A failure is answered, and says what went wrong.** It is a status, or "nothing typed
+    /// could be read" — never the query, the attributes or the credential, because an error is
+    /// what gets logged. The row keeps the sentence until a keep that works or a forget.
+    @discardableResult
+    func saveTyped(host: String) async -> ForumKeeping {
+        let host = host.lowercased()
+        var credential = typed[host]
+        if credential == nil, hasEngine(host: host) {
+            credential = await engine(host: host).typedCredential()
+        }
+        guard let credential, credential.isComplete else {
+            notices[host] = .unkept(.nothingTyped)
+            return .failed(.nothingTyped)
+        }
+        do {
+            try credentials.save(credential)
+        } catch {
+            let failure = ForumKeepFailure.store(ForumKeychainReason.error(error))
+            notices[host] = .unkept(failure)
+            refreshSavedHosts()
+            return .failed(failure)
+        }
+        typed[host] = nil
+        if case .unkept? = notices[host] { notices[host] = nil }
         refreshSavedHosts()
+        return .kept
+    }
+
+    /// What the forum's page would have handed over on a submit, for a test that has no page.
+    func holdTyped(_ credential: ForumCredential) {
+        typed[credential.host] = credential
+    }
+
+    /// Whether a submitted pair is being held for this host. Asked by tests only.
+    func holdsTyped(host: String) -> Bool {
+        typed[host.lowercased()] != nil
+    }
+
+    func forgetPassword(host: String) {
+        let host = host.lowercased()
+        do {
+            try credentials.forget(host: host)
+            if case .unforgotten? = notices[host] { notices[host] = nil }
+        } catch {
+            // Said on the row: a password the reader asked to be rid of and still held is the one
+            // failure here they would most want to hear about.
+            notices[host] = .unforgotten(ForumKeychainReason.error(error))
+        }
+        refreshSavedHosts()
+    }
+
+    func notice(host: String) -> ForumRowNotice? {
+        notices[host.lowercased()]
     }
 
     func hasPassword(host: String) -> Bool {
@@ -321,8 +540,128 @@ public final class ForumSessions {
 
     /// A sign-in was reached on the forum's own page this run. See `witnessed`.
     func recordSignIn(host: String) {
-        witnessed.insert(host.lowercased())
-        reachedHosts.insert(host.lowercased())
+        let host = host.lowercased()
+        witnessed.insert(host)
+        reachedHosts.insert(host)
+        landed[host, default: 0] += 1
+        if case .lapsed? = notices[host] { notices[host] = nil }
+        for landing in landings { landing(host) }
+    }
+
+    /// Tells `landing` whenever a sign-in lands on a host — the automatic path, the reader's
+    /// own page, or a launch signing a forum in again. `ForumPosts` listens, so that nothing it
+    /// read as a guest stays read as a guest (#153).
+    func whenSignedIn(_ landing: @escaping @MainActor (String) -> Void) {
+        landings.append(landing)
+    }
+
+    /// How many sign-ins have landed on this host this run. See `landed`.
+    func signIns(host: String) -> Int {
+        landed[host.lowercased()] ?? 0
+    }
+
+    // MARK: - At launch
+
+    /// Signs in again, by itself, every forum here whose sign-in did not survive the relaunch and
+    /// whose username and password the reader kept — #153. The app calls this once, at launch,
+    /// the way it asks each Mastodon whether its token still holds.
+    ///
+    /// **Only a forum with something kept is touched.** Which forums those are is the Keychain's
+    /// list of attributes, which reads no password — so a forum with nothing kept never has its
+    /// store opened or a browser stood up for it, and one whose session cookie survived is
+    /// asked nothing at all: its password is read only when there is a sign-in to make, which on
+    /// a Mac's login keychain is also the one read that may put a prompt in front of the reader.
+    ///
+    /// **Started here and not awaited**, and registered before this returns, so a post fetch for
+    /// the same forum that starts a moment later finds it running and waits for it —
+    /// `settled(host:within:)`. What it cannot do is said on the row (`notices`), and the row
+    /// still offers Sign in, because it reads signed out.
+    ///
+    /// `attempt` is the sign-in itself, handed in by a test; the app's is `signIn(host:)`.
+    public func signInAgain(
+        hosts: [String],
+        attempt: (@MainActor (String) async -> ForumSignInOutcome)? = nil
+    ) {
+        if let listingFailure {
+            NetLog.auth.notice(
+                "\(NetLog.line("keychain list", host: "-", error: listingFailure), privacy: .public)"
+            )
+        }
+        // The store's sessions, read once for every forum signed in again here rather than
+        // once per forum — and only where there is one, so a launch with nothing kept opens no
+        // store.
+        var sessions: Task<[String], Never>?
+        for host in Set(hosts.map { $0.lowercased() }) where savedHosts.contains(host) {
+            guard relaunching[host] == nil else { continue }
+            let held = sessions ?? Task { [weak self] in await self?.sessionDomains() ?? [] }
+            sessions = held
+            // On `SourceWork` for the whole of it (#164): the forum's browser is not an
+            // `HTTPClient` a request could be watched through, so the work is registered itself.
+            let token = work.begin(host: host, for: .signIn)
+            relaunching[host] = Task { [weak self, work] in
+                defer { work.end(token) }
+                await self?.relaunch(host: host, sessions: held, attempt: attempt)
+                self?.relaunching[host] = nil
+            }
+        }
+    }
+
+    private func relaunch(
+        host: String, sessions: Task<[String], Never>,
+        attempt: (@MainActor (String) async -> ForumSignInOutcome)?
+    ) async {
+        guard !(await holdsSession(host: host, sessions: sessions)) else { return }
+        let outcome: ForumSignInOutcome
+        if let attempt {
+            outcome = await attempt(host)
+        } else {
+            outcome = await signIn(host: host)
+        }
+        switch outcome {
+        case .signedIn:
+            recordSignIn(host: host)
+        case .handOver(let stop):
+            notices[host] = .lapsed(stop)
+        }
+    }
+
+    /// Whether the store holds a member's session for this host, asked of the store directly
+    /// rather than of `reachedHosts`, which waits on the forums having been handed over.
+    /// `sessions` is the store's read, shared by every forum `signInAgain(hosts:)` started.
+    private func holdsSession(host: String, sessions: Task<[String], Never>) async -> Bool {
+        if witnessed.contains(host) { return true }
+        return await sessions.value.contains { ForumWebEngine.holds($0, for: host) }
+    }
+
+    /// The domains the store holds a member's session cookie under.
+    private func sessionDomains() async -> [String] {
+        await dataStore.httpCookieStore.allCookies()
+            .filter { ForumMember.isSessionCookie(named: $0.name) }
+            .map(\.domain)
+    }
+
+    /// Returns once this host's launch sign-in has settled, or once `limit` has passed, whichever
+    /// is first. Immediately where there is none.
+    ///
+    /// **Bounded**, because a forum behind a browser check can hold a sign-in for most of a
+    /// minute before it gives up, and a reader should not look at empty rows for that long. What
+    /// is read before the sign-in lands is read again when it does — `ForumPosts.signedIn`.
+    func settled(host: String, within limit: Duration = ForumSessions.launchHold) async {
+        guard let running = relaunching[host.lowercased()] else { return }
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await running.value }
+            group.addTask { try? await Task.sleep(for: limit) }
+            await group.next()
+            group.cancelAll()
+        }
+    }
+
+    /// How long a forum's posts wait for its launch sign-in. See `settled(host:within:)`.
+    nonisolated static let launchHold: Duration = .seconds(12)
+
+    /// Whether this host's launch sign-in is still running.
+    func isSigningInAgain(host: String) -> Bool {
+        relaunching[host.lowercased()] != nil
     }
 
     // MARK: - Clearing
@@ -342,6 +681,8 @@ public final class ForumSessions {
         // in to last launch holds its session before anything asks for its page. A store never
         // built this run holds nothing this run could have put there, and is left unopened.
         if let madeStore { await ForumWebEngine.forget(host: host, in: madeStore) }
+        typed[host.lowercased()] = nil
+        notices[host.lowercased()] = nil
         forgetPassword(host: host)
         witnessed.remove(host.lowercased())
         // The cookies have just gone, so what the row says goes with them — for this host and
@@ -351,7 +692,15 @@ public final class ForumSessions {
     }
 
     func refreshSavedHosts() {
-        savedHosts = (try? credentials.savedHosts()) ?? []
+        do {
+            savedHosts = try credentials.savedHosts()
+            listingFailure = nil
+        } catch {
+            // What is drawn falls back to "nothing kept", which is all that can be drawn; why is
+            // kept for the launch to log, rather than dropped.
+            savedHosts = []
+            listingFailure = ForumKeychainReason.error(error)
+        }
     }
 }
 

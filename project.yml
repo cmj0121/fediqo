@@ -19,6 +19,13 @@ settings:
     # file looks like; a real build is stamped on the command line by the release lane.
     MARKETING_VERSION: "0.0.0"
     CURRENT_PROJECT_VERSION: "0"
+    # Which commit a build was made from and whether the checkout differed from it (#143),
+    # handed over by the same route as the two above -- `scripts/version.sh --source`, through
+    # Apps/Makefile and the release lane. **Empty here, not a placeholder:** a build nobody
+    # stamped has no source it can name, and Preferences reads an empty value as "not
+    # recorded" rather than showing a revision somebody typed.
+    FEDIQO_SOURCE_REVISION: ""
+    FEDIQO_SOURCE_DIRTY: ""
     ENABLE_USER_SCRIPT_SANDBOXING: YES
   # Signing is a property of which build this is, not of the project. Debug is what a
   # checkout with no certificates in it builds -- a pull request has none and must not need
@@ -82,6 +89,11 @@ targets:
         # would be a number that stops being true on the next commit.
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # The source, beside the version, for Preferences to say which Fediqo this is (#143).
+        # Fediqo's own keys, since no key Apple defines means "the commit"; `BuildStamp` in
+        # FediqoUI is the one reader, and names the same two.
+        FediqoSourceRevision: $(FEDIQO_SOURCE_REVISION)
+        FediqoSourceDirty: $(FEDIQO_SOURCE_DIRTY)
         CFBundleURLTypes:
           - CFBundleURLName: dev.mini-poc.fediqo
             CFBundleURLSchemes: [fediqo]
@@ -136,6 +148,8 @@ targets:
       properties:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        FediqoSourceRevision: $(FEDIQO_SOURCE_REVISION)
+        FediqoSourceDirty: $(FEDIQO_SOURCE_DIRTY)
         # Without this, iOS runs the app in the compatibility mode it keeps for apps written
         # before the modern screen sizes: letterboxed, scaled, with the tab bar floating
         # somewhere above the bottom of the glass. An empty dictionary is the whole of what

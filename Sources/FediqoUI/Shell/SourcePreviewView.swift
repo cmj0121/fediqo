@@ -47,10 +47,15 @@ struct SourcePreviewView: View {
     /// "Account" — so a second `pane`-weight title inside that page would be two page titles. In a
     /// sheet there is no competing title, so the host keeps `pane` there. A `static func` rather
     /// than a branch inside a `body`, so one test pins it without standing a view up.
-    static func titleFont(for surface: JoinSurface) -> Font {
+    ///
+    /// **A role and no longer a `Font`** (#96): what points a role is set in is the reader's to
+    /// choose and the view's to resolve, so a value decided here would be one that stopped
+    /// moving with the preference. The decision this makes — which of the two roles — is
+    /// unchanged, and is still the whole of what a test has to pin.
+    static func titleRole(for surface: JoinSurface) -> ShellType {
         switch surface {
-        case .sheet: ShellType.pane
-        case .pane: ShellType.name
+        case .sheet: .pane
+        case .pane: .name
         }
     }
 
@@ -88,11 +93,11 @@ struct SourcePreviewView: View {
         var body: some View {
             VStack(alignment: .leading, spacing: ShellSpace.tight) {
                 Text(preview.host)
-                    .font(SourcePreviewView.titleFont(for: surface))
+                    .shellFont(SourcePreviewView.titleRole(for: surface))
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
                 Text(L10n.t(SourcePreviewView.framingKey(for: origin)))
-                    .font(ShellType.meta)
+                    .shellFont(.meta)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -109,7 +114,7 @@ struct SourcePreviewView: View {
         case .silent:
             spine {
                 Text(String(format: L10n.t("join.preview.silent"), preview.host))
-                    .font(ShellType.body)
+                    .shellFont(.body)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -117,11 +122,11 @@ struct SourcePreviewView: View {
             spine {
                 VStack(alignment: .leading, spacing: ShellSpace.snug) {
                     Text(String(format: L10n.t("join.preview.unread"), preview.host))
-                        .font(ShellType.body)
+                        .shellFont(.body)
                         .foregroundStyle(ShellChrome.inkDim(colorScheme))
                         .fixedSize(horizontal: false, vertical: true)
                     Text(Self.unreadMessage(error))
-                        .font(ShellType.mark)
+                        .shellFont(.mark)
                         .foregroundStyle(ShellChrome.inkFaint(colorScheme))
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -133,7 +138,7 @@ struct SourcePreviewView: View {
         case .unasked:
             spine {
                 Text(String(format: L10n.t("join.preview.unasked"), preview.host))
-                    .font(ShellType.body)
+                    .shellFont(.body)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -162,13 +167,13 @@ struct SourcePreviewView: View {
                     identityLine(preview.kind)
                     if let title = profile.title {
                         Text(title)
-                            .font(ShellType.name)
+                            .shellFont(.name)
                             .foregroundStyle(ShellChrome.ink(colorScheme))
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     if let summary = profile.summary {
                         Text(summary)
-                            .font(ShellType.body)
+                            .shellFont(.body)
                             .foregroundStyle(ShellChrome.inkDim(colorScheme))
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -232,7 +237,7 @@ struct SourcePreviewView: View {
             VStack(alignment: .leading, spacing: ShellSpace.tight) {
                 if let stated {
                     stated
-                        .font(ShellType.reading)
+                        .shellFont(.reading)
                         .foregroundStyle(ShellChrome.inkFaint(colorScheme))
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -242,7 +247,7 @@ struct SourcePreviewView: View {
                 // as "I cannot read this", which is false for most servers.
                 if let registration = profile.registration {
                     Text(L10n.t(Self.registrationKey(registration)))
-                        .font(ShellType.meta)
+                        .shellFont(.meta)
                         .foregroundStyle(ShellChrome.inkFaint(colorScheme))
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -322,17 +327,17 @@ struct SourcePreviewView: View {
     private func rules(_ rules: [String]) -> some View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
             Text(L10n.t("join.preview.rules"))
-                .font(ShellType.name)
+                .shellFont(.name)
                 .foregroundStyle(ShellChrome.ink(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
             ForEach(Array(rules.enumerated()), id: \.offset) { index, rule in
                 HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
                     Text(verbatim: "\(index + 1)")
-                        .font(ShellType.reading)
+                        .shellFont(.reading)
                         .foregroundStyle(ShellChrome.inkFaint(colorScheme))
                         .accessibilityHidden(true)
                     Text(rule)
-                        .font(ShellType.body)
+                        .shellFont(.body)
                         .foregroundStyle(ShellChrome.inkDim(colorScheme))
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -408,7 +413,7 @@ struct SourcePreviewView: View {
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                     .accessibilityHidden(true)
                 Text(L10n.t(Self.cautionKey(caution, for: origin)))
-                    .font(ShellType.meta.weight(.medium))
+                    .shellFont(.meta, weight: .medium)
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -417,13 +422,13 @@ struct SourcePreviewView: View {
             // The outcome line is a prediction about a press, and on a detail there is no press.
             // What replaces it is the present tense of the same fact: what the reader is reading.
             Text(SourcePreviewView.heldLine(held))
-                .font(ShellType.meta)
+                .shellFont(.meta)
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             Text(L10n.t(Self.outcomeKey(preview.kind)))
-                .font(ShellType.meta)
+                .shellFont(.meta)
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)

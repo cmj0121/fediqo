@@ -88,12 +88,85 @@ struct StoreFileTests {
         #expect(loaded.first { $0.id == "2" }?.statusID == nil)
     }
 
+    /// #106: a boost that landed shows as boosted after a relaunch. What is written down is the
+    /// source's own answer, carried on the note; a source that never said reads back as never
+    /// having said, and a no reads back as a no.
+    @Test("What the source said about a boost survives a relaunch, and silence stays silence")
+    func boostedSurvivesRelaunch() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        func said(_ id: String, _ boosted: Bool?) -> Note {
+            Note(
+                id: id, source: mastodon, author: "Ada", handle: "@ada@first.example", body: "hello",
+                postedAt: origin, categories: [.home], boosted: boosted, statusID: id
+            )
+        }
+        try await StoreFile(at: dir).save(
+            sources: [mastodon], notes: [said("1", true), said("2", false), said("3", nil)]
+        )
+        let loaded = StoreFile.open(at: dir).notes
+        #expect(loaded.first { $0.id == "1" }?.boosted == true)
+        #expect(loaded.first { $0.id == "2" }?.boosted == false)
+        #expect(loaded.first { $0.id == "3" }?.boosted == nil)
+    }
+
+    /// #107: a favourite is kept the way a boost is, and apart from it.
+    @Test("What the source said about a favourite survives a relaunch, apart from the boost")
+    func favouritedSurvivesRelaunch() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        func said(_ id: String, _ favourited: Bool?) -> Note {
+            Note(
+                id: id, source: mastodon, author: "Ada", handle: "@ada@first.example", body: "hello",
+                postedAt: origin, categories: [.home], boosted: false, favourited: favourited,
+                statusID: id
+            )
+        }
+        try await StoreFile(at: dir).save(
+            sources: [mastodon], notes: [said("1", true), said("2", false), said("3", nil)]
+        )
+        let loaded = StoreFile.open(at: dir).notes
+        #expect(loaded.first { $0.id == "1" }?.favourited == true)
+        #expect(loaded.first { $0.id == "2" }?.favourited == false)
+        #expect(loaded.first { $0.id == "3" }?.favourited == nil)
+        #expect(loaded.allSatisfy { $0.boosted == false })
+    }
+
+    /// #109: what went stays gone after a relaunch, because the store the save writes no
+    /// longer holds it — and only it went.
+    @Test("A post taken back stays gone after a relaunch, and nothing else goes")
+    func takenBackStaysGone() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = ItemStore(sources: [mastodon], notes: [note(id: "1"), note(id: "2")])
+        await store.forget(NoteKey(host: mastodon.host, id: "1"))
+        let snapshot = await store.snapshot()
+        try await StoreFile(at: dir).save(sources: snapshot.sources, notes: snapshot.notes)
+        #expect(StoreFile.open(at: dir).notes.map(\.id) == ["2"])
+    }
+
     @Test("A reply whose parent's handle is unknown comes back a reply")
     func replyWithoutHandle() async throws {
         let file = try StoreFile(database: DatabaseQueue())
         let saved = [note(id: "1", reply: Reply(handle: nil)), note(id: "2")]
         try await file.save(sources: [mastodon], notes: saved)
         #expect(Set(try file.load().notes) == Set(saved))
+    }
+
+    @Test("What a reply answers, as its own server names it, survives a relaunch")
+    func inReplyToIDSurvivesRelaunch() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let saved = [
+            note(id: "1", reply: Reply(handle: "@ada@first.example", inReplyToId: "10941")),
+            note(id: "2", reply: Reply(handle: "@ada@first.example")),
+            note(id: "3"),
+        ]
+        try await StoreFile(at: dir).save(sources: [mastodon], notes: saved)
+        let loaded = StoreFile.open(at: dir).notes
+        #expect(loaded.first { $0.id == "1" }?.reply?.inReplyToId == "10941")
+        #expect(loaded.first { $0.id == "2" }?.reply?.inReplyToId == nil, "a parent nobody named")
+        #expect(loaded.first { $0.id == "3" }?.reply == nil, "not a reply at all")
     }
 
     @Test("Unset sensitive and spoiler stay unset, apart from false and empty", arguments: [
@@ -104,6 +177,17 @@ struct StoreFileTests {
         let saved = note(sensitive: sensitive, spoiler: spoiler)
         try await file.save(sources: [mastodon], notes: [saved])
         #expect(try file.load().notes == [saved])
+    }
+
+    @Test("Notes are read back in the order they were written, which is the order they arrived in")
+    func writtenOrderSurvives() async throws {
+        let file = try StoreFile(database: DatabaseQueue())
+        let second = Source(host: "second.example", kind: .mastodon)
+        let uri = "https://first.example/users/ada/statuses/1"
+        // Against the key's own order on purpose: the later host and the later id first.
+        let saved = [note(id: "z", source: second), note(id: uri, source: second), note(id: uri), note(id: "a")]
+        try await file.save(sources: [mastodon, second], notes: saved)
+        #expect(try file.load().notes == saved)
     }
 
     @Test("Row facts survive a relaunch on the same directory")

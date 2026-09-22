@@ -44,7 +44,7 @@ struct ForumPostsTests {
         floor: Int? = 1,
         author: String = "tinbox",
         body: String = "",
-        quoted: String? = nil,
+        quoted: [DiscuzQuotation] = [],
         withheld: Bool = false
     ) -> DiscuzPost {
         DiscuzPost(
@@ -376,7 +376,7 @@ struct ForumPostsTests {
         #expect(ForumPosts.cost(of: [chinese]) == 300 + furniture)
 
         // A quotation is a stranger's words held on this device just as much as the body is.
-        let quoting = Self.post(body: "ab", quoted: "cde")
+        let quoting = Self.post(body: "ab", quoted: [DiscuzQuotation(words: "cde")])
         #expect(ForumPosts.cost(of: [quoting]) == 5 + furniture)
         #expect(ForumPosts.cost(of: []) == 0)
     }
@@ -737,7 +737,7 @@ struct ForumPostsTests {
         // One source, one board, and it is the child's own number — not its parent's.
         #expect(session.sources.map(\.host) == ["install-d.example"])
         #expect(session.sources.first?.boards.map(\.fid) == [300])
-        #expect(session.queries.map(\.id) == ["all"])
+        #expect(session.queries.map(\.id) == ["all", "trends"])
         // And exactly one board was read: a tick on a child is one board's worth of traffic.
         let listings = await http.requested.filter { $0.query?.contains("forumdisplay") == true }
         #expect(listings.count == 1)

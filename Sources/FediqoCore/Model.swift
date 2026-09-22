@@ -42,8 +42,8 @@ public enum ProtocolKind: String, Sendable, Hashable, CaseIterable {
     /// Whether a source of this kind has the timelines every Mastodon-shaped server shares —
     /// public, trends, home — so that a category naming one of them can mean this source.
     ///
-    /// **The one list**, read by the Trends tab and by a timeline's rules alike: a second list
-    /// is how the tab and the rule come to disagree about a server. No `default:`, so a kind
+    /// **The one list**, read by a timeline's rules and by `hasTrends`, which starts from it: a
+    /// second list is how a tab and a rule come to disagree about a server. No `default:`, so a kind
     /// added later has to be answered here rather than inheriting somebody else's answer.
     public var hasTimelines: Bool {
         switch self {
@@ -56,8 +56,47 @@ public enum ProtocolKind: String, Sendable, Hashable, CaseIterable {
         }
     }
 
+    /// Whether a source of this kind has something trending — so that `.trends` can mean it, the
+    /// Trends tab can be offered for it, and a reload of a timeline that reaches its Trends reads
+    /// them.
+    ///
+    /// **Every kind with timelines, and a Discuz! beside them without them.** A Discuz! forum
+    /// ranks its threads and its blogs by the week (`DiscuzRanklist`), which is exactly what a
+    /// microblog's trending read is: what everybody else is reading. It still has no public or
+    /// home timeline, so `hasTimelines` stays false for it and those still never reach a forum.
+    /// A Discourse has no ranking this app reads. No `default:`, `hasTimelines`' rule.
+    public var hasTrends: Bool {
+        switch self {
+        case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
+            .gotosocial, .discuz:
+            true
+        case .discourse, .unknown:
+            false
+        }
+    }
+
     /// Whether this is a forum, whose authors are that forum's and nobody else's.
     public var isForum: Bool { self == .discourse || self == .discuz }
+
+    /// Whether Fediqo can write to a source of this kind at all (#69).
+    ///
+    /// **`hasTimelines`' shape and for its reason** — one list per protocol fact, here beside the
+    /// others rather than beside the feature that first needed it, so a protocol added later is
+    /// answered in one place. No `default:`.
+    ///
+    /// **A forum is `false` although it signs in**, and the two are unrelated: a Discuz! sign-in is
+    /// a cookie and a saved password that let this device *read* a board a signed-out reader may
+    /// not, and this app has no way at all to post to a forum. So a forum row says read only, for a
+    /// reason that is about the protocol rather than about anything its reader chose.
+    public var canWrite: Bool {
+        switch self {
+        // Signed in on the server's own page, and the writing part is what #69 lets a reader buy.
+        case .mastodon: true
+        case .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial,
+            .discourse, .discuz, .unknown:
+            false
+        }
+    }
 }
 
 /// One board of a forum the reader subscribed to.
@@ -153,7 +192,8 @@ public struct Source: Identifiable, Hashable, Sendable {
 public enum Category: Hashable, Sendable {
     /// A Mastodon source's public timeline.
     case `public`
-    /// A Mastodon source's trending statuses.
+    /// A Mastodon source's trending statuses — and a Discuz! forum's ranking lists, its threads
+    /// and blogs ranked for the week (`DiscuzRanklist`).
     case trends
     /// A signed-in Mastodon account's home timeline.
     case home
@@ -163,18 +203,77 @@ public enum Category: Hashable, Sendable {
     case board(id: String)
 }
 
-public enum Audience: String, Sendable, Hashable {
+public enum Audience: String, Sendable, Hashable, CaseIterable {
     case everyone
     case unlisted
     case followers
     case mentioned
+
+    /// What a Mastodon source calls this on the wire.
+    public var mastodon: String {
+        switch self {
+        case .everyone: "public"
+        case .unlisted: "unlisted"
+        case .followers: "private"
+        case .mentioned: "direct"
+        }
+    }
+
+    public init?(mastodon raw: String) {
+        switch raw {
+        case "public": self = .everyone
+        case "unlisted": self = .unlisted
+        case "private": self = .followers
+        case "direct": self = .mentioned
+        default: return nil
+        }
+    }
+
+    /// How far a post travels, as a rank: the people who are mentioned are the fewest, everyone
+    /// is the most. Unlisted sits above followers because anybody may read it who looks.
+    ///
+    /// **No `default:`**, so a fifth audience has to say where it stands.
+    public var reach: Int {
+        switch self {
+        case .mentioned: 0
+        case .followers: 1
+        case .unlisted: 2
+        case .everyone: 3
+        }
+    }
+
+    /// Whether this goes further than `other`.
+    public func isWider(than other: Audience) -> Bool { reach > other.reach }
+
+    /// Where an answer's reach starts (#108): **never wider than the post it answers.**
+    ///
+    /// A followers-only post answered in public would carry a private conversation to everybody
+    /// on the first press, and the reader would learn it from the replies. So the answer starts
+    /// where the post is, and widening it is a choice the reader makes where they can see it.
+    ///
+    /// **A post whose reach this device was never told starts at the narrowest**, because that is
+    /// the only start that cannot be wider than whatever the truth is.
+    public static func answering(_ answered: Audience?) -> Audience {
+        answered ?? .mentioned
+    }
 }
 
 public struct Reply: Hashable, Sendable {
     public let handle: String?
+    /// The id **that post's own server** gave the post this one answers, where it named one.
+    ///
+    /// The same spelling as `Note.statusID` and for the same reason: a thread is nested by
+    /// matching a post's parent against the parents already placed, and a URI cannot do that —
+    /// `in_reply_to_id` is a status id and the two are different strings for one post.
+    ///
+    /// **Nothing where the source has no such idea.** A forum reply is not a `Note` at all and a
+    /// microblog that does not send one leaves this nil, which reads as "answered something this
+    /// device cannot name" — the same thing `handle: nil` says about who.
+    public let inReplyToId: String?
 
-    public init(handle: String? = nil) {
+    public init(handle: String? = nil, inReplyToId: String? = nil) {
         self.handle = handle
+        self.inReplyToId = inReplyToId
     }
 }
 
@@ -311,6 +410,25 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// leaves no booster here and matches on its author alone. Nothing fills it in afterwards,
     /// and a note stored before this existed has none.
     public let boosterHandle: String?
+    /// Whether the reader this copy was fetched as has boosted it, **as the source said** — not
+    /// as this device remembers pressing anything (#106).
+    ///
+    /// **Nothing is not `false`**, `sensitive`'s rule and for its reason. A public timeline read
+    /// signed out carries no such field at all, and reading that silence as a no would draw every
+    /// post in it as one the reader has not boosted — which is a claim nobody made. Nothing means
+    /// the source never said, so the mark is not offered; `false` means it said no.
+    ///
+    /// It is a fact about this copy through this source, which is what makes it survive a
+    /// relaunch honestly: the row is stored with what the server last said, and every later fetch
+    /// of the same post overwrites it with what the server says then.
+    public let boosted: Bool?
+    /// Whether the reader this copy was fetched as has favourited it, as the source said (#107).
+    ///
+    /// `boosted`'s shape, for `boosted`'s reasons: nothing is a source that never said, which is
+    /// every unsigned read, and it is the server's answer that is kept rather than a press. A
+    /// favourite is a note to the author and to oneself, and a list of them this device kept on
+    /// its own would be a list no other app agrees with.
+    public let favourited: Bool?
     public let audience: Audience?
     public let avatarURL: URL?
     /// What came attached, in the order the server listed it. Empty is a post that brought
@@ -332,6 +450,16 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// what reading the post again (#29) asks for. Nothing on a row stored before 0.2.0 learned
     /// it, and on every forum post.
     public let statusID: String?
+    /// A forum thread's opening post as this device last read it — its words, what it quoted,
+    /// and its author's picture (#154). Nothing on every other post, and on a forum row nobody
+    /// has reached yet.
+    ///
+    /// **Kept with the row, and only what was read.** A thread table carries no part of the
+    /// opening post, so this is filled in by the one read D30 already makes when a row is reached,
+    /// and never by reading ahead. A post the forum withheld is not an opening to keep, and never
+    /// arrives here (`ForumOpening.init?(_:)`). It goes when the row goes — a Remove, or the
+    /// reader's keep-for window — and stays when a Clear keeps the row.
+    public let opening: ForumOpening?
 
     public init(
         id: String,
@@ -346,6 +474,8 @@ public struct Note: Identifiable, Hashable, Sendable {
         reply: Reply? = nil,
         boostedBy: String? = nil,
         boosterHandle: String? = nil,
+        boosted: Bool? = nil,
+        favourited: Bool? = nil,
         audience: Audience? = nil,
         avatarURL: URL? = nil,
         attachments: [Attachment] = [],
@@ -354,7 +484,8 @@ public struct Note: Identifiable, Hashable, Sendable {
         emojis: [CustomEmoji] = [],
         url: URL? = nil,
         counts: Counts = Counts(),
-        statusID: String? = nil
+        statusID: String? = nil,
+        opening: ForumOpening? = nil
     ) {
         self.id = id
         self.source = source
@@ -368,6 +499,8 @@ public struct Note: Identifiable, Hashable, Sendable {
         self.reply = reply
         self.boostedBy = boostedBy
         self.boosterHandle = boosterHandle
+        self.boosted = boosted
+        self.favourited = favourited
         self.audience = audience
         self.avatarURL = avatarURL
         self.attachments = attachments
@@ -377,21 +510,75 @@ public struct Note: Identifiable, Hashable, Sendable {
         self.url = url
         self.counts = counts
         self.statusID = statusID
+        self.opening = opening
     }
 
     /// This copy, read again, laid over the one held for the same row (#29): what the server says
     /// now — text, cover, attachments, counts — with the categories the held copy arrived through
     /// kept (and grown), its booster kept, and its board where this read names none.
+    ///
+    /// **`boosted` and `favourited` fall back to what was held, rather than being overwritten with
+    /// nothing.** A
+    /// re-read made signed out — the public timeline, a thread asked of a host with no token —
+    /// carries no such field, and letting that silence replace a yes the same server gave an hour
+    /// ago would draw the post as unboosted because nobody asked, which is the one thing #106
+    /// says the mark must never do. A read made as the reader always says something, so it always
+    /// wins.
     func refreshed(over held: Note) -> Note {
         Note(
             id: id, source: source, author: author, handle: handle, body: body, title: title,
             board: board ?? held.board, postedAt: postedAt,
             categories: held.categories.union(categories), reply: reply,
             boostedBy: held.boostedBy, boosterHandle: held.boosterHandle,
+            boosted: boosted ?? held.boosted,
+            favourited: favourited ?? held.favourited,
             audience: audience, avatarURL: avatarURL, attachments: attachments,
             sensitive: sensitive, spoiler: spoiler, emojis: emojis, url: url, counts: counts,
-            statusID: statusID ?? held.statusID
+            statusID: statusID ?? held.statusID,
+            // A read of the row that says nothing of its opening post — a board listing, which
+            // never does — leaves the one this device read where it is (#154).
+            opening: opening ?? held.opening
         )
+    }
+
+    /// This note with its opening post as just read. Everything else is as it was.
+    public func with(opening: ForumOpening) -> Note {
+        Note(
+            id: id, source: source, author: author, handle: handle, body: body, title: title,
+            board: board, postedAt: postedAt, categories: categories, reply: reply,
+            boostedBy: boostedBy, boosterHandle: boosterHandle, boosted: boosted,
+            favourited: favourited, audience: audience, avatarURL: avatarURL,
+            attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis,
+            url: url, counts: counts, statusID: statusID, opening: opening
+        )
+    }
+}
+
+/// A forum thread's opening post, as it is kept with its row (#154).
+///
+/// **What a row draws of it, and nothing else**: the words, what they quoted, and the author's
+/// picture the same page carried. Not the floor, the post number or when it was posted — the row
+/// already has its author and its date from the thread table, and a second copy of either would
+/// be a second answer to a question the row has already answered.
+public struct ForumOpening: Hashable, Sendable {
+    /// The author's own words. Empty where the post has none — a picture, a poll — which is an
+    /// answer, and is kept as one so the row is not asked again for words that do not exist.
+    public let words: String
+    public let quoted: [DiscuzQuotation]
+    public let avatarURL: URL?
+
+    public init(words: String, quoted: [DiscuzQuotation] = [], avatarURL: URL? = nil) {
+        self.words = words
+        self.quoted = quoted
+        self.avatarURL = avatarURL
+    }
+
+    /// The opening post worth keeping, or nothing where it is not: **a post the forum withheld
+    /// is the forum's notice, not the author's words**, and keeping it would draw a signed-in
+    /// reader's row as locked for as long as the row is kept.
+    public init?(_ post: DiscuzPost) {
+        guard !post.isWithheld else { return nil }
+        self.init(words: post.body, quoted: post.quoted, avatarURL: post.avatarURL)
     }
 }
 
@@ -417,6 +604,16 @@ public struct NoteKey: Hashable, Sendable {
     /// The same key as one string, for a surface whose identity has to be a `String`. Joined on
     /// the record separator, which neither a hostname nor any id a server sends can contain.
     public var rowID: String { "\(host)\u{1e}\(id)" }
+
+    /// The key a row id was built from, or nothing where the string is no row id.
+    ///
+    /// Split at the first separator: a host cannot contain one, so that is where the host ends,
+    /// and two keys are equal exactly where their row ids are. So a caller holding a row id can
+    /// compare keys rather than build a row id for every note it walks past.
+    public init?(rowID: String) {
+        guard let cut = rowID.firstIndex(of: "\u{1e}") else { return nil }
+        self.init(host: String(rowID[..<cut]), id: String(rowID[rowID.index(after: cut)...]))
+    }
 }
 
 extension Note {

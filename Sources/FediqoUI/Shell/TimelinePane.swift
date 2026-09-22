@@ -2,11 +2,39 @@ import AVKit
 import FediqoCore
 import SwiftUI
 
+/// The two marks in the timeline's header, and whether either has anything to do (#33).
+///
+/// **Handed down rather than worked out here.** Whether the search may open and whether there is
+/// anything to reload are the two functions `FediqoRootView` asks before it lets `/` and `r`
+/// do anything, and a pane that decided it for itself would be the same rule written twice —
+/// which is how a mark and the key it stands for come to disagree. This carries the answers and
+/// the presses together, so a call site cannot pass one without the other.
+struct TimelineWays {
+    /// Whether the search can be opened from where the reader is. False draws no mark at all:
+    /// decision 4's rule is a control that is absent rather than dead.
+    var canSearch: Bool
+    var onSearch: () -> Void
+    /// Whether there is anything for `r` to ask for. A reload already running is still `true` —
+    /// the mark keeps its place rather than blinking out from under the finger that pressed it,
+    /// and stays the mark: a plate there would be a second loading animation beside the toast.
+    var canReload: Bool
+    var onReload: () -> Void
+}
+
 /// The timeline place: named queries, a brief rule, then the stream or a thread.
 struct TimelinePane: View {
     @Bindable var session: ShellSession
     @Binding var selectedID: String?
-    @Binding var openedID: String?
+    /// The step of the walk the reader is standing on, where they have walked anywhere (#122):
+    /// a conversation, or somebody's page. Held by the app, because leaving it is `Escape` and
+    /// `q` — which are read where the keys are.
+    ///
+    /// **One value where there were two bindings.** A person and a thread were held here as two
+    /// optionals and drawn by an `if`/`else if` whose order was the layer order restated; the
+    /// walk says which is in front, and this pane draws whatever that is.
+    var standing: ShellStep?
+    /// A press on a face or a name, answered by the root under the walk's own rule.
+    var onOpenPerson: (DummyPerson) -> Void
     /// Where every deck in this pane is turned to, and which rows the reader uncovered. Held by
     /// the app rather than here, because `m` and `s` are pressed where the keys are read.
     @Binding var decks: ShellDecks
@@ -15,8 +43,24 @@ struct TimelinePane: View {
     let playback: ShellPlayback
     /// A press on a card's own play mark, which the root answers under the same rule as `a`.
     var onPlayRow: (DummyItem) -> Void
+    /// A press on a card, and a press on the counter in its corner: `v` and `m`, answered by the
+    /// root under the same rules the keys are (#33).
+    var onViewRow: (DummyItem) -> Void
+    var onTurnRow: (DummyItem) -> Void
+    /// A second press on the row the lamp is already on: `Return`. See `DummyCommand.tapped`.
+    ///
+    /// **The press says which post it means.** It used to say so by writing the lamp and calling
+    /// this, which made the open depend on a `@State` write being readable by the very next
+    /// statement — and where it is not, the root opens whatever was lit *before*, which is the
+    /// wrong post on the one path built for a reader who cannot press twice. The id travels with
+    /// the press instead, and the root lights it and opens it together.
+    var onOpenThread: (String) -> Void
     var jumpToTop: Int
-    var onPopThread: () -> Void
+    /// A press to leave whatever is in front: one step back out of the walk. Both panes press
+    /// it, because both are steps of the same walk.
+    var onBack: () -> Void
+    /// The search and the reload, as a finger reaches them.
+    var ways: TimelineWays
     /// While open, its results are the list and the timeline waits under it (#32).
     var search: ShellSearch?
     @State private var marks: [String: DummyMarks] = [:]
@@ -25,16 +69,33 @@ struct TimelinePane: View {
     @State private var settledHosts: Set<String> = []
     @State private var toast: String?
     @State private var toastTick = 0
+    /// What a finger gets on the header's marks, whatever the glyph inside measures. The row's
+    /// own marks are held open the same way — see `DummyItemRow.touch`.
+    @ShellMetric(relativeTo: .caption) private var touch: CGFloat = 32
     @Environment(\.colorScheme) private var colorScheme
     @Environment(DummyPrefs.self) private var prefs
 
     private var timeline: TimelineQuery { session.currentTimeline }
 
+    /// A search is open over this timeline. `search` is never nil in the product — the root holds
+    /// one for the life of the window — so whether one is open is this, and not `search == nil`.
+    private var searching: Bool { search?.isOpen == true }
+
     private var items: [DummyItem] {
-        search?.items(
-            from: session.notes, revision: session.notesRevision, sources: session.sources, latest: prefs.latestDate
-        )
+        search.flatMap { session.searched($0, latest: prefs.latestDate) }
             ?? session.timelineItems(latest: prefs.latestDate)
+    }
+
+    /// Running first; a live note replaces a leftover line; otherwise the reload
+    /// line. Loading and a miss do not auto-dismiss: a 2s flash is a fact the
+    /// reader has to act on, gone.
+    private var banner: TimelineToast? {
+        TimelineToast.shown(
+            running: session.reload.running,
+            line: session.reload.line,
+            stopped: session.reload.stopped,
+            note: toast
+        )
     }
 
     var body: some View {
@@ -48,51 +109,129 @@ struct TimelinePane: View {
                 .fill(ShellChrome.hairline(colorScheme))
                 .frame(height: ShellSpace.hair)
 
-            if let opened = openedItem {
-                DummyThreadPane(
-                    root: opened,
+            // **Whatever step the reader is standing on** (#122). A face pressed inside a
+            // conversation opens over it, and a row pressed on that page opens over the page;
+            // which is in front is `ShellWalk` and is not decided again here. **No `default:`.**
+            switch standing {
+            case .person(let person):
+                PersonPane(
+                    person: person,
+                    items: session.heldPosts(of: person),
                     catalogues: session.emoji,
-                    catalogueSettled: settledHosts.contains(opened.source.host),
+                    catalogueSettled: settledHosts.contains(person.host),
                     posts: session.posts,
                     selectedID: $selectedID,
                     marks: markBinding,
+                    // A row here opens the conversation it belongs to (#122), so the answer mark
+                    // does what it does on the timeline: it opens that conversation first.
+                    acting: acting,
                     decks: $decks,
                     playback: playback,
                     onPlayRow: onPlayRow,
+                    onViewRow: onViewRow,
+                    onTurnRow: onTurnRow,
+                    onOpenThread: onOpenThread,
                     jumpToTop: jumpToTop,
                     onToast: showToast,
-                    onBack: onPopThread
+                    onBack: onBack
                 )
-                // One pane per thread, so going back from a nested one draws its parent afresh.
-                .id(opened.id)
-            } else if items.isEmpty {
-                empty
-            } else {
-                list
+                // One pane per person, so opening a second face from inside one draws afresh.
+                .id(person.id)
+            case .thread(let id):
+                // A root this device no longer holds draws the stream instead, which is the same
+                // answer the pane gave when it looked the root up among the timeline's own rows.
+                if let opened = session.held(id) {
+                    DummyThreadPane(
+                        root: opened,
+                        catalogues: session.emoji,
+                        catalogueSettled: settledHosts.contains(opened.source.host),
+                        posts: session.posts,
+                        conversations: session.conversations,
+                        onAskAround: { Task { await session.conversations.again(opened, in: session) } },
+                        selectedID: $selectedID,
+                        marks: markBinding,
+                        // Inside the conversation the answer mark opens the answer (#108).
+                        acting: { acting($0, inside: opened) },
+                        decks: $decks,
+                        playback: playback,
+                        onPlayRow: onPlayRow,
+                        onViewRow: onViewRow,
+                        onTurnRow: onTurnRow,
+                        onOpenThread: onOpenThread,
+                        onOpenPerson: onOpenPerson,
+                        jumpToTop: jumpToTop,
+                        onToast: showToast,
+                        onBack: onBack
+                    )
+                    // One pane per thread, so going back from a nested one draws its parent
+                    // afresh.
+                    .id(opened.id)
+                    // **The ask is the pane opening** — #90. A microblog thread is one request
+                    // about the post the reader has just pressed Return on, so nothing asks them
+                    // a second time for a thing they have already said they want. It is the
+                    // pane's own `.task`, so closing the thread cancels a read still on the wire,
+                    // and asked once per post per run: reopening draws what is already held.
+                    .task(id: opened.id) { await session.conversations.open(opened, in: session) }
+                } else {
+                    underneath
+                }
+            // A page read out of a post is never what this pane is handed: it is drawn over the
+            // step beneath it (`ShellWalk.beneath`, `LinkInPlace`), which is what stands here.
+            case .link, nil:
+                underneath
             }
         }
         .overlay(alignment: .bottom) {
-            if let toast {
-                Text(toast)
-                    .font(ShellType.meta)
-                    .padding(.horizontal, ShellSpace.step)
-                    .padding(.vertical, ShellSpace.snug)
-                    .background(ShellChrome.well(colorScheme), in: Capsule())
-                    .foregroundStyle(ShellChrome.ink(colorScheme))
+            if let banner {
+                TimelineToastBanner(toast: banner, work: session.work, reading: session.reload.reading)
                     .padding(.bottom, ShellSpace.pad)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: toast)
+        .animation(.easeInOut(duration: 0.2), value: banner)
         .task(id: catalogueHosts) { await waitForCatalogues() }
         .onChange(of: session.toast) { _, toast in
             if let toast { showToast(toast.text) }
         }
-        .onChange(of: session.timelineID) { _, _ in
-            if let selectedID, !items.contains(where: { $0.id == selectedID }) {
-                self.selectedID = nil
+        // Each timeline keeps the post the reader was on (#100). The one left writes down where
+        // they were standing; the one arrived at lights what it wrote down last time, among the
+        // posts it holds now — nothing at all for a timeline this run has not opened, which is
+        // also the answer the old line gave on every switch.
+        //
+        // **Not while the search is open** (#32). The lamp is then the search's own, and the
+        // post the timeline underneath was on is parked inside `ShellSearch` waiting to be
+        // handed back. Writing a result's id into the timeline's place would lose that post and
+        // put a result in its stead.
+        //
+        // **Open, and not merely there** (#144). The root hands this pane its one `ShellSearch`
+        // whether or not a search is open, so a test for `nil` was false on every switch the
+        // product ever made: no timeline's place was written down or given back, and the only
+        // line that ran was the one that puts the lamp out where the arrived-at list lacks it.
+        // A post that happened to be in both lists stayed lit, which read as a place kept.
+        //
+        // **With the search open, the parked post is what moves** (#145). The search now asks
+        // the timeline in front, so switching searches the new one with the pattern kept, and
+        // the lamp stays on a result only where the new results still hold it. The post parked
+        // for the old timeline is written down as its place, and the new timeline's own is
+        // parked instead — among the posts that timeline shows, not among the results — so
+        // closing the search gives back the post of the timeline the reader is in.
+        .onChange(of: session.timelineID) { left, arrived in
+            // Another list, so the row the last one had at the top means nothing here.
+            session.scrolledTop = nil
+            if !searching {
+                selectedID = session.timelinePlaces.switched(
+                    from: left, to: arrived, standingOn: selectedID, among: items.map(\.id)
+                )
+            } else {
+                let shown = session.timelineItems(latest: prefs.latestDate).map(\.id)
+                search?.switched { parked in
+                    session.timelinePlaces.switched(from: left, to: arrived, standingOn: parked, among: shown)
+                }
+                if let selectedID, !items.contains(where: { $0.id == selectedID }) {
+                    self.selectedID = nil
+                }
             }
-            openedID = nil
+            // The walk ends on the same change, where it is held: `FediqoRootView` clears it.
         }
     }
 
@@ -139,7 +278,7 @@ struct TimelinePane: View {
         // the child rather than passed in, because it is a host and a transport and nothing
         // else — the transport is what has to come from out here.
         let store = session.emoji
-        let http = session.http
+        let http = WatchedHTTP(session.http, for: .emoji, in: session.work)
         await withTaskGroup(of: String.self) { group in
             for host in catalogueHosts {
                 group.addTask { await Self.catalogue(host, in: store, over: http); return host }
@@ -166,50 +305,125 @@ struct TimelinePane: View {
         await store.settle(host: host)
     }
 
-    private var openedItem: DummyItem? {
-        guard let openedID else { return nil }
-        return items.first { $0.id == openedID }
+    /// Where a list drawn afresh puts the reader (#110).
+    enum Landing: Equatable, Sendable {
+        /// The lamp's row, in the middle — what coming back from a thread has always done.
+        case centred(String)
+        /// The row that was at the top when the list was last drawn, at the top again.
+        case top(String)
     }
 
-    private var list: some View {
-        ScrollViewReader { proxy in
+    /// **The lamp first, and the place scrolled to where there is no lamp.** A list is drawn
+    /// afresh by a thread closing and, since #110, by a window dragged across the width where
+    /// the arrangement changes — and a reader who scrolled without lighting anything was put
+    /// back at the top, which is the place scrolled to lost. A static function over the two
+    /// facts, so the order between them is a thing a test can ask.
+    static func landing(selected: String?, top: String?) -> Landing? {
+        if let id = DummyCommand.centredOnAppear(selected: selected) { return .centred(id) }
+        return top.map(Landing.top)
+    }
+
+    /// The list under the walk: what is held, or the notice that says there is nothing.
+    ///
+    /// Written out once, because two places fall back to it — nothing walked to, and a
+    /// conversation whose root this device no longer holds.
+    ///
+    /// **Rows win, and nothing else decides.** What is already here is read at once, including
+    /// while a reload runs; and a reload running, a failed source, a search and nobody joined are
+    /// all the notice where there are no rows — waiting rows would be a wait that never ended,
+    /// and a pane-sized failure would hide that this timeline has nothing to show. A wait and a
+    /// miss are the bottom toast, and the distinctions inside empty live on `EmptyNotice`.
+    @ViewBuilder
+    private var underneath: some View {
+        // Bound once: the list, each row's rule under it and the jump to the top all read the
+        // same rows, and each read of `items` used to ask the session for them again.
+        let items = items
+        if items.isEmpty {
+            empty
+        } else {
+            list(items)
+        }
+    }
+
+    private func list(_ items: [DummyItem]) -> some View {
+        let last = items.count - 1
+        return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                        let isLast = index == last
                         DummyItemRow(
                             item: item,
                             catalogues: session.emoji,
                             catalogueSettled: settledHosts.contains(item.source.host),
                             posts: session.posts,
                             marks: markBinding(item),
+                            acting: acting(item),
                             selected: item.id == selectedID,
                             top: decks.top(of: item.id, of: item.attachments.count),
                             lifted: decks.isLifted(item.id),
-                            player: player(of: item),
-                            onSelect: { selectedID = item.id },
+                            player: playback.rowPlayer(for: item, decks: decks),
+                            // A press lights the row; a second press on the row it is already on
+                            // opens the conversation, which is what `Return` does (#33). The rule
+                            // is `DummyCommand.tapped` and is read by both lists.
+                            onSelect: {
+                                switch DummyCommand.tapped(item.id, selected: selectedID) {
+                                case .select: selectedID = item.id
+                                case .open: onOpenThread(item.id)
+                                }
+                            },
+                            // Lit and opened in one, for the reader who activates a row once —
+                            // done by the root, in one turn, on the id this press carries.
+                            onOpen: { onOpenThread(item.id) },
+                            // The face and the name, as a press (#99).
+                            onOpenPerson: onOpenPerson,
                             onToggleCover: { _ = decks.toggleCover(item.id) },
                             onPlay: { onPlayRow(item) },
+                            onView: { onViewRow(item) },
+                            onTurn: { onTurnRow(item) },
                             onEnded: { playback.stop() },
                             onToast: showToast
                         )
                         .id(item.id)
-                        if index < items.count - 1 {
+                        if !isLast {
                             Rectangle()
                                 .fill(ShellChrome.hairline(colorScheme))
                                 .frame(height: ShellSpace.hair)
                         }
                     }
                 }
+                .scrollTargetLayout()
             }
             .scrollIndicators(.never)
+            // The end of the list stops short of whatever floats over the page (#112).
+            .clearsFloatingCorner()
+            .modifier(KeepsTopRow(session: session))
             .onAppear {
-                guard let id = DummyCommand.centredOnAppear(selected: selectedID) else { return }
                 // A tick later: a lazy stack just built has not laid out the row to scroll to.
-                Task { @MainActor in proxy.scrollTo(id, anchor: .center) }
+                switch Self.landing(selected: selectedID, top: session.scrolledTop) {
+                case .centred(let id): Task { @MainActor in proxy.scrollTo(id, anchor: .center) }
+                case .top(let id): Task { @MainActor in proxy.scrollTo(id, anchor: .top) }
+                case nil: break
+                }
             }
             .onChange(of: selectedID) { _, id in
                 guard let id else { return }
                 withAnimation(.easeInOut(duration: 0.18)) {
+                    proxy.scrollTo(id, anchor: .center)
+                }
+            }
+            // Coming back to a timeline, the post it kept is centred again (#100) — "still
+            // focused" and "still in view" are two halves of one sentence, and lighting a row
+            // the reader would have to scroll to find is only the first half.
+            //
+            // **A tick later, and read through the binding rather than captured.** The stack has
+            // just been rebuilt for this query and has not laid out the row yet, which is the
+            // same wait `onAppear` takes; and by the time the tick comes round the pane's own
+            // handler has lit the row, so the id asked for is the one that was restored rather
+            // than the one this pass was built with.
+            .onChange(of: session.timelineID) { _, _ in
+                Task { @MainActor in
+                    guard let id = selectedID else { return }
                     proxy.scrollTo(id, anchor: .center)
                 }
             }
@@ -227,14 +441,35 @@ struct TimelinePane: View {
         }
     }
 
-    /// The player for this row's slot, where this row's card is the thing that is playing. There
-    /// is at most one in the app, so at most one row ever gets it back.
-    private func player(of item: DummyItem) -> AVPlayer? {
-        playback.player(
-            for: ShellPlaying.playable(decks.showing(item.attachments, of: item.id)),
-            of: item.id,
-            on: .row
-        )
+    /// One row's share of #54's acts (#106).
+    ///
+    /// **Built here and handed down**, so the timeline, a conversation and somebody's page all
+    /// draw one answer: the session holds what the sign-in bought and what the source has turned
+    /// away since, and three panes working it out for themselves would be three derivations free
+    /// to disagree about one post.
+    private func acting(_ item: DummyItem) -> ItemActing {
+        acting(item, inside: nil)
+    }
+
+    /// The same, for a row drawn inside the conversation around `root` — where the answer mark
+    /// opens the answer rather than the conversation (#108).
+    private func acting(_ item: DummyItem, inside root: DummyItem?) -> ItemActing {
+        var acting = session.acting(on: item)
+        acting.perform = { act in
+            switch act {
+            case .boost, .favourite:
+                Task { await session.toggle(act, on: item) }
+            case .answer:
+                if let root {
+                    session.openAnswer(to: item, in: root)
+                } else {
+                    onOpenThread(item.id)
+                }
+            case .withdraw:
+                session.askToWithdraw(item)
+            }
+        }
+        return acting
     }
 
     private func markBinding(_ item: DummyItem) -> Binding<DummyMarks> {
@@ -283,26 +518,21 @@ struct TimelinePane: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 if session.timelineID != nil {
                     Text(session.rule(of: timeline))
-                        .font(ShellType.meta)
+                        .shellFont(.meta)
                         .foregroundStyle(ShellChrome.inkDim(colorScheme))
                         .lineLimit(1)
                 }
+                searchMark
+                reloadMark
             }
             if session.timelinesUnreadable {
                 Text(L10n.t("timeline.unreadable"))
-                    .font(ShellType.meta)
+                    .shellFont(.meta)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let latest = prefs.latestDate {
                 latestMark(latest)
-            }
-            if let line = session.reload.line {
-                Text(line)
-                    .font(ShellType.meta)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                    .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .accessibilityElement(children: .contain)
@@ -313,7 +543,7 @@ struct TimelinePane: View {
     private func latestMark(_ latest: LatestDate) -> some View {
         let day = latest.start().formatted(.dateTime.year().month().day().locale(L10n.locale()))
         return Label(String(format: L10n.t("timeline.latest"), day), systemImage: "calendar")
-            .font(ShellType.meta)
+            .shellFont(.meta)
             .foregroundStyle(ShellChrome.inkDim(colorScheme))
             .lineLimit(1)
             .accessibilityLabel(String(format: L10n.t("timeline.latest.label"), day))
@@ -336,7 +566,7 @@ struct TimelinePane: View {
                         .accessibilityHidden(true)
                 }
             }
-            .font(ShellType.meta.weight(selected ? .semibold : .regular))
+            .shellFont(.meta, weight: selected ? .semibold : .regular)
             .foregroundStyle(selected ? ShellChrome.selectInk(colorScheme) : ShellChrome.inkDim(colorScheme))
             .padding(.horizontal, ShellSpace.snug)
             .padding(.vertical, ShellSpace.tight)
@@ -359,13 +589,59 @@ struct TimelinePane: View {
         }
     }
 
+    /// `/` and `r`, for the reader holding no keyboard (#33).
+    ///
+    /// **On the trailing edge of the header, where the rule already is.** They are about the
+    /// whole timeline rather than about any one tab, and the tabs themselves scroll — a mark
+    /// among them would scroll off with them. `[+]` is pinned at the other end for that reason
+    /// and these are its pair.
+    ///
+    /// **Absent rather than dead**, which is decision 4 and is why each of them is a `Bool` the
+    /// root worked out with the same function the key asks: under an open thread there is no
+    /// search to open, with no sources there is nothing to reload, and a mark that is drawn and
+    /// refuses is a question about this app rather than an answer.
+    ///
+    /// **Both say what the keys list says.** The sentence on each is `shortcut.search` and
+    /// `shortcut.reload` — the same string the written-down key is explained with, not a second
+    /// wording of it, so the press and the key cannot come to describe themselves differently.
+    @ViewBuilder
+    private var searchMark: some View {
+        if ways.canSearch {
+            headerMark("magnifyingglass", says: "shortcut.search", action: ways.onSearch)
+        }
+    }
+
+    /// `r`'s mark. Stays the mark while a reload runs: a plate here would be a second
+    /// loading animation, and blinking the control out from under the finger that pressed
+    /// it is the thing decision 4 refuses. A press then still does nothing (`r` already).
+    @ViewBuilder
+    private var reloadMark: some View {
+        if ways.canReload {
+            headerMark("arrow.clockwise", says: "shortcut.reload", action: ways.onReload)
+        }
+    }
+
+    /// One glyph, quiet, with a finger's worth of room round it whatever size the glyph is drawn.
+    private func headerMark(_ symbol: String, says key: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .shellFont(.meta, weight: .medium)
+                .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                .frame(minWidth: touch, minHeight: touch)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(L10n.t(key))
+        .accessibilityLabel(L10n.t(key))
+    }
+
     /// `[+]`: a new timeline. A press, not a selected tab.
     private var addPill: some View {
         Button {
             session.newTimeline()
         } label: {
             Image(systemName: "plus")
-                .font(ShellType.meta.weight(.semibold))
+                .shellFont(.meta, weight: .semibold)
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .padding(.horizontal, ShellSpace.snug)
                 .padding(.vertical, ShellSpace.tight)
@@ -378,30 +654,48 @@ struct TimelinePane: View {
         .accessibilityLabel(L10n.t("timeline.new.title"))
     }
 
-    @ViewBuilder
     private var empty: some View {
-        if let search, search.isSearching, !search.isIndexed {
-            ShellNotice(
-                symbol: "magnifyingglass",
-                title: L10n.t("search.indexing.title"),
-                detail: L10n.t("search.indexing.detail")
-            )
-        } else if search?.isSearching == true {
-            ShellNotice(
-                symbol: "magnifyingglass",
-                title: L10n.t("search.empty.title"),
-                detail: L10n.t("search.empty.detail")
-            )
-        } else {
-            timelineEmpty
-        }
+        ShellNotice(EmptyNotice.timeline(
+            searching: search?.isSearching == true,
+            indexed: search?.isIndexed ?? false,
+            query: timeline,
+            notes: session.notes,
+            written: session.written,
+            sources: session.sources,
+            // The folded text only where a rule reads it, as `timelineItems` asks: All and Trends
+            // read none, and an empty one of them would otherwise fold every note held to say so.
+            index: session.definition(of: timeline).readsText ? session.textIndex : TextIndex([]),
+            latest: prefs.latestDate,
+            // **"Asked, and there is genuinely nothing"** — which a run that skipped a source
+            // cannot claim. A host that answered as something this app does not read leaves
+            // `failed` empty (it did not fail to answer), so without the third clause an empty
+            // timeline would read as settled under a toast saying one of its sources was never
+            // spoken to (#86).
+            asked: session.reload.landed > 0
+                && session.reload.failed.isEmpty
+                && session.reload.unspoken == nil
+                && !session.reload.stopped
+        ))
     }
+}
 
-    private var timelineEmpty: some View {
-        ShellNotice(
-            symbol: "list.bullet.rectangle",
-            title: L10n.t("\(timeline.emptyKey).title"),
-            detail: L10n.t("\(timeline.emptyKey).detail")
-        )
+/// Which row is at the top of the stream, written down as the reader scrolls — into the session,
+/// which outlives the pane, and past observation, so a scroll redraws nothing (#110).
+///
+/// **Watched, never steered.** A position binding also drives the scroll view it is bound to, and
+/// on a list rebuilt by a swap of arrangement it was a second hand on the scroll beside the lamp's
+/// own `scrollTo` — seen once on a running Mac, with the lamp fourteen rows down and off the
+/// screen after the swap. This only reports, so what moves the list on appearing is
+/// `TimelinePane.landing` and nothing else.
+///
+/// A modifier of its own rather than a closure in the list's chain, which is long enough already
+/// for the compiler the CI builds with.
+struct KeepsTopRow: ViewModifier {
+    let session: ShellSession
+
+    func body(content: Content) -> some View {
+        content.onScrollTargetVisibilityChange(idType: String.self) { visible in
+            session.scrolledTop = visible.first
+        }
     }
 }

@@ -1,0 +1,211 @@
+# Local servers of every protocol Fediqo can join today. Brought up by
+# `make servers`, thrown away by `make servers-down`. Dummy passwords only.
+#
+# Images are pinned by digest where the pull on this machine already had one.
+# Tags stay beside the digest so a reader can see which release it is.
+
+name: fediqo-servers
+
+x-mastodon-env: &mastodon-env
+  LOCAL_DOMAIN: mastodon.localhost
+  RAILS_ENV: production
+  NODE_ENV: production
+  RAILS_SERVE_STATIC_FILES: "true"
+  RAILS_LOG_LEVEL: warn
+  WEB_CONCURRENCY: "1"
+  MAX_THREADS: "5"
+  DB_HOST: mastodon-db
+  DB_PORT: "5432"
+  DB_USER: mastodon
+  DB_NAME: mastodon
+  DB_PASS: local-only
+  REDIS_HOST: mastodon-redis
+  REDIS_PORT: "6379"
+  ES_ENABLED: "false"
+  TRUSTED_PROXY_IP: 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.1,::1
+  SMTP_SERVER: 127.0.0.1
+  SMTP_PORT: "25"
+  SMTP_AUTH_METHOD: none
+  SMTP_OPENSSL_VERIFY_MODE: none
+  SMTP_ENABLE_STARTTLS: "false"
+  SMTP_FROM_ADDRESS: notifications@mastodon.localhost
+  SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+  OTP_SECRET: ${OTP_SECRET}
+  VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY}
+  VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY}
+  ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY: ${ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY}
+  ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY: ${ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY}
+  ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT: ${ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT}
+
+services:
+  caddy:
+    image: caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+    ports:
+      - "127.0.0.1:443:443"
+      - "[::1]:443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on:
+      - mastodon-web
+      - discourse
+      - discuz
+    restart: unless-stopped
+
+  mastodon-db:
+    image: postgres:16-alpine@sha256:44c4ee9810eff91f7eab4d822642e01115b1a9eccce4bcbdde7604752d68eac6
+    environment:
+      POSTGRES_USER: mastodon
+      POSTGRES_PASSWORD: local-only
+      POSTGRES_DB: mastodon
+    volumes:
+      - mastodon-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mastodon -d mastodon"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  mastodon-redis:
+    image: redis:7-alpine@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  mastodon-web:
+    image: ghcr.io/mastodon/mastodon:v4.6.6@sha256:3579200b208d4ebbc1affd1218828f3b02dc19953d83d0217eb095dacb84dc00
+    environment:
+      <<: *mastodon-env
+    command: bundle exec puma -C config/puma.rb
+    depends_on:
+      mastodon-db:
+        condition: service_healthy
+      mastodon-redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -s --noproxy localhost localhost:3000/health | grep -q OK",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    restart: unless-stopped
+
+  discourse-db:
+    # Discourse 2026 structure.sql wants `vector`. Vanilla postgres will not boot it.
+    image: pgvector/pgvector:pg17@sha256:143f87bbb8cbec339013c275cbf158c55d807d6aec4a98ff56086f1e87c861d5
+    environment:
+      POSTGRES_USER: discourse
+      POSTGRES_PASSWORD: local-only
+      POSTGRES_DB: discourse
+    volumes:
+      - discourse-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U discourse -d discourse"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  discourse-redis:
+    image: redis:7-alpine@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  discourse:
+    image: pikapods/docker-discourse:latest@sha256:4e3bc1712abdfd759264995dc9c1461b6e807f521554af5f953fa6aaa889cbdf
+    environment:
+      DISCOURSE_HOSTNAME: discourse.localhost
+      DISCOURSE_FORCE_HTTPS: "true"
+      DISCOURSE_DB_HOST: discourse-db
+      DISCOURSE_DB_USERNAME: discourse
+      DISCOURSE_DB_PASSWORD: local-only
+      DISCOURSE_DB_NAME: discourse
+      DISCOURSE_REDIS_HOST: discourse-redis
+      DISCOURSE_DEVELOPER_EMAILS: admin@discourse.localhost
+      DISCOURSE_SECRET_KEY_BASE: ${DISCOURSE_SECRET_KEY_BASE}
+      CONTAINER_DISCOURSE_ADMIN_EMAIL: admin@discourse.localhost
+      CONTAINER_DISCOURSE_ADMIN_PASSWORD: local-only-pass1
+      CONTAINER_DISCOURSE_ADMIN_USERNAME: admin
+      CONTAINER_DISCOURSE_PITCHFORK_WORKERS: "1"
+      CONTAINER_DISCOURSE_SIDEKIQ_CONCURRENCY: "1"
+      CONTAINER_DISCOURSE_DB_MIGRATE: "TRUE"
+    volumes:
+      - discourse-data:/data
+    depends_on:
+      discourse-db:
+        condition: service_healthy
+      discourse-redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -fsS --noproxy localhost http://127.0.0.1:3000/srv/status || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 180s
+    restart: unless-stopped
+
+  discuz-db:
+    image: mariadb:11@sha256:79d59758afc91b89b120b0a8904d637f5a3b3e1c4900f29b740d6d46c72fef68
+    environment:
+      MARIADB_DATABASE: discuz
+      MARIADB_USER: discuz
+      MARIADB_PASSWORD: local-only
+      MARIADB_ROOT_PASSWORD: local-only
+    volumes:
+      - discuz-db:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  discuz:
+    image: izumiko/discuz:latest@sha256:5adeec76d66e55ca23f012543d18d022df5e9699456f19db95557d4b82b6c6e5
+    environment:
+      SERVER_NAME: ":80"
+      PUID: "1000"
+      PGID: "1000"
+      TZ: UTC
+    volumes:
+      - discuz-www:/app/public
+      # The image's entrypoint chowns these Caddy dirs; without them it exits 1.
+      - discuz-caddy-data:/data
+      - discuz-caddy-config:/config
+    depends_on:
+      discuz-db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        ["CMD", "curl", "-fsS", "--noproxy", "localhost", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+    restart: unless-stopped
+
+volumes:
+  caddy-data:
+  mastodon-db:
+  discourse-db:
+  discourse-data:
+  discuz-db:
+  discuz-www:
+  discuz-caddy-data:
+  discuz-caddy-config:

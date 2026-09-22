@@ -206,14 +206,14 @@ struct WrittenTimelineTests {
         #expect(session.toast?.text == L10n.t("timeline.edit.fixed"))
     }
 
-    @Test("e is the editor key and the keys list names it under Timeline")
+    @Test("e is the editor key and the keys list names it under Act")
     func editorKeyIsListed() throws {
         #expect(DummyCommand.from("e") == .editTimeline)
         #expect(DummyCommand.from("e", typing: true) == nil)
         #expect(DummyCommand.from("e", fieldFocused: true) == nil)
         let line = try #require(DummyShortcut.all.first { $0.commands == [.editTimeline] })
         #expect(line.keys == ["e"])
-        #expect(line.group == .timeline)
+        #expect(line.group == .act)
         #expect(line.detail == "Write or change this timeline")
         #expect(L10n.t("shortcut.edit", language: .taiwanese) == "寫或改這條時間軸")
     }
@@ -237,6 +237,7 @@ struct WrittenTimelineTests {
         #expect(after.written.map(\.name) == ["Second", "First"])
         #expect(after.queries == before.queries)
         #expect(after.written[1].rules.count == 10)
+        #expect(after.written.map(\.desc) == [nil, nil])
     }
 
     @Test("Every rule kind round-trips through what is kept, ids and effects included")
@@ -273,16 +274,45 @@ struct WrittenTimelineTests {
             .category(.trends, in: .every),
         ])
         #expect(read[0].rules[1].effect == .exclude)
+        #expect(read[0].desc == nil)
     }
 
-    @Test("What is written carries version 1 and nothing but the known fields")
+    @Test("What is written carries version 2 and nothing but the known fields")
     func savedIsVersioned() throws {
         let store = freshStore()
         store.save([TimelineDefinition(name: "V", rules: try everyKind())])
         let data = try #require(store.defaults.data(forKey: store.key))
         let top = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
-        #expect(top["version"] as? Int == 1)
+        #expect(top["version"] as? Int == 2)
         #expect(Set(top.keys) == ["version", "timelines"])
+        let rows = try #require(top["timelines"] as? [[String: Any]])
+        #expect(Set(rows[0].keys) == ["id", "name", "rules"])
+    }
+
+    @Test("A description round-trips; version 1 without one loads as none")
+    func descriptionPersists() throws {
+        let store = freshStore()
+        let timeline = TimelineDefinition(name: "Mine", rules: try everyKind(), desc: "Friends posting about Swift")
+        store.save([timeline])
+        #expect(store.load() == .timelines([timeline]))
+        let data = try #require(store.defaults.data(forKey: store.key))
+        let top = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(top["version"] as? Int == 2)
+        let rows = try #require(top["timelines"] as? [[String: Any]])
+        #expect(rows[0]["desc"] as? String == "Friends posting about Swift")
+
+        let v1 = #"""
+        {"version":1,"timelines":[{"id":"11111111-1111-1111-1111-111111111111","name":"Old","rules":[]}]}
+        """#
+        store.defaults.set(Data(v1.utf8), forKey: store.key)
+        guard case .timelines(let read) = store.load() else {
+            Issue.record("version 1 without desc did not read")
+            return
+        }
+        #expect(read[0].name == "Old")
+        #expect(read[0].desc == nil)
+        #expect(TimelineDefinition(name: "X", rules: [], desc: "   ").desc == nil)
+        #expect(TimelineDefinition(name: "X", rules: [], desc: " Hi ").desc == "Hi")
     }
 
     // MARK: Fail closed
@@ -294,10 +324,11 @@ struct WrittenTimelineTests {
             #"{"version":1,"timelines":[{"id":"11111111-1111-1111-1111-111111111111","name":"X","rules":[{"id":"00000000-0000-0000-0000-000000000001","effect":"include","kind":"category","category":{"kind":"channel","id":"1"}}]}]}"#,
             #"{"version":1,"timelines":[{"id":"11111111-1111-1111-1111-111111111111","name":"X","rules":[{"id":"00000000-0000-0000-0000-000000000001","effect":"include","kind":"category","category":{"kind":"board","id":"1"}}]}]}"#,
             #"{"timelines":[{"id":"11111111-1111-1111-1111-111111111111","name":"X","rules":[]}]}"#,
-            #"{"version":2,"timelines":[{"id":"11111111-1111-1111-1111-111111111111","name":"X","rules":[]}]}"#,
+            #"{"version":3,"timelines":[{"id":"11111111-1111-1111-1111-111111111111","name":"X","rules":[]}]}"#,
             #"{"version":0,"timelines":[{"id":"11111111-1111-1111-1111-111111111111","name":"X","rules":[]}]}"#,
             #"{"version":1,"timelines":[],"pinned":true}"#,
             #"{"version":1,"timelines":[{"id":"11111111-1111-1111-1111-111111111111","name":"X","rules":[],"colour":"red"}]}"#,
+            #"{"version":2,"timelines":[{"id":"11111111-1111-1111-1111-111111111111","name":"X","rules":[],"colour":"red"}]}"#,
             #"{"version":1,"timelines":[{"id":"11111111-1111-1111-1111-111111111111","name":"X","rules":[{"id":"00000000-0000-0000-0000-000000000001","effect":"include","kind":"keyword","value":"a","regex":true}]}]}"#,
             #"{"version":1,"timelines":[{"id":"11111111-1111-1111-1111-111111111111","name":"X","rules":[{"id":"00000000-0000-0000-0000-000000000001","effect":"include","kind":"category","category":{"kind":"trends","since":1}}]}]}"#,
             #"[{"id":"11111111-1111-1111-1111-111111111111","name":"X","rules":[]}]"#,
@@ -337,7 +368,7 @@ struct WrittenTimelineTests {
     @Test("The store itself refuses to write over what it cannot read, whoever asks")
     func saveRefusesOverUnreadable() {
         let store = freshStore()
-        let kept = Data(#"{"version":2,"timelines":[]}"#.utf8)
+        let kept = Data(#"{"version":3,"timelines":[]}"#.utf8)
         store.defaults.set(kept, forKey: store.key)
         store.save([TimelineDefinition(id: UUID(), name: "Would overwrite", rules: [])])
         #expect(store.defaults.data(forKey: store.key) == kept)
@@ -381,7 +412,7 @@ struct WrittenTimelineTests {
         }
     }
 
-    @Test("A board or list is only for its own source; trends never offers a forum; a forum author is forced")
+    @Test("A board or list is only for its own source; trends offers a Discuz! but never a Discourse; a forum author is forced")
     func refusedScopesNotOffered() {
         let sources = [microblog, forum]
         let board = RuleBuilder.scopes(for: .category(.board(id: "42"), on: "f.example"), sources: sources)
@@ -392,9 +423,14 @@ struct WrittenTimelineTests {
             == [.source(host: "m.example")])
         #expect(Rule.category(.list(id: "7"), in: .every, sources: sources) == nil)
 
-        let trends = RuleBuilder.scopes(for: .category(.trends, on: "m.example"), sources: sources)
-        #expect(trends == [.every, .source(host: "m.example")])
-        #expect(Rule.category(.trends, in: .source(host: "f.example"), sources: sources) == nil)
+        // A Discuz!'s ranking lists are its Trends; a Discourse has none to offer.
+        let talk = Source(host: "t.example", kind: .discourse)
+        let trends = RuleBuilder.scopes(for: .category(.trends, on: "m.example"), sources: sources + [talk])
+        #expect(trends == [.every, .source(host: "m.example"), .source(host: "f.example")])
+        #expect(Rule.category(.trends, in: .source(host: "f.example"), sources: sources) != nil)
+        #expect(Rule.category(.trends, in: .source(host: "t.example"), sources: sources + [talk]) == nil)
+        let publicScopes = RuleBuilder.scopes(for: .category(.public, on: "m.example"), sources: sources)
+        #expect(publicScopes == [.every, .source(host: "m.example")], "public is still never a forum's")
 
         #expect(RuleBuilder.scopes(for: .author("@kim@f.example"), sources: sources) == [.source(host: "f.example")])
         #expect(RuleBuilder.scopes(for: .source("m.example"), sources: sources).isEmpty)
@@ -418,7 +454,7 @@ struct WrittenTimelineTests {
         #expect(groups.map(\.host) == ["m.example", "f.example"])
         // Home is not offered for a signed-out source, but it is where held posts came through it.
         #expect(groups[0].categories == [.public, .trends, .home])
-        #expect(groups[1].categories == [.board(id: "42")])
+        #expect(groups[1].categories == [.trends, .board(id: "42")])
         #expect(RuleText.categoryName(.board(id: "42"), host: "f.example", sources: [forum]) == "Dev")
         #expect(RuleBuilder.authors(in: notes) == ["ada@m.example", "kim@f.example"])
     }
@@ -432,7 +468,7 @@ struct WrittenTimelineTests {
         #expect(out[0].categories == [.public, .trends, .list(id: "7"), .list(id: "9")])
         let signedIn = RuleBuilder.categories(in: sources, notes: [], signedIn: { $0 == "m.example" })
         #expect(signedIn[0].categories == [.public, .trends, .home, .list(id: "7"), .list(id: "9")])
-        #expect(signedIn[1].categories == [.board(id: "42")])
+        #expect(signedIn[1].categories == [.trends, .board(id: "42")])
 
         #expect(RuleText.categoryName(.list(id: "7"), host: "m.example", sources: sources) == "Friends")
         let friends = try #require(Rule.category(.list(id: "7"), in: .source(host: "m.example"), sources: sources))
@@ -517,6 +553,30 @@ struct WrittenTimelineTests {
         #expect(session.name(of: .all) == "All")
         #expect(session.rule(of: query) == "1 rule of yours, in time order.")
         #expect(session.rule(of: .trends) == L10n.t("timeline.rule.trends"))
+        #expect(session.written[0].desc == nil)
+    }
+
+    @Test("A written tab shows its description where All and Trends show theirs, and falls back")
+    func writtenDescription() throws {
+        let session = session()
+        var made = draft("Swift folks", [try #require(Rule.keyword("swift", in: .every))], in: session)
+        made.desc = "Friends posting about Swift"
+        session.commit(made)
+        let query = TimelineQuery.written(session.written[0].id)
+        #expect(session.rule(of: query) == "Friends posting about Swift")
+        #expect(session.written[0].desc == "Friends posting about Swift")
+        #expect(session.rule(of: .all) == L10n.t("timeline.rule.all"))
+        #expect(session.rule(of: .trends) == L10n.t("timeline.rule.trends"))
+        #expect(L10n.t("timeline.desc.placeholder") == "A short description, optional")
+        #expect(L10n.t("timeline.desc.placeholder", language: .taiwanese) == "一句簡短說明，可留空")
+
+        session.editCurrentTimeline()
+        var editing = try #require(session.editing)
+        #expect(editing.desc == "Friends posting about Swift")
+        editing.desc = "   "
+        session.commit(editing)
+        #expect(session.written[0].desc == nil)
+        #expect(session.rule(of: query) == "1 rule of yours, in time order.")
     }
 
     // MARK: One text index per session
@@ -761,6 +821,11 @@ struct WrittenTimelineTests {
             #expect(adding.scope == .source(host: "n.example"), "\(category)")
             #expect(adding.rule(sources)?.kind == .category(category, in: .source(host: "n.example")))
             adding.nextScope(sources)
+            // Trends is also the Discuz!'s to have, so it comes one step before every source.
+            if category == .trends {
+                #expect(adding.scope == .source(host: "f.example"))
+                adding.nextScope(sources)
+            }
             #expect(adding.scope == .every)
         }
     }

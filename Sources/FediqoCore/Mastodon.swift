@@ -68,20 +68,69 @@ public struct MastodonClient: Sendable {
     /// `people`, `posts` and `readsWithoutAccount` come back nothing, because Mastodon has no such
     /// idea — see `SourceProfile.activeMonth`.
     public func profile() async throws -> SourceProfile {
-        guard let url = Host.httpsURL(host: host, path: "/api/v2/instance") else {
+        let data: Data
+        do {
+            data = try await instanceDocument()
+        } catch MastodonRequestError.invalidURL {
             // Nothing was asked, so nothing answered badly. `unreadable` would claim a
             // server sent something unreadable when no request was ever built.
             throw ProfileError.unreachable
-        }
-        let (data, response) = try await http.data(from: url)
-        // **The status is read before the body is, and that ordering is the whole guard.** A
-        // Mastodon older than 4.0 does not have this endpoint and answers 404 with a page of
-        // HTML; a decoder handed that reports a corrupt profile for a server whose only fault is
-        // its age. Nothing non-2xx reaches `JSONDecoder` from here.
-        guard (200..<300).contains(response.statusCode) else {
-            throw ProfileError.of(status: response.statusCode)
+        } catch MastodonRequestError.http(let status) {
+            throw ProfileError.of(status: status)
         }
         return try MastodonJSON.decoder.decode(InstanceDTO.self, from: data).asProfile(host: host)
+    }
+
+    /// `/api/v2/instance`, fetched — **the one place its address is built and its status read**.
+    ///
+    /// Three readers want this document for three different things: what the server says about
+    /// itself, what it says it is, and how long a post on it may be. They wanted it through
+    /// three copies of the same four lines, each of which had to remember the same rule.
+    ///
+    /// **The status is read before the body is, and that ordering is the whole guard.** A
+    /// Mastodon older than 4.0 does not have this endpoint and answers 404 with a page of HTML;
+    /// a decoder handed that reports a corrupt profile for a server whose only fault is its age.
+    /// Nothing non-2xx reaches `JSONDecoder` from here.
+    ///
+    /// The failure is spelled in this type's own error, and the one caller that owes its reader
+    /// a different vocabulary — `profile()`, which speaks `ProfileError` — translates it at the
+    /// call. That is one translation rather than three spellings of one rule.
+    private func instanceDocument() async throws -> Data {
+        guard let url = Host.httpsURL(host: host, path: "/api/v2/instance") else {
+            throw MastodonRequestError.invalidURL
+        }
+        let (data, response) = try await http.data(from: url)
+        guard (200..<300).contains(response.statusCode) else {
+            throw MastodonRequestError.http(response.statusCode)
+        }
+        return data
+    }
+
+    /// **What this server says it is, now** — the flavour, asked of the server rather than read
+    /// off what was written down when it was joined.
+    ///
+    /// The same document, the same rule and the same one endpoint the detector's probe reads:
+    /// `Probe.kind(from:)` is shared rather than spelled again here, so a server that a join
+    /// would name one thing cannot be named another by a read. A host is joined once and read
+    /// for as long as the reader keeps it, and in between it can be migrated, replaced, or
+    /// upgraded into a different program — the name is the server's to tell, and this is the
+    /// asking.
+    ///
+    /// **Non-2xx throws rather than answering `.unknown`.** "It would not say" and "it said
+    /// something this app does not know" are different facts about a server and only one of them
+    /// is the server's own answer; a caller that cannot tell them apart would start treating an
+    /// outage as a migration.
+    public func flavour() async throws -> ProtocolKind {
+        Probe.kind(from: try await instanceDocument())
+    }
+
+    /// How many characters a status on this server may be, or Mastodon's 500 where it did not
+    /// say. Unauthenticated, the same document a preview already fetches.
+    public func statusLimit() async -> Int {
+        guard let data = try? await instanceDocument() else { return MastodonWrite.defaultLimit }
+        let advertised = (try? MastodonJSON.decoder.decode(InstanceDTO.self, from: data))?
+            .configuration?.statuses?.maxCharacters
+        return MastodonWrite.limit(advertised: advertised)
     }
 
     private func statuses(
@@ -107,7 +156,13 @@ public struct MastodonClient: Sendable {
     }
 }
 
-enum MastodonRequestError: Error, Equatable {
+/// What a read of a Mastodon server, made without a token, ended in.
+///
+/// **Public because a pane has to tell a refusal from the dark.** A thread that the server said
+/// no to and a thread that nothing answered are two different sentences and only one of them is
+/// worth a second press — `ShellConversations.Absence` is where that judgement is made, and it
+/// cannot make it against an error it cannot name.
+public enum MastodonRequestError: Error, Equatable, Sendable {
     case invalidURL
     case http(Int)
 }
@@ -149,6 +204,7 @@ struct InstanceDTO: Decodable, Sendable {
     let description: String?
     let thumbnail: Thumbnail?
     let usage: Usage?
+    let configuration: Configuration?
     let registrations: Registrations?
     let rules: [Rule]?
 
@@ -163,6 +219,14 @@ struct InstanceDTO: Decodable, Sendable {
             /// The only count v2 carries. There is no total here: the registered-account number
             /// left with v1's `stats` block and did not come back.
             let activeMonth: Int?
+        }
+    }
+
+    struct Configuration: Decodable, Sendable {
+        let statuses: Statuses?
+
+        struct Statuses: Decodable, Sendable {
+            let maxCharacters: Int?
         }
     }
 
@@ -188,11 +252,19 @@ struct InstanceDTO: Decodable, Sendable {
             // is admitted under.
             thumbnail: Host.fetchableURL(thumbnail?.url),
             activeMonth: usage?.users?.activeMonth,
+            statusLimit: Self.statusLimit(configuration?.statuses?.maxCharacters),
             registration: Self.registration(registrations),
             // The rules a server did not send and the rules a server has none of are the same
             // nothing to draw. See `SourceProfile.rules`.
             rules: (rules ?? []).compactMap(\.text)
         )
+    }
+
+    /// A positive advertised ceiling, or nothing — zero and below are a server that said
+    /// something useless, not a status that may be no characters at all.
+    private static func statusLimit(_ advertised: Int?) -> Int? {
+        guard let advertised, advertised > 0 else { return nil }
+        return advertised
     }
 
     /// Two booleans into the three answers a reader can act on.
@@ -222,6 +294,13 @@ struct StatusDTO: Decodable, Sendable {
     let repliesCount: Int?
     let reblogsCount: Int?
     let favouritesCount: Int?
+    /// Whether the account this was fetched as has boosted it (#106). Absent on every unsigned
+    /// read, which Mastodon does not send this field on at all — see `Note.boosted`, which keeps
+    /// absent and `false` apart for that reason.
+    let reblogged: Bool?
+    /// Whether the account this was fetched as has favourited it (#107). Absent on an unsigned
+    /// read, as `reblogged` is.
+    let favourited: Bool?
     let mediaAttachments: [MediaAttachment]?
     /// Whether the author covered it, and the line they covered it with. Optional because a
     /// server that did not send them has told us nothing, which is not the same as telling us
@@ -334,7 +413,12 @@ struct StatusDTO: Decodable, Sendable {
         let booster = reblog == nil ? nil : account
         let host = source.host
         return Note(
-            id: subject.uri ?? "https://\(host)/statuses/\(subject.id)",
+            // The name the post was minted under, where this server sent one — the fact two
+            // servers carrying one status both state, and the whole of what #113 merges on.
+            // Where it sent none, a name this device made up: `Note.inventedID` mints it and is
+            // also what recognises it again, so a copy held under a made-up name is merged with
+            // nothing rather than with whatever else happens to spell the same.
+            id: subject.uri ?? Note.inventedID(host: host, statusID: subject.id),
             source: source,
             author: subject.account.name,
             handle: Self.handle(subject.account.acct, host: host),
@@ -344,6 +428,13 @@ struct StatusDTO: Decodable, Sendable {
             reply: Self.reply(inReplyToId: subject.inReplyToId, mentions: subject.mentions, host: host),
             boostedBy: booster?.name,
             boosterHandle: booster.map { Self.handle($0.acct, host: host) },
+            // **The subject's flag and never the wrapper's**, which is the same reading every
+            // other field on this row takes. A boost is a status of its own carrying the post
+            // inside it; what a reader means by "have I boosted this" is about the post, and the
+            // wrapper's own `reblogged` is about the wrapper. On anything but a boost the two are
+            // one value, because `subject` is `self`.
+            boosted: subject.reblogged,
+            favourited: subject.favourited,
             audience: Self.audience(subject.visibility),
             avatarURL: Host.fetchableURL(subject.account.avatar),
             attachments: subject.mediaAttachments?.compactMap { $0.asAttachment } ?? [],
@@ -393,21 +484,15 @@ struct StatusDTO: Decodable, Sendable {
     }
 
     private static func reply(inReplyToId: String?, mentions: [Mention]?, host: String) -> Reply? {
-        guard inReplyToId != nil else { return nil }
+        guard let inReplyToId else { return nil }
         if let acct = mentions?.first?.acct {
-            return Reply(handle: handle(acct, host: host))
+            return Reply(handle: handle(acct, host: host), inReplyToId: inReplyToId)
         }
-        return Reply(handle: nil)
+        return Reply(handle: nil, inReplyToId: inReplyToId)
     }
 
     private static func audience(_ visibility: String?) -> Audience? {
-        switch visibility {
-        case "public": .everyone
-        case "unlisted": .unlisted
-        case "private": .followers
-        case "direct": .mentioned
-        default: nil
-        }
+        visibility.flatMap(Audience.init(mastodon:))
     }
 }
 

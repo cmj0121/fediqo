@@ -1,0 +1,4 @@
+# Generated on this machine. Thrown away with `make servers-down`.
+.env
+.run/
+.caddy-data/

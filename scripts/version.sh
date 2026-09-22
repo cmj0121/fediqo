@@ -5,6 +5,7 @@
 #   scripts/version.sh              # MARKETING_VERSION=0.1.0 CURRENT_PROJECT_VERSION=75
 #   scripts/version.sh --marketing  # 0.1.0
 #   scripts/version.sh --build      # 75
+#   scripts/version.sh --source     # FEDIQO_SOURCE_REVISION=532ab49… FEDIQO_SOURCE_DIRTY=NO
 #
 # `VERSION` names the series this checkout is working towards -- `0.1` -- and the tags say which
 # of that series have already been released. The patch number is the one after the highest tag in
@@ -109,9 +110,33 @@ build() {
     git rev-list --count HEAD
 }
 
+# Which source a build is made from (#143): the commit, whole, and whether the checkout differed
+# from it when the build was asked for. Neither number above can say it -- a build number counts
+# commits, and two branches the same length count the same -- so a report that names only those
+# cannot tell the build that fixed something from the one beside it.
+#
+# **Dirty is anything `git status` would show**, untracked files included, because an untracked
+# file under `Sources/` is compiled exactly as a tracked one is. What is ignored is not counted:
+# `.build/`, the generated project, `.env`. It is asked when the build is asked for, after
+# XcodeGen has rewritten the plists it owns, so a build is dirty only if what it compiles is.
+#
+# **Outside a checkout it prints nothing**, and the build is simply not stamped. The app then
+# says it does not know which source it came from, which is true, rather than naming one.
+#
+# Not part of `--both`: that line is what `make version` prints for a person, and it answers
+# what the build calls itself, which this does not change.
+source_stamp() {
+    local revision dirty=NO
+
+    revision="$(git rev-parse --verify --quiet HEAD 2>/dev/null)" || return 0
+    [ -z "$(git status --porcelain 2>/dev/null)" ] || dirty=YES
+    echo "FEDIQO_SOURCE_REVISION=$revision FEDIQO_SOURCE_DIRTY=$dirty"
+}
+
 case "${1:---both}" in
     --marketing) marketing ;;
     --build)     build ;;
+    --source)    source_stamp ;;
     --both)      echo "MARKETING_VERSION=$(marketing) CURRENT_PROJECT_VERSION=$(build)" ;;
-    *)           echo >&2 "usage: ${0##*/} [--marketing|--build|--both]"; exit 2 ;;
+    *)           echo >&2 "usage: ${0##*/} [--marketing|--build|--source|--both]"; exit 2 ;;
 esac

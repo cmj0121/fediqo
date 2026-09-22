@@ -1,0 +1,249 @@
+import SwiftUI
+
+/// **On its way, said once for the whole app** — the plate a surface puts where a real thing
+/// will be, and the rhythm every waiting thing here moves to.
+///
+/// ## Why this is a plate and not a spinner
+///
+/// The argument is `ForumWaiting`'s and is not restated: a reader who has scrolled one timeline
+/// has already learned that a quiet plate is what "asked for, not here yet" looks like here, and
+/// a platform spinner would be a second vocabulary for the same fact. What was missing was a
+/// *place* for that plate to be written down. `ForumPostBand` drew one shape, `RemoteImage` drew
+/// another, and `ForumWaiting` drew a third with its own copy of the clock — three surfaces, one
+/// idea, and nothing stopping a fourth from inventing a fifth.
+///
+/// ## What it is
+///
+/// **A shape and no words.** Nothing here is text, so there is nothing to translate, nothing to
+/// truncate, and nothing this app puts in an author's mouth while their post is still coming.
+/// The sentence exists — `spoken` — but only a screen reader ever meets it.
+///
+/// **It takes the place it is given.** A `Shape` has no size of its own: whatever frame the
+/// surface hands it is the frame it fills, so an avatar-sized hole, a row-sized hole and a
+/// picture-sized hole are the same view under three frames rather than three views. The surface
+/// says how big; it does not say what waiting looks like. A round place — an avatar — clips it.
+///
+/// **It has a floor, and the floor scales.** Given no height at all it is still a plate a reader
+/// can see, and at the largest type size it grows with the type it stands among, so a one-line
+/// plate beside 30-point words does not read as a hairline.
+///
+/// ## The reader who asked for less movement
+///
+/// `accessibilityReduceMotion` takes the clock away rather than slowing it: there is no
+/// `TimelineView` in that branch at all, so no second frame is ever drawn. What is left is
+/// `wave(0, of: 1, at: 0)` — the plate at full — which is exactly the still plate this shell
+/// already used for waiting before any of it moved. Nothing moves, and it still reads as a held
+/// place.
+///
+/// ## What a screen reader hears
+///
+/// One element, one sentence, once. `children: .ignore` closes the same trap `EmojiText`
+/// documents: without it a reader is free to walk into the `TimelineView` and read whatever a
+/// container happens to name.
+///
+/// A surface that stands **several** of these in one place — a row of plates standing for a row
+/// of words — is one waiting place and owes the reader one sentence, not one per plate. That is
+/// `speaks`, and it is the API rather than a warning: `ShellWaiting(speaks: false)` is a plate
+/// that is `.accessibilityHidden` outright, so the group its surface wraps and labels with
+/// `spoken` is the only thing a reader can land on. A plate standing alone is its own place and
+/// speaks by default; a surface only has to say so when it is taking the sentence over.
+struct ShellWaiting: View {
+    /// Whether this plate is the waiting place, or one shape inside a place the surface speaks
+    /// for. False is silence, not an empty label — see `voice(speaks:)`.
+    let speaks: Bool
+
+    /// What the plate is drawn on, which decides what it is drawn in.
+    let ground: Ground
+
+    /// The two grounds a plate is ever drawn on. The chassis is every page, row and sheet, and
+    /// takes the scheme; the stage is `ShellChrome.behindPicture`, where a picture is opened, and
+    /// is nearly black whatever the scheme says.
+    enum Ground: Equatable, Sendable {
+        case chassis
+        case stage
+    }
+
+    init(speaks: Bool = true, on ground: Ground = .chassis) {
+        self.speaks = speaks
+        self.ground = ground
+    }
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// The smallest a plate may be, scaled to the type it stands among.
+    @ShellMetric(relativeTo: .body) private var floor: CGFloat = ShellSpace.snug
+
+    // MARK: - The one rhythm
+
+    /// How long one pass takes. Slow enough not to read as an alarm, quick enough that a reader
+    /// who glances at it sees it move.
+    static let period: TimeInterval = 1.2
+
+    /// How often the clock ticks. `EmojiClock.fastestTick` is the ceiling this app already set
+    /// for how often anything may ask for a redraw, and a fading plate needs nothing near it.
+    static let tick: TimeInterval = 1.0 / 20
+
+    /// The two ends of this plate's own pulse.
+    ///
+    /// **Shallower than `ForumWaiting`'s, and that is a statement rather than a drift.** Those
+    /// plates trail a sentence that already carries the fact. This one *is* the fact — it is
+    /// standing in for the thing the reader is waiting for — and a place that empties every 1.2
+    /// seconds is a place that flickers. The rhythm is shared; how deep the breath goes belongs
+    /// to what is breathing.
+    ///
+    /// **The bottom of the breath is held to `ShellChrome.placeFloor`** (#142). It was 0.55 of
+    /// `well`, which on the page in light is 1.07:1 — a row still arriving that reads as empty
+    /// space for part of every pass. The plate now wears `ShellChrome.waiting`, and 0.8 of that
+    /// is about the lowest it can bank and still clear 3:1 on every ground it is drawn on; the
+    /// lit end is 4.8:1 on the page. Measured as a swing of luminance rather than of opacity, the
+    /// breath is no smaller than it was — it is the same pass, over a plate a reader can see.
+    static let banked: Double = 0.8
+    static let lit: Double = 1.0
+
+    /// What a plate on `ground` is drawn in, at full; the pulse is an opacity over this.
+    static func ink(_ scheme: ColorScheme, on ground: Ground) -> Color {
+        switch ground {
+        case .chassis: ShellChrome.waiting(scheme)
+        case .stage: ShellChrome.waitingOnStage
+        }
+    }
+
+    /// A clock only where one is wanted — nothing for a reader who asked for less movement.
+    ///
+    /// The same shape and the same answer as `EmojiText.clock(for:reduceMotion:)`: a `nil` is
+    /// what makes the still branch structural rather than an animation running at zero speed.
+    static func clock(reduceMotion: Bool) -> TimeInterval? {
+        reduceMotion ? nil : tick
+    }
+
+    /// Where one shape of `count` is in the pass at one instant, in `0...1` — 1 is lit.
+    ///
+    /// A cosine rather than a step, so a run of shapes never all sit at one brightness and never
+    /// reads as a stutter. `instant` is a wall clock, so it is taken modulo the period and the
+    /// result is finite for every input a `TimelineView` can hand it. Shape 0 at instant 0 is
+    /// full, which is what makes the still frame a real frame.
+    static func wave(_ index: Int, of count: Int, at instant: TimeInterval) -> Double {
+        let phase = (instant / period - Double(index) / Double(count))
+            .truncatingRemainder(dividingBy: 1)
+        return (1 + cos(2 * .pi * phase)) / 2
+    }
+
+    /// How present the plate is at one instant, in `banked...lit`. What `body` actually draws,
+    /// named so that the claim can be made without a screen.
+    static func glow(at instant: TimeInterval) -> Double {
+        banked + (lit - banked) * wave(0, of: 1, at: instant)
+    }
+
+    /// What a screen reader is told, and the sentence a surface holding several plates labels the
+    /// group with. Nowhere on screen: a plate says this by being a plate.
+    static var spoken: String { L10n.t("shell.waiting") }
+
+    /// What one plate is given to say — the sentence when it is the waiting place, and `nil` when
+    /// its surface speaks for the group.
+    ///
+    /// The same shape and the same reason as `clock(reduceMotion:)`: `nil` makes the silent
+    /// branch structural. A plate that is hidden is not a plate with an empty label, which a
+    /// reader can still land on and be told nothing by.
+    static func voice(speaks: Bool) -> String? {
+        speaks ? spoken : nil
+    }
+
+    var body: some View {
+        let shape = Group {
+            if let tick = Self.clock(reduceMotion: reduceMotion) {
+                TimelineView(.periodic(from: .now, by: tick)) { instant in
+                    plate(at: instant.date.timeIntervalSinceReferenceDate)
+                }
+            } else {
+                plate(at: 0)
+            }
+        }
+        .frame(minWidth: floor, minHeight: floor)
+
+        if let sentence = Self.voice(speaks: speaks) {
+            shape
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text(sentence))
+                .accessibilityAddTraits(.updatesFrequently)
+        } else {
+            shape.accessibilityHidden(true)
+        }
+    }
+
+    /// **Not the milled recess any more** (#142). `well` is a container's colour and was chosen
+    /// to be quiet, and a plate quiet enough to be a container is quiet enough to be missed.
+    /// What is drawn here stands in for a thing, so it takes the ramp a thing's ink is on; see
+    /// `ShellChrome.waiting`.
+    private func plate(at instant: TimeInterval) -> some View {
+        RoundedRectangle(cornerRadius: ShellSpace.tight, style: .continuous)
+            .fill(Self.ink(colorScheme, on: ground))
+            .opacity(Self.glow(at: instant))
+    }
+}
+
+/// **Nothing here, and nothing on its way** — the place a face or a picture would be when there is
+/// none to come.
+///
+/// The other half of `ShellWaiting`, drawn so the two cannot be taken for each other in any frame,
+/// moving or still: waiting is a **solid** plate in the ink ramp with nothing on it; this is a
+/// **hollow** one — the quiet `well` recess, outlined in `ShellChrome.vacantEdge`, with a glyph
+/// saying what is missing. A reader who has turned motion off sees a still solid plate for the one
+/// and a ring with a silhouette in it for the other, which is the difference #68 exists to keep.
+///
+/// The edge is what holds this to `ShellChrome.placeFloor`. The fill stays `well`, because the
+/// glyph's own contrast was measured on it and a darker fill would take the glyph under.
+///
+/// Silent: a place with nothing in it is not a fact a screen reader needs read out, and every
+/// call site already sits inside an element that speaks for it.
+struct ShellVacant: View {
+    let standing: RemoteImage.Standing
+    var radius: CGFloat = ShellSpace.tight
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// The mark that says which kind of nothing this is. A person's silhouette over a missing
+    /// attachment would be worse than no mark at all.
+    static func glyph(_ standing: RemoteImage.Standing) -> String {
+        switch standing {
+        case .avatar: "person.fill"
+        case .picture: "photo"
+        }
+    }
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: radius, style: .continuous)
+            .fill(ShellChrome.well(colorScheme))
+            .overlay {
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .strokeBorder(ShellChrome.vacantEdge(colorScheme), lineWidth: ShellSpace.hair)
+            }
+            .overlay {
+                Image(systemName: Self.glyph(standing))
+                    .shellFont(standing == .avatar ? .meta : .body)
+                    .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+            }
+            .accessibilityHidden(true)
+    }
+}
+
+/// The one view under four frames and nothing else — what a surface hands it is the only thing
+/// that differs. Switch the preview between light and dark, and its type size between the two
+/// ends of the scale, to read the two claims a test cannot make.
+#Preview("On its way, at four sizes") {
+    @Previewable @Environment(\.colorScheme) var scheme
+    VStack(alignment: .leading, spacing: ShellSpace.step) {
+        ShellWaiting()
+        ShellWaiting().frame(width: 160)
+        ShellWaiting().frame(width: 44, height: 44)
+        ShellWaiting().frame(height: 120)
+        // #142: waiting beside empty, the pair a still frame must keep apart.
+        HStack(spacing: ShellSpace.step) {
+            ShellWaiting().frame(width: 44, height: 44)
+            ShellVacant(standing: .avatar).frame(width: 44, height: 44)
+        }
+    }
+    .padding(ShellSpace.pad)
+    .frame(width: 360, alignment: .leading)
+    .background(ShellChrome.page(scheme))
+}

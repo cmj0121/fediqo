@@ -20,13 +20,14 @@ struct ProfileTests {
     private static func instance(
         registrations: String = #"{"enabled": true, "approval_required": false, "message": null}"#,
         rules: String = #"[{"id": "1", "text": "Be kind", "hint": "and patient"}]"#,
-        thumbnail: String = #""https://install-g.example/system/site_uploads/thumb.png""#
+        thumbnail: String = #""https://install-g.example/system/site_uploads/thumb.png""#,
+        version: String = "4.3.1"
     ) -> String {
         #"""
         {
           "domain": "install-g.example",
           "title": "Install G",
-          "version": "4.3.1",
+          "version": "\#(version)",
           "source_url": "https://example.invalid/mastodon",
           "description": "A small server for people who repair bicycles.",
           "usage": {"users": {"active_month": 1482}},
@@ -77,8 +78,32 @@ struct ProfileTests {
         #expect(profile.thumbnail?.absoluteString
             == "https://install-g.example/system/site_uploads/thumb.png")
         #expect(profile.activeMonth == 1482)
+        #expect(profile.statusLimit == 500)
         #expect(profile.registration == .open)
         #expect(profile.rules == ["Be kind"])
+    }
+
+    @Test("A Mastodon that advertises another ceiling is taken at its word")
+    func aMastodonAdvertisesItsCeiling() async throws {
+        let long = Self.instance().replacingOccurrences(
+            of: #""max_characters": 500"#, with: #""max_characters": 2000"#
+        )
+        let (answer, _) = try await Self.answer(
+            ["/api/v2/instance": .text(long)],
+            host: Self.mastodonHost,
+            kind: .mastodon
+        )
+        #expect(try Self.stated(answer).statusLimit == 2000)
+    }
+
+    @Test("A Mastodon that said nothing about a ceiling leaves it unguessed")
+    func aMastodonWithoutACeilingSaysNothing() async throws {
+        let (answer, _) = try await Self.answer(
+            ["/api/v2/instance": .text(#"{"title":"Install G"}"#)],
+            host: Self.mastodonHost,
+            kind: .mastodon
+        )
+        #expect(try Self.stated(answer).statusLimit == nil)
     }
 
     @Test("A Mastodon has no idea how many accounts it holds, and says nothing rather than zero")
@@ -603,6 +628,37 @@ struct ProfileTests {
         // statistics a theme draws on `/forum.php` are not one. A read that never happened must
         // not spend a stranger's bandwidth finding that out.
         #expect(asked.isEmpty)
+    }
+
+    // MARK: - What the server says it is, asked of the server (#86)
+
+    @Test("A server's flavour is the version string it serves, read by the detector's own rule")
+    func flavourFromVersion() async throws {
+        // **Two rows and not a table of forks.** Which version string names which program is
+        // `Probe.kind(from:)`'s rule and `DetectTests.probeNames` already walks it case by case;
+        // a second table here would be two lists of fork names to edit together. What is new is
+        // that `flavour()` reads that one document and answers with the probe's answer.
+        let plain = FixtureHTTP(["/api/v2/instance": .text(Self.instance())])
+        #expect(try await MastodonClient(http: plain, host: Self.mastodonHost).flavour() == .mastodon)
+        #expect(await plain.paths == ["/api/v2/instance"], "the one document the join already reads")
+
+        let forked = FixtureHTTP([
+            "/api/v2/instance": .text(Self.instance(version: "2.7.2 (compatible; Akkoma 3.10.4)")),
+        ])
+        #expect(try await MastodonClient(http: forked, host: Self.mastodonHost).flavour() == .akkoma)
+    }
+
+    @Test("A server that would not say throws rather than answering unknown: an outage is not a name")
+    func flavourRefusalThrows() async throws {
+        let refusing = FixtureHTTP(["/api/v2/instance": .text("no", status: 503)])
+        await #expect(throws: MastodonRequestError.http(503)) {
+            _ = try await MastodonClient(http: refusing, host: Self.mastodonHost).flavour()
+        }
+
+        // Answered, and what it answered names nothing this app knows. That **is** the server
+        // speaking, so it is a name and not a throw.
+        let odd = FixtureHTTP(["/api/v2/instance": .text("{}")])
+        #expect(try await MastodonClient(http: odd, host: Self.mastodonHost).flavour() == .unknown)
     }
 
     @Test("Every protocol has an answer, and none of them is unasked")

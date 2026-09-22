@@ -7,9 +7,11 @@
 "shell.usage.title" = "用量";
 "shell.usage.summary" = "這台機器上留了什麼";
 "shell.preferences.title" = "偏好";
-"shell.preferences.summary" = "語言、主題與字級";
+"shell.preferences.summary" = "語言、主題、字級與這個組建";
 "shell.timeline.disabled" = "先到帳號頁新增來源";
 "shell.notices.disabled" = "通知需要已登入的來源";
+"shell.places.fold" = "地方";
+"shell.places.fold.help" = "地方：%@";
 "account.rail.empty" = "新增來源";
 "account.add.title" = "新增來源";
 "account.hero.promise" = "你的時間軸。你的規則。";
@@ -44,12 +46,34 @@
 "compose.disabled.summary" = "發文需要已登入的來源";
 "compose.cancel" = "取消";
 "compose.post" = "發佈";
+"compose.body" = "你的貼文";
+"compose.source" = "來源";
+"compose.visibility" = "可見範圍";
+"compose.visibility.public" = "公開";
+"compose.visibility.unlisted" = "不公開列出";
+"compose.visibility.private" = "私人";
+"compose.visibility.direct" = "限提及";
+"compose.limit" = "%d / %d";
+"compose.none.title" = "沒有可以發文的來源";
+"compose.none.detail" = "你已登入的來源裡，沒有可以從這裡發文的。";
+"answer.title" = "回應";
+"answer.to" = "回應 %@";
+"answer.goesTo" = "送往 %@";
+"answer.reach" = "誰看得到";
+"answer.wider" = "這則回應傳得比它回應的貼文更遠。";
+"answer.body" = "你的回應";
+"answer.send" = "送出";
+"withdraw.title" = "要收回這則貼文嗎？";
+"withdraw.detail" = "「%@」會從 %@ 收回。在多數來源上，別人寫在它底下的回應也會一起消失。收回後無法復原。";
+"withdraw.confirm" = "收回";
 
 "shortcut.title" = "快捷鍵";
 "shortcut.note" = "沒有在寫的時候，這些鍵會動。";
 "shortcut.close" = "關閉";
-"shortcut.group.timeline" = "時間軸";
-"shortcut.group.app" = "每個分頁";
+"shortcut.group.move" = "移動";
+"shortcut.group.read" = "閱讀";
+"shortcut.group.act" = "動作";
+"shortcut.group.app" = "App";
 "shortcut.landing" = "從啟動重新載入";
 "shortcut.tabs" = "輪換這一頁的分頁";
 "shortcut.pages" = "輪換左側的地方";
@@ -63,6 +87,11 @@
 "shortcut.compose" = "新貼文";
 "shortcut.list" = "這份清單";
 "shortcut.back" = "回到清單";
+"shortcut.boost" = "把這則貼文轉發到它的來源，或收回轉發";
+"shortcut.favourite" = "在這則貼文的來源收藏它，或取消收藏";
+"shortcut.answer" = "在討論串裡回應你所在的這則貼文";
+"shortcut.withdraw" = "收回你所在的這則貼文（限你自己寫的）";
+"shortcut.person" = "打開你所在這則貼文的作者";
 "shortcut.reload" = "重新載入這條時間軸，或打開的討論串";
 "shortcut.dismiss" = "關掉眼前的東西，或取消選取";
 "shortcut.search" = "搜尋這台裝置上的貼文";
@@ -86,21 +115,35 @@
 "timeline.latest" = "只到 %@";
 "timeline.latest.label" = "只顯示 %@ 以前的貼文，較新的貼文已隱藏";
 "timeline.reload.progress" = "重新載入中…";
+"timeline.reload.piece" = "重新載入 %1$@ %2$@";
+"timeline.reload.host" = "重新載入 %@";
+"timeline.reload.more" = "%1$@ +%2$d";
 "timeline.reload.failed" = "無法重新載入 %@。";
+"timeline.reload.unspoken" = "%1$@ 現在自稱是 %2$@，Fediqo 讀不了。它先前帶來的東西仍然都在。";
 "timeline.reload.stopped" = "已停止重新載入。";
 "thread.reload.unfindable" = "這篇無法重新載入：登入 %@ 才能在那裡找到它。";
 "thread.reload.notfound" = "這篇無法重新載入：%@ 找不到它。";
 "thread.reload.scope" = "這篇無法重新載入：請重新登入 %@，讓 Fediqo 能找到它。";
 "timeline.empty.title" = "還沒有東西進來";
-"timeline.empty.detail" = "你加的來源的公開貼文會落在這裡，新的在上面。";
+"timeline.empty.detail" = "到「帳號」加一個來源。它的公開貼文會落在這裡，新的在上面。";
 "timeline.empty.trends.title" = "目前沒有趨勢";
 "timeline.empty.trends.detail" = "來源標為趨勢的貼文會落在這裡，依發文時間排列。";
+"timeline.empty.trends.answered.detail" = "已問過你的來源，沒有標為趨勢的貼文。";
+"timeline.empty.held.title" = "還沒有收過貼文";
+"timeline.empty.held.detail" = "來源已在，這台裝置還沒有留下它們的貼文。到「帳號」再加一個來源，或重新載入再問一次。";
+"timeline.empty.answered.title" = "問過了，沒有東西回來";
+"timeline.empty.answered.detail" = "已問過你的來源，它們沒有貼文可留。換一個來源才會填滿這裡。";
+"timeline.empty.rules.title" = "這條時間軸什麼都不讓過";
+"timeline.empty.rules.detail" = "你的規則把這台裝置上的貼文都藏起來了：%@";
+"timeline.empty.latest.title" = "那天以前沒有貼文";
+"timeline.empty.latest.detail" = "更新的貼文被偏好設定裡的截止日期擋住了。";
 "shortcut.edit" = "寫或改這條時間軸";
 "timeline.edit.title" = "編輯時間軸";
 "timeline.new.title" = "新時間軸";
 "timeline.edit.fixed" = "「全部」和「趨勢」不能編輯。要加你自己的時間軸，按 +，或用 Tab 移到 + 再按 e。";
 "timeline.unreadable" = "這台裝置上的時間軸在這裡讀不了。它們原封不動地留著，這裡不會存任何東西蓋過去。";
 "timeline.name.placeholder" = "替這條時間軸取名";
+"timeline.desc.placeholder" = "一句簡短說明，可留空";
 "timeline.done" = "完成";
 "timeline.place" = "你的時間軸中的第 %1$d 條，共 %2$d 條";
 "timeline.earlier" = "‹ 往前";
@@ -164,11 +207,11 @@
 "editor.keys.pick" = "選";
 "editor.keys.scope" = "範圍";
 "editor.keys.confirm" = "加入";
-"search.placeholder" = "搜尋這台裝置上的貼文：* 任意多字，? 一個字";
-"search.label" = "搜尋這台裝置上的貼文";
+"search.placeholder" = "搜尋「%@」：* 任意多字，? 一個字";
+"search.label" = "搜尋「%@」顯示的貼文";
 "search.found" = "找到 %d 則";
-"search.empty.title" = "沒有相符的貼文";
-"search.empty.detail" = "只會搜尋已經在這台裝置上的貼文。試著少打幾個字，或用 * 代表任意多字。";
+"search.empty.title" = "「%@」裡沒有相符的貼文";
+"search.empty.detail" = "只會搜尋這個時間軸會顯示、已經在這台裝置上的貼文。試著少打幾個字，或用 * 代表任意多字。";
 "search.indexing.title" = "搜尋中…";
 "search.indexing.detail" = "正在讀一次這台裝置上的貼文，之後每打一個字只需比對。";
 
@@ -193,18 +236,24 @@
 "item.covered.show" = "掀開";
 "item.covered.label" = "按 s 掀開";
 
-"item.act.reply" = "回覆";
-"item.act.reblog" = "轉發";
+"item.act.boost" = "轉發";
+"item.act.unboost" = "收回轉發";
+"item.act.onItsWay" = "正在送出";
+"item.act.failed" = "沒有送達。按一下再試一次。";
+"item.act.through" = "%1$@（經由 %2$@）";
+"item.act.no.protocol" = "這裡只能讀";
+"item.act.no.signIn" = "登入後才能在這裡動作";
+"item.act.no.turnedAway" = "這個來源拒絕了寫入";
+"item.act.no.unnameable" = "這則貼文在它的來源上沒有名字";
+"item.act.unfavourite" = "取消收藏";
+"item.act.withdraw" = "收回你寫的貼文";
+"item.act.answer" = "回應";
 "item.act.quote" = "引用";
 "item.act.favourite" = "收藏";
 "item.act.bookmark" = "書籤";
 "item.act.kept" = "留下";
 "item.act.more" = "更多";
-"item.toast.reply" = "回覆只在這台機器上。";
-"item.toast.reblog" = "轉發只在這台機器上。";
 "item.toast.quote" = "引用會開啟編輯器。這次工作階段還不行。";
-"item.toast.favourite.on" = "已收藏，在這台機器上。";
-"item.toast.favourite.off" = "已取消收藏。";
 "item.toast.bookmark.on" = "已加書籤，dummy。";
 "item.toast.bookmark.off" = "已取消書籤。";
 "item.toast.kept.on" = "已留在這台機器上。";
@@ -254,6 +303,45 @@
 "prefs.latest.date" = "最晚日期";
 "prefs.latest.footer" = "每個時間軸都不顯示這一天結束後（依這台裝置的時區）發佈的貼文。較新的貼文仍留在這台裝置上；關掉這項就會再看到。";
 
+"prefs.tab.choices" = "設定";
+"prefs.tab.build" = "這個 Fediqo";
+"prefs.tab.work" = "連線中";
+"work.title" = "正在向來源讀取的東西";
+"work.none" = "目前沒有任何工作。這台裝置此刻沒有向任何來源要求任何東西。";
+"work.footer" = "只列出此刻正在進行的工作，結束後就會離開清單。在這裡查看不會送出或停止任何東西，也只顯示請求要去的主機名稱，不顯示其他內容。";
+"work.elapsed.seconds" = "%d 秒";
+"work.elapsed.minutes" = "%1$d 分 %2$d 秒";
+"work.count" = "同時 %d 個";
+"work.purpose.timeline" = "讀取時間軸";
+"work.purpose.conversation" = "讀取對話串";
+"work.purpose.forumPost" = "讀取論壇文章";
+"work.purpose.forumReplies" = "讀取論壇文章的回覆";
+"work.purpose.lists" = "讀取你的列表";
+"work.purpose.joining" = "查看要加入的來源";
+"work.purpose.boards" = "讀取論壇的看板";
+"work.purpose.directory" = "列出可加入的來源";
+"work.purpose.serverCheck" = "詢問來源本身的資訊";
+"work.purpose.picture" = "圖片";
+"work.purpose.emoji" = "自訂表情符號";
+"work.purpose.signInCheck" = "確認登入狀態";
+"work.purpose.signIn" = "登入中";
+"work.purpose.signOut" = "登出中";
+"work.purpose.write" = "送出你寫的或按下的內容";
+"about.title" = "這個 Fediqo";
+"about.version" = "版本";
+"about.build" = "組建";
+"about.source" = "原始碼";
+"about.source.none" = "未記錄：這個組建做出時沒有寫入它的原始碼版本";
+"about.changes" = "變更";
+"about.changes.none" = "無：完全依已提交的內容組建";
+"about.changes.uncommitted" = "組建時含有尚未提交的變更";
+"about.missing" = "未記錄";
+"about.line" = "%@：%@";
+"about.copy" = "全部複製";
+"about.copied" = "已複製";
+"about.copy.hint" = "把這一區的所有內容以文字放到剪貼簿，方便回報問題。";
+"about.footer" = "這裡顯示的正是這個組建做出時被標記的內容。這裡不會連上網路。";
+
 "prefs.cache" = "存在這台裝置上";
 "prefs.cache.footer" = "這些大多會向各來源重新讀取：表情符號名稱會在一天後自行重新讀取，其他則在你需要時再讀。登入留下的兩樣東西只存在這台裝置上。你登入過的論壇會把登入 Cookie 留在這裡，下次開啟 Fediqo 時你仍是登入狀態；它們不會被備份，也不會跟著你的 Apple 帳號走。你要求 Fediqo 存起來的密碼放在這台裝置的鑰匙圈裡，永遠不會複製到 iCloud。按「清除」時，兩者都會和其他東西一起刪掉。";
 "prefs.held.posts" = "%d 則貼文";
@@ -301,6 +389,25 @@
 "forum.stop.refused" = "這個論壇不接受存起來的帳號與密碼。";
 "forum.stop.unreadable" = "讀不懂這個論壇的回覆。請在下面登入，看看它說什麼。";
 "forum.stop.unreachable" = "這個論壇沒有回應。請在下面試試。";
+"forum.stop.keychain" = "為這個論壇存起來的帳號與密碼讀不回來：%@。請在下面登入。";
+"forum.lapsed.first" = "啟動時沒有重新登入：為這個論壇存起來的東西用不上。登入後才看得到會員看得到的內容。";
+"forum.lapsed.wall" = "啟動時沒有重新登入：這個論壇前面有東西要檢查瀏覽器。請登入回答它。";
+"forum.lapsed.captcha" = "啟動時沒有重新登入：這個論壇要求驗證碼。請登入回答它。";
+"forum.lapsed.question" = "啟動時沒有重新登入：這個帳號設了安全提問。請登入回答它。";
+"forum.lapsed.refused" = "啟動時沒有重新登入：這個論壇不接受存起來的帳號與密碼。請登入再試一次。";
+"forum.lapsed.unreadable" = "啟動時沒有重新登入：讀不懂這個論壇的回覆。請登入看看它說什麼。";
+"forum.lapsed.unreachable" = "啟動時沒有重新登入：這個論壇沒有回應。請登入再試一次。";
+"forum.lapsed.keychain" = "啟動時沒有重新登入：存起來的帳號與密碼讀不回來：%@。請登入再試一次。";
+"forum.keychain.locked" = "鑰匙圈鎖住了（狀態碼 %d）";
+"forum.keychain.entitlement" = "這個版本的程式不被允許使用鑰匙圈（狀態碼 %d）";
+"forum.keychain.denied" = "鑰匙圈拒絕了存取（狀態碼 %d）";
+"forum.keychain.missing" = "這台裝置上沒有可以存放它的鑰匙圈（狀態碼 %d）";
+"forum.keychain.other" = "鑰匙圈拒絕了（狀態碼 %d）";
+"forum.keychain.incomplete" = "要存的帳號與密碼只有一半";
+"forum.keychain.unreadable" = "鑰匙圈裡為它存的東西，這個程式讀不懂";
+"forum.unkept" = "已經登入，但你的帳號與密碼沒有存起來：%@。重新開啟程式後，會再請你登入一次。";
+"forum.unkept.nothing" = "從論壇的頁面上讀不到你輸入的內容";
+"forum.unforgotten" = "為這個論壇存起來的帳號與密碼刪不掉：%@。";
 "prefs.password.held" = "這台裝置存著密碼";
 "prefs.password.forget" = "忘掉";
 "prefs.password.forget.label" = "忘掉這台裝置為 %@ 存的密碼";
@@ -314,6 +421,7 @@
 "board.choose.threads" = "%d 主題";
 "board.choose.posts" = "%d 回覆";
 "board.choose.unstated" = "這個論壇沒有寫這個版塊的數字";
+"board.choose.kept" = "你在讀、但這份列表沒有放進去的版塊";
 "board.choose.hint.on" = "訂閱這個版塊";
 "board.choose.hint.off" = "取消訂閱這個版塊";
 "board.unread.some" = "你挑的版塊裡有 %d 個讀不到，沒有訂閱：";
@@ -332,6 +440,7 @@
 /* Unit F6 — a thread's first post, and the four things it can be. */
 "item.forum.coming" = "正在讀第一篇";
 "item.forum.withheld" = "這個論壇只讓登入的人看這篇。";
+"item.forum.unread" = "開啟時才讀取——這不是你訂閱的版塊。";
 "item.forum.silent" = "這篇沒有文字。";
 "item.forum.refused" = "這個論壇不讓這個 App 讀這個主題。";
 "item.forum.unreadable" = "這個論壇有回應，但裡面沒有這個 App 讀得到的文章。";
@@ -340,8 +449,14 @@
 
 /* Unit F6 — the rest of the topic. */
 "thread.replies.load" = "讀其他回覆";
+"thread.around.again" = "再讀一次討論串";
+"thread.around.unreachable" = "這篇的討論串沒有送達。";
+"thread.around.refused" = "%@ 不讓這個 app 讀這篇的討論串。";
+"thread.around.unfindable" = "在 %@ 上無法指認這篇，因此讀不到它的討論串。";
 "thread.replies.loading" = "正在讀回覆…";
 "thread.replies.none" = "還沒有人回這一篇。";
+"thread.empty.title" = "這則下面沒有東西";
+"thread.empty.detail" = "回覆會落在這裡。";
 "thread.replies.count" = "%d 則回覆";
 "thread.reply.floor" = "#%d";
 "thread.reply.quoted" = "引用：%@";
@@ -405,6 +520,21 @@
 "account.sources.held"           = "每一個在這個裝置上還留著什麼，在「用量」裡。";
 /* M1 tail rev 4 — the compact row. What the marks on a row mean, said once for the list. */
 "account.sources.marks"          = "一列只帶它自己那個來源有的標記：登入、換版塊或列表、清除它留在這裡的東西、移除它。";
+/* #69 — what may be done on a source, said on its row and explained once for the list. */
+"account.sources.writing"        = "每一列也會說那個來源上可以做什麼：讀、讀與寫，或者唯讀——那個協定在 Fediqo 裡根本沒有「寫」這件事。寫入被拒是說有一次寫入被擋了下來；再登入那個來源一次。";
+"account.source.writing.never"   = "唯讀";
+"account.source.writing.read"    = "讀";
+"account.source.writing.write"   = "讀與寫";
+"account.source.writing.refused" = "寫入被拒";
+/* Said in the open, for as long as it is true, to a reader who agreed to something narrower. */
+"account.sources.writing.again"  = "Fediqo 現在登入時會連「寫」一起要求。%@ 是在那之前登入的：在那裡讀到的和以前完全一樣，Fediqo 什麼也不寫。不用先登出，在下面選就好。";
+"account.sources.writing.again.choose" = "選擇 %@ 可以做什麼";
+/* The choice itself, put before the server's own page opens. */
+"account.signin.ask.title"       = "登入 %@？";
+"account.signin.ask.detail"      = "讀會把你的首頁與你的列表帶進來。寫讓你在 Fediqo 裡發文、回覆、轉發、收藏，也可以把它們收回。兩種選擇讀到的都一樣，而且你隨時可以登出。";
+"account.signin.ask.read"        = "登入來讀";
+"account.signin.ask.write"       = "登入來讀與寫";
+
 "account.source.boards"          = "%1$d 個版塊：%2$@";
 "account.source.unread"          = "讀不到它的自我介紹。";
 "account.source.remove.label"    = "移除 %@，連同它留在這裡的東西";
@@ -463,3 +593,38 @@
 "list.choose.done"                    = "完成";
 "list.choose.hint.on"                 = "讀這個列表";
 "list.choose.hint.off"                = "不再讀這個列表";
+
+/* #34 — an address in somebody's post, and the two ways to follow it. */
+"link.open.here"                      = "在 Fediqo 開啟 %@";
+"link.open.browser"                   = "用瀏覽器開啟 %@";
+"link.hint.pointer"                   = "按一下在這裡讀。Control 加按一下改用瀏覽器開啟。";
+"link.hint.touch"                     = "按一下在這裡讀。長按改用瀏覽器開啟。";
+"link.reader.label"                   = "%@，在 Fediqo 裡讀";
+"link.reader.browser"                 = "用瀏覽器開啟";
+"link.reader.close"                   = "完成";
+"link.reader.refused"                 = "這個連結要去的地方 Fediqo 不會開啟，已停住沒有前往。";
+"link.reader.back"                    = "返回";
+"link.reader.leaveHint"               = "Esc 或 q";
+"post.tag.spoken"                     = "主題標籤 %@";
+
+/* #64 — the one way of saying something is on its way. Spoken only: the plate itself is what a
+   reader sees, and it carries no words. */
+"shell.waiting"                       = "正在讀取…";
+
+/* #67 — what did not arrive, said in the place it would have taken. */
+"shell.failed"                        = "%@ 沒有回應。";
+"shell.failed.retry"                  = "再試一次";
+
+"person.back" = "返回";
+"person.leaveHint" = "Esc 或 q";
+"person.through" = "從 %@ 讀到的";
+"person.held" = "這裡有 %d 則";
+"person.none" = "這台裝置上還沒有他們的貼文。";
+"item.person.open" = "打開 %@";
+
+/* One post more than one source carried (#114). The row is drawn as the first; these name the rest. */
+"item.source.more" = "%1$@ +%2$d";
+"item.source.also" = "%1$@，也來自 %2$@";
+"item.source.join" = "、";
+"thread.copies.title" = "各來源帶來的樣子";
+"thread.copies.from" = "來自 %@";

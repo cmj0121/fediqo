@@ -21,6 +21,19 @@ struct DummyItemRow: View {
     /// otherwise press one and draw the other.
     let posts: ForumPosts
     @Binding var marks: DummyMarks
+    /// This row's share of #54's acts: what the post offers, where each offered act has got to,
+    /// and the presses themselves (#106).
+    ///
+    /// **Handed in rather than worked out here.** Two of the three facts that decide what is
+    /// offered — what the sign-in bought and what the source has turned away since — live on the
+    /// session, and a row deriving its own answer would be a second derivation free to disagree
+    /// with the word the source page draws. `ItemActing()` is a row in a list that does not act:
+    /// a fixture, a preview.
+    ///
+    /// **One value rather than a property per act**, because it grows: #54 has four acts and
+    /// three panes draw rows, so a property each would be twelve parameters to keep in step
+    /// across three call sites.
+    var acting = ItemActing()
     var selected: Bool = false
     /// Whether this row is the post the reader opened **in order to read** — the thread pane, and
     /// nowhere else.
@@ -41,9 +54,11 @@ struct DummyItemRow: View {
     /// *expand* and the guide says "Open the thread"; before this, expanding a post showed the
     /// reader exactly the same three lines the row already had.
     ///
-    /// Two things and no third: the words lose their line limit, and the band stops being pinned
-    /// to `Box.thumb` and clipped. Everything else about the row — the four bands, the slot, the
-    /// marks, the cover — is identical, because none of it was ever the problem.
+    /// Three things and no fourth: the words lose their line limit, the band stops being pinned
+    /// to `Box.thumb` and clipped, and a forum post's quotation is drawn above them (#104) — all
+    /// three for the one reason, that a list under a thumb and a post opened to be read are not
+    /// the same surface. Everything else about the row — the four bands, the slot, the marks, the
+    /// cover — is identical, because none of it was ever the problem.
     var inFull: Bool = false
     /// Which attachment is on top. It belongs to the app rather than to this view, so that a
     /// refresh that replaces the list leaves a reader who turned to the third one looking at the
@@ -56,9 +71,29 @@ struct DummyItemRow: View {
     /// top of it. See `ShellPlayback`.
     var player: AVPlayer?
     var onSelect: (() -> Void)?
+    /// Opening the conversation around this post — `Return`, and the second press of a finger on
+    /// a row already lit (#33).
+    ///
+    /// **Held apart from `onSelect` for the one reader who cannot press twice.** A press is what
+    /// the list decides between lighting and opening; a reader using VoiceOver lands on the row
+    /// and activates it once, so the open has to be offered as a named action of its own. Nothing
+    /// where there is nothing to open — the post an open thread is already about says so by
+    /// passing nothing, rather than by announcing an action that would be refused.
+    var onOpen: (() -> Void)?
+    /// Opening whoever wrote this post — a press on their face, or on their name (#99).
+    ///
+    /// **Optional, and nothing is the honest answer twice over.** A row that names nobody has no
+    /// person to open, and a list that is already this person's own page has nowhere to go: both
+    /// pass nothing, and what the reader gets is a face that is a picture rather than a control
+    /// they can press and be refused. Decision 4's rule — absent, not disabled.
+    var onOpenPerson: ((DummyPerson) -> Void)?
     var onToggleCover: () -> Void = {}
     /// Starts or stops what is on top of the deck — the mark on the card's own way to the key `a`.
     var onPlay: () -> Void = {}
+    /// Opens what is on top of the deck over the app: the card's own way to the key `v` (#33).
+    var onView: () -> Void = {}
+    /// Turns the deck: the counter's own way to the key `m` (#33).
+    var onTurn: () -> Void = {}
     /// That the playing rectangle has left the screen, which the owner answers by stopping.
     var onEnded: () -> Void = {}
     var onToast: (String) -> Void
@@ -68,39 +103,45 @@ struct DummyItemRow: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openURL) private var openURL
 
-    #if os(iOS)
-    @Environment(\.horizontalSizeClass) private var sizeClass
-    /// A phone held upright, where the picture beside the words leaves the words a
-    /// column four characters wide. Everywhere else the row keeps its full width.
-    private var narrow: Bool { sizeClass == .compact }
-    #else
-    private var narrow: Bool { false }
-    #endif
+    /// The shell's own arrangement, measured once at the root (#110).
+    @Environment(\.shellLayout) private var shellLayout
+    /// A narrow page, where the picture beside the words leaves the words a column four
+    /// characters wide — a phone held upright, and now a Mac window dragged narrow too, which
+    /// used to keep the wide row at every width because the row asked the device rather than the
+    /// space. Everywhere else the row keeps its full width.
+    private var narrow: Bool { shellLayout == .narrow }
 
     /// The row's fittings, in points at the standard type size and scaled from there.
     /// They used to be fixed: the words grew with the reader's preference and the
     /// avatar, the thumbnail and every mark stayed exactly where they were, so at the
     /// largest size a row was big text wrapped around small furniture.
-    @ScaledMetric(relativeTo: .body) private var avatarSide: CGFloat = Box.avatar
-    @ScaledMetric(relativeTo: .body) private var thumbSide: CGFloat = Box.thumb
-    @ScaledMetric(relativeTo: .caption) private var vis: CGFloat = 16
-    @ScaledMetric(relativeTo: .caption) private var glyph: CGFloat = 17
-    @ScaledMetric(relativeTo: .caption) private var countBox: CGFloat = 20
+    @ShellMetric(relativeTo: .body) private var avatarSide: CGFloat = Box.avatar
+    @ShellMetric(relativeTo: .body) private var thumbSide: CGFloat = Box.thumb
+    /// The box the audience mark stands in. Tied to the mark's own role rather than to the
+    /// caption beside it, so the box and the glyph in it climb together — `ShellMetric`'s
+    /// whole point.
+    @ShellMetric(relativeTo: .callout) private var vis: CGFloat = Box.vis
+    /// The room inside the source pill, on the pill's own rung so the capsule grows with the
+    /// host in it rather than closing round it as the letters climb.
+    @ShellMetric(relativeTo: .caption2) private var pillSideways: CGFloat = Box.pillSideways
+    @ShellMetric(relativeTo: .caption2) private var pillUpright: CGFloat = Box.pillUpright
+    @ShellMetric(relativeTo: .caption) private var glyph: CGFloat = 17
+    @ShellMetric(relativeTo: .caption) private var countBox: CGFloat = 20
     /// What a finger gets, whatever the glyph drawn inside it measures.
-    @ScaledMetric(relativeTo: .caption) private var touch: CGFloat = 32
+    @ShellMetric(relativeTo: .caption) private var touch: CGFloat = 32
     /// How far a covered row is smeared. Scaled with the words for the same reason every other
     /// fitting here is, and here the reason is not proportion but correctness: a fixed radius that
     /// hides the default size leaves the largest size legible, and a cover that can be read
     /// through is not a cover.
-    @ScaledMetric(relativeTo: .body) private var smear: CGFloat = 10
+    @ShellMetric(relativeTo: .body) private var smear: CGFloat = 10
     /// How tall the cover is. **A fixed size, and that is the point of it**: a cover drawn around
     /// its contents is a cover that tells the reader how much is underneath, and it would be
     /// server text sizing a band again — the same defect as a row that grows with its post, one
     /// layer down. Whatever the author wrote and however long the post is, the cover is this.
-    @ScaledMetric(relativeTo: .body) private var coverBox: CGFloat = 44
+    @ShellMetric(relativeTo: .body) private var coverBox: CGFloat = 44
     /// One body line: the least the notice line takes, so the cover mark standing alone with no
     /// warning beside it leaves the band where a one-line warning would.
-    @ScaledMetric(relativeTo: .body) private var noticeLine: CGFloat = 22
+    @ShellMetric(relativeTo: .body) private var noticeLine: CGFloat = 22
 
     enum Box {
         /// The lamp is a lamp at every type size, and a corner is a corner.
@@ -116,7 +157,44 @@ struct DummyItemRow: View {
         /// portrait sizes the words band to the words, as it did before any of this.
         static let avatar: CGFloat = 36
         static let thumb: CGFloat = 96
+        /// What the audience mark is given. Named beside the two above and for the same
+        /// reason: a test measures it, and it has to stay wide enough for the glyph the role
+        /// below draws — a box that did not grow with the mark would clip it.
+        static let vis: CGFloat = 20
+        /// The room inside the source pill, sideways and upright.
+        ///
+        /// **Two numbers and not one, because the ends of a capsule are round.** Equal room on
+        /// all four sides puts the first and last letters of the host under the curve, where
+        /// the shape has already taken the room back — so a pill padded evenly still reads as
+        /// a host against the wall. Twice as much sideways is what makes the room look equal.
+        ///
+        /// Both are steps off the shell's own scale rather than numbers chosen here. The pill
+        /// carried `tight` sideways and two hairs upright, which is a capsule drawn round the
+        /// letters rather than round the word.
+        ///
+        /// **The upright figure is the one with a ceiling.** The meta line stands in the
+        /// avatar's band, and a pill taller than the face beside it makes the headline taller
+        /// and every row in the list with it. `SourcePillTests` measures that rather than
+        /// trusting it.
+        static let pillSideways: CGFloat = ShellSpace.snug
+        static let pillUpright: CGFloat = ShellSpace.tight
     }
+
+    /// The role the audience mark is drawn in — **a rung up the scale from the line it stands
+    /// in, and that is the whole of #97's first half.**
+    ///
+    /// It was `.meta`, which is the caption the handle beside it takes, at a medium weight. A
+    /// glyph drawn at the size of the smallest writing on the row is a fact a reader has to hunt
+    /// for, and who a post was written for is not a footnote to it.
+    ///
+    /// `.name` is the row's own callout — the size the author's name is set in — so the mark
+    /// reads at a glance and still sits inside the avatar's band, which is what keeps it on the
+    /// meta line rather than making the line taller.
+    ///
+    /// Named here rather than written into the view, because a test cannot reach inside a `View`
+    /// body to ask what size something was drawn at, and "larger than the caption beside it" is
+    /// an acceptance line that has to be measurable.
+    static let visRole: ShellType = .name
 
     /// Four bands, and every row has all four whether or not it has anything to put
     /// in them:
@@ -256,7 +334,11 @@ struct DummyItemRow: View {
                 // the row is a container, and a container is not an element. A custom action put
                 // there is offered to nobody, which is a control that exists in the source and
                 // not on the screen — the exact defect this milestone has shipped three times.
-                .accessibilityActions { outwardAction }
+                .accessibilityActions {
+                    outwardAction
+                    openAction
+                    personAction
+                }
             mainBox(written)
             actions
         }
@@ -273,7 +355,7 @@ struct DummyItemRow: View {
                 if item.answering != .nothing { answered }
                 if let who = item.boostedBy { boosted(by: who) }
             }
-            .font(ShellType.mark)
+            .shellFont(.mark)
             .foregroundStyle(ShellChrome.inkFaint(colorScheme))
             .lineLimit(1)
         }
@@ -302,10 +384,15 @@ struct DummyItemRow: View {
     /// name gives up letters before the line gives up the meta: where a post came from
     /// and when is what a reader scans down the list for, and a name they can only
     /// half read is still a name they recognise.
+    ///
+    /// **The face and the name are one control each, and the meta line is not** (#99). Who wrote
+    /// a post is a person the reader can open; where it came through and when are facts about the
+    /// post, and a press on the host that opened somebody would be the row answering a question
+    /// nobody asked.
     private func headline(_ written: Written) -> some View {
         HStack(alignment: .center, spacing: ShellSpace.snug) {
-            avatar
-            names(written)
+            pressingPerson(avatar)
+            pressingPerson(names(written))
             Spacer(minLength: ShellSpace.snug)
             meta
         }
@@ -392,13 +479,14 @@ struct DummyItemRow: View {
                     host: item.source.host,
                     standing: .avatar,
                     alt: nil,
+                    // The row already speaks as a post; an arriving face must not shout too.
+                    speaks: false,
                     radius: Box.plate
                 )
             } else {
-                // Nothing to draw and nothing on its way: the bare plate, which is what this row
-                // has always drawn for an author who sent no picture.
-                RoundedRectangle(cornerRadius: Box.plate, style: .continuous)
-                    .fill(ShellChrome.well(colorScheme))
+                // Nothing to draw and nothing on its way: the empty place, hollow and marked,
+                // so it is never the solid plate an arriving face waits as (#142).
+                ShellVacant(standing: .avatar, radius: Box.plate)
             }
         }
         .frame(width: avatarSide, height: avatarSide)
@@ -406,7 +494,7 @@ struct DummyItemRow: View {
 
     private var postedAgo: some View {
         Text(item.postedAt, format: .relative(presentation: .numeric, unitsStyle: .abbreviated))
-            .font(ShellType.reading)
+            .shellFont(.reading)
             .foregroundStyle(ShellChrome.inkFaint(colorScheme))
             .lineLimit(1)
             .help(exactPostedAt)
@@ -417,32 +505,92 @@ struct DummyItemRow: View {
         item.postedAt.formatted(.dateTime.year().month().day().hour().minute().second())
     }
 
+    /// Who the author wrote it for: the glyph says which audience, the colour says how far the
+    /// post travels, and the name of it is what a pointer and a screen reader are given.
+    ///
+    /// **The name is said twice on purpose and read from one place.** `help` is the pointer's
+    /// and `accessibilityLabel` is VoiceOver's, and neither can be dropped in favour of the
+    /// other — but a glyph is nothing to a listener, so the two must never be allowed to say
+    /// different things. `spokenAudience(_:)` is where they both get the string.
     private var visibility: some View {
         Group {
             if let audience = item.audience {
                 Image(systemName: audience.symbolName)
-                    .font(ShellType.meta.weight(.medium))
+                    .shellFont(Self.visRole)
                     .foregroundStyle(ShellChrome.vis(audience, colorScheme))
-                    .help(L10n.t("item.visibility.\(audience.rawValue)"))
-                    .accessibilityLabel(L10n.t("item.visibility.\(audience.rawValue)"))
+                    .help(Self.spokenAudience(audience))
+                    .accessibilityLabel(Self.spokenAudience(audience))
             }
         }
         .frame(width: vis, height: vis)
     }
 
-    /// The one server this row came through. A post two servers carry is two rows (#10), each
-    /// naming its own, so there is never a second host to count here.
+    /// What the audience mark is called, in the shell's own language.
+    ///
+    /// A named function rather than a string built in the view body, for the reason the way out
+    /// is one: a label spelled inside a `View` is reachable from no test, and "VoiceOver still
+    /// names the audience" is something this branch has to be able to prove rather than assert.
+    static func spokenAudience(_ audience: DummyAudience) -> String {
+        L10n.t("item.visibility.\(audience.rawValue)")
+    }
+
+    /// The servers this row came through: the one it is drawn as, and how many more (#114).
+    ///
+    /// **Named, and not listed.** A post three servers carried says `first.example +2` rather than
+    /// three capsules, because a row is one height and a list of servers along its meta line is
+    /// the thing #114 said the row must not become. Every one of them is still named — to a
+    /// pointer by `help`, and to a listener by the label — so the count is a shortening of the
+    /// drawing and never of the fact. A post one server carried draws its host alone, as it
+    /// always has.
+    ///
+    /// **The room inside it is `Box.pillSideways` and `Box.pillUpright`** — see there for why
+    /// the two are different numbers. What is worth saying here is what the room must not do:
+    /// the padding is applied to the letters and the capsule is drawn behind the result, so a
+    /// row too narrow for the whole host takes it out of the host and never out of the room.
+    /// That order is what keeps `lineLimit(1)`'s truncation the thing that gives way.
+    ///
+    /// **No width and no `fixedSize`, deliberately.** The pill hugs the host it names, so a
+    /// short one is not stretched to a size it has nothing to put in, and a long one gives way
+    /// before the age does — which is what `layoutPriority(0)` on the meta line says.
     private var sourcePill: some View {
-        Text(item.source.host)
-            .font(ShellType.mark)
+        Text(Self.drawnSource(item))
+            .shellFont(.mark)
             .foregroundStyle(ShellChrome.inkDim(colorScheme))
             .lineLimit(1)
-            .padding(.horizontal, ShellSpace.tight)
-            .padding(.vertical, ShellSpace.hair * 2)
+            .padding(.horizontal, pillSideways)
+            .padding(.vertical, pillUpright)
             .background(
                 Capsule(style: .continuous)
                     .fill(ShellChrome.well(colorScheme))
             )
+            .help(Self.spokenSource(item))
+            .accessibilityLabel(Self.spokenSource(item))
+    }
+
+    /// What the pill names, and so what a listener hears where the headline combines it in.
+    ///
+    /// The host and nothing else — not the board a forum row sits in, not the protocol drawn as
+    /// a page. A named function rather than a string reached for inside the view body, so that
+    /// "the pill still names the source" is a sentence a test can put a question to; the same
+    /// reason `spokenAudience(_:)` is one.
+    ///
+    /// **Every source, by name, where a post came through more than one** (#114): a listener
+    /// cannot see a count and look further, so what the drawing shortens this says in full.
+    static func spokenSource(_ item: DummyItem, language: DummyLanguage? = nil) -> String {
+        let others = item.otherCopies.map(\.source.host)
+        guard !others.isEmpty else { return item.source.host }
+        return String(
+            format: L10n.t("item.source.also", language: language),
+            item.source.host, others.joined(separator: L10n.t("item.source.join", language: language))
+        )
+    }
+
+    /// What the pill draws: the host, and how many other servers carried the same post.
+    static func drawnSource(_ item: DummyItem, language: DummyLanguage? = nil) -> String {
+        guard !item.otherCopies.isEmpty else { return item.source.host }
+        return String(
+            format: L10n.t("item.source.more", language: language), item.source.host, item.otherCopies.count
+        )
     }
 
     /// What came attached sits beside the words, never under them, and against the
@@ -570,6 +718,14 @@ struct DummyItemRow: View {
     /// phone there is no `s` to fall back on, and the band's accessibility action reaches only a
     /// reader using assistive technology. Without this, a covered post on a phone could not be
     /// opened at all.
+    ///
+    /// **And the words under it are letters, not prose.** `words` draws them from the label cut
+    /// while the cover is on — see `EmojiText.words` — so there is no link run, no context menu
+    /// and no tooltip behind the blur. Without that the sentence above was not true: a `Text`
+    /// carrying an address is hit-tested by the text layer before the `Button` round it, so a
+    /// press meant to lift the cover opened the author's page, and a secondary press listed the
+    /// hosts the warning was put in front of and offered to open them. Both are the author's
+    /// choice, made out of a post the reader had said they were not ready to read.
     ///
     /// **Pressed but not spoken.** The band above is already one element carrying the whole of
     /// `spokenCover` and the action that works it, so announcing this too would offer the same
@@ -758,12 +914,12 @@ struct DummyItemRow: View {
         VStack(alignment: .leading, spacing: ShellSpace.tight) {
             if item.source.kind == .board, let board = item.board {
                 Text(board)
-                    .font(ShellType.meta)
+                    .shellFont(.meta)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
             }
             if let title = item.title {
                 Text(title)
-                    .font(ShellType.name)
+                    .shellFont(.name)
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                     .lineLimit(1)
             }
@@ -773,15 +929,27 @@ struct DummyItemRow: View {
             // and a thread's is one of five states — not here yet, the words, withheld, no words
             // at all, or a reason there are none. See `ForumPostBand`.
             //
-            // **Plain `Text` inside that band, not `EmojiText`.** A Discuz! post carries no
-            // custom-emoji list and the forum has no `/api/v1/custom_emojis` for a catalogue to
-            // answer out of, so scanning a stranger's post for shortcodes that can never resolve
-            // would be work with no possible result — and would put a picture in a line on the
-            // strength of a colon somebody typed.
+            // **No custom-emoji list inside that band.** A Discuz! post carries none and the
+            // forum has no `/api/v1/custom_emojis` for a catalogue to answer out of, so scanning
+            // a stranger's post for shortcodes that can never resolve would be work with no
+            // possible result — and would put a picture in a line on the strength of a colon
+            // somebody typed. It draws the words as prose all the same: an address in a forum
+            // post is an address a reader wants to follow exactly as much as one in a microblog
+            // post, and #34 says so in as many words.
             if let thread {
-                ForumPostBand(thread: thread, posts: posts, lines: wordLines)
+                ForumPostBand(
+                    thread: thread, posts: posts, lines: wordLines, inFull: inFull,
+                    linked: !covered
+                )
             } else {
-                EmojiText(item.body, emojis: written.body, host: host)
+                // **Prose, which is the cut that grows links — unless a cover stands in front of
+                // these words.** This is the one line on the row the author wrote as writing; the
+                // name, the handle and the cover line above are labels they chose, and
+                // `EmojiText`'s two initialisers say why that difference is not a matter of
+                // taste. `covered` is read here rather than passed in because every call site of
+                // this function already agrees with it: `cover` draws only while it is true and
+                // `stitched` only while it is false.
+                EmojiText.words(item.body, emojis: written.body, host: host, covered: covered)
                     .foregroundStyle(
                         item.title == nil ? ShellChrome.ink(colorScheme) : ShellChrome.inkDim(colorScheme)
                     )
@@ -831,6 +999,8 @@ struct DummyItemRow: View {
                 radius: Box.plate,
                 player: player,
                 onPlay: onPlay,
+                onOpen: onView,
+                onTurn: onTurn,
                 onEnded: onEnded
             )
             .frame(width: thumbSide, height: thumbSide)
@@ -853,23 +1023,12 @@ struct DummyItemRow: View {
 
     private var passOn: some View {
         HStack(spacing: ShellSpace.snug) {
-            counted("arrowshape.turn.up.left", count: item.counts.replies,
-                    label: "item.act.reply", on: false) {
-                onToast(L10n.t("item.toast.reply"))
-            }
-            counted("arrow.2.squarepath", count: item.counts.reblogs,
-                    label: "item.act.reblog", on: false) {
-                onToast(L10n.t("item.toast.reblog"))
-            }
+            actMark(.answer)
+            actMark(.boost)
             mark("quote.bubble", label: "item.act.quote", on: false) {
                 onToast(L10n.t("item.toast.quote"))
             }
-            counted(marks.favourited ? "star.fill" : "star",
-                    count: item.counts.favourites,
-                    label: "item.act.favourite", on: marks.favourited) {
-                marks.favourited.toggle()
-                onToast(L10n.t(marks.favourited ? "item.toast.favourite.on" : "item.toast.favourite.off"))
-            }
+            actMark(.favourite)
         }
     }
 
@@ -885,25 +1044,60 @@ struct DummyItemRow: View {
                 marks.kept.toggle()
                 onToast(L10n.t(marks.kept ? "item.toast.kept.on" : "item.toast.kept.off"))
             }
+            actMark(.withdraw)
             mark("ellipsis", label: "item.act.more", on: false) {
                 onToast(L10n.t("item.toast.more"))
+            }
+            refusal
+        }
+    }
+
+    /// One of #54's acts, as a mark under the post: answering (#108), boosting (#106),
+    /// favouriting (#107) and taking back what the reader wrote (#109).
+    ///
+    /// **Absent rather than disabled where the post does not offer it**, which is decision 4 on
+    /// this repo's controls and is what `DummyItem.outwardURL` argues at length: a mark the reader
+    /// cannot press is a question about this app, and the honest answer to "you are not signed in
+    /// here" is the sentence `refusal` draws, not a greyed arrow. **And absent where the list has
+    /// nowhere for the press to go** — a row drawn with no session behind it — for the same reason.
+    ///
+    /// Whether it is done is what the source the act goes through said — never what this device
+    /// remembers pressing, and on a row two sources carried, never the other source's word
+    /// (#136); `ItemActs.mark` reads it, the count beside it and its name. Boost and favourite are
+    /// one shape with two meanings, so a reader who learns one does not have to learn the other.
+    /// An answer and a take-back are never done: the reader may answer as often as they like, and
+    /// a post taken back is not on the row to be drawn. The take-back's press is the question and
+    /// never the act; on its way and failed every mark changes shape, and a failure is pressed
+    /// again to try again. Nothing is not a reading: a count of zero is left off rather than drawn
+    /// as a nought beside every glyph in the list.
+    @ViewBuilder
+    private func actMark(_ act: PostAct) -> some View {
+        if acting.acts.offers(act), let perform = acting.perform {
+            let shown = ItemActs.mark(act, on: item, acting: acting)
+            DummyMarkButton(symbol: shown.symbol, count: (shown.count ?? 0) > 0 ? shown.count : nil,
+                            label: shown.spoken, on: shown.done, quiet: !reading, glyph: glyph,
+                            countWidth: countBox, touch: touch) {
+                perform(act)
             }
         }
     }
 
-    /// Nothing is not a reading. A count of zero is left off rather than drawn as a
-    /// nought beside every glyph in the list.
-    private func counted(_ symbol: String, count: Int?, label: String, on: Bool,
-                         action: @escaping () -> Void) -> some View {
-        let shown = (count ?? 0) > 0 ? count : nil
-        return DummyMarkButton(symbol: symbol, count: shown, labelKey: label,
-                               on: on, quiet: !reading, glyph: glyph,
-                               countWidth: countBox, touch: touch, action: action)
+    /// What the row says where it offers none of #54's acts. Nothing where it offers them, and
+    /// nothing where there is no source for a sentence to be about — a fixture, a preview.
+    @ViewBuilder
+    private var refusal: some View {
+        if let refused = acting.acts.refused {
+            Text(ItemActs.refusalLine(refused))
+                .shellFont(.meta)
+                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                .lineLimit(1)
+                .accessibilityLabel(ItemActs.refusalLine(refused))
+        }
     }
 
     private func mark(_ symbol: String, label: String, on: Bool,
                       action: @escaping () -> Void) -> some View {
-        DummyMarkButton(symbol: symbol, count: nil, labelKey: label,
+        DummyMarkButton(symbol: symbol, count: nil, label: L10n.t(label),
                         on: on, quiet: !reading, glyph: glyph,
                         countWidth: countBox, touch: touch, action: action)
     }
@@ -936,10 +1130,82 @@ struct DummyItemRow: View {
     ///
     /// **Nothing where there is nowhere to go**, which is the same rule the menu keeps: an action
     /// announced and then refused is worse than an action never announced.
+    /// The conversation, as a reader using VoiceOver reaches it.
+    ///
+    /// The press a finger makes is the row's own and is decided by `DummyCommand.tapped`: one
+    /// press lights, the next opens. A reader landing on this element activates it once, so the
+    /// second half is offered here by name — the same shape `outwardAction` above uses, and for
+    /// the same reason. It says what the written-down key says.
+    @ViewBuilder
+    private var openAction: some View {
+        if let onOpen {
+            Button(L10n.t("shortcut.expand"), action: onOpen)
+        }
+    }
+
     @ViewBuilder
     private var outwardAction: some View {
         if item.outwardURL != nil {
             Button(item.outwardName) { openOutward() }
+        }
+    }
+
+    // MARK: - Whoever wrote it
+
+    /// Whoever wrote this post, where the row names somebody. Nothing where it does not, which is
+    /// what makes the face a picture rather than a dead control on such a row.
+    var person: DummyPerson? { DummyPerson(item) }
+
+    /// Whether a press on the face or the name goes anywhere — both halves in one place, so the
+    /// picture, the letters and the spoken action cannot come to disagree about it.
+    private var opensPerson: Bool { onOpenPerson != nil && person != nil }
+
+    /// The press itself. Named rather than written inline at three call sites, for the reason
+    /// `openOutward` is named: a control wired inside a `View` body is a control no test can
+    /// press, and this milestone has shipped three of them wired to the wrong thing.
+    private func openPerson() {
+        guard let person, let onOpenPerson else { return }
+        onOpenPerson(person)
+    }
+
+    /// What opening them is called, to a pointer and to a listener alike: their own name, in a
+    /// sentence of ours. A bare "Open" beside forty faces says which verb and never which person.
+    static func spokenPerson(_ person: DummyPerson) -> String {
+        String(format: L10n.t("item.person.open"), person.name.isEmpty ? person.handle ?? "" : person.name)
+    }
+
+    /// Opening them, as a reader using VoiceOver reaches it.
+    ///
+    /// **A named action and not a button they land on.** The headline is `.combine`d into one
+    /// element, so the two buttons inside it are not separately reachable — a face wired only as
+    /// a `Button` would be a control that exists for a pointer and for nobody else, which is the
+    /// defect this file records shipping three times.
+    @ViewBuilder
+    private var personAction: some View {
+        if opensPerson, let person {
+            Button(Self.spokenPerson(person)) { openPerson() }
+        }
+    }
+
+    /// Whatever is handed in, made pressable where there is somebody to open and left exactly as
+    /// it was where there is not.
+    ///
+    /// **Nothing is hidden and nothing is relabelled.** What goes through here is the face and
+    /// the author's own name, and the name is most of what the headline says out loud — a wrapper
+    /// that took it out of the tree would buy a press at the price of a row that no longer names
+    /// its author. `.plain` keeps the letters and the picture exactly as they were drawn, so the
+    /// control is a press and not a new appearance.
+    ///
+    /// The pointer is told whose page this is; a listener is told by `personAction`, which is the
+    /// one announced on the combined element a reader actually lands on.
+    @ViewBuilder
+    private func pressingPerson(_ content: some View) -> some View {
+        if opensPerson, let person {
+            Button(action: openPerson) { content }
+                .buttonStyle(.plain)
+                .help(Self.spokenPerson(person))
+        } else {
+            content
         }
     }
 }
@@ -1027,7 +1293,13 @@ private struct WayOut: ViewModifier {
 private struct DummyMarkButton: View {
     let symbol: String
     let count: Int?
-    let labelKey: String
+    /// The name of the control, already resolved.
+    ///
+    /// **A string and not a key**, since #106: an act's mark is named for what a press will do
+    /// *and* for where the last press got to — "Boost, on its way" — and that is a sentence built
+    /// from two facts rather than one word looked up. `ItemActs.spoken` builds it; the marks that
+    /// are still this device's own pass `L10n.t` of their key and read exactly as they did.
+    let label: String
     let on: Bool
     /// True on every row but the one being read. Emphasis only — the control is always
     /// here, always the same size, and always reachable.
@@ -1049,7 +1321,7 @@ private struct DummyMarkButton: View {
                     .frame(width: glyph, height: glyph)
                 if let count {
                     Text(String(count))
-                        .font(ShellType.reading)
+                        .shellFont(.reading)
                         .frame(minWidth: countWidth, alignment: .leading)
                 }
             }
@@ -1059,8 +1331,8 @@ private struct DummyMarkButton: View {
         .buttonStyle(.plain)
         .foregroundStyle(tint)
         .animation(.easeInOut(duration: 0.15), value: quiet)
-        .help(L10n.t(labelKey))
-        .accessibilityLabel(L10n.t(labelKey))
+        .help(label)
+        .accessibilityLabel(label)
         .accessibilityAddTraits(on ? .isSelected : [])
     }
 

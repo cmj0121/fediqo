@@ -13,6 +13,7 @@ struct TimelineDraft: Identifiable, Equatable {
     let id: TimelineID
     let isNew: Bool
     var name: String
+    var desc: String
     var rules: [Rule]
     /// Where among the reader's timelines it goes, 0 being first after All and Trends.
     var position: Int
@@ -23,6 +24,7 @@ struct TimelineDraft: Identifiable, Equatable {
         id = UUID()
         isNew = true
         name = ""
+        desc = ""
         rules = []
         position = places - 1
         self.places = places
@@ -32,6 +34,7 @@ struct TimelineDraft: Identifiable, Equatable {
         id = timeline.id
         isNew = false
         name = timeline.name
+        desc = timeline.desc ?? ""
         rules = timeline.rules
         self.position = position
         self.places = places
@@ -69,11 +72,36 @@ struct ShellToast: Equatable {
 }
 
 /// The stream as last drawn, and what it was drawn from.
+extension TimelineDefinition {
+    /// Whether any rule reads a post's words or its author, which is what needs the folded text.
+    /// All and Trends read none, so drawing or searching them folds nothing.
+    var readsText: Bool {
+        rules.contains { $0.kind.tag == .keyword || $0.kind.tag == .author }
+    }
+}
+
 struct DrawnTimeline {
     struct Key: Equatable {
         let definition: TimelineDefinition
         let notesRevision: Int
         let latest: LatestDate?
+    }
+
+    let key: Key
+    let items: [DummyItem]
+}
+
+/// One person's page as last drawn, and what it was drawn from.
+///
+/// **Keyed on every name `DummyPerson.wrote(_:)` reads**, not on `DummyPerson.id` alone: the id
+/// joins the handle *or* the name, so a person known by a handle and a stranger whose bare name
+/// spells the same would share one — and one page's posts would be drawn on the other's.
+struct HeldByPerson {
+    struct Key: Equatable {
+        let host: String
+        let handle: String?
+        let name: String
+        let notesRevision: Int
     }
 
     let key: Key
@@ -109,13 +137,41 @@ extension ShellSession {
         let definition = definition(of: currentTimeline)
         let key = DrawnTimeline.Key(definition: definition, notesRevision: notesRevision, latest: latest)
         if let drawnTimeline, drawnTimeline.key == key { return drawnTimeline.items }
-        let readsText = definition.rules.contains { $0.kind.tag == .keyword || $0.kind.tag == .author }
         let items = currentTimeline.items(
-            from: notes, among: written, index: readsText ? textIndex : TextIndex([]), latest: latest
+            from: notes, among: written, index: definition.readsText ? textIndex : TextIndex([]), latest: latest
         )
         drawnTimeline = DrawnTimeline(key: key, items: items)
         timelineEvaluations += 1
         return items
+    }
+
+    /// What this device holds of one person, newest first — `DummyPerson.held(of:in:)`, kept
+    /// until the notes change, because the page and the keys each read it on every redraw and
+    /// every one of those used to walk everything held.
+    func heldPosts(of person: DummyPerson) -> [DummyItem] {
+        let key = HeldByPerson.Key(
+            host: person.host, handle: person.handle, name: person.name, notesRevision: notesRevision
+        )
+        if let drawnPerson, drawnPerson.key == key { return drawnPerson.items }
+        let items = DummyPerson.held(of: person, in: notes)
+        drawnPerson = HeldByPerson(key: key, items: items)
+        return items
+    }
+
+    /// What the open search finds in the timeline in front (#145), or nothing while none is open.
+    ///
+    /// **One call for the list and the keys.** The pane draws this and `j`, `k` and Return walk
+    /// it; two readers each spelling the timeline, the notes and the text index out for
+    /// themselves would be two answers to "what did the search find" that could come apart.
+    func searched(_ search: ShellSearch, latest: LatestDate?) -> [DummyItem]? {
+        search.items(
+            in: definition(of: currentTimeline),
+            text: textIndex,
+            from: notes,
+            revision: notesRevision,
+            sources: sources,
+            latest: latest
+        )
     }
 
     func definition(of query: TimelineQuery) -> TimelineDefinition {
@@ -124,16 +180,18 @@ extension ShellSession {
 
     /// A tab's name: a written timeline's own, a built-in's from the strings.
     func name(of query: TimelineQuery) -> String {
-        guard case .written(let id) = query, let timeline = written.first(where: { $0.id == id }) else {
-            return query.name
-        }
-        return timeline.name
+        query.name(among: written)
     }
 
-    /// The line beside the tabs.
+    /// The line beside the tabs. Empty description keeps the generated rule line, so a
+    /// timeline kept before descriptions still has one.
     func rule(of query: TimelineQuery) -> String {
         guard case .written = query else { return query.rule }
-        return L10n.count("timeline.rule.written", definition(of: query).rules.count)
+        let definition = definition(of: query)
+        if let desc = definition.desc?.trimmingCharacters(in: .whitespacesAndNewlines), !desc.isEmpty {
+            return desc
+        }
+        return L10n.count("timeline.rule.written", definition.rules.count)
     }
 
     /// Whether a rule of this query names something this device no longer holds. Asked for every
@@ -201,7 +259,9 @@ extension ShellSession {
     func commit(_ draft: TimelineDraft) {
         guard draft.canSave, !timelinesUnreadable else { return }
         var timelines = written.filter { $0.id != draft.id }
-        let timeline = TimelineDefinition(id: draft.id, name: draft.trimmedName, rules: draft.rules)
+        let timeline = TimelineDefinition(
+            id: draft.id, name: draft.trimmedName, rules: draft.rules, desc: draft.desc
+        )
         timelines.insert(timeline, at: min(draft.position, timelines.count))
         keep(timelines)
         editing = nil

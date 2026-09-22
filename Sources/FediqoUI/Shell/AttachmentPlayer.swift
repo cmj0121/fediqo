@@ -57,6 +57,18 @@ final class ShellPlayback {
         playing.here(url, of: post, on: stage) == nil ? nil : player
     }
 
+    /// The player for a row's slot, where that row's card is the thing that is playing — the card
+    /// its deck is showing. There is at most one in the app, so at most one row ever gets it
+    /// back. **One reading for every list a row is drawn in**: the stream, a conversation and
+    /// somebody's page.
+    func rowPlayer(for item: DummyItem, decks: ShellDecks) -> AVPlayer? {
+        player(
+            for: ShellPlaying.playable(decks.showing(item.attachments, of: item.id)),
+            of: item.id,
+            on: .row
+        )
+    }
+
     @discardableResult
     func toggle(_ url: URL?, of post: String, on stage: ShellPlaying.Stage) -> Bool {
         var next = playing
@@ -162,7 +174,7 @@ struct AttachmentPlayer: View {
     private var badge: some View {
         if let mark {
             Image(systemName: mark)
-                .font(ShellType.mark.weight(.medium))
+                .shellFont(.mark, weight: .medium)
                 .foregroundStyle(ShellChrome.overPicture)
                 .padding(ShellSpace.tight)
                 .background(Circle().fill(ShellChrome.scrim))

@@ -67,7 +67,7 @@ struct AttachmentKeysTests {
         for (character, command) in Self.keys {
             let line = DummyShortcut.all.first { $0.commands == [command] }
             #expect(line?.keys == [String(character)])
-            #expect(line?.group == .timeline)
+            #expect(line?.group == .read)
         }
     }
 

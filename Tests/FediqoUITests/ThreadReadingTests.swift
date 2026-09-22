@@ -64,11 +64,12 @@ struct ThreadReadingTests {
     private static func post(
         pid: Int = 1,
         body: String = "",
+        quoted: [DiscuzQuotation] = [],
         avatar: URL? = nil
     ) -> DiscuzPost {
         DiscuzPost(
             pid: pid, tid: tid, floor: 1, author: "tinbox",
-            handle: "@tinbox@\(host)", body: body, avatarURL: avatar
+            handle: "@tinbox@\(host)", body: body, quoted: quoted, avatarURL: avatar
         )
     }
 
@@ -164,6 +165,155 @@ struct ThreadReadingTests {
     }
     #endif
 
+    // MARK: - What the opening post quoted — #104
+
+    /// **The gap #94 left, stated as a fact about the cache rather than about a screenshot.**
+    ///
+    /// Core has kept a quotation out of the words and kept it rather than dropping it since #94,
+    /// and `ForumReplyRow` has drawn every reply's since F6. Nothing read it back for the *first*
+    /// post of a topic, so a thread that opened by answering another drew the answer and never
+    /// what it answered — while the reply under it, quoting the same person, drew both.
+    ///
+    /// The nesting is asserted here as well as in Core because it is what the pane draws: one
+    /// level per rule, which is the whole of what #94 settled about how a quotation looks.
+    @Test("A topic's first post keeps what it quoted, and its own words stay its own")
+    func theOpeningPostKeepsWhatItQuoted() async throws {
+        // One page, two posts, each quoting: the opening post quotes an argument that already
+        // has a quotation inside it, and the reply below quotes the opening post. Both halves
+        // come off the one page D30 already fetches.
+        let http = FixtureHTTP([
+            Self.threadAddress(): .text(#"""
+            <div class="plc" id="pid9101">
+              <ul class="authi"><li>1<sup>#</sup></li>
+              <li><a href="home.php?mod=space&amp;uid=8">tinbox</a></li></ul>
+              <div class="message">
+                <div class="quote"><blockquote>沙洲电子 发表于 2017-12-15 17:49<br />
+                  <div class="quote"><blockquote>hexi 发表于 2017-12-15 17:00<br />
+                  论坛运维都要花钱</blockquote></div>
+                  这个确实该支持一下</blockquote></div>
+                那就每人出十块
+              </div>
+            </div>
+            <div class="plc" id="pid9102">
+              <ul class="authi"><li>2<sup>#</sup></li>
+              <li><a href="home.php?mod=space&amp;uid=9">greenpine</a></li></ul>
+              <div class="message">
+                <div class="quote"><blockquote>tinbox 发表于 2017-12-15 18:00<br />
+                那就每人出十块</blockquote></div>
+                同意楼上
+              </div>
+            </div>
+            """#),
+        ])
+        let posts = ForumPosts(http: http)
+        let ref = Self.ref()
+
+        // Nothing before the page lands, which is the same answer as "quoted nothing" — and is
+        // meant to be: there is nothing to draw either way.
+        #expect(posts.quoted(of: ref).isEmpty)
+        await posts.fetch(ref)
+
+        let outer = try #require(posts.quoted(of: ref).first)
+        #expect(posts.quoted(of: ref).count == 1, "one quotation at the top, however deep it goes")
+        #expect(outer.words.hasPrefix("沙洲电子 发表于 2017-12-15 17:49"))
+        #expect(outer.words.contains("这个确实该支持一下"))
+        // Nested where the page nested it, each level keeping its own words.
+        let inner = try #require(outer.quoting.first)
+        #expect(inner.words.contains("论坛运维都要花钱"))
+        #expect(!outer.words.contains("论坛运维都要花钱"))
+        #expect(inner.quoting.isEmpty)
+
+        // Told apart from the author's own words: the band's words are what this person wrote,
+        // and nothing of what the other two did.
+        #expect(posts.reading(ref) == .words("那就每人出十块"))
+
+        // And the reply below it quotes too, off the same page — the two halves this issue is
+        // about being the same shape at last.
+        await posts.fetchReplies(ref)
+        guard case .loaded(let replies) = posts.standing(of: ref) else {
+            Issue.record("the replies did not arrive: \(posts.standing(of: ref))")
+            return
+        }
+        let reply = try #require(replies.first)
+        #expect(try #require(reply.quoted.first).words.contains("那就每人出十块"))
+        #expect(reply.body == "同意楼上")
+    }
+
+    /// **The rule, and it is a sentence about this app rather than about a layout**: a timeline
+    /// row is one height whatever the post it stands for quoted, and the pane is what the reader
+    /// opened in order to read.
+    ///
+    /// The band takes the row's own `inFull` rather than reading it back out of `lines == nil`,
+    /// so the fitting and the decision to apply it stay two things — the split `wordLines`
+    /// already makes, asserted from both ends here.
+    @Test("The quotation is the pane's, and a row in a list draws none")
+    func onlyTheOpenedTopicDrawsTheQuotation() {
+        let quoted = [DiscuzQuotation(words: "甲 说过", quoting: [DiscuzQuotation(words: "乙 说过")])]
+        #expect(ForumPostBand.quotations(quoted, inFull: true) == quoted)
+        #expect(ForumPostBand.quotations(quoted, inFull: false).isEmpty)
+        // A post that quoted nothing draws nothing in either place, which is today's row exactly.
+        #expect(ForumPostBand.quotations([], inFull: true).isEmpty)
+        #expect(ForumPostBand.quotations([], inFull: false).isEmpty)
+
+        // The one flag the band is handed is the one the row keeps, so the two cannot disagree:
+        // the quotation is drawn in exactly the place the words lose their line limit.
+        let posts = ForumPosts()
+        #expect(Self.row(Self.item(), posts: posts, inFull: true).wordLines == nil)
+        #expect(Self.row(Self.item(), posts: posts).wordLines != nil)
+
+        // Introduced with the sentence a reply's quotation is introduced with, because it is the
+        // same view: one string in every language, not a second one for the opening post.
+        for language in [DummyLanguage.english, .taiwanese] {
+            let said = L10n.t("thread.reply.quoted", language: language)
+            #expect(said != "thread.reply.quoted", "the quotation label is missing in \(language)")
+            #expect(said.contains("%@"), "\(language) has nowhere to put the quoted words")
+        }
+    }
+
+    #if os(macOS)
+    /// **Both halves at once, measured**, the way `thePaneGrowsAndTheListDoesNot` measures the
+    /// words: the quotation is on screen in the pane, and the timeline row did not move.
+    ///
+    /// The second assertion is the acceptance line this unit is most able to break — the band is
+    /// shared between the two surfaces, and a quotation drawn unconditionally would land on every
+    /// row of a list at once. Only relations are asserted, for that test's reason: the ink a
+    /// system font reports is a fact about the machine.
+    @Test("A quoted first post grows the pane and leaves the timeline row where it was")
+    func theQuotationMovesThePaneAndNotTheRow() {
+        let item = Self.item()
+        let key = ForumPosts.Key(Self.ref(), .opening)
+        let words = "那就每人出十块"
+
+        let plain = ForumPosts()
+        plain.keep([Self.post(body: words)], for: key, startedAt: 0)
+        let quoting = ForumPosts()
+        quoting.keep(
+            [Self.post(body: words, quoted: [DiscuzQuotation(words: String(
+                repeating: "沙洲电子 发表于 2017-12-15 17:49，这个确实该支持一下。", count: 40
+            ))])],
+            for: key, startedAt: 0
+        )
+
+        // The list, unmoved: one height, whatever the post it stands for quoted. Two rules hold
+        // that and both are wanted — `mainBox` pins the band at `Box.thumb` and clips it, and
+        // `quotations(_:inFull:)` means there is nothing drawn there to clip.
+        let listedPlain = Self.height(item, posts: plain)
+        let listedQuoting = Self.height(item, posts: quoting)
+        #expect(listedPlain == listedQuoting,
+                "the timeline row moved: \(listedPlain) vs \(listedQuoting)")
+
+        // The pane: the quotation is drawn, so the row is taller by what it takes.
+        let openedPlain = Self.height(item, posts: plain, inFull: true)
+        let openedQuoting = Self.height(item, posts: quoting, inFull: true)
+        #expect(openedQuoting > openedPlain,
+                "the quotation was not drawn: \(openedQuoting) vs \(openedPlain)")
+
+        // And a first post that quoted nothing is the row it always was — the pane's short post
+        // still measures the listed row, which is what it measured before any of this.
+        #expect(openedPlain == listedPlain)
+    }
+    #endif
+
     // MARK: - "The user's avatar does not loaded"
 
     /// **The row's avatar arrives with its opening post, and costs no request of its own.**
@@ -243,7 +393,11 @@ struct ThreadReadingTests {
         let still = (0..<ForumWaiting.plates).map { ForumWaiting.glow($0, at: 0) }
         #expect(still[0] == ForumWaiting.lit)
         #expect(still.dropFirst().allSatisfy { $0 < ForumWaiting.lit })
-        #expect(Set(still).count == ForumWaiting.plates, "three plates, three brightnesses")
+        // Two brightnesses, not three: a third of a pass either side of the lit plate is the same
+        // point of the cosine, so plates 1 and 2 are equal and differ only by the ~2.8e-16 that a
+        // `Set(still).count == 3` was quietly passing on.
+        #expect(abs(still[1] - still[2]) < 1e-9,
+                "the still frame is one lit plate and two equally banked ones")
     }
 
     /// Bounded from **both** sides, which is this branch's first convention — a ceiling asserted
@@ -348,7 +502,7 @@ struct ThreadReadingTests {
     func theGuideSaysWhatSDoesNow() throws {
         let line = try #require(DummyShortcut.all.first { $0.commands == [.reveal] })
         #expect(line.keys == ["s"])
-        #expect(line.group == .timeline)
+        #expect(line.group == .read)
         // One line for one key. `s` having two jobs must not become two lines claiming two keys.
         #expect(DummyShortcut.all.filter { $0.keys == ["s"] }.count == 1)
 

@@ -105,7 +105,7 @@ struct RemoveTests {
 
         // The premise, stated rather than assumed: a Remove that started with nothing measures
         // nothing at all.
-        #expect(session.queries.map(\.id) == ["all"])
+        #expect(session.queries.map(\.id) == ["all", "trends"])
         #expect(await session.emoji.catalogue(host: alpha)?.count == 1)
         #expect(pictures.holding(host: alpha).count == 1)
 
@@ -211,10 +211,10 @@ struct RemoveTests {
         #expect(addressable == [beta])
     }
 
-    /// A post a microblog and a forum both carry is one row each, and each row is drawn in the
-    /// shape of the server it came through.
-    @Test("A post two servers carry is a row from each, with the shape each of them is")
-    func aSharedPostIsARowFromEachServer() async {
+    /// A post two servers carry was one row each until #114; it is one row now, naming both, and
+    /// each copy under it is still drawn in the shape of the server it came through.
+    @Test("A post two servers carry is one row, and each copy keeps the shape of its server")
+    func aSharedPostIsOneRowOfEachServersCopies() async {
         let session = ShellSession(http: FixtureHTTP(), pictures: ShellPictures(http: FixtureHTTP()))
         let micro = Source(host: alpha, kind: .mastodon)
         let forum = Source(host: beta, kind: .discourse)
@@ -225,10 +225,11 @@ struct RemoveTests {
         )
 
         let items = TimelineQuery.all.items(from: session.notes, latest: nil)
-        #expect(items.count == 2)
-        #expect(Set(items.map(\.source.host)) == [alpha, beta])
-        #expect(items.first { $0.source.host == alpha }?.source.kind == .microblog)
-        #expect(items.first { $0.source.host == beta }?.source.kind == .forum)
+        #expect(items.count == 1)
+        let copies = items.first?.copies ?? []
+        #expect(Set(copies.map(\.source.host)) == [alpha, beta])
+        #expect(copies.first { $0.source.host == alpha }?.source.kind == .microblog)
+        #expect(copies.first { $0.source.host == beta }?.source.kind == .forum)
     }
 
     // MARK: - The order

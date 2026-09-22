@@ -102,6 +102,9 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
         // impersonation this project refuses, and it would also buy nothing: measured against
         // `challenge.example`, a full Safari agent and WebKit's bare one reached exactly the same place.
         configuration.applicationNameForUserAgent = Fediqo.name
+        // The forum's own "remember me", ticked on every login form this browser shows — #153.
+        // Without it a sign-in made by hand is answered with a cookie that ends when the app does.
+        configuration.userContentController.addUserScript(Self.remembering)
         view = WKWebView(frame: .init(x: 0, y: 0, width: 1024, height: 768),
                          configuration: configuration)
         super.init()
@@ -248,6 +251,43 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
         return credential.isComplete ? credential : nil
     }
 
+    /// Starts or stops handing back what the reader types into the forum's own login form, at the
+    /// moment they submit it — #153. See `ForumLoginScript.watchTyped`.
+    ///
+    /// **On only while the reader has the switch on**, which is where D23's honest sentence
+    /// changes. Turned off, the handler goes, so a listener already in the page finds nobody to
+    /// hand anything to; the script is taken out of documents still to come.
+    ///
+    /// Put into the document already on screen as well as into those to come, because the reader
+    /// turns the switch on with the form already in front of them.
+    func watchTyped(_ on: Bool, into typed: @escaping @MainActor (ForumCredential) -> Void) {
+        let content = view.configuration.userContentController
+        content.removeScriptMessageHandler(forName: ForumLoginScript.typedMessage, contentWorld: .defaultClient)
+        content.removeAllUserScripts()
+        content.addUserScript(Self.remembering)
+        guard on else { return }
+        let host = host
+        content.add(
+            TypedHandler { username, password in
+                typed(ForumCredential(host: host, username: username, password: password))
+            },
+            contentWorld: .defaultClient,
+            name: ForumLoginScript.typedMessage
+        )
+        content.addUserScript(WKUserScript(
+            source: ForumLoginScript.watchTyped, injectionTime: .atDocumentEnd,
+            forMainFrameOnly: true, in: .defaultClient
+        ))
+        view.evaluateJavaScript(ForumLoginScript.watchTyped, in: nil, in: .defaultClient) { _ in }
+    }
+
+    static var remembering: WKUserScript {
+        WKUserScript(
+            source: ForumLoginScript.remember, injectionTime: .atDocumentEnd,
+            forMainFrameOnly: true, in: .defaultClient
+        )
+    }
+
     /// The forum's own sign-in page, which is where the reader is sent and where an automatic
     /// attempt reads its `formhash` and `loginhash` from.
     var loginURL: URL? {
@@ -378,6 +418,30 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
         withError error: any Error
     ) {
         MainActor.assumeIsolated { failure = error }
+    }
+}
+
+/// Where `ForumLoginScript.watchTyped` hands the pair. A class of its own because the protocol
+/// wants an `NSObject`. **Nothing here prints, logs or keeps the message**: it is passed on and
+/// dropped, and a body that is not two strings is dropped unread.
+private final class TypedHandler: NSObject, WKScriptMessageHandler {
+    let typed: @MainActor (String, String) -> Void
+
+    init(_ typed: @escaping @MainActor (String, String) -> Void) {
+        self.typed = typed
+    }
+
+    func userContentController(
+        _ userContentController: WKUserContentController, didReceive message: WKScriptMessage
+    ) {
+        MainActor.assumeIsolated {
+            guard let body = message.body as? [String: Any],
+                  let username = body["username"] as? String,
+                  let password = body["password"] as? String,
+                  !username.isEmpty, !password.isEmpty
+            else { return }
+            typed(username, password)
+        }
     }
 }
 

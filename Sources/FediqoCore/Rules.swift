@@ -63,8 +63,8 @@ public enum RuleKind: Hashable, Sendable {
 /// One rule of a timeline.
 ///
 /// **Made only through the factories**, which refuse what cannot mean anything: an empty keyword,
-/// a handle with no instance, a board or list for every source, and public, trends or home on a
-/// forum. `id` is a parameter so a stored rule comes back as the same rule.
+/// a handle with no instance, a board or list for every source, public or home on a forum, and
+/// trends on a forum that ranks nothing. `id` is a parameter so a stored rule comes back as the same rule.
 public struct Rule: Hashable, Sendable, Identifiable {
     public let id: UUID
     public var effect: RuleEffect
@@ -116,8 +116,9 @@ public struct Rule: Hashable, Sendable, Identifiable {
         return Rule(id: id, effect: effect, kind: .keyword(text, in: scope))
     }
 
-    /// A category. A board or a list is one source's, so it is never for every source; public,
-    /// trends and home are Mastodon's, so never for a source `sources` holds as something else.
+    /// A category. A board or a list is one source's, so it is never for every source; public
+    /// and home are Mastodon's, so never for a source `sources` holds as something else; trends
+    /// are also a Discuz!'s (`ProtocolKind.hasTrends`), and never a Discourse's.
     public static func category(
         _ category: Category,
         in scope: RuleScope,
@@ -129,8 +130,11 @@ public struct Rule: Hashable, Sendable, Identifiable {
         switch (category, scope) {
         case (.board, .every), (.list, .every):
             return nil
-        case (.public, .source(let host)), (.trends, .source(let host)), (.home, .source(let host)):
+        case (.public, .source(let host)), (.home, .source(let host)):
             if let source = sources.first(where: { $0.host == host }), !source.kind.hasTimelines { return nil }
+        // A Discuz! has Trends — its ranking lists — without having the other two.
+        case (.trends, .source(let host)):
+            if let source = sources.first(where: { $0.host == host }), !source.kind.hasTrends { return nil }
         default:
             break
         }
@@ -152,11 +156,15 @@ public struct TimelineDefinition: Hashable, Sendable, Identifiable {
     public let id: TimelineID
     public var name: String
     public var rules: [Rule]
+    /// Empty or whitespace is none, so a kept timeline never invents a description.
+    public var desc: String?
 
-    public init(id: TimelineID = UUID(), name: String, rules: [Rule]) {
+    public init(id: TimelineID = UUID(), name: String, rules: [Rule], desc: String? = nil) {
         self.id = id
         self.name = name
         self.rules = rules
+        let trimmed = desc?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        self.desc = trimmed.isEmpty ? nil : trimmed
     }
 
     /// Everything held. No rules.
@@ -335,7 +343,8 @@ public struct CompiledTimeline: Sendable {
         if case .source(let host) = rule.kind.scope, host != source.host { return false }
         guard case .category(let category, _) = rule.kind else { return true }
         switch category {
-        case .public, .trends, .home, .list: return source.kind.hasTimelines
+        case .public, .home, .list: return source.kind.hasTimelines
+        case .trends: return source.kind.hasTrends
         case .board: return source.kind.isForum
         }
     }

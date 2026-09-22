@@ -20,7 +20,11 @@ public enum DummyItemKind: String, Sendable, Hashable {
 }
 
 /// Who the author wrote it for, where the dummy said so. Nothing means the shape has no such idea.
-public enum DummyAudience: String, Sendable, Hashable {
+///
+/// `CaseIterable` so that what is drawn for an audience can be asserted over all of them rather
+/// than over the four somebody remembered to write down: an audience added here and left out of
+/// the colour ramp is then a test that stops, not a mark that quietly takes a neighbour's hue.
+public enum DummyAudience: String, Sendable, Hashable, CaseIterable {
     case everyone
     case unlisted
     case followers
@@ -64,14 +68,17 @@ public struct DummyCounts: Hashable, Sendable {
     }
 }
 
-/// What this device has done to a dummy item. Remote marks are still local in this mock.
+/// What this device has done to a dummy item, and kept to itself.
+///
+/// **The favourite left this type with #107.** It was a list kept in Fediqo that nobody else could
+/// see and no other app agreed with; it is now `DummyItem.favourited`, which is what the source
+/// says. What is left here is what really is this device's own: a bookmark, which is a different
+/// thing on a source that has both and is not #107's, and what the reader chose to keep.
 public struct DummyMarks: Hashable, Sendable {
-    public var favourited: Bool
     public var bookmarked: Bool
     public var kept: Bool
 
-    public init(favourited: Bool = false, bookmarked: Bool = false, kept: Bool = false) {
-        self.favourited = favourited
+    public init(bookmarked: Bool = false, kept: Bool = false) {
         self.bookmarked = bookmarked
         self.kept = kept
     }
@@ -83,6 +90,13 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     public let id: String
     /// The item's id as the source sent it.
     public let noteID: String
+    /// The id **this post's own server** gives it — `Note.statusID`, where the row has one.
+    ///
+    /// **Carried rather than looked up.** A row that cannot be named on its server offers none of
+    /// #54's acts, and the mark is drawn per row on every pass: a search back through the session's
+    /// notes to answer it would be a scan of everything held, once a row, for a fact the row was
+    /// built from. Nothing on a forum post and on a row kept before 0.2.0 learned it.
+    public var statusID: String?
 
     public let source: DummySource
     public let author: String
@@ -103,6 +117,13 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     public let workRelated: Bool
     public let answering: DummyAnswering
     public let boostedBy: String?
+    /// Whether the reader has boosted it, **as the source said** — `Note.boosted`, carried rather
+    /// than derived, so the mark under the post and the row in the store cannot come to disagree.
+    /// Nothing where the source never said, which is what makes the mark absent rather than off.
+    public var boosted: Bool?
+    /// Whether the reader has favourited it, as the source said — `Note.favourited`, in `boosted`'s
+    /// shape and for its reasons (#107).
+    public var favourited: Bool?
     public let audience: DummyAudience?
     /// The author's picture, where the source sent an address for one.
     public let avatarURL: URL?
@@ -117,6 +138,13 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// go to.
     public let url: URL?
     public let attachments: [Attachment]
+    /// A forum thread's opening post as this device last read it — `Note.opening`, carried so a
+    /// row reached before this run draws its words without asking (#154). Nothing elsewhere.
+    public var opening: ForumOpening?
+    /// What this post arrived through — `Note.categories`, carried so a forum row knows whether it
+    /// was ranked and which board it is in, which is what decides whether reaching it may read
+    /// its opening post (`ForumPosts.readsWhenReached`). Empty on a fixture.
+    public var categories: Set<FediqoCore.Category> = []
     /// Whether the author covered it, or nothing where the source never said. Carried as the
     /// three answers it has, not folded down to two — see `covered`.
     public let sensitive: Bool?
@@ -131,6 +159,27 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     public let emojis: [CustomEmoji]
     public let counts: DummyCounts
     public let marks: DummyMarks
+    /// Every other copy of this post this device holds, from the other sources that carried it,
+    /// in the order they arrived (#114). Empty for a post held from one source, which is most.
+    ///
+    /// **The row is the first copy and these ride along; nothing is blended.** Each is drawn as
+    /// its own source carried it — its own words, its own cover, its own pictures — because two
+    /// copies of one post can differ (an edit that reached one server and not the other, an
+    /// emoji one server spells differently), and a reader who wants to know why is owed both as
+    /// they came rather than one this app assembled out of the two. What counts as the same post
+    /// is `SamePost`'s answer, a fact the sources stated; this only carries it.
+    public private(set) var otherCopies: [DummyItem] = []
+
+    /// Every source this post came through, the row's own first. One for most rows.
+    public var sources: [DummySource] { [source] + otherCopies.map(\.source) }
+
+    /// Every copy, the row's own first, each as its source carried it — what opening the row
+    /// shows (#114). A copy here carries no copies of its own.
+    public var copies: [DummyItem] {
+        var own = self
+        own.otherCopies = []
+        return [own] + otherCopies
+    }
 
     /// Whether the row fills its slot. One answer for the whole post, because the slot is one
     /// square however many things came attached.
@@ -207,6 +256,14 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         return url
     }
 
+    /// The page opening this row reads, where opening it reads a page rather than a
+    /// conversation: a forum's ranked blog, whose words the ranking list gave and whose page is
+    /// the rest of it. Read in the app's own reader (#34), in place on a Mac (#169) — never by a
+    /// parser of this app's, and never before the reader opens it. Nothing for every other row.
+    public var page: URL? {
+        DiscuzBlogRow.isBlog(noteID) ? outwardURL : nil
+    }
+
     /// What the way out is called, wherever it is drawn: the act, and the host it leads to.
     ///
     /// **`thread.open` reused, not twinned.** The key is named for the pane that first needed it
@@ -235,9 +292,32 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// Not the live stream. Named queries do not read this.
     public static let stored: [DummyItem] = []
 
-    /// One note as root; conversation fetch is out of this branch.
+    /// This post alone — **what a thread reads as before its conversation is here, and where
+    /// there is no conversation to be had.**
+    ///
+    /// Not a placeholder and not a failure: a forum thread's answers are `ForumPosts`', a post
+    /// nobody answered really is one post, and a microblog thread that has not landed yet says
+    /// so for itself. The pane draws whichever of the three it is; this is the shape they share.
     public func dummyConversation() -> DummyConversation {
         DummyConversation(ancestors: [], post: self, descendants: [])
+    }
+
+    /// Every copy of one post, drawn as one row: the first copy, naming the rest (#114).
+    ///
+    /// `copies` are one post's by `SamePost.gathered` and in the order they arrived, which is the
+    /// store's; the first is the row. **The row's identity is the first copy's own row**, so a
+    /// post held from one source keeps exactly the id it always had, and whatever is keyed by a
+    /// row — the lamp, a mark, a place — acts on the merged row once.
+    init(merging copies: [Note]) {
+        self.init(copies[0])
+        otherCopies = copies.dropFirst().map(DummyItem.init)
+    }
+
+    /// Notes, in the order they are to be drawn, as rows: one per post, however many sources
+    /// carried it. The one place a list of held notes becomes a list of rows, so the timeline and
+    /// the search cannot come to disagree about when two copies are one.
+    static func merged(_ notes: [Note]) -> [DummyItem] {
+        SamePost.gathered(notes).map(DummyItem.init(merging:))
     }
 
     /// One stored note, drawn as a row.
@@ -256,10 +336,15 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         workRelated = false
         answering = Self.answering(note.reply)
         boostedBy = note.boostedBy
+        boosted = note.boosted
+        favourited = note.favourited
+        statusID = note.statusID
         audience = note.audience.map(DummyAudience.init)
         avatarURL = note.avatarURL
         url = note.url
         attachments = note.attachments
+        opening = note.opening
+        categories = note.categories
         sensitive = note.sensitive
         spoiler = note.spoiler
         emojis = note.emojis
@@ -365,7 +450,60 @@ public struct DummyConversation: Hashable, Sendable {
     }
 }
 
+extension DummyConversation {
+    /// The conversation a source handed back, around the post the reader opened.
+    ///
+    /// **The post itself is the one the pane was already given, not the one the thread carries.**
+    /// A source's answer to "the thread around this post" may or may not include the post, and
+    /// where it does it is a second copy of a row this device already holds — with its own marks,
+    /// its own deck and its own id. Drawing that copy would move the lamp off the row the reader
+    /// pressed. So `root` stands, and anything in either half that *is* the root is dropped.
+    ///
+    /// **Ancestors keep the source's order and are not nested.** They are one chain by
+    /// construction — each answers the one before it — so a rail per generation says nothing a
+    /// reader cannot already see, and `DummyConversation.depth(of:)` reads their depth off their
+    /// position for exactly that reason.
+    ///
+    /// **Answers are nested by who they answer, and the chain is walked in one pass.** An answer
+    /// whose parent has already been placed is one deeper than it; an answer whose parent this
+    /// device cannot name — no `inReplyToId`, or a parent the source did not send — is a direct
+    /// answer to the post. That fallback is the honest one: the source says it belongs to this
+    /// thread, and the only place left to put it is under the post. It is also what keeps the
+    /// pass linear, since the order a server walks its own tree already puts parents first.
+    ///
+    /// `rootID` is the id **the post's own server** gave the post — `Note.statusID`. It is passed
+    /// in rather than read off `root.statusID`, although the row now carries one, because the
+    /// caller has the id the thread was actually *fetched* by and this must be the same string:
+    /// a conversation nested against one id and asked for under another would place every answer
+    /// at the first generation and look like a server that sends flat threads. Nothing where it
+    /// could not be known, and then every answer does stand at the first generation, which is the
+    /// honest fallback rather than an accident.
+    public static func around(
+        _ root: DummyItem, rootID: String?, ancestors: [Note], descendants: [Note]
+    ) -> DummyConversation {
+        var depths: [String: Int] = [:]
+        if let rootID { depths[rootID] = 0 }
+        var entries: [DummyThreadEntry] = []
+        for note in descendants where note.key.rowID != root.id {
+            let parent = note.reply?.inReplyToId.flatMap { depths[$0] }
+            let depth = (parent ?? 0) + 1
+            if let id = note.statusID { depths[id] = depth }
+            entries.append(DummyThreadEntry(item: DummyItem(note), depth: depth))
+        }
+        return DummyConversation(
+            ancestors: ancestors.filter { $0.key.rowID != root.id }.map(DummyItem.init),
+            post: root,
+            descendants: entries
+        )
+    }
+}
+
 public struct DummyThreadEntry: Hashable, Sendable {
     public let item: DummyItem
     public let depth: Int
+
+    public init(item: DummyItem, depth: Int) {
+        self.item = item
+        self.depth = depth
+    }
 }

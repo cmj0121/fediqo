@@ -13,9 +13,9 @@ import Testing
 struct ViewerTests {
     // MARK: The layer order
 
-    @Test("The order is viewer, shortcuts, thread, search, selection")
+    @Test("The order is viewer, shortcuts, person, thread, link, search, selection")
     func theOrderIsTheOrder() {
-        #expect(DummyLayer.allCases == [.viewer, .shortcuts, .thread, .search, .selection])
+        #expect(DummyLayer.allCases == [.viewer, .shortcuts, .person, .thread, .link, .search, .selection])
     }
 
     @Test("A dismissing press closes the outermost thing that is open, and only that")
@@ -77,6 +77,263 @@ struct ViewerTests {
         }
     }
 
+    /// #99's half of the order, pressed rather than reasoned about. The face is not a key, so it
+    /// is not a `DummyCommand` — `Shell.pressFace` is the press, and it asks the product's own
+    /// guard rather than restating it.
+    @Test("A face pressed inside a conversation opens over it, and leaving gives it back")
+    func aFaceOpensOverAConversationAndGivesItBack() {
+        let shell = Shell(items: Self.list, selected: Self.a)
+        #expect(shell.press(.expandPost))
+        #expect(shell.threadOpen)
+        let ada = DummyPerson(Self.list[0])
+        #expect(ada != nil)
+        #expect(shell.pressFace(ada!))
+        #expect(shell.personOpen == ada)
+        // The conversation is still on the walk underneath — only the step in front is open
+        // (#122) — and leaving takes the person off it.
+        #expect(shell.walk.depth == 2)
+        #expect(shell.press(.dismiss))
+        #expect(shell.personOpen == nil)
+        #expect(shell.threadOpen)
+        // `q` says the same thing about a person a second press says about the thread.
+        #expect(shell.press(.back))
+        #expect(!shell.threadOpen)
+    }
+
+    /// #122, pressed: a row on somebody's page opens the conversation it belongs to, and leaving
+    /// that conversation gives the page back, standing on the row it was opened from.
+    @Test("A row on somebody's page opens its conversation, and leaving gives the page back on it")
+    func aRowOnAPersonsPageOpensItsConversation() {
+        let shell = Shell(items: Self.list, selected: Self.a)
+        let ada = DummyPerson(Self.list[0])!
+        #expect(shell.pressFace(ada))
+        // Walking their posts with `j`, and pressing the one the lamp landed on.
+        shell.selected = Self.c
+        #expect(shell.pressRow(Self.c))
+        #expect(shell.walk.standing == .thread(Self.c))
+        #expect(shell.personOpen == nil)
+        #expect(shell.press(.dismiss))
+        #expect(shell.personOpen == ada)
+        #expect(shell.selected == Self.c)
+    }
+
+    /// And a face inside that conversation still opens the person, however far in the reader
+    /// has gone — the press #99 exists for is not taken off any row to pay for #122.
+    @Test("A face inside a conversation opened from a page still opens, and leaving gives the conversation back")
+    func aFaceInsideThatConversationStillOpens() {
+        let shell = Shell(items: Self.list, selected: Self.a)
+        let ada = DummyPerson(Self.list[0])!
+        #expect(shell.pressFace(ada))
+        #expect(shell.pressRow(Self.b))
+        #expect(shell.pressFace(ada))
+        #expect(shell.personOpen == ada)
+        #expect(shell.walk.depth == 3)
+        #expect(shell.press(.back))
+        #expect(shell.walk.standing == .thread(Self.b))
+        #expect(shell.selected == Self.b)
+    }
+
+    /// Leaving unwinds in the order the reader walked in, and the last leaving returns to the
+    /// timeline on the row the first press was made from — with nothing left on the walk.
+    @Test("Leaving unwinds in the order walked, and ends on the row the first press was made from")
+    func leavingUnwindsInTheOrderWalked() {
+        let shell = Shell(items: Self.list, selected: Self.d)
+        let ada = DummyPerson(Self.list[0])!
+        #expect(shell.pressFace(ada))
+        #expect(shell.pressRow(Self.a))
+        #expect(shell.pressFace(ada))
+        #expect(shell.pressRow(Self.c))
+        #expect(shell.pressRow(Self.b))
+        var seen: [ShellStep?] = []
+        while shell.walk.depth > 0 {
+            #expect(shell.press(.dismiss))
+            seen.append(shell.walk.standing)
+        }
+        #expect(seen == [.thread(Self.c), .person(ada), .thread(Self.a), .person(ada), nil])
+        #expect(shell.selected == Self.d)
+        #expect(shell.walk.isEmpty)
+        // One more press gives back the lamp, which is where a press to leave always ended.
+        #expect(shell.press(.dismiss))
+        #expect(shell.selected == nil)
+    }
+
+    /// A step onto what the reader is already standing on is not a step, so leaving never takes
+    /// two presses to do one thing.
+    @Test("Pressing the face of the page already open, or the thread already open, is not a step")
+    func aStepOntoTheSameStepIsNone() {
+        let shell = Shell(items: Self.list, selected: Self.a)
+        let ada = DummyPerson(Self.list[0])!
+        #expect(shell.pressFace(ada))
+        #expect(!shell.pressFace(ada))
+        #expect(shell.pressRow(Self.a))
+        #expect(!shell.pressRow(Self.a))
+        #expect(shell.walk.depth == 2)
+    }
+
+    // MARK: A link read in place (#169)
+
+    /// timeline → conversation → link → back to the conversation → back to the timeline, by the
+    /// two keys that leave.
+    @Test("q and Escape leave a link read in place, then the conversation it was pressed in")
+    func aLinkIsLeftLikeAnyStep() {
+        let shell = Shell(items: Self.list, selected: Self.d)
+        #expect(shell.press(.expandPost))
+        #expect(shell.walk.standing == .thread(Self.d))
+        shell.selected = Self.b
+        let page = URL(string: "https://example.test/a")!
+        #expect(shell.pressLink(page))
+        #expect(shell.walk.openedLink == page)
+        #expect(!shell.threadOpen, "only the step in front is open")
+        #expect(shell.press(.back))
+        #expect(shell.walk.standing == .thread(Self.d))
+        #expect(shell.selected == Self.b)
+        #expect(shell.press(.dismiss))
+        #expect(shell.walk.isEmpty)
+        #expect(shell.selected == Self.d)
+    }
+
+    @Test("A link pressed under the viewer is not a step")
+    func noLinkStepUnderTheViewer() {
+        let shell = Shell(items: Self.list, selected: Self.a)
+        #expect(shell.press(.viewAttachment))
+        #expect(shell.viewing != nil)
+        #expect(!shell.pressLink(URL(string: "https://example.test/a")!))
+        #expect(shell.walk.isEmpty)
+    }
+
+    // MARK: `p` — the face's press, by key (#140)
+
+    /// #140's first line: the lamp on a row, one key, and that row's author is in front.
+    @Test("p opens whoever wrote the lit row, and Escape gives the row back")
+    func pOpensTheAuthorAndEscapeGivesTheRowBack() {
+        let shell = Shell(items: Self.list, selected: Self.c)
+        #expect(shell.press(.openAuthor))
+        #expect(shell.personOpen == DummyPerson(Self.list[2]))
+        // Their page is walked with `j` like any other list; leaving has to give back the row
+        // the key was pressed on, not wherever the lamp was left on the page.
+        shell.selected = Self.a
+        #expect(shell.press(.dismiss))
+        #expect(shell.personOpen == nil)
+        #expect(shell.walk.isEmpty)
+        #expect(shell.selected == Self.c)
+    }
+
+    /// The leave key says what Escape says, as it does for a page a finger opened.
+    @Test("q leaves a page p opened exactly as it leaves one a face opened")
+    func qLeavesAsTheFaceDoes() {
+        let byKey = Shell(items: Self.list, selected: Self.b)
+        let byFace = Shell(items: Self.list, selected: Self.b)
+        #expect(byKey.press(.openAuthor))
+        #expect(byFace.pressFace(DummyPerson(Self.list[1])!))
+        #expect(byKey.walk == byFace.walk)
+        #expect(byKey.press(.back))
+        #expect(byFace.press(.back))
+        #expect(byKey.walk == byFace.walk)
+        #expect(byKey.selected == Self.b)
+        #expect(byFace.selected == Self.b)
+    }
+
+    /// Inside a conversation the lamp is on somebody else's answer as often as not, and `p`
+    /// means that answer's author, not the conversation's.
+    @Test("Inside a conversation p opens the lit answer's author, and leaving gives the answer back")
+    func pInsideAConversationMeansTheLitAnswer() {
+        let grace = Self.item("g", author: "Grace", handle: "@grace@first.example")
+        let g = NoteKey(host: "first.example", id: "g").rowID
+        let shell = Shell(items: Self.list + [grace], selected: Self.a)
+        #expect(shell.press(.expandPost))
+        shell.selected = g
+        #expect(shell.press(.openAuthor))
+        #expect(shell.personOpen == DummyPerson(grace))
+        #expect(shell.personOpen != DummyPerson(Self.list[0]))
+        #expect(shell.press(.dismiss))
+        #expect(shell.walk.standing == .thread(Self.a))
+        #expect(shell.selected == g)
+    }
+
+    /// On somebody's own page the key opens nothing, moves nothing and closes nothing — and a
+    /// press refused is the whole of what "says nothing wrong happened" can mean here: no page,
+    /// no toast, and the lamp exactly where it was.
+    @Test("On somebody's page p opens nothing and moves nothing")
+    func pOnAPersonsPageDoesNothing() {
+        let shell = Shell(items: Self.list, selected: Self.a)
+        #expect(shell.press(.openAuthor))
+        let before = shell.walk
+        shell.selected = Self.c
+        #expect(!shell.press(.openAuthor))
+        #expect(shell.walk == before)
+        #expect(shell.walk.depth == 1)
+        #expect(shell.selected == Self.c)
+        // Nothing lit on the page is refused the same way: the key does not light the first row
+        // on its way to refusing.
+        shell.selected = nil
+        #expect(!shell.press(.openAuthor))
+        #expect(shell.selected == nil)
+    }
+
+    /// A conversation opened *from* somebody's page is a conversation, and in a conversation a
+    /// face is a press — so the key is too.
+    @Test("In a conversation opened from somebody's page, p opens again")
+    func pInAConversationFromAPageOpens() {
+        let shell = Shell(items: Self.list, selected: Self.a)
+        #expect(shell.press(.openAuthor))
+        #expect(shell.pressRow(Self.b))
+        #expect(shell.press(.openAuthor))
+        #expect(shell.walk.depth == 3)
+        #expect(shell.press(.back))
+        #expect(shell.walk.standing == .thread(Self.b))
+        #expect(shell.selected == Self.b)
+    }
+
+    /// With nothing lit, the first press lights the first row and the second opens its author —
+    /// `b`, `f` and `v`'s shape, so a key whose first press moves nothing is not a key that
+    /// looks broken.
+    @Test("With nothing lit, p lights the first row, and the next p opens its author")
+    func pWithNothingLitLightsFirst() {
+        let shell = Shell(items: Self.list, selected: nil)
+        #expect(shell.press(.openAuthor))
+        #expect(shell.selected == Self.a)
+        #expect(shell.personOpen == nil)
+        #expect(shell.press(.openAuthor))
+        #expect(shell.personOpen == DummyPerson(Self.list[0]))
+    }
+
+    /// The entry rule, from the key's side: not under the guide, and not under the viewer.
+    @Test("p under the guide or the viewer opens nobody, and leaves them alone")
+    func pDoesNotOpenUnderTheGuideOrTheViewer() {
+        let guide = Shell(items: Self.list, selected: Self.a)
+        #expect(guide.press(.showShortcuts))
+        #expect(!guide.press(.openAuthor))
+        #expect(guide.personOpen == nil)
+        #expect(guide.shortcutsOpen)
+        let viewer = Shell(items: Self.list, selected: Self.a)
+        #expect(viewer.press(.viewAttachment))
+        #expect(!viewer.press(.openAuthor))
+        #expect(viewer.personOpen == nil)
+        #expect(viewer.viewing == Self.a)
+    }
+
+    /// A row that names nobody has no face to press, so it has no key either.
+    @Test("On a row that names nobody, p opens nothing")
+    func pOnARowThatNamesNobody() {
+        let nobody = Self.item("n", author: "", handle: "")
+        let n = NoteKey(host: "first.example", id: "n").rowID
+        #expect(DummyPerson(nobody) == nil)
+        let shell = Shell(items: [nobody], selected: n)
+        #expect(!shell.press(.openAuthor))
+        #expect(shell.walk.isEmpty)
+    }
+
+    /// The entry rule, from the press's own side: a face under the guide opens nobody, and does
+    /// not close the guide to make room for itself.
+    @Test("A face under the guide opens nobody, and leaves the guide alone")
+    func aFaceDoesNotOpenUnderTheGuide() {
+        let shell = Shell(items: Self.list, selected: Self.a)
+        #expect(shell.press(.showShortcuts))
+        #expect(!shell.pressFace(DummyPerson(Self.list[0])!))
+        #expect(shell.personOpen == nil)
+        #expect(shell.shortcutsOpen)
+    }
+
     @Test("? under an open viewer does nothing, and leaves the viewer alone")
     func theGuideDoesNotOpenUnderTheViewer() {
         let shell = Shell(items: Self.list, selected: Self.a)
@@ -98,11 +355,14 @@ struct ViewerTests {
     func tabUnderTheGuideRotatesTheGuide() {
         let shell = Shell(items: Self.list, selected: Self.a)
         #expect(shell.press(.showShortcuts))
-        #expect(shell.shortcutTab == .timeline)
+        #expect(shell.shortcutTab == .move)
         #expect(shell.press(.nextTab))
-        #expect(shell.shortcutTab == .app)
+        #expect(shell.shortcutTab == .read)
         #expect(shell.press(.nextTab))
-        #expect(shell.shortcutTab == .timeline)
+        #expect(shell.shortcutTab == .act)
+        #expect(shell.press(.previousTab))
+        #expect(shell.shortcutTab == .read)
+        #expect(shell.press(.previousTab))
         #expect(shell.press(.previousTab))
         #expect(shell.shortcutTab == .app)
         #expect(!shell.threadOpen)
@@ -180,7 +440,7 @@ struct ViewerTests {
     func leavingTheViewerFirst() {
         for command in [DummyCommand.dismiss, .back] {
             let shell = Shell(items: Self.list, selected: Self.a)
-            shell.threadOpen = true
+            shell.pressRow(Self.a)
             #expect(shell.press(.viewAttachment))
             #expect(shell.press(command))
             #expect(shell.viewing == nil)
@@ -276,7 +536,7 @@ struct ViewerTests {
     func aStaleViewerIsNotALayer() {
         let shell = Shell(items: Self.list, selected: Self.a)
         shell.viewing = "nobody"
-        shell.threadOpen = true
+        shell.pressRow(Self.a)
         // `q` must give back the conversation, not pretend to close a viewer nobody can see.
         #expect(shell.press(.back))
         #expect(shell.viewing == nil)
@@ -357,13 +617,15 @@ struct ViewerTests {
     private static func item(
         _ id: String,
         attachments: [FediqoCore.Attachment] = [],
-        spoiler: String? = nil
+        spoiler: String? = nil,
+        author: String = "Ada",
+        handle: String = "@ada@first.example"
     ) -> DummyItem {
         DummyItem(Note(
             id: id,
             source: Source(host: "first.example", kind: .mastodon),
-            author: "Ada",
-            handle: "@ada@first.example",
+            author: author,
+            handle: handle,
             body: "words",
             postedAt: Date(timeIntervalSince1970: 1_700_000_000),
             categories: [.public],
@@ -410,10 +672,18 @@ struct ViewerTests {
         let items: [DummyItem]
         var selected: String?
         var viewing: String?
-        var threadOpen = false
+        /// How far the reader has walked out from the stream, as the root holds it (#122).
+        ///
+        /// **One stack, and the real type.** The harness used to keep a `Bool` for the thread
+        /// and an optional person beside it, which could not express a conversation opened from
+        /// somebody's page at all — a harness describing a smaller world than the code, which is
+        /// the fault `isOpen` is an exhaustive switch to prevent one level up.
+        var walk = ShellWalk()
+        var threadOpen: Bool { walk.openedThread != nil }
+        var personOpen: DummyPerson? { walk.openedPerson }
         var shortcutsOpen = false
         var searchOpen = false
-        var shortcutTab = DummyShortcutGroup.timeline
+        var shortcutTab = DummyShortcutGroup.move
         var decks = ShellDecks()
         var playing = ShellPlaying()
 
@@ -431,14 +701,43 @@ struct ViewerTests {
             switch layer {
             case .viewer: viewedItem != nil
             case .shortcuts: shortcutsOpen
+            case .person: personOpen != nil
             case .thread: threadOpen
+            case .link: walk.openedLink != nil
             case .search: searchOpen
             case .selection: selected != nil
             }
         }
 
+        /// A press on a row that is already lit, and the root's own guard before it (#122).
+        @discardableResult
+        func pressRow(_ id: String) -> Bool {
+            guard DummyCommand.canWalk(whenOpen: openLayers) else { return false }
+            selected = id
+            return walk.walk(to: .thread(id), from: selected)
+        }
+
         var openLayers: Set<DummyLayer> {
             Set(DummyLayer.allCases.filter(isOpen))
+        }
+
+        /// A press on a face or a name, which has no key and so is not a `DummyCommand` (#99).
+        ///
+        /// **The entry rule and nothing else**, which is the whole of what `openPerson` adds to
+        /// it once the place is the timeline — and the place is the half `PersonTests` asks about
+        /// directly. `canOpen` is read here for the reason every other branch of this harness
+        /// reads it: the order lives in one list and no surface re-expresses it.
+        @discardableResult
+        func pressFace(_ person: DummyPerson) -> Bool {
+            guard DummyCommand.canWalk(whenOpen: openLayers) else { return false }
+            return walk.walk(to: .person(person), from: selected)
+        }
+
+        /// A link pressed in a post's words on a Mac (#169): the root's own rule for whether it
+        /// is a step of the walk.
+        @discardableResult
+        func pressLink(_ url: URL) -> Bool {
+            FediqoRootView.placeLink(url, on: &walk, from: selected, place: .timeline, open: openLayers)
         }
 
         /// What the app does when the reader walks to another page.
@@ -484,10 +783,16 @@ struct ViewerTests {
                     return decks.toggleCover(item.id)
                 }
             case .expandPost:
-                guard selected != nil,
-                      DummyCommand.canOpen(.thread, whenOpen: openLayers) else { return false }
-                threadOpen = true
-                return true
+                guard let selected else { return false }
+                return pressRow(selected)
+            // `p` (#140): the root's guard, then the lit row, then the face's own press. The
+            // same three steps `FediqoRootView.openAuthor` takes, in the same order.
+            case .openAuthor:
+                guard DummyCommand.canOpenAuthor(whenOpen: openLayers) else { return false }
+                return onFocusedItem { item in
+                    guard let person = DummyPerson(item) else { return false }
+                    return pressFace(person)
+                }
             case .showShortcuts:
                 if shortcutsOpen {
                     shortcutsOpen = false
@@ -510,7 +815,13 @@ struct ViewerTests {
                     guard command == .dismiss else { return false }
                     shortcutsOpen = false
                     return true
-                case .thread: threadOpen = false; return true
+                // A face is left by both keys, exactly as a conversation is: the page is
+                // something the reader opened, and both `q` and `Escape` take it away. One step
+                // back, whichever kind of step it was — the walk says which (#122).
+                case .person, .thread, .link:
+                    guard let left = walk.back() else { return false }
+                    selected = left.lamp
+                    return true
                 case .search:
                     guard command == .dismiss else { return false }
                     searchOpen = false

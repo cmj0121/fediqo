@@ -7,9 +7,11 @@
 "shell.usage.title" = "Usage";
 "shell.usage.summary" = "What this device is keeping";
 "shell.preferences.title" = "Preferences";
-"shell.preferences.summary" = "Language, theme, and type";
+"shell.preferences.summary" = "Language, theme, type, and this build";
 "shell.timeline.disabled" = "Add a source on Account first";
 "shell.notices.disabled" = "Notices need a signed-in source";
+"shell.places.fold" = "Places";
+"shell.places.fold.help" = "Places: %@";
 "account.rail.empty" = "Add a source";
 "account.add.title" = "Add a source";
 "account.hero.promise" = "Your timeline. Your rules.";
@@ -44,12 +46,34 @@
 "compose.disabled.summary" = "Compose needs a signed-in source";
 "compose.cancel" = "Cancel";
 "compose.post" = "Post";
+"compose.body" = "Your post";
+"compose.source" = "Source";
+"compose.visibility" = "Visibility";
+"compose.visibility.public" = "public";
+"compose.visibility.unlisted" = "unlisted";
+"compose.visibility.private" = "private";
+"compose.visibility.direct" = "direct";
+"compose.limit" = "%d / %d";
+"compose.none.title" = "Nothing to write to";
+"compose.none.detail" = "None of the sources you are signed in to can be written to from here.";
+"answer.title" = "Answer";
+"answer.to" = "Answering %@";
+"answer.goesTo" = "Goes to %@";
+"answer.reach" = "Who it reaches";
+"answer.wider" = "This reaches further than the post it answers.";
+"answer.body" = "Your answer";
+"answer.send" = "Send";
+"withdraw.title" = "Take this post back?";
+"withdraw.detail" = "“%@” is taken back from %@. On most sources the answers other people wrote under it go with it. It does not come back.";
+"withdraw.confirm" = "Take it back";
 
 "shortcut.title" = "Keys";
 "shortcut.note" = "These work while you are not writing.";
 "shortcut.close" = "Close";
-"shortcut.group.timeline" = "Timeline";
-"shortcut.group.app" = "Every tab";
+"shortcut.group.move" = "Move";
+"shortcut.group.read" = "Read";
+"shortcut.group.act" = "Act";
+"shortcut.group.app" = "App";
 "shortcut.landing" = "Reload from the launch";
 "shortcut.tabs" = "Rotate this page's tabs";
 "shortcut.pages" = "Rotate the places";
@@ -63,6 +87,11 @@
 "shortcut.compose" = "New post";
 "shortcut.list" = "This list";
 "shortcut.back" = "Back to the list";
+"shortcut.boost" = "Boost this post to its source, or take the boost back";
+"shortcut.favourite" = "Favourite this post on its source, or take the favourite back";
+"shortcut.answer" = "Answer the post you are on, from inside its conversation";
+"shortcut.withdraw" = "Take back the post you are on, where you wrote it";
+"shortcut.person" = "Open whoever wrote the post you are on";
 "shortcut.reload" = "Reload this timeline, or the open thread";
 "shortcut.dismiss" = "Close what is in front, or unfocus";
 "shortcut.search" = "Search the posts this device holds";
@@ -86,21 +115,35 @@
 "timeline.latest" = "Up to %@";
 "timeline.latest.label" = "Showing posts up to %@; newer posts are hidden";
 "timeline.reload.progress" = "Reloading…";
+"timeline.reload.piece" = "Reloading %1$@ %2$@";
+"timeline.reload.host" = "Reloading %@";
+"timeline.reload.more" = "%1$@ +%2$d";
 "timeline.reload.failed" = "Could not reload %@.";
+"timeline.reload.unspoken" = "%1$@ now answers as %2$@, which Fediqo does not read. What it brought here is still here.";
 "timeline.reload.stopped" = "Reload stopped.";
 "thread.reload.unfindable" = "This post can't be reloaded: sign in to %@ to find it there.";
 "thread.reload.notfound" = "This post can't be reloaded: %@ did not find it.";
 "thread.reload.scope" = "This post can't be reloaded: sign in to %@ again to let Fediqo find it.";
 "timeline.empty.title" = "Nothing has arrived";
-"timeline.empty.detail" = "Public notes from the sources you added land here, newest first.";
+"timeline.empty.detail" = "Add a source on Account. Public notes from it land here, newest first.";
 "timeline.empty.trends.title" = "Nothing is trending";
 "timeline.empty.trends.detail" = "Notes your sources hand over as trending land here, in the order they were posted.";
+"timeline.empty.trends.answered.detail" = "Your sources were asked, and none handed over a trending note.";
+"timeline.empty.held.title" = "Nothing held yet";
+"timeline.empty.held.detail" = "This device has not kept a note from your sources. Add a source on Account, or reload to ask them.";
+"timeline.empty.answered.title" = "Nothing came back";
+"timeline.empty.answered.detail" = "Your sources were asked, and had no notes to keep. Another source is what would fill this.";
+"timeline.empty.rules.title" = "This timeline lets nothing through";
+"timeline.empty.rules.detail" = "A rule of yours hid what this device holds: %@";
+"timeline.empty.latest.title" = "Nothing on or before that day";
+"timeline.empty.latest.detail" = "Newer notes are held back by the latest date in Preferences.";
 "shortcut.edit" = "Write or change this timeline";
 "timeline.edit.title" = "Edit timeline";
 "timeline.new.title" = "New timeline";
 "timeline.edit.fixed" = "All and Trends can't be edited. To add your own timeline, press + — or Tab to it and press e.";
 "timeline.unreadable" = "Your timelines on this device can't be read here. They are left untouched, and nothing new is saved over them.";
 "timeline.name.placeholder" = "Name this timeline";
+"timeline.desc.placeholder" = "A short description, optional";
 "timeline.done" = "Done";
 "timeline.place" = "%1$d of %2$d of your timelines";
 "timeline.earlier" = "‹ Earlier";
@@ -165,11 +208,11 @@
 "editor.keys.pick" = "pick";
 "editor.keys.scope" = "scope";
 "editor.keys.confirm" = "add";
-"search.placeholder" = "Search what this device holds: * any run, ? one character";
-"search.label" = "Search the posts this device holds";
+"search.placeholder" = "Search %@: * any run, ? one character";
+"search.label" = "Search the posts %@ shows";
 "search.found" = "%d found";
-"search.empty.title" = "Nothing held matches";
-"search.empty.detail" = "Only posts already on this device are searched. Try fewer characters, or * for any run of them.";
+"search.empty.title" = "Nothing in %@ matches";
+"search.empty.detail" = "Only the posts this timeline shows, already on this device, are searched. Try fewer characters, or * for any run of them.";
 "search.indexing.title" = "Searching…";
 "search.indexing.detail" = "Reading the posts this device holds, once, so each key only matches.";
 
@@ -194,18 +237,24 @@
 "item.covered.show" = "Show it";
 "item.covered.label" = "Press s to show it";
 
-"item.act.reply" = "Reply";
-"item.act.reblog" = "Reblog";
+"item.act.boost" = "Boost";
+"item.act.unboost" = "Take the boost back";
+"item.act.onItsWay" = "on its way";
+"item.act.failed" = "did not arrive. Press to try again.";
+"item.act.through" = "%1$@ through %2$@";
+"item.act.no.protocol" = "read only here";
+"item.act.no.signIn" = "sign in to act here";
+"item.act.no.turnedAway" = "this source turned a write away";
+"item.act.no.unnameable" = "this post cannot be named on its server";
+"item.act.unfavourite" = "Take the favourite back";
+"item.act.withdraw" = "Take back what you wrote";
+"item.act.answer" = "Answer";
 "item.act.quote" = "Quote";
 "item.act.favourite" = "Favourite";
 "item.act.bookmark" = "Bookmark";
 "item.act.kept" = "Kept";
 "item.act.more" = "More";
-"item.toast.reply" = "Reply stays on this device.";
-"item.toast.reblog" = "Reblog stays on this device.";
 "item.toast.quote" = "A quote opens the composer. Not this session.";
-"item.toast.favourite.on" = "Favourited, on this device.";
-"item.toast.favourite.off" = "Favourite cleared.";
 "item.toast.bookmark.on" = "Bookmarked, dummy.";
 "item.toast.bookmark.off" = "Bookmark cleared.";
 "item.toast.kept.on" = "Kept on this device.";
@@ -254,6 +303,46 @@
 "prefs.latest" = "Stop at a latest date";
 "prefs.latest.date" = "Latest date";
 "prefs.latest.footer" = "Every timeline shows nothing posted after the end of this day, in this device's time zone. Newer posts stay on this device; turn this off to see them again.";
+
+"prefs.tab.choices" = "Settings";
+"prefs.tab.build" = "This Fediqo";
+"prefs.tab.work" = "In flight";
+"work.title" = "Asking the sources now";
+"work.none" = "Nothing is running. This device is not asking any source for anything right now.";
+"work.footer" = "Only what is running this moment, and it leaves the list as it ends. Looking here sends nothing and stops nothing, and shows no more of a request than the name of the host it goes to.";
+"work.elapsed.seconds" = "%d s";
+"work.elapsed.minutes" = "%1$d min %2$d s";
+"work.count" = "%d at once";
+"work.count.one" = "1 at once";
+"work.purpose.timeline" = "Reading a timeline";
+"work.purpose.conversation" = "Reading a conversation";
+"work.purpose.forumPost" = "Reading a forum post";
+"work.purpose.forumReplies" = "Reading a forum post's replies";
+"work.purpose.lists" = "Reading your lists";
+"work.purpose.joining" = "Looking at a server to add";
+"work.purpose.boards" = "Reading a forum's boards";
+"work.purpose.directory" = "Listing servers to join";
+"work.purpose.serverCheck" = "Asking a server about itself";
+"work.purpose.picture" = "Pictures";
+"work.purpose.emoji" = "Custom emoji";
+"work.purpose.signInCheck" = "Checking a sign-in";
+"work.purpose.signIn" = "Signing in";
+"work.purpose.signOut" = "Signing out";
+"work.purpose.write" = "Sending what you wrote or pressed";
+"about.title" = "This Fediqo";
+"about.version" = "Version";
+"about.build" = "Build";
+"about.source" = "Source";
+"about.source.none" = "Not recorded: this build was made without its source written into it";
+"about.changes" = "Changes";
+"about.changes.none" = "None: built exactly as committed";
+"about.changes.uncommitted" = "Built with changes not yet committed";
+"about.missing" = "Not recorded";
+"about.line" = "%@: %@";
+"about.copy" = "Copy all";
+"about.copied" = "Copied";
+"about.copy.hint" = "Puts everything in this section on the clipboard as text, for a report.";
+"about.footer" = "Exactly what this build was stamped with when it was made. Nothing here asks the network.";
 
 "prefs.cache" = "Held on this device";
 "prefs.cache.footer" = "Most of this is read again from each server: its emoji names by themselves after a day, and the rest when you ask for it. Two things a sign-in leaves are kept on this device and nowhere else. A forum you signed in to keeps its session cookies here, so you are still signed in the next time Fediqo opens; they are not backed up and do not follow your Apple account. A password you asked Fediqo to save is kept in this device's Keychain and is never copied to iCloud. Clear deletes both along with everything else.";
@@ -306,6 +395,25 @@
 "forum.stop.refused" = "This forum did not accept the saved username and password.";
 "forum.stop.unreadable" = "This forum's answer could not be read. Sign in below and see what it says.";
 "forum.stop.unreachable" = "This forum did not answer. Try below.";
+"forum.stop.keychain" = "The username and password kept for this forum could not be read back: %@. Sign in below.";
+"forum.lapsed.first" = "Not signed in again at launch: nothing kept for this forum could be used. Sign in to read what its members read.";
+"forum.lapsed.wall" = "Not signed in again at launch: something in front of this forum wants to check the browser. Sign in to answer it.";
+"forum.lapsed.captcha" = "Not signed in again at launch: this forum is asking for a verification code. Sign in to answer it.";
+"forum.lapsed.question" = "Not signed in again at launch: this account has a security question. Sign in to answer it.";
+"forum.lapsed.refused" = "Not signed in again at launch: this forum did not accept the kept username and password. Sign in to try again.";
+"forum.lapsed.unreadable" = "Not signed in again at launch: this forum's answer could not be read. Sign in to see what it says.";
+"forum.lapsed.unreachable" = "Not signed in again at launch: this forum did not answer. Sign in to try again.";
+"forum.lapsed.keychain" = "Not signed in again at launch: the kept username and password could not be read back: %@. Sign in to try again.";
+"forum.keychain.locked" = "the Keychain is locked (status %d)";
+"forum.keychain.entitlement" = "this build of the app is not allowed to use the Keychain (status %d)";
+"forum.keychain.denied" = "access to the Keychain was refused (status %d)";
+"forum.keychain.missing" = "there is no Keychain on this device to keep it in (status %d)";
+"forum.keychain.other" = "the Keychain refused (status %d)";
+"forum.keychain.incomplete" = "only part of a username and password was there to keep";
+"forum.keychain.unreadable" = "what the Keychain holds for it is not something this app can read";
+"forum.unkept" = "Signed in, but your username and password were not kept: %@. You will be asked to sign in again after a relaunch.";
+"forum.unkept.nothing" = "nothing you typed could be read from the forum's page";
+"forum.unforgotten" = "The username and password kept for this forum could not be deleted: %@.";
 "prefs.password.held" = "Password held on this device";
 "prefs.password.forget" = "Forget it";
 "prefs.password.forget.label" = "Forget the password held for %@";
@@ -319,6 +427,7 @@
 "board.choose.threads" = "%d threads";
 "board.choose.posts" = "%d posts";
 "board.choose.unstated" = "This forum stated no figures for this board";
+"board.choose.kept" = "Boards you read that this list does not place";
 "board.choose.hint.on" = "Subscribe to this board";
 "board.choose.hint.off" = "Stop subscribing to this board";
 "board.unread.some" = "%d of the boards you picked could not be read, and were not subscribed to:";
@@ -340,6 +449,7 @@
    writing, which is why each is drawn in the row's quiet register. */
 "item.forum.coming" = "Loading the first post";
 "item.forum.withheld" = "This forum keeps this post for readers who are signed in.";
+"item.forum.unread" = "Read when you open it — its board is not one you read.";
 "item.forum.silent" = "There are no words in this post.";
 "item.forum.refused" = "This forum would not let this app read this thread.";
 "item.forum.unreadable" = "This forum answered, but there was no post this app could read.";
@@ -348,8 +458,14 @@
 
 /* Unit F6 — the rest of the topic. */
 "thread.replies.load" = "Load the replies";
+"thread.around.again" = "Try the thread again";
+"thread.around.unreachable" = "The thread around this post did not arrive.";
+"thread.around.refused" = "%@ would not let this app read the thread around this post.";
+"thread.around.unfindable" = "This post cannot be named on %@, so the thread around it cannot be read.";
 "thread.replies.loading" = "Loading the replies…";
 "thread.replies.none" = "Nobody has answered this one yet.";
+"thread.empty.title" = "Nothing under this post";
+"thread.empty.detail" = "Replies to it would land here.";
 "thread.replies.count" = "%d replies";
 "thread.reply.floor" = "#%d";
 "thread.reply.quoted" = "Quoted: %@";
@@ -413,6 +529,21 @@
 "account.sources.held"           = "What each one has left on this device is on Usage.";
 /* M1 tail rev 4 — the compact row. What the marks on a row mean, said once for the list. */
 "account.sources.marks"          = "A row carries only the marks its own server has: sign in, change boards or lists, clear what it left here, and remove it.";
+/* #69 — what may be done on a source, said on its row and explained once for the list. */
+"account.sources.writing"        = "A row also says what may be done on that source: read, read and write, or read only where the protocol has no writing in Fediqo at all. Write refused means a write was turned away; sign in to that source again.";
+"account.source.writing.never"   = "read only";
+"account.source.writing.read"    = "read";
+"account.source.writing.write"   = "read and write";
+"account.source.writing.refused" = "write refused";
+/* Said in the open, for as long as it is true, to a reader who agreed to something narrower. */
+"account.sources.writing.again"  = "Fediqo now asks to write as well as read when you sign in. %@ signed in before it did: reading there is exactly as it was, and Fediqo writes nothing. Choose below, without signing out first.";
+"account.sources.writing.again.choose" = "Choose what %@ may do";
+/* The choice itself, put before the server's own page opens. */
+"account.signin.ask.title"       = "Sign in to %@?";
+"account.signin.ask.detail"      = "Reading brings in your Home and your lists. Writing lets you post, reply, boost and favourite from Fediqo, and take any of them back. Reading is the same whichever you choose, and you can sign out at any time.";
+"account.signin.ask.read"        = "Sign in to read";
+"account.signin.ask.write"       = "Sign in to read and write";
+
 "account.source.boards"          = "%1$d boards: %2$@";
 "account.source.unread"          = "Its description could not be read.";
 "account.source.remove.label"    = "Remove %@ and everything it left here";
@@ -471,3 +602,39 @@
 "list.choose.done"                    = "Done";
 "list.choose.hint.on"                 = "Read this list";
 "list.choose.hint.off"                = "Stop reading this list";
+
+/* #34 — an address in somebody's post, and the two ways to follow it. */
+"link.open.here"                      = "Open %@ in Fediqo";
+"link.open.browser"                   = "Open %@ in your browser";
+"link.hint.pointer"                   = "Press to read it here. Control-click to open it in your browser.";
+"link.hint.touch"                     = "Press to read it here. Press and hold to open it in your browser.";
+"link.reader.label"                   = "%@, read inside Fediqo";
+"link.reader.browser"                 = "Open in your browser";
+"link.reader.close"                   = "Done";
+"link.reader.refused"                 = "That link goes somewhere Fediqo will not open. It was not followed.";
+"link.reader.back"                    = "Back";
+"link.reader.leaveHint"               = "Esc or q";
+"post.tag.spoken"                     = "hashtag %@";
+
+/* #64 — the one way of saying something is on its way. Spoken only: the plate itself is what a
+   reader sees, and it carries no words. */
+"shell.waiting"                       = "Loading…";
+
+/* #67 — what did not arrive, said in the place it would have taken. */
+"shell.failed"                        = "%@ did not answer.";
+"shell.failed.retry"                  = "Try again";
+
+"person.back" = "Back";
+"person.leaveHint" = "Esc or q";
+"person.through" = "Read through %@";
+"person.held" = "%d posts here";
+"person.held.one" = "%d post here";
+"person.none" = "Nothing of theirs has reached this device yet.";
+"item.person.open" = "Open %@";
+
+/* One post more than one source carried (#114). The row is drawn as the first; these name the rest. */
+"item.source.more" = "%1$@ +%2$d";
+"item.source.also" = "%1$@, also from %2$@";
+"item.source.join" = ", ";
+"thread.copies.title" = "As each source carried it";
+"thread.copies.from" = "From %@";

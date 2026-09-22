@@ -287,7 +287,7 @@ struct BoardChoiceTests {
         #expect(!session.notes.isEmpty)
 
         // All and Trends are the only timeline queries. Boards stay on the source.
-        #expect(session.queries.map(\.id) == ["all"])
+        #expect(session.queries.map(\.id) == ["all", "trends"])
         #expect(session.availability.allows(.timeline))
         #expect(session.choosing == nil)
         #expect(session.refuse == nil)
@@ -297,8 +297,9 @@ struct BoardChoiceTests {
     /// list to `all` and `trends` whatever it had joined, and a forum has no trending read — so
     /// that tab was permanently empty and there was no way for a reader to tell it from a quiet
     /// hour.
-    @Test("A forum is offered no Trends tab")
-    func aForumIsOfferedNoTrends() async {
+    /// A Discuz!'s ranking lists are its Trends, so a Discuz! alone is offered the tab.
+    @Test("A Discuz! is offered a Trends tab, for its ranking lists")
+    func aDiscuzIsOfferedTrends() async {
         let session = Self.session(Self.forumHTTP(
             index: .text(#"""
             <html><head><meta name="generator" content="Discuz! X5.0" /></head><body>
@@ -326,41 +327,47 @@ struct BoardChoiceTests {
         }
         await session.subscribe(offer.boards.filter { $0.fid == 33 })
 
-        #expect(!session.queries.contains { $0.id == "trends" })
+        #expect(session.queries.contains { $0.id == "trends" })
         // And the place is still open, which is the half that would have broken quietly: the
         // gate used to want both ids.
         #expect(session.availability.allows(.timeline))
         #expect(session.timelineID == .all)
     }
 
-    @Test("Every protocol is asked whether it has trends, and the two forums say no")
+    @Test("Every protocol is asked whether it has trends: a Discourse says no, a Discuz! yes")
     func trendsIsDecidedPerProtocol() {
         for kind in ProtocolKind.allCases {
             switch kind {
-            case .discourse, .discuz, .unknown:
+            case .discourse, .unknown:
                 #expect(!ShellSession.hasTrends(kind), "\(kind) should be offered no trends")
             case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
-                .gotosocial:
+                .gotosocial, .discuz:
                 #expect(ShellSession.hasTrends(kind), "\(kind) should be offered trends")
             }
         }
     }
 
-    /// **All and Trends are the only two queries of the store.** A forum is offered All alone —
-    /// it has no trending read — and a microblog beside it brings Trends back. Boards add
-    /// nothing to this list: they choose what a source fetches, not what the rail draws.
+    /// **All and Trends are the only two queries of the store.** A Discourse is offered All
+    /// alone — it has no trending read — and a microblog or a Discuz! beside it brings Trends
+    /// back. Boards add nothing to this list: they choose what a source fetches, not what the
+    /// rail draws.
     @Test("The queries are All, and Trends only where a source has one")
     func queriesAreAllAndTrends() {
         let session = Self.session(Self.forumHTTP(index: .fail))
+        let discourse = Source(host: "talk.example", kind: .discourse)
+        session.sources = [discourse]
+        session.rebuildQueries()
+        #expect(session.queries.map(\.id) == ["all"])
+
+        session.sources = [discourse, Source(host: "mastodon.example", kind: .mastodon)]
+        session.rebuildQueries()
+        #expect(session.queries.map(\.id) == ["all", "trends"])
+
         let forum = Source(
             host: "forum.example", kind: .discuz,
             boards: [BoardSubscription(fid: 33, name: "启动盘工具")]
         )
-        session.sources = [forum]
-        session.rebuildQueries()
-        #expect(session.queries.map(\.id) == ["all"])
-
-        session.sources = [forum, Source(host: "mastodon.example", kind: .mastodon)]
+        session.sources = [discourse, forum]
         session.rebuildQueries()
         #expect(session.queries.map(\.id) == ["all", "trends"])
     }
@@ -377,7 +384,7 @@ struct BoardChoiceTests {
         session.sources = [Source(host: "mastodon.example", kind: .mastodon)]
         session.rebuildQueries()
         session.timelineID = .trends
-        session.sources = [Source(host: "forum.example", kind: .discuz)]
+        session.sources = [Source(host: "talk.example", kind: .discourse)]
         session.rebuildQueries()
         #expect(session.timelineID == .all)
     }
@@ -413,7 +420,7 @@ struct BoardChoiceTests {
         }
         await session.subscribe(offer.boards.filter { $0.fid == 33 })
 
-        #expect(session.queries.map(\.id) == ["all"])
+        #expect(session.queries.map(\.id) == ["all", "trends"])
         #expect(session.timelineID == .all)
         #expect(!TimelineQuery.all.items(from: session.notes, latest: nil).isEmpty)
     }
@@ -466,7 +473,7 @@ struct BoardChoiceTests {
         // The one that read is subscribed; the one that did not is **not** — a board in the rail
         // whose timeline can never load is the same failure as a source that can never load.
         #expect(session.sources.first?.boards.map(\.fid) == [33])
-        #expect(session.queries.map(\.id) == ["all"])
+        #expect(session.queries.map(\.id) == ["all", "trends"])
 
         // And the reader is owed a sentence, because they picked it off a list this app drew.
         #expect(session.unread.map(\.board.fid) == [41])
@@ -641,10 +648,13 @@ struct BoardChoiceTests {
     /// — so the retry reads one rather than reusing whatever the refused look left behind.
     ///
     /// **What this test does not show, said so rather than implied:** that the second read goes
-    /// through the engine the sign-in built. This session holds no real engine, so `joiner(for:)`
-    /// falls back to the plain client and the two transports are indistinguishable from here.
-    /// That half is pinned Core-side by `PreviewTests.aPreviewSurvivesItsJoiner`, which runs the
-    /// press on a second `FixtureHTTP` and asserts the second one did the reading.
+    /// through the engine the sign-in built. A sign-in this run witnessed sends every read of the
+    /// host through the forum's browser (`ForumSessions.readTransport`), and a browser here would
+    /// be a `WKWebView` loading a real address — so once the sign-in is recorded it is forgotten
+    /// again, and `joiner(for:)` reads through the plain client. The door is pinned by
+    /// `ForumTransportTests.thePickerFollowsAKeptSignIn`, and the reading half Core-side by
+    /// `PreviewTests.aPreviewSurvivesItsJoiner`, which runs the press on a second `FixtureHTTP`
+    /// and asserts the second one did the reading.
     ///
     /// Pinned so it can fail: this calls `resumeAfterSignIn()` **once** and expects the boards.
     /// Wired to `add()`, as it was, the reader is left sitting on a preview and this goes red.
@@ -660,6 +670,8 @@ struct BoardChoiceTests {
         """#)))
         session.hostname = Self.host
         #expect(session.signInFinished(reached: true, host: Self.host), "the premise: a sign-in")
+        // The witnessed sign-in would send the retry through a real browser; see above.
+        await session.forums.forget(host: Self.host)
 
         await session.resumeAfterSignIn()
 
@@ -716,7 +728,7 @@ struct BoardChoiceTests {
 
         // The server stays added and its boards stay chosen. The rail is still All.
         #expect(session.sources.first?.boards.map(\.fid) == [33])
-        #expect(session.queries.map(\.id) == ["all"])
+        #expect(session.queries.map(\.id) == ["all", "trends"])
         #expect(session.cleared == 1)
     }
 
@@ -868,6 +880,9 @@ struct BoardChoiceTests {
             Issue.record("the boards control did not open the picker")
             return
         }
+        // The pages of the boards already read, read when the picker opened (#161), are done
+        // before the press is counted.
+        await session.looking?.value
         let asked = await http.requested.count
 
         await session.subscribe(offer.boards.filter { [33, 40, 37, 41].contains($0.fid) })
@@ -903,19 +918,21 @@ struct BoardChoiceTests {
         await session.subscribe(offer.boards.filter { [33, 37].contains($0.fid) })
 
         #expect(session.sources.first?.boards.map(\.fid) == [33, 37])
-        #expect(session.queries.map(\.id) == ["all"])
+        #expect(session.queries.map(\.id) == ["all", "trends"])
         #expect(session.notes.count == held, """
             Unticking a board deleted the notes it had already brought. Decision 22: this device \
             stops fetching it, it does not forget what it holds.
             """)
     }
 
-    /// **Decision 26, and it is deliberately silent.** A board the reader is subscribed to that
-    /// the forum no longer lists cannot be ticked, because it is not offered. Pressing Subscribe
-    /// therefore drops it, and no sentence is added for it: the honest reading is that the forum
-    /// stopped offering the board, and Cancel still loses nothing.
-    @Test("A subscribed board the forum no longer lists is not ticked, and no sentence is added")
-    func aBoardTheForumNoLongerListsIsDroppedSilently() async {
+    /// **Decision 26, revised by #161: only an untick removes a subscription.** A board the
+    /// reader reads that the front page no longer lists is still listed — under the name it was
+    /// subscribed by — and still ticked, and a press keeps it. Absence from one page is not
+    /// evidence the board is gone: a sub-board the front page never names is absent the same
+    /// way, and the old rule dropped it from a reader who never touched it. A board the forum
+    /// really deleted is there to untick.
+    @Test("A subscribed board the forum no longer lists is still listed, ticked, and kept")
+    func aBoardTheForumNoLongerListsIsKept() async {
         let (session, _) = await Self.reading()
         // The same forum, one board later withdrawn from its index.
         session.stage = nil
@@ -931,21 +948,21 @@ struct BoardChoiceTests {
         reopened.sources = session.sources
 
         await reopened.changeBoards(host: Self.host)
+        await reopened.looking?.value
 
         guard case .choosingBoards(let offer, let origin) = reopened.stage else {
             Issue.record("the boards control did not open the picker")
             return
         }
-        #expect(offer.boards.map(\.fid) == [33, 37], "the premise: the forum stopped listing 40")
-        #expect(origin.ticked == [33, 37], """
-            A board the forum no longer offers was ticked, which is a tick on a row that is not \
-            on the list.
-            """)
-        // The baseline still carries it, because that is what the reader is subscribed to — and
-        // the press drops it by walking the picks rather than by a rule about it.
-        #expect(origin.keeping.map(\.fid) == [33, 40, 37])
-        #expect(reopened.refuse == nil, "decision 26: a dropped board gets no sentence")
+        #expect(offer.boards.map(\.fid) == [33, 37, 40], "listed, after what the forum places")
+        #expect(offer.categories.last?.gid == JoinOffer.keptSection)
+        #expect(origin.ticked == [33, 40, 37])
+        #expect(reopened.refuse == nil)
         #expect(reopened.rowRefusal == nil)
+
+        // And the press keeps it, having asked nothing of it again.
+        await reopened.subscribe(offer.boards.filter { origin.ticked.contains($0.fid) })
+        #expect(Set(reopened.sources.first?.boards.map(\.fid) ?? []) == [33, 40, 37])
     }
 
     /// **Decision 24, from both ends.** Core cannot express "unsubscribe from everything" — with

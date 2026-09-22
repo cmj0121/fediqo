@@ -31,6 +31,9 @@ final class EmojiCache {
     static let shared = EmojiCache()
 
     private let http: HTTPClient
+    /// Where each emoji picture on the wire is shown (#164). The app's own; a test hands in
+    /// another.
+    var work: SourceWork = .shared
     private var entries: [Key: Entry] = [:]
     private var cost = 0
     /// A counter, not a date: what recency needs is an order, and a monotonic tick is one that
@@ -444,22 +447,37 @@ final class EmojiCache {
     /// for on every pass of every row it appears in. So the scan happens once per line and every
     /// later pass is a dictionary lookup whose key hashes over UTF-8 rather than over graphemes.
     func runs(in text: String, from emojis: [CustomEmoji]) -> [EmojiRun] {
-        // A post nobody sent a picture for is the fast path in the scanner itself — one run and
-        // no scan. A line longer than the memo will hold is not remembered either: see
-        // `maxMemoisedLine` for why remembering it would cost what it saves and hold what the
-        // budget above cannot see.
-        guard !emojis.isEmpty, text.utf8.count <= Self.maxMemoisedLine else {
-            return CustomEmoji.runs(in: text, from: emojis)
+        remembered(text, emojis, linked: false)
+    }
+
+    /// The cut of a post's **own words**: the same memo, over the cut that also finds the
+    /// addresses the author wrote. `EmojiText`'s two initialisers decide which of the two a line
+    /// gets, and this keeps them apart in the memo so one cannot be handed the other's answer.
+    func proseRuns(in text: String, from emojis: [CustomEmoji]) -> [EmojiRun] {
+        remembered(text, emojis, linked: true)
+    }
+
+    private func remembered(_ text: String, _ emojis: [CustomEmoji], linked: Bool) -> [EmojiRun] {
+        // A post nobody sent a picture for and that nobody wrote an address in is the fast path
+        // in the scanners themselves — one run and no scan. A line longer than the memo will hold
+        // is not remembered either: see `maxMemoisedLine` for why remembering it would cost what
+        // it saves and hold what the budget above cannot see.
+        guard linked || !emojis.isEmpty, text.utf8.count <= Self.maxMemoisedLine else {
+            return Self.cut(text, emojis, linked: linked)
         }
-        let cut = Cut(text: text, emojis: emojis)
+        let cut = Cut(text: text, emojis: emojis, linked: linked)
         if let remembered = cuts[cut] { return remembered }
-        let made = CustomEmoji.runs(in: text, from: emojis)
+        let made = Self.cut(text, emojis, linked: linked)
         cuts[cut] = made
         cutOrder.append(cut)
         if cutOrder.count > Self.maxRememberedLines {
             cuts.removeValue(forKey: cutOrder.removeFirst())
         }
         return made
+    }
+
+    private static func cut(_ text: String, _ emojis: [CustomEmoji], linked: Bool) -> [EmojiRun] {
+        linked ? EmojiRun.prose(in: text, emojis: emojis) : CustomEmoji.runs(in: text, from: emojis)
     }
 
     // MARK: - Fetching
@@ -548,7 +566,8 @@ final class EmojiCache {
     /// address out of a stranger's JSON from reaching `URLSession` at all.
     private func download(_ url: URL) -> Task<Data?, Never> {
         if let running = downloads[url] { return running }
-        let http = http
+        // On `SourceWork` while it is on the wire (#164).
+        let http = WatchedHTTP(http, for: .emoji, in: work)
         let started = Task<Data?, Never> { @MainActor [weak self] in
             defer { self?.downloads[url] = nil }
             guard let self else { return nil }
@@ -574,6 +593,9 @@ final class EmojiCache {
     private struct Cut: Hashable {
         let text: String
         let emojis: [CustomEmoji]
+        /// Which cut this is. The same words are cut two ways — a label's and a post's own — and
+        /// a memo that could not tell them apart would hand a name the prose answer.
+        let linked: Bool
     }
 
     private func touch(_ key: Key) {
