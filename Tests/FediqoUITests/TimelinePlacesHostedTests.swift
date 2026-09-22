@@ -16,7 +16,15 @@ import Testing
 /// under test.
 ///
 /// What it does not reach: a window, a hand on the trackpad, or iOS. Those are the user's.
-@Suite("Where each timeline was left, hosted")
+///
+/// **It gives the main actor back between passes.** Every test in this process that waits on the
+/// main actor — the reload, join and subscribe suites behind `FixtureHTTP`'s gates — waits behind
+/// whatever holds it, and a nested `RunLoop.main.run` does not drain the main queue: an earlier
+/// version spun it four times per switch and, on a loaded runner, held the main actor for most of
+/// a minute, until those suites' fifty-second watchdogs fired. Each settle here is one layout, one
+/// brief pass of the run loop and a `Task.yield()`, and the rows a test stands on are worked out
+/// from the session without drawing anything.
+@Suite("Where each timeline was left, hosted", .serialized)
 @MainActor
 struct TimelinePlacesHostedTests {
     private let microblog = Source(host: "m.example", kind: .mastodon)
@@ -76,27 +84,47 @@ struct TimelinePlacesHostedTests {
         let search: ShellSearch
         let view: NSView
 
-        /// The rows the timeline in front holds, as the pane draws them.
-        var rows: [String] { session.timelineItems(latest: nil).map(\.id) }
+        /// The rows a timeline holds, worked out from the session rather than drawn — asking it
+        /// by switching would be a switch, and one the pane would answer.
+        func rows(of query: TimelineQuery) -> [String] {
+            query.items(from: session.notes, among: session.written, index: session.textIndex, latest: nil).map(\.id)
+        }
 
         /// `j` until the lamp is on this row.
-        func stand(on id: String?) {
+        func stand(on id: String?) async {
             lamp.wanted = id
             lamp.tick += 1
-            settle()
+            await settle()
             #expect(lamp.seen == id)
         }
 
-        func press(_ query: TimelineQuery) {
+        func press(_ query: TimelineQuery) async {
             session.timelineID = query
-            settle()
+            await settle()
         }
 
-        func settle() {
-            for _ in 0 ..< 4 {
-                view.layoutSubtreeIfNeeded()
-                RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        /// Tab until this timeline is in front: each press its own switch, as the reader's are.
+        func tab(to query: TimelineQuery) async {
+            while session.currentTimeline != query {
+                session.rotateTab(by: 1)
+                await settle()
             }
+        }
+
+        /// One change answered: the pane's `onChange`, then the lamp it wrote. Two passes, each
+        /// a layout and a brief turn of the run loop, and the main actor handed back after each.
+        func settle() async {
+            for _ in 0 ..< 2 {
+                turn()
+                await Task.yield()
+            }
+        }
+
+        /// One layout and a brief turn of the run loop, which is where the hosting view answers
+        /// what changed. Synchronous, because the run loop cannot be turned from an async body.
+        private func turn() {
+            view.layoutSubtreeIfNeeded()
+            RunLoop.main.run(mode: .default, before: .distantPast)
         }
     }
 
@@ -105,7 +133,7 @@ struct TimelinePlacesHostedTests {
              postedAt: Date(timeIntervalSince1970: t), categories: categories)
     }
 
-    private func harness() throws -> Harness {
+    private func harness() async throws -> Harness {
         let session = ShellSession(http: FixtureHTTP([:]), timelines: WrittenTimelineStore(defaults: HostedDefaults()))
         session.sources = [microblog]
         session.rebuildQueries()
@@ -127,7 +155,7 @@ struct TimelinePlacesHostedTests {
         let view = NSHostingView(rootView: Host(session: session, lamp: lamp, search: search))
         view.frame = NSRect(x: 0, y: 0, width: 900, height: 700)
         let harness = Harness(session: session, lamp: lamp, search: search, view: view)
-        harness.settle()
+        await harness.settle()
         return harness
     }
 
@@ -138,36 +166,29 @@ struct TimelinePlacesHostedTests {
     /// The rows of one timeline that no other timeline in this pairing holds, so a lamp that
     /// merely survived a switch cannot pass for a place that was kept.
     private func own(_ query: TimelineQuery, against other: TimelineQuery, in harness: Harness) -> [String] {
-        let session = harness.session
-        let before = session.timelineID
-        session.timelineID = other
-        let theirs = Set(session.timelineItems(latest: nil).map(\.id))
-        session.timelineID = query
-        let mine = session.timelineItems(latest: nil).map(\.id)
-        session.timelineID = before
-        harness.settle()
-        return mine.filter { !theirs.contains($0) }
+        let theirs = Set(harness.rows(of: other))
+        return harness.rows(of: query).filter { !theirs.contains($0) }
     }
 
     // MARK: Acceptance: the four steps
 
     @Test("On X on post 1, to Y on post 2, back to X, back to Y: post 2 is lit")
-    func theFourSteps() throws {
-        let h = try harness()
+    func theFourSteps() async throws {
+        let h = try await harness()
         let x = TimelineQuery.all
         let y = TimelineQuery.trends
-        h.press(x)
+        await h.press(x)
         let post1 = try #require(own(x, against: y, in: h).last)
-        h.stand(on: post1)
+        await h.stand(on: post1)
 
-        h.press(y)
-        let post2 = try #require(own(y, against: x, in: h).last ?? h.rows.last)
-        h.stand(on: post2)
+        await h.press(y)
+        let post2 = try #require(own(y, against: x, in: h).last ?? h.rows(of: y).last)
+        await h.stand(on: post2)
 
-        h.press(x)
+        await h.press(x)
         #expect(h.lamp.seen == post1, "step 3: X gives back post 1")
 
-        h.press(y)
+        await h.press(y)
         #expect(h.lamp.seen == post2, "step 4: Y gives back post 2")
     }
 
@@ -179,44 +200,32 @@ struct TimelinePlacesHostedTests {
     private func post(in query: TimelineQuery, against other: TimelineQuery, in h: Harness) throws -> String {
         let own = own(query, against: other, in: h)
         if let post = own.dropFirst().first ?? own.first { return post }
-        let before = h.session.timelineID
-        h.session.timelineID = query
-        let rows = h.session.timelineItems(latest: nil).map(\.id)
-        h.session.timelineID = before
-        h.settle()
-        return try #require(rows.dropFirst().first)
+        return try #require(h.rows(of: query).dropFirst().first)
     }
 
     /// X → Y → X → Y → X → Y, every arrival checked, for each pairing of All, Trends and a
-    /// written timeline, in both orders and by both ways of switching.
+    /// written timeline, by both ways of switching. One order per pairing: the trips go both
+    /// ways already, so the reversed order would ask each switch a second time.
     @Test("Going back and forth lands, every time, on the post each was left on", arguments: [false, true])
-    func backAndForth(byTab: Bool) throws {
-        let pairings: [(TimelineQuery?, TimelineQuery?)] = [
-            (.all, .trends), (.trends, .all), (.all, nil), (nil, .all), (.trends, nil), (nil, .trends),
-        ]
+    func backAndForth(byTab: Bool) async throws {
+        let pairings: [(TimelineQuery?, TimelineQuery?)] = [(.all, .trends), (.all, nil), (nil, .trends)]
         for (a, b) in pairings {
-            let h = try harness()
+            let h = try await harness()
             let x = try a ?? written(h.session)
             let y = try b ?? written(h.session)
-            let go: (TimelineQuery) -> Void = { query in
-                if byTab {
-                    // Tab and ⇧Tab from wherever the reader is to the one asked for.
-                    while h.session.currentTimeline != query { h.session.rotateTab(by: 1) }
-                    h.settle()
-                } else {
-                    h.press(query)
-                }
+            func go(_ query: TimelineQuery) async {
+                if byTab { await h.tab(to: query) } else { await h.press(query) }
             }
             let xPost = try post(in: x, against: y, in: h)
             let yPost = try post(in: y, against: x, in: h)
-            go(x)
-            h.stand(on: xPost)
-            go(y)
-            h.stand(on: yPost)
+            await go(x)
+            await h.stand(on: xPost)
+            await go(y)
+            await h.stand(on: yPost)
             for trip in 1 ... 2 {
-                go(x)
+                await go(x)
                 #expect(h.lamp.seen == xPost, "\(x) → back on trip \(trip)")
-                go(y)
+                await go(y)
                 #expect(h.lamp.seen == yPost, "\(y) → back on trip \(trip)")
             }
         }
@@ -225,45 +234,45 @@ struct TimelinePlacesHostedTests {
     /// Arriving at one timeline is not a write to another's: a third timeline passed through
     /// on the way, standing on something else, leaves X's and Y's where they were.
     @Test("Passing through a third timeline changes neither of the other two")
-    func aThirdChangesNeither() throws {
-        let h = try harness()
+    func aThirdChangesNeither() async throws {
+        let h = try await harness()
         let mine = try written(h.session)
         let allPost = try post(in: .all, against: .trends, in: h)
         let trendPost = try post(in: .trends, against: mine, in: h)
-        h.press(.all)
-        h.stand(on: allPost)
-        h.press(.trends)
-        h.stand(on: trendPost)
-        h.press(mine)
-        h.stand(on: try #require(h.rows.last))
-        h.press(.all)
+        await h.press(.all)
+        await h.stand(on: allPost)
+        await h.press(.trends)
+        await h.stand(on: trendPost)
+        await h.press(mine)
+        await h.stand(on: try #require(h.rows(of: mine).last))
+        await h.press(.all)
         #expect(h.lamp.seen == allPost)
-        h.press(mine)
-        h.press(.trends)
+        await h.press(mine)
+        await h.press(.trends)
         #expect(h.lamp.seen == trendPost)
     }
 
     /// A post that has left the timeline since is not pretended to be there, however many trips
     /// it took — and the other timeline's place is not disturbed by finding it gone.
     @Test("A post that has since left its timeline is not lit, on the second trip or the third")
-    func aPostThatLeftIsNotLit() throws {
-        let h = try harness()
+    func aPostThatLeftIsNotLit() async throws {
+        let h = try await harness()
         let allPost = try post(in: .all, against: .trends, in: h)
         let trendPost = try post(in: .trends, against: .all, in: h)
-        h.press(.all)
-        h.stand(on: allPost)
-        h.press(.trends)
-        h.stand(on: trendPost)
-        h.press(.all)
+        await h.press(.all)
+        await h.stand(on: allPost)
+        await h.press(.trends)
+        await h.stand(on: trendPost)
+        await h.press(.all)
         #expect(h.lamp.seen == allPost)
         // A reload lands without the Trends post the reader was on.
         h.session.notes = h.session.notes.filter { $0.id != String(trendPost.split(separator: "\u{1E}").last ?? "") }
-        h.settle()
-        h.press(.trends)
+        await h.settle()
+        await h.press(.trends)
         #expect(h.lamp.seen == nil)
-        h.press(.all)
+        await h.press(.all)
         #expect(h.lamp.seen == allPost)
-        h.press(.trends)
+        await h.press(.trends)
         #expect(h.lamp.seen == nil)
     }
 
@@ -271,22 +280,22 @@ struct TimelinePlacesHostedTests {
     /// and closing it gives back the post the timeline was on.
     @Test("With the search open a switch writes no place, and closing gives the parked post back")
     func theSearchStillParks() async throws {
-        let h = try harness()
+        let h = try await harness()
         let allPost = try post(in: .all, against: .trends, in: h)
         let trendPost = try post(in: .trends, against: .all, in: h)
-        h.press(.trends)
-        h.stand(on: trendPost)
-        h.press(.all)
-        h.stand(on: allPost)
+        await h.press(.trends)
+        await h.stand(on: trendPost)
+        await h.press(.all)
+        await h.stand(on: allPost)
         // `/`, as the root opens it: the lamp parked in the search and put out.
         h.search.open(from: h.lamp.seen, over: h.session.notes)
-        h.stand(on: nil)
-        h.press(.trends)
-        h.press(.all)
+        await h.stand(on: nil)
+        await h.press(.trends)
+        await h.press(.all)
         // Closed, as the root closes it: the parked post back on the lamp.
-        h.stand(on: h.search.close())
+        await h.stand(on: h.search.close())
         #expect(h.lamp.seen == allPost)
-        h.press(.trends)
+        await h.press(.trends)
         #expect(h.lamp.seen == trendPost)
     }
 }
