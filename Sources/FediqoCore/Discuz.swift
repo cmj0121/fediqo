@@ -157,18 +157,33 @@ public struct DiscuzClient: Sendable {
     /// the board this read is for, and `noThreads` would throw its answer away. Each board comes
     /// back filed under `board` — its section, its number as the parent.
     public func subBoards(of board: DiscuzBoard) async throws -> [DiscuzBoard] {
+        try await around(board.fid).subBoards.map { $0.placed(under: board) }
+    }
+
+    /// One board's own page, read for the boards around it and **not** for its threads: what it
+    /// writes under it, and — from its trail — what it is under. `notes` is always empty.
+    ///
+    /// The read `subBoards(of:)` makes on a tick, and the one a restate makes for each board
+    /// the reader **already reads** when the picker opens: those are boards they chose, so
+    /// reading them is not reading ahead, and it is what files a picked sub-board under its
+    /// parent before any refresh has. No threads are required, for `subBoards(of:)`'s reason.
+    public func around(_ fid: Int) async throws -> DiscuzBoardPage {
         guard let url = Host.httpsURL(
             host: host,
             path: "/forum.php",
             query: [
                 URLQueryItem(name: "mod", value: "forumdisplay"),
-                URLQueryItem(name: "fid", value: String(board.fid)),
+                URLQueryItem(name: "fid", value: String(fid)),
             ]
         ) else {
             throw DiscuzRequestError.invalidURL
         }
         let html = try await page(url)
-        return DiscuzIndex.subBoards(in: html, under: board.fid).map { $0.placed(under: board) }
+        return DiscuzBoardPage(
+            notes: [],
+            subBoards: DiscuzIndex.subBoards(in: html, under: fid),
+            parent: DiscuzIndex.parent(of: fid, in: html)
+        )
     }
 
     /// The forum's index: every category a signed-out — or signed-in — reader may see, and the
@@ -474,10 +489,12 @@ public struct DiscuzBoard: Identifiable, Hashable, Sendable {
     /// children in the parent's cell on the front page. Other installs never do: the front page
     /// names the parent alone, and its children are written only on the parent's own page, in a
     /// `subforum_<fid>` block above its threads — the `list` layout's rows, with their figures.
-    /// That page is read at two moments and no third, both chosen so that no board's page is
-    /// read ahead of the reader: **when the reader ticks the board in the picker** (see
-    /// `DiscuzClient.subBoards(of:)`), and **when a subscribed board is read for its threads**,
-    /// which was going to happen anyway (see `DiscuzClient.boardPage`). A sub-board both places
+    /// That page is read only for a board the reader has chosen, never ahead of them: **when
+    /// they tick it in the picker** (see `DiscuzClient.subBoards(of:)`), **when the picker opens
+    /// on boards they already read** (`DiscuzClient.around(_:)` — which is also what files a
+    /// sub-board picked without its parent, by its own page's trail), and **when a subscribed
+    /// board is read for its threads**, which was going to happen anyway
+    /// (`DiscuzClient.boardPage`). A sub-board both places
     /// name is listed once — see `JoinOffer.adding(_:under:)`.
     ///
     /// **A sub-board is emptier than a board where the forum says less about it.** On the front

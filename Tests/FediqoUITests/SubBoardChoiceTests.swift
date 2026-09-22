@@ -8,7 +8,8 @@ import Testing
 ///
 /// The markup is `install-g.example`'s shape, trimmed and renamed — see `DiscuzSubBoardTests`,
 /// which pins the parsing. What is pinned here is **when** that page is read and what the reader
-/// is left holding: a tick reads it, a reload reads it anyway, and nothing else does.
+/// is left holding: a tick reads it, a reload reads it anyway, and a restate reads the pages of
+/// the boards the reader already reads — and nothing reads a board the reader has not chosen.
 @MainActor
 @Suite("Choosing sub-boards", .serialized)
 struct SubBoardChoiceTests {
@@ -72,6 +73,7 @@ struct SubBoardChoiceTests {
             "https://\(host)/forum.php": .text(index),
             look(38): .text(boardPage(38, children: true)),
             look(40): .text(boardPage(40)),
+            look(434): .text(boardPage(434, parent: 38)),
             read(38): .text(boardPage(38, children: true)),
             read(40): .text(boardPage(40)),
             read(434): .text(boardPage(434, parent: 38)),
@@ -162,6 +164,84 @@ struct SubBoardChoiceTests {
         // does not drop a board the reader never touched.
         #expect(offer.boards.map(\.fid) == [38, 434, 40])
         #expect(origin.ticked == [434, 40])
+    }
+
+    /// A session reading `boards`, joined weeks ago, with **no refresh yet** this run.
+    private static func unrefreshed(
+        _ boards: [BoardSubscription], routes: [String: FixtureHTTP.Outcome] = routes
+    ) async -> (ShellSession, FixtureHTTP) {
+        let http = FixtureHTTP(routes)
+        let store = ItemStore()
+        await store.add(Source(host: host, kind: .discuz, boards: boards))
+        let session = ShellSession(http: http, store: store)
+        await session.reloadFromStore()
+        return (session, http)
+    }
+
+    @Test("A sub-board read alone, before any refresh, is listed under its parent, ticked, and kept")
+    func aSubBoardAloneBeforeARefreshIsKept() async throws {
+        let (session, http) = await Self.unrefreshed([BoardSubscription(fid: 434, name: "Child")])
+
+        await session.changeBoards(host: Self.host)
+        await session.looking?.value
+
+        guard case .choosingBoards(let offer, let origin) = session.stage else {
+            Issue.record("the boards control did not open the picker")
+            return
+        }
+        // Its own page's trail filed it under 38; the parent's page was not read.
+        #expect(offer.boards.map(\.fid) == [38, 434, 40])
+        #expect(offer.boards.first { $0.fid == 434 }?.parent == 38)
+        #expect(origin.ticked == [434])
+        #expect(await !http.requested.contains { $0.absoluteString == Self.look(38) })
+
+        // A new board ticked and pressed: the one the reader already read stays.
+        await session.subscribe(offer.boards.filter { [434, 40].contains($0.fid) })
+        #expect(Set(session.sources.first?.boards.map(\.fid) ?? []) == [434, 40])
+    }
+
+    @Test("A subscribed board whose page cannot be read is still listed, ticked, and kept")
+    func aSubscribedBoardWhosePageFailsIsKept() async throws {
+        var routes = Self.routes
+        routes[Self.look(434)] = .fail
+        let (session, _) = await Self.unrefreshed(
+            [BoardSubscription(fid: 434, name: "Child")], routes: routes
+        )
+
+        await session.changeBoards(host: Self.host)
+        await session.looking?.value
+
+        guard case .choosingBoards(let offer, let origin) = session.stage else {
+            Issue.record("the boards control did not open the picker")
+            return
+        }
+        // At the top level, under the name it was subscribed by — not left out.
+        let kept = try #require(offer.boards.first { $0.fid == 434 })
+        #expect(kept.name == "Child")
+        #expect(kept.parent == nil)
+        #expect(kept.gid == JoinOffer.keptSection)
+        #expect(origin.ticked == [434])
+        #expect(session.rowRefusal == nil)
+
+        await session.subscribe(offer.boards.filter { [434, 40].contains($0.fid) })
+        #expect(Set(session.sources.first?.boards.map(\.fid) ?? []) == [434, 40])
+    }
+
+    @Test("A subscribed parent shows its sub-boards when the picker opens, with no tick")
+    func aSubscribedParentShowsItsSubBoardsOnOpen() async throws {
+        let (session, _) = await Self.unrefreshed([BoardSubscription(fid: 38, name: "Parent")])
+
+        await session.changeBoards(host: Self.host)
+        await session.looking?.value
+
+        guard case .choosingBoards(let offer, let origin) = session.stage else {
+            Issue.record("the boards control did not open the picker")
+            return
+        }
+        #expect(offer.boards.map(\.fid) == [38, 434, 40])
+        #expect(offer.boards.first { $0.fid == 434 }?.threads == 15595)
+        // Listed, not picked.
+        #expect(origin.ticked == [38])
     }
 
     @Test("A look that fails leaves the picker as it was, and a second tick asks again")

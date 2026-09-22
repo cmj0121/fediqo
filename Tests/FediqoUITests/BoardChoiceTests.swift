@@ -868,6 +868,9 @@ struct BoardChoiceTests {
             Issue.record("the boards control did not open the picker")
             return
         }
+        // The pages of the boards already read, read when the picker opened (#161), are done
+        // before the press is counted.
+        await session.looking?.value
         let asked = await http.requested.count
 
         await session.subscribe(offer.boards.filter { [33, 40, 37, 41].contains($0.fid) })
@@ -910,12 +913,14 @@ struct BoardChoiceTests {
             """)
     }
 
-    /// **Decision 26, and it is deliberately silent.** A board the reader is subscribed to that
-    /// the forum no longer lists cannot be ticked, because it is not offered. Pressing Subscribe
-    /// therefore drops it, and no sentence is added for it: the honest reading is that the forum
-    /// stopped offering the board, and Cancel still loses nothing.
-    @Test("A subscribed board the forum no longer lists is not ticked, and no sentence is added")
-    func aBoardTheForumNoLongerListsIsDroppedSilently() async {
+    /// **Decision 26, revised by #161: only an untick removes a subscription.** A board the
+    /// reader reads that the front page no longer lists is still listed — under the name it was
+    /// subscribed by — and still ticked, and a press keeps it. Absence from one page is not
+    /// evidence the board is gone: a sub-board the front page never names is absent the same
+    /// way, and the old rule dropped it from a reader who never touched it. A board the forum
+    /// really deleted is there to untick.
+    @Test("A subscribed board the forum no longer lists is still listed, ticked, and kept")
+    func aBoardTheForumNoLongerListsIsKept() async {
         let (session, _) = await Self.reading()
         // The same forum, one board later withdrawn from its index.
         session.stage = nil
@@ -931,21 +936,21 @@ struct BoardChoiceTests {
         reopened.sources = session.sources
 
         await reopened.changeBoards(host: Self.host)
+        await reopened.looking?.value
 
         guard case .choosingBoards(let offer, let origin) = reopened.stage else {
             Issue.record("the boards control did not open the picker")
             return
         }
-        #expect(offer.boards.map(\.fid) == [33, 37], "the premise: the forum stopped listing 40")
-        #expect(origin.ticked == [33, 37], """
-            A board the forum no longer offers was ticked, which is a tick on a row that is not \
-            on the list.
-            """)
-        // The baseline still carries it, because that is what the reader is subscribed to — and
-        // the press drops it by walking the picks rather than by a rule about it.
-        #expect(origin.keeping.map(\.fid) == [33, 40, 37])
-        #expect(reopened.refuse == nil, "decision 26: a dropped board gets no sentence")
+        #expect(offer.boards.map(\.fid) == [33, 37, 40], "listed, after what the forum places")
+        #expect(offer.categories.last?.gid == JoinOffer.keptSection)
+        #expect(origin.ticked == [33, 40, 37])
+        #expect(reopened.refuse == nil)
         #expect(reopened.rowRefusal == nil)
+
+        // And the press keeps it, having asked nothing of it again.
+        await reopened.subscribe(offer.boards.filter { origin.ticked.contains($0.fid) })
+        #expect(Set(reopened.sources.first?.boards.map(\.fid) ?? []) == [33, 40, 37])
     }
 
     /// **Decision 24, from both ends.** Core cannot express "unsubscribe from everything" — with

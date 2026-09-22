@@ -354,6 +354,38 @@ public struct JoinOffer: Sendable, Hashable {
     }
 }
 
+extension JoinOffer {
+    /// The section a board the reader already reads is filed in when the list in hand does not
+    /// place it anywhere. Negative, because every Discuz! section number is positive.
+    public static let keptSection = -1
+
+    /// The same offer, with every board in `subscribed` that it does not list added — **so a
+    /// board the reader reads is never off the list they are changing** (#161).
+    ///
+    /// A board can be absent from the list in hand without being gone from the forum: a
+    /// sub-board the front page never names is absent until its own page has been read. Left
+    /// off, it could not be ticked, and the next press would unsubscribe a board the reader
+    /// never touched. So it is listed at the top level, under the name it was subscribed by, in
+    /// a section of its own named `section` — and taken out of there by the next `applied`
+    /// that files it under its parent, because this runs last and adds only what is missing.
+    public func keeping(_ subscribed: [BoardSubscription], section: String) -> JoinOffer {
+        let listed = Set(boards.map(\.fid))
+        var seen = Set<Int>()
+        let missing = subscribed
+            .filter { !listed.contains($0.fid) && seen.insert($0.fid).inserted }
+            .map {
+                DiscuzBoard(fid: $0.fid, name: $0.name, category: section, gid: Self.keptSection)
+            }
+        guard !missing.isEmpty else { return self }
+        return JoinOffer(
+            host: host,
+            kind: kind,
+            categories: categories
+                + [DiscuzCategory(gid: Self.keptSection, name: section, boards: missing)]
+        )
+    }
+}
+
 /// What this run has learned about one forum's sub-boards from pages it was reading anyway.
 ///
 /// **D29's page half, for a reader changing boards they already have** (#161). A forum whose
@@ -956,6 +988,27 @@ public struct SourceJoin: Sendable {
         case .discuz:
             do {
                 return try await DiscuzClient(http: http, host: offer.host).subBoards(of: board)
+            } catch let error where Cancellation.happened(error) {
+                throw CancellationError()
+            } catch let error as DiscuzRequestError {
+                throw DiscuzJoin.refusal(error)
+            } catch {
+                throw JoinError.unreachable
+            }
+        case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
+            .gotosocial, .discourse, .unknown:
+            throw JoinError.unsupportedKind(offer.kind)
+        }
+    }
+
+    /// One board's own page, read for the boards around it — see `DiscuzClient.around(_:)`.
+    ///
+    /// Read by a restate for each board the reader already reads, when the picker opens.
+    public func around(_ fid: Int, in offer: JoinOffer) async throws -> DiscuzBoardPage {
+        switch offer.kind {
+        case .discuz:
+            do {
+                return try await DiscuzClient(http: http, host: offer.host).around(fid)
             } catch let error where Cancellation.happened(error) {
                 throw CancellationError()
             } catch let error as DiscuzRequestError {
