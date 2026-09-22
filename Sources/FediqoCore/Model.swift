@@ -430,6 +430,16 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// what reading the post again (#29) asks for. Nothing on a row stored before 0.2.0 learned
     /// it, and on every forum post.
     public let statusID: String?
+    /// A forum thread's opening post as this device last read it — its words, what it quoted,
+    /// and its author's picture (#154). Nothing on every other post, and on a forum row nobody
+    /// has reached yet.
+    ///
+    /// **Kept with the row, and only what was read.** A thread table carries no part of the
+    /// opening post, so this is filled in by the one read D30 already makes when a row is reached,
+    /// and never by reading ahead. A post the forum withheld is not an opening to keep, and never
+    /// arrives here (`ForumOpening.init?(_:)`). It goes when the row goes — a Remove, or the
+    /// reader's keep-for window — and stays when a Clear keeps the row.
+    public let opening: ForumOpening?
 
     public init(
         id: String,
@@ -454,7 +464,8 @@ public struct Note: Identifiable, Hashable, Sendable {
         emojis: [CustomEmoji] = [],
         url: URL? = nil,
         counts: Counts = Counts(),
-        statusID: String? = nil
+        statusID: String? = nil,
+        opening: ForumOpening? = nil
     ) {
         self.id = id
         self.source = source
@@ -479,6 +490,7 @@ public struct Note: Identifiable, Hashable, Sendable {
         self.url = url
         self.counts = counts
         self.statusID = statusID
+        self.opening = opening
     }
 
     /// This copy, read again, laid over the one held for the same row (#29): what the server says
@@ -502,8 +514,51 @@ public struct Note: Identifiable, Hashable, Sendable {
             favourited: favourited ?? held.favourited,
             audience: audience, avatarURL: avatarURL, attachments: attachments,
             sensitive: sensitive, spoiler: spoiler, emojis: emojis, url: url, counts: counts,
-            statusID: statusID ?? held.statusID
+            statusID: statusID ?? held.statusID,
+            // A read of the row that says nothing of its opening post — a board listing, which
+            // never does — leaves the one this device read where it is (#154).
+            opening: opening ?? held.opening
         )
+    }
+
+    /// This note with its opening post as just read. Everything else is as it was.
+    public func with(opening: ForumOpening) -> Note {
+        Note(
+            id: id, source: source, author: author, handle: handle, body: body, title: title,
+            board: board, postedAt: postedAt, categories: categories, reply: reply,
+            boostedBy: boostedBy, boosterHandle: boosterHandle, boosted: boosted,
+            favourited: favourited, audience: audience, avatarURL: avatarURL,
+            attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis,
+            url: url, counts: counts, statusID: statusID, opening: opening
+        )
+    }
+}
+
+/// A forum thread's opening post, as it is kept with its row (#154).
+///
+/// **What a row draws of it, and nothing else**: the words, what they quoted, and the author's
+/// picture the same page carried. Not the floor, the post number or when it was posted — the row
+/// already has its author and its date from the thread table, and a second copy of either would
+/// be a second answer to a question the row has already answered.
+public struct ForumOpening: Hashable, Sendable {
+    /// The author's own words. Empty where the post has none — a picture, a poll — which is an
+    /// answer, and is kept as one so the row is not asked again for words that do not exist.
+    public let words: String
+    public let quoted: [DiscuzQuotation]
+    public let avatarURL: URL?
+
+    public init(words: String, quoted: [DiscuzQuotation] = [], avatarURL: URL? = nil) {
+        self.words = words
+        self.quoted = quoted
+        self.avatarURL = avatarURL
+    }
+
+    /// The opening post worth keeping, or nothing where it is not: **a post the forum withheld
+    /// is the forum's notice, not the author's words**, and keeping it would draw a signed-in
+    /// reader's row as locked for as long as the row is kept.
+    public init?(_ post: DiscuzPost) {
+        guard !post.isWithheld else { return nil }
+        self.init(words: post.body, quoted: post.quoted, avatarURL: post.avatarURL)
     }
 }
 

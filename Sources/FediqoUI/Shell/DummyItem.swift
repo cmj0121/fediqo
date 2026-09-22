@@ -138,6 +138,9 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// go to.
     public let url: URL?
     public let attachments: [Attachment]
+    /// A forum thread's opening post as this device last read it — `Note.opening`, carried so a
+    /// row reached before this run draws its words without asking (#154). Nothing elsewhere.
+    public var opening: ForumOpening?
     /// Whether the author covered it, or nothing where the source never said. Carried as the
     /// three answers it has, not folded down to two — see `covered`.
     public let sensitive: Bool?
@@ -328,6 +331,7 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         avatarURL = note.avatarURL
         url = note.url
         attachments = note.attachments
+        opening = note.opening
         sensitive = note.sensitive
         spoiler = note.spoiler
         emojis = note.emojis

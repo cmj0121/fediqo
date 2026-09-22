@@ -436,6 +436,10 @@ struct UsagePane: View {
 
     /// The forum posts this device is holding from this server — D30's cache, in the inventory.
     ///
+    /// **This run's cache, which Clear empties.** An opening post kept with its row (#154) is part
+    /// of the row, and a Clear keeps the rows, so it is not counted here: the figure is what the
+    /// button beside it lets go of.
+    ///
     /// **Drawn only for a forum**, which is the one place this cache can ever hold anything: a
     /// `tid` is Discuz!'s number and `ForumThreadRef` refuses everything else, so a line under
     /// `first.example` reading "no first posts held" would be a true sentence about a thing
