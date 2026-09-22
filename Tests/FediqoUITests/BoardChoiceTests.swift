@@ -287,7 +287,7 @@ struct BoardChoiceTests {
         #expect(!session.notes.isEmpty)
 
         // All and Trends are the only timeline queries. Boards stay on the source.
-        #expect(session.queries.map(\.id) == ["all"])
+        #expect(session.queries.map(\.id) == ["all", "trends"])
         #expect(session.availability.allows(.timeline))
         #expect(session.choosing == nil)
         #expect(session.refuse == nil)
@@ -297,8 +297,9 @@ struct BoardChoiceTests {
     /// list to `all` and `trends` whatever it had joined, and a forum has no trending read — so
     /// that tab was permanently empty and there was no way for a reader to tell it from a quiet
     /// hour.
-    @Test("A forum is offered no Trends tab")
-    func aForumIsOfferedNoTrends() async {
+    /// A Discuz!'s ranking lists are its Trends, so a Discuz! alone is offered the tab.
+    @Test("A Discuz! is offered a Trends tab, for its ranking lists")
+    func aDiscuzIsOfferedTrends() async {
         let session = Self.session(Self.forumHTTP(
             index: .text(#"""
             <html><head><meta name="generator" content="Discuz! X5.0" /></head><body>
@@ -326,41 +327,47 @@ struct BoardChoiceTests {
         }
         await session.subscribe(offer.boards.filter { $0.fid == 33 })
 
-        #expect(!session.queries.contains { $0.id == "trends" })
+        #expect(session.queries.contains { $0.id == "trends" })
         // And the place is still open, which is the half that would have broken quietly: the
         // gate used to want both ids.
         #expect(session.availability.allows(.timeline))
         #expect(session.timelineID == .all)
     }
 
-    @Test("Every protocol is asked whether it has trends, and the two forums say no")
+    @Test("Every protocol is asked whether it has trends: a Discourse says no, a Discuz! yes")
     func trendsIsDecidedPerProtocol() {
         for kind in ProtocolKind.allCases {
             switch kind {
-            case .discourse, .discuz, .unknown:
+            case .discourse, .unknown:
                 #expect(!ShellSession.hasTrends(kind), "\(kind) should be offered no trends")
             case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
-                .gotosocial:
+                .gotosocial, .discuz:
                 #expect(ShellSession.hasTrends(kind), "\(kind) should be offered trends")
             }
         }
     }
 
-    /// **All and Trends are the only two queries of the store.** A forum is offered All alone —
-    /// it has no trending read — and a microblog beside it brings Trends back. Boards add
-    /// nothing to this list: they choose what a source fetches, not what the rail draws.
+    /// **All and Trends are the only two queries of the store.** A Discourse is offered All
+    /// alone — it has no trending read — and a microblog or a Discuz! beside it brings Trends
+    /// back. Boards add nothing to this list: they choose what a source fetches, not what the
+    /// rail draws.
     @Test("The queries are All, and Trends only where a source has one")
     func queriesAreAllAndTrends() {
         let session = Self.session(Self.forumHTTP(index: .fail))
+        let discourse = Source(host: "talk.example", kind: .discourse)
+        session.sources = [discourse]
+        session.rebuildQueries()
+        #expect(session.queries.map(\.id) == ["all"])
+
+        session.sources = [discourse, Source(host: "mastodon.example", kind: .mastodon)]
+        session.rebuildQueries()
+        #expect(session.queries.map(\.id) == ["all", "trends"])
+
         let forum = Source(
             host: "forum.example", kind: .discuz,
             boards: [BoardSubscription(fid: 33, name: "启动盘工具")]
         )
-        session.sources = [forum]
-        session.rebuildQueries()
-        #expect(session.queries.map(\.id) == ["all"])
-
-        session.sources = [forum, Source(host: "mastodon.example", kind: .mastodon)]
+        session.sources = [discourse, forum]
         session.rebuildQueries()
         #expect(session.queries.map(\.id) == ["all", "trends"])
     }
@@ -377,7 +384,7 @@ struct BoardChoiceTests {
         session.sources = [Source(host: "mastodon.example", kind: .mastodon)]
         session.rebuildQueries()
         session.timelineID = .trends
-        session.sources = [Source(host: "forum.example", kind: .discuz)]
+        session.sources = [Source(host: "talk.example", kind: .discourse)]
         session.rebuildQueries()
         #expect(session.timelineID == .all)
     }
@@ -413,7 +420,7 @@ struct BoardChoiceTests {
         }
         await session.subscribe(offer.boards.filter { $0.fid == 33 })
 
-        #expect(session.queries.map(\.id) == ["all"])
+        #expect(session.queries.map(\.id) == ["all", "trends"])
         #expect(session.timelineID == .all)
         #expect(!TimelineQuery.all.items(from: session.notes, latest: nil).isEmpty)
     }
@@ -466,7 +473,7 @@ struct BoardChoiceTests {
         // The one that read is subscribed; the one that did not is **not** — a board in the rail
         // whose timeline can never load is the same failure as a source that can never load.
         #expect(session.sources.first?.boards.map(\.fid) == [33])
-        #expect(session.queries.map(\.id) == ["all"])
+        #expect(session.queries.map(\.id) == ["all", "trends"])
 
         // And the reader is owed a sentence, because they picked it off a list this app drew.
         #expect(session.unread.map(\.board.fid) == [41])
@@ -716,7 +723,7 @@ struct BoardChoiceTests {
 
         // The server stays added and its boards stay chosen. The rail is still All.
         #expect(session.sources.first?.boards.map(\.fid) == [33])
-        #expect(session.queries.map(\.id) == ["all"])
+        #expect(session.queries.map(\.id) == ["all", "trends"])
         #expect(session.cleared == 1)
     }
 
@@ -906,7 +913,7 @@ struct BoardChoiceTests {
         await session.subscribe(offer.boards.filter { [33, 37].contains($0.fid) })
 
         #expect(session.sources.first?.boards.map(\.fid) == [33, 37])
-        #expect(session.queries.map(\.id) == ["all"])
+        #expect(session.queries.map(\.id) == ["all", "trends"])
         #expect(session.notes.count == held, """
             Unticking a board deleted the notes it had already brought. Decision 22: this device \
             stops fetching it, it does not forget what it holds.

@@ -268,7 +268,17 @@ final class ShellSession {
     /// Every change is handed on to `forums`, which is the one place that knows which of them
     /// are forums a sign-in can be held for.
     var sources: [Source] = [] {
-        didSet { forums.watch(forums: sources.filter { $0.kind == .discuz }.map(\.host)) }
+        didSet {
+            let discuz = sources.filter { $0.kind == .discuz }
+            forums.watch(forums: discuz.map(\.host))
+            // The boards each forum is read for, which is what decides whether reaching a ranked
+            // thread may read it (`ForumPosts.readsWhenReached`). Written only when it changed,
+            // so a reload that leaves the picks alone does not wake every forum row.
+            let read = Dictionary(
+                discuz.map { ($0.host, Set($0.boards.map(\.fid))) }, uniquingKeysWith: { a, _ in a }
+            )
+            if posts.boardsRead != read { posts.boardsRead = read }
+        }
     }
     var notes: [Note] = [] {
         didSet {
@@ -1832,8 +1842,9 @@ final class ShellSession {
     /// The tabs, rebuilt from what is actually joined.
     ///
     /// **All and Trends, then the reader's own timelines in their order.** Boards stay a property of
-    /// the source — what this device fetches next — not a third timeline. A forum is not
+    /// the source — what this device fetches next — not a third timeline. A Discourse is not
     /// offered Trends: it has no trending read, and an empty tab is a promise the app cannot keep.
+    /// A Discuz! is, for its ranking lists.
     ///
     /// Rebuilt rather than appended to, because a second join changes what the first one's tabs
     /// should be: joining a forum after a microblog must not take Trends away, and the only way
@@ -1853,11 +1864,12 @@ final class ShellSession {
 
     /// Whether a source of this kind has a trending timeline to offer.
     ///
-    /// **`ProtocolKind.hasTimelines`, not a second list**, so the Trends tab and the Trends
-    /// timeline's own rule cannot disagree about which servers have trends. A forum has none;
-    /// its boards choose what is fetched and are not tabs.
+    /// **`ProtocolKind.hasTrends`, not a second list**, so the Trends tab and the Trends
+    /// timeline's own rule cannot disagree about which servers have trends. A Discuz! has them —
+    /// its ranking lists — and a Discourse has none; a forum's boards choose what is fetched and
+    /// are not tabs.
     static func hasTrends(_ kind: ProtocolKind) -> Bool {
-        kind.hasTimelines
+        kind.hasTrends
     }
 
     /// The client a join of this host should go through.

@@ -42,8 +42,8 @@ public enum ProtocolKind: String, Sendable, Hashable, CaseIterable {
     /// Whether a source of this kind has the timelines every Mastodon-shaped server shares —
     /// public, trends, home — so that a category naming one of them can mean this source.
     ///
-    /// **The one list**, read by the Trends tab and by a timeline's rules alike: a second list
-    /// is how the tab and the rule come to disagree about a server. No `default:`, so a kind
+    /// **The one list**, read by a timeline's rules and by `hasTrends`, which starts from it: a
+    /// second list is how a tab and a rule come to disagree about a server. No `default:`, so a kind
     /// added later has to be answered here rather than inheriting somebody else's answer.
     public var hasTimelines: Bool {
         switch self {
@@ -52,6 +52,25 @@ public enum ProtocolKind: String, Sendable, Hashable, CaseIterable {
             true
         // Neither forum has one. A forum's categories are its boards.
         case .discourse, .discuz, .unknown:
+            false
+        }
+    }
+
+    /// Whether a source of this kind has something trending — so that `.trends` can mean it, the
+    /// Trends tab can be offered for it, and a reload of a timeline that reaches its Trends reads
+    /// them.
+    ///
+    /// **Every kind with timelines, and a Discuz! beside them without them.** A Discuz! forum
+    /// ranks its threads and its blogs by the week (`DiscuzRanklist`), which is exactly what a
+    /// microblog's trending read is: what everybody else is reading. It still has no public or
+    /// home timeline, so `hasTimelines` stays false for it and those still never reach a forum.
+    /// A Discourse has no ranking this app reads. No `default:`, `hasTimelines`' rule.
+    public var hasTrends: Bool {
+        switch self {
+        case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
+            .gotosocial, .discuz:
+            true
+        case .discourse, .unknown:
             false
         }
     }
@@ -173,7 +192,8 @@ public struct Source: Identifiable, Hashable, Sendable {
 public enum Category: Hashable, Sendable {
     /// A Mastodon source's public timeline.
     case `public`
-    /// A Mastodon source's trending statuses.
+    /// A Mastodon source's trending statuses — and a Discuz! forum's ranking lists, its threads
+    /// and blogs ranked for the week (`DiscuzRanklist`).
     case trends
     /// A signed-in Mastodon account's home timeline.
     case home

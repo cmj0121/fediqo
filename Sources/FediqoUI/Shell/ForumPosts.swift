@@ -29,6 +29,12 @@ struct ForumThreadRef: Hashable, Sendable {
     /// The row in the store this thread is, where the ref came from a row — what a read landing
     /// is kept under. See `ForumPosts.keeping`.
     let note: NoteKey?
+    /// Whether the forum's ranking lists named this thread — it arrived as its Trends. Carried,
+    /// like `kept`, and not part of what the thread is.
+    let ranked: Bool
+    /// The boards the row says the thread is in, by number: its board's own listing, or the
+    /// ranking list's board cell. Carried, like `kept`.
+    let boards: Set<Int>
 
     /// The thread a row is standing on, or nothing where this row is not a Discuz! thread at all.
     ///
@@ -43,13 +49,23 @@ struct ForumThreadRef: Hashable, Sendable {
         self.tid = tid
         kept = item.opening
         note = NoteKey(host: item.source.host, id: item.noteID)
+        ranked = item.categories.contains(.trends)
+        boards = Set(item.categories.compactMap { category -> Int? in
+            guard case .board(let id) = category else { return nil }
+            return Int(id)
+        })
     }
 
-    init(host: String, tid: Int, kept: ForumOpening? = nil) {
+    init(
+        host: String, tid: Int, kept: ForumOpening? = nil,
+        ranked: Bool = false, boards: Set<Int> = []
+    ) {
         self.host = host.lowercased()
         self.tid = tid
         self.kept = kept
         note = nil
+        self.ranked = ranked
+        self.boards = boards
     }
 
     static func == (a: ForumThreadRef, b: ForumThreadRef) -> Bool {
@@ -89,6 +105,10 @@ enum ForumReading: Equatable, Sendable {
     case silent
     /// It cannot be had. Which kind, because the row says different things about them.
     case absent(ForumPosts.Absence)
+    /// Not read, **on purpose, until the reader opens it**: a thread the forum's ranking lists
+    /// named, from a board the reader does not read. See `ForumPosts.readsWhenReached`. Only a row
+    /// in a list says this; the opened thread reads it.
+    case unread
 
     /// What one fetched post is worth to a row: the words, or the reason there are none.
     ///
@@ -375,6 +395,43 @@ final class ForumPosts {
         if let kept = ref.kept { return kept.words.isEmpty ? .silent : .words(kept.words) }
         if let absence = missing[key] { return .absent(absence) }
         return .coming
+    }
+
+    /// The boards the reader reads on each forum, by number — what `readsWhenReached` asks. Kept
+    /// here by the session as its sources change; empty until it does.
+    var boardsRead: [String: Set<Int>] = [:]
+
+    /// **Whether reaching this row may read its opening post** — the points guard.
+    ///
+    /// Some forums charge the reader points just to open a thread in some boards, and D30 reads a
+    /// row's opening post the moment it is reached. A reader who chose a board has chosen what
+    /// reading it costs; a thread the forum's ranking lists named from a board they never chose
+    /// has not been chosen by them at all, and scrolling past it must not spend their points. So a
+    /// ranked thread is read when reached **only when one of its boards is one the reader reads**
+    /// — and is otherwise read when they open it, which is them choosing it. Every thread that was
+    /// not ranked is D30's as it always was.
+    ///
+    /// **Strict where it cannot tell.** A ranked thread with no board this device knows of — the
+    /// row wrote none — is not read, and neither is one on a forum read through its front page
+    /// with no board chosen: the front page makes no row a board's.
+    func readsWhenReached(_ ref: ForumThreadRef) -> Bool {
+        guard ref.ranked else { return true }
+        return !ref.boards.isDisjoint(with: boardsRead[ref.host] ?? [])
+    }
+
+    /// Whether a band standing on this thread should read it now: `asks`, and — in a list rather
+    /// than the opened thread — the points guard. The one answer the band's wait and its read
+    /// both ask, so the two cannot disagree.
+    func fetches(_ ref: ForumThreadRef, opened: Bool) -> Bool {
+        asks(ref) && (opened || readsWhenReached(ref))
+    }
+
+    /// `reading(_:)`, as a band in a list or in the opened thread draws it: a row the guard keeps
+    /// from reading says so, where it would otherwise wait for a read that is not coming.
+    func reading(_ ref: ForumThreadRef, opened: Bool) -> ForumReading {
+        let reading = reading(ref)
+        if reading == .coming, !opened, !readsWhenReached(ref) { return .unread }
+        return reading
     }
 
     /// Whether a row standing on this thread should ask the forum for its opening post now.
@@ -1074,7 +1131,7 @@ struct ForumPostBand: View {
         // band on screen re-stamps its interest between one arrival and the next; a band that
         // stops reading looks infinitely stale to the eviction predicate however recently it was
         // drawn. Do not move this, and do not wrap this view in an `EquatableView`.
-        let reading = posts.reading(thread)
+        let reading = posts.reading(thread, opened: inFull)
         // Read in `body` for the same reason, and drawn above the words the way `ForumReplyRow`
         // draws a reply's: whoever was quoted spoke first, so their sentence comes first.
         let quoted = Self.quotations(posts.quoted(of: thread), inFull: inFull)
@@ -1090,7 +1147,7 @@ struct ForumPostBand: View {
         .task(
             id: Wanting(
                 thread: thread,
-                settled: !posts.asks(thread),
+                settled: !posts.fetches(thread, opened: inFull),
                 generation: posts.generation,
                 active: placeIsActive
             )
@@ -1098,7 +1155,10 @@ struct ForumPostBand: View {
             // Decision 20: a post is fetched only for the place the reader is in. **Only the
             // fetch is gated** — `posts.reading(…)` above still runs and still stamps interest on
             // every pass, on every page, or I8 breaks.
-            guard placeIsActive, posts.asks(thread) else { return }
+            //
+            // **And in a list, only a thread the reader's boards make theirs** — the points guard,
+            // `ForumPosts.readsWhenReached`. The opened thread (`inFull`) is the reader's choice.
+            guard placeIsActive, posts.fetches(thread, opened: inFull) else { return }
             // Cancelled by the row going away, which is the whole point of it. A thrown
             // cancellation here means this row did not stay, so nothing is asked for.
             do { try await Task.sleep(for: Self.settle) } catch { return }
@@ -1140,6 +1200,8 @@ struct ForumPostBand: View {
                 Color.clear.frame(height: 0)
             case .absent(let absence):
                 said("exclamationmark.triangle", Self.sentence(for: absence))
+            case .unread:
+                said("hand.raised", L10n.t("item.forum.unread"))
             }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -1251,6 +1313,7 @@ struct ForumPostBand: View {
         case .withheld: L10n.t("item.forum.withheld")
         case .silent: L10n.t("item.forum.silent")
         case .absent(let absence): sentence(for: absence)
+        case .unread: L10n.t("item.forum.unread")
         }
     }
 }

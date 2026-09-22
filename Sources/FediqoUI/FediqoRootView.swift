@@ -1104,6 +1104,10 @@ public struct FediqoRootView: View {
     private func openThread(_ id: String) -> Bool {
         guard Self.canWalk(place: place, open: openLayers) else { return false }
         selectedItemID = id
+        // **A forum's ranked blog is a page, not a conversation**: opening it reads its page in
+        // the app's own reader, as a link pressed in its words would — on a Mac in place of the
+        // timeline (#169), and Back returns to this row.
+        if let page = session.held(id)?.page { return linkReader.open(page) }
         // The lamp is read back after the press has moved it, which is how a conversation comes
         // back to its own opening post and a person's page comes back to the row the lamp was
         // on: one sentence for what used to be two. See `ShellWalk`.

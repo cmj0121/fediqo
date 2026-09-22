@@ -68,7 +68,7 @@ struct ShellAvailability: Hashable, Sendable {
     /// **`all` is what a timeline needs, and `trends` is no longer part of the answer.**
     ///
     /// This used to require both, which was true while every joinable source was a microblog.
-    /// A forum has no trending read at all, so a forum-only store is offered All alone — the
+    /// A Discourse has no trending read at all, so a Discourse-only store is offered All alone — the
     /// timelines are All and Trends, and a forum's boards only choose what is fetched. Asking for
     /// `trends` here would close the Timeline place to a reader whose only source is a forum:
     /// the one place their threads are drawn.

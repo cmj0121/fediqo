@@ -77,6 +77,48 @@ public struct DiscuzClient: Sendable {
         return try await read(url, source: source)
     }
 
+    /// The threads the forum ranks by replies this week — half of its Trends.
+    ///
+    /// **One page, and the week's.** `orderby=thisweek` is the ranking list's own default span,
+    /// and replies are what a thread's row already counts. Each comes back as the same row its
+    /// board's listing makes (`DiscuzRankedThread.asNote`), with `.trends` beside its board.
+    ///
+    /// **Nothing is an answer here, where it is not on a board's page.** A board with no threads
+    /// is a page this app could not read; a ranking with nothing in it is a quiet week, or a
+    /// forum that switched its ranking lists off — so an empty page is `[]` and not `noThreads`.
+    /// What the page itself refuses (a challenge, a notice, the sign-in page) still throws, for
+    /// the caller to decide what that is worth.
+    public func rankedThreads(source: Source) async throws -> [Note] {
+        let html = try await page(try ranklistURL(type: "thread", view: "replies"))
+        return DiscuzRanklist.threads(in: html).map { $0.asNote(source: source, host: host) }
+    }
+
+    /// The blogs (日誌) the forum ranks by how often they were read this week — the other half of
+    /// its Trends, and a kind of row of its own (`DiscuzRankedBlog`). Empty where there are none;
+    /// `rankedThreads`' reasoning.
+    public func rankedBlogs(source: Source) async throws -> [Note] {
+        let html = try await page(try ranklistURL(type: "blog", view: "heats"))
+        return DiscuzRanklist.blogs(in: html).map { $0.asNote(source: source, host: host) }
+    }
+
+    /// `misc.php?mod=ranklist&type=…&view=…&orderby=thisweek`, built out of the host and words
+    /// this file chose — never lifted off a page.
+    private func ranklistURL(type: String, view: String) throws -> URL {
+        guard let url = Host.httpsURL(
+            host: host,
+            path: "/misc.php",
+            query: [
+                URLQueryItem(name: "mod", value: "ranklist"),
+                URLQueryItem(name: "type", value: type),
+                URLQueryItem(name: "view", value: view),
+                URLQueryItem(name: "orderby", value: "thisweek"),
+            ]
+        ) else {
+            throw DiscuzRequestError.invalidURL
+        }
+        return url
+    }
+
     /// One board's thread list, newest thread first.
     ///
     /// The same page as the guide with one column fewer, and the same parser reads both. A board

@@ -390,19 +390,32 @@ final class ShellReload {
                 )
             }
             let read: Bool
+            // Whether a board or the front page was read at all — a Trends-only ask reads neither.
+            let listed: Bool
             if let categories {
                 let asked = source.boards.filter { categories.contains(.board(id: String($0.fid))) }
                 read = await boards(asked, of: stamp, through: client, in: session)
+                listed = !asked.isEmpty
             } else if source.boards.isEmpty {
                 read = await land(host, in: session) { try await client(nil).latest(source: stamp) }
+                listed = true
             } else {
                 read = await boards(source.boards, of: stamp, through: client, in: session)
+                listed = true
+            }
+            // **Its Trends, where the timeline reaches them** — the Trends tab, All, and a written
+            // timeline whose rules can show them: `categories` names `.trends`, or is nil for the
+            // source's usual reads, which on a Discuz! are its boards and its ranking lists as on
+            // a Mastodon they are its public timeline and its trends. After the boards, so a
+            // ranked thread lands on the row its board already made rather than first.
+            if categories?.contains(.trends) ?? true, !Task.isCancelled {
+                await ranked(stamp, through: http, in: session)
             }
             // **A board read again reads its rows' opening posts again too** (#154) — when each
             // row is reached, not now. The words kept with a row are what the forum said the
             // last time; a reader who pressed `r` asked what it says now. Only where the forum
             // answered: a reload that did not get through leaves the kept words standing.
-            if read, !Task.isCancelled { session.posts.revisit(host: host) }
+            if listed, read, !Task.isCancelled { session.posts.revisit(host: host) }
             return read
         case .discourse:
             // A Discourse's front page is its one read; it has no boards this app picks.
@@ -473,6 +486,25 @@ final class ShellReload {
             } && read
         }
         return read
+    }
+
+    /// A Discuz!'s Trends: the week's ranked threads, then the week's ranked blogs, one page each
+    /// and one after the other, through the forum's own transport — shown as its Trends while they
+    /// run (#164, #170).
+    ///
+    /// **Never a failure.** A forum may switch its ranking lists off, keep them for members, or
+    /// have nothing ranked this week, and none of that is the forum not answering: the reader
+    /// asked for its boards and its Trends, and a Trends that is not there is simply no rows.
+    /// So what these two pages bring lands, and what they could not bring is not reported.
+    private func ranked(
+        _ source: Source, through http: any HTTPClient, in session: ShellSession
+    ) async {
+        let client = DiscuzClient(
+            http: timed(http, for: .timeline, name: .trends, in: session), host: source.host
+        )
+        _ = await land(source.host, in: session) { try await client.rankedThreads(source: source) }
+        guard !Task.isCancelled else { return }
+        _ = await land(source.host, in: session) { try await client.rankedBlogs(source: source) }
     }
 
     /// One read into the store, while its source is still here and the reload is not stopped.
