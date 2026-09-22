@@ -17,11 +17,18 @@ import SwiftUI
 /// be 0.5.0 arriving early, and it would turn a face into a request to a server the reader did not
 /// press anything to reach.
 ///
-/// ## Why the rows do not open
+/// ## The rows open, and the face on them does not
 ///
-/// A person sits over the thread in the layer order — `DummyLayer.person` says why — so a
-/// conversation may not open underneath one. The rows here light and do not open, and they are
-/// handed no open action rather than one that would be refused. It is a list to read.
+/// A row here opens the conversation that post belongs to, the way a row anywhere else in the
+/// app does (#122). It could not, for as long as a person was a layer that sat over the thread:
+/// a conversation may not open under the layer it is under, so the one list made of somebody's
+/// own posts was the one place where a post was a thing to look at and not a thing to read. The
+/// two are one walk now — `ShellWalk` — and leaving the conversation gives this page back,
+/// standing on the row it was opened from.
+///
+/// **The face is still not a press here**, and that is the one thing this page does differently
+/// from every other list: it is already this person's page, so a face that opened it would be a
+/// control that promises a journey and stands still. Absent, rather than drawn and refused.
 struct PersonPane: View {
     let person: DummyPerson
     /// What this device already holds of theirs, newest first. Worked out by
@@ -43,6 +50,9 @@ struct PersonPane: View {
     var onPlayRow: (DummyItem) -> Void
     var onViewRow: (DummyItem) -> Void
     var onTurnRow: (DummyItem) -> Void
+    /// A press on a row: the conversation that post belongs to, answered by the root under the
+    /// walk's own rule (#122) — the same closure the stream's rows are given.
+    var onOpenThread: (String) -> Void
     var jumpToTop: Int
     var onToast: (String) -> Void
     var onBack: () -> Void
@@ -196,10 +206,9 @@ struct PersonPane: View {
 
     /// One of theirs.
     ///
-    /// **Two closures are deliberately nothing.** `onOpen` is nothing because a conversation may
-    /// not open under this page, and `onOpenPerson` is nothing because this *is* their page — a
-    /// face that opened the page it is already on is a control that promises a journey and stands
-    /// still. Both are the same rule: absent rather than refused.
+    /// **One closure is deliberately nothing.** `onOpenPerson` is nothing because this *is*
+    /// their page — a face that opened the page it is already on is a control that promises a
+    /// journey and stands still, so it is absent rather than drawn and refused.
     private func row(_ item: DummyItem) -> some View {
         DummyItemRow(
             item: item,
@@ -216,11 +225,17 @@ struct PersonPane: View {
                 of: item.id,
                 on: .row
             ),
-            // A press lights the row, and a second press on a row already lit does nothing here.
-            // `DummyCommand.tapped` is not consulted, because its second answer is an open this
-            // page has no way to honour.
-            onSelect: { selectedID = item.id },
-            onOpen: nil,
+            // A press lights the row; a second press on the row it is already on opens the
+            // conversation, which is `DummyCommand.tapped` and is exactly what a press does on
+            // the stream (#122). This page used to answer only the first half.
+            onSelect: {
+                switch DummyCommand.tapped(item.id, selected: selectedID) {
+                case .select: selectedID = item.id
+                case .open: onOpenThread(item.id)
+                }
+            },
+            // Lit and opened in one, for the reader who activates a row once.
+            onOpen: { onOpenThread(item.id) },
             onOpenPerson: nil,
             onToggleCover: { _ = decks.toggleCover(item.id) },
             onPlay: { onPlayRow(item) },
