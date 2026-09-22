@@ -397,17 +397,7 @@ struct TimelinePane: View {
                 .scrollTargetLayout()
             }
             .scrollIndicators(.never)
-            // Which row is at the top, written down as the reader scrolls — into the session,
-            // which outlives this pane, and past observation, so a scroll redraws nothing (#110).
-            //
-            // **Watched, never steered.** A position binding also drives the scroll view it is
-            // bound to, and on a list rebuilt by the swap it was a second hand on the scroll
-            // beside the lamp's own `scrollTo` — seen once on a running Mac, with the lamp
-            // fourteen rows down and off the screen after the swap. This only reports, so what
-            // moves the list on appearing is `landing` and nothing else.
-            .onScrollTargetVisibilityChange(idType: String.self) { visible in
-                session.scrolledTop = visible.first
-            }
+            .modifier(KeepsTopRow(session: session))
             .onAppear {
                 // A tick later: a lazy stack just built has not laid out the row to scroll to.
                 switch Self.landing(selected: selectedID, top: session.scrolledTop) {
@@ -695,5 +685,26 @@ struct TimelinePane: View {
                 && session.reload.unspoken == nil
                 && !session.reload.stopped
         ))
+    }
+}
+
+/// Which row is at the top of the stream, written down as the reader scrolls — into the session,
+/// which outlives the pane, and past observation, so a scroll redraws nothing (#110).
+///
+/// **Watched, never steered.** A position binding also drives the scroll view it is bound to, and
+/// on a list rebuilt by a swap of arrangement it was a second hand on the scroll beside the lamp's
+/// own `scrollTo` — seen once on a running Mac, with the lamp fourteen rows down and off the
+/// screen after the swap. This only reports, so what moves the list on appearing is
+/// `TimelinePane.landing` and nothing else.
+///
+/// A modifier of its own rather than a closure in the list's chain, which is long enough already
+/// for the compiler the CI builds with.
+struct KeepsTopRow: ViewModifier {
+    let session: ShellSession
+
+    func body(content: Content) -> some View {
+        content.onScrollTargetVisibilityChange(idType: String.self) { visible in
+            session.scrolledTop = visible.first
+        }
     }
 }
