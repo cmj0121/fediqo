@@ -648,10 +648,13 @@ struct BoardChoiceTests {
     /// — so the retry reads one rather than reusing whatever the refused look left behind.
     ///
     /// **What this test does not show, said so rather than implied:** that the second read goes
-    /// through the engine the sign-in built. This session holds no real engine, so `joiner(for:)`
-    /// falls back to the plain client and the two transports are indistinguishable from here.
-    /// That half is pinned Core-side by `PreviewTests.aPreviewSurvivesItsJoiner`, which runs the
-    /// press on a second `FixtureHTTP` and asserts the second one did the reading.
+    /// through the engine the sign-in built. A sign-in this run witnessed sends every read of the
+    /// host through the forum's browser (`ForumSessions.readTransport`), and a browser here would
+    /// be a `WKWebView` loading a real address — so once the sign-in is recorded it is forgotten
+    /// again, and `joiner(for:)` reads through the plain client. The door is pinned by
+    /// `ForumTransportTests.thePickerFollowsAKeptSignIn`, and the reading half Core-side by
+    /// `PreviewTests.aPreviewSurvivesItsJoiner`, which runs the press on a second `FixtureHTTP`
+    /// and asserts the second one did the reading.
     ///
     /// Pinned so it can fail: this calls `resumeAfterSignIn()` **once** and expects the boards.
     /// Wired to `add()`, as it was, the reader is left sitting on a preview and this goes red.
@@ -667,6 +670,8 @@ struct BoardChoiceTests {
         """#)))
         session.hostname = Self.host
         #expect(session.signInFinished(reached: true, host: Self.host), "the premise: a sign-in")
+        // The witnessed sign-in would send the retry through a real browser; see above.
+        await session.forums.forget(host: Self.host)
 
         await session.resumeAfterSignIn()
 

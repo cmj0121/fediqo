@@ -666,13 +666,10 @@ final class ForumPosts {
     /// this is not an optimisation: a cookie jar is not something a `URLSession` may borrow, so a
     /// thread on a forum the reader signed in to comes back withheld — or as a login page, or a
     /// challenge's 403 — if it is fetched any other way, a relaunch included.
-    /// `readsThroughEngine` rather than `transport`, because `transport(host:)` would *build* one
-    /// for every host and this app does not start a web process for a host that never needed it.
+    /// `readTransport` rather than `transport`, because `transport(host:)` would *build* one for
+    /// every host and this app does not start a web process for a host that never needed it.
     private func client(for host: String, part: Part, within limit: Duration?) -> DiscuzClient {
-        var transport = http
-        if let forums, forums.readsThroughEngine(host: host) {
-            transport = ForumJoinTransport(forums.transport(host: host))
-        }
+        var transport = forums?.readTransport(host: host, else: http) ?? http
         transport = WatchedHTTP(
             transport, for: part == .opening ? .forumPost : .forumReplies, in: work
         )

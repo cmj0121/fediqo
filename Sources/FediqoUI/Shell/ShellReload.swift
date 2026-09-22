@@ -552,8 +552,7 @@ final class ShellReload {
 
     /// A forum signed in to is read through its own browser, as a join reads it.
     private func transport(_ host: String, in session: ShellSession) -> any HTTPClient {
-        guard session.forums.readsThroughEngine(host: host) else { return session.http }
-        return ForumJoinTransport(session.forums.transport(host: host))
+        session.forums.readTransport(host: host, else: session.http)
     }
 }
 

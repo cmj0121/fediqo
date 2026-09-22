@@ -374,6 +374,19 @@ public final class ForumSessions {
         hasEngine(host: host) || reachedSignIn(host: host)
     }
 
+    /// The client a read of that host goes through: the forum's own browser where
+    /// `readsThroughEngine(host:)` says so, else `plain`.
+    ///
+    /// **One door for every read** — a reload, a post fetch and a join — so that none of them can
+    /// ask a narrower question than the others. A join used to ask `hasEngine` alone, and after a
+    /// relaunch with a sign-in kept on a challenge-fronted forum its board picker read through
+    /// `URLSession` and got back the 403 the rest of the app had stopped getting. Asked without
+    /// building anything, so a microblog still starts no web process.
+    func readTransport(host: String, else plain: any HTTPClient) -> any HTTPClient {
+        guard readsThroughEngine(host: host) else { return plain }
+        return ForumJoinTransport(transport(host: host))
+    }
+
     // MARK: - Signing in
 
     /// Signs in from the saved credential, or says why the reader has to.

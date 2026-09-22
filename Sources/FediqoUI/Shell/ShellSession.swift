@@ -1874,21 +1874,25 @@ final class ShellSession {
 
     /// The client a join of this host should go through.
     ///
-    /// **The forum's own browser, but only where this run already has one.** An engine exists for
-    /// a host exactly when the reader has been offered a sign-in for it, which is the moment the
-    /// session it holds starts to matter: a second `begin` after a sign-in has to go through the
-    /// thing that was signed in, or the reader watches a sheet clear a challenge and then gets
-    /// the same refusal from a client that was never there. `hasEngine` is asked rather than
-    /// `engine(host:)` so that a plain microblog join never starts a web process.
+    /// **The forum's own browser where this run has one, or where this device holds a sign-in
+    /// for it** — `ForumSessions.readTransport`, the same door a reload and a post fetch read
+    /// through. An engine exists for a host the moment the reader has been offered a sign-in for
+    /// it, which is when the session it holds starts to matter: a second `begin` after a sign-in
+    /// has to go through the thing that was signed in, or the reader watches a sheet clear a
+    /// challenge and then gets the same refusal from a client that was never there. And a
+    /// sign-in kept across a relaunch leaves cookies and no engine, so asking about this run
+    /// alone sent the board picker, a restate and `around(_:)` through `URLSession` and back to
+    /// the challenge's 403.
     /// **It has to be the engine, and nothing can stand in for it.** A host behind an
     /// interactive challenge cannot be read by `URLSessionClient` at all — not with a different
     /// agent, and not with a cookie copied out of the browser. The check is cleared by a person
     /// in a browser, and the only thing holding what that produced is the engine they cleared it
     /// in; reading a second time through anything else gets the challenge back.
     ///
-    /// **`hasEngine` rather than `transport`**, because `transport(host:)` would *build* one — a
-    /// reader adding an ordinary microblog would silently start a web process for a host that
-    /// never needed it, and this app does not spend a reader's battery on a maybe.
+    /// **`readTransport` rather than `transport`**, because `transport(host:)` would *build* one —
+    /// a reader adding an ordinary microblog would silently start a web process for a host that
+    /// never needed it, and this app does not spend a reader's battery on a maybe. A signed-in
+    /// host is a forum, so this still starts none for a microblog.
     ///
     /// `purpose` is what its requests are shown as while they run (#164), and `name` the one
     /// board they read, by the name the reader knows it by — nil for a read of no one board,
@@ -1896,10 +1900,7 @@ final class ShellSession {
     private func joiner(
         for host: String, for purpose: SourceWork.Purpose, name: SourceWork.Name? = nil
     ) -> SourceJoin {
-        var client: any HTTPClient = http
-        if forums.hasEngine(host: host) {
-            client = ForumJoinTransport(forums.transport(host: host))
-        }
+        let client = forums.readTransport(host: host, else: http)
         return SourceJoin(http: WatchedHTTP(client, for: purpose, name: name, in: work), store: store, catalogues: emoji)
     }
 
