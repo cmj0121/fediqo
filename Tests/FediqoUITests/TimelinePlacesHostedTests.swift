@@ -298,6 +298,44 @@ struct TimelinePlacesHostedTests {
         await h.press(.trends)
         #expect(h.lamp.seen == trendPost)
     }
+
+    /// #145 on top of #100 and #144: a timeline switched under an open search is searched with
+    /// the pattern kept, and closing the search gives back the post of the timeline the reader
+    /// is now in — each timeline's place still its own.
+    @Test("Switched with the search open, closing gives back the place of the timeline arrived at")
+    func switchedUnderTheSearch() async throws {
+        let h = try await harness()
+        let mine = try written(h.session)
+        let allPost = try post(in: .all, against: .trends, in: h)
+        let trendPost = try post(in: .trends, against: .all, in: h)
+        await h.press(.trends)
+        await h.stand(on: trendPost)
+        await h.press(.all)
+        await h.stand(on: allPost)
+        h.search.open(from: h.lamp.seen, over: h.session.notes)
+        await h.stand(on: nil)
+        await h.search.indexed()
+        h.search.text = "*"
+        h.search.settle("*")
+        await h.settle()
+        // A result lit on All, then Trends in front: the pattern is kept and Trends is searched.
+        let result = try #require(h.session.searched(h.search, latest: nil)?.first?.id)
+        await h.stand(on: result)
+        await h.press(.trends)
+        #expect(h.search.text == "*")
+        let found = try #require(h.session.searched(h.search, latest: nil)).map(\.id)
+        #expect(found == h.rows(of: .trends))
+        if let lit = h.lamp.seen { #expect(found.contains(lit)) }
+        // Through a written timeline and back to Trends, still searching.
+        await h.press(mine)
+        await h.press(.trends)
+        await h.stand(on: h.search.close())
+        #expect(h.lamp.seen == trendPost, "Trends' own place, not All's")
+        await h.press(.all)
+        #expect(h.lamp.seen == allPost, "All's place was written down, not the result")
+        await h.press(.trends)
+        #expect(h.lamp.seen == trendPost)
+    }
 }
 
 /// Defaults whose values live in this object only: nothing reaches `cfprefsd` or the disk.

@@ -9,6 +9,12 @@ import Observation
 /// opened. So does emptying the field. It reads the notes the session holds and asks no source
 /// anything.
 ///
+/// **Asked of the timeline in front** (#145). What it finds is what that timeline lets through —
+/// its sources, its categories, its rules, and the latest date — matched against the pattern
+/// #32 settled. A search that ignored the one thing the reader already said about a timeline
+/// would show them, from Trends or from a timeline written to leave a topic out, exactly the
+/// posts it was written to keep away. On All that is everything, as it always was.
+///
 /// **Typing only matches.** The notes are folded into a `SearchIndex` off the main actor as the
 /// search opens, not in the first redraw after a keystroke; what is searched trails what is typed
 /// by a short pause (`settle`), so a large store is not re-read on every key.
@@ -37,6 +43,8 @@ final class ShellSearch {
 
     private struct Key: Equatable {
         let pattern: String
+        /// The timeline searched: switching with the search open searches the new one.
+        let timeline: TimelineDefinition
         /// `ShellSession.notesRevision`: bumped whenever the notes are replaced, so comparing it
         /// costs nothing however many notes there are.
         let revision: Int
@@ -107,6 +115,19 @@ final class ShellSearch {
         restore(selectionBefore)
     }
 
+    /// The timeline under the search changed (#145): the post parked for it is written down as
+    /// the place of the one left, and the one arrived at hands over its own, to come back when the
+    /// search closes.
+    ///
+    /// **The parked post and not the lamp.** With the search open the lamp is on a result, and a
+    /// result is never a timeline's place (#100) — so the one thing moved between timelines here
+    /// is what was parked, and closing the search gives back the post of the timeline the reader
+    /// is now in, rather than one from the timeline they opened the search in.
+    func switched(_ place: (_ parked: String?) -> String?) {
+        guard isOpen else { return }
+        selectionBefore = place(selectionBefore)
+    }
+
     /// Whether moving to `place` closes the search. It belongs to the timeline, and one left
     /// open behind another page would be closed by an Escape pressed there, for nothing seen.
     func closes(leavingFor place: ShellPlace) -> Bool {
@@ -118,8 +139,14 @@ final class ShellSearch {
         if isOpen, typed == text { pattern = typed }
     }
 
-    /// The posts found, newest first, cut at the latest date as every timeline is (#22) — or
-    /// nothing while there is no search, so the timeline is drawn as it was.
+    /// The posts found in `timeline`, newest first, cut at the latest date as every timeline is
+    /// (#22) — or nothing while there is no search, so the timeline is drawn as it was.
+    ///
+    /// **The timeline's rules first, then the pattern, then the date, then the merge** — the
+    /// timeline's own order with the pattern in it (#145, #114). A copy a rule keeps out is never
+    /// matched, so however well it matches it is not found; and a post two sources carried is
+    /// drawn once, from the copies both let through. `text` is the session's folded text, which a
+    /// keyword or author rule reads; the caller builds it only for a timeline that has one.
     ///
     /// Found nothing yet, too, until the index has landed — the list stands empty and says it is
     /// searching, rather than showing the timeline the pattern has not been matched against. The
@@ -128,15 +155,23 @@ final class ShellSearch {
     /// folded as they are read (`SearchIndex.entry`).
     ///
     /// Asked on every body pass, so the answer is kept until the pattern, the notes — as
-    /// `revision` counts them — the sources or the date change.
-    func items(from notes: [Note], revision: Int, sources: [Source], latest: LatestDate?) -> [DummyItem]? {
+    /// `revision` counts them — the timeline, the sources or the date change.
+    func items(
+        in timeline: TimelineDefinition,
+        text: @autoclosure () -> TextIndex,
+        from notes: [Note],
+        revision: Int,
+        sources: [Source],
+        latest: LatestDate?
+    ) -> [DummyItem]? {
         guard isOpen, let search = NoteSearch(pattern, sources: sources, labels: Self.labels) else {
             return nil
         }
         guard isIndexed else { return [] }
-        let key = Key(pattern: pattern, revision: revision, sources: sources, latest: latest)
+        let key = Key(pattern: pattern, timeline: timeline, revision: revision, sources: sources, latest: latest)
         if let cached, cached.key == key { return cached.items }
-        let found = search.found(notes, index)
+        let shown = CompiledTimeline(timeline, sources: []).shown(notes, timeline.readsText ? text() : TextIndex([]))
+        let found = search.found(shown, index)
         // One post is one row here as it is on the timeline (#114): a search that drew a merged
         // row twice would be the complaint #10 left for later, arriving through the search field.
         let items = DummyItem.merged(latest?.shown(found) ?? found)

@@ -6,6 +6,9 @@ import SwiftUI
 /// back to the list. The pattern is set in the keycap face, so a `?` and a `*` are easy to count.
 struct SearchBar: View {
     @Bindable var search: ShellSearch
+    /// The name of the timeline being searched (#145), in the field and in what VoiceOver reads,
+    /// so a reader who switched timeline with the search open can see which one it now asks.
+    var timeline: String
     /// How many posts are found, or nothing while no pattern is being searched.
     var found: Int?
     /// Return: the keys go back to the list, on its first result.
@@ -27,6 +30,15 @@ struct SearchBar: View {
                 Text(verbatim: "/")
                     .shellFont(.keycap, weight: .semibold)
                     .foregroundStyle(focused ? ShellChrome.phosphor(colorScheme) : ShellChrome.inkDim(colorScheme))
+                    .accessibilityHidden(true)
+                // Which timeline is searched, still there once the placeholder has gone under
+                // what was typed. Read by VoiceOver as part of the field's own label instead.
+                Text(timeline)
+                    .shellFont(.meta, weight: .semibold)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                    .lineLimit(1)
+                    // At its own width, as the tab it names is drawn.
+                    .fixedSize()
                     .accessibilityHidden(true)
                 field
                 if let found {
@@ -61,7 +73,7 @@ struct SearchBar: View {
     }
 
     private var field: some View {
-        TextField(L10n.t("search.placeholder"), text: $search.text)
+        TextField(String(format: L10n.t("search.placeholder"), timeline), text: $search.text)
             .shellFont(.keycap)
             .textFieldStyle(.plain)
             .foregroundStyle(ShellChrome.ink(colorScheme))
@@ -80,6 +92,6 @@ struct SearchBar: View {
                 focused = false
                 onSubmit()
             }
-            .accessibilityLabel(L10n.t("search.label"))
+            .accessibilityLabel(String(format: L10n.t("search.label"), timeline))
     }
 }

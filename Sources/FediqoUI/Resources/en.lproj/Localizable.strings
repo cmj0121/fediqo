@@ -203,11 +203,11 @@
 "editor.keys.pick" = "pick";
 "editor.keys.scope" = "scope";
 "editor.keys.confirm" = "add";
-"search.placeholder" = "Search what this device holds: * any run, ? one character";
-"search.label" = "Search the posts this device holds";
+"search.placeholder" = "Search %@: * any run, ? one character";
+"search.label" = "Search the posts %@ shows";
 "search.found" = "%d found";
-"search.empty.title" = "Nothing held matches";
-"search.empty.detail" = "Only posts already on this device are searched. Try fewer characters, or * for any run of them.";
+"search.empty.title" = "Nothing in %@ matches";
+"search.empty.detail" = "Only the posts this timeline shows, already on this device, are searched. Try fewer characters, or * for any run of them.";
 "search.indexing.title" = "Searching…";
 "search.indexing.detail" = "Reading the posts this device holds, once, so each key only matches.";
 
