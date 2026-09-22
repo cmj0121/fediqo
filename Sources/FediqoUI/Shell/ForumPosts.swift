@@ -326,6 +326,10 @@ final class ForumPosts {
     /// to say why.
     @ObservationIgnored private let forums: ForumSessions?
 
+    /// Where each page read is shown while it is on the wire (#164) — as the opening post or as
+    /// the replies, which only this knows. The app's own; a test hands in another.
+    @ObservationIgnored var work: SourceWork = .shared
+
     init(http: any HTTPClient = ForumPosts.live, through forums: ForumSessions? = nil) {
         self.http = http
         self.forums = forums
@@ -527,7 +531,7 @@ final class ForumPosts {
             // Before the slot is taken, so a forum still signing in holds up nobody else's.
             if let forums = self.forums { await forums.settled(host: key.host) }
             let asked = self.forums?.signIns(host: key.host) ?? 0
-            let client = self.client(for: key.host, within: limit)
+            let client = self.client(for: key.host, part: part, within: limit)
             await self.enter()
             let answer: Result<[DiscuzPost], Absence>
             do {
@@ -607,11 +611,14 @@ final class ForumPosts {
     /// challenge's 403 — if it is fetched any other way, a relaunch included.
     /// `readsThroughEngine` rather than `transport`, because `transport(host:)` would *build* one
     /// for every host and this app does not start a web process for a host that never needed it.
-    private func client(for host: String, within limit: Duration?) -> DiscuzClient {
+    private func client(for host: String, part: Part, within limit: Duration?) -> DiscuzClient {
         var transport = http
         if let forums, forums.readsThroughEngine(host: host) {
             transport = ForumJoinTransport(forums.transport(host: host))
         }
+        transport = WatchedHTTP(
+            transport, for: part == .opening ? .forumPost : .forumReplies, in: work
+        )
         if let limit { transport = Deadline(transport, within: limit) }
         return DiscuzClient(http: transport, host: host)
     }

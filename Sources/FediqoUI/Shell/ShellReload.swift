@@ -115,7 +115,8 @@ final class ShellReload {
             // and is not asked again until a Clear or a Remove.
             await withTaskGroup(of: Void.self) { group in
                 for ask in asks where sources.first(where: { $0.host == ask.host })?.kind.hasTimelines == true {
-                    group.addTask { await session.flavours.ask(ask.host, through: self.timed(session.http)) }
+                    let asking = self.timed(session.http, for: .serverCheck, in: session)
+                    group.addTask { await session.flavours.ask(ask.host, through: asking) }
                 }
             }
             guard !Task.isCancelled else { return }
@@ -278,7 +279,9 @@ final class ShellReload {
                 guard let topic = held.id.split(separator: ":").last.flatMap({ Int($0) }) else {
                     return .failed
                 }
-                let client = DiscourseClient(http: timed(transport(host, in: session)), host: host)
+                let client = DiscourseClient(
+                    http: timed(transport(host, in: session), for: .conversation, in: session), host: host
+                )
                 let note = try await client.topic(topic, source: stamp, board: held.board)
                 try Task.checkCancellation()
                 await session.store.refresh([note], ifSourceHere: host)
@@ -303,8 +306,8 @@ final class ShellReload {
     /// Clear between two of its requests ends it before the next goes out on a forgotten token.
     private func againOnMastodon(_ held: Note, stamp: Source, in session: ShellSession) async throws -> Again {
         let host = stamp.host
-        guard let door = session.mastodon.authorized(host: host, within: deadline) else {
-            let post = MastodonPost(http: timed(session.http), host: host)
+        guard let door = session.mastodon.authorized(host: host, within: deadline, for: .conversation) else {
+            let post = MastodonPost(http: timed(session.http, for: .conversation, in: session), host: host)
             return try await Self.again(held, stamp: stamp, through: post, signedIn: false, in: session)
         }
         let post = MastodonPost(door: door)
@@ -348,7 +351,7 @@ final class ShellReload {
         let stamp = Source(host: host, kind: source.kind)
         switch source.kind {
         case .mastodon:
-            let client = MastodonClient(http: timed(session.http), host: host)
+            let client = MastodonClient(http: timed(session.http, for: .timeline, in: session), host: host)
             let publicRead = { try await client.publicTimeline(source: stamp) }
             let trendsRead = { try await client.trending(source: stamp) }
             var read: Bool
@@ -364,7 +367,7 @@ final class ShellReload {
             }
             return await readAsYou(source, for: categories, in: session) && read
         case .discuz:
-            let client = DiscuzClient(http: timed(transport(host, in: session)), host: host)
+            let client = DiscuzClient(http: timed(transport(host, in: session), for: .timeline, in: session), host: host)
             let read: Bool
             if let categories {
                 let asked = source.boards.filter { categories.contains(.board(id: String($0.fid))) }
@@ -383,7 +386,7 @@ final class ShellReload {
         case .discourse:
             // A Discourse's front page is its one read; it has no boards this app picks.
             guard categories == nil else { return true }
-            let client = DiscourseClient(http: timed(transport(host, in: session)), host: host)
+            let client = DiscourseClient(http: timed(transport(host, in: session), for: .timeline, in: session), host: host)
             return await land(host, in: session) { try await client.latest(source: stamp) }
         case .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial,
              .unknown:
@@ -404,7 +407,7 @@ final class ShellReload {
             })
         }
         guard home || lists?.isEmpty == false,
-              let door = session.mastodon.authorized(host: source.host, within: deadline)
+              let door = session.mastodon.authorized(host: source.host, within: deadline, for: .timeline)
         else { return true }
         let account = MastodonAccount(door: door, store: session.store)
         do {
@@ -449,8 +452,11 @@ final class ShellReload {
         }
     }
 
-    private func timed(_ http: any HTTPClient) -> any HTTPClient {
-        Deadline(http, within: deadline)
+    /// Bounded by the reload's deadline, and on `SourceWork` for what it is (#164) while it runs.
+    private func timed(
+        _ http: any HTTPClient, for purpose: SourceWork.Purpose, in session: ShellSession
+    ) -> any HTTPClient {
+        Deadline(WatchedHTTP(http, for: purpose, in: session.work) as any HTTPClient, within: deadline)
     }
 
     /// A forum signed in to is read through its own browser, as a join reads it.

@@ -406,9 +406,9 @@ struct MastodonSignInTests {
     func door() throws {
         let tokens = MemoryMastodonTokens()
         let sessions = MastodonSessions(tokens: tokens, sender: MastodonServer(tokens: tokens))
-        #expect(sessions.authorized(host: host) == nil)
+        #expect(sessions.authorized(host: host, for: .timeline) == nil)
         try tokens.save(token(host))
-        #expect(sessions.authorized(host: host)?.token.host == host)
+        #expect(sessions.authorized(host: host, for: .timeline)?.token.host == host)
     }
 
     // MARK: - Clear and Remove

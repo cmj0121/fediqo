@@ -403,6 +403,9 @@ final class ShellPictures {
 
     @ObservationIgnored let http: any HTTPClient
 
+    /// Where each picture on the wire is shown (#164). The app's own; a test hands in another.
+    @ObservationIgnored var work: SourceWork = .shared
+
     /// The copies of pictures already on this device, where there are any to keep.
     ///
     /// Read before the network and written after it, so a picture fetched once is drawn from this
@@ -484,7 +487,9 @@ final class ShellPictures {
             inFlight[key]?.hosts.insert(host)
             return running.task
         }
-        let client = http
+        // On `SourceWork` while it is on the wire (#164) — and not while it is read from disk,
+        // which asks no source anything.
+        let client = WatchedHTTP(http, for: .picture, in: work)
         let disk = disk
         // Unstructured on purpose: the caller is a view's `.task`, and that is cancelled by any
         // rebuild. What it cancels has to be this view's waiting and not the work itself.

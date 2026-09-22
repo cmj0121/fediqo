@@ -330,10 +330,11 @@ final class ShellConversations {
     /// rule `ShellReload` reads a single post by, spelled once more here because this unit asks
     /// its own question and must not ask it through a door the reader has closed.
     private func door(host: String, in session: ShellSession) -> MastodonPost {
-        if let door = session.mastodon.authorized(host: host, within: deadline) {
+        if let door = session.mastodon.authorized(host: host, within: deadline, for: .conversation) {
             return MastodonPost(door: door)
         }
-        return MastodonPost(http: Deadline(session.http, within: deadline), host: host)
+        let watched = WatchedHTTP(session.http, for: .conversation, in: session.work)
+        return MastodonPost(http: Deadline(watched as any HTTPClient, within: deadline), host: host)
     }
 
     /// Every failure a thread read can end in, as one of three sentences.
