@@ -32,7 +32,7 @@ enum DiscuzRanklist {
     /// Every ranked thread on the page, in the order the page ranks them. Nothing where the page
     /// has no ranking on it — switched off, empty, or not a ranking page at all.
     static func threads(in html: String) -> [DiscuzRankedThread] {
-        guard let patterns = Patterns(), let index = DiscuzIndex.Patterns() else { return [] }
+        guard let patterns = Patterns.shared, let index = DiscuzIndex.Patterns.shared else { return [] }
         return patterns.row.matches(in: html, range: NSRange(html.startIndex..., in: html))
             .compactMap { match -> DiscuzRankedThread? in
                 guard let attributes = Range(match.range(at: 1), in: html),
@@ -59,7 +59,7 @@ enum DiscuzRanklist {
               ),
               let href = Range(link.range(at: 1), in: heading).map({ String(heading[$0]) }),
               let words = Range(link.range(at: 2), in: heading).map({ String(heading[$0]) }),
-              let tid = number(in: href, patterns.tid),
+              let tid = DiscuzIndex.number(inHref: href, shapes: patterns.tid),
               case let title = HTMLText.plain(words), !title.isEmpty
         else { return nil }
 
@@ -67,11 +67,11 @@ enum DiscuzRanklist {
         let fid = patterns.link.capture(1, in: board).flatMap { DiscuzIndex.fid(inHref: $0, patterns: index) }
         let by = patterns.byCell.capture(1, in: row) ?? ""
         let author = patterns.cite.capture(1, in: by).map(HTMLText.plain) ?? ""
-        let posted = patterns.em.capture(1, in: by).flatMap { DiscuzDate.parse($0, date: patterns.date) }
+        let posted = patterns.em.capture(1, in: by).flatMap { DiscuzDate.parse($0, date: index.date) }
         // The last cell is the figure the page ranks by — replies, on the view this app asks for.
         let replies = patterns.cell.captures(1, in: row).last
             .map(HTMLText.plain)
-            .flatMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+            .flatMap { Int($0) }
 
         return DiscuzRankedThread(
             rank: patterns.rankCell.capture(1, in: row).flatMap { rank(in: $0, patterns) },
@@ -90,7 +90,7 @@ enum DiscuzRanklist {
     /// Every ranked blog on the page, in the order the page ranks them. Nothing where there is
     /// no ranking on it.
     static func blogs(in html: String) -> [DiscuzRankedBlog] {
-        guard let patterns = Patterns() else { return [] }
+        guard let patterns = Patterns.shared, let index = DiscuzIndex.Patterns.shared else { return [] }
         return patterns.entry.captures(1, in: html).compactMap { entry -> DiscuzRankedBlog? in
             // The title is the `dt`'s link **to a blog** — the other link in it is the forum's
             // share button, whose address names the same blog through a different door.
@@ -109,7 +109,7 @@ enum DiscuzRanklist {
             let byline = patterns.plainDetail.capture(1, in: entry) ?? ""
             let author = patterns.link.capture(2, in: byline).map(HTMLText.plain) ?? ""
             let posted = patterns.dimSpan.capture(1, in: byline)
-                .flatMap { DiscuzDate.parse($0, date: patterns.date) }
+                .flatMap { DiscuzDate.parse($0, date: index.date) }
             let excerpt = patterns.excerpt.capture(1, in: entry).map(Self.excerpt) ?? ""
 
             return DiscuzRankedBlog(
@@ -134,26 +134,16 @@ enum DiscuzRanklist {
     static func excerpt(_ raw: String) -> String {
         let once = HTMLText.plain(raw)
         let twice = HTMLText.plain(once)
-        return twice
-            .replacingOccurrences(of: "<[A-Za-z/][^>]*$", with: "", options: .regularExpression)
+        guard let cut = Patterns.shared?.unfinishedTag else { return twice }
+        let range = NSRange(twice.startIndex..., in: twice)
+        return cut.stringByReplacingMatches(in: twice, range: range, withTemplate: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// A rank, as an image's `alt` for the first three and as text for the rest.
     private static func rank(in cell: String, _ patterns: Patterns) -> Int? {
         if let alt = patterns.alt.capture(1, in: cell), let rank = Int(alt) { return rank }
-        return Int(HTMLText.plain(cell).trimmingCharacters(in: .whitespacesAndNewlines))
-    }
-
-    /// A positive number out of an address, by the first of `shapes` that finds one.
-    private static func number(in raw: String, _ shapes: [NSRegularExpression]) -> Int? {
-        let href = raw.replacingOccurrences(of: "&amp;", with: "&", options: .caseInsensitive)
-        for shape in shapes {
-            if let found = shape.capture(1, in: href), let number = Int(found), number > 0 {
-                return number
-            }
-        }
-        return nil
+        return Int(HTMLText.plain(cell))
     }
 
     /// Whose blog and which, out of an address to one, or nothing where it is not one.
@@ -164,8 +154,8 @@ enum DiscuzRanklist {
     private static func blogAddress(_ raw: String, _ patterns: Patterns) -> (uid: Int, id: Int)? {
         let href = raw.replacingOccurrences(of: "&amp;", with: "&", options: .caseInsensitive)
         if patterns.blogQuery.firstMatch(in: href, range: NSRange(href.startIndex..., in: href)) != nil,
-           let uid = number(in: href, [patterns.uid]),
-           let id = number(in: href, [patterns.blogID]) {
+           let uid = DiscuzIndex.number(inHref: href, shapes: [patterns.uid]),
+           let id = DiscuzIndex.number(inHref: href, shapes: [patterns.blogID]) {
             return (uid, id)
         }
         // `blog-21-500.html`, the rewrite Discuz! offers for a blog.
@@ -178,8 +168,14 @@ enum DiscuzRanklist {
         return (uid, id)
     }
 
-    /// The patterns, compiled once per page — `DiscuzPage.Patterns`' reason.
-    struct Patterns {
+    /// The patterns, compiled once for the life of the process — `DiscuzPage.Patterns`' reason.
+    ///
+    /// No date of its own: a thread's is read with `DiscuzIndex.Patterns`' — built beside this
+    /// one anyway, for a board's number — and a blog's with the same.
+    struct Patterns: @unchecked Sendable {
+        /// Compiled on first use and shared by every page read after it.
+        static let shared = Patterns()
+
         let row: NSRegularExpression
         let headingRow: NSRegularExpression
         let rankCell: NSRegularExpression
@@ -202,7 +198,8 @@ enum DiscuzRanklist {
         let uid: NSRegularExpression
         let blogID: NSRegularExpression
         let blogRewrite: NSRegularExpression
-        let date: NSRegularExpression
+        /// The last tag of an excerpt the forum cut halfway through. See `excerpt(_:)`.
+        let unfinishedTag: NSRegularExpression
 
         init?() {
             let options: NSRegularExpression.Options = [.dotMatchesLineSeparators, .caseInsensitive]
@@ -210,9 +207,7 @@ enum DiscuzRanklist {
                 -> NSRegularExpression? {
                 try? NSRegularExpression(pattern: pattern, options: options)
             }
-            func classed(_ value: String) -> String {
-                "class\\s*=\\s*[\"'][^\"']*\\b\(value)\\b[^\"']*[\"']"
-            }
+            let classed = DiscuzMarkup.classed
             guard
                 let row = compile("<tr\\b([^>]*)>(.*?)</tr>"),
                 let headingRow = compile(classed("th")),
@@ -240,9 +235,7 @@ enum DiscuzRanklist {
                 let uid = compile("[?&;]uid=(\\d+)"),
                 let blogID = compile("[?&;]id=(\\d+)"),
                 let blogRewrite = compile("(?:^|/)blog-(\\d+)-(\\d+)\\.html"),
-                let date = compile(
-                    "(\\d{4})-(\\d{1,2})-(\\d{1,2})(?:[\\s\u{00A0}]+(\\d{1,2}):(\\d{2})(?::(\\d{2}))?)?", []
-                )
+                let unfinishedTag = compile("<[A-Za-z/][^>]*$", [])
             else { return nil }
             self.row = row
             self.headingRow = headingRow
@@ -266,7 +259,7 @@ enum DiscuzRanklist {
             self.uid = uid
             self.blogID = blogID
             self.blogRewrite = blogRewrite
-            self.date = date
+            self.unfinishedTag = unfinishedTag
         }
     }
 }

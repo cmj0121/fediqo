@@ -94,8 +94,10 @@ public enum SamePost {
         var groups: [[Note]] = []
         var byPost: [PostIdentity: Int] = [:]
         for note in notes {
-            guard let post = note.post, let at = byPost[post] else {
-                note.post.map { byPost[$0] = groups.count }
+            // Read once: `post` is worked out, not stored.
+            let post = note.post
+            guard let post, let at = byPost[post] else {
+                post.map { byPost[$0] = groups.count }
                 groups.append([note])
                 continue
             }
