@@ -202,6 +202,24 @@ public struct FediqoRootView: View {
                     .presentationDetents([.medium, .large])
                     #endif
             }
+            // Taking back what the reader wrote (#109): the one act that asks first. It names
+            // what goes and nothing goes until it is confirmed; cancelling leaves all as it was.
+            .confirmationDialog(
+                session.withdrawing.map { ItemActs.withdrawQuestion($0).title } ?? "",
+                isPresented: Binding(
+                    get: { session.withdrawing != nil },
+                    set: { if !$0 { session.cancelWithdraw() } }
+                ),
+                titleVisibility: .visible,
+                presenting: session.withdrawing
+            ) { item in
+                Button(L10n.t("withdraw.confirm"), role: .destructive) {
+                    Task { await session.withdraw(item) }
+                }
+                Button(L10n.t("compose.cancel"), role: .cancel) { session.cancelWithdraw() }
+            } message: { item in
+                Text(ItemActs.withdrawQuestion(item).detail)
+            }
             // An answer, over the conversation it belongs to (#108). Driven by the session's one
             // value, so the key and the mark open the same surface by writing the same thing.
             .sheet(item: $session.answering) { target in
@@ -592,6 +610,8 @@ public struct FediqoRootView: View {
             return favouriteFocused()
         case .answer:
             return answerFocused()
+        case .withdraw:
+            return onFocusedItem { session.askToWithdraw($0) }
         case .compose:
             guard availability.canCompose else { return false }
             showingShortcuts = false

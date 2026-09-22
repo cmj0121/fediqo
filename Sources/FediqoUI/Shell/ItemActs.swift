@@ -32,6 +32,8 @@ struct ItemActing {
     /// that is where an answer is written; from inside the conversation, opening the answer.
     /// Nothing where the list can do neither — somebody's page — and then no mark is drawn.
     var answer: (() -> Void)?
+    /// Asking to take the post back (#109). Only ever the question — nothing goes on this press.
+    var withdraw: (() -> Void)?
 }
 
 /// The vocabulary of the acts a reader performs on a post.
@@ -65,6 +67,8 @@ enum ItemActs {
         // An answer is never "done" on the post: the reader may answer as often as they like, and
         // the words they wrote are rows of their own in the thread.
         case .answer: return "arrowshape.turn.up.left"
+        // Never "done": a post taken back is not on the row to be drawn.
+        case .withdraw: return "trash"
         }
     }
 
@@ -78,6 +82,7 @@ enum ItemActs {
         case .favourite:
             return L10n.t(done ? "item.act.unfavourite" : "item.act.favourite", language: language)
         case .answer: return L10n.t("item.act.answer", language: language)
+        case .withdraw: return L10n.t("item.act.withdraw", language: language)
         }
     }
 
@@ -96,6 +101,21 @@ enum ItemActs {
         case .failed: return name + " " + L10n.t("item.act.failed", language: language)
         case nil: return name
         }
+    }
+
+    /// The question taking a post back asks (#109): **what goes, by name, before anything goes.**
+    ///
+    /// The post's own opening words and the source it goes from, what goes with it on most
+    /// sources — the answers other people wrote under it — and that it does not come back.
+    static func withdrawQuestion(
+        _ item: DummyItem, language: DummyLanguage? = nil
+    ) -> (title: String, detail: String) {
+        let words = item.body.trimmingCharacters(in: .whitespacesAndNewlines)
+        let opening = words.count > 80 ? String(words.prefix(80)) + "…" : words
+        return (
+            L10n.t("withdraw.title", language: language),
+            String(format: L10n.t("withdraw.detail", language: language), opening, item.source.host)
+        )
     }
 
     /// What a row says where it offers no acts at all.

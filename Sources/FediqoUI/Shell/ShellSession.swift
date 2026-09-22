@@ -467,8 +467,52 @@ final class ShellSession {
         }
         return PostActs.on(
             mastodon.writing(host: item.source.host, kind: kind),
-            nameable: item.statusID != nil
+            nameable: item.statusID != nil,
+            mine: isMine(item)
         )
+    }
+
+    /// Whether the reader wrote this post, **as its source said this run** (#109): the post's
+    /// handle against who the source says the reader is. Not known is not theirs.
+    ///
+    /// A boost the reader made of somebody else's post names that somebody as its author, so it is
+    /// never offered for taking back — the boost is taken back with the boost's own mark.
+    func isMine(_ item: DummyItem) -> Bool {
+        guard let me = mastodon.handles[item.source.host], let handle = item.handle else { return false }
+        return me.caseInsensitiveCompare(handle) == .orderedSame
+    }
+
+    /// The post whose taking back is being asked about, where one is (#109). Observed, and the
+    /// question is presented from it; nothing goes while it is only asked.
+    var withdrawing: DummyItem?
+
+    /// Asks whether to take `item` back. **Asked, never pressed** — the only act in #54 that asks
+    /// first, because a post taken back does not come back. Refused where the post does not offer
+    /// it, which is the same one rule the mark reads.
+    @discardableResult
+    func askToWithdraw(_ item: DummyItem) -> Bool {
+        guard acts(on: item).offers(.withdraw), !acts.isOnItsWay(item.id, .withdraw) else {
+            return false
+        }
+        withdrawing = item
+        return true
+    }
+
+    /// The question answered no: everything stays as it was.
+    func cancelWithdraw() {
+        withdrawing = nil
+    }
+
+    /// The question answered yes: the post is taken back from its source, and once the source
+    /// says so it leaves the timeline, any open thread and the store, so it stays gone after a
+    /// relaunch. A failure leaves it where it is and the same act asks again.
+    func withdraw(_ item: DummyItem) async {
+        withdrawing = nil
+        await perform(.withdraw, on: item) { door, note in
+            try await MastodonWrite(door: door, store: self.store).withdraw(note)
+            self.conversations.drop(note.key)
+            return note
+        }
     }
 
     /// Boosts the post, or takes the boost back — the same press either way (#106).
