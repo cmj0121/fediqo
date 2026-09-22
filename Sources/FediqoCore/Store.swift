@@ -176,6 +176,16 @@ public actor ItemStore {
         notes.values.sorted(by: Self.storeOrder)
     }
 
+    /// Lets go of one row — a post its author took back (#109). Silent where it is not held.
+    ///
+    /// **One row and never a host's worth.** `remove(host:)` is the reader letting go of a server;
+    /// this is a server saying one post no longer exists, and the other copies of it through other
+    /// sources are theirs to say about.
+    public func forget(_ key: NoteKey) {
+        guard notes.removeValue(forKey: key) != nil else { return }
+        revision += 1
+    }
+
     /// One row, or nothing where this store does not hold it.
     ///
     /// **So that an act can hand back the row as the store has it** rather than as it decoded it

@@ -79,6 +79,8 @@ public enum PostAct: Sendable, Hashable, CaseIterable {
     case favourite
     /// Words written back to the post, from inside the conversation it belongs to (#108).
     case answer
+    /// What the reader wrote, taken back (#109). **Offered only on their own posts.**
+    case withdraw
 }
 
 /// Why a post offers none of the acts. Nothing is a post that offers them.
@@ -125,16 +127,21 @@ public struct PostActs: Sendable, Hashable {
     /// reader is owed the reason that is about their source rather than the one about our
     /// bookkeeping.
     ///
+    /// `mine` is whether the source says the reader wrote it. **Taking back is offered on that
+    /// alone**, and somebody else's post never offers it — which is not a refusal with a sentence,
+    /// because there is nothing the reader could do to change it and nothing to explain.
+    ///
     /// **No `default:`**, this package's standing rule: a fifth `SourceWriting` has to say what a
     /// post on such a source offers.
-    public static func on(_ writing: SourceWriting, nameable: Bool) -> PostActs {
+    public static func on(_ writing: SourceWriting, nameable: Bool, mine: Bool = false) -> PostActs {
         switch writing {
         case .never: return PostActs(offered: [], refused: .protocolCannot)
         case .reads: return PostActs(offered: [], refused: .notSignedIn)
         case .refused: return PostActs(offered: [], refused: .turnedAway)
         case .writes:
             guard nameable else { return PostActs(offered: [], refused: .unnameable) }
-            return PostActs(offered: Set(PostAct.allCases))
+            let everyone = Set(PostAct.allCases).subtracting([.withdraw])
+            return PostActs(offered: mine ? everyone.union([.withdraw]) : everyone)
         }
     }
 

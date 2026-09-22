@@ -102,6 +102,29 @@ public struct MastodonWrite: Sendable {
         try await act(on: note, path: on ? "favourite" : "unfavourite")
     }
 
+    /// Takes back a post the reader wrote (#109), and lets go of the row once the source has.
+    ///
+    /// **The row goes only after the source says it went.** A refusal or a miss leaves it exactly
+    /// where it is, and the same act can be asked again. A 404 is the source saying the post is
+    /// not there — taken back elsewhere, or already gone — and that is what the reader asked for,
+    /// so the row goes then too rather than standing as a post the source says does not exist.
+    ///
+    /// Nothing checks here that the post is the reader's own: the source refuses anybody else's,
+    /// and the one place that decides whether to offer it is `PostActs.on`.
+    public func withdraw(_ note: Note) async throws {
+        guard await store.sources().contains(where: { $0.host == host }) else {
+            throw MastodonWriteError.noSource
+        }
+        guard let id = note.statusID, ListSubscription.isPathSegment(id) else {
+            throw MastodonWriteError.unfindable
+        }
+        do {
+            _ = try await door.delete(path: "/api/v1/statuses/\(id)")
+        } catch MastodonAuthError.http(404) {}
+        try Task.checkCancellation()
+        await store.forget(note.key)
+    }
+
     /// One act on one status, and what the server says the post looks like afterwards.
     ///
     /// **The answer goes through `refresh` and never `ingest`.** The reader is acting on a post
