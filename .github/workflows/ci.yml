@@ -9,15 +9,24 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# The Xcode a runner uses is named here, never left to the image's default. A release is
+# built on the maintainer's Mac with the newest Xcode; a runner on an older one failed code
+# that ships fine and passed nothing that ships broken. This is the newest the hosted images
+# carry -- raise it when a newer one lands, and keep servers.yml saying the same.
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+
 jobs:
   test:
     name: Tests and coverage
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
 
       - name: Show the toolchain
-        run: swift --version
+        run: |
+          xcodebuild -version
+          swift --version
 
       - name: Cache the package build
         uses: actions/cache@v4
@@ -40,9 +49,14 @@ jobs:
 
   build:
     name: Both apps, from a clean checkout
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
+
+      - name: Show the toolchain
+        run: |
+          xcodebuild -version
+          swift --version
 
       # #10 asks that nothing be needed beyond this checkout and one brew install.
       # If this line ever grows a second install, that promise has been broken.

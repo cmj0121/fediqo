@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # A Docker daemon this job can use, or a hard failure.
 #
-# GitHub's macos-15 runner has no Docker Desktop. Nested virt for colima is
+# GitHub's hosted macOS runners have no Docker Desktop. Nested virt for colima is
 # often missing on the ARM image. Trying and then failing closed is the honest
 # answer: a green job that never brought the servers up would mean nothing.
 
@@ -28,7 +28,7 @@ if ! command -v colima >/dev/null 2>&1 || ! command -v docker >/dev/null 2>&1; t
 fi
 
 colima start --cpu 3 --memory 7 --disk 40 --runtime docker || {
-    echo >&2 "ci-docker: colima could not start (macos-15 ARM often cannot nest a VM)."
+    echo >&2 "ci-docker: colima could not start (a hosted ARM macOS runner often cannot nest a VM)."
     echo >&2 "Fail closed: this job must not be green without the servers."
     exit 1
 }

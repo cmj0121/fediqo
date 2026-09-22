@@ -11,17 +11,23 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# The same Xcode ci.yml names, and for its reason.
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+
 jobs:
   servers:
     name: Servers, the slow suite, and a release build
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
 
       - name: Show the toolchain
-        run: swift --version
+        run: |
+          xcodebuild -version
+          swift --version
 
-      # GitHub's macos-15 image has no Docker Desktop. This script tries
+      # GitHub's macOS images have no Docker Desktop. This script tries
       # colima and fails closed if a daemon never comes up, so a green job
       # is never one that skipped the servers.
       - name: Docker, or this job is not honest
