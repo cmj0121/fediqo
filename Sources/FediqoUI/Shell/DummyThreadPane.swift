@@ -730,6 +730,21 @@ struct ForumReplyRow: View {
 /// at every level rather than growing: the rules are what say how deep this is, and a widening
 /// step would run a deep quotation off a phone's screen for no more information.
 ///
+/// **A level with no words of its own draws no rule (#160).** Some templates write a quotation
+/// that only wraps another — words empty, the real quotation inside. Given a rule, it drew a
+/// second one the full height of the first with nothing between them: one border twice, the
+/// thing #94 set out to remove. It is collapsed here, in the view, and not in Core, because a
+/// tree this device kept before this build (#154) still holds its wrappers, and a quotation read
+/// from what was kept has to draw the same as one read from the forum. One place that decides
+/// it for both, rather than two that could disagree. `drawn(_:)` is the whole of that decision;
+/// two quotations side by side in one level stay two.
+///
+/// ## Whoever was quoted reads first
+///
+/// A level draws what it quoted **above** its own words — the order `ForumReplyRow` and
+/// `ForumPostBand` (#104) already draw a post in. Whoever was quoted spoke first, so an answer
+/// never reads before the thing it answers, at any depth.
+///
 /// **No cap here.** `DiscuzQuotation.deepest` bounds the tree where it is read, so what arrives
 /// is already shallow enough to draw; a second ceiling in the view would be a rule that could
 /// disagree with the one in Core.
@@ -738,16 +753,32 @@ struct ForumReplyRow: View {
 ///
 /// Every level carries the same "Quoted: …" label over its own words, so a reader using
 /// VoiceOver hears each person's sentence introduced as a quotation instead of one label over
-/// everybody's. A level that is only a wrapper — words empty, one quotation inside it, which
-/// some templates write — draws no text and no label, only its rule.
+/// everybody's — innermost first, because that is the order they are drawn in and were said
+/// in. A wrapper has no words and so no label; what it wraps is read where it would have been.
 struct ForumQuotation: View {
     let quotation: DiscuzQuotation
 
     @Environment(\.colorScheme) private var colorScheme
 
+    /// The levels drawn for `levels`: every wrapper — a level with no words — replaced, in its
+    /// place, by what it wraps, all the way down. What comes back has words at every level, so
+    /// every rule drawn has somebody's sentence beside it.
+    static func drawn(_ levels: [DiscuzQuotation]) -> [DiscuzQuotation] {
+        levels.flatMap { level in
+            level.words.isEmpty
+                ? drawn(level.quoting)
+                : [DiscuzQuotation(words: level.words, quoting: drawn(level.quoting))]
+        }
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: ShellSpace.tight) {
-            if !quotation.words.isEmpty {
+        // A wrapper handed straight to this view — a post's own list arrives as it was read or
+        // kept — draws what it wraps and nothing of its own: no rule, no inset.
+        if quotation.words.isEmpty {
+            quoted
+        } else {
+            VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                quoted
                 Text(quotation.words)
                     .shellFont(.meta)
                     .foregroundStyle(ShellChrome.inkFaint(colorScheme))
@@ -756,16 +787,24 @@ struct ForumQuotation: View {
                         Text(String(format: L10n.t("thread.reply.quoted"), quotation.words))
                     )
             }
-            ForEach(quotation.quoting.indices, id: \.self) { level in
-                ForumQuotation(quotation: quotation.quoting[level])
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, ShellSpace.snug)
+            .overlay(alignment: .leading) {
+                Rectangle()
+                    .fill(ShellChrome.hairline(colorScheme))
+                    .frame(width: ShellSpace.hair)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.leading, ShellSpace.snug)
-        .overlay(alignment: .leading) {
-            Rectangle()
-                .fill(ShellChrome.hairline(colorScheme))
-                .frame(width: ShellSpace.hair)
+    }
+
+    /// What this level quoted, wrappers already taken out, one `ForumQuotation` each and above
+    /// the words. Keyed by position, for the reason `ForumReplyRow` states.
+    private var quoted: some View {
+        let levels = Self.drawn(quotation.quoting)
+        return VStack(alignment: .leading, spacing: ShellSpace.tight) {
+            ForEach(levels.indices, id: \.self) { level in
+                ForumQuotation(quotation: levels[level])
+            }
         }
     }
 }
