@@ -153,6 +153,27 @@ public struct FediqoRootView: View {
         )
     }
 
+    /// Whether the take-back question is being asked (#109). Written out here for
+    /// `stagePresented`'s reason: built inside the modifier chain, this binding and the title
+    /// beside it took `body` past what Swift 6.0 on the runner would type-check in reasonable
+    /// time, while a newer compiler here solved it without a word.
+    ///
+    /// Answered by any route that is not the confirm button — Cancel, a click outside, Escape —
+    /// it is a cancel, and nothing goes.
+    private var withdrawAsked: Binding<Bool> {
+        Binding(
+            get: { session.withdrawing != nil },
+            set: { asked in if !asked { session.cancelWithdraw() } }
+        )
+    }
+
+    /// The take-back question's title: what goes, named. Empty only while nothing is asked, when
+    /// the dialog is not drawn.
+    private var withdrawTitle: String {
+        guard let item = session.withdrawing else { return "" }
+        return ItemActs.withdrawQuestion(item).title
+    }
+
     public var body: some View {
         layout
             // The reader's time window is set on the store once at launch, before the store is
@@ -204,11 +225,8 @@ public struct FediqoRootView: View {
             // Taking back what the reader wrote (#109): the one act that asks first. It names
             // what goes and nothing goes until it is confirmed; cancelling leaves all as it was.
             .confirmationDialog(
-                session.withdrawing.map { ItemActs.withdrawQuestion($0).title } ?? "",
-                isPresented: Binding(
-                    get: { session.withdrawing != nil },
-                    set: { if !$0 { session.cancelWithdraw() } }
-                ),
+                withdrawTitle,
+                isPresented: withdrawAsked,
                 titleVisibility: .visible,
                 presenting: session.withdrawing
             ) { item in
