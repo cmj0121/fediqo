@@ -138,14 +138,14 @@ struct TimelineToastBanner: View {
 
     @ViewBuilder
     private var waitMark: some View {
-        switch TimelineToast.waitMark(reduceMotion: reduceMotion) {
-        case .spinner:
+        // The still mark's glyph is `WaitMark.symbol`'s, so the name a test reads is the one drawn.
+        if let symbol = TimelineToast.waitMark(reduceMotion: reduceMotion).symbol {
+            Image(systemName: symbol)
+                .shellFont(.meta)
+                .accessibilityHidden(true)
+        } else {
             ProgressView()
                 .controlSize(.small)
-                .accessibilityHidden(true)
-        case .hourglass:
-            Image(systemName: "hourglass")
-                .shellFont(.meta)
                 .accessibilityHidden(true)
         }
     }

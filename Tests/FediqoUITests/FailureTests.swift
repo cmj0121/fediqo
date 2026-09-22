@@ -1,3 +1,4 @@
+import FediqoCore
 import Foundation
 import Testing
 @testable import FediqoUI
@@ -51,20 +52,17 @@ struct FailureTests {
     /// place — that is not this task.
     @Test("A wait and a miss leave the stream empty or held")
     func aWaitAndAMissLeaveTheStream() {
-        let waiting = TimelinePane.standing(
-            running: true, hasItems: false, searching: false, hasSources: true
+        // The stream is its rows, or the empty notice where it has none — a reload's running and
+        // its misses are not inputs to that choice. What a running or missed reload leaves in an
+        // empty stream is the notice for "not everybody was asked", never the wait or the miss.
+        let empty = EmptyNotice.timeline(
+            searching: false, indexed: true, query: .all, notes: [], written: [],
+            sources: [Source(host: "one.example", kind: .mastodon)], index: TextIndex([]),
+            latest: nil, asked: false, language: .english
         )
-        let missed = TimelinePane.standing(
-            running: false, hasItems: false, searching: false, hasSources: true,
-            failed: ["one.example"]
-        )
-        let held = TimelinePane.standing(
-            running: false, hasItems: true, searching: false, hasSources: true,
-            failed: ["one.example"]
-        )
-        #expect(waiting == .empty)
-        #expect(missed == .empty)
-        #expect(held == .held)
+        #expect(empty.kind == .held)
+        #expect(empty.spoken != ShellWaiting.spoken)
+        #expect(empty.title != ShellFailure.spoken(["one.example"]))
         #expect(ShellFailure.spoken(["one.example"]) == String(
             format: L10n.t("shell.failed"), "one.example"
         ))

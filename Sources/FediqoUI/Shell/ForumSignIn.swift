@@ -48,7 +48,13 @@ public enum ForumSignInStop: Equatable, Sendable {
 
     /// The sheet's sentence, with the Keychain's reason put into it where there is one.
     func explanation(language: DummyLanguage? = nil) -> String {
-        let said = L10n.t(explanationKey, language: language)
+        said(explanationKey, language: language)
+    }
+
+    /// The sentence behind `key`, with the Keychain's reason put into it where this stop is the
+    /// Keychain's — the one step the sheet's line and the row's lapsed line share.
+    func said(_ key: String, language: DummyLanguage? = nil) -> String {
+        let said = L10n.t(key, language: language)
         guard case .keychain(let error) = self else { return said }
         return String(format: said, ForumKeychainReason.of(error, language: language))
     }
@@ -162,9 +168,7 @@ enum ForumRowNotice: Equatable, Sendable {
     func sentence(language: DummyLanguage? = nil) -> String {
         switch self {
         case .lapsed(let stop):
-            let said = L10n.t(stop.lapsedKey, language: language)
-            guard case .keychain(let error) = stop else { return said }
-            return String(format: said, ForumKeychainReason.of(error, language: language))
+            return stop.said(stop.lapsedKey, language: language)
         case .unkept(let failure):
             return failure.sentence(language: language)
         case .unforgotten(let error):

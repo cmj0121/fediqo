@@ -32,16 +32,14 @@ struct ItemActing {
     /// its first copy, and a boost that goes through the second would otherwise show the first
     /// source's "not boosted" over a press that the second source has already said yes to.
     var through: [PostAct: DummyItem] = [:]
-    /// Boosting the post to its source, or taking the boost back (#106).
-    var boost: (() -> Void)?
-    /// Favouriting the post on its source, or taking the favourite back (#107).
-    var favourite: (() -> Void)?
-    /// Answering the post (#108): from a timeline, opening the conversation it belongs to, since
-    /// that is where an answer is written; from inside the conversation, opening the answer.
-    /// Nothing where the list can do neither — somebody's page — and then no mark is drawn.
-    var answer: (() -> Void)?
-    /// Asking to take the post back (#109). Only ever the question — nothing goes on this press.
-    var withdraw: (() -> Void)?
+    /// The press on one act's mark, **one closure for the four** rather than one each: boosting
+    /// the post to its source or taking the boost back (#106), the same for a favourite (#107),
+    /// answering it (#108) — from a timeline by opening the conversation it belongs to, since
+    /// that is where an answer is written, and from inside the conversation by opening the answer
+    /// — and asking to take it back (#109), which is only ever the question.
+    ///
+    /// Nothing where the list cannot act — a fixture, a preview — and then no mark is drawn.
+    var perform: ((PostAct) -> Void)?
 }
 
 /// What one act's mark draws on one row — `ItemActs.mark`'s answer.

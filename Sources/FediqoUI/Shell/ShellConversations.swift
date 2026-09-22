@@ -296,7 +296,7 @@ final class ShellConversations {
         standings[item.id] = .coming
         let stamp = Source(host: host, kind: held.source.kind)
         do {
-            let post = door(host: host, in: session)
+            let post = session.conversationPost(host: host, within: deadline).post
             guard let id = try await post.id(of: held) else {
                 standings[item.id] = .absent(.unfindable)
                 return
@@ -329,17 +329,6 @@ final class ShellConversations {
         }
     }
 
-    /// As the reader where this device is signed in to the host, unsigned otherwise — the one
-    /// rule `ShellReload` reads a single post by, spelled once more here because this unit asks
-    /// its own question and must not ask it through a door the reader has closed.
-    private func door(host: String, in session: ShellSession) -> MastodonPost {
-        if let door = session.mastodon.authorized(host: host, within: deadline, for: .conversation) {
-            return MastodonPost(door: door)
-        }
-        let watched = WatchedHTTP(session.http, for: .conversation, in: session.work)
-        return MastodonPost(http: Deadline(watched as any HTTPClient, within: deadline), host: host)
-    }
-
     /// Every failure a thread read can end in, as one of three sentences.
     ///
     /// **A status the server chose is a refusal and everything else is the dark.** A 403 on the
@@ -355,5 +344,19 @@ final class ShellConversations {
 
     private static func chosen(_ status: Int) -> Absence {
         (400..<500).contains(status) ? .refused : .unreachable
+    }
+}
+
+extension ShellSession {
+    /// One microblog post and the conversation around it, read as the reader where this device
+    /// is signed in to the host and unsigned otherwise — **the one rule** a thread read and a
+    /// reload's read of a single post both go by, so neither can ask through a door the reader
+    /// has closed. Each request ends within `limit`, and `signedIn` says which door it was.
+    func conversationPost(host: String, within limit: Duration) -> (post: MastodonPost, signedIn: Bool) {
+        if let door = mastodon.authorized(host: host, within: limit, for: .conversation) {
+            return (MastodonPost(door: door), true)
+        }
+        let watched = WatchedHTTP(http, for: .conversation, in: work)
+        return (MastodonPost(http: Deadline(watched as any HTTPClient, within: limit), host: host), false)
     }
 }

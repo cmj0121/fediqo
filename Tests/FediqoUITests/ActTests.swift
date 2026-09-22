@@ -222,10 +222,10 @@ struct ActTests {
         )
         let item = try row(session)
         let watchdog = hangGuard(gate)
-        let first = Task { await session.boost(item) }
+        let first = Task { await session.toggle(.boost, on: item) }
         #expect(await spun { await server.paths.count == 1 })
         #expect(session.acts.isOnItsWay(item.id, .boost))
-        await session.boost(item)
+        await session.toggle(.boost, on: item)
         #expect(await server.paths == ["/api/v1/statuses/9/reblog"], "one act, not two")
         await gate.open()
         await first.value
@@ -241,12 +241,12 @@ struct ActTests {
             routes: ["/api/v1/statuses/9/reblog": .fail]
         )
         let item = try row(session)
-        await session.boost(item)
+        await session.toggle(.boost, on: item)
         #expect(session.acts.standing(of: item.id, .boost) == .failed)
         #expect(session.notes.first?.boosted == false)
         #expect(session.acts(on: item).offers(.boost), "a miss is not a refusal; the mark stays")
 
-        await session.boost(item)
+        await session.toggle(.boost, on: item)
         #expect(await server.paths.count == 2, "pressing again asks again")
     }
 
@@ -257,7 +257,7 @@ struct ActTests {
             routes: ["/api/v1/statuses/9/reblog": .json("{}", status: 403)]
         )
         let item = try row(session)
-        await session.boost(item)
+        await session.toggle(.boost, on: item)
         #expect(session.acts.standing(of: item.id, .boost) == .failed)
         #expect(session.notes.first?.boosted == false)
         #expect(session.acts(on: item).refused == .turnedAway)
@@ -269,7 +269,7 @@ struct ActTests {
             scopes: writing, holding: note(boosted: true),
             routes: ["/api/v1/statuses/9/unreblog": .json(Self.status(reblogged: false))]
         )
-        await session.boost(try row(session))
+        await session.toggle(.boost, on: try row(session))
         #expect(await server.paths == ["/api/v1/statuses/9/unreblog"])
         #expect(session.notes.first?.boosted == false)
     }
@@ -277,7 +277,7 @@ struct ActTests {
     @Test("A post that does not offer the mark sends nothing when pressed")
     func aRefusedPostSendsNothing() async throws {
         let (session, server) = try await shell(scopes: MastodonOAuth.reading, holding: note(boosted: false))
-        await session.boost(try row(session))
+        await session.toggle(.boost, on: try row(session))
         #expect(await server.paths.isEmpty)
         #expect(session.acts.standings.isEmpty)
     }
@@ -290,7 +290,7 @@ struct ActTests {
             scopes: writing, holding: note(boosted: false),
             routes: ["/api/v1/statuses/9/reblog": .json(Self.status(reblogged: true))]
         )
-        await session.boost(try row(session))
+        await session.toggle(.boost, on: try row(session))
         #expect(session.acts.standings.isEmpty, "a landed act leaves no record of its own")
         #expect(try row(session).boosted == true)
 
@@ -352,7 +352,7 @@ struct ActTests {
             scopes: writing, holding: note(boosted: false, favourited: false),
             routes: ["/api/v1/statuses/9/favourite": .json(Self.status(reblogged: false, favourited: true))]
         )
-        await session.favourite(try row(session))
+        await session.toggle(.favourite, on: try row(session))
         #expect(await server.paths == ["/api/v1/statuses/9/favourite"])
         #expect(session.notes.first?.favourited == true)
         #expect(session.notes.first?.boosted == false)
@@ -366,11 +366,11 @@ struct ActTests {
             routes: ["/api/v1/statuses/9/unfavourite": .fail]
         )
         let item = try row(session)
-        await session.favourite(item)
+        await session.toggle(.favourite, on: item)
         #expect(session.acts.standing(of: item.id, .favourite) == .failed)
         #expect(session.acts.standing(of: item.id, .boost) == nil, "one act's failure is not another's")
         #expect(session.notes.first?.favourited == true)
-        await session.favourite(item)
+        await session.toggle(.favourite, on: item)
         #expect(await server.paths == ["/api/v1/statuses/9/unfavourite", "/api/v1/statuses/9/unfavourite"])
     }
 
@@ -411,7 +411,7 @@ struct ActTests {
         #expect(!session.notes.contains { $0.key.rowID == reply.id }, "the answer is not a store row")
         #expect(session.acts(on: reply).offers(.favourite))
 
-        await session.favourite(reply)
+        await session.toggle(.favourite, on: reply)
         #expect(await server.paths.last == "/api/v1/statuses/12/favourite")
         #expect(session.acts.standings.isEmpty)
         let after = try #require(session.conversations.conversation(around: root).descendants.first?.item)
@@ -469,7 +469,7 @@ struct ActTests {
         let ownID = try #require(session.notes.first { $0.source.host == own }?.statusID)
         #expect(row.statusID == ownID, "the row carries its own copy's id on its own source")
 
-        await session.boost(row)
+        await session.toggle(.boost, on: row)
         let request = try #require(await server.requests.first)
         #expect(await server.requests.count == 1, "one act, to one source")
         #expect(request.url?.host == own)

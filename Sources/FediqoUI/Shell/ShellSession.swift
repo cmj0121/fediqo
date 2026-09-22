@@ -495,7 +495,7 @@ final class ShellSession {
     /// Writes the draft to the chosen source and takes the returned post into the store.
     /// Empty or over-long text is not sent. A failure keeps the draft.
     func post() async throws {
-        let text = composeDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = ComposerSheet.trimmed(composeDraft)
         guard !text.isEmpty, let host = composeHost else { return }
         guard writableSources.contains(where: { $0.host == host }) else {
             throw MastodonWriteError.noSource
@@ -510,12 +510,23 @@ final class ShellSession {
             composeDraft = ComposerSheet.draftAfterLanding(current: composeDraft, sent: text)
             await adopt()
             await persist?()
-        } catch MastodonAuthError.signedOut {
-            mastodon.endedByServer(host: host)
-            throw MastodonAuthError.signedOut
-        } catch MastodonAuthError.http(let status) where status == 403 {
-            mastodon.refusedWrite(host: host)
-            throw MastodonAuthError.http(403)
+        } catch {
+            writeFailed(error, host: host)
+            throw error
+        }
+    }
+
+    /// What a write's failure says about the sign-in it went through, written against `host`:
+    /// a 401 the account check confirmed signs the source out, and a 403 marks the source as
+    /// having turned a write away. **One reading for every write** — a post, an answer and each
+    /// act — because they are the same two answers from the same door, and a second reading of
+    /// them is how two writes come to tell a reader different things about one sign-in. Any
+    /// other failure says nothing about the sign-in.
+    private func writeFailed(_ error: any Error, host: String) {
+        switch error as? MastodonAuthError {
+        case .signedOut?: mastodon.endedByServer(host: host)
+        case .http(403)?: mastodon.refusedWrite(host: host)
+        default: break
         }
     }
 
@@ -663,29 +674,25 @@ final class ShellSession {
         }
     }
 
-    /// Boosts the post, or takes the boost back — the same press either way (#106).
+    /// Boosts the post or takes the boost back (#106), or favourites it or takes the favourite
+    /// back (#107) — the same press either way, and one press with two meanings. The other two
+    /// acts are not toggles, and do nothing here.
     ///
     /// **Which way it goes is read off the post and not off the press.** The acting copy's
-    /// `boosted` is what the source it goes through last said, so a row the reader boosted in another app and this device has since
-    /// fetched takes the boost back on its first press here, which is what the mark under it says
-    /// it will do.
+    /// `boosted` or `favourited` is what the source it goes through last said, so a row the reader
+    /// boosted in another app and this device has since fetched takes the boost back on its first
+    /// press here, which is what the mark under it says it will do.
     ///
     /// Nothing is written down about the press landing: the store takes the server's answer, and
     /// what the row draws afterwards is that. A refusal leaves the post exactly as it was and
     /// leaves a failure the same press clears by trying again.
-    func boost(_ item: DummyItem) async {
-        await perform(.boost, on: item) { door, note in
-            try await MastodonWrite(door: door, store: self.store)
-                .boost(note, on: note.boosted != true)
-        }
-    }
-
-    /// Favourites the post, or takes the favourite back — `boost`'s press with a different meaning
-    /// (#107). Which way it goes is read off what the source last said.
-    func favourite(_ item: DummyItem) async {
-        await perform(.favourite, on: item) { door, note in
-            try await MastodonWrite(door: door, store: self.store)
-                .favourite(note, on: note.favourited != true)
+    func toggle(_ act: PostAct, on item: DummyItem) async {
+        guard act == .boost || act == .favourite else { return }
+        await perform(act, on: item) { door, note in
+            let write = MastodonWrite(door: door, store: self.store)
+            return act == .boost
+                ? try await write.boost(note, on: note.boosted != true)
+                : try await write.favourite(note, on: note.favourited != true)
         }
     }
 
@@ -703,9 +710,12 @@ final class ShellSession {
     /// between them can answer differently.
     ///
     /// A 401 the account check confirms signs the source out, and a 403 marks the source as
-    /// having turned a write away — both exactly as `post()` does, because they are the same two
-    /// answers from the same door and a second reading of them is how two acts come to tell a
-    /// reader different things about one sign-in.
+    /// having turned a write away — `writeFailed`, exactly as `post()` reads them.
+    ///
+    /// **Every failure leaves the act failed**, a cancelled one included: a cancelled act is one
+    /// that did not arrive, said in the one sentence a reader can act on — press again. There is
+    /// no third thing to tell them, and leaving no standing at all would draw the post as though
+    /// the press had landed.
     private func perform(
         _ act: PostAct,
         on item: DummyItem,
@@ -724,18 +734,8 @@ final class ShellSession {
             acts.landed(copy.id, act)
             await adopt()
             await persist?()
-        } catch MastodonAuthError.signedOut {
-            mastodon.endedByServer(host: host)
-            acts.failed(copy.id, act)
-        } catch MastodonAuthError.http(403) {
-            mastodon.refusedWrite(host: host)
-            acts.failed(copy.id, act)
-        } catch let error where Cancellation.happened(error) {
-            // A cancelled act is one that did not arrive, said in the one sentence a reader can
-            // act on: press again. There is no third thing to tell them, and leaving no standing
-            // at all would draw the post as though the press had landed.
-            acts.failed(copy.id, act)
         } catch {
+            writeFailed(error, host: host)
             acts.failed(copy.id, act)
         }
     }
@@ -816,12 +816,9 @@ final class ShellSession {
             conversations.landed(note, under: target.root.id, rootID: target.root.statusID)
             await adopt()
             await persist?()
-        } catch MastodonAuthError.signedOut {
-            mastodon.endedByServer(host: host)
-            throw MastodonAuthError.signedOut
-        } catch MastodonAuthError.http(let status) where status == 403 {
-            mastodon.refusedWrite(host: host)
-            throw MastodonAuthError.http(403)
+        } catch {
+            writeFailed(error, host: host)
+            throw error
         }
     }
 

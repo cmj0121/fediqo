@@ -60,8 +60,8 @@ struct ShellNotice: View {
 
 /// What an empty place says, from facts a test can name without drawing the pane.
 ///
-/// The standing is still `TimelinePane.standing`'s `.empty`. This is the copy and the
-/// distinctions inside that standing: a search, a timeline the rules emptied, a source
+/// The stream draws this wherever it has no rows (`TimelinePane.underneath`). This is the copy
+/// and the distinctions inside that empty: a search, a timeline the rules emptied, a source
 /// never asked, a source that answered with nothing, a thread with nothing under it.
 struct EmptyNotice: Equatable, Sendable {
     /// Why this place is empty. The view does not switch on it; tests do.

@@ -263,13 +263,7 @@ struct LinkReaderSheet: View {
     /// clicked into the page still has a key that leaves it; `q` is the page's there, as every
     /// other letter is.
     private var back: some View {
-        Button(action: onClose) {
-            Label(L10n.t("link.reader.back"), systemImage: "chevron.left")
-                .shellFont(.meta, weight: .medium)
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(ShellChrome.selectInk(colorScheme))
-        .keyboardShortcut(.cancelAction)
+        ShellBackButton("link.reader.back", shortcut: .cancelAction, action: onClose)
     }
 
     /// One line, where the page asked to go somewhere this app will not follow.

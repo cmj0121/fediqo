@@ -313,11 +313,10 @@ final class ShellReload {
     /// Clear between two of its requests ends it before the next goes out on a forgotten token.
     private func againOnMastodon(_ held: Note, stamp: Source, in session: ShellSession) async throws -> Again {
         let host = stamp.host
-        guard let door = session.mastodon.authorized(host: host, within: deadline, for: .conversation) else {
-            let post = MastodonPost(http: timed(session.http, for: .conversation, in: session), host: host)
+        let (post, signedIn) = session.conversationPost(host: host, within: deadline)
+        guard signedIn else {
             return try await Self.again(held, stamp: stamp, through: post, signedIn: false, in: session)
         }
-        let post = MastodonPost(door: door)
         return try await asReader(host) {
             try await Self.again(held, stamp: stamp, through: post, signedIn: true, in: session)
         }

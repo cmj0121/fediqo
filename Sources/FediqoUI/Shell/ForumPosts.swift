@@ -637,7 +637,7 @@ final class ForumPosts {
             // row is the store's, and so is when it is saved.
             if part == .opening, case .success(let posts) = answer,
                let first = posts.first, let opening = ForumOpening(first) {
-                self.keeping?(self.rows[key] ?? ForumThreadRef(host: key.host, tid: key.tid).noteKey, opening)
+                self.keeping?(self.noteKey(for: key), opening)
             }
 
             switch answer {
@@ -719,6 +719,18 @@ final class ForumPosts {
 
     // MARK: - Admission and eviction
 
+    /// Lets one thread's posts go, and what they cost with them — the one place `heldBytes` is
+    /// taken down for a post that leaves.
+    private func dropEntry(_ key: Key) {
+        if let gone = entries.removeValue(forKey: key) { heldBytes -= gone.cost }
+    }
+
+    /// The store row a thread's posts belong to: the row it was read for, or the spelling
+    /// `DiscuzThread.asNote` writes where no row was.
+    private func noteKey(for key: Key) -> NoteKey {
+        rows[key] ?? ForumThreadRef(host: key.host, tid: key.tid).noteKey
+    }
+
     /// Admits what came back, or declines it.
     ///
     /// Room is made oldest-first and never past something a band has wanted since this fetch
@@ -750,7 +762,7 @@ final class ForumPosts {
             return
         }
         for old in evictable {
-            if let gone = entries.removeValue(forKey: old) { heldBytes -= gone.cost }
+            dropEntry(old)
         }
 
         heldBytes -= already
@@ -865,7 +877,7 @@ final class ForumPosts {
             cleared.insert(key)
         }
         for key in Array(entries.keys) where key.host == host {
-            if let gone = entries.removeValue(forKey: key) { heldBytes -= gone.cost }
+            dropEntry(key)
         }
         for key in Array(missing.keys) where key.host == host {
             missing.removeValue(forKey: key)
@@ -891,7 +903,7 @@ final class ForumPosts {
         let host = raw.lowercased()
         var dropped = false
         for (key, held) in entries where key.host == host && held.posts.contains(where: \.isWithheld) {
-            if let gone = entries.removeValue(forKey: key) { heldBytes -= gone.cost }
+            dropEntry(key)
             dropped = true
         }
         for (key, absence) in missing where key.host == host
@@ -933,7 +945,7 @@ final class ForumPosts {
         let host = raw.lowercased()
         due.insert(host)
         for key in Array(entries.keys) where key.host == host && key.part == .opening {
-            if let gone = entries.removeValue(forKey: key) { heldBytes -= gone.cost }
+            dropEntry(key)
         }
         for key in Array(missing.keys) where key.host == host && key.part == .opening {
             missing.removeValue(forKey: key)
@@ -948,7 +960,7 @@ final class ForumPosts {
         var found: [NoteKey: ForumOpening] = [:]
         for (key, held) in entries where key.host == host && key.part == .opening {
             guard let first = held.posts.first, let opening = ForumOpening(first) else { continue }
-            found[rows[key] ?? ForumThreadRef(host: key.host, tid: key.tid).noteKey] = opening
+            found[noteKey(for: key)] = opening
         }
         return found
     }
@@ -1244,12 +1256,21 @@ struct ForumPostBand: View {
     /// figures in `BoardPickerSheet` use — and the glyph is what says at a glance that this line
     /// is a condition rather than content.
     private func said(_ symbol: String, _ text: String) -> some View {
+        Self.said(symbol, text, lines: lines, colorScheme: colorScheme)
+    }
+
+    /// The same line for any post's words — a reply's in the thread pane included, so the forum
+    /// keeping a post from a signed-out reader reads the same on the row and under it.
+    ///
+    /// One line fewer than the words get, so a long sentence of this app's own cannot fill a band
+    /// meant for somebody's post — and no limit at all where the words have none (`lines` nil),
+    /// because there is no band to overflow.
+    static func said(
+        _ symbol: String, _ text: String, lines: Int?, colorScheme: ColorScheme
+    ) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: ShellSpace.tight) {
             Image(systemName: symbol)
             Text(text)
-                // One line fewer than the words get, so a long sentence of this app's own cannot
-                // fill a band meant for somebody's post — and no limit at all where the words
-                // have none, because there is no band to overflow.
                 .lineLimit(lines.map { max(1, $0 - 1) })
                 .multilineTextAlignment(.leading)
         }

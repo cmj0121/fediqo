@@ -65,12 +65,7 @@ struct DummyThreadPane: View {
         let above = conversation.ancestors.count
         return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: ShellSpace.snug) {
-                Button(action: onBack) {
-                    Label(L10n.t("thread.back"), systemImage: "chevron.left")
-                        .shellFont(.meta, weight: .medium)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(ShellChrome.selectInk(colorScheme))
+                ShellBackButton("thread.back", action: onBack)
                 Text(L10n.t("thread.title"))
                     .shellFont(.pane)
                     .foregroundStyle(ShellChrome.ink(colorScheme))
@@ -217,7 +212,7 @@ struct DummyThreadPane: View {
             inFull: true,
             top: decks.top(of: item.id, of: item.attachments.count),
             lifted: decks.isLifted(item.id),
-            player: player(of: item),
+            player: playback.rowPlayer(for: item, decks: decks),
             // The same one rule the stream's rows read: a press lights the row, and a second
             // press on the row already lit is `Return` (#33).
             onSelect: {
@@ -244,15 +239,6 @@ struct DummyThreadPane: View {
         .padding(.leading, indent(depth))
         .overlay(alignment: .leading) { rail(depth) }
         .id(item.id)
-    }
-
-    /// The player for this row's slot, where this row's card is the thing that is playing.
-    private func player(of item: DummyItem) -> AVPlayer? {
-        playback.player(
-            for: ShellPlaying.playable(decks.showing(item.attachments, of: item.id)),
-            of: item.id,
-            on: .row
-        )
     }
 
     // MARK: - The rest of the topic — D31
@@ -687,12 +673,8 @@ struct ForumReplyRow: View {
     @ViewBuilder
     private var words: some View {
         if post.isWithheld {
-            HStack(alignment: .firstTextBaseline, spacing: ShellSpace.tight) {
-                Image(systemName: "lock")
-                Text(L10n.t("item.forum.withheld"))
-            }
-            .shellFont(.meta)
-            .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+            // `ForumPostBand`'s own line for it, with the whole of a reply to say it in.
+            ForumPostBand.said("lock", L10n.t("item.forum.withheld"), lines: nil, colorScheme: colorScheme)
         } else if post.body.isEmpty {
             // The forum answered, the post was not withheld, and there were no words in it: a
             // picture, an attachment, a poll. Nothing drawn, for the reason `ForumPostBand` draws

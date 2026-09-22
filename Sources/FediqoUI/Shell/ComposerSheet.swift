@@ -9,11 +9,6 @@ struct ComposerSheet: View {
     @State private var sending = false
     @State private var failedHost: String?
 
-    /// Sources `SourceWriting.writes` names, in join order.
-    static func offered(_ rows: [SourceRow]) -> [Source] {
-        rows.filter { $0.writing == .writes }.map(\.source)
-    }
-
     /// What the sheet draws: empty is only when there is nothing to write to **and** nothing
     /// unsent and no failure in hand. A 403 or 401 that spends the last writable source must
     /// not swallow the draft into that notice.
@@ -66,7 +61,7 @@ struct ComposerSheet: View {
 
     var body: some View {
         @Bindable var session = session
-        let offered = Self.offered(session.rows)
+        let offered = session.writableSources
         let host = session.composeHost
         let limit = host.map(session.postLimit(of:)) ?? MastodonWrite.defaultLimit
         let remaining = Self.remaining(session.composeDraft, limit: limit)
