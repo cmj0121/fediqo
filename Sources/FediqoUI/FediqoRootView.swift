@@ -375,7 +375,7 @@ public struct FediqoRootView: View {
                     session.dismissStage()
                 }
             }
-            .dummyShellKeys { character, shift, control, command in
+            .dummyShellKeys(home: search.submits) { character, shift, control, command in
                 performDummyKey(character, shift: shift, control: control, command: command)
             }
             .environment(prefs)

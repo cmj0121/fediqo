@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 /// The line `/` opens along the foot of the timeline, the way a pager's search line does.
 ///
@@ -11,7 +14,8 @@ struct SearchBar: View {
     var timeline: String
     /// How many posts are found, or nothing while no pattern is being searched.
     var found: Int?
-    /// Return: the keys go back to the list, on its first result.
+    /// Return: the keys go back to the list, on its first result. Called once the pattern has
+    /// been settled to what the field says, so the first result is one for the whole pattern.
     var onSubmit: () -> Void
     /// The field emptied: the timeline is back, with the selection it had.
     var onCleared: () -> Void
@@ -60,6 +64,11 @@ struct SearchBar: View {
         .onAppear { focused = true }
         .onChange(of: search.focusTick) { _, _ in focused = true }
         .onChange(of: focused) { _, on in search.fieldFocused = on }
+        // Return pressed before the index landed found nothing yet to light; its first result
+        // is lit once it does, unless `/` has handed the field the keys again since.
+        .onChange(of: search.isIndexed) { _, _ in
+            if search.takeLitWhenIndexed() { onSubmit() }
+        }
         .onDisappear { search.fieldFocused = false }
         .onChange(of: search.text) { old, new in
             if new.isEmpty, !old.isEmpty { onCleared() }
@@ -89,7 +98,18 @@ struct SearchBar: View {
             .onExitCommand { onClose() }
             #endif
             .onSubmit {
+                // What the field says is searched now, and the keys are the list's before the
+                // focus has finished moving (#163).
+                search.submit()
                 focused = false
+                #if os(macOS)
+                // Setting the focus to false is a request AppKit may not act on at once; a field
+                // editor left first responder takes every letter the shell does not map, and a
+                // `j` would be typed into the pattern instead of reaching the list. The window
+                // itself takes it, as it does when nothing is focused; the shell's keys are read
+                // by a monitor ahead of any responder, so they need nothing more.
+                NSApp.keyWindow?.makeFirstResponder(nil)
+                #endif
                 onSubmit()
             }
             .accessibilityLabel(String(format: L10n.t("search.label"), timeline))
