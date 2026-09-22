@@ -19,10 +19,6 @@ import Testing
 @Suite("Opening whoever wrote it, by key")
 @MainActor
 struct PersonKeyTests {
-    init() {
-        L10n.language = .english
-    }
-
     // MARK: - The letter
 
     @Test("p is the key, and it is the draft's while writing and the field's while typing")
@@ -61,23 +57,40 @@ struct PersonKeyTests {
         #expect(DummyShortcut.all.filter { $0.commands.contains(.openAuthor) }.count == 1)
     }
 
-    /// In every language the app ships, and in both Chinese bundles: `L10n` falls back from one
-    /// to the other, so a line missing from one would still resolve and hide the gap.
+    /// In every language the app ships, asked by language rather than by setting the shell's:
+    /// suites run side by side, and a test that wrote `L10n.language` would change the words
+    /// under every other test reading them.
     @Test("The guide's line reads in every language the app ships")
     func theLineReadsEverywhere() throws {
         let line = try #require(DummyShortcut.all.first { $0.commands == [.openAuthor] })
+        let key = "shortcut.\(line.name)"
         for language in DummyLanguage.allCases {
-            L10n.language = language
-            #expect(line.detail != "shortcut.person", "\(language) has no line for p")
-            #expect(!line.detail.isEmpty, "\(language)")
+            let said = L10n.t(key, language: language)
+            #expect(said != key, "\(language) has no line for p")
+            #expect(!said.isEmpty, "\(language)")
         }
-        L10n.language = .english
+    }
+
+    /// **In both Chinese tables, and not only through the fallback.** `L10n` falls back from
+    /// `zh-TW` to `zh-Hant`, so a line missing from one still resolves and hides that it is
+    /// missing. The tables are read from the files the app is built from, as `ComposeTests` and
+    /// `BoardChoiceTests` read them, because a built bundle's folders are not found by the same
+    /// path on every toolchain.
+    @Test("The guide's line is written in every table, not reached by falling back")
+    func theLineIsInEveryTable() throws {
         for lproj in ["en", "zh-Hant", "zh-TW"] {
-            let path = try #require(Bundle.module.path(forResource: lproj, ofType: "lproj"))
-            let bundle = try #require(Bundle(path: path))
-            let said = bundle.localizedString(forKey: "shortcut.person", value: nil, table: nil)
-            #expect(said != "shortcut.person", "\(lproj) has no line for p")
+            let table = try String(contentsOf: Self.table(lproj), encoding: .utf8)
+            #expect(table.contains("\"shortcut.person\" = \""), "\(lproj) has no line for p")
         }
+    }
+
+    /// A shipped table, read from the source tree next to this file.
+    private static func table(_ lproj: String) -> URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/FediqoUI/Resources/\(lproj).lproj/Localizable.strings")
     }
 
     // MARK: - When it may open anybody
