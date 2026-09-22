@@ -9,7 +9,11 @@ import Testing
 /// rail and the phone already stand on, and where a list rebuilt by the swap puts the reader.
 /// What it cannot: that the swap happens during the drag, which is a window being resized under
 /// a hand — named in the report rather than claimed here.
+///
+/// **The suite is `@MainActor`** because `TimelinePane.landing` is a static on a `View`, which
+/// the Swift CI builds with isolates to the main actor even where a newer compiler does not.
 @Suite("The width decides the arrangement")
+@MainActor
 struct LayoutTests {
     // MARK: One line
 
