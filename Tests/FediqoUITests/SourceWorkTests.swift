@@ -179,6 +179,23 @@ struct SourceWorkTests {
         #expect(work.now.isEmpty)
     }
 
+    @Test("Listing servers to join is listed as that while it is asked", .timeLimit(.minutes(1)))
+    func theDirectory() async {
+        let work = SourceWork()
+        let http = GatedHTTP(["/servers": .text("[]")], holding: "/servers")
+        let watchdog = hangGuard(http.gate)
+        defer { watchdog.cancel() }
+        let session = ShellSession(http: http, store: ItemStore())
+        session.work = work
+
+        let loading = Task { await session.loadCatalog() }
+        #expect(await spun { await http.asks == 1 })
+        #expect(work.now.values.map(\.purpose) == [.directory])
+        await http.gate.open()
+        await loading.value
+        #expect(work.now.isEmpty)
+    }
+
     @Test("A Mastodon's sign-in checked at launch is listed while it is asked")
     func aMastodonLaunchCheck() async throws {
         let work = SourceWork()
