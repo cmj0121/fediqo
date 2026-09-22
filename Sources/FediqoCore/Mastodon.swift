@@ -413,7 +413,12 @@ struct StatusDTO: Decodable, Sendable {
         let booster = reblog == nil ? nil : account
         let host = source.host
         return Note(
-            id: subject.uri ?? "https://\(host)/statuses/\(subject.id)",
+            // The name the post was minted under, where this server sent one — the fact two
+            // servers carrying one status both state, and the whole of what #113 merges on.
+            // Where it sent none, a name this device made up: `Note.inventedID` mints it and is
+            // also what recognises it again, so a copy held under a made-up name is merged with
+            // nothing rather than with whatever else happens to spell the same.
+            id: subject.uri ?? Note.inventedID(host: host, statusID: subject.id),
             source: source,
             author: subject.account.name,
             handle: Self.handle(subject.account.acct, host: host),

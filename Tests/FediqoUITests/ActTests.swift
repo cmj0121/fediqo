@@ -366,4 +366,67 @@ struct ActTests {
         #expect(DummyMarks() == DummyMarks(bookmarked: false, kept: false),
                 "the device-local marks no longer carry a favourite")
     }
+
+    // MARK: - One post held from two sources (#114)
+
+    @Test("An act on a row that stands for two copies goes to the copy the row is drawn as")
+    func aMergedRowActsThroughItsOwnCopy() async throws {
+        let tokens = MemoryMastodonTokens()
+        for signed in ["a.example", "b.example"] {
+            try tokens.save(MastodonToken(
+                host: signed, accessToken: "tok-\(signed)", clientID: "cid", clientSecret: "csecret",
+                scopes: writing
+            ))
+        }
+        // The post as either source answers the press: the same `uri`, since it is one post.
+        func answered(_ statusID: String) -> String {
+            """
+            {"id":"\(statusID)","uri":"https://origin.example/users/ada/statuses/1",
+             "created_at":"2023-11-14T22:13:20.000Z","content":"<p>hello</p>",
+             "visibility":"public","reblogged":true,
+             "account":{"username":"ada","acct":"ada@origin.example","display_name":"Ada"}}
+            """
+        }
+        let server = ActServer([
+            "/api/v1/statuses/111/reblog": .json(answered("111")),
+            "/api/v1/statuses/222/reblog": .json(answered("222")),
+        ])
+        let store = ItemStore()
+        func copy(on host: String, _ statusID: String) -> Note {
+            Note(
+                id: "https://origin.example/users/ada/statuses/1",
+                source: Source(host: host, kind: .mastodon),
+                author: "Ada", handle: "@ada@origin.example", body: "hello",
+                postedAt: Date(timeIntervalSince1970: 1_700_000_000), categories: [.home],
+                boosted: false, statusID: statusID
+            )
+        }
+        for host in ["a.example", "b.example"] { await store.add(Source(host: host, kind: .mastodon)) }
+        await store.ingest([copy(on: "b.example", "222"), copy(on: "a.example", "111")])
+        let session = ShellSession(
+            http: FixtureHTTP(), store: store,
+            mastodon: MastodonSessions(tokens: tokens, sender: server)
+        )
+        session.mastodon.refresh()
+        await session.reloadFromStore()
+
+        let rows = DummyItem.merged(session.notes)
+        let row = try #require(rows.first)
+        #expect(rows.count == 1 && row.otherCopies.count == 1, "one row for two copies")
+        let own = row.source.host
+        let other = try #require(row.otherCopies.first).source.host
+        let ownID = try #require(session.notes.first { $0.source.host == own }?.statusID)
+        #expect(row.statusID == ownID, "the row carries its own copy's id on its own source")
+
+        await session.boost(row)
+        let request = try #require(await server.requests.first)
+        #expect(await server.requests.count == 1, "one act, to one source")
+        #expect(request.url?.host == own)
+        #expect(request.url?.path == "/api/v1/statuses/\(ownID)/reblog",
+                "under the id the row's own source gave the post, never the other copy's")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer tok-\(own)")
+        #expect(session.notes.first { $0.source.host == own }?.boosted == true)
+        #expect(session.notes.first { $0.source.host == other }?.boosted == false,
+                "the other source was not asked, so its copy says what it said")
+    }
 }

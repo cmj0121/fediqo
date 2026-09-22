@@ -152,6 +152,27 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     public let emojis: [CustomEmoji]
     public let counts: DummyCounts
     public let marks: DummyMarks
+    /// Every other copy of this post this device holds, from the other sources that carried it,
+    /// in the order they arrived (#114). Empty for a post held from one source, which is most.
+    ///
+    /// **The row is the first copy and these ride along; nothing is blended.** Each is drawn as
+    /// its own source carried it — its own words, its own cover, its own pictures — because two
+    /// copies of one post can differ (an edit that reached one server and not the other, an
+    /// emoji one server spells differently), and a reader who wants to know why is owed both as
+    /// they came rather than one this app assembled out of the two. What counts as the same post
+    /// is `SamePost`'s answer, a fact the sources stated; this only carries it.
+    public private(set) var otherCopies: [DummyItem] = []
+
+    /// Every source this post came through, the row's own first. One for most rows.
+    public var sources: [DummySource] { [source] + otherCopies.map(\.source) }
+
+    /// Every copy, the row's own first, each as its source carried it — what opening the row
+    /// shows (#114). A copy here carries no copies of its own.
+    public var copies: [DummyItem] {
+        var own = self
+        own.otherCopies = []
+        return [own] + otherCopies
+    }
 
     /// Whether the row fills its slot. One answer for the whole post, because the slot is one
     /// square however many things came attached.
@@ -264,6 +285,24 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// so for itself. The pane draws whichever of the three it is; this is the shape they share.
     public func dummyConversation() -> DummyConversation {
         DummyConversation(ancestors: [], post: self, descendants: [])
+    }
+
+    /// Every copy of one post, drawn as one row: the first copy, naming the rest (#114).
+    ///
+    /// `copies` are one post's by `SamePost.gathered` and in the order they arrived, which is the
+    /// store's; the first is the row. **The row's identity is the first copy's own row**, so a
+    /// post held from one source keeps exactly the id it always had, and whatever is keyed by a
+    /// row — the lamp, a mark, a place — acts on the merged row once.
+    init(merging copies: [Note]) {
+        self.init(copies[0])
+        otherCopies = copies.dropFirst().map(DummyItem.init)
+    }
+
+    /// Notes, in the order they are to be drawn, as rows: one per post, however many sources
+    /// carried it. The one place a list of held notes becomes a list of rows, so the timeline and
+    /// the search cannot come to disagree about when two copies are one.
+    static func merged(_ notes: [Note]) -> [DummyItem] {
+        SamePost.gathered(notes).map(DummyItem.init(merging:))
     }
 
     /// One stored note, drawn as a row.

@@ -10,22 +10,15 @@ public struct FediqoRootView: View {
     /// moment the store has said whether anything is joined.
     @State private var launch = ShellLaunch()
     @State private var selectedItemID: String?
-    @State private var threadStack: [String] = []
-    /// Whoever the reader pressed the face of, where they have pressed one (#99).
+    /// How far the reader has walked out from the stream, and by which steps (#122).
     ///
-    /// **One person and not a stack.** A thread opens a thread, and the stack is what a
-    /// conversation inside a conversation needs. A person's page is every row already theirs, so
-    /// it offers no face to press and there is never a second person to keep. Held here beside
-    /// the thread because leaving it is `Escape` and `q`, and the keys are read here.
-    @State private var openedPerson: DummyPerson?
-    /// The row the lamp was on when a face was pressed, so leaving them gives it back.
-    ///
-    /// `poppedThread` does the same job for a conversation by remembering the post it was opened
-    /// from; a person's page is not opened *from* a post it can name — it is opened from a face,
-    /// and every row of theirs is a different list — so the lamp's place is kept here instead.
-    /// Without it, a reader who walked their posts with `j` and then left would come back to the
-    /// timeline standing on a row that is not in it.
-    @State private var personReturn: String?
+    /// **One stack for conversations and people both.** They were two pieces of state — a stack
+    /// of thread ids, and one person with the lamp's place kept beside them — which is what made
+    /// the order between them something `DummyLayer` had to settle once and for all, and what
+    /// made a row on somebody's page a thing that lit and went no further. `ShellWalk` says why
+    /// one stack is the honest shape. Held here because leaving it is `Escape` and `q`, and the
+    /// keys are read here.
+    @State private var walk = ShellWalk()
     /// What `/` opened (#32). Its results stand in for the stream while it is open.
     @State private var search = ShellSearch()
     @State private var jumpToTop = 0
@@ -196,6 +189,12 @@ public struct FediqoRootView: View {
                 let accepted = new.placing(place, as: place)
                 if accepted != place { place = accepted }
             }
+            // A timeline switched is the list every step of the walk was standing on being
+            // replaced, so the walk ends rather than unwinds: there is no row left to hand the
+            // lamp back to. Where the lamp lands is #100's, and `TimelinePane` answers it on the
+            // same change. Here rather than in the pane because the walk is held here — the pane
+            // used to do it through a binding whose one meaning was "close the thread".
+            .onChange(of: session.timelineID) { _, _ in walk.clear() }
             .sheet(isPresented: $composing) {
                 ComposerSheet()
                     #if os(iOS)
@@ -560,8 +559,10 @@ public struct FediqoRootView: View {
             // `q` does about it.
             switch DummyCommand.outermost(of: openLayers) {
             case .viewer: return closeViewer()
-            case .person: return closePerson()
-            case .thread: return popThread()
+            // One step back, whichever kind of step it was. The two lines used to be two
+            // methods over two pieces of state; they are one walk now, and unwinding it in the
+            // order the reader walked is the whole of what a press to leave does (#122).
+            case .person, .thread: return leaveWalk()
             case .search, .shortcuts, .selection, nil: return false
             }
         case .reload:
@@ -605,8 +606,7 @@ public struct FediqoRootView: View {
             case .shortcuts:
                 showingShortcuts = false
                 return true
-            case .person: return closePerson()
-            case .thread: return popThread()
+            case .person, .thread: return leaveWalk()
             case .search:
                 closeSearch()
                 return true
@@ -638,8 +638,11 @@ public struct FediqoRootView: View {
         switch layer {
         case .viewer: viewedItem != nil
         case .shortcuts: showingShortcuts
-        case .person: openedPerson != nil
-        case .thread: !threadStack.isEmpty
+        // **Only the innermost step of the walk is open**, so these two are never both true
+        // (#122). That is what lets the order between them go unasked: `outermost` is handed at
+        // most one of them, and `DummyCommand.canWalk` asks about the pair rather than either.
+        case .person: walk.openedPerson != nil
+        case .thread: walk.openedThread != nil
         case .search: search.isOpen
         case .selection: selectedItemID != nil
         }
@@ -949,14 +952,14 @@ public struct FediqoRootView: View {
 
     /// The timeline back as it was, with the post that was selected before the search.
     private func closeSearch() {
-        threadStack = []
+        walk.clear()
         selectedItemID = search.close()
     }
 
     /// The field emptied: the timeline is back, so the post selected before the search is too.
     private func searchCleared() {
         search.cleared { selection in
-            threadStack = []
+            walk.clear()
             selectedItemID = selection
         }
     }
@@ -964,17 +967,20 @@ public struct FediqoRootView: View {
     /// Whichever list is in front: somebody's own posts, the open conversation, or the stream
     /// under both.
     ///
-    /// **A person is asked about first, because they are the layer in front** — the same order
-    /// `TimelinePane` draws in and `Escape` leaves by, read out of `DummyLayer` once and applied
-    /// here rather than restated. `j` and `k` walk what the reader is looking at.
+    /// **Whatever step the walk is standing on**, which is what the reader is looking at and
+    /// what `j` and `k` walk. It used to ask about a person first and a conversation second,
+    /// which was the layer order restated here; the walk answers it once and no surface decides
+    /// it a second time. **No `default:`.**
     private var currentListItems: [DummyItem] {
-        if let openedPerson {
-            return DummyPerson.held(of: openedPerson, in: session.notes)
-        }
-        if let opened = threadStack.last, let item = streamItems.first(where: { $0.id == opened }) {
+        switch walk.standing {
+        case .person(let person):
+            return DummyPerson.held(of: person, in: session.notes)
+        case .thread(let opened):
+            guard let item = session.held(opened) else { return streamItems }
             return session.conversations.conversation(around: item).inOrder
+        case nil:
+            return streamItems
         }
-        return streamItems
     }
 
     private var currentListIDs: [String]? {
@@ -984,18 +990,13 @@ public struct FediqoRootView: View {
 
     private func jumpListOrThreadToTop() -> Bool {
         guard place == .timeline else { return false }
-        // Somebody's page first, for `currentListItems`' reason: `g` goes to the top of the list
-        // the reader is looking at.
-        if openedPerson != nil {
+        // The top of a conversation is its own opening post, which is not the first row of the
+        // list the walk is standing on — every other case is. **No `default:`.**
+        switch walk.standing {
+        case .thread(let opened) where session.held(opened) != nil:
+            selectedItemID = opened
+        case .person, .thread, nil:
             guard let first = currentListItems.first else { return false }
-            selectedItemID = first.id
-            jumpToTop += 1
-            return true
-        }
-        if let opened = threadStack.last, let item = streamItems.first(where: { $0.id == opened }) {
-            selectedItemID = item.id
-        } else {
-            guard let first = streamItems.first else { return false }
             selectedItemID = first.id
         }
         jumpToTop += 1
@@ -1084,19 +1085,26 @@ public struct FediqoRootView: View {
     /// body makes on every pass; stamping more often can only make an entry look *less* stale to
     /// the eviction predicate. What I8 forbids is a band that stops reading, not one read twice.
     private func repliesWanted(of item: DummyItem) -> Bool {
-        guard place == .timeline, viewedItem == nil, threadStack.last == item.id,
+        guard place == .timeline, viewedItem == nil, walk.openedThread == item.id,
               let thread = ForumThreadRef(item)
         else { return false }
         return session.posts.standing(of: thread).wantsPressing
     }
 
-    /// Whether `Return` — and the press of a finger on a row that is its touch path (#33) — may
-    /// open a conversation now. One expression, two readers, for the reason `canSearch` gives.
+    /// Whether the reader may walk one step further out from where they are: `Return` and the
+    /// press of a finger on a row that is its touch path (#33), and the press on a face or a
+    /// name that opens somebody (#99). One expression, and now one for both steps.
     ///
-    /// Nothing here is about *which* post: the lamp is the key's business and the press carries
-    /// its own id. **No `default:`**, for `canReload`'s reason.
-    static func canOpenThread(place: ShellPlace, open: Set<DummyLayer>) -> Bool {
-        place == .timeline && DummyCommand.canOpen(.thread, whenOpen: open)
+    /// **Two names for one rule was how #122's gap was written down.** A conversation asked
+    /// `canOpen(.thread,)` and a face asked `canOpen(.person,)`, and because those two layers
+    /// were ordered against each other the first refused wherever the second had already been
+    /// taken. They are one walk, so there is one guard: `DummyCommand.canWalk` reads the order
+    /// out of `DummyLayer` once and asks only what stands in front of the pair.
+    ///
+    /// Nothing here is about *which* post or *which* person: the lamp is the key's business and
+    /// a press carries its own id.
+    static func canWalk(place: ShellPlace, open: Set<DummyLayer>) -> Bool {
+        place == .timeline && DummyCommand.canWalk(whenOpen: open)
     }
 
     /// `Return`: the conversation around the post the lamp is on.
@@ -1115,11 +1123,12 @@ public struct FediqoRootView: View {
     /// lamp moves only where the open is allowed, for `openViewer`'s reason: a press that can
     /// open nothing must not move anything either.
     private func openThread(_ id: String) -> Bool {
-        guard Self.canOpenThread(place: place, open: openLayers) else { return false }
+        guard Self.canWalk(place: place, open: openLayers) else { return false }
         selectedItemID = id
-        if threadStack.last == id { return false }
-        threadStack.append(id)
-        return true
+        // The lamp is read back after the press has moved it, which is how a conversation comes
+        // back to its own opening post and a person's page comes back to the row the lamp was
+        // on: one sentence for what used to be two. See `ShellWalk`.
+        return walk.walk(to: .thread(id), from: selectedItemID)
     }
 
     /// Whether `r` — and the mark in the header that is its touch path (#33) — has anything to
@@ -1159,21 +1168,12 @@ public struct FediqoRootView: View {
         ) else { return false }
         if session.reload.running { return true }
         // The thread as `TimelinePane` draws it: one it cannot find draws the timeline instead.
-        let opened = threadStack.last.flatMap { opened in streamItems.first { $0.id == opened } }
+        let opened = walk.openedThread.flatMap(session.held)
         session.reload.press(thread: opened, timeline: session.currentTimeline, in: session)
         return true
     }
 
     // MARK: - Whoever wrote it — #99
-
-    /// Whether a face may be pressed into a page now. **One expression, and the press is its one
-    /// reader today** — there is no key for this, so there is no second reader to disagree with.
-    ///
-    /// It is the layer order's own question and nothing more: a person opens over a conversation
-    /// and under the guide and the viewer, exactly as `DummyLayer.person` states it.
-    static func canOpenPerson(place: ShellPlace, open: Set<DummyLayer>) -> Bool {
-        place == .timeline && DummyCommand.canOpen(.person, whenOpen: open)
-    }
 
     /// A press on a face or a name: that person's page, over whatever is under it.
     ///
@@ -1181,51 +1181,25 @@ public struct FediqoRootView: View {
     /// this milestone were wired inside a `View` body where no test could call them, and all
     /// three stayed green while doing the wrong thing. This is the guard and the act together,
     /// where a test can press it.
+    ///
+    /// The lamp is not moved. A face is not a row, so pressing one says nothing about which post
+    /// the reader is standing on, and the walk keeps that row to hand back when the page is left.
     private func openPerson(_ person: DummyPerson) -> Bool {
-        guard Self.canOpenPerson(place: place, open: openLayers) else { return false }
-        if openedPerson == person { return false }
-        personReturn = selectedItemID
-        openedPerson = person
+        guard Self.canWalk(place: place, open: openLayers) else { return false }
+        return walk.walk(to: .person(person), from: selectedItemID)
+    }
+
+    /// One step back out of the walk: whatever the reader took that step from is what they get
+    /// back, standing on the row they took it from.
+    ///
+    /// **One method for both kinds of step**, which is #122's whole shape. Leaving a person used
+    /// to restore a lamp kept in a second piece of state and leaving a conversation used to
+    /// restore the post it was opened from, and because they were two methods a walk that
+    /// alternated between them could not unwind in the order it was walked.
+    private func leaveWalk() -> Bool {
+        guard let left = walk.back() else { return false }
+        selectedItemID = left.lamp
         return true
-    }
-
-    /// Leaving them: whatever was under the page is what the reader gets back — the conversation
-    /// they pressed the face inside, or the stream. Nothing here touches the thread stack or the
-    /// lamp, because a person's page was drawn over both rather than in place of them.
-    private func closePerson() -> Bool {
-        guard openedPerson != nil else { return false }
-        openedPerson = nil
-        selectedItemID = personReturn
-        personReturn = nil
-        return true
-    }
-
-    private func popThread() -> Bool {
-        guard let popped = DummyCommand.poppedThread(threadStack) else { return false }
-        threadStack = popped.stack
-        selectedItemID = popped.selected
-        return true
-    }
-
-    /// The open person, as the pane holds it. A write of nothing is the pane's own `Back` button,
-    /// which has to leave by the same door `Escape` does — so it goes through `closePerson` and
-    /// the lamp comes back with it, rather than clearing the state and stranding the selection.
-    private var openedSomebody: Binding<DummyPerson?> {
-        Binding(
-            get: { openedPerson },
-            set: { newValue in
-                if newValue == nil { _ = closePerson() } else { openedPerson = newValue }
-            }
-        )
-    }
-
-    private var openedThread: Binding<String?> {
-        Binding(
-            get: { threadStack.last },
-            set: { newValue in
-                if newValue == nil { threadStack = [] }
-            }
-        )
     }
 
     /// Tab rotates this page's tabs: named queries on the timeline, purposes on Usage.
@@ -1335,8 +1309,7 @@ public struct FediqoRootView: View {
             TimelinePane(
                 session: session,
                 selectedID: $selectedItemID,
-                openedID: openedThread,
-                openedPerson: openedSomebody,
+                standing: walk.standing,
                 onOpenPerson: { _ = openPerson($0) },
                 decks: $decks,
                 playback: playback,
@@ -1345,7 +1318,7 @@ public struct FediqoRootView: View {
                 onTurnRow: turnRow,
                 onOpenThread: { _ = openThread($0) },
                 jumpToTop: jumpToTop,
-                onPopThread: { _ = popThread() },
+                onBack: { _ = leaveWalk() },
                 // The two marks in the timeline's header, and whether there is anything for them
                 // to do — the same two functions the keys ask (#33).
                 ways: TimelineWays(

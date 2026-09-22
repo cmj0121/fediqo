@@ -89,14 +89,85 @@ struct ViewerTests {
         #expect(ada != nil)
         #expect(shell.pressFace(ada!))
         #expect(shell.personOpen == ada)
-        // The conversation is still open underneath, and leaving takes the person off it.
-        #expect(shell.threadOpen)
+        // The conversation is still on the walk underneath — only the step in front is open
+        // (#122) — and leaving takes the person off it.
+        #expect(shell.walk.depth == 2)
         #expect(shell.press(.dismiss))
         #expect(shell.personOpen == nil)
         #expect(shell.threadOpen)
         // `q` says the same thing about a person a second press says about the thread.
         #expect(shell.press(.back))
         #expect(!shell.threadOpen)
+    }
+
+    /// #122, pressed: a row on somebody's page opens the conversation it belongs to, and leaving
+    /// that conversation gives the page back, standing on the row it was opened from.
+    @Test("A row on somebody's page opens its conversation, and leaving gives the page back on it")
+    func aRowOnAPersonsPageOpensItsConversation() {
+        let shell = Shell(items: Self.list, selected: Self.a)
+        let ada = DummyPerson(Self.list[0])!
+        #expect(shell.pressFace(ada))
+        // Walking their posts with `j`, and pressing the one the lamp landed on.
+        shell.selected = Self.c
+        #expect(shell.pressRow(Self.c))
+        #expect(shell.walk.standing == .thread(Self.c))
+        #expect(shell.personOpen == nil)
+        #expect(shell.press(.dismiss))
+        #expect(shell.personOpen == ada)
+        #expect(shell.selected == Self.c)
+    }
+
+    /// And a face inside that conversation still opens the person, however far in the reader
+    /// has gone — the press #99 exists for is not taken off any row to pay for #122.
+    @Test("A face inside a conversation opened from a page still opens, and leaving gives the conversation back")
+    func aFaceInsideThatConversationStillOpens() {
+        let shell = Shell(items: Self.list, selected: Self.a)
+        let ada = DummyPerson(Self.list[0])!
+        #expect(shell.pressFace(ada))
+        #expect(shell.pressRow(Self.b))
+        #expect(shell.pressFace(ada))
+        #expect(shell.personOpen == ada)
+        #expect(shell.walk.depth == 3)
+        #expect(shell.press(.back))
+        #expect(shell.walk.standing == .thread(Self.b))
+        #expect(shell.selected == Self.b)
+    }
+
+    /// Leaving unwinds in the order the reader walked in, and the last leaving returns to the
+    /// timeline on the row the first press was made from — with nothing left on the walk.
+    @Test("Leaving unwinds in the order walked, and ends on the row the first press was made from")
+    func leavingUnwindsInTheOrderWalked() {
+        let shell = Shell(items: Self.list, selected: Self.d)
+        let ada = DummyPerson(Self.list[0])!
+        #expect(shell.pressFace(ada))
+        #expect(shell.pressRow(Self.a))
+        #expect(shell.pressFace(ada))
+        #expect(shell.pressRow(Self.c))
+        #expect(shell.pressRow(Self.b))
+        var seen: [ShellStep?] = []
+        while shell.walk.depth > 0 {
+            #expect(shell.press(.dismiss))
+            seen.append(shell.walk.standing)
+        }
+        #expect(seen == [.thread(Self.c), .person(ada), .thread(Self.a), .person(ada), nil])
+        #expect(shell.selected == Self.d)
+        #expect(shell.walk.isEmpty)
+        // One more press gives back the lamp, which is where a press to leave always ended.
+        #expect(shell.press(.dismiss))
+        #expect(shell.selected == nil)
+    }
+
+    /// A step onto what the reader is already standing on is not a step, so leaving never takes
+    /// two presses to do one thing.
+    @Test("Pressing the face of the page already open, or the thread already open, is not a step")
+    func aStepOntoTheSameStepIsNone() {
+        let shell = Shell(items: Self.list, selected: Self.a)
+        let ada = DummyPerson(Self.list[0])!
+        #expect(shell.pressFace(ada))
+        #expect(!shell.pressFace(ada))
+        #expect(shell.pressRow(Self.a))
+        #expect(!shell.pressRow(Self.a))
+        #expect(shell.walk.depth == 2)
     }
 
     /// The entry rule, from the press's own side: a face under the guide opens nobody, and does
@@ -213,7 +284,7 @@ struct ViewerTests {
     func leavingTheViewerFirst() {
         for command in [DummyCommand.dismiss, .back] {
             let shell = Shell(items: Self.list, selected: Self.a)
-            shell.threadOpen = true
+            shell.pressRow(Self.a)
             #expect(shell.press(.viewAttachment))
             #expect(shell.press(command))
             #expect(shell.viewing == nil)
@@ -309,7 +380,7 @@ struct ViewerTests {
     func aStaleViewerIsNotALayer() {
         let shell = Shell(items: Self.list, selected: Self.a)
         shell.viewing = "nobody"
-        shell.threadOpen = true
+        shell.pressRow(Self.a)
         // `q` must give back the conversation, not pretend to close a viewer nobody can see.
         #expect(shell.press(.back))
         #expect(shell.viewing == nil)
@@ -443,9 +514,15 @@ struct ViewerTests {
         let items: [DummyItem]
         var selected: String?
         var viewing: String?
-        var threadOpen = false
-        /// Whoever the reader pressed a face into, as the root holds it (#99).
-        var personOpen: DummyPerson?
+        /// How far the reader has walked out from the stream, as the root holds it (#122).
+        ///
+        /// **One stack, and the real type.** The harness used to keep a `Bool` for the thread
+        /// and an optional person beside it, which could not express a conversation opened from
+        /// somebody's page at all — a harness describing a smaller world than the code, which is
+        /// the fault `isOpen` is an exhaustive switch to prevent one level up.
+        var walk = ShellWalk()
+        var threadOpen: Bool { walk.openedThread != nil }
+        var personOpen: DummyPerson? { walk.openedPerson }
         var shortcutsOpen = false
         var searchOpen = false
         var shortcutTab = DummyShortcutGroup.timeline
@@ -473,6 +550,14 @@ struct ViewerTests {
             }
         }
 
+        /// A press on a row that is already lit, and the root's own guard before it (#122).
+        @discardableResult
+        func pressRow(_ id: String) -> Bool {
+            guard DummyCommand.canWalk(whenOpen: openLayers) else { return false }
+            selected = id
+            return walk.walk(to: .thread(id), from: selected)
+        }
+
         var openLayers: Set<DummyLayer> {
             Set(DummyLayer.allCases.filter(isOpen))
         }
@@ -485,9 +570,8 @@ struct ViewerTests {
         /// reads it: the order lives in one list and no surface re-expresses it.
         @discardableResult
         func pressFace(_ person: DummyPerson) -> Bool {
-            guard DummyCommand.canOpen(.person, whenOpen: openLayers) else { return false }
-            personOpen = person
-            return true
+            guard DummyCommand.canWalk(whenOpen: openLayers) else { return false }
+            return walk.walk(to: .person(person), from: selected)
         }
 
         /// What the app does when the reader walks to another page.
@@ -533,10 +617,8 @@ struct ViewerTests {
                     return decks.toggleCover(item.id)
                 }
             case .expandPost:
-                guard selected != nil,
-                      DummyCommand.canOpen(.thread, whenOpen: openLayers) else { return false }
-                threadOpen = true
-                return true
+                guard let selected else { return false }
+                return pressRow(selected)
             case .showShortcuts:
                 if shortcutsOpen {
                     shortcutsOpen = false
@@ -560,9 +642,12 @@ struct ViewerTests {
                     shortcutsOpen = false
                     return true
                 // A face is left by both keys, exactly as a conversation is: the page is
-                // something the reader opened, and both `q` and `Escape` take it away.
-                case .person: personOpen = nil; return true
-                case .thread: threadOpen = false; return true
+                // something the reader opened, and both `q` and `Escape` take it away. One step
+                // back, whichever kind of step it was — the walk says which (#122).
+                case .person, .thread:
+                    guard let left = walk.back() else { return false }
+                    selected = left.lamp
+                    return true
                 case .search:
                     guard command == .dismiss else { return false }
                     searchOpen = false

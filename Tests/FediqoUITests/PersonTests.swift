@@ -131,15 +131,15 @@ struct PersonTests {
 
     // MARK: - Where a person sits, and what leaving gives back
 
-    /// **The order, and the half of it that is load-bearing.** A person opens over a conversation,
-    /// so a face pressed inside one goes somewhere; a press to leave then gives the conversation
-    /// back, which is where the reader was.
-    @Test("A person opens over a conversation, and leaving gives the conversation back")
-    func aPersonOpensOverAConversation() {
-        #expect(DummyCommand.canOpen(.person, whenOpen: [.selection]))
-        #expect(DummyCommand.canOpen(.person, whenOpen: [.thread, .selection]))
-        #expect(DummyCommand.outermost(of: [.person, .thread, .selection]) == .person)
-        // Leaving takes the person and only the person: the thread is still open under it.
+    /// **A face pressed inside a conversation goes somewhere**, which is the half of #99 the
+    /// order was arranged for: a person opens from a row of a thread, and a press to leave gives
+    /// the conversation back, which is where the reader was.
+    @Test("A person opens from inside a conversation, and leaving gives the conversation back")
+    func aPersonOpensFromInsideAConversation() {
+        #expect(DummyCommand.canWalk(whenOpen: [.selection]))
+        #expect(DummyCommand.canWalk(whenOpen: [.thread, .selection]))
+        // Leaving takes the step and only the step, and which step that is the walk says.
+        #expect(DummyCommand.outermost(of: [.person, .selection]) == .person)
         #expect(DummyCommand.outermost(of: [.thread, .selection]) == .thread)
     }
 
@@ -147,28 +147,29 @@ struct PersonTests {
     /// never closes what is above it to make room for itself.
     @Test("A person does not open under the guide or the viewer")
     func aPersonDoesNotOpenUnderWhatIsOverTheApp() {
-        #expect(!DummyCommand.canOpen(.person, whenOpen: [.viewer]))
-        #expect(!DummyCommand.canOpen(.person, whenOpen: [.shortcuts]))
+        #expect(!DummyCommand.canWalk(whenOpen: [.viewer]))
+        #expect(!DummyCommand.canWalk(whenOpen: [.shortcuts]))
     }
 
-    /// **The stated cost of that order, pinned rather than left to be discovered.** A row on
-    /// somebody's page lights and does not open a conversation, because a thread may not open
-    /// underneath them. `PersonPane` hands its rows no open action rather than one that would be
-    /// refused, and this is the rule that makes that the right shape.
-    @Test("A conversation does not open from under somebody's page")
-    func aThreadDoesNotOpenUnderAPerson() {
-        #expect(!DummyCommand.canOpen(.thread, whenOpen: [.person]))
-        #expect(!FediqoRootView.canOpenThread(place: .timeline, open: [.person, .selection]))
+    /// **What the order used to cost, and no longer does** (#122). A row on somebody's page lit
+    /// and went no further, because a conversation may not open under the layer it is under. The
+    /// two are one walk now, so a step is refused by what stands in front of the pair and by
+    /// nothing else — and somebody's page stands in front of nothing.
+    @Test("A conversation opens from somebody's page")
+    func aThreadOpensFromAPersonsPage() {
+        #expect(DummyCommand.canWalk(whenOpen: [.person]))
+        #expect(FediqoRootView.canWalk(place: .timeline, open: [.person, .selection]))
     }
 
-    /// The press's own guard, asked the way the root asks it.
+    /// The press's own guard, asked the way the root asks it. One guard for both steps: a face
+    /// and a row ask the same question about how far out the reader already is.
     @Test("A face may be pressed on the timeline and nowhere else")
     func aFaceMayBePressedOnTheTimeline() {
-        #expect(FediqoRootView.canOpenPerson(place: .timeline, open: []))
-        #expect(FediqoRootView.canOpenPerson(place: .timeline, open: [.thread, .selection]))
-        #expect(!FediqoRootView.canOpenPerson(place: .timeline, open: [.viewer]))
+        #expect(FediqoRootView.canWalk(place: .timeline, open: []))
+        #expect(FediqoRootView.canWalk(place: .timeline, open: [.thread, .selection]))
+        #expect(!FediqoRootView.canWalk(place: .timeline, open: [.viewer]))
         for place in ShellPlace.allCases where place != .timeline {
-            #expect(!FediqoRootView.canOpenPerson(place: place, open: []), "\(place)")
+            #expect(!FediqoRootView.canWalk(place: place, open: []), "\(place)")
         }
     }
 
