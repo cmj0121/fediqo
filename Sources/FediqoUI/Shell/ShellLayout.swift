@@ -83,6 +83,9 @@ struct ShellArranged<Content: View>: View {
         let layout = answer(width)
         content(layout)
             .environment(\.shellLayout, layout)
+            // The width itself, for the one question the arrangement cannot answer: whether the
+            // narrow arrangement's strip still fits its names (#141). See `ShellNarrow`.
+            .environment(\.shellWidth, width)
             // **The window's floor is the narrow arrangement's, not the rail's.** It used to be a
             // `minWidth` of 520 on the rail's own arrangement, which is what stopped a Mac window
             // from ever reaching a width that could draw anything else. Both bounds on one frame,
@@ -105,6 +108,12 @@ extension EnvironmentValues {
     /// — a row, most of all. Handed down from the one place that measured, so a row does not
     /// guess from the device while the shell answers the width.
     @Entry var shellLayout: ShellLayout = .wide
+
+    /// The width `ShellArranged` last measured, where it has measured one. Read by `ShellNarrow`
+    /// alone, to ask whether the places' strip still fits its names (#141). A row asks
+    /// `shellLayout` and not this: which arrangement it is in is the row's business, and how
+    /// wide the window is exactly is not.
+    @Entry var shellWidth: CGFloat? = nil
 
     /// The corner of the page something is drawn over, where something is: how far it reaches in
     /// from the trailing edge, and how far up from the bottom (#112). Nothing, everywhere else.
