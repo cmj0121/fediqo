@@ -581,7 +581,7 @@ struct JoinSheet: View {
     private var picked: Binding<Set<Int>> {
         Binding(
             get: { session.stage?.ticked ?? [] },
-            set: { session.stage = session.stage?.ticking($0) }
+            set: { session.tick($0) }
         )
     }
 

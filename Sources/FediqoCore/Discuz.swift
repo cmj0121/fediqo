@@ -18,6 +18,7 @@ import Foundation
 // | `install-c.example` | X5.0. Grid index; canonical `forum.php?mod=forumdisplay&fid=N`; abbreviated counts (`5万`) keeping the exact figure in a `title`; a touch template that **lazy-loads** its avatars into `data-src`; a desktop template whose avatar box is `favatar` and is filled in by script, so there is no `<img>` to read; pinned threads |
 // | `install-d.example` | X3.4 served **GBK** — and UTF-8 on its own mobile page, so one forum is two encodings. The **wide list** index layout: a board's name is an `<h2>`, which is what makes "the heading nearest this section" the wrong rule; sub-boards written as bare links inside a parent's cell; avatars on two hosts, neither of them the forum; a favourite button in the same list as the author's name |
 // | `install-e.example` | X3.4 with **nothing a signed-out reader may see**: a hand-written `id="category_-99999"` block in place of a forum list, Discuz!'s own `messagetext` notice on every board, an empty guide table, and the sign-in page |
+// | `install-g.example` | X3.2 in **Traditional** Chinese, the reader's own forum, behind a managed challenge and read signed in. **No sub-board on its index at all**: a board's sub-boards are written only on that board's own page, in a `subforum_N` block of `list` rows with their figures — beside a board that is only a link elsewhere |
 // | `install-f.example` | Discourse |
 // | `challenge.example` | a forum behind a managed challenge |
 // | `avatars-d.example` | `install-d`'s avatar host on the touch template |
@@ -93,7 +94,13 @@ public struct DiscuzClient: Sendable {
     /// spells it today, and a name the reader subscribed to months ago may be stale. It is used
     /// only where the page named no board at all.
     public func board(_ fid: Int, source: Source, named: String? = nil) async throws -> [Note] {
-        guard let url = Host.httpsURL(
+        guard let url = boardURL(fid) else { throw DiscuzRequestError.invalidURL }
+        return try await read(url, source: source, named: named, boardID: String(fid))
+    }
+
+    /// A board's thread list, newest thread first — see `board(_:source:named:)`.
+    private func boardURL(_ fid: Int) -> URL? {
+        Host.httpsURL(
             host: host,
             path: "/forum.php",
             query: [
@@ -102,10 +109,7 @@ public struct DiscuzClient: Sendable {
                 URLQueryItem(name: "filter", value: "author"),
                 URLQueryItem(name: "orderby", value: "dateline"),
             ]
-        ) else {
-            throw DiscuzRequestError.invalidURL
-        }
-        return try await read(url, source: source, named: named, boardID: String(fid))
+        )
     }
 
     /// One subscribed board's thread list — what a reader who picked this board is reading.
@@ -119,6 +123,52 @@ public struct DiscuzClient: Sendable {
     /// standing rule: no address in this file came out of a stranger's markup.
     public func threads(board: DiscuzBoard, source: Source) async throws -> [Note] {
         try await self.board(board.fid, source: source, named: board.name)
+    }
+
+    /// One board's thread list, and what the same page says about the boards around it.
+    ///
+    /// **The same one request as `board(_:source:named:)`**, read for two more facts that were
+    /// already on the page: the boards written under this one in its `subforum_<fid>` block,
+    /// and the board it sits under, where its trail names one. A reload reads every subscribed
+    /// board's page anyway, so this is how a sub-board the index never mentions becomes known
+    /// without a single request being added for it — **D29**, the page half.
+    public func boardPage(
+        _ fid: Int, source: Source, named: String? = nil
+    ) async throws -> DiscuzBoardPage {
+        guard let url = boardURL(fid) else { throw DiscuzRequestError.invalidURL }
+        let html = try await page(url)
+        return DiscuzBoardPage(
+            notes: try rows(html, source: source, named: named, boardID: String(fid)),
+            subBoards: DiscuzIndex.subBoards(in: html, under: fid),
+            parent: DiscuzIndex.parent(of: fid, in: html)
+        )
+    }
+
+    /// The boards a board's own page writes under it, and **nothing else read off it**.
+    ///
+    /// **D29, and the forums whose index does not state them.** Some installs write a board's
+    /// sub-boards only on that board's page, in a `subforum_<fid>` block above its threads; the
+    /// front page never names them, so a reader choosing from the index could not pick one at
+    /// all. This is the read that finds them, and **it is made only when the reader ticks that
+    /// board in the picker** — one page for a board they have just shown they want, never every
+    /// board's page ahead of them choosing.
+    ///
+    /// No threads are required: a parent whose page is only a list of sub-boards is exactly
+    /// the board this read is for, and `noThreads` would throw its answer away. Each board comes
+    /// back filed under `board` — its section, its number as the parent.
+    public func subBoards(of board: DiscuzBoard) async throws -> [DiscuzBoard] {
+        guard let url = Host.httpsURL(
+            host: host,
+            path: "/forum.php",
+            query: [
+                URLQueryItem(name: "mod", value: "forumdisplay"),
+                URLQueryItem(name: "fid", value: String(board.fid)),
+            ]
+        ) else {
+            throw DiscuzRequestError.invalidURL
+        }
+        let html = try await page(url)
+        return DiscuzIndex.subBoards(in: html, under: board.fid).map { $0.placed(under: board) }
     }
 
     /// The forum's index: every category a signed-out — or signed-in — reader may see, and the
@@ -288,8 +338,17 @@ public struct DiscuzClient: Sendable {
         named: String? = nil,
         boardID: String? = nil
     ) async throws -> [Note] {
-        let html = try await page(url)
+        try rows(try await page(url), source: source, named: named, boardID: boardID)
+    }
 
+    /// A page `page` already judged, turned into rows — `read`'s second half, shared with
+    /// `boardPage` so the two cannot come to disagree about what a board's threads are.
+    private func rows(
+        _ html: String,
+        source: Source,
+        named: String?,
+        boardID: String?
+    ) throws -> [Note] {
         let rows = DiscuzPage.threads(in: html)
         // **An empty list is the one answer this must never give.** A parser that meets markup it
         // cannot read and returns `[]` hands the reader a forum that draws nothing, forever, with
@@ -402,7 +461,7 @@ public struct DiscuzBoard: Identifiable, Hashable, Sendable {
     /// When somebody last posted in it, where the page said. Read the way every other Discuz!
     /// date here is read, and UTC for the same reason: see `DiscuzDate`.
     public let lastPostAt: Date?
-    /// The board this one sits under, where the index wrote it under one. **D29.**
+    /// The board this one sits under, where the forum wrote it under one. **D29.**
     ///
     /// A sub-board is a separate `fid` in Discuz! and it is a separate pick here, because a
     /// parent's `forumdisplay` does *not* include its children's threads: a checkbox that quietly
@@ -411,17 +470,46 @@ public struct DiscuzBoard: Identifiable, Hashable, Sendable {
     /// `forum.php?mod=forumdisplay&fid=300` with its own heading and sixty-three threads of its
     /// own, none of which appear under 297.
     ///
-    /// **A sub-board is emptier than a board, and that is the honest cost.** On the index it is a
-    /// bare name: no thread count, no post count, no last-post time. Those stay `nil` rather than
-    /// becoming zeroes, which is this file's standing rule about a figure the forum did not state.
+    /// **Two places write one, and both are read (#161).** `install-d.example` names a board's
+    /// children in the parent's cell on the front page. Other installs never do: the front page
+    /// names the parent alone, and its children are written only on the parent's own page, in a
+    /// `subforum_<fid>` block above its threads — the `list` layout's rows, with their figures.
+    /// That page is read at two moments and no third, both chosen so that no board's page is
+    /// read ahead of the reader: **when the reader ticks the board in the picker** (see
+    /// `DiscuzClient.subBoards(of:)`), and **when a subscribed board is read for its threads**,
+    /// which was going to happen anyway (see `DiscuzClient.boardPage`). A sub-board both places
+    /// name is listed once — see `JoinOffer.adding(_:under:)`.
+    ///
+    /// **A sub-board is emptier than a board where the forum says less about it.** On the front
+    /// page it is a bare name: no thread count, no post count, no last-post time. Those stay
+    /// `nil` rather than becoming zeroes, which is this file's standing rule about a figure the
+    /// forum did not state. On the parent's page it has all three, and they are kept.
     public let parent: Int?
     /// How far to indent it: `0` for a board, `1` for a board under one.
     ///
     /// Derived from `parent` rather than stored beside it, so the two can never disagree — and it
-    /// stops at one because one level is all a Discuz! index states. A forum may nest deeper in
-    /// its own database; its index page writes a board's *direct* children and no further, so a
-    /// deeper number here would be a claim this device cannot support.
+    /// stops at one because one level is all this device reads. A forum may nest deeper in its
+    /// own database; the front page writes a board's *direct* children and no further, and a
+    /// sub-board's own page is never read for boards under *it*, so a deeper number here would
+    /// be a claim this device cannot support.
     public var depth: Int { parent == nil ? 0 : 1 }
+
+    /// The same board, filed under `parent`: its section, and its number as the parent.
+    ///
+    /// A board read off a parent's own page does not know which section of the index that page
+    /// belongs to — the page is about one board, not the forum — so it takes its parent's.
+    func placed(under parent: DiscuzBoard) -> DiscuzBoard {
+        DiscuzBoard(
+            fid: fid,
+            name: name,
+            category: parent.category,
+            gid: parent.gid,
+            threads: threads,
+            posts: posts,
+            lastPostAt: lastPostAt,
+            parent: parent.fid
+        )
+    }
 
     public init(
         fid: Int,
@@ -440,6 +528,23 @@ public struct DiscuzBoard: Identifiable, Hashable, Sendable {
         self.threads = threads
         self.posts = posts
         self.lastPostAt = lastPostAt
+        self.parent = parent
+    }
+}
+
+/// One board's page, read: its threads, and what it says about the boards around it.
+public struct DiscuzBoardPage: Sendable, Equatable {
+    public let notes: [Note]
+    /// The boards the page writes under this one, each carrying this board's number as its
+    /// parent and **no section of its own** — the page does not say which section it is in.
+    /// `JoinOffer.adding(_:under:)` files them under the parent's.
+    public let subBoards: [DiscuzBoard]
+    /// The board this one sits under, where the page's trail names one.
+    public let parent: Int?
+
+    public init(notes: [Note], subBoards: [DiscuzBoard], parent: Int?) {
+        self.notes = notes
+        self.subBoards = subBoards
         self.parent = parent
     }
 }
@@ -560,6 +665,74 @@ enum DiscuzIndex {
         }
     }
 
+    /// The boards a board's own page writes under it, in the order it writes them — **D29, the
+    /// page half** (#161).
+    ///
+    /// **Matched on the number, as a category is.** The block is `<div id="subforum_<fid>">`
+    /// and it is read only where `<fid>` is the board this page is about: a page that carried a
+    /// second board's block — a sidebar, a template that repeats — would otherwise hand that
+    /// board's children to this one. It ends at its own `</table>`; the thread list below it is
+    /// a table of its own and is never read as boards.
+    ///
+    /// **Both layouts are asked, as on the index.** The one install measured writes these rows
+    /// the `list` way — `fl_tb`, one board to a `<tr>`, `fl_i` and `fl_by` beside the name — and
+    /// Discuz! can be set to draw them as the grid instead, which the same rules already read.
+    /// Their figures are kept where stated and `nil` where not: unlike the front page's bare
+    /// names, a parent's page states them.
+    ///
+    /// One level and no deeper: a board a row names inside its own cell would be a board under a
+    /// sub-board, which `DiscuzBoard.depth` does not draw, so it is dropped rather than promoted
+    /// to a level it is not at. A board only linking elsewhere is not in the answer — see
+    /// `DiscuzBoardLayout.isOnlyALink`. Each board carries `fid` as its parent and **no section
+    /// of its own**: the page does not say which section it sits in, and a caller files it
+    /// under its parent's (`DiscuzBoard.placed(under:)`).
+    static func subBoards(in html: String, under fid: Int) -> [DiscuzBoard] {
+        guard fid > 0, let patterns = Patterns() else { return [] }
+        let full = NSRange(html.startIndex..., in: html)
+        let opening = patterns.subforum.matches(in: html, range: full).first { match in
+            guard let range = Range(match.range(at: 1), in: html) else { return false }
+            return Int(html[range]) == fid
+        }
+        guard let opening, let start = Range(opening.range, in: html) else { return [] }
+        let rest = html[start.upperBound...]
+        let end = rest.range(of: "</table>", options: .caseInsensitive)?.upperBound
+            ?? rest.endIndex
+        return boards(in: String(rest[..<end]), gid: 0, category: "", patterns: patterns)
+            .filter { $0.parent == nil && $0.fid != fid }
+            .map { board in
+                DiscuzBoard(
+                    fid: board.fid,
+                    name: board.name,
+                    category: board.category,
+                    gid: board.gid,
+                    threads: board.threads,
+                    posts: board.posts,
+                    lastPostAt: board.lastPostAt,
+                    parent: fid
+                )
+            }
+    }
+
+    /// The board a board's page says it sits under, or nothing.
+    ///
+    /// **Read off the page's trail**, `<div id="pt">`: home, the forum, the section, the parent
+    /// where there is one, then this board — each a link. The board before this one in that
+    /// trail is its parent where it is a *board* address; for a board at the top it is the
+    /// section's `gid=` link, which yields no board number, and the answer is nothing. Needed
+    /// because a reader may have picked a sub-board and not its parent: the parent's page is
+    /// then never read, and this is the one place the sub-board's place is still written.
+    static func parent(of fid: Int, in html: String) -> Int? {
+        guard fid > 0, let patterns = Patterns(),
+              let trail = patterns.trail.capture(1, in: html)
+        else { return nil }
+        let boards = patterns.anchor.captures(1, in: trail).compactMap {
+            Self.fid(inHref: $0, patterns: patterns)
+        }
+        guard let own = boards.lastIndex(of: fid), own > 0 else { return nil }
+        let above = boards[own - 1]
+        return above == fid ? nil : above
+    }
+
     /// The boards inside one category's section, in the order the page writes them.
     ///
     /// Both layouts are asked, and the answers are merged **by where they were found** rather
@@ -587,6 +760,10 @@ enum DiscuzIndex {
         let heading: NSRegularExpression
         /// `<div id="category_N"` — where that category's boards begin.
         let section: NSRegularExpression
+        /// `<div id="subforum_N"` — where a board's own page writes the boards under it.
+        let subforum: NSRegularExpression
+        /// `<div id="pt">…</div>` — a page's trail, from home to the board it is about.
+        let trail: NSRegularExpression
         /// `<dl>…</dl>` — one board, on the grid layout.
         let definition: NSRegularExpression
         /// `<dt>…</dt>` — its name and its address.
@@ -633,6 +810,16 @@ enum DiscuzIndex {
                     pattern: "<div[^>]*\\bid\\s*=\\s*[\"']category_(\\d+)[\"'][^>]*>",
                     options: options
                 ),
+                let subforum = try? NSRegularExpression(
+                    pattern: "<div[^>]*\\bid\\s*=\\s*[\"']subforum_(\\d+)[\"'][^>]*>",
+                    options: options
+                ),
+                // To the first `</div>`: the trail's links sit in one inner `<div class="z">`,
+                // and every one of them is before that inner block closes.
+                let trail = try? NSRegularExpression(
+                    pattern: "<div[^>]*\\bid\\s*=\\s*[\"']pt[\"'][^>]*>(.*?)</div>",
+                    options: options
+                ),
                 let definition = try? NSRegularExpression(pattern: wrapped("dl"), options: options),
                 let term = try? NSRegularExpression(pattern: wrapped("dt"), options: options),
                 let detail = try? NSRegularExpression(pattern: wrapped("dd"), options: options),
@@ -674,6 +861,8 @@ enum DiscuzIndex {
             else { return nil }
             self.heading = heading
             self.section = section
+            self.subforum = subforum
+            self.trail = trail
             self.definition = definition
             self.term = term
             self.detail = detail
@@ -865,11 +1054,37 @@ enum DiscuzBoardLayout: CaseIterable, Sendable {
             },
             lastPostAt: lastPostCell.flatMap { DiscuzIndex.lastPost(in: $0, patterns: patterns) }
         )
+        if Self.isOnlyALink(board, lastPost: lastPostCell, patterns: patterns) { return [] }
         return [(origin + headingMatch.range(at: 1).location, board)]
             + self.children(
                 in: body, at: origin, of: board, naming: headingMatch.range(at: 1),
                 patterns: patterns
             )
+    }
+
+    /// Whether this "board" is only a link somewhere else, with no threads of its own (#161).
+    ///
+    /// **Recognised by shape, not by its label.** Discuz! lets an administrator make a board
+    /// that is a link to an address outside the forum; it is drawn in the same row as a board,
+    /// and a reader who picked it would be subscribed to a page with no thread list, forever.
+    /// Its row differs from a real board's in two ways that hold on any template and in any
+    /// language: **it states no figures at all** — no threads, no posts, no last-post time, the
+    /// count cell empty — and **its last-post cell is a link to the board itself**, where a
+    /// real board's links to a thread. The words in that cell (`鏈接到外部地址` on
+    /// `install-g.example`) are the translated half and are not read.
+    ///
+    /// Both are required. A board that has never been posted in states no figures either, and
+    /// its last-post cell says so in words (`install-b.example` writes `...`) — no link to
+    /// itself, so it is kept; and a busy board's cell links to a thread, never to itself.
+    static func isOnlyALink(
+        _ board: DiscuzBoard, lastPost cell: String?, patterns: DiscuzIndex.Patterns
+    ) -> Bool {
+        guard board.threads == nil, board.posts == nil, board.lastPostAt == nil,
+              let cell
+        else { return false }
+        return patterns.anchor.captures(1, in: cell).contains {
+            DiscuzIndex.fid(inHref: $0, patterns: patterns) == board.fid
+        }
     }
 
     /// The boards this board's own cell names underneath it — **D29**.

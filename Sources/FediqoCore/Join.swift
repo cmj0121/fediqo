@@ -313,6 +313,92 @@ public struct JoinOffer: Sendable, Hashable {
     /// Every board on the forum, flat and in the order the index listed them. The categories are
     /// what a picker groups by; this is what it iterates.
     public var boards: [DiscuzBoard] { categories.flatMap(\.boards) }
+
+    /// The same offer, with `found` drawn under the board `parent` — **D29's page half** (#161).
+    ///
+    /// **A board already on the offer is not listed again**, wherever it is and whatever it was
+    /// found as: a sub-board the front page named and the parent's own page named too is one
+    /// board, and two rows for it would be two ticks for one subscription. The front page's
+    /// copy is the one kept, because it was there first and the reader may already have
+    /// ticked it.
+    ///
+    /// **Under a board and never under a sub-board**, which is `DiscuzBoard.depth`'s one level;
+    /// and only under a board this offer lists, so a parent the forum no longer offers takes its
+    /// children with it rather than leaving them hanging under nothing. They go after the
+    /// parent's existing children, filed in its section, in the order they were found.
+    ///
+    /// **Nothing is ticked.** Listing a parent's children does not pick them, and a picked
+    /// parent does not pick them either: each is its own `fid` and its own pick.
+    public func adding(_ found: [DiscuzBoard], under parent: Int) -> JoinOffer {
+        guard let above = boards.first(where: { $0.fid == parent }), above.parent == nil else {
+            return self
+        }
+        var listed = Set(boards.map(\.fid))
+        let added = found
+            .filter { $0.fid != parent && listed.insert($0.fid).inserted }
+            .map { $0.placed(under: above) }
+        guard !added.isEmpty else { return self }
+        var placed = false
+        let categories = categories.map { category -> DiscuzCategory in
+            guard !placed,
+                  let at = category.boards.firstIndex(where: { $0.fid == parent })
+            else { return category }
+            placed = true
+            var boards = category.boards
+            var end = at + 1
+            while end < boards.count, boards[end].parent == parent { end += 1 }
+            boards.insert(contentsOf: added, at: end)
+            return DiscuzCategory(gid: category.gid, name: category.name, boards: boards)
+        }
+        return JoinOffer(host: host, kind: kind, categories: categories)
+    }
+}
+
+/// What this run has learned about one forum's sub-boards from pages it was reading anyway.
+///
+/// **D29's page half, for a reader changing boards they already have** (#161). A forum whose
+/// front page never names a sub-board still writes it on its parent's page, and on its own:
+/// a reload reads every subscribed board's page for its threads, so the boards under it — and,
+/// for a sub-board, the board it is under — are on this device already, with no request spent
+/// on them. Held for the run and never stored: the next reload says it again, and the store's
+/// schema is not this question's to change.
+///
+/// Without it a restate would open on the front page alone, and a sub-board the reader had
+/// picked would not be on it — so it could not be ticked, and the next press would drop it.
+public struct DiscuzSubBoards: Sendable, Equatable {
+    /// Each parent's children, in the order its page wrote them.
+    private var under: [Int: [DiscuzBoard]] = [:]
+
+    public init() {}
+
+    public var isEmpty: Bool { under.isEmpty }
+
+    /// One board's page, read: what it says is under it, and what it is under.
+    ///
+    /// The page's own list comes first and carries its figures; a board learned earlier and not
+    /// on it stays after it, because a page that has stopped naming a board is not evidence the
+    /// reader may not pick it. A board learned only from its own trail carries no figures —
+    /// its own page does not state them, and this file's rule is nothing rather than zero.
+    public mutating func learn(_ page: DiscuzBoardPage, of board: BoardSubscription) {
+        if !page.subBoards.isEmpty {
+            let fresh = Set(page.subBoards.map(\.fid))
+            under[board.fid] = page.subBoards
+                + (under[board.fid] ?? []).filter { !fresh.contains($0.fid) }
+        }
+        if let parent = page.parent, parent != board.fid,
+           !(under[parent] ?? []).contains(where: { $0.fid == board.fid }) {
+            under[parent, default: []].append(DiscuzBoard(
+                fid: board.fid, name: board.name, category: "", gid: 0, parent: parent
+            ))
+        }
+    }
+
+    /// `offer`, with everything learned drawn under its parent. See `JoinOffer.adding`.
+    public func applied(to offer: JoinOffer) -> JoinOffer {
+        under.keys.sorted().reduce(offer) { offer, parent in
+            offer.adding(under[parent] ?? [], under: parent)
+        }
+    }
 }
 
 /// How far `SourceJoin.begin(host:)` got.
@@ -853,6 +939,33 @@ public struct SourceJoin: Sendable {
         case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
             .gotosocial, .discourse, .unknown:
             throw JoinError.unsupportedKind(source.kind)
+        }
+    }
+
+    /// The boards one board's own page writes under it — read because the reader just ticked
+    /// that board in the picker (#161).
+    ///
+    /// **One page, for one board the reader has shown they want**, and never before: the
+    /// picker does not read any board's page ahead of the reader choosing. Nothing is added
+    /// and nothing is ticked; the caller files what comes back with `JoinOffer.adding`.
+    ///
+    /// Throws `JoinError.unsupportedKind` for an offer from a kind that has no boards, and what
+    /// reading the page throws, as `index` names it.
+    public func subBoards(of board: DiscuzBoard, in offer: JoinOffer) async throws -> [DiscuzBoard] {
+        switch offer.kind {
+        case .discuz:
+            do {
+                return try await DiscuzClient(http: http, host: offer.host).subBoards(of: board)
+            } catch let error where Cancellation.happened(error) {
+                throw CancellationError()
+            } catch let error as DiscuzRequestError {
+                throw DiscuzJoin.refusal(error)
+            } catch {
+                throw JoinError.unreachable
+            }
+        case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
+            .gotosocial, .discourse, .unknown:
+            throw JoinError.unsupportedKind(offer.kind)
         }
     }
 

@@ -1566,7 +1566,11 @@ final class ShellSession {
         )
         defer { progress = nil }
         do {
-            let offer = try await joiner(for: host).boards(of: source)
+            // The front page, and the sub-boards this run has already read off pages it was
+            // reading anyway (#161) — so a sub-board the front page never names, and the reader
+            // already has, is on the list to stay ticked rather than dropped by the next press.
+            let index = try await joiner(for: host).boards(of: source)
+            let offer = subBoards[host]?.applied(to: index) ?? index
             guard mine == errand else { return }
             let offered = Set(offer.boards.map(\.fid))
             stage = .choosingBoards(offer, from: .joined(
@@ -1581,6 +1585,83 @@ final class ShellSession {
             guard mine == errand else { return }
             rowRefusal = (host: host, key: "account.source.boards.unread")
         }
+    }
+
+    /// What this run has read about each forum's sub-boards, by host — #161, D29's page half.
+    ///
+    /// Filled by the pages this device reads anyway — each subscribed board's, on a reload — and
+    /// by the one page a tick in the picker reads. Held for the run and dropped by Clear, like
+    /// every other copy of a server's word here; the next reload says it again.
+    @ObservationIgnored var subBoards: [String: DiscuzSubBoards] = [:]
+
+    /// The boards whose own page has been read for sub-boards this run, by host, so a board
+    /// ticked, unticked and ticked again is one request and not three. A read that failed is
+    /// taken off, so ticking it again asks again.
+    @ObservationIgnored private var lookedUnder: [String: Set<Int>] = [:]
+
+    /// The last read `tick(_:)` started, for a test to wait on. Nothing else reads it.
+    @ObservationIgnored private(set) var looking: Task<Void, Never>?
+
+    /// The reader's hand on the picker — **the one door a tick comes through**.
+    ///
+    /// Writes the ticks into the stage, exactly as before (decision 27). And where a board has
+    /// just been ticked — not unticked, and not a board under a board — its own page is read
+    /// for the boards it writes under it (#161): some forums name a sub-board nowhere else. That
+    /// is **the one moment a board's page is read in the picker**: the reader has just said they
+    /// want this board, and it is one page for one board. Reading every board's page when the
+    /// picker opens would be forty requests nobody asked for, which is what the issue forbids.
+    ///
+    /// The tick itself picks nothing more than the board ticked. What the read finds is drawn
+    /// under it, unticked: a parent's page does not carry its children's threads, so a parent
+    /// that quietly picked them would be a lie about what the reader subscribed to.
+    func tick(_ picked: Set<Int>) {
+        let before = stage?.ticked ?? []
+        stage = stage?.ticking(picked)
+        guard case .choosingBoards(let offer, _) = stage else { return }
+        let host = offer.host.lowercased()
+        for fid in picked.subtracting(before).sorted() {
+            guard let board = offer.boards.first(where: { $0.fid == fid }),
+                  board.parent == nil,
+                  lookedUnder[host, default: []].insert(fid).inserted
+            else { continue }
+            looking = Task { await self.look(under: board, in: offer) }
+        }
+    }
+
+    /// One board's own page, read for what it writes under it, and drawn there if the reader
+    /// is still choosing on this forum.
+    ///
+    /// **Quiet when it fails.** The board the reader ticked is still ticked and still readable;
+    /// what did not arrive is a list of boards they had not seen, and a refusal sentence over a
+    /// picker they are still using would be about something they never asked for. Ticking it
+    /// again asks again.
+    func look(under board: DiscuzBoard, in offer: JoinOffer) async {
+        let host = offer.host.lowercased()
+        let found: [DiscuzBoard]
+        do {
+            found = try await joiner(for: offer.host).subBoards(of: board, in: offer)
+        } catch {
+            lookedUnder[host]?.remove(board.fid)
+            return
+        }
+        guard !found.isEmpty else { return }
+        subBoards[host, default: DiscuzSubBoards()].learn(
+            DiscuzBoardPage(notes: [], subBoards: found, parent: nil),
+            of: BoardSubscription(board)
+        )
+        // Drawn into whatever the picker holds **now**, which another tick's read may already
+        // have grown — never into the offer this read started from.
+        guard case .choosingBoards(let current, let origin) = stage,
+              current.host.lowercased() == host
+        else { return }
+        stage = .choosingBoards(current.adding(found, under: board.fid), from: origin)
+    }
+
+    /// One subscribed board's page, read on a reload, and what it said about the boards
+    /// around it kept for the picker — see `subBoards`.
+    func learn(_ page: DiscuzBoardPage, of board: BoardSubscription, host: String) {
+        guard !page.subBoards.isEmpty || page.parent != nil else { return }
+        subBoards[host.lowercased(), default: DiscuzSubBoards()].learn(page, of: board)
     }
 
     /// The reader stepped back from one protocol's servers to the list of protocols.
@@ -1814,6 +1895,9 @@ final class ShellSession {
         // And nine: what the server last said it was is that server's word, not this device's
         // note. Dropped with the rest, so the next read asks it again.
         flavours.forget(host: host)
+        // Eleven: what this run read about the forum's sub-boards is its word too (#161).
+        subBoards[host] = nil
+        lookedUnder[host] = nil
         // Ten. A Clear signs this source out below, so an act still on its way to it is an act
         // that cannot now arrive, and a failure left standing about a source the reader has just
         // emptied is a sentence about nothing (#106).
