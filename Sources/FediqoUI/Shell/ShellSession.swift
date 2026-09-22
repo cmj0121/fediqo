@@ -273,6 +273,19 @@ final class ShellSession {
         }
     }
 
+    /// The row one id stands for, anywhere in what this device holds — or nothing, where this
+    /// device does not hold it any more.
+    ///
+    /// **Over the store and not over the stream** (#122). A conversation opened from somebody's
+    /// page is opened from a post of theirs, and what is theirs is everything held rather than
+    /// what the query in front lets through — so a root looked for among the timeline's rows is
+    /// a root a rule can hide, and the pane would draw the timeline under the press instead of
+    /// the conversation the reader pressed for. The comparison is one string per note; the row
+    /// is built once, for the one note that matched.
+    func held(_ rowID: String) -> DummyItem? {
+        notes.first { $0.key.rowID == rowID }.map(DummyItem.init)
+    }
+
     /// What `notes` holds, counted (#7) — rebuilt where `notes` is assigned or the breakdown
     /// switches between week and month, never on a redraw.
     private(set) var holdings = Holdings(notes: [], per: .month)

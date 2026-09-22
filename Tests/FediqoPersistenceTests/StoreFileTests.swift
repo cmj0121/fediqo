@@ -179,6 +179,17 @@ struct StoreFileTests {
         #expect(try file.load().notes == [saved])
     }
 
+    @Test("Notes are read back in the order they were written, which is the order they arrived in")
+    func writtenOrderSurvives() async throws {
+        let file = try StoreFile(database: DatabaseQueue())
+        let second = Source(host: "second.example", kind: .mastodon)
+        let uri = "https://first.example/users/ada/statuses/1"
+        // Against the key's own order on purpose: the later host and the later id first.
+        let saved = [note(id: "z", source: second), note(id: uri, source: second), note(id: uri), note(id: "a")]
+        try await file.save(sources: [mastodon, second], notes: saved)
+        #expect(try file.load().notes == saved)
+    }
+
     @Test("Row facts survive a relaunch on the same directory")
     func rowFactsSurviveRelaunch() async throws {
         let dir = scratch()

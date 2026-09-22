@@ -243,11 +243,24 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         return items[next]
     }
 
-    /// Leaving the innermost open thread: the stack one shorter, and the post that thread was
-    /// opened from selected again — whatever `j` and `k` moved to inside it.
-    public static func poppedThread(_ stack: [String]) -> (stack: [String], selected: String)? {
-        guard let opened = stack.last else { return nil }
-        return (Array(stack.dropLast()), opened)
+    /// The two layers that are one walk: somebody's page, and a conversation (#122).
+    ///
+    /// They are drawn at the same distance from the stream and only ever one at a time, because
+    /// `ShellWalk` holds them in one stack and only its innermost step is open. Their order
+    /// relative to each other in `allCases` is therefore never asked — which of them is in front
+    /// is what the reader walked, not what this list says.
+    public static let walk: Set<DummyLayer> = [.person, .thread]
+
+    /// Whether the reader may walk one step further out from where they are now.
+    ///
+    /// **The order is still read once**, out of `DummyLayer.allCases` and through `canOpen`. The
+    /// walk's own two layers are set aside first and the question is asked about `.person`, which
+    /// is the front of the pair: a step may be taken exactly when nothing outside the walk stands
+    /// in front of it. So a conversation still does not open under the viewer or the guide, and
+    /// it now does open from somebody's page — which is #122, and which no second list of layers
+    /// had to be written to say.
+    public static func canWalk(whenOpen open: Set<DummyLayer>) -> Bool {
+        canOpen(.person, whenOpen: open.subtracting(walk))
     }
 
     /// What a press of a finger on a row means: the lamp, or the conversation (#33).
@@ -287,17 +300,21 @@ public enum DummyLayer: Hashable, Sendable, CaseIterable {
     case shortcuts
     /// Somebody's page, opened by pressing their face or their name on a row (#99).
     ///
-    /// **Over the thread, and that is the load-bearing half of the order.** A face is on every
-    /// row a thread draws as well as on every row of the stream, so a person has to be able to
-    /// open from inside a conversation — and a press to leave then gives the conversation back,
-    /// which is where the reader was. Under the thread it would be a control the entry rule
-    /// refuses, which is a face that does nothing on half the rows in the app.
+    /// **It and `.thread` are one walk, and neither is in front of the other** (#122). The two
+    /// used to be ordered here, a person over a conversation, which is the right answer for the
+    /// press that opens them — a face is on every row a thread draws, so a person has to open
+    /// from inside a conversation — and the wrong one for the press that leaves the page again:
+    /// a row there lit and went no further, because a conversation may not open under the layer
+    /// it is under. Which of the two is in front is now `ShellWalk`, and it is what the reader
+    /// walked rather than what a list decided in advance.
     ///
-    /// What it costs, stated: a row on a person's page lights but does not open a conversation,
-    /// because a thread may not open underneath them. #99 asks that what this device holds of
-    /// theirs is *there*, and the page is a list to read rather than a place to navigate out of.
+    /// Only the innermost step of that walk is ever open, so these two are never both in a set
+    /// of open layers and the order between them is never asked. What is still asked, and still
+    /// read out of this one list, is what stands in front of *both* — see
+    /// `DummyCommand.canWalk(whenOpen:)`.
     case person
-    /// The conversation opened over the stream.
+    /// The conversation opened over whatever it was opened from: the stream, a search's results,
+    /// another conversation, or somebody's page. One walk with `.person` — see there.
     case thread
     /// A search's results in place of the stream (#32). Under a thread, because a result can be
     /// opened; over the selection, because leaving it gives back the one made before it opened.

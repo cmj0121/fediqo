@@ -117,12 +117,14 @@ struct TouchTests {
     @Test("A press opens a conversation exactly where Return would")
     func aPressOpensAThreadWhereReturnWould() {
         func can(_ place: ShellPlace = .timeline, open: Set<DummyLayer> = []) -> Bool {
-            FediqoRootView.canOpenThread(place: place, open: open)
+            FediqoRootView.canWalk(place: place, open: open)
         }
         #expect(can(open: [.selection]))
-        // A reply inside an open thread opens its own conversation: the thread is still what is
-        // outermost afterwards.
+        // A reply inside an open thread opens its own conversation: one more step of the walk.
         #expect(can(open: [.thread, .selection]))
+        // And so does a row on somebody's page, which is #122 — the walk is one stack, so a
+        // conversation is no longer refused by the step the reader took before it.
+        #expect(can(open: [.person, .selection]))
         // A result found on this device can be opened, which is what puts search under thread.
         #expect(can(open: [.search]))
         // Nothing opens *under* the picture or the keys list.

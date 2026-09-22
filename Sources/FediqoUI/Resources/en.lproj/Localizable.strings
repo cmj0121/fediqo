@@ -542,6 +542,7 @@
 "link.reader.browser"                 = "Open in your browser";
 "link.reader.close"                   = "Done";
 "link.reader.refused"                 = "That link goes somewhere Fediqo will not open. It was not followed.";
+"post.tag.spoken"                     = "hashtag %@";
 
 /* #64 — the one way of saying something is on its way. Spoken only: the plate itself is what a
    reader sees, and it carries no words. */
@@ -558,3 +559,10 @@
 "person.held.one" = "%d post here";
 "person.none" = "Nothing of theirs has reached this device yet.";
 "item.person.open" = "Open %@";
+
+/* One post more than one source carried (#114). The row is drawn as the first; these name the rest. */
+"item.source.more" = "%1$@ +%2$d";
+"item.source.also" = "%1$@, also from %2$@";
+"item.source.join" = ", ";
+"thread.copies.title" = "As each source carried it";
+"thread.copies.from" = "From %@";

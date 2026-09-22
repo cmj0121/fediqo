@@ -121,10 +121,11 @@ struct EmojiText: View {
         // Once per pass of this line, never once per tick: the `TimelineView` below re-runs its
         // own content and not this body, so the cut is captured rather than remade at 25 a
         // second — and the cache remembers it across passes of the row as well.
-        let cut = linked ? cache.proseRuns(in: text, from: emojis) : cache.runs(in: text, from: emojis)
+        let cut = self.cut
         let baseline = request.metrics.baseline
         let links = Self.links(in: cut)
         let ink = ShellChrome.selectInk(colorScheme)
+        let plate = ShellChrome.well(colorScheme)
 
         Group {
             if let clock = Self.clock(for: pictures, reduceMotion: reduceMotion) {
@@ -136,12 +137,14 @@ struct EmojiText: View {
                 Self.line(cut, pictures, at: 0, baseline: baseline, linkInk: ink)
             }
         }
+        // Only where a pill is drawn: a line with no tag keeps the system's own drawing.
+        .modifier(TagPlating(plate: plate, active: Self.hasTags(cut)))
         .font(role.font(at: typeSize))
         // One element carrying one label. Without `.ignore` the label would be landing on a
         // `TimelineView` whenever a clock is running — a container rather than a piece of text —
         // and a screen reader would be free to read the interpolated `Text` inside it instead.
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(accessibilityText)
+        .accessibilityLabel(Self.spoken(cut))
         // **Both ways in, named, on the element the reader lands on.** A press on the drawn link
         // and a secondary press on the words are both gestures, and a reader who makes neither
         // would otherwise be read an address and given no way to follow it. `DummyItemRow`'s way
@@ -152,6 +155,11 @@ struct EmojiText: View {
             await cache.fetch(request)
             arrived = Arrived(request: request, frames: cache.held(request))
         }
+    }
+
+    /// Whether a cut line has a tag in it, and so a pill to draw.
+    static func hasTags(_ cut: [EmojiRun]) -> Bool {
+        cut.contains { if case .tag = $0 { true } else { false } }
     }
 
     /// The addresses in a cut line, in the order they were written.
@@ -179,9 +187,40 @@ struct EmojiText: View {
         let frames: [String: EmojiCache.Frames]
     }
 
+    /// The cut this line is drawn from: the prose cut where the call site asked for a post's own
+    /// words, the label cut everywhere else. Both are remembered by the cache.
+    @MainActor
+    private var cut: [EmojiRun] {
+        linked ? cache.proseRuns(in: text, from: emojis) : cache.runs(in: text, from: emojis)
+    }
+
+    /// What a screen reader is given for this line — see `spoken(_:)`.
+    @MainActor
+    var accessibilityText: Text { Self.spoken(cut) }
+
     /// What a screen reader is given: what the author typed, shortcodes and all. It cannot see a
     /// picture, and `:blobcat:` is at least the name of one.
-    var accessibilityText: Text { Text(verbatim: text) }
+    ///
+    /// **Read back from the cut rather than from `text`**, and that is what makes one sentence
+    /// true: a word is said to be a hashtag exactly where a pill is drawn round it, and nowhere
+    /// else. A name with a `#` in it, a covered post and a `#` inside an address are all cut
+    /// without a `.tag`, so they are read as the letters they are. The cut concatenated is the
+    /// words exactly — `EmojiRun.prose` promises it — so a line with no tag is read as it always
+    /// was, and reading it costs a walk of runs the cache already holds rather than a second scan.
+    ///
+    /// A tag is read as the word the author wrote, named as a tag, and **named rather than
+    /// actioned**: there is no action on it, because there is nothing yet for one to do, and an
+    /// action that did nothing would be the control the drawing refuses to look like.
+    static func spoken(_ cut: [EmojiRun]) -> Text {
+        Text(verbatim: cut.reduce(into: "") { spoken, run in
+            switch run {
+            case .text(let words): spoken += words
+            case .link(let link): spoken += link.text
+            case .emoji(let emoji): spoken += ":\(emoji.shortcode):"
+            case .tag(let tag): spoken += String(format: L10n.t("post.tag.spoken"), tag.name)
+            }
+        })
+    }
 
     /// What the task brought back, or — before it has run — whatever the cache already holds, so
     /// a line whose emoji another row has already fetched draws them on its first pass rather
@@ -214,6 +253,8 @@ struct EmojiText: View {
                 return line + Text(verbatim: words)
             case .link(let link):
                 return line + Self.drawn(link, in: linkInk)
+            case .tag(let tag):
+                return line + Self.drawn(tag)
             case .emoji(let emoji):
                 // Until the picture is here the shortcode stands in for it, which is what the
                 // reader would have seen anyway and is never a blank.
@@ -244,6 +285,135 @@ struct EmojiText: View {
         address.foregroundColor = ink
         address.underlineStyle = .single
         return Text(address)
+    }
+
+    /// A hashtag, drawn as one: the word, with a little room either side of it, marked so that
+    /// `TagPlates` draws a pill of the shell's grey behind it.
+    ///
+    /// **A label, and drawn so that it cannot be taken for a control.** `ShellChrome.well` is the
+    /// milled recess the shell puts a pill or a keycap in — neutral on purpose, because a
+    /// container that borrows the lamp's hue makes every container look selected. The letters
+    /// keep the line's own ink, carry no underline and no `link`, so nothing about the run says
+    /// *press here*: an address is the phosphor and a line under it, a tag is the grey and the
+    /// ordinary ink, and the two are told apart by colour, by edge and by whether there is a
+    /// line under the word, which is three differences and not one. There is no press for it to
+    /// have — that is a later unit — and a pill that looked pressable and did nothing would be
+    /// worse than the plain word it replaced.
+    ///
+    /// **A mark rather than a colour.** A background attribute inside a `Text` is a rectangle on
+    /// both platforms and cannot be given a radius, which is a grey highlight and not a pill. So
+    /// the run carries `PostTagMark` and nothing else, and the capsule is drawn by the line's
+    /// renderer from where the run was actually laid out. The tag stays letters in the one
+    /// `Text` — it wraps, is selected and is the author's spelling — and the plate is paint, not
+    /// layout, so nothing about it can move a line or change a row's height.
+    ///
+    /// **The room is a narrow no-break space each side**, inside the marked run so the capsule's
+    /// round ends fall in it rather than on the `#` and the last letter. No-break, so the plate
+    /// cannot be split from its word at the end of a line and the line breaks round the pill as
+    /// it would round the word. The spaces are drawing only: `tag.text` is still exactly what
+    /// was typed, and what a screen reader hears is built from the tag and not from this.
+    static func drawn(_ tag: PostTag) -> Text {
+        Text(verbatim: tagRoom + tag.text + tagRoom).customAttribute(PostTagMark())
+    }
+
+    /// The room inside a tag's plate, each side: `U+202F NARROW NO-BREAK SPACE`.
+    static let tagRoom = "\u{202F}"
+}
+
+/// The mark a hashtag's run carries, and the only thing that tells `TagPlates` where a pill goes.
+///
+/// No fields: it says *this run is a tag* and nothing about what the tag is, because the drawing
+/// needs nothing more and a mark that carried the tag would be a second copy of the cut.
+struct PostTagMark: TextAttribute {}
+
+/// Draws a line with a capsule of the shell's grey behind every run marked `PostTagMark`, and
+/// otherwise exactly as the system would.
+///
+/// **Every plate first, then every line of letters.** A plate is outset a little past its run, so
+/// drawing line by line would let the next line's plate lie over the last line's descenders; all
+/// the paint goes down before any of the ink does, and no plate can cover a letter.
+///
+/// **One capsule per line a tag is on.** Its runs on a line are joined first — see
+/// `plateBounds` — so a word set in two faces is still one pill. A tag has no space in it and its
+/// room is no-break, so it moves to the next line whole; the only way it is split is a single tag
+/// longer than the line, which the system then breaks by character. That draws as two capsules,
+/// one per line, which is what the letters are doing too.
+///
+/// **Paint, not layout.** The capsule is the tag's typographic bounds outset sideways by
+/// `plateOutset` of its height and not at all upright, so it sits inside the line's own height
+/// and a line — and so a row — is exactly as tall as it was. `displayPadding` tells SwiftUI about
+/// the few points it reaches past the text's frame at either end, so they are not clipped.
+struct TagPlates: TextRenderer {
+    let plate: Color
+
+    /// How far past its letters the capsule reaches at each end, as a share of its height. A
+    /// tenth is two points at the body size: enough air round the room, and less than half the
+    /// ordinary space between two tags, so `#a #b` is two pills and not one.
+    static let plateOutset: CGFloat = 0.1
+
+    var displayPadding: EdgeInsets {
+        EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4)
+    }
+
+    /// The capsule behind one run: its bounds, outset sideways, with round ends.
+    static func plate(around bounds: CGRect) -> Path {
+        let rect = bounds.insetBy(dx: -bounds.height * plateOutset, dy: 0)
+        return Path(roundedRect: rect, cornerRadius: rect.height / 2, style: .continuous)
+    }
+
+    /// Where the plates go on one line: each unbroken stretch of marked runs, as one box.
+    ///
+    /// **One tag is often several runs, and this is where that stops showing.** A run is a
+    /// stretch of one font, and `#台灣` is `#` in the system face and `台灣` in the CJK fallback
+    /// beside it — measured, three runs for `#二` with its room, and a capsule per run would be a
+    /// row of overlapping pills of slightly different heights round one word. Two tags can never
+    /// meet here: a `#` straight after a tag's letter opens nothing, so there is always an
+    /// unmarked character between two pills. The box is the union, so a taller fallback face
+    /// sets the plate's height for the whole word rather than for its own letters.
+    static func plateBounds(_ runs: [(marked: Bool, bounds: CGRect)]) -> [CGRect] {
+        var plates: [CGRect] = []
+        var open: CGRect?
+        for run in runs {
+            if run.marked {
+                open = open.map { $0.union(run.bounds) } ?? run.bounds
+            } else if let done = open {
+                plates.append(done)
+                open = nil
+            }
+        }
+        if let done = open { plates.append(done) }
+        return plates
+    }
+
+    func draw(layout: Text.Layout, in context: inout GraphicsContext) {
+        for line in layout {
+            let runs = line.map { ($0[PostTagMark.self] != nil, $0.typographicBounds.rect) }
+            for bounds in Self.plateBounds(runs) {
+                context.fill(Self.plate(around: bounds), with: .color(plate))
+            }
+        }
+        for line in layout {
+            context.draw(line)
+        }
+    }
+}
+
+/// The renderer, only on a line with a tag in it.
+///
+/// **Absent, not idle** — `ProseLinks`' shape. A renderer that draws every line as the system
+/// would is still a renderer in the path of every post; a post with no tag keeps the system's own
+/// drawing, which is the one way to be sure it looks exactly as it did.
+private struct TagPlating: ViewModifier {
+    let plate: Color
+    let active: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if active {
+            content.textRenderer(TagPlates(plate: plate))
+        } else {
+            content
+        }
     }
 }
 

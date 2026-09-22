@@ -133,7 +133,11 @@ public struct StoreFile: Sendable {
         try db.read { db in
             let sources = try SourceRecord.fetchAll(db).map(\.source)
             let byHost = Dictionary(uniqueKeysWithValues: sources.map { ($0.host, $0) })
-            let notes = try NoteRecord.fetchAll(db).compactMap { record in
+            // In the order they were written, which `ItemStore.snapshot` made the order they
+            // arrived in: the copy of a post a merged row is drawn as is the one that came
+            // first (#114), and a table read in no stated order is read in whatever order
+            // SQLite likes. Stated, so that it is a guarantee rather than a habit.
+            let notes = try NoteRecord.order(Column.rowID).fetchAll(db).compactMap { record in
                 byHost[record.host].map(record.note(from:))
             }
             return (sources, notes)
