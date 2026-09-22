@@ -1060,20 +1060,21 @@ struct DummyItemRow: View {
     /// cannot press is a question about this app, and the honest answer to "you are not signed in
     /// here" is the sentence `refusal` draws, not a greyed arrow.
     ///
-    /// Whether it is done is `item.boosted`, which is what the source said — never what this
-    /// device remembers pressing. Nothing is not `false`: a post whose source never said carries
-    /// no mark at all, because `acts` has already refused it as unnameable or unsigned.
+    /// Whether it is done is what the source the boost goes through said — never what this
+    /// device remembers pressing, and on a row two sources carried, never the other source's
+    /// word (#136); `ItemActs.mark` reads it. Nothing is not `false`: a post whose source never
+    /// said carries no mark at all, because `acts` has already refused it as unnameable or
+    /// unsigned.
     @ViewBuilder
     private var boostMark: some View {
         if acting.acts.offers(.boost) {
-            let done = item.boosted == true
-            let standing = acting.standings[.boost]
+            let shown = ItemActs.mark(.boost, on: item, acting: acting)
             counted(
-                ItemActs.symbol(.boost, done: done, standing: standing),
-                count: item.counts.reblogs,
+                shown.symbol,
+                count: shown.count,
                 label: "item.act.boost",
-                on: done,
-                spoken: ItemActs.spoken(.boost, done: done, standing: standing)
+                on: shown.done,
+                spoken: shown.spoken
             ) {
                 acting.boost?()
             }
@@ -1089,12 +1090,13 @@ struct DummyItemRow: View {
     @ViewBuilder
     private var answerMark: some View {
         if acting.acts.offers(.answer), let answer = acting.answer {
+            let shown = ItemActs.mark(.answer, on: item, acting: acting)
             counted(
-                ItemActs.symbol(.answer, done: false, standing: nil),
-                count: item.counts.replies,
+                shown.symbol,
+                count: shown.count,
                 label: "item.act.answer",
                 on: false,
-                spoken: ItemActs.spoken(.answer, done: false, standing: nil)
+                spoken: shown.spoken
             ) {
                 answer()
             }
@@ -1109,14 +1111,13 @@ struct DummyItemRow: View {
     @ViewBuilder
     private var favouriteMark: some View {
         if acting.acts.offers(.favourite) {
-            let done = item.favourited == true
-            let standing = acting.standings[.favourite]
+            let shown = ItemActs.mark(.favourite, on: item, acting: acting)
             counted(
-                ItemActs.symbol(.favourite, done: done, standing: standing),
-                count: item.counts.favourites,
+                shown.symbol,
+                count: shown.count,
                 label: "item.act.favourite",
-                on: done,
-                spoken: ItemActs.spoken(.favourite, done: done, standing: standing)
+                on: shown.done,
+                spoken: shown.spoken
             ) {
                 acting.favourite?()
             }
@@ -1131,9 +1132,8 @@ struct DummyItemRow: View {
     @ViewBuilder
     private var withdrawMark: some View {
         if acting.acts.offers(.withdraw), let withdraw = acting.withdraw {
-            let standing = acting.standings[.withdraw]
-            mark(ItemActs.symbol(.withdraw, done: false, standing: standing),
-                 spoken: ItemActs.spoken(.withdraw, done: false, standing: standing)) {
+            let shown = ItemActs.mark(.withdraw, on: item, acting: acting)
+            mark(shown.symbol, spoken: shown.spoken) {
                 withdraw()
             }
         }

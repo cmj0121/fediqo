@@ -464,24 +464,18 @@ struct TimelinePane: View {
     /// The same, for a row drawn inside the conversation around `root` — where the answer mark
     /// opens the answer rather than the conversation (#108).
     private func acting(_ item: DummyItem, inside root: DummyItem?) -> ItemActing {
-        var standings: [PostAct: ShellActStanding] = [:]
-        for act in PostAct.allCases {
-            standings[act] = session.acts.standing(of: item.id, act)
+        var acting = session.acting(on: item)
+        acting.boost = { Task { await session.boost(item) } }
+        acting.favourite = { Task { await session.favourite(item) } }
+        acting.answer = {
+            if let root {
+                session.openAnswer(to: item, in: root)
+            } else {
+                onOpenThread(item.id)
+            }
         }
-        return ItemActing(
-            acts: session.acts(on: item),
-            standings: standings,
-            boost: { Task { await session.boost(item) } },
-            favourite: { Task { await session.favourite(item) } },
-            answer: {
-                if let root {
-                    session.openAnswer(to: item, in: root)
-                } else {
-                    onOpenThread(item.id)
-                }
-            },
-            withdraw: { session.askToWithdraw(item) }
-        )
+        acting.withdraw = { session.askToWithdraw(item) }
+        return acting
     }
 
     private func markBinding(_ item: DummyItem) -> Binding<DummyMarks> {

@@ -233,6 +233,7 @@
 "item.act.unboost" = "Take the boost back";
 "item.act.onItsWay" = "on its way";
 "item.act.failed" = "did not arrive. Press to try again.";
+"item.act.through" = "%1$@ through %2$@";
 "item.act.no.protocol" = "read only here";
 "item.act.no.signIn" = "sign in to act here";
 "item.act.no.turnedAway" = "this source turned a write away";

@@ -1365,13 +1365,14 @@ private struct WithdrawQuestion: ViewModifier {
             }
             Button(L10n.t("compose.cancel"), role: .cancel) { session.cancelWithdraw() }
         } message: { item in
-            Text(ItemActs.withdrawQuestion(item).detail)
+            Text(ItemActs.withdrawQuestion(session.withdrawingCopy ?? item).detail)
         }
     }
 
-    /// What goes, named. Empty only while nothing is asked, when the dialog is not drawn.
+    /// What goes, named — the copy that goes, on a row two sources carried (#136). Empty only
+    /// while nothing is asked, when the dialog is not drawn.
     private var title: String {
-        guard let item = session.withdrawing else { return "" }
+        guard let item = session.withdrawingCopy ?? session.withdrawing else { return "" }
         return ItemActs.withdrawQuestion(item).title
     }
 
