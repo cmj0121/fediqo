@@ -266,6 +266,15 @@ final class ShellSession {
         }
     }
 
+    /// The row at the top of the stream, as the reader last left it scrolled (#110).
+    ///
+    /// **Here and not on the pane**, because the pane is what a window dragged across the width
+    /// where the arrangement changes throws away and builds again; the session is not. **And
+    /// past observation**, because the scroll view writes it on every row that passes the top,
+    /// and a redraw of everything that reads this session on every one of those would be the
+    /// scroll paying for a note nobody reads until the list is drawn again.
+    @ObservationIgnored var scrolledTop: String?
+
     /// The row one id stands for, anywhere in what this device holds — or nothing, where this
     /// device does not hold it any more.
     ///

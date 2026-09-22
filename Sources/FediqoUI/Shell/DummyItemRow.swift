@@ -90,14 +90,13 @@ struct DummyItemRow: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openURL) private var openURL
 
-    #if os(iOS)
-    @Environment(\.horizontalSizeClass) private var sizeClass
-    /// A phone held upright, where the picture beside the words leaves the words a
-    /// column four characters wide. Everywhere else the row keeps its full width.
-    private var narrow: Bool { sizeClass == .compact }
-    #else
-    private var narrow: Bool { false }
-    #endif
+    /// The shell's own arrangement, measured once at the root (#110).
+    @Environment(\.shellLayout) private var shellLayout
+    /// A narrow page, where the picture beside the words leaves the words a column four
+    /// characters wide — a phone held upright, and now a Mac window dragged narrow too, which
+    /// used to keep the wide row at every width because the row asked the device rather than the
+    /// space. Everywhere else the row keeps its full width.
+    private var narrow: Bool { shellLayout == .narrow }
 
     /// The row's fittings, in points at the standard type size and scaled from there.
     /// They used to be fixed: the words grew with the reader's preference and the
