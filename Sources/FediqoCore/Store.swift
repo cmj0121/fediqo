@@ -159,6 +159,23 @@ public actor ItemStore {
         }
     }
 
+    /// Keeps a forum row's opening post as just read, with the row (#154). Only for rows held,
+    /// and only while their source is: an opening that arrives for a row a Remove took away is
+    /// not a way back in. Returns whether anything changed, so a caller saves only then.
+    @discardableResult
+    public func keep(_ openings: [NoteKey: ForumOpening]) -> Bool {
+        var changed = false
+        for (key, opening) in openings {
+            guard let held = notes[key], held.opening != opening,
+                  sourceList.contains(where: { $0.host == key.host })
+            else { continue }
+            notes[key] = held.with(opening: opening)
+            changed = true
+        }
+        if changed { revision += 1 }
+        return changed
+    }
+
     /// Lets go of one server: the source, the boards the reader picked on it, and the notes it
     /// carried here. Each source is its own rows, so this host's copy goes and the other source's
     /// copy of the same content stays (#10).

@@ -393,6 +393,8 @@ final class ShellSession {
         // 274KB — so it carries its own far tighter ceiling. See `ForumPosts.maxBytes`, and the
         // plan's standing item about per-caller response ceilings, of which this is the first.
         self.posts = posts ?? ForumPosts(through: forums)
+        // An opening post read is kept with its row (#154). Weak: the cache is this session's.
+        self.posts.keeping = { [weak self] key, opening in self?.keep(opening, for: key) }
         switch timelines?.load() {
         case .timelines(let kept)?: written = kept
         case .unreadable?: timelinesUnreadable = true
@@ -1797,9 +1799,14 @@ final class ShellSession {
         await emoji.forget(host: host)
         emojis.forget(host: host)
         pictures.forget(host: host)
-        // Six kinds became seven. A forum's opening posts are this device's copy of that server's
-        // words, held for exactly the reason the pictures are, and a Clear that reached the
-        // pictures and left the posts would empty half of what the reader was looking at.
+        // Six kinds became seven. A forum's opening posts were this device's copy of that
+        // server's words, held for exactly the reason the pictures are — until #154 kept them
+        // with their rows, which a Clear keeps (#7). So the ones this run read are handed to
+        // the rows first, and what the cache lets go of below is its own copy, the replies,
+        // and what was withheld or refused: the rows still draw their words, and nothing is
+        // asked of the forum for them. A Remove reaches here too, after its rows are gone, and
+        // then there is nothing to hand them to.
+        keep(posts.openings(host: host))
         posts.forget(host: host)
         // Seven became eight, for the same reason: an open thread's answers are this device's
         // copy of that server's words too.
@@ -1849,6 +1856,32 @@ final class ShellSession {
         notes = await store.all()
         await persist?()
         return dropped
+    }
+
+    /// An opening post just read, kept with its row in the store and saved (#154).
+    ///
+    /// **Not written into `notes`**, which the timeline is drawn from and which would redraw every
+    /// row for every post that lands as the reader scrolls. This run draws the words from
+    /// `posts`, which holds them; the rows carry them from the next read of the store on — a
+    /// relaunch, a reload, a join — and a Clear hands them over itself (`keep(_:)` below).
+    func keep(_ opening: ForumOpening, for key: NoteKey) {
+        Task {
+            guard await store.keep([key: opening]) else { return }
+            await persist?()
+        }
+    }
+
+    /// This run's opening posts for rows still held, handed to the store **and** to the rows drawn
+    /// now, for a Clear about to let the cache that was drawing them go (#154).
+    private func keep(_ openings: [NoteKey: ForumOpening]) {
+        guard !openings.isEmpty,
+              notes.contains(where: { openings[$0.key] != nil && $0.opening != openings[$0.key] })
+        else { return }
+        notes = notes.map { note in openings[note.key].map(note.with(opening:)) ?? note }
+        Task {
+            guard await store.keep(openings) else { return }
+            await persist?()
+        }
     }
 
     /// The reader is done being signed in to one forum, and nothing else about it changes.

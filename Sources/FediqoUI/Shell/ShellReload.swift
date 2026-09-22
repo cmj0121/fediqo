@@ -365,14 +365,21 @@ final class ShellReload {
             return await readAsYou(source, for: categories, in: session) && read
         case .discuz:
             let client = DiscuzClient(http: timed(transport(host, in: session)), host: host)
-            guard let categories else {
-                guard !source.boards.isEmpty else {
-                    return await land(host, in: session) { try await client.latest(source: stamp) }
-                }
-                return await boards(source.boards, of: stamp, through: client, in: session)
+            let read: Bool
+            if let categories {
+                let asked = source.boards.filter { categories.contains(.board(id: String($0.fid))) }
+                read = await boards(asked, of: stamp, through: client, in: session)
+            } else if source.boards.isEmpty {
+                read = await land(host, in: session) { try await client.latest(source: stamp) }
+            } else {
+                read = await boards(source.boards, of: stamp, through: client, in: session)
             }
-            let asked = source.boards.filter { categories.contains(.board(id: String($0.fid))) }
-            return await boards(asked, of: stamp, through: client, in: session)
+            // **A board read again reads its rows' opening posts again too** (#154) — when each
+            // row is reached, not now. The words kept with a row are what the forum said the
+            // last time; a reader who pressed `r` asked what it says now. Only where the forum
+            // answered: a reload that did not get through leaves the kept words standing.
+            if read, !Task.isCancelled { session.posts.revisit(host: host) }
+            return read
         case .discourse:
             // A Discourse's front page is its one read; it has no boards this app picks.
             guard categories == nil else { return true }

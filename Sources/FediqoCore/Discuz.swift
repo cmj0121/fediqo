@@ -1047,6 +1047,11 @@ struct DiscuzThread: Equatable, Sendable {
             // least sometimes carries an excerpt, a Discuz! thread table carries no part of the
             // opening post at all — reading one would be a second request per row against a
             // stranger's server, which is not what the reader pressed a button for.
+            //
+            // Since #154 the opening post, once a row is reached and read, is kept with the row —
+            // but as `Note.opening`, not here: `body` is what a keyword rule and the search read,
+            // and a rule that began matching a thread only after somebody happened to scroll to
+            // it would be a rule that changes its mind about the same post.
             body: "",
             title: title.isEmpty ? nil : title,
             // The row's own board where the page gave one, the page's heading otherwise. Never

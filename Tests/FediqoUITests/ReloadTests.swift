@@ -118,6 +118,22 @@ struct ReloadTests {
         #expect(!session.reload.running)
     }
 
+    /// #154: a board read again means its rows' kept words may be old, so each row asks again when
+    /// it is reached — and only where the forum answered, so a dark reload leaves them standing.
+    @Test("A forum's board read again makes its rows read their opening posts again; one unread does not")
+    func aBoardReadAgainRevisitsItsRows() async {
+        let (session, _) = await shell()
+        await session.reload.timeline(.all, in: session)
+        #expect(session.posts.due.contains(Self.forum), "the board was read and its rows kept their words")
+
+        var dark = Self.everything
+        dark[Self.boardAddress] = nil
+        let (unread, _) = await shell(dark)
+        await unread.reload.timeline(.all, in: unread)
+        #expect(unread.reload.failed.contains(Self.forum), "the premise: the board did not answer")
+        #expect(!unread.posts.due.contains(Self.forum), "a reload that did not get through let the words go")
+    }
+
     @Test("Trends asks only the sources that have trends, and only for their trends")
     func trendsAsksTrends() async {
         let (session, http) = await shell()

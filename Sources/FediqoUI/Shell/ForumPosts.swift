@@ -22,6 +22,13 @@ struct ForumThreadRef: Hashable, Sendable {
     /// Folded once, here, where it enters this module's caches — decision 21.
     let host: String
     let tid: Int
+    /// The opening post this device kept with the row, where it has one (#154). **Carried, not
+    /// part of what the thread is**: two refs to one thread are one thread whatever either
+    /// remembers of it, so `==` and the hash read the host and the number only.
+    let kept: ForumOpening?
+    /// The row in the store this thread is, where the ref came from a row — what a read landing
+    /// is kept under. See `ForumPosts.keeping`.
+    let note: NoteKey?
 
     /// The thread a row is standing on, or nothing where this row is not a Discuz! thread at all.
     ///
@@ -34,11 +41,30 @@ struct ForumThreadRef: Hashable, Sendable {
         guard let tid = Int(parts[2]), tid > 0, !parts[1].isEmpty else { return nil }
         self.host = String(parts[1]).lowercased()
         self.tid = tid
+        kept = item.opening
+        note = NoteKey(host: item.source.host, id: item.noteID)
     }
 
-    init(host: String, tid: Int) {
+    init(host: String, tid: Int, kept: ForumOpening? = nil) {
         self.host = host.lowercased()
         self.tid = tid
+        self.kept = kept
+        note = nil
+    }
+
+    static func == (a: ForumThreadRef, b: ForumThreadRef) -> Bool {
+        a.host == b.host && a.tid == b.tid
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(host)
+        hasher.combine(tid)
+    }
+
+    /// The row this thread is in the store: the one the ref was read off, or else the spelling
+    /// `DiscuzThread.asNote` writes.
+    var noteKey: NoteKey {
+        note ?? NoteKey(host: host, id: "discuz:\(host):\(tid)")
     }
 }
 
@@ -89,6 +115,18 @@ enum ForumReading: Equatable, Sendable {
 /// forum, for one press. This package refuses that traffic everywhere else it comes up, so the
 /// post is fetched for the rows the reader actually stopped on and kept for as long as it is
 /// affordable to keep it.
+///
+/// ## And kept with the row once it is read — #154, revising D30
+///
+/// D30 held what was read here and nowhere else, so every relaunch started again from titles and
+/// asked the forum for every row again, and a dark network showed a forum already read as
+/// nothing but titles. **The fetching rule is unchanged** — a row is read when it is reached, and
+/// never ahead — but what the read brings back of the opening post (its words, what it quoted,
+/// the author's picture) is now handed to the session to keep with the row (`keeping`), and a
+/// row that carries it draws it without asking (`ForumThreadRef.kept`, `asks(_:)`). What the
+/// forum withheld is never kept. This cache is still where this run's answers are held first,
+/// and it is still bounded; what is kept with a row is bounded by the rows, and by the reader's
+/// keep-for window, like every other thing a row carries.
 ///
 /// **`ShellPictures` is the model and the resemblance is deliberate**, down to the names. It is
 /// the same problem with a different payload: work commissioned from a view body, deduplicated,
@@ -326,8 +364,27 @@ final class ForumPosts {
         if let held = entries[key], let opening = held.posts.first {
             return ForumReading.of(opening)
         }
+        // **What was kept with the row, before any reason there is nothing** (#154). This run's
+        // own answer is above it, so a reload's words replace the kept ones on screen the moment
+        // they land; a failure below it is only this run's, and the words already read are still
+        // the author's.
+        if let kept = ref.kept { return kept.words.isEmpty ? .silent : .words(kept.words) }
         if let absence = missing[key] { return .absent(absence) }
         return .coming
+    }
+
+    /// Whether a row standing on this thread should ask the forum for its opening post now.
+    ///
+    /// **Only a row that has nothing to draw, or whose board was just read again.** A row kept
+    /// with its words draws them and asks nothing — that is what a relaunch and a dark network
+    /// are owed (#154) — until a reload of its board says the forum may have changed its mind;
+    /// then the row asks once, when it is reached, and what comes back replaces what was kept.
+    /// Everything else is D30's rule as it always was: not asked for, not already held, and not
+    /// already answered with a reason asking again cannot change.
+    func asks(_ ref: ForumThreadRef) -> Bool {
+        let key = Key(ref, .opening)
+        guard entries[key] == nil, missing[key] == nil else { return false }
+        return ref.kept == nil || due.contains(key.host)
     }
 
     /// The author's picture, where the opening post brought one — **and a stamp, like `reading`**.
@@ -354,7 +411,8 @@ final class ForumPosts {
     func avatar(of ref: ForumThreadRef) -> URL? {
         let key = Key(ref, .opening)
         wanted(key)
-        return entries[key]?.posts.first?.avatarURL
+        if let held = entries[key] { return held.posts.first?.avatarURL }
+        return ref.kept?.avatarURL
     }
 
     /// What the opening post reproduced of somebody else's — **and a stamp, like `reading`** (#104).
@@ -373,7 +431,8 @@ final class ForumPosts {
     func quoted(of ref: ForumThreadRef) -> [DiscuzQuotation] {
         let key = Key(ref, .opening)
         wanted(key)
-        return entries[key]?.posts.first?.quoted ?? []
+        if let held = entries[key] { return held.posts.first?.quoted ?? [] }
+        return ref.kept?.quoted ?? []
     }
 
     /// The rest of the topic, and how it got there — D31.
@@ -412,6 +471,7 @@ final class ForumPosts {
     ///
     /// Returns whether every part asked came back.
     func reload(_ ref: ForumThreadRef, within limit: Duration) async -> Bool {
+        rows[Key(ref, .opening)] = ref.noteKey
         let keys = Part.allCases.map { Key(ref, $0) }.filter { key in
             key.part == .opening || entries[key] != nil || missing[key] != nil || inFlight[key] != nil
         }
@@ -440,6 +500,7 @@ final class ForumPosts {
 
     private func fetch(_ ref: ForumThreadRef, part: Part) async {
         let key = Key(ref, part)
+        if part == .opening { rows[key] = ref.noteKey }
         guard entries[key] == nil, missing[key]?.asksAgain ?? true else { return }
         await work(for: key).value
     }
@@ -508,6 +569,14 @@ final class ForumPosts {
             if asked != (self.forums?.signIns(host: key.host) ?? 0), Self.isGuestShaped(answer) {
                 self.generation += 1
                 return
+            }
+
+            // **An opening post read is kept with its row** (#154) — unless the forum withheld it,
+            // which is its notice and not the author's words. Handed on, not written here: the
+            // row is the store's, and so is when it is saved.
+            if part == .opening, case .success(let posts) = answer,
+               let first = posts.first, let opening = ForumOpening(first) {
+                self.keeping?(self.rows[key] ?? ForumThreadRef(host: key.host, tid: key.tid).noteKey, opening)
             }
 
             switch answer {
@@ -705,7 +774,13 @@ final class ForumPosts {
 
     // MARK: - What a reader clears
 
-    /// Drops every post this device holds from one forum — decision 14, this cache's share.
+    /// Drops every post this run holds in memory from one forum — decision 14, this cache's share.
+    ///
+    /// **What it no longer reaches, since #154: an opening post kept with its row.** Those are in
+    /// the index with the rows, and a Clear keeps the rows (#7) — so it keeps their words too, and
+    /// `ShellSession.clear` hands this run's openings to the rows (`openings(host:)`) before it
+    /// calls this. What goes here is this run's copies: the replies, what was withheld or refused,
+    /// and the opening posts held in memory, which the rows now carry for themselves.
     ///
     /// **One sweep and no reference counting**, which is where this parts company with
     /// `ShellPictures.forget(host:)`. A picture address can be handed out by two servers, so
@@ -733,6 +808,9 @@ final class ForumPosts {
         }
         for key in Array(missing.keys) where key.host == host {
             missing.removeValue(forKey: key)
+        }
+        for key in Array(rows.keys) where key.host == host {
+            rows.removeValue(forKey: key)
         }
         generation += 1
     }
@@ -770,6 +848,48 @@ final class ForumPosts {
         case .success(let posts): posts.contains(where: \.isWithheld)
         case .failure(let absence): absence == .refused || absence == .unreadable
         }
+    }
+
+    /// Where an opening post read goes to be kept with its row — the session's store (#154). Set
+    /// by the session that owns this cache; nothing where there is none, which is a test's.
+    @ObservationIgnored var keeping: (@MainActor (NoteKey, ForumOpening) -> Void)?
+
+    /// The row each opening post being read belongs to, so what lands is kept under it.
+    @ObservationIgnored private var rows: [Key: NoteKey] = [:]
+
+    /// Forums whose boards were read again this run: their rows ask for their opening posts once
+    /// more when reached, whatever was kept (#154). See `asks(_:)`.
+    private(set) var due: Set<String> = []
+
+    /// A forum's boards were just read again, so each of its rows should read its opening post
+    /// again when it is reached, and keep what the forum says now (#154).
+    ///
+    /// **When reached, and not now.** Nothing is fetched here: this run's answers are let go and
+    /// the rows on screen are told, so the ones the reader is looking at ask, and a row nobody
+    /// reaches asks nothing — D30's rule, still. Until the new words land the kept ones are
+    /// drawn, and where the forum does not answer they stay.
+    func revisit(host raw: String) {
+        let host = raw.lowercased()
+        due.insert(host)
+        for key in Array(entries.keys) where key.host == host && key.part == .opening {
+            if let gone = entries.removeValue(forKey: key) { heldBytes -= gone.cost }
+        }
+        for key in Array(missing.keys) where key.host == host && key.part == .opening {
+            missing.removeValue(forKey: key)
+        }
+        generation += 1
+    }
+
+    /// The opening posts this run read from one forum and holds, by the row each belongs to — what
+    /// a Clear hands to the rows it keeps before it lets this cache go (#154).
+    func openings(host raw: String) -> [NoteKey: ForumOpening] {
+        let host = raw.lowercased()
+        var found: [NoteKey: ForumOpening] = [:]
+        for (key, held) in entries where key.host == host && key.part == .opening {
+            guard let first = held.posts.first, let opening = ForumOpening(first) else { continue }
+            found[rows[key] ?? ForumThreadRef(host: key.host, tid: key.tid).noteKey] = opening
+        }
+        return found
     }
 
     /// Keys whose fetch was in the air when the reader cleared their forum. Read after the
@@ -963,7 +1083,7 @@ struct ForumPostBand: View {
         .task(
             id: Wanting(
                 thread: thread,
-                settled: reading != .coming,
+                settled: !posts.asks(thread),
                 generation: posts.generation,
                 active: placeIsActive
             )
@@ -971,7 +1091,7 @@ struct ForumPostBand: View {
             // Decision 20: a post is fetched only for the place the reader is in. **Only the
             // fetch is gated** — `posts.reading(…)` above still runs and still stamps interest on
             // every pass, on every page, or I8 breaks.
-            guard placeIsActive, reading == .coming else { return }
+            guard placeIsActive, posts.asks(thread) else { return }
             // Cancelled by the row going away, which is the whole point of it. A thrown
             // cancellation here means this row did not stay, so nothing is asked for.
             do { try await Task.sleep(for: Self.settle) } catch { return }

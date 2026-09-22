@@ -368,6 +368,44 @@ private struct NoteFacts: Codable {
     /// `Note.favourited` (#107), for `boosted`'s reasons and in its shape: additive, optional, no
     /// migration id, and the source's answer rather than a press.
     var favourited: Bool?
+    /// `Note.opening` (#154): a forum row's opening post as this device last read it. Additive
+    /// and optional, so no migration id, and the refuse-a-newer-store rule is not reached: a row
+    /// written before 0.4.0 learned it reads as a row nobody has reached, which it is to this
+    /// build, and an earlier build decoding this row ignores the key.
+    var opening: OpeningRow?
+}
+
+/// `ForumOpening` as `NoteFacts` writes it.
+private struct OpeningRow: Codable {
+    var words: String
+    var quoted: [QuotationRow]
+    var avatarURL: URL?
+
+    init(_ opening: ForumOpening) {
+        words = opening.words
+        quoted = opening.quoted.map(QuotationRow.init)
+        avatarURL = opening.avatarURL
+    }
+
+    var opening: ForumOpening {
+        ForumOpening(words: words, quoted: quoted.map(\.quotation), avatarURL: avatarURL)
+    }
+}
+
+/// One level of a quotation, and the levels it quoted. As deep as what was read, which Core
+/// bounds at `DiscuzQuotation.deepest` levels before anything is kept.
+private struct QuotationRow: Codable {
+    var words: String
+    var quoting: [QuotationRow]
+
+    init(_ quotation: DiscuzQuotation) {
+        words = quotation.words
+        quoting = quotation.quoting.map(QuotationRow.init)
+    }
+
+    var quotation: DiscuzQuotation {
+        DiscuzQuotation(words: words, quoting: quoting.map(\.quotation))
+    }
 }
 
 private struct ReplyRow: Codable {
@@ -456,7 +494,8 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             url: note.url,
             statusID: note.statusID,
             boosted: note.boosted,
-            favourited: note.favourited
+            favourited: note.favourited,
+            opening: note.opening.map(OpeningRow.init)
         )
     }
 
@@ -489,7 +528,8 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             spoiler: facts.spoiler,
             emojis: facts.emojis.map(\.emoji),
             url: facts.url,
-            statusID: facts.statusID
+            statusID: facts.statusID,
+            opening: facts.opening?.opening
         )
     }
 }
