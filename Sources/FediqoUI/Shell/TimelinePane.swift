@@ -82,9 +82,7 @@ struct TimelinePane: View {
     private var searching: Bool { search?.isOpen == true }
 
     private var items: [DummyItem] {
-        search?.items(
-            from: session.notes, revision: session.notesRevision, sources: session.sources, latest: prefs.latestDate
-        )
+        search.flatMap { session.searched($0, latest: prefs.latestDate) }
             ?? session.timelineItems(latest: prefs.latestDate)
     }
 
@@ -245,6 +243,13 @@ struct TimelinePane: View {
         // product ever made: no timeline's place was written down or given back, and the only
         // line that ran was the one that puts the lamp out where the arrived-at list lacks it.
         // A post that happened to be in both lists stayed lit, which read as a place kept.
+        //
+        // **With the search open, the parked post is what moves** (#145). The search now asks
+        // the timeline in front, so switching searches the new one with the pattern kept, and
+        // the lamp stays on a result only where the new results still hold it. The post parked
+        // for the old timeline is written down as its place, and the new timeline's own is
+        // parked instead — among the posts that timeline shows, not among the results — so
+        // closing the search gives back the post of the timeline the reader is in.
         .onChange(of: session.timelineID) { left, arrived in
             // Another list, so the row the last one had at the top means nothing here.
             session.scrolledTop = nil
@@ -252,8 +257,14 @@ struct TimelinePane: View {
                 selectedID = session.timelinePlaces.switched(
                     from: left, to: arrived, standingOn: selectedID, among: items.map(\.id)
                 )
-            } else if let selectedID, !items.contains(where: { $0.id == selectedID }) {
-                self.selectedID = nil
+            } else {
+                let shown = session.timelineItems(latest: prefs.latestDate).map(\.id)
+                search?.switched { parked in
+                    session.timelinePlaces.switched(from: left, to: arrived, standingOn: parked, among: shown)
+                }
+                if let selectedID, !items.contains(where: { $0.id == selectedID }) {
+                    self.selectedID = nil
+                }
             }
             // The walk ends on the same change, where it is held: `FediqoRootView` clears it.
         }

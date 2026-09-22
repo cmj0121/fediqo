@@ -61,6 +61,17 @@ public enum TimelineQuery: Hashable, Identifiable, Sendable {
         }
     }
 
+    /// The name a reader knows this timeline by: a written one's own, a built-in's from the
+    /// strings — the tab's word, and the word the search field and its empty notice use (#145).
+    func name(among written: [TimelineDefinition], language: DummyLanguage? = nil) -> String {
+        switch self {
+        case .all: L10n.t("timeline.tab.all", language: language)
+        case .trends: L10n.t("timeline.tab.trends", language: language)
+        case .written(let id):
+            written.first { $0.id == id }?.name ?? L10n.t("timeline.tab.all", language: language)
+        }
+    }
+
     public var rule: String {
         switch self {
         case .all, .written: L10n.t("timeline.rule.all")

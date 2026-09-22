@@ -72,6 +72,14 @@ struct ShellToast: Equatable {
 }
 
 /// The stream as last drawn, and what it was drawn from.
+extension TimelineDefinition {
+    /// Whether any rule reads a post's words or its author, which is what needs the folded text.
+    /// All and Trends read none, so drawing or searching them folds nothing.
+    var readsText: Bool {
+        rules.contains { $0.kind.tag == .keyword || $0.kind.tag == .author }
+    }
+}
+
 struct DrawnTimeline {
     struct Key: Equatable {
         let definition: TimelineDefinition
@@ -112,13 +120,28 @@ extension ShellSession {
         let definition = definition(of: currentTimeline)
         let key = DrawnTimeline.Key(definition: definition, notesRevision: notesRevision, latest: latest)
         if let drawnTimeline, drawnTimeline.key == key { return drawnTimeline.items }
-        let readsText = definition.rules.contains { $0.kind.tag == .keyword || $0.kind.tag == .author }
         let items = currentTimeline.items(
-            from: notes, among: written, index: readsText ? textIndex : TextIndex([]), latest: latest
+            from: notes, among: written, index: definition.readsText ? textIndex : TextIndex([]), latest: latest
         )
         drawnTimeline = DrawnTimeline(key: key, items: items)
         timelineEvaluations += 1
         return items
+    }
+
+    /// What the open search finds in the timeline in front (#145), or nothing while none is open.
+    ///
+    /// **One call for the list and the keys.** The pane draws this and `j`, `k` and Return walk
+    /// it; two readers each spelling the timeline, the notes and the text index out for
+    /// themselves would be two answers to "what did the search find" that could come apart.
+    func searched(_ search: ShellSearch, latest: LatestDate?) -> [DummyItem]? {
+        search.items(
+            in: definition(of: currentTimeline),
+            text: textIndex,
+            from: notes,
+            revision: notesRevision,
+            sources: sources,
+            latest: latest
+        )
     }
 
     func definition(of query: TimelineQuery) -> TimelineDefinition {
@@ -127,10 +150,7 @@ extension ShellSession {
 
     /// A tab's name: a written timeline's own, a built-in's from the strings.
     func name(of query: TimelineQuery) -> String {
-        guard case .written(let id) = query, let timeline = written.first(where: { $0.id == id }) else {
-            return query.name
-        }
-        return timeline.name
+        query.name(among: written)
     }
 
     /// The line beside the tabs. Empty description keeps the generated rule line, so a

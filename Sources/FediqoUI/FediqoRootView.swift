@@ -858,9 +858,7 @@ public struct FediqoRootView: View {
     }
 
     private var searchItems: [DummyItem]? {
-        search.items(
-            from: session.notes, revision: session.notesRevision, sources: session.sources, latest: prefs.latestDate
-        )
+        session.searched(search, latest: prefs.latestDate)
     }
 
     /// Whether `/` — and the mark in the header that is its touch path (#33) — can do anything
@@ -877,8 +875,8 @@ public struct FediqoRootView: View {
         place == .timeline && DummyCommand.canOpen(.search, whenOpen: open)
     }
 
-    /// `/` on the timeline: an empty search over what this device holds, or the field again if
-    /// one is open. The selection is put aside, to come back when the search closes.
+    /// `/` on the timeline: an empty search over what the timeline in front lets through (#145), or
+    /// the field again if one is open. The selection is put aside, to come back when the search closes.
     private func openSearch() -> Bool {
         guard Self.canSearch(place: place, open: openLayers) else { return false }
         if search.isOpen {
@@ -1335,6 +1333,7 @@ public struct FediqoRootView: View {
                 if search.isOpen {
                     SearchBar(
                         search: search,
+                        timeline: session.name(of: session.currentTimeline),
                         found: search.isIndexed ? searchItems?.count : nil,
                         onSubmit: { selectedItemID = streamItems.first?.id },
                         onCleared: searchCleared,

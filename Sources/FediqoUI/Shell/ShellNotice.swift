@@ -132,10 +132,13 @@ struct EmptyNotice: Equatable, Sendable {
                     detail: L10n.t("search.indexing.detail", language: language)
                 )
             }
+            // Which timeline it looked in (#145): a search finds only what that one lets through,
+            // so "nothing matches" without the name would read as nothing on this device at all.
+            let name = query.name(among: written, language: language)
             return EmptyNotice(
                 kind: .search,
                 symbol: "magnifyingglass",
-                title: L10n.t("search.empty.title", language: language),
+                title: String(format: L10n.t("search.empty.title", language: language), name),
                 detail: L10n.t("search.empty.detail", language: language)
             )
         }
