@@ -53,6 +53,13 @@ final class ShellSession {
     /// to comes back withheld.
     let posts: ForumPosts
 
+    /// Every act on a post this run has in the air, and every one that did not land — #106.
+    ///
+    /// On the session for `conversations`' reason: what a row draws and what a key presses have to
+    /// be the same object. It holds no landed act at all — see its own doc, which is where the
+    /// "not because this device remembered pressing it" half of #106 is actually enforced.
+    let acts = ShellActs()
+
     /// The conversation around each post the reader has opened — #90.
     ///
     /// Beside `posts` and for its reason: the forum half of "what is around this post" is that
@@ -418,8 +425,9 @@ final class ShellSession {
     }
 
     /// Asks the instance where this run has not already been told, and remembers the answer.
-    func refreshPostLimit() async {
-        guard let host = composeHost else { return }
+    /// The composer's chosen source where no host is named; an answer names its own (#108).
+    func refreshPostLimit(of named: String? = nil) async {
+        guard let host = named ?? composeHost else { return }
         if postLimits[host] != nil { return }
         if case .stated(let profile) = profiles[host] {
             postLimits[host] = MastodonWrite.limit(advertised: profile.statusLimit)
@@ -453,6 +461,181 @@ final class ShellSession {
             _ = try await MastodonWrite(door: door, store: store)
                 .post(text, visibility: composeAudience)
             composeDraft = ComposerSheet.draftAfterLanding(current: composeDraft, sent: text)
+            await adopt()
+            await persist?()
+        } catch MastodonAuthError.signedOut {
+            mastodon.endedByServer(host: host)
+            throw MastodonAuthError.signedOut
+        } catch MastodonAuthError.http(let status) where status == 403 {
+            mastodon.refusedWrite(host: host)
+            throw MastodonAuthError.http(403)
+        }
+    }
+
+    /// What may be done to one post, from the source it was read through and whether this device
+    /// can name it there (#106).
+    ///
+    /// **Asked of the session and never worked out on the row**, for `rows`' reason: two of the
+    /// three facts that decide it — what the sign-in bought, and what the source has turned away
+    /// since — are held here, and a row deriving its own answer would be a second derivation free
+    /// to disagree with the one the source page draws.
+    ///
+    /// A post whose host is not a source here offers nothing and says nothing: a fixture, a
+    /// preview, a row left over from a Remove. That is `PostActs.none` rather than a refusal,
+    /// because there is no source for a sentence to be about.
+    func acts(on item: DummyItem) -> PostActs {
+        guard let kind = sources.first(where: { $0.host == item.source.host })?.kind else {
+            return .none
+        }
+        return PostActs.on(
+            mastodon.writing(host: item.source.host, kind: kind),
+            nameable: item.statusID != nil
+        )
+    }
+
+    /// Boosts the post, or takes the boost back — the same press either way (#106).
+    ///
+    /// **Which way it goes is read off the post and not off the press.** `item.boosted` is what
+    /// the source last said, so a row the reader boosted in another app and this device has since
+    /// fetched takes the boost back on its first press here, which is what the mark under it says
+    /// it will do.
+    ///
+    /// Nothing is written down about the press landing: the store takes the server's answer, and
+    /// what the row draws afterwards is that. A refusal leaves the post exactly as it was and
+    /// leaves a failure the same press clears by trying again.
+    func boost(_ item: DummyItem) async {
+        await perform(.boost, on: item) { door, note in
+            try await MastodonWrite(door: door, store: self.store)
+                .boost(note, on: note.boosted != true)
+        }
+    }
+
+    /// Favourites the post, or takes the favourite back — `boost`'s press with a different meaning
+    /// (#107). Which way it goes is read off what the source last said.
+    func favourite(_ item: DummyItem) async {
+        await perform(.favourite, on: item) { door, note in
+            try await MastodonWrite(door: door, store: self.store)
+                .favourite(note, on: note.favourited != true)
+        }
+    }
+
+    /// One act on one post, with everything every act shares: the guard against a second press
+    /// while the first is out, the sign-in, the store, and the three sentences #53 sets.
+    ///
+    /// **The held note is read here and handed down, rather than each act finding its own.** The
+    /// row is a drawing of a note and the act is performed against the note, and an act that
+    /// looked the row up a second time inside itself would be two lookups that a Remove landing
+    /// between them can answer differently.
+    ///
+    /// A 401 the account check confirms signs the source out, and a 403 marks the source as
+    /// having turned a write away — both exactly as `post()` does, because they are the same two
+    /// answers from the same door and a second reading of them is how two acts come to tell a
+    /// reader different things about one sign-in.
+    private func perform(
+        _ act: PostAct,
+        on item: DummyItem,
+        _ body: @escaping (MastodonAuthorized, Note) async throws -> Note
+    ) async {
+        guard acts(on: item).offers(act) else { return }
+        // A store row, or an answer read in an open conversation, which #90 keeps out of the store.
+        guard let note = notes.first(where: { $0.key.rowID == item.id })
+                ?? conversations.note(item.id),
+              let door = mastodon.authorized(host: item.source.host)
+        else { return }
+        guard acts.begin(item.id, act) else { return }
+        do {
+            let answered = try await body(door, note)
+            conversations.replace(answered)
+            acts.landed(item.id, act)
+            await adopt()
+            await persist?()
+        } catch MastodonAuthError.signedOut {
+            mastodon.endedByServer(host: item.source.host)
+            acts.failed(item.id, act)
+        } catch MastodonAuthError.http(403) {
+            mastodon.refusedWrite(host: item.source.host)
+            acts.failed(item.id, act)
+        } catch let error where Cancellation.happened(error) {
+            // A cancelled act is one that did not arrive, said in the one sentence a reader can
+            // act on: press again. There is no third thing to tell them, and leaving no standing
+            // at all would draw the post as though the press had landed.
+            acts.failed(item.id, act)
+        } catch {
+            acts.failed(item.id, act)
+        }
+    }
+
+    /// The answer being written, where one is (#108). Nothing while no answer is open.
+    ///
+    /// **Observed, and the sheet is presented from it**, so a key and a press on the mark open
+    /// the one surface by writing the one value.
+    var answering: AnswerTarget?
+    /// What has been written to each post and not yet sent, by row. Kept when the sheet closes
+    /// unsent and when a send fails, so every character survives both; cleared only by a landing.
+    var answerDrafts: [String: String] = [:]
+    /// Who each unsent answer reaches, by row — chosen before it is sent, from where it started.
+    var answerReach: [String: Audience] = [:]
+
+    /// Opens the answer to `item`, inside the conversation around `root`.
+    ///
+    /// **Refused where the post does not offer it**, the same one rule the mark under it reads.
+    /// The first time a post is answered, the draft starts with its author's handle, since a
+    /// Mastodon answer reaches the person answered only where it names them — the words are the
+    /// reader's to change — and the reach starts where the post is and no wider.
+    @discardableResult
+    func openAnswer(to item: DummyItem, in root: DummyItem) -> Bool {
+        guard acts(on: item).offers(.answer) else { return false }
+        if answerDrafts[item.id] == nil, let handle = item.handle, handle.hasPrefix("@") {
+            answerDrafts[item.id] = handle + " "
+        }
+        let start = Audience.answering(
+            notes.first { $0.key.rowID == item.id }?.audience
+                ?? conversations.note(item.id)?.audience
+        )
+        if answerReach[item.id] == nil { answerReach[item.id] = start }
+        answering = AnswerTarget(item: item, root: root, start: start)
+        return true
+    }
+
+    /// The answer's text, bound for the sheet. Empty where nothing is kept for this post.
+    func answerDraft(_ target: AnswerTarget) -> String { answerDrafts[target.id] ?? "" }
+
+    func canSendAnswer(_ target: AnswerTarget) -> Bool {
+        ComposerSheet.canSend(
+            text: answerDraft(target),
+            limit: postLimit(of: target.item.source.host),
+            hasSource: acts(on: target.item).offers(.answer)
+        )
+    }
+
+    /// Sends the answer to the source the post was read through — **the post decides it; it is
+    /// not a choice** — and lays what landed into the conversation under what it answers.
+    ///
+    /// A failure throws and keeps every character: the draft is only cleared by a landing, and
+    /// only where it is still the text that was sent, `ComposerSheet.draftAfterLanding`'s rule.
+    /// 401 and 403 are read as `post()` reads them.
+    func answer(_ target: AnswerTarget) async throws {
+        let item = target.item
+        let host = item.source.host
+        let text = ComposerSheet.trimmed(answerDraft(target))
+        guard !text.isEmpty, text.count <= postLimit(of: host) else { return }
+        guard acts(on: item).offers(.answer),
+              let answered = notes.first(where: { $0.key.rowID == item.id })
+                ?? conversations.note(item.id),
+              let door = mastodon.authorized(host: host)
+        else { throw MastodonWriteError.noSource }
+        let reach = answerReach[item.id] ?? target.start
+        do {
+            let note = try await MastodonWrite(door: door, store: store)
+                .post(text, visibility: reach, answering: answered)
+            answerDrafts[item.id] = ComposerSheet.draftAfterLanding(
+                current: answerDraft(target), sent: text
+            )
+            if answerDrafts[item.id]?.isEmpty == true {
+                answerDrafts[item.id] = nil
+                answerReach[item.id] = nil
+            }
+            conversations.landed(note, under: target.root.id, rootID: target.root.statusID)
             await adopt()
             await persist?()
         } catch MastodonAuthError.signedOut {
@@ -1489,6 +1672,10 @@ final class ShellSession {
         // And nine: what the server last said it was is that server's word, not this device's
         // note. Dropped with the rest, so the next read asks it again.
         flavours.forget(host: host)
+        // Ten. A Clear signs this source out below, so an act still on its way to it is an act
+        // that cannot now arrive, and a failure left standing about a source the reader has just
+        // emptied is a sentence about nothing (#106).
+        acts.forget(host: host)
         await forums.forget(host: host)
         // Decision 10: a Mastodon's sign-in goes with a Clear as a forum's does. Signing out
         // drops nothing that Home or a list brought in.

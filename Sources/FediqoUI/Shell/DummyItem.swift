@@ -68,14 +68,17 @@ public struct DummyCounts: Hashable, Sendable {
     }
 }
 
-/// What this device has done to a dummy item. Remote marks are still local in this mock.
+/// What this device has done to a dummy item, and kept to itself.
+///
+/// **The favourite left this type with #107.** It was a list kept in Fediqo that nobody else could
+/// see and no other app agreed with; it is now `DummyItem.favourited`, which is what the source
+/// says. What is left here is what really is this device's own: a bookmark, which is a different
+/// thing on a source that has both and is not #107's, and what the reader chose to keep.
 public struct DummyMarks: Hashable, Sendable {
-    public var favourited: Bool
     public var bookmarked: Bool
     public var kept: Bool
 
-    public init(favourited: Bool = false, bookmarked: Bool = false, kept: Bool = false) {
-        self.favourited = favourited
+    public init(bookmarked: Bool = false, kept: Bool = false) {
         self.bookmarked = bookmarked
         self.kept = kept
     }
@@ -87,6 +90,13 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     public let id: String
     /// The item's id as the source sent it.
     public let noteID: String
+    /// The id **this post's own server** gives it — `Note.statusID`, where the row has one.
+    ///
+    /// **Carried rather than looked up.** A row that cannot be named on its server offers none of
+    /// #54's acts, and the mark is drawn per row on every pass: a search back through the session's
+    /// notes to answer it would be a scan of everything held, once a row, for a fact the row was
+    /// built from. Nothing on a forum post and on a row kept before 0.2.0 learned it.
+    public var statusID: String?
 
     public let source: DummySource
     public let author: String
@@ -107,6 +117,13 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     public let workRelated: Bool
     public let answering: DummyAnswering
     public let boostedBy: String?
+    /// Whether the reader has boosted it, **as the source said** — `Note.boosted`, carried rather
+    /// than derived, so the mark under the post and the row in the store cannot come to disagree.
+    /// Nothing where the source never said, which is what makes the mark absent rather than off.
+    public var boosted: Bool?
+    /// Whether the reader has favourited it, as the source said — `Note.favourited`, in `boosted`'s
+    /// shape and for its reasons (#107).
+    public var favourited: Bool?
     public let audience: DummyAudience?
     /// The author's picture, where the source sent an address for one.
     public let avatarURL: URL?
@@ -304,6 +321,9 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         workRelated = false
         answering = Self.answering(note.reply)
         boostedBy = note.boostedBy
+        boosted = note.boosted
+        favourited = note.favourited
+        statusID = note.statusID
         audience = note.audience.map(DummyAudience.init)
         avatarURL = note.avatarURL
         url = note.url
@@ -434,9 +454,13 @@ extension DummyConversation {
     /// thread, and the only place left to put it is under the post. It is also what keeps the
     /// pass linear, since the order a server walks its own tree already puts parents first.
     ///
-    /// `rootID` is the id **the post's own server** gave the post — `Note.statusID`, which the
-    /// row itself does not carry. Nothing where it could not be known, and then every answer
-    /// stands at the first generation, which is the same fallback for the same reason.
+    /// `rootID` is the id **the post's own server** gave the post — `Note.statusID`. It is passed
+    /// in rather than read off `root.statusID`, although the row now carries one, because the
+    /// caller has the id the thread was actually *fetched* by and this must be the same string:
+    /// a conversation nested against one id and asked for under another would place every answer
+    /// at the first generation and look like a server that sends flat threads. Nothing where it
+    /// could not be known, and then every answer does stand at the first generation, which is the
+    /// honest fallback rather than an accident.
     public static func around(
         _ root: DummyItem, rootID: String?, ancestors: [Note], descendants: [Note]
     ) -> DummyConversation {
