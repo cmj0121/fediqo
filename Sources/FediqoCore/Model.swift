@@ -208,6 +208,34 @@ public enum Audience: String, Sendable, Hashable, CaseIterable {
         default: return nil
         }
     }
+
+    /// How far a post travels, as a rank: the people who are mentioned are the fewest, everyone
+    /// is the most. Unlisted sits above followers because anybody may read it who looks.
+    ///
+    /// **No `default:`**, so a fifth audience has to say where it stands.
+    public var reach: Int {
+        switch self {
+        case .mentioned: 0
+        case .followers: 1
+        case .unlisted: 2
+        case .everyone: 3
+        }
+    }
+
+    /// Whether this goes further than `other`.
+    public func isWider(than other: Audience) -> Bool { reach > other.reach }
+
+    /// Where an answer's reach starts (#108): **never wider than the post it answers.**
+    ///
+    /// A followers-only post answered in public would carry a private conversation to everybody
+    /// on the first press, and the reader would learn it from the replies. So the answer starts
+    /// where the post is, and widening it is a choice the reader makes where they can see it.
+    ///
+    /// **A post whose reach this device was never told starts at the narrowest**, because that is
+    /// the only start that cannot be wider than whatever the truth is.
+    public static func answering(_ answered: Audience?) -> Audience {
+        answered ?? .mentioned
+    }
 }
 
 public struct Reply: Hashable, Sendable {
@@ -362,6 +390,25 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// leaves no booster here and matches on its author alone. Nothing fills it in afterwards,
     /// and a note stored before this existed has none.
     public let boosterHandle: String?
+    /// Whether the reader this copy was fetched as has boosted it, **as the source said** — not
+    /// as this device remembers pressing anything (#106).
+    ///
+    /// **Nothing is not `false`**, `sensitive`'s rule and for its reason. A public timeline read
+    /// signed out carries no such field at all, and reading that silence as a no would draw every
+    /// post in it as one the reader has not boosted — which is a claim nobody made. Nothing means
+    /// the source never said, so the mark is not offered; `false` means it said no.
+    ///
+    /// It is a fact about this copy through this source, which is what makes it survive a
+    /// relaunch honestly: the row is stored with what the server last said, and every later fetch
+    /// of the same post overwrites it with what the server says then.
+    public let boosted: Bool?
+    /// Whether the reader this copy was fetched as has favourited it, as the source said (#107).
+    ///
+    /// `boosted`'s shape, for `boosted`'s reasons: nothing is a source that never said, which is
+    /// every unsigned read, and it is the server's answer that is kept rather than a press. A
+    /// favourite is a note to the author and to oneself, and a list of them this device kept on
+    /// its own would be a list no other app agrees with.
+    public let favourited: Bool?
     public let audience: Audience?
     public let avatarURL: URL?
     /// What came attached, in the order the server listed it. Empty is a post that brought
@@ -397,6 +444,8 @@ public struct Note: Identifiable, Hashable, Sendable {
         reply: Reply? = nil,
         boostedBy: String? = nil,
         boosterHandle: String? = nil,
+        boosted: Bool? = nil,
+        favourited: Bool? = nil,
         audience: Audience? = nil,
         avatarURL: URL? = nil,
         attachments: [Attachment] = [],
@@ -419,6 +468,8 @@ public struct Note: Identifiable, Hashable, Sendable {
         self.reply = reply
         self.boostedBy = boostedBy
         self.boosterHandle = boosterHandle
+        self.boosted = boosted
+        self.favourited = favourited
         self.audience = audience
         self.avatarURL = avatarURL
         self.attachments = attachments
@@ -433,12 +484,22 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// This copy, read again, laid over the one held for the same row (#29): what the server says
     /// now — text, cover, attachments, counts — with the categories the held copy arrived through
     /// kept (and grown), its booster kept, and its board where this read names none.
+    ///
+    /// **`boosted` and `favourited` fall back to what was held, rather than being overwritten with
+    /// nothing.** A
+    /// re-read made signed out — the public timeline, a thread asked of a host with no token —
+    /// carries no such field, and letting that silence replace a yes the same server gave an hour
+    /// ago would draw the post as unboosted because nobody asked, which is the one thing #106
+    /// says the mark must never do. A read made as the reader always says something, so it always
+    /// wins.
     func refreshed(over held: Note) -> Note {
         Note(
             id: id, source: source, author: author, handle: handle, body: body, title: title,
             board: board ?? held.board, postedAt: postedAt,
             categories: held.categories.union(categories), reply: reply,
             boostedBy: held.boostedBy, boosterHandle: held.boosterHandle,
+            boosted: boosted ?? held.boosted,
+            favourited: favourited ?? held.favourited,
             audience: audience, avatarURL: avatarURL, attachments: attachments,
             sensitive: sensitive, spoiler: spoiler, emojis: emojis, url: url, counts: counts,
             statusID: statusID ?? held.statusID

@@ -54,6 +54,13 @@
 "compose.limit" = "%d / %d";
 "compose.none.title" = "Nothing to write to";
 "compose.none.detail" = "None of the sources you are signed in to can be written to from here.";
+"answer.title" = "Answer";
+"answer.to" = "Answering %@";
+"answer.goesTo" = "Goes to %@";
+"answer.reach" = "Who it reaches";
+"answer.wider" = "This reaches further than the post it answers.";
+"answer.body" = "Your answer";
+"answer.send" = "Send";
 
 "shortcut.title" = "Keys";
 "shortcut.note" = "These work while you are not writing.";
@@ -73,6 +80,9 @@
 "shortcut.compose" = "New post";
 "shortcut.list" = "This list";
 "shortcut.back" = "Back to the list";
+"shortcut.boost" = "Boost this post to its source, or take the boost back";
+"shortcut.favourite" = "Favourite this post on its source, or take the favourite back";
+"shortcut.answer" = "Answer the post you are on, from inside its conversation";
 "shortcut.reload" = "Reload this timeline, or the open thread";
 "shortcut.dismiss" = "Close what is in front, or unfocus";
 "shortcut.search" = "Search the posts this device holds";
@@ -215,18 +225,22 @@
 "item.covered.show" = "Show it";
 "item.covered.label" = "Press s to show it";
 
-"item.act.reply" = "Reply";
-"item.act.reblog" = "Reblog";
+"item.act.boost" = "Boost";
+"item.act.unboost" = "Take the boost back";
+"item.act.onItsWay" = "on its way";
+"item.act.failed" = "did not arrive. Press to try again.";
+"item.act.no.protocol" = "read only here";
+"item.act.no.signIn" = "sign in to act here";
+"item.act.no.turnedAway" = "this source turned a write away";
+"item.act.no.unnameable" = "this post cannot be named on its server";
+"item.act.unfavourite" = "Take the favourite back";
+"item.act.answer" = "Answer";
 "item.act.quote" = "Quote";
 "item.act.favourite" = "Favourite";
 "item.act.bookmark" = "Bookmark";
 "item.act.kept" = "Kept";
 "item.act.more" = "More";
-"item.toast.reply" = "Reply stays on this device.";
-"item.toast.reblog" = "Reblog stays on this device.";
 "item.toast.quote" = "A quote opens the composer. Not this session.";
-"item.toast.favourite.on" = "Favourited, on this device.";
-"item.toast.favourite.off" = "Favourite cleared.";
 "item.toast.bookmark.on" = "Bookmarked, dummy.";
 "item.toast.bookmark.off" = "Bookmark cleared.";
 "item.toast.kept.on" = "Kept on this device.";

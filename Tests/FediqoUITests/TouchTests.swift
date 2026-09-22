@@ -35,7 +35,7 @@ struct TouchTests {
     @Test("Every key the guide names for the timeline can be done without one")
     func everyTimelineKeyHasATouchPath() {
         let timeline = DummyShortcut.lines(in: .timeline)
-        #expect(timeline.count == 12)
+        #expect(timeline.count == 15)
         let short = timeline.filter { $0.touch == .keysOnly || $0.touch == .partly }.map(\.name)
         #expect(short.isEmpty, "no touch path for: \(short.joined(separator: ", "))")
     }
@@ -56,10 +56,18 @@ struct TouchTests {
         #expect(Self.line("turn").touch == .press)
         #expect(Self.line("reveal").touch == .press)
         #expect(Self.line("back").touch == .press)
-        // A tab held, or double-clicked. The one secondary press among the twelve.
+        // A tab held, or double-clicked. The one secondary press among the fifteen.
         #expect(Self.line("edit").touch == .hold)
         #expect(Self.line("search").touch == .press)
         #expect(Self.line("reload").touch == .press)
+        // The boost mark under the post (#106). Absent where the post cannot be boosted, and the
+        // key is refused there too, so there is no half of it a finger cannot reach.
+        #expect(Self.line("boost").touch == .press)
+        // The star under the post (#107), for the boost's reason.
+        #expect(Self.line("favourite").touch == .press)
+        // The answer mark (#108): inside a conversation it opens the answer, and on the timeline
+        // it opens the conversation first, which is where the key is answered too.
+        #expect(Self.line("answer").touch == .press)
     }
 
     /// The other tab, recorded rather than wished for: two of its five keys are a keyboard's

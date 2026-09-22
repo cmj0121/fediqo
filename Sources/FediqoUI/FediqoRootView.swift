@@ -204,6 +204,14 @@ public struct FediqoRootView: View {
                     .presentationDetents([.medium, .large])
                     #endif
             }
+            // An answer, over the conversation it belongs to (#108). Driven by the session's one
+            // value, so the key and the mark open the same surface by writing the same thing.
+            .sheet(item: $session.answering) { target in
+                AnswerSheet(target: target)
+                    #if os(iOS)
+                    .presentationDetents([.medium, .large])
+                    #endif
+            }
             // **A link the reader pressed in somebody's words, drawn over the shell** (#34). On
             // the root beside the other presenters and for their stated reason: one presenter
             // driven by one piece of state survives a second call site, and this one has three
@@ -582,6 +590,12 @@ public struct FediqoRootView: View {
             return true
         case .search:
             return openSearch()
+        case .boost:
+            return boostFocused()
+        case .favourite:
+            return favouriteFocused()
+        case .answer:
+            return answerFocused()
         case .compose:
             guard availability.canCompose else { return false }
             showingShortcuts = false
@@ -1033,6 +1047,49 @@ public struct FediqoRootView: View {
             case .nothing:
                 return false
             }
+        }
+    }
+
+    /// `b` — the post the lamp is on, boosted to the source it was read through, or the boost
+    /// taken back (#106).
+    ///
+    /// **The acting half only.** Whether this post offers the act at all is `session.acts(on:)`,
+    /// read here and by the mark under the post from the one place, so a key that acted where no
+    /// mark is drawn — or a mark drawn over a key that refuses — cannot happen. A post that does
+    /// not offer it moves nothing and says so, which is what leaves the press available to the
+    /// platform.
+    ///
+    /// `onFocusedItem` and not `onActedItem`: the viewer is a picture over a post, and the post
+    /// it is over is the one the lamp is on, so there is no second post for this key to mean.
+    private func boostFocused() -> Bool {
+        onFocusedItem { item in
+            guard session.acts(on: item).offers(.boost) else { return false }
+            Task { await session.boost(item) }
+            return true
+        }
+    }
+
+    /// `f` — the post the lamp is on, favourited on its source or the favourite taken back (#107).
+    /// `boostFocused`'s acting half, for its reasons.
+    private func favouriteFocused() -> Bool {
+        onFocusedItem { item in
+            guard session.acts(on: item).offers(.favourite) else { return false }
+            Task { await session.favourite(item) }
+            return true
+        }
+    }
+
+    /// `w` — an answer to the post the lamp is on, written from inside its conversation (#108).
+    ///
+    /// **Only with a conversation in front**, because that is where the answer lands and where
+    /// the post being answered is in its place; on the bare timeline, and on somebody's page even
+    /// when it is open over a conversation, the key moves nothing and yields. The conversation is
+    /// the walk's (#122) and its root is looked up among everything held, the pane's own lookup.
+    /// Whether the post offers it is `session.openAnswer`'s one guard, the one the mark reads.
+    private func answerFocused() -> Bool {
+        guard let opened = walk.openedThread, let root = session.held(opened) else { return false }
+        return onFocusedItem { item in
+            session.openAnswer(to: item, in: root)
         }
     }
 

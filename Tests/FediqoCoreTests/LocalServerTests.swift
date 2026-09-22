@@ -95,6 +95,32 @@ struct LocalServerTests {
             #expect(await store.all().contains { $0.id == note.id })
         }
 
+        @Test("A boost goes to the Mastodon server and comes back as the server's own answer")
+        func mastodonBoosts() async throws {
+            try await LocalServers.requireHealthy()
+            let http = try client()
+            let store = ItemStore()
+            try await SourceJoin(
+                http: http, store: store, catalogues: EmojiCatalogueStore()
+            ).join(host: LocalServers.mastodon)
+            let tokens = MemoryMastodonTokens()
+            let token = MastodonToken(
+                host: LocalServers.mastodon,
+                accessToken: try LocalServers.writerToken(),
+                clientID: "x",
+                clientSecret: "x"
+            )
+            try tokens.save(token)
+            let write = MastodonWrite(
+                door: MastodonAuthorized(token: token, sender: http, store: tokens), store: store
+            )
+            let posted = try await write.post("fediqo-106-\(UUID().uuidString.prefix(8))", visibility: .everyone)
+            let boosted = try await write.boost(posted, on: true)
+            #expect(boosted.boosted == true)
+            let back = try await write.boost(boosted, on: false)
+            #expect(back.boosted == false)
+        }
+
         @Test("Registering this app on the Mastodon server is answered with a client id")
         func mastodonRegisters() async throws {
             try await LocalServers.requireHealthy()
