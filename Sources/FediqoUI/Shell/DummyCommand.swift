@@ -383,7 +383,7 @@ public enum DummyRowTap: Hashable, Sendable, CaseIterable {
 /// **One case per line of the written-down keys, and not optional.** A key added to
 /// `DummyShortcut.all` has to say how a finger reaches it. `.keysOnly` is the answer where there
 /// is honestly nothing and `.partly` where there is some of it, and `TouchTests` refuses both for
-/// the Timeline group, because a way in for most of a key is not what #33 accepts. A field that
+/// every tab but App, because a way in for most of a key is not what #33 accepts. A field that
 /// could be left off would be a promise the next key is free to break silently.
 ///
 /// **It says how, not what.** Nothing dispatches on this: it is the written-down answer to "and
@@ -406,7 +406,7 @@ public enum DummyTouch: String, Hashable, Sendable, CaseIterable {
     ///
     /// The answer for a key that is several jobs at once, where writing either `.press` or
     /// `.keysOnly` would be a claim about the other half. `TouchTests` refuses it for the
-    /// Timeline group exactly as it refuses `.keysOnly`: "partly" is not what #33 accepts there.
+    /// tabs but App exactly as it refuses `.keysOnly`: "partly" is not what #33 accepts there.
     case partly
     /// No touch path at all: this key is reachable only from a keyboard.
     case keysOnly
@@ -422,9 +422,17 @@ public enum DummyFocus: Equatable, Sendable {
     case post(DummyItem)
 }
 
-/// The tabs of the written-down keys. Timeline is this page's stream; App is every tab.
+/// The tabs of the written-down keys, one per purpose (#152), in the order a reader meets them:
+/// getting to a post, reading it, doing something with it, and the app around all three.
+///
+/// **What the App tab is.** Every key on the other three has a way in that needs no keyboard
+/// (#33), and App holds exactly the three that do not, or not wholly: the guide itself, Escape,
+/// and ⌘R. `⌃Tab` moves between the app's pages and is `Tab`'s kind of key, so it sits under
+/// Move with it rather than here — which is also what keeps that sentence true.
 public enum DummyShortcutGroup: String, CaseIterable, Identifiable, Sendable {
-    case timeline
+    case move
+    case read
+    case act
     case app
 
     public var id: String { rawValue }
@@ -454,58 +462,70 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
         all.filter { $0.group == group }
     }
 
+    /// Written tab by tab, in the order each tab draws its lines.
     public static let all: [DummyShortcut] = [
-        // The named pills along the top of the timeline, pressed.
-        DummyShortcut(group: .timeline, keys: ["Tab", "⇧Tab"], name: "tabs",
-                      commands: [.nextTab, .previousTab], touch: .press),
+        // MARK: Move — where the reader is
+
         // A press on a row lights it, which is where `j` and `k` leave the lamp.
-        DummyShortcut(group: .timeline, keys: ["j", "k", "↓", "↑"], name: "posts",
+        DummyShortcut(group: .move, keys: ["j", "k", "↓", "↑"], name: "posts",
                       commands: [.nextPost, .previousPost], touch: .press),
         // **The list under a finger, and no mark of our own.** `g` is a shortcut for a scroll,
         // and a phone already has the scroll; a "top" button would be chrome on every row of
         // every timeline for something the reader's thumb does. What `g` does besides — light
         // the first post — is `.press` on that post, which is the line above.
-        DummyShortcut(group: .timeline, keys: ["g"], name: "top", commands: [.goTop], touch: .scroll),
-        DummyShortcut(group: .timeline, keys: ["Return", "Space"], name: "expand",
+        DummyShortcut(group: .move, keys: ["g"], name: "top", commands: [.goTop], touch: .scroll),
+        // The named pills along the top of the timeline, pressed.
+        DummyShortcut(group: .move, keys: ["Tab", "⇧Tab"], name: "tabs",
+                      commands: [.nextTab, .previousTab], touch: .press),
+        // The rail on a Mac, the tab bar on a phone.
+        DummyShortcut(group: .move, keys: ["⌃Tab", "⌃⇧Tab"], name: "pages",
+                      commands: [.nextPage, .previousPage], touch: .press),
+        // Back in the thread's own header, and the close mark on the viewer.
+        DummyShortcut(group: .move, keys: ["q"], name: "back", commands: [.back], touch: .press),
+
+        // MARK: Read — what is in front of the reader
+
+        DummyShortcut(group: .read, keys: ["Return", "Space"], name: "expand",
                       commands: [.expandPost], touch: .pressAgain),
+        // The cover is a button over its whole face — `DummyItemRow.cover`.
+        DummyShortcut(group: .read, keys: ["s"], name: "reveal", commands: [.reveal], touch: .press),
         // The card itself, pressed. The mark on it is `a`'s and takes its own press.
-        DummyShortcut(group: .timeline, keys: ["v"], name: "view",
+        DummyShortcut(group: .read, keys: ["v"], name: "view",
                       commands: [.viewAttachment], touch: .press),
-        DummyShortcut(group: .timeline, keys: ["a"], name: "play",
+        DummyShortcut(group: .read, keys: ["a"], name: "play",
                       commands: [.playAttachment], touch: .press),
         // The counter in the card's corner, which is drawn exactly where there is more than one
         // card to turn to.
-        DummyShortcut(group: .timeline, keys: ["m"], name: "turn",
+        DummyShortcut(group: .read, keys: ["m"], name: "turn",
                       commands: [.nextAttachment], touch: .press),
-        // The cover is a button over its whole face — `DummyItemRow.cover`.
-        DummyShortcut(group: .timeline, keys: ["s"], name: "reveal", commands: [.reveal], touch: .press),
-        // Back in the thread's own header, and the close mark on the viewer.
-        DummyShortcut(group: .timeline, keys: ["q"], name: "back", commands: [.back], touch: .press),
-        // A tab held, or double-clicked — `TimelinePane.queryPill`.
-        DummyShortcut(group: .timeline, keys: ["e"], name: "edit",
-                      commands: [.editTimeline], touch: .hold),
-        DummyShortcut(group: .timeline, keys: ["/"], name: "search", commands: [.search], touch: .press),
-        DummyShortcut(group: .timeline, keys: ["r"], name: "reload", commands: [.reload], touch: .press),
+        // The face or the name at the head of the row, pressed (#99) — the press this key was
+        // written for (#140). Absent on somebody's own page, where the key does nothing either.
+        DummyShortcut(group: .read, keys: ["p"], name: "person", commands: [.openAuthor], touch: .press),
+        DummyShortcut(group: .read, keys: ["/"], name: "search", commands: [.search], touch: .press),
+        DummyShortcut(group: .read, keys: ["r"], name: "reload", commands: [.reload], touch: .press),
+
+        // MARK: Act — what the reader does to a post, or writes
+
         // The mark under the post, pressed — drawn on every row whose source can be written to
         // and absent on the rest, which is why the line is `.press` and not `.partly`: where the
         // mark is missing the key does nothing either, so there is no half of this a finger
         // cannot reach.
-        DummyShortcut(group: .timeline, keys: ["b"], name: "boost", commands: [.boost], touch: .press),
+        DummyShortcut(group: .act, keys: ["b"], name: "boost", commands: [.boost], touch: .press),
         // The star under the post, for `b`'s reason.
-        DummyShortcut(group: .timeline, keys: ["f"], name: "favourite", commands: [.favourite], touch: .press),
+        DummyShortcut(group: .act, keys: ["f"], name: "favourite", commands: [.favourite], touch: .press),
         // The answer mark under a post in an open conversation. On the timeline the same mark
         // opens the conversation first, which is where the key is answered too.
-        DummyShortcut(group: .timeline, keys: ["w"], name: "answer", commands: [.answer], touch: .press),
+        DummyShortcut(group: .act, keys: ["w"], name: "answer", commands: [.answer], touch: .press),
         // The take-back mark, drawn on the reader's own posts only — and the key is refused on
         // everyone else's, so there is no half of it a finger cannot reach.
-        DummyShortcut(group: .timeline, keys: ["d"], name: "withdraw", commands: [.withdraw], touch: .press),
-        // The face or the name at the head of the row, pressed (#99) — the press this key was
-        // written for (#140). Absent on somebody's own page, where the key does nothing either.
-        DummyShortcut(group: .timeline, keys: ["p"], name: "person", commands: [.openAuthor], touch: .press),
-        // The rail on a Mac, the tab bar on a phone.
-        DummyShortcut(group: .app, keys: ["⌃Tab", "⌃⇧Tab"], name: "pages",
-                      commands: [.nextPage, .previousPage], touch: .press),
-        DummyShortcut(group: .app, keys: ["c"], name: "compose", commands: [.compose], touch: .press),
+        DummyShortcut(group: .act, keys: ["d"], name: "withdraw", commands: [.withdraw], touch: .press),
+        DummyShortcut(group: .act, keys: ["c"], name: "compose", commands: [.compose], touch: .press),
+        // A tab held, or double-clicked — `TimelinePane.queryPill`.
+        DummyShortcut(group: .act, keys: ["e"], name: "edit",
+                      commands: [.editTimeline], touch: .hold),
+
+        // MARK: App — the three a finger cannot wholly reach
+
         // **This list is the one thing in this app a finger cannot ask for**, which is the honest
         // answer and not a resting place: a reader with no keyboard has no way to the written-down
         // keys, and needs none, because #33 is the promise that they never have to read them.

@@ -502,7 +502,7 @@ struct ThreadReadingTests {
     func theGuideSaysWhatSDoesNow() throws {
         let line = try #require(DummyShortcut.all.first { $0.commands == [.reveal] })
         #expect(line.keys == ["s"])
-        #expect(line.group == .timeline)
+        #expect(line.group == .read)
         // One line for one key. `s` having two jobs must not become two lines claiming two keys.
         #expect(DummyShortcut.all.filter { $0.keys == ["s"] }.count == 1)
 

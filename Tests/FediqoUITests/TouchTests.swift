@@ -27,15 +27,16 @@ struct TouchTests {
 
     // MARK: - The list is the promise
 
-    /// **This is #33's acceptance line, executable.** Every key the guide names for the timeline
-    /// has a way in that needs no keyboard — and because `touch` is not optional, a thirteenth
+    /// **This is #33's acceptance line, executable.** Every key the guide names outside its App
+    /// tab has a way in that needs no keyboard — and because `touch` is not optional, another
     /// key cannot be added to the list without answering the question. A key that genuinely has
     /// no touch path, or only part of one, would have to write `.keysOnly` or `.partly` here,
-    /// either of which fails this test rather than passing quietly.
-    @Test("Every key the guide names for the timeline can be done without one")
+    /// either of which fails this test rather than passing quietly. Since #152 this reaches the
+    /// two lines the old Every-tab group held that a finger does reach, `⌃Tab` and `c`.
+    @Test("Every key the guide names outside App can be done without one")
     func everyTimelineKeyHasATouchPath() {
-        let timeline = DummyShortcut.lines(in: .timeline)
-        #expect(timeline.count == 17)
+        let timeline = DummyShortcut.all.filter { $0.group != .app }
+        #expect(timeline.count == 19)
         let short = timeline.filter { $0.touch == .keysOnly || $0.touch == .partly }.map(\.name)
         #expect(short.isEmpty, "no touch path for: \(short.joined(separator: ", "))")
     }

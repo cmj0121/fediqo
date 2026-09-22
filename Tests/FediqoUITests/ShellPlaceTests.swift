@@ -265,28 +265,59 @@ struct DummyCommandTests {
         #expect(DummyCommand.from("?", typing: true) == nil)
     }
 
-    @Test("The guide is grouped by tab")
-    func theGuideIsGroupedByTab() {
-        #expect(DummyShortcutGroup.allCases == [.timeline, .app])
-        #expect(DummyShortcut.lines(in: .timeline).allSatisfy { $0.group == .timeline })
-        #expect(DummyShortcut.lines(in: .app).allSatisfy { $0.group == .app })
-        #expect(
-            DummyShortcut.lines(in: .timeline).count + DummyShortcut.lines(in: .app).count
-                == DummyShortcut.all.count
-        )
-        #expect(!DummyShortcut.lines(in: .timeline).isEmpty)
-        #expect(!DummyShortcut.lines(in: .app).isEmpty)
-        #expect(L10n.t("shortcut.group.moving") == "shortcut.group.moving")
-        #expect(L10n.t("shortcut.group.timeline", language: .english) == "Timeline")
-        #expect(L10n.t("shortcut.group.app", language: .english) == "Every tab")
-        #expect(L10n.t("shortcut.group.timeline", language: .taiwanese) == "時間軸")
-        #expect(L10n.t("shortcut.group.app", language: .taiwanese) == "每個分頁")
-        #expect(DummyShortcutGroup.rotated(from: .timeline, by: 1) == .app)
-        #expect(DummyShortcutGroup.rotated(from: .app, by: 1) == .timeline)
-        #expect(DummyShortcutGroup.rotated(from: .timeline, by: -1) == .app)
-        #expect(DummyShortcutGroup.rotated(from: .app, by: -1) == .timeline)
-        // The plate plus its outer padding still fits the minimum window.
-        #expect(ShortcutGuide.Metrics.plate + 2 * ShellSpace.room <= 520)
+    /// #152: one tab per purpose, in the order a reader meets them, and every line on exactly
+    /// one of them. The lines are named here tab by tab, so moving one is a change to this file.
+    @Test("The guide is grouped by purpose, each key on exactly one tab")
+    func theGuideIsGroupedByPurpose() {
+        #expect(DummyShortcutGroup.allCases == [.move, .read, .act, .app])
+        let names = { (group: DummyShortcutGroup) in DummyShortcut.lines(in: group).map(\.name) }
+        #expect(names(.move) == ["posts", "top", "tabs", "pages", "back"])
+        #expect(names(.read) == ["expand", "reveal", "view", "play", "turn", "person", "search", "reload"])
+        #expect(names(.act) == ["boost", "favourite", "answer", "withdraw", "compose", "edit"])
+        #expect(names(.app) == ["list", "dismiss", "landing"])
+        let every = DummyShortcutGroup.allCases.flatMap(names)
+        #expect(every.count == DummyShortcut.all.count)
+        #expect(Set(every) == Set(DummyShortcut.all.map(\.name)))
+        #expect(Set(every).count == every.count)
+        // The 22 lines the guide listed before #152, still listed.
+        #expect(DummyShortcut.all.count == 22)
+    }
+
+    @Test("Tab and shift-Tab rotate the guide's four tabs, wrapping")
+    func theGuidesTabsRotate() {
+        #expect(DummyShortcutGroup.rotated(from: .move, by: 1) == .read)
+        #expect(DummyShortcutGroup.rotated(from: .read, by: 1) == .act)
+        #expect(DummyShortcutGroup.rotated(from: .act, by: 1) == .app)
+        #expect(DummyShortcutGroup.rotated(from: .app, by: 1) == .move)
+        #expect(DummyShortcutGroup.rotated(from: .move, by: -1) == .app)
+        #expect(DummyShortcutGroup.rotated(from: .read, by: -1) == .move)
+    }
+
+    /// Asked by name in each language, and read from the tables the app is built from so a
+    /// name reached only by falling back to English is caught.
+    @Test("Each tab is named for its purpose in every language")
+    func theGuidesTabsAreNamed() throws {
+        #expect(L10n.t("shortcut.group.move", language: .english) == "Move")
+        #expect(L10n.t("shortcut.group.read", language: .english) == "Read")
+        #expect(L10n.t("shortcut.group.act", language: .english) == "Act")
+        #expect(L10n.t("shortcut.group.app", language: .english) == "App")
+        #expect(L10n.t("shortcut.group.move", language: .taiwanese) == "移動")
+        #expect(L10n.t("shortcut.group.read", language: .taiwanese) == "閱讀")
+        #expect(L10n.t("shortcut.group.act", language: .taiwanese) == "動作")
+        #expect(L10n.t("shortcut.group.app", language: .taiwanese) == "App")
+        #expect(L10n.t("shortcut.group.timeline", language: .english) == "shortcut.group.timeline")
+        let resources = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/FediqoUI/Resources")
+        for table in ["en", "zh-Hant", "zh-TW"] {
+            let text = try String(
+                contentsOf: resources.appendingPathComponent("\(table).lproj/Localizable.strings"),
+                encoding: .utf8
+            )
+            for group in DummyShortcutGroup.allCases {
+                #expect(text.contains("\"\(group.titleKey)\" = "), "\(group.titleKey) missing in \(table)")
+            }
+        }
     }
 
     @Test("⌘R plays the launch again, and the letter r reloads")
@@ -326,8 +357,9 @@ struct DummyCommandTests {
         #expect(L10n.t("shortcut.tabs") != "shortcut.tabs")
         #expect(L10n.t("shortcut.pages") != "shortcut.pages")
         #expect(Set(DummyShortcut.all.map(\.group)) == Set(DummyShortcutGroup.allCases))
-        #expect(L10n.t("shortcut.group.timeline") != "shortcut.group.timeline")
-        #expect(L10n.t("shortcut.group.app") != "shortcut.group.app")
+        for group in DummyShortcutGroup.allCases {
+            #expect(L10n.t(group.titleKey, language: .english) != group.titleKey)
+        }
     }
 
     @Test("Letters belong to the draft while composing")

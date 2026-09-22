@@ -206,14 +206,14 @@ struct WrittenTimelineTests {
         #expect(session.toast?.text == L10n.t("timeline.edit.fixed"))
     }
 
-    @Test("e is the editor key and the keys list names it under Timeline")
+    @Test("e is the editor key and the keys list names it under Act")
     func editorKeyIsListed() throws {
         #expect(DummyCommand.from("e") == .editTimeline)
         #expect(DummyCommand.from("e", typing: true) == nil)
         #expect(DummyCommand.from("e", fieldFocused: true) == nil)
         let line = try #require(DummyShortcut.all.first { $0.commands == [.editTimeline] })
         #expect(line.keys == ["e"])
-        #expect(line.group == .timeline)
+        #expect(line.group == .act)
         #expect(line.detail == "Write or change this timeline")
         #expect(L10n.t("shortcut.edit", language: .taiwanese) == "寫或改這條時間軸")
     }

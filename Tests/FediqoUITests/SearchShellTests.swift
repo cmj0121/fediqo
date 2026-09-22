@@ -61,7 +61,7 @@ struct SearchShellTests {
     @Test("The keys list names `/` under Timeline, in both languages")
     func keysList() throws {
         let line = try #require(DummyShortcut.all.first { $0.commands == [.search] })
-        #expect(line.group == .timeline)
+        #expect(line.group == .read)
         #expect(line.keys == ["/"])
         for language in [DummyLanguage.english, .taiwanese] {
             for key in ["shortcut.search", "search.placeholder", "search.label", "search.empty.title",

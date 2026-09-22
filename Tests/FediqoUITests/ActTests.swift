@@ -206,7 +206,7 @@ struct ActTests {
         #expect(DummyCommand.from("b") == .boost)
         #expect(DummyCommand.from("b", typing: true) == nil)
         #expect(DummyCommand.from("b", fieldFocused: true) == nil)
-        #expect(DummyShortcut.all.contains { $0.commands == [.boost] && $0.group == .timeline })
+        #expect(DummyShortcut.all.contains { $0.commands == [.boost] && $0.group == .act })
     }
 
     // MARK: - The press

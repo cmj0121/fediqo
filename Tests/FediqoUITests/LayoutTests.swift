@@ -67,10 +67,12 @@ struct LayoutTests {
     }
 
     /// The floor is the narrowest phone, and a sheet drawn over the page at that width keeps its
-    /// edges: the guide gives up width, not its margins.
-    @Test("The keys list fits the floor by narrowing, and is its full width where the rail is")
+    /// edges: the guide gives up width, not its margins. Since #152 the plate is wider than the
+    /// line the rail appears at, so between that line and the plate's full width it narrows as
+    /// well; `ShortcutGuideHostedTests` measures both ends.
+    @Test("The keys list fits the floor by narrowing, and has room left beside it")
     func theGuideFitsEveryWidth() {
-        #expect(ShortcutGuide.Metrics.plate + 2 * ShellSpace.room <= ShellLayout.breakpoint)
+        #expect(ShortcutGuide.Metrics.plate.width > ShellLayout.breakpoint - 2 * ShellSpace.room)
         #expect(ShellLayout.floor - 2 * ShellSpace.room > 0)
     }
 

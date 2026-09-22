@@ -27,7 +27,7 @@ public struct FediqoRootView: View {
     @State private var jumpToTop = 0
     @State private var composing = false
     @State private var showingShortcuts = false
-    @State private var shortcutTab: DummyShortcutGroup = .timeline
+    @State private var shortcutTab: DummyShortcutGroup = .move
     /// The launch overlay. Starts true; `LandingView` clears it after the flips, and
     /// `playsLanding` is false from the first frame when reduce motion is on.
     @State private var showingLanding = true

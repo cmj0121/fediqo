@@ -720,7 +720,7 @@ struct ReloadTests {
         #expect(DummyCommand.from("r", command: true) == .replayLanding)
         let line = DummyShortcut.all.first { $0.commands == [.reload] }
         #expect(line?.keys == ["r"])
-        #expect(line?.group == .timeline)
+        #expect(line?.group == .read)
         for key in ["shortcut.reload", "timeline.reload.progress", "timeline.reload.failed"] {
             for language in [DummyLanguage.english, .taiwanese] {
                 #expect(L10n.t(key, language: language) != key, "\(key) is missing in \(language)")
