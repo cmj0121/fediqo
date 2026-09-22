@@ -35,7 +35,7 @@ struct TouchTests {
     @Test("Every key the guide names for the timeline can be done without one")
     func everyTimelineKeyHasATouchPath() {
         let timeline = DummyShortcut.lines(in: .timeline)
-        #expect(timeline.count == 15)
+        #expect(timeline.count == 16)
         let short = timeline.filter { $0.touch == .keysOnly || $0.touch == .partly }.map(\.name)
         #expect(short.isEmpty, "no touch path for: \(short.joined(separator: ", "))")
     }
@@ -56,7 +56,7 @@ struct TouchTests {
         #expect(Self.line("turn").touch == .press)
         #expect(Self.line("reveal").touch == .press)
         #expect(Self.line("back").touch == .press)
-        // A tab held, or double-clicked. The one secondary press among the fifteen.
+        // A tab held, or double-clicked. The one secondary press among the sixteen.
         #expect(Self.line("edit").touch == .hold)
         #expect(Self.line("search").touch == .press)
         #expect(Self.line("reload").touch == .press)
@@ -68,6 +68,8 @@ struct TouchTests {
         // The answer mark (#108): inside a conversation it opens the answer, and on the timeline
         // it opens the conversation first, which is where the key is answered too.
         #expect(Self.line("answer").touch == .press)
+        // Taking back (#109): the mark on the reader's own posts, which asks before anything goes.
+        #expect(Self.line("withdraw").touch == .press)
     }
 
     /// The other tab, recorded rather than wished for: two of its five keys are a keyboard's

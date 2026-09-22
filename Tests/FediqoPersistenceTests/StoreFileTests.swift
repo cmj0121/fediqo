@@ -132,6 +132,19 @@ struct StoreFileTests {
         #expect(loaded.allSatisfy { $0.boosted == false })
     }
 
+    /// #109: what went stays gone after a relaunch, because the store the save writes no
+    /// longer holds it — and only it went.
+    @Test("A post taken back stays gone after a relaunch, and nothing else goes")
+    func takenBackStaysGone() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = ItemStore(sources: [mastodon], notes: [note(id: "1"), note(id: "2")])
+        await store.forget(NoteKey(host: mastodon.host, id: "1"))
+        let snapshot = await store.snapshot()
+        try await StoreFile(at: dir).save(sources: snapshot.sources, notes: snapshot.notes)
+        #expect(StoreFile.open(at: dir).notes.map(\.id) == ["2"])
+    }
+
     @Test("A reply whose parent's handle is unknown comes back a reply")
     func replyWithoutHandle() async throws {
         let file = try StoreFile(database: DatabaseQueue())
