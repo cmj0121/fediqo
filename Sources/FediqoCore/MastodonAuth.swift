@@ -327,21 +327,25 @@ public struct MastodonOAuth: Sendable {
         guard let url = Host.httpsURL(host: host, path: path) else { return nil }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.setValue(
-            "application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type"
-        )
-        request.httpBody = Data(
-            fields.map { "\(escape($0.0))=\(escape($0.1))" }.joined(separator: "&").utf8
-        )
+        request.setForm(fields)
         return request
     }
+}
 
-    /// Form encoding: everything but RFC 3986's unreserved characters is escaped, so a `+`, `&`
-    /// or `=` inside a secret stays inside it.
-    private static func escape(_ value: String) -> String {
-        var unreserved = CharacterSet.alphanumerics
-        unreserved.insert(charactersIn: "-._~")
-        return value.addingPercentEncoding(withAllowedCharacters: unreserved) ?? ""
+extension URLRequest {
+    /// `fields` as this request's form body, and the header that says so — the one encoding a
+    /// sign-in and a signed-in write both send.
+    ///
+    /// Everything but RFC 3986's unreserved characters is escaped, so a `+`, `&` or `=` inside
+    /// a secret or a status stays inside it.
+    mutating func setForm(_ fields: [(String, String)]) {
+        func escape(_ value: String) -> String {
+            var unreserved = CharacterSet.alphanumerics
+            unreserved.insert(charactersIn: "-._~")
+            return value.addingPercentEncoding(withAllowedCharacters: unreserved) ?? ""
+        }
+        setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        httpBody = Data(fields.map { "\(escape($0.0))=\(escape($0.1))" }.joined(separator: "&").utf8)
     }
 }
 
@@ -427,24 +431,8 @@ public struct MastodonAuthorized: Sendable {
         request.httpMethod = method
         request.setValue("Bearer \(token.accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        if let form {
-            request.setValue(
-                "application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type"
-            )
-            request.httpBody = Data(
-                form.map { "\(Self.escape($0.0))=\(Self.escape($0.1))" }.joined(separator: "&")
-                    .utf8
-            )
-        }
+        if let form { request.setForm(form) }
         let (body, response) = try await sender.send(request)
         return (body, response.statusCode)
-    }
-
-    /// Form encoding: everything but RFC 3986's unreserved characters is escaped, so a `+`, `&`
-    /// or `=` inside the status stays inside it.
-    private static func escape(_ value: String) -> String {
-        var unreserved = CharacterSet.alphanumerics
-        unreserved.insert(charactersIn: "-._~")
-        return value.addingPercentEncoding(withAllowedCharacters: unreserved) ?? ""
     }
 }
