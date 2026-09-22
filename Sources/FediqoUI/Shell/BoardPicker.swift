@@ -90,9 +90,9 @@ struct BoardPickerList: View {
 
     /// How far a board under a board is set in.
     ///
-    /// One step and only one: `DiscuzBoard.depth` stops at 1 because a Discuz! index writes a
-    /// board's *direct* children and no further, so a second rung here would be a claim this
-    /// device cannot support. `ShellSpace.room` rather than a new number — it is the scale's own
+    /// One step and only one: `DiscuzBoard.depth` stops at 1 because this device reads a board's
+    /// *direct* children and no further, so a second rung here would be a claim it cannot
+    /// support. `ShellSpace.room` rather than a new number — it is the scale's own
     /// "around something that has to stand alone", and a child board is exactly that.
     private static let rung = ShellSpace.room
 
@@ -105,9 +105,13 @@ struct BoardPickerList: View {
     /// what the reader subscribed to or nine boards' worth of traffic they did not ask for. They
     /// are separate `fid`s in Discuz! and they are separate picks here.
     ///
-    /// **These rows are emptier than their neighbours and that is the honest cost of listing
-    /// them.** On the index a sub-board is a bare name: no thread count, no post count, no
-    /// last-post time. `figures` already draws a stated figure and nothing at all where the forum
+    /// **Found in two places, drawn the same way (#161).** Some forums name a board's children on
+    /// the front page; others only on the parent's own page, which is read when the reader ticks
+    /// the parent — so those rows appear under it a moment after the tick, unticked.
+    ///
+    /// **These rows can be emptier than their neighbours and that is the honest cost of listing
+    /// them.** On the front page a sub-board is a bare name: no thread count, no post count, no
+    /// last-post time. On the parent's own page it has all three, and they are drawn. `figures` already draws a stated figure and nothing at all where the forum
     /// stated nothing, so a child row usually falls to the "this forum stated no figures" line —
     /// which is true, and is what makes the row judgeable rather than merely present.
     ///

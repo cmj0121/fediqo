@@ -396,6 +396,7 @@
 "board.choose.threads" = "%d 主題";
 "board.choose.posts" = "%d 回覆";
 "board.choose.unstated" = "這個論壇沒有寫這個版塊的數字";
+"board.choose.kept" = "你在讀、但這份列表沒有放進去的版塊";
 "board.choose.hint.on" = "訂閱這個版塊";
 "board.choose.hint.off" = "取消訂閱這個版塊";
 "board.unread.some" = "你挑的版塊裡有 %d 個讀不到，沒有訂閱：";
