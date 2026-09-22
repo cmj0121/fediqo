@@ -56,6 +56,16 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     /// `d` — ask to take back the post the lamp is on, where the reader wrote it (#109). The key
     /// asks; it never takes anything back by itself.
     case withdraw
+    /// `p` — the page of whoever wrote the post the lamp is on (#140). The key for what a press on
+    /// a face or a name has done since #99: the one thing a row offered that no key reached.
+    ///
+    /// **Why `p`.** It is the person, and it was free: every letter a row already answers to is
+    /// taken, and of the ones left `p` is the one that reads as the thing it opens — a person, a
+    /// profile. The caps on a keyboard are not translated (`DummyShortcut`), so a Latin mnemonic
+    /// is the only kind a key can have. `u` for user was the other candidate and was passed over
+    /// because this app never calls anybody a user; the page is headed with a name, not an
+    /// account.
+    case openAuthor
     case showShortcuts
     /// `/` — search what this device holds (#32). `?` is still the keys list; see `typed`.
     case search
@@ -110,6 +120,7 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         case "f": return .favourite
         case "w": return .answer
         case "d": return .withdraw
+        case "p": return .openAuthor
         case "c": return .compose
         case "j", KeyEquivalent.downArrow.character: return .nextPost
         case "k", KeyEquivalent.upArrow.character: return .previousPost
@@ -261,6 +272,22 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     /// had to be written to say.
     public static func canWalk(whenOpen open: Set<DummyLayer>) -> Bool {
         canOpen(.person, whenOpen: open.subtracting(walk))
+    }
+
+    /// Whether `p` may open the author of the row the lamp is on (#140).
+    ///
+    /// **`canWalk`, and one thing more.** A person is a step of the walk like any other, so the
+    /// order is asked the way a face asks it and nothing new about what stands in front of what
+    /// is written here. What is added is the one place a face is not a press at all: somebody's
+    /// own page, where every row is theirs and a key that opened a page would open the page it is
+    /// already on. `PersonPane` leaves the face undrawn as a control there; this is the key saying
+    /// the same thing, and saying it by doing nothing rather than by complaining.
+    ///
+    /// `.person` in the set means the reader is standing on a page, because only the innermost
+    /// step of the walk is ever open. A conversation opened *from* a page is `.thread` and nothing
+    /// else, so `p` works there as it does in every other conversation — a face in it is a press.
+    public static func canOpenAuthor(whenOpen open: Set<DummyLayer>) -> Bool {
+        canWalk(whenOpen: open) && !open.contains(.person)
     }
 
     /// What a press of a finger on a row means: the lamp, or the conversation (#33).
@@ -472,6 +499,9 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
         // The take-back mark, drawn on the reader's own posts only — and the key is refused on
         // everyone else's, so there is no half of it a finger cannot reach.
         DummyShortcut(group: .timeline, keys: ["d"], name: "withdraw", commands: [.withdraw], touch: .press),
+        // The face or the name at the head of the row, pressed (#99) — the press this key was
+        // written for (#140). Absent on somebody's own page, where the key does nothing either.
+        DummyShortcut(group: .timeline, keys: ["p"], name: "person", commands: [.openAuthor], touch: .press),
         // The rail on a Mac, the tab bar on a phone.
         DummyShortcut(group: .app, keys: ["⌃Tab", "⌃⇧Tab"], name: "pages",
                       commands: [.nextPage, .previousPage], touch: .press),

@@ -35,7 +35,7 @@ struct TouchTests {
     @Test("Every key the guide names for the timeline can be done without one")
     func everyTimelineKeyHasATouchPath() {
         let timeline = DummyShortcut.lines(in: .timeline)
-        #expect(timeline.count == 16)
+        #expect(timeline.count == 17)
         let short = timeline.filter { $0.touch == .keysOnly || $0.touch == .partly }.map(\.name)
         #expect(short.isEmpty, "no touch path for: \(short.joined(separator: ", "))")
     }
@@ -70,6 +70,8 @@ struct TouchTests {
         #expect(Self.line("answer").touch == .press)
         // Taking back (#109): the mark on the reader's own posts, which asks before anything goes.
         #expect(Self.line("withdraw").touch == .press)
+        // Whoever wrote it (#140): the face or the name at the head of the row, pressed (#99).
+        #expect(Self.line("person").touch == .press)
     }
 
     /// The other tab, recorded rather than wished for: two of its five keys are a keyboard's
