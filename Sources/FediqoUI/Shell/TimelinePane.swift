@@ -77,6 +77,10 @@ struct TimelinePane: View {
 
     private var timeline: TimelineQuery { session.currentTimeline }
 
+    /// A search is open over this timeline. `search` is never nil in the product — the root holds
+    /// one for the life of the window — so whether one is open is this, and not `search == nil`.
+    private var searching: Bool { search?.isOpen == true }
+
     private var items: [DummyItem] {
         search?.items(
             from: session.notes, revision: session.notesRevision, sources: session.sources, latest: prefs.latestDate
@@ -235,10 +239,16 @@ struct TimelinePane: View {
         // post the timeline underneath was on is parked inside `ShellSearch` waiting to be
         // handed back. Writing a result's id into the timeline's place would lose that post and
         // put a result in its stead.
+        //
+        // **Open, and not merely there** (#144). The root hands this pane its one `ShellSearch`
+        // whether or not a search is open, so a test for `nil` was false on every switch the
+        // product ever made: no timeline's place was written down or given back, and the only
+        // line that ran was the one that puts the lamp out where the arrived-at list lacks it.
+        // A post that happened to be in both lists stayed lit, which read as a place kept.
         .onChange(of: session.timelineID) { left, arrived in
             // Another list, so the row the last one had at the top means nothing here.
             session.scrolledTop = nil
-            if search == nil {
+            if !searching {
                 selectedID = session.timelinePlaces.switched(
                     from: left, to: arrived, standingOn: selectedID, among: items.map(\.id)
                 )
