@@ -471,17 +471,62 @@ final class ShellSession {
     /// since — are held here, and a row deriving its own answer would be a second derivation free
     /// to disagree with the one the source page draws.
     ///
+    /// **A row two sources carried (#114) offers every act any copy behind it offers** (#136).
+    /// Merging changes how a post is drawn, never what a reader can do with it, so a reader signed
+    /// in to the second source and not the first keeps what the second source's row gave them
+    /// before the rows were one. Which copy each act then goes through is `actingCopy`. Where no
+    /// copy offers anything, the row says why as a row of one does — the reason of the first copy
+    /// that has one, which is the drawn copy wherever its source is still here.
+    ///
     /// A post whose host is not a source here offers nothing and says nothing: a fixture, a
     /// preview, a row left over from a Remove. That is `PostActs.none` rather than a refusal,
     /// because there is no source for a sentence to be about.
     func acts(on item: DummyItem) -> PostActs {
-        guard let kind = sources.first(where: { $0.host == item.source.host })?.kind else {
+        let each = item.copies.map(ownActs(on:))
+        let offered = each.reduce(into: Set<PostAct>()) { $0.formUnion($1.offered) }
+        guard offered.isEmpty else { return PostActs(offered: offered) }
+        return each.first { $0.refused != nil } ?? .none
+    }
+
+    /// The copy behind `item` that `act` goes through, or nothing where no copy offers it (#136).
+    ///
+    /// **The first copy that offers the act, in the row's own order**, so the drawn copy wherever
+    /// the reader can write on its source — the same row answering the same way every time — and
+    /// otherwise the first of the others that can. The act then uses that copy's host, that
+    /// host's sign-in and the id that host gave the post, all three together: a status id names
+    /// a post only on the server that issued it, and the drawn copy's id sent to another host
+    /// would name nothing, or somebody else's post.
+    ///
+    /// For a row of one this is the row itself or nothing, exactly as before there were copies.
+    func actingCopy(of item: DummyItem, for act: PostAct) -> DummyItem? {
+        item.copies.first { ownActs(on: $0).offers(act) }
+    }
+
+    /// A row's share of the acts, everything but the presses: what it offers, the copy each act
+    /// goes through and where each has got to there. The panes add the presses.
+    ///
+    /// **Each standing is read off the copy its act goes through** (#136), which is where
+    /// `perform` keeps it, so a press through a merged row's second source is drawn on its way
+    /// and a failure there is drawn as one. `through` names only a copy that is not the row.
+    func acting(on item: DummyItem) -> ItemActing {
+        var acting = ItemActing(acts: acts(on: item))
+        for act in PostAct.allCases {
+            let copy = actingCopy(of: item, for: act) ?? item
+            acting.standings[act] = acts.standing(of: copy.id, act)
+            if copy.id != item.id { acting.through[act] = copy }
+        }
+        return acting
+    }
+
+    /// What one copy offers on its own source — the rule a row of one has always read.
+    private func ownActs(on copy: DummyItem) -> PostActs {
+        guard let kind = sources.first(where: { $0.host == copy.source.host })?.kind else {
             return .none
         }
         return PostActs.on(
-            mastodon.writing(host: item.source.host, kind: kind),
-            nameable: item.statusID != nil,
-            mine: isMine(item)
+            mastodon.writing(host: copy.source.host, kind: kind),
+            nameable: copy.statusID != nil,
+            mine: isMine(copy)
         )
     }
 
@@ -497,16 +542,26 @@ final class ShellSession {
 
     /// The post whose taking back is being asked about, where one is (#109). Observed, and the
     /// question is presented from it; nothing goes while it is only asked.
+    ///
+    /// The row as it was pressed, every copy behind it, because a confirmed take-back lets go of
+    /// all of them. What the question names is `withdrawingCopy`.
     var withdrawing: DummyItem?
+
+    /// The copy the take-back being asked about goes through: the reader's own post, on the
+    /// source they wrote it on (#136). **What the question names**, its words and its host, since
+    /// that is the post that goes and the source it goes from.
+    var withdrawingCopy: DummyItem? {
+        withdrawing.flatMap { actingCopy(of: $0, for: .withdraw) }
+    }
 
     /// Asks whether to take `item` back. **Asked, never pressed** — the only act in #54 that asks
     /// first, because a post taken back does not come back. Refused where the post does not offer
     /// it, which is the same one rule the mark reads.
     @discardableResult
     func askToWithdraw(_ item: DummyItem) -> Bool {
-        guard acts(on: item).offers(.withdraw), !acts.isOnItsWay(item.id, .withdraw) else {
-            return false
-        }
+        guard let copy = actingCopy(of: item, for: .withdraw),
+              !acts.isOnItsWay(copy.id, .withdraw)
+        else { return false }
         withdrawing = item
         return true
     }
@@ -520,15 +575,18 @@ final class ShellSession {
     /// says so it leaves the timeline, any open thread and the store, so it stays gone after a
     /// relaunch. A failure leaves it where it is and the same act asks again.
     ///
-    /// **A row that stands for two copies (#114) lets go of both.** The act goes to the copy the
-    /// row is drawn as — its own source, under its own id — and the other copies are that same
-    /// post as other servers carried it. Their author has just taken it back at the source it was
-    /// written through, which is what tells every other server to drop it; leaving them here
-    /// would redraw the row as the next copy and put back the post the reader just watched go.
-    /// They are dropped only after the source has said the post went.
+    /// **A row that stands for two copies (#114) lets go of all of them.** The act goes through
+    /// the copy that is the reader's own post on a source they signed in to (#136) — its source,
+    /// under its id — and the other copies are that same post as other servers carried it. Their
+    /// author has just taken it back at the source it was written through, which is what tells
+    /// every other server to drop it; leaving them here would redraw the row as the next copy and
+    /// put back the post the reader just watched go. They are dropped only after the source has
+    /// said the post went.
     func withdraw(_ item: DummyItem) async {
         withdrawing = nil
-        let others = item.otherCopies.map { NoteKey(host: $0.source.host, id: $0.noteID) }
+        guard let copy = actingCopy(of: item, for: .withdraw) else { return }
+        let others = item.copies.filter { $0.id != copy.id }
+            .map { NoteKey(host: $0.source.host, id: $0.noteID) }
         await perform(.withdraw, on: item) { door, note in
             try await MastodonWrite(door: door, store: self.store).withdraw(note)
             for key in [note.key] + others {
@@ -541,8 +599,8 @@ final class ShellSession {
 
     /// Boosts the post, or takes the boost back — the same press either way (#106).
     ///
-    /// **Which way it goes is read off the post and not off the press.** `item.boosted` is what
-    /// the source last said, so a row the reader boosted in another app and this device has since
+    /// **Which way it goes is read off the post and not off the press.** The acting copy's
+    /// `boosted` is what the source it goes through last said, so a row the reader boosted in another app and this device has since
     /// fetched takes the boost back on its first press here, which is what the mark under it says
     /// it will do.
     ///
@@ -568,6 +626,11 @@ final class ShellSession {
     /// One act on one post, with everything every act shares: the guard against a second press
     /// while the first is out, the sign-in, the store, and the three sentences #53 sets.
     ///
+    /// **Everything below is the acting copy's, never the row's** (#136): the held note, the door
+    /// and the host a 401 or a 403 is written against are all read off the one copy `actingCopy`
+    /// chose, and the standing is keyed by that copy, so what the mark draws while the act is out
+    /// is the act on the post it went to. For a row of one the copy is the row.
+    ///
     /// **The held note is read here and handed down, rather than each act finding its own.** The
     /// row is a drawing of a note and the act is performed against the note, and an act that
     /// looked the row up a second time inside itself would be two lookups that a Remove landing
@@ -582,32 +645,33 @@ final class ShellSession {
         on item: DummyItem,
         _ body: @escaping (MastodonAuthorized, Note) async throws -> Note
     ) async {
-        guard acts(on: item).offers(act) else { return }
+        guard let copy = actingCopy(of: item, for: act) else { return }
+        let host = copy.source.host
         // A store row, or an answer read in an open conversation, which #90 keeps out of the store.
-        guard let note = notes.first(where: { $0.key.rowID == item.id })
-                ?? conversations.note(item.id),
-              let door = mastodon.authorized(host: item.source.host)
+        guard let note = notes.first(where: { $0.key.rowID == copy.id })
+                ?? conversations.note(copy.id),
+              let door = mastodon.authorized(host: host)
         else { return }
-        guard acts.begin(item.id, act) else { return }
+        guard acts.begin(copy.id, act) else { return }
         do {
             let answered = try await body(door, note)
             conversations.replace(answered)
-            acts.landed(item.id, act)
+            acts.landed(copy.id, act)
             await adopt()
             await persist?()
         } catch MastodonAuthError.signedOut {
-            mastodon.endedByServer(host: item.source.host)
-            acts.failed(item.id, act)
+            mastodon.endedByServer(host: host)
+            acts.failed(copy.id, act)
         } catch MastodonAuthError.http(403) {
-            mastodon.refusedWrite(host: item.source.host)
-            acts.failed(item.id, act)
+            mastodon.refusedWrite(host: host)
+            acts.failed(copy.id, act)
         } catch let error where Cancellation.happened(error) {
             // A cancelled act is one that did not arrive, said in the one sentence a reader can
             // act on: press again. There is no third thing to tell them, and leaving no standing
             // at all would draw the post as though the press had landed.
-            acts.failed(item.id, act)
+            acts.failed(copy.id, act)
         } catch {
-            acts.failed(item.id, act)
+            acts.failed(copy.id, act)
         }
     }
 
@@ -622,15 +686,18 @@ final class ShellSession {
     /// Who each unsent answer reaches, by row — chosen before it is sent, from where it started.
     var answerReach: [String: Audience] = [:]
 
-    /// Opens the answer to `item`, inside the conversation around `root`.
+    /// Opens the answer to `row`, inside the conversation around `root`.
     ///
     /// **Refused where the post does not offer it**, the same one rule the mark under it reads.
+    /// On a row two sources carried the answer is to the copy `actingCopy` chooses (#136), and
+    /// the sheet is opened on that copy, so the source it names, the id it answers and the draft
+    /// kept for it are that copy's own.
     /// The first time a post is answered, the draft starts with its author's handle, since a
     /// Mastodon answer reaches the person answered only where it names them — the words are the
     /// reader's to change — and the reach starts where the post is and no wider.
     @discardableResult
-    func openAnswer(to item: DummyItem, in root: DummyItem) -> Bool {
-        guard acts(on: item).offers(.answer) else { return false }
+    func openAnswer(to row: DummyItem, in root: DummyItem) -> Bool {
+        guard let item = actingCopy(of: row, for: .answer) else { return false }
         if answerDrafts[item.id] == nil, let handle = item.handle, handle.hasPrefix("@") {
             answerDrafts[item.id] = handle + " "
         }

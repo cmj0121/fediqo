@@ -23,7 +23,15 @@ import SwiftUI
 /// behind it. It offers nothing and says nothing, which is `PostActs.none`.
 struct ItemActing {
     var acts: PostActs = .none
+    /// Where each offered act has got to, **on the copy it goes through** — `through`'s.
     var standings: [PostAct: ShellActStanding] = [:]
+    /// The copy each offered act goes through, where the row stands for more than one (#136).
+    /// Missing is the row itself, which is every row of one.
+    ///
+    /// **Carried so the mark reads the same copy the press goes to.** A merged row is drawn as
+    /// its first copy, and a boost that goes through the second would otherwise show the first
+    /// source's "not boosted" over a press that the second source has already said yes to.
+    var through: [PostAct: DummyItem] = [:]
     /// Boosting the post to its source, or taking the boost back (#106).
     var boost: (() -> Void)?
     /// Favouriting the post on its source, or taking the favourite back (#107).
@@ -34,6 +42,16 @@ struct ItemActing {
     var answer: (() -> Void)?
     /// Asking to take the post back (#109). Only ever the question — nothing goes on this press.
     var withdraw: (() -> Void)?
+}
+
+/// What one act's mark draws on one row — `ItemActs.mark`'s answer.
+struct ItemMark: Equatable {
+    let symbol: String
+    /// What the source the act goes through last said.
+    let done: Bool
+    let count: Int?
+    /// The mark's name to a pointer and to VoiceOver.
+    let spoken: String
 }
 
 /// The vocabulary of the acts a reader performs on a post.
@@ -92,15 +110,50 @@ enum ItemActs {
     /// **One reader for the glyph and the listener**, which is #97's arrangement and for its
     /// reason: a mark and a sentence built from two derivations of one fact are two things that
     /// can be told different stories about one post.
+    ///
+    /// `host` is the source the act goes through, named where the row stands for more than one
+    /// (#136) — so a reader who hears the row name two sources also hears which one a press
+    /// reaches. Nothing on a row of one, whose source the row already names once.
     static func spoken(
-        _ act: PostAct, done: Bool, standing: ShellActStanding?, language: DummyLanguage? = nil
+        _ act: PostAct, done: Bool, standing: ShellActStanding?, through host: String? = nil,
+        language: DummyLanguage? = nil
     ) -> String {
-        let name = name(act, done: done, language: language)
+        var name = name(act, done: done, language: language)
+        if let host {
+            name = String(format: L10n.t("item.act.through", language: language), name, host)
+        }
         switch standing {
         case .onItsWay: return name + " " + L10n.t("item.act.onItsWay", language: language)
         case .failed: return name + " " + L10n.t("item.act.failed", language: language)
         case nil: return name
         }
+    }
+
+    /// Everything one act's mark draws on one row: its glyph, whether it is done, the count
+    /// beside it and the sentence a pointer and VoiceOver are given.
+    ///
+    /// **All of it is read off the copy the act goes through** (#136) — `acting.through`, or the
+    /// row where there is none — so the row never shows one source's state and presses another's.
+    /// One reader for the four, `spoken`'s reason: the glyph and the sentence told apart would be
+    /// two stories about one mark.
+    static func mark(
+        _ act: PostAct, on item: DummyItem, acting: ItemActing, language: DummyLanguage? = nil
+    ) -> ItemMark {
+        let copy = acting.through[act] ?? item
+        let standing = acting.standings[act]
+        let (done, count): (Bool, Int?) = switch act {
+        case .boost: (copy.boosted == true, copy.counts.reblogs)
+        case .favourite: (copy.favourited == true, copy.counts.favourites)
+        case .answer: (false, copy.counts.replies)
+        case .withdraw: (false, nil)
+        }
+        let host = item.otherCopies.isEmpty ? nil : copy.source.host
+        return ItemMark(
+            symbol: symbol(act, done: done, standing: standing),
+            done: done,
+            count: count,
+            spoken: spoken(act, done: done, standing: standing, through: host, language: language)
+        )
     }
 
     /// The question taking a post back asks (#109): **what goes, by name, before anything goes.**
