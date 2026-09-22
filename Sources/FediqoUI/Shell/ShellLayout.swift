@@ -42,6 +42,24 @@ public enum ShellLayout: Hashable, Sendable, CaseIterable {
         guard let width else { return .wide }
         return width < breakpoint ? .narrow : .wide
     }
+
+    /// The arrangement on a platform that may still have its own say (#111).
+    ///
+    /// **An iPad answers the width it has, the way a Mac window does.** It used to answer the
+    /// system's size class, which is right at the extremes and wrong exactly where a tablet is
+    /// most often used beside something else: an 11-inch iPad at half the screen is some 590
+    /// points wide and compact, so it drew the phone's tabs with room for the rail to spare.
+    /// Turning the device is then the same change as dragging a window — a new width, answered —
+    /// and every size the system offers beside another app is answered by what it is.
+    ///
+    /// **A phone keeps its size class**, and that is the one place a device is still asked about.
+    /// #110 names the phone as its own task, and on its side a phone is wide enough for the rail
+    /// and not tall enough to stand it in; answering the phone's width here would be deciding that
+    /// task inside this one. `phoneIsCompact` is `nil` on everything that is not a phone.
+    public static func answering(width: CGFloat?, phoneIsCompact: Bool?) -> ShellLayout {
+        if let phoneIsCompact { return phoneIsCompact ? .narrow : .wide }
+        return answering(width: width)
+    }
 }
 
 /// The width a window gives, measured, and the arrangement for it handed to what is drawn (#110).
