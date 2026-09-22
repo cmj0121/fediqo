@@ -170,6 +170,128 @@ struct ViewerTests {
         #expect(shell.walk.depth == 2)
     }
 
+    // MARK: `p` — the face's press, by key (#140)
+
+    /// #140's first line: the lamp on a row, one key, and that row's author is in front.
+    @Test("p opens whoever wrote the lit row, and Escape gives the row back")
+    func pOpensTheAuthorAndEscapeGivesTheRowBack() {
+        let shell = Shell(items: Self.list, selected: Self.c)
+        #expect(shell.press(.openAuthor))
+        #expect(shell.personOpen == DummyPerson(Self.list[2]))
+        // Their page is walked with `j` like any other list; leaving has to give back the row
+        // the key was pressed on, not wherever the lamp was left on the page.
+        shell.selected = Self.a
+        #expect(shell.press(.dismiss))
+        #expect(shell.personOpen == nil)
+        #expect(shell.walk.isEmpty)
+        #expect(shell.selected == Self.c)
+    }
+
+    /// The leave key says what Escape says, as it does for a page a finger opened.
+    @Test("q leaves a page p opened exactly as it leaves one a face opened")
+    func qLeavesAsTheFaceDoes() {
+        let byKey = Shell(items: Self.list, selected: Self.b)
+        let byFace = Shell(items: Self.list, selected: Self.b)
+        #expect(byKey.press(.openAuthor))
+        #expect(byFace.pressFace(DummyPerson(Self.list[1])!))
+        #expect(byKey.walk == byFace.walk)
+        #expect(byKey.press(.back))
+        #expect(byFace.press(.back))
+        #expect(byKey.walk == byFace.walk)
+        #expect(byKey.selected == Self.b)
+        #expect(byFace.selected == Self.b)
+    }
+
+    /// Inside a conversation the lamp is on somebody else's answer as often as not, and `p`
+    /// means that answer's author, not the conversation's.
+    @Test("Inside a conversation p opens the lit answer's author, and leaving gives the answer back")
+    func pInsideAConversationMeansTheLitAnswer() {
+        let grace = Self.item("g", author: "Grace", handle: "@grace@first.example")
+        let g = NoteKey(host: "first.example", id: "g").rowID
+        let shell = Shell(items: Self.list + [grace], selected: Self.a)
+        #expect(shell.press(.expandPost))
+        shell.selected = g
+        #expect(shell.press(.openAuthor))
+        #expect(shell.personOpen == DummyPerson(grace))
+        #expect(shell.personOpen != DummyPerson(Self.list[0]))
+        #expect(shell.press(.dismiss))
+        #expect(shell.walk.standing == .thread(Self.a))
+        #expect(shell.selected == g)
+    }
+
+    /// On somebody's own page the key opens nothing, moves nothing and closes nothing — and a
+    /// press refused is the whole of what "says nothing wrong happened" can mean here: no page,
+    /// no toast, and the lamp exactly where it was.
+    @Test("On somebody's page p opens nothing and moves nothing")
+    func pOnAPersonsPageDoesNothing() {
+        let shell = Shell(items: Self.list, selected: Self.a)
+        #expect(shell.press(.openAuthor))
+        let before = shell.walk
+        shell.selected = Self.c
+        #expect(!shell.press(.openAuthor))
+        #expect(shell.walk == before)
+        #expect(shell.walk.depth == 1)
+        #expect(shell.selected == Self.c)
+        // Nothing lit on the page is refused the same way: the key does not light the first row
+        // on its way to refusing.
+        shell.selected = nil
+        #expect(!shell.press(.openAuthor))
+        #expect(shell.selected == nil)
+    }
+
+    /// A conversation opened *from* somebody's page is a conversation, and in a conversation a
+    /// face is a press — so the key is too.
+    @Test("In a conversation opened from somebody's page, p opens again")
+    func pInAConversationFromAPageOpens() {
+        let shell = Shell(items: Self.list, selected: Self.a)
+        #expect(shell.press(.openAuthor))
+        #expect(shell.pressRow(Self.b))
+        #expect(shell.press(.openAuthor))
+        #expect(shell.walk.depth == 3)
+        #expect(shell.press(.back))
+        #expect(shell.walk.standing == .thread(Self.b))
+        #expect(shell.selected == Self.b)
+    }
+
+    /// With nothing lit, the first press lights the first row and the second opens its author —
+    /// `b`, `f` and `v`'s shape, so a key whose first press moves nothing is not a key that
+    /// looks broken.
+    @Test("With nothing lit, p lights the first row, and the next p opens its author")
+    func pWithNothingLitLightsFirst() {
+        let shell = Shell(items: Self.list, selected: nil)
+        #expect(shell.press(.openAuthor))
+        #expect(shell.selected == Self.a)
+        #expect(shell.personOpen == nil)
+        #expect(shell.press(.openAuthor))
+        #expect(shell.personOpen == DummyPerson(Self.list[0]))
+    }
+
+    /// The entry rule, from the key's side: not under the guide, and not under the viewer.
+    @Test("p under the guide or the viewer opens nobody, and leaves them alone")
+    func pDoesNotOpenUnderTheGuideOrTheViewer() {
+        let guide = Shell(items: Self.list, selected: Self.a)
+        #expect(guide.press(.showShortcuts))
+        #expect(!guide.press(.openAuthor))
+        #expect(guide.personOpen == nil)
+        #expect(guide.shortcutsOpen)
+        let viewer = Shell(items: Self.list, selected: Self.a)
+        #expect(viewer.press(.viewAttachment))
+        #expect(!viewer.press(.openAuthor))
+        #expect(viewer.personOpen == nil)
+        #expect(viewer.viewing == Self.a)
+    }
+
+    /// A row that names nobody has no face to press, so it has no key either.
+    @Test("On a row that names nobody, p opens nothing")
+    func pOnARowThatNamesNobody() {
+        let nobody = Self.item("n", author: "", handle: "")
+        let n = NoteKey(host: "first.example", id: "n").rowID
+        #expect(DummyPerson(nobody) == nil)
+        let shell = Shell(items: [nobody], selected: n)
+        #expect(!shell.press(.openAuthor))
+        #expect(shell.walk.isEmpty)
+    }
+
     /// The entry rule, from the press's own side: a face under the guide opens nobody, and does
     /// not close the guide to make room for itself.
     @Test("A face under the guide opens nobody, and leaves the guide alone")
@@ -461,13 +583,15 @@ struct ViewerTests {
     private static func item(
         _ id: String,
         attachments: [FediqoCore.Attachment] = [],
-        spoiler: String? = nil
+        spoiler: String? = nil,
+        author: String = "Ada",
+        handle: String = "@ada@first.example"
     ) -> DummyItem {
         DummyItem(Note(
             id: id,
             source: Source(host: "first.example", kind: .mastodon),
-            author: "Ada",
-            handle: "@ada@first.example",
+            author: author,
+            handle: handle,
             body: "words",
             postedAt: Date(timeIntervalSince1970: 1_700_000_000),
             categories: [.public],
@@ -619,6 +743,14 @@ struct ViewerTests {
             case .expandPost:
                 guard let selected else { return false }
                 return pressRow(selected)
+            // `p` (#140): the root's guard, then the lit row, then the face's own press. The
+            // same three steps `FediqoRootView.openAuthor` takes, in the same order.
+            case .openAuthor:
+                guard DummyCommand.canOpenAuthor(whenOpen: openLayers) else { return false }
+                return onFocusedItem { item in
+                    guard let person = DummyPerson(item) else { return false }
+                    return pressFace(person)
+                }
             case .showShortcuts:
                 if shortcutsOpen {
                     shortcutsOpen = false

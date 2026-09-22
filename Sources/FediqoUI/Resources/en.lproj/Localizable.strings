@@ -87,6 +87,7 @@
 "shortcut.favourite" = "Favourite this post on its source, or take the favourite back";
 "shortcut.answer" = "Answer the post you are on, from inside its conversation";
 "shortcut.withdraw" = "Take back the post you are on, where you wrote it";
+"shortcut.person" = "Open whoever wrote the post you are on";
 "shortcut.reload" = "Reload this timeline, or the open thread";
 "shortcut.dismiss" = "Close what is in front, or unfocus";
 "shortcut.search" = "Search the posts this device holds";

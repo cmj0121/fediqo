@@ -523,6 +523,8 @@ public struct FediqoRootView: View {
             return answerFocused()
         case .withdraw:
             return onFocusedItem { session.askToWithdraw($0) }
+        case .openAuthor:
+            return openAuthor()
         case .compose:
             guard availability.canCompose else { return false }
             showingShortcuts = false
@@ -1141,6 +1143,32 @@ public struct FediqoRootView: View {
     private func openPerson(_ person: DummyPerson) -> Bool {
         guard Self.canWalk(place: place, open: openLayers) else { return false }
         return walk.walk(to: .person(person), from: selectedItemID)
+    }
+
+    /// `p` — whoever wrote the post the lamp is on (#140). The face's own press, from the keyboard.
+    ///
+    /// **Through `openPerson` and not beside it**, so the key and the face are one act with one
+    /// guard: the walk remembers the row the lamp is on, and leaving by `Escape` or `q` gives it
+    /// back exactly as leaving a page opened by a finger does.
+    ///
+    /// The guard is asked before `onFocusedItem`, for `openViewer`'s reason: a press that is about
+    /// to be refused must not light the first row on its way to refusing. On somebody's own page
+    /// that is the whole of the answer — nothing moves, nothing is said, and the letter is still
+    /// ours (`DummyCommand.consumes`), so it does not fall through to the platform as a beep. A
+    /// row that names nobody (`DummyPerson(_:)` is nil) is refused the same way its face is:
+    /// there is no page to open, so there is no press.
+    private func openAuthor() -> Bool {
+        guard Self.canOpenAuthor(place: place, open: openLayers) else { return false }
+        return onFocusedItem { item in
+            guard let person = DummyPerson(item) else { return false }
+            return openPerson(person)
+        }
+    }
+
+    /// Whether `p` has anybody to open now: `canWalk`'s place, and `DummyCommand.canOpenAuthor`'s
+    /// order. Static and given its inputs, for `canWalk`'s reason.
+    static func canOpenAuthor(place: ShellPlace, open: Set<DummyLayer>) -> Bool {
+        place == .timeline && DummyCommand.canOpenAuthor(whenOpen: open)
     }
 
     /// One step back out of the walk: whatever the reader took that step from is what they get
