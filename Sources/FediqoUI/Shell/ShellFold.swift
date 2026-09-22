@@ -90,9 +90,12 @@ enum ShellFold {
     /// **The names and not a count.** "5 places" says there is something behind the press and
     /// not what. A reader looking for Usage needs to hear Usage before pressing. The list is
     /// joined in the shell's language, so 中文 gets 、 and not an English comma.
-    static func spoken(_ places: [ShellPlace]) -> String {
-        let names = places.map(\.title).formatted(.list(type: .and).locale(L10n.locale()))
-        return String(format: L10n.t("shell.places.fold.help"), names)
+    ///
+    /// `language` is the shell's where it is not given, for `L10n.t(_:language:)`'s reason.
+    static func spoken(_ places: [ShellPlace], language: DummyLanguage? = nil) -> String {
+        let names = places.map { $0.title(language: language) }
+            .formatted(.list(type: .and).locale(L10n.locale(language)))
+        return String(format: L10n.t("shell.places.fold.help", language: language), names)
     }
 }
 
@@ -129,6 +132,9 @@ struct ShellNarrow<Tabs: View, Folded: View>: View {
 struct FoldedPlaces<Page: View>: View {
     @Binding var place: ShellPlace
     let places: [ShellPlace]
+    /// The shell's language where nothing is given, which is the app's only caller. A test names
+    /// one, so it need not set the global every other suite reads.
+    var language: DummyLanguage? = nil
     @ViewBuilder var page: () -> Page
 
     var body: some View {
@@ -147,10 +153,10 @@ struct FoldedPlaces<Page: View>: View {
     private var picker: some View {
         // **One sentence, asked for once and handed to both**, so a pointer's help and a
         // listener cannot come to be told different things.
-        let said = ShellFold.spoken(places)
-        return Picker(L10n.t("shell.places.fold"), selection: $place) {
+        let said = ShellFold.spoken(places, language: language)
+        return Picker(L10n.t("shell.places.fold", language: language), selection: $place) {
             ForEach(places) { item in
-                Label(item.title, systemImage: item.symbolName).tag(item)
+                Label(item.title(language: language), systemImage: item.symbolName).tag(item)
             }
         }
         .pickerStyle(.menu)

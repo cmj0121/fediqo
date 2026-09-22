@@ -15,13 +15,17 @@ public enum ShellPlace: String, CaseIterable, Identifiable, Hashable, Sendable {
     /// see `ShellLaunch`.
     public static let launch: ShellPlace = .account
 
-    var title: String {
+    var title: String { title(language: nil) }
+
+    /// The name in one language, where a caller must not read the shell's: a test asking both
+    /// languages side by side with other suites, which may not set the global to do it (#141).
+    func title(language: DummyLanguage?) -> String {
         switch self {
-        case .timeline: L10n.t("shell.timeline.title")
-        case .notices: L10n.t("shell.notices.title")
-        case .account: L10n.t("shell.account.title")
-        case .usage: L10n.t("shell.usage.title")
-        case .preferences: L10n.t("shell.preferences.title")
+        case .timeline: L10n.t("shell.timeline.title", language: language)
+        case .notices: L10n.t("shell.notices.title", language: language)
+        case .account: L10n.t("shell.account.title", language: language)
+        case .usage: L10n.t("shell.usage.title", language: language)
+        case .preferences: L10n.t("shell.preferences.title", language: language)
         }
     }
 
