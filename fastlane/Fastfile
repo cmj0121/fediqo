@@ -125,8 +125,13 @@ end
 # team, and which profile to sign with. The profile has to be here and not only in the export
 # options -- Release signs manually, and a manual archive with no profile named fails before
 # there is anything to export.
-def stamp(version, build)
-  "MARKETING_VERSION=#{version} CURRENT_PROJECT_VERSION=#{build} DEVELOPMENT_TEAM=#{TEAM_ID}"
+#
+# The source rides the same line (#143): which commit this is and whether the checkout differed
+# from it, as `scripts/version.sh --source` put it, so a build on TestFlight names in Preferences
+# exactly what a `make -C Apps mac` on a laptop names. Empty outside a checkout, and the app
+# then says it does not know rather than naming anything.
+def stamp(version, build, source)
+  "MARKETING_VERSION=#{version} CURRENT_PROJECT_VERSION=#{build} #{source} DEVELOPMENT_TEAM=#{TEAM_ID}".squeeze(" ")
 end
 
 # Signing has to be written into the one target it belongs to. Handed to xcodebuild on the
@@ -266,6 +271,10 @@ lane :publish do
   # somebody types this, and takes whatever version scripts/version.sh settled for, saying so
   # out loud when it had to settle. The tag is CI's business, and CI runs this same line.
   version = version_sh("--marketing")
+  # Asked once, here, before anything below writes a file: both platforms are the same source,
+  # and a store upload or a signing step that left something behind in the checkout must not
+  # make the second archive call itself dirty when the first did not.
+  source = version_sh("--source")
 
   # Before the archive, not after the upload. Everything below takes minutes and costs a
   # build number; a language folder spelled wrong or a version with nothing written for it
@@ -280,8 +289,8 @@ lane :publish do
   notes = release_notes(version)
   UI.important("Fediqo #{version} (#{build}) -- both platforms, TestFlight only.")
 
-  publish_ios(version: version, build: build, notes: notes)
-  publish_macos(version: version, build: build, notes: notes)
+  publish_ios(version: version, build: build, source: source, notes: notes)
+  publish_macos(version: version, build: build, source: source, notes: notes)
 
   UI.success("Fediqo #{version} (#{build}) is on TestFlight, with what the store is told. Nothing was submitted for review.")
 end
@@ -301,7 +310,7 @@ private_lane :publish_ios do |options|
     derived_data_path: DERIVED,
     output_directory: OUTPUT,
     output_name: "Fediqo-iOS",
-    xcargs: stamp(options[:version], options[:build]),
+    xcargs: stamp(options[:version], options[:build], options[:source]),
     export_options: {
       teamID: TEAM_ID,
       signingCertificate: identity,
@@ -346,7 +355,7 @@ private_lane :publish_macos do |options|
     derived_data_path: DERIVED,
     output_directory: OUTPUT,
     output_name: "Fediqo",
-    xcargs: stamp(options[:version], options[:build]),
+    xcargs: stamp(options[:version], options[:build], options[:source]),
     export_options: {
       teamID: TEAM_ID,
       signingCertificate: identity,

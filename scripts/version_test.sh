@@ -77,6 +77,51 @@ check 0.1.7 "three components pin the version outright"                    0.1.7
 check 0.1.0 "a tag from another series does not answer for this one"       0.1 v0.2.5
 check 0.0.0 "no VERSION at all: there has not been a release"              --none
 
+# What `--source` says (#143), in a throwaway repository for the reason `answer` is. Each case is
+# a shell fragment run in a repository with one commit, and the answer is compared with `$head`
+# standing for that commit, since its hash is only known once it has been made.
+source_answer() {
+    local setup="$1"
+    local repo; repo="$(mktemp -d)"
+    mkdir -p "$repo/scripts"
+    cp "$SCRIPT" "$repo/scripts/version.sh"
+    (
+        cd "$repo"
+        git init -q .
+        git config user.email t@example.com
+        git config user.name t
+        printf 'scripts/\n' > .gitignore
+        printf 'one\n' > tracked
+        git add .gitignore tracked
+        git commit -q -m one
+        eval "$setup"
+        local head; head="$(git rev-parse HEAD 2>/dev/null || echo no-commit)"
+        ./scripts/version.sh --source 2>/dev/null | sed "s/$head/\$head/"
+    )
+    rm -rf "$repo"
+}
+
+source_check() {
+    local want="$1" note="$2" setup="$3"
+    local got; got="$(source_answer "$setup" || echo "<the script failed>")"
+
+    if [ "$got" = "$want" ]; then
+        printf '  ok    %s\n' "$note"
+    else
+        printf '  FAIL  wanted "%s" got "%s" -- %s\n' "$want" "$got" "$note"
+        failures=$((failures + 1))
+    fi
+}
+
+echo
+echo "version.sh --source:"
+
+source_check 'FEDIQO_SOURCE_REVISION=$head FEDIQO_SOURCE_DIRTY=NO'  "a clean checkout names its commit" ":"
+source_check 'FEDIQO_SOURCE_REVISION=$head FEDIQO_SOURCE_DIRTY=YES' "a changed file is a change"     "printf 'two\n' > tracked"
+source_check 'FEDIQO_SOURCE_REVISION=$head FEDIQO_SOURCE_DIRTY=YES' "so is a file nobody has added"   "touch new.swift"
+source_check 'FEDIQO_SOURCE_REVISION=$head FEDIQO_SOURCE_DIRTY=NO'  "an ignored file is not"          "mkdir -p scripts/x; touch scripts/x/y"
+source_check ''                                                     "no checkout at all: nothing"      "rm -rf .git"
+
 echo
 if [ "$failures" -eq 0 ]; then
     echo "version.sh: every case answered"

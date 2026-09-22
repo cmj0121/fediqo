@@ -106,6 +106,11 @@ The build number is the history, stepped past whatever App Store Connect already
 twice counts the same commits twice, and the store will not take a number it has seen. Both platforms take the same
 number, because a release attempt is one attempt however many stores it reaches.
 
+**Every build also records the commit it was made from**, and whether the checkout had changes no commit records
+-- `scripts/version.sh --source`, handed to `xcodebuild` beside the version by `Apps/Makefile` and by this lane.
+Preferences shows it, with the version and build number, exactly as stamped. A build that did not come through
+either says the source is not recorded rather than naming one.
+
 **No tag is required to run this, and now that is true rather than merely written down.** A laptop publishes
 whenever somebody types the command; the tag is what records afterwards which commit went out.
 

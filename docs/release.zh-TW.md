@@ -83,6 +83,10 @@ Marketing 版本來自 `scripts/version.sh`：`HEAD` 上的 tag 去掉 `v`，或
 Build number 是歷史，再往上跨過 App Store Connect 已經握著的號碼 —— 同一個 commit 發兩次會數到同樣多的
 commit，而商店不收看過的號碼。兩個平台用同一個號碼，因為一次發布嘗試就是一次，無論它抵達幾個商店。
 
+**每個 build 也記下它是從哪個 commit 做出來的**，以及當時工作目錄裡有沒有尚未提交的變更 ——
+`scripts/version.sh --source`，由 `Apps/Makefile` 和這條 lane 跟版本一起交給 `xcodebuild`。偏好設定照著標記
+原樣顯示它，連同版本與 build number。沒有經過這兩條路做出的 build，會說原始碼未記錄，而不是隨便報一個。
+
 **跑這道指令不需要 tag。** tag 是讓一次發布「發生」的東西 —— 是 workflow 將來要監看的訊號 —— 但不是讓
 這道指令能動的東西。laptop 上任何人打下它就會發布。
 
