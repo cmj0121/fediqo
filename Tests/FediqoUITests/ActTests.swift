@@ -4,8 +4,9 @@ import Testing
 @testable import FediqoUI
 
 /// A server that answers an act by path, remembering every request, and holding one path until
-/// the test lets it through so a press can be caught on its way.
-private actor ActServer: HTTPSender {
+/// the test lets it through so a press can be caught on its way. Target-visible, since the answer
+/// and the take-back suites ask the same kind of server the same kind of question.
+actor ActServer: HTTPSender {
     enum Outcome: Sendable {
         case json(String, status: Int = 200)
         case fail
@@ -23,6 +24,20 @@ private actor ActServer: HTTPSender {
     }
 
     var paths: [String] { requests.compactMap { $0.url?.path } }
+
+    var methods: [String] { requests.compactMap(\.httpMethod) }
+
+    func form(_ path: String) -> [String: String] {
+        guard let request = requests.first(where: { $0.url?.path == path }),
+              let body = request.httpBody, let text = String(data: body, encoding: .utf8)
+        else { return [:] }
+        var fields: [String: String] = [:]
+        for pair in text.split(separator: "&") {
+            let parts = pair.split(separator: "=", maxSplits: 1).map(String.init)
+            fields[parts[0]] = parts.count > 1 ? parts[1].removingPercentEncoding : ""
+        }
+        return fields
+    }
 
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         requests.append(request)

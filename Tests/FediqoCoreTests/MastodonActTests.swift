@@ -221,4 +221,64 @@ struct MastodonActTests {
         #expect(PostActs.on(.never, nameable: false).refused == .protocolCannot)
         #expect(PostActs.none.offered.isEmpty && PostActs.none.refused == nil)
     }
+
+    // MARK: - Answering (#108)
+
+    static func answerStatus(id: String = "20", to parent: String = "9", visibility: String = "followers") -> String {
+        """
+        {"id":"\(id)","uri":"https://social.example/users/me/statuses/\(id)",
+         "created_at":"2024-06-03T00:00:00.000Z","content":"<p>@ada yes</p>",
+         "visibility":"\(visibility)","in_reply_to_id":"\(parent)",
+         "mentions":[{"acct":"ada"}],
+         "account":{"username":"me","acct":"me","display_name":"Me"}}
+        """
+    }
+
+    @Test("An answer names the post it answers by its own id, as the reader, and lands")
+    func anAnswerLands() async throws {
+        let answered = try held(Self.status())
+        let (write, store, server, _) = try await actor(holding: answered, [
+            "/api/v1/statuses": .json(Self.answerStatus(visibility: "private")),
+        ])
+        let note = try await write.post("@ada yes", visibility: .followers, answering: answered)
+        let form = await server.form("/api/v1/statuses")
+        #expect(form["in_reply_to_id"] == "9")
+        #expect(form["visibility"] == "private")
+        #expect(form["status"] == "@ada yes")
+        #expect(note.reply?.inReplyToId == "9")
+        #expect(await store.all().contains { $0.key == note.key })
+        #expect(await server.paths == ["/api/v1/statuses"], "nothing is read again")
+    }
+
+    @Test("A post this device cannot name, or one from another source, is not answered at all")
+    func anUnnameableAnswerIsNotSent() async throws {
+        let bare = Note(
+            id: "https://social.example/x", source: source, author: "Ada", handle: "@ada@social.example",
+            body: "hi", postedAt: Date(timeIntervalSince1970: 0), categories: [.home]
+        )
+        let (write, _, server, _) = try await actor(holding: bare, [:])
+        await #expect(throws: MastodonWriteError.unfindable) {
+            _ = try await write.post("yes", visibility: .everyone, answering: bare)
+        }
+        let elsewhere = try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(Self.status().utf8))
+            .asNote(source: Source(host: "other.example", kind: .mastodon), category: .home)
+        await #expect(throws: MastodonWriteError.unfindable) {
+            _ = try await write.post("yes", visibility: .everyone, answering: elsewhere)
+        }
+        #expect(await server.paths.isEmpty, "an answer is never sent as a post that answers nothing")
+    }
+
+    @Test("An answer starts no wider than the post it answers, and at the narrowest where unknown")
+    func theReachStartsNoWider() {
+        for audience in Audience.allCases {
+            #expect(Audience.answering(audience) == audience)
+            #expect(!Audience.answering(audience).isWider(than: audience))
+        }
+        #expect(Audience.answering(nil) == .mentioned)
+        let ladder: [Audience] = [.mentioned, .followers, .unlisted, .everyone]
+        for (lower, higher) in zip(ladder, ladder.dropFirst()) {
+            #expect(higher.isWider(than: lower))
+            #expect(!lower.isWider(than: higher))
+        }
+    }
 }
