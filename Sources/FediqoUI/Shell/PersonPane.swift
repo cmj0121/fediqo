@@ -156,8 +156,7 @@ struct PersonPane: View {
                     radius: DummyItemRow.Box.plate
                 )
             } else {
-                RoundedRectangle(cornerRadius: DummyItemRow.Box.plate, style: .continuous)
-                    .fill(ShellChrome.well(colorScheme))
+                ShellVacant(standing: .avatar, radius: DummyItemRow.Box.plate)
             }
         }
         .frame(width: faceSide, height: faceSide)

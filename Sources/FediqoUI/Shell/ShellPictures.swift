@@ -1172,6 +1172,11 @@ struct RemoteImage: View {
 
     var radius: CGFloat = ShellSpace.tight
 
+    /// What this picture is drawn on — the chassis, or the stage a picture is opened on. Only the
+    /// viewer says `.stage`; it decides what a waiting plate here is drawn in, because the
+    /// chassis' light-scheme plate would vanish into `ShellChrome.behindPicture` (#142).
+    var ground: ShellWaiting.Ground = .chassis
+
     /// What fills the frame this view was handed. The frame itself belongs to the call site —
     /// an avatar side, a thumb side — and none of these is an empty view that would let it
     /// collapse. Held is a copy already in hand: no plate, no flicker. Failed is a wait that
@@ -1188,8 +1193,8 @@ struct RemoteImage: View {
     static let plateSpeaks = false
 
     /// The still-coming branch is the shell's plate filling this frame, not a second well.
-    static func waitingPlate() -> ShellWaiting {
-        ShellWaiting(speaks: plateSpeaks)
+    static func waitingPlate(on ground: ShellWaiting.Ground = .chassis) -> ShellWaiting {
+        ShellWaiting(speaks: plateSpeaks, on: ground)
     }
 
     /// Reduce Motion is the shell's clock, so a waiting picture stops with the rest of the app.
@@ -1248,7 +1253,7 @@ struct RemoteImage: View {
                 } else if fill == .waiting {
                     // Still coming, and there is somewhere for it to come from. The shell's plate
                     // fills the same frame the picture will, so text around it never moves.
-                    Self.waitingPlate()
+                    Self.waitingPlate(on: ground)
                 } else if fill == .failed {
                     // The wait ended and nothing came. The same failure place a timeline uses,
                     // filling this frame; a press runs the same fetch a first ask does.
@@ -1316,12 +1321,10 @@ struct RemoteImage: View {
     /// here — so they get one mark, and it says which kind of nothing it is. Quiet: it is a fact
     /// about the row, not a fault anyone has to do something about. A wait that ended with
     /// nothing is `Fill.failed`, not this.
+    ///
+    /// Hollow where the waiting plate is solid — `ShellVacant`, which is also what a row draws
+    /// for an author who sent no picture at all, since to a reader that is the same nothing.
     private var absent: some View {
-        ShellChrome.well(colorScheme)
-            .overlay {
-                Image(systemName: standing == .avatar ? "person.fill" : "photo")
-                    .shellFont(standing == .avatar ? .meta : .body)
-                    .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-            }
+        ShellVacant(standing: standing, radius: radius)
     }
 }
