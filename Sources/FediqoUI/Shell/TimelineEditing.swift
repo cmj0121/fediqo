@@ -91,6 +91,23 @@ struct DrawnTimeline {
     let items: [DummyItem]
 }
 
+/// One person's page as last drawn, and what it was drawn from.
+///
+/// **Keyed on every name `DummyPerson.wrote(_:)` reads**, not on `DummyPerson.id` alone: the id
+/// joins the handle *or* the name, so a person known by a handle and a stranger whose bare name
+/// spells the same would share one — and one page's posts would be drawn on the other's.
+struct HeldByPerson {
+    struct Key: Equatable {
+        let host: String
+        let handle: String?
+        let name: String
+        let notesRevision: Int
+    }
+
+    let key: Key
+    let items: [DummyItem]
+}
+
 /// One tab's missing-rule mark, and what it was worked out from.
 struct MissingRules {
     struct Key: Equatable {
@@ -125,6 +142,19 @@ extension ShellSession {
         )
         drawnTimeline = DrawnTimeline(key: key, items: items)
         timelineEvaluations += 1
+        return items
+    }
+
+    /// What this device holds of one person, newest first — `DummyPerson.held(of:in:)`, kept
+    /// until the notes change, because the page and the keys each read it on every redraw and
+    /// every one of those used to walk everything held.
+    func heldPosts(of person: DummyPerson) -> [DummyItem] {
+        let key = HeldByPerson.Key(
+            host: person.host, handle: person.handle, name: person.name, notesRevision: notesRevision
+        )
+        if let drawnPerson, drawnPerson.key == key { return drawnPerson.items }
+        let items = DummyPerson.held(of: person, in: notes)
+        drawnPerson = HeldByPerson(key: key, items: items)
         return items
     }
 

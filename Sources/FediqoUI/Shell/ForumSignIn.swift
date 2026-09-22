@@ -583,23 +583,30 @@ public final class ForumSessions {
                 "\(NetLog.line("keychain list", host: "-", error: listingFailure), privacy: .public)"
             )
         }
+        // The store's sessions, read once for every forum signed in again here rather than
+        // once per forum — and only where there is one, so a launch with nothing kept opens no
+        // store.
+        var sessions: Task<[String], Never>?
         for host in Set(hosts.map { $0.lowercased() }) where savedHosts.contains(host) {
             guard relaunching[host] == nil else { continue }
+            let held = sessions ?? Task { [weak self] in await self?.sessionDomains() ?? [] }
+            sessions = held
             // On `SourceWork` for the whole of it (#164): the forum's browser is not an
             // `HTTPClient` a request could be watched through, so the work is registered itself.
             let token = work.begin(host: host, for: .signIn)
             relaunching[host] = Task { [weak self, work] in
                 defer { work.end(token) }
-                await self?.relaunch(host: host, attempt: attempt)
+                await self?.relaunch(host: host, sessions: held, attempt: attempt)
                 self?.relaunching[host] = nil
             }
         }
     }
 
     private func relaunch(
-        host: String, attempt: (@MainActor (String) async -> ForumSignInOutcome)?
+        host: String, sessions: Task<[String], Never>,
+        attempt: (@MainActor (String) async -> ForumSignInOutcome)?
     ) async {
-        guard !(await holdsSession(host: host)) else { return }
+        guard !(await holdsSession(host: host, sessions: sessions)) else { return }
         let outcome: ForumSignInOutcome
         if let attempt {
             outcome = await attempt(host)
@@ -616,12 +623,17 @@ public final class ForumSessions {
 
     /// Whether the store holds a member's session for this host, asked of the store directly
     /// rather than of `reachedHosts`, which waits on the forums having been handed over.
-    private func holdsSession(host: String) async -> Bool {
+    /// `sessions` is the store's read, shared by every forum `signInAgain(hosts:)` started.
+    private func holdsSession(host: String, sessions: Task<[String], Never>) async -> Bool {
         if witnessed.contains(host) { return true }
-        let cookies = await dataStore.httpCookieStore.allCookies()
-        return cookies.contains {
-            ForumMember.isSessionCookie(named: $0.name) && ForumWebEngine.holds($0.domain, for: host)
-        }
+        return await sessions.value.contains { ForumWebEngine.holds($0, for: host) }
+    }
+
+    /// The domains the store holds a member's session cookie under.
+    private func sessionDomains() async -> [String] {
+        await dataStore.httpCookieStore.allCookies()
+            .filter { ForumMember.isSessionCookie(named: $0.name) }
+            .map(\.domain)
     }
 
     /// Returns once this host's launch sign-in has settled, or once `limit` has passed, whichever

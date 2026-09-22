@@ -256,6 +256,8 @@ final class ShellSession {
     /// The last timeline drawn and what it was drawn from, so a redraw that reads it several
     /// times evaluates the rules once.
     @ObservationIgnored var drawnTimeline: DrawnTimeline?
+    /// The person's page last drawn and what it was drawn from. See `heldPosts(of:)`.
+    @ObservationIgnored var drawnPerson: HeldByPerson?
     /// How many times the rules ran for the stream: the test's window on `drawnTimeline`.
     @ObservationIgnored var timelineEvaluations = 0
     /// Each tab's missing-rule mark as last worked out, so a redraw compiles no tab again.
@@ -304,10 +306,23 @@ final class ShellSession {
     /// page is opened from a post of theirs, and what is theirs is everything held rather than
     /// what the query in front lets through — so a root looked for among the timeline's rows is
     /// a root a rule can hide, and the pane would draw the timeline under the press instead of
-    /// the conversation the reader pressed for. The comparison is one string per note; the row
-    /// is built once, for the one note that matched.
+    /// the conversation the reader pressed for. The row id is split once and each note's key
+    /// compared to it, so walking past a note builds nothing; the row is built once, for the one
+    /// note that matched.
     func held(_ rowID: String) -> DummyItem? {
-        notes.first { $0.key.rowID == rowID }.map(DummyItem.init)
+        heldNote(rowID).map(DummyItem.init)
+    }
+
+    /// The store row one row id stands for, in `notes`. See `held(_:)`.
+    func heldNote(_ rowID: String) -> Note? {
+        guard let key = NoteKey(rowID: rowID) else { return nil }
+        return notes.first { $0.source.host == key.host && $0.id == key.id }
+    }
+
+    /// The note behind a row, wherever this run holds it: a store row, or an answer read in an
+    /// open conversation, which #90 keeps out of the store.
+    func note(ofRow rowID: String) -> Note? {
+        heldNote(rowID) ?? conversations.note(rowID)
     }
 
     /// What `notes` holds, counted (#7) — rebuilt where `notes` is assigned or the breakdown
@@ -523,7 +538,12 @@ final class ShellSession {
     /// preview, a row left over from a Remove. That is `PostActs.none` rather than a refusal,
     /// because there is no source for a sentence to be about.
     func acts(on item: DummyItem) -> PostActs {
-        let each = item.copies.map(ownActs(on:))
+        Self.acts(from: item.copies.map(ownActs(on:)))
+    }
+
+    /// The row's acts out of each copy's own, in the row's order — `acts(on:)` over copies
+    /// whose acts are already worked out.
+    private static func acts(from each: [PostActs]) -> PostActs {
         let offered = each.reduce(into: Set<PostAct>()) { $0.formUnion($1.offered) }
         guard offered.isEmpty else { return PostActs(offered: offered) }
         return each.first { $0.refused != nil } ?? .none
@@ -549,10 +569,15 @@ final class ShellSession {
     /// **Each standing is read off the copy its act goes through** (#136), which is where
     /// `perform` keeps it, so a press through a merged row's second source is drawn on its way
     /// and a failure there is drawn as one. `through` names only a copy that is not the row.
+    ///
+    /// Each copy's own acts are worked out once, and both the offer and each act's copy are read
+    /// off them — `acts(on:)` and `actingCopy(of:for:)` asked separately would ask every copy
+    /// again for every act.
     func acting(on item: DummyItem) -> ItemActing {
-        var acting = ItemActing(acts: acts(on: item))
+        let each = item.copies.map { (copy: $0, acts: ownActs(on: $0)) }
+        var acting = ItemActing(acts: Self.acts(from: each.map(\.acts)))
         for act in PostAct.allCases {
-            let copy = actingCopy(of: item, for: act) ?? item
+            let copy = each.first { $0.acts.offers(act) }?.copy ?? item
             acting.standings[act] = acts.standing(of: copy.id, act)
             if copy.id != item.id { acting.through[act] = copy }
         }
@@ -689,8 +714,7 @@ final class ShellSession {
         guard let copy = actingCopy(of: item, for: act) else { return }
         let host = copy.source.host
         // A store row, or an answer read in an open conversation, which #90 keeps out of the store.
-        guard let note = notes.first(where: { $0.key.rowID == copy.id })
-                ?? conversations.note(copy.id),
+        guard let note = note(ofRow: copy.id),
               let door = mastodon.authorized(host: host, for: .write)
         else { return }
         guard acts.begin(copy.id, act) else { return }
@@ -743,8 +767,9 @@ final class ShellSession {
             answerDrafts[item.id] = handle + " "
         }
         let start = Audience.answering(
-            notes.first { $0.key.rowID == item.id }?.audience
-                ?? conversations.note(item.id)?.audience
+            // Each half asked for an audience in turn: a store row that carries none leaves the
+            // conversation's copy to say, as `note(ofRow:)` would not.
+            heldNote(item.id)?.audience ?? conversations.note(item.id)?.audience
         )
         if answerReach[item.id] == nil { answerReach[item.id] = start }
         answering = AnswerTarget(item: item, root: root, start: start)
@@ -774,8 +799,7 @@ final class ShellSession {
         let text = ComposerSheet.trimmed(answerDraft(target))
         guard !text.isEmpty, text.count <= postLimit(of: host) else { return }
         guard acts(on: item).offers(.answer),
-              let answered = notes.first(where: { $0.key.rowID == item.id })
-                ?? conversations.note(item.id),
+              let answered = note(ofRow: item.id),
               let door = mastodon.authorized(host: host, for: .write)
         else { throw MastodonWriteError.noSource }
         let reach = answerReach[item.id] ?? target.start
@@ -1828,15 +1852,42 @@ final class ShellSession {
         await adopt()
     }
 
+    /// Only the sources, projected again through what each server has just said it is — for a
+    /// reload that has asked every server and has not read anything yet, so has no notes to adopt.
+    func reprojectSources() async {
+        await adoptSources()
+        rebuildQueries()
+    }
+
     /// What the store now holds, and the queries that draw it.
+    ///
+    /// **Each half assigned only where it moved.** Both have observers behind them — the forums
+    /// watched, the boards each forum is read for, the holdings counted and the text index
+    /// dropped — and every view reading the session redraws on an assignment, so a reload that
+    /// changed nothing used to pay for all of it. The notes are compared by the store's revision
+    /// rather than row by row: unchanged since the last adopt, and nothing here has assigned
+    /// `notes` since either, they are what the store holds.
     private func adopt() async {
+        await adoptSources()
+        let revision = await store.revision
+        if adopted?.store != revision || adopted?.notes != notesRevision {
+            notes = await store.all()
+            adopted = (store: revision, notes: notesRevision)
+        }
+        rebuildQueries()
+    }
+
+    /// The store's revision and `notesRevision` as the last adopt left them. Read in a hop before
+    /// the notes, so a write landing between the two is adopted again next time, never missed.
+    @ObservationIgnored private var adopted: (store: Int, notes: Int)?
+
+    private func adoptSources() async {
         // **Projected through what each server says it is** — #86. One place, so the row, the
         // tabs, a rule and a read all speak to a host under the name its own server gave rather
         // than the one written down when it was joined. Identity where nothing has been said,
         // which is every host until a read asks one.
-        sources = await store.sources().map(flavours.spoken)
-        notes = await store.all()
-        rebuildQueries()
+        let spoken = await store.sources().map(flavours.spoken)
+        if spoken != sources { sources = spoken }
     }
 
     /// The tabs, rebuilt from what is actually joined.
@@ -1855,8 +1906,9 @@ final class ShellSession {
             timelineID = nil
             return
         }
-        queries = sources.contains(where: { Self.hasTrends($0.kind) }) ? [.all, .trends] : [.all]
-        queries += written.map { .written($0.id) }
+        var rebuilt: [TimelineQuery] = sources.contains(where: { Self.hasTrends($0.kind) }) ? [.all, .trends] : [.all]
+        rebuilt += written.map { .written($0.id) }
+        if rebuilt != queries { queries = rebuilt }
         if !queries.contains(where: { $0 == timelineID }) {
             timelineID = .all
         }

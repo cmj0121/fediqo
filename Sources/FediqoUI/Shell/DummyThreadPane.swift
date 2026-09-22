@@ -55,11 +55,15 @@ struct DummyThreadPane: View {
     private let deepestIndent = 4
 
     /// What this pane draws: the conversation the source handed back, or this post alone until
-    /// one has. Built each pass rather than held, for `ShellConversationStanding.loaded`'s reason.
+    /// one has. Built each pass rather than held, for `ShellConversationStanding.loaded`'s reason
+    /// — and built **once** a pass: `body` binds it and hands each row the depth its place in
+    /// the conversation already says, rather than every row asking the conversation again.
     private var conversation: DummyConversation { conversations.conversation(around: root) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let conversation = conversation
+        let above = conversation.ancestors.count
+        return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: ShellSpace.snug) {
                 Button(action: onBack) {
                     Label(L10n.t("thread.back"), systemImage: "chevron.left")
@@ -86,15 +90,15 @@ struct DummyThreadPane: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 6) {
-                        ForEach(conversation.ancestors) { above in
-                            threaded(above, dimmed: true)
+                        ForEach(Array(conversation.ancestors.enumerated()), id: \.element.id) { step in
+                            threaded(step.element, dimmed: true, depth: step.offset)
                         }
-                        threaded(conversation.post, dimmed: false)
+                        threaded(conversation.post, dimmed: false, depth: above)
                         if !root.otherCopies.isEmpty {
                             carried
                         }
                         ForEach(conversation.descendants, id: \.item.id) { entry in
-                            threaded(entry.item, dimmed: false)
+                            threaded(entry.item, dimmed: false, depth: above + entry.depth)
                         }
                         if let thread {
                             rest(of: thread)
@@ -195,9 +199,10 @@ struct DummyThreadPane: View {
         }
     }
 
-    private func threaded(_ item: DummyItem, dimmed: Bool) -> some View {
-        let depth = conversation.depth(of: item.id)
-        return DummyItemRow(
+    /// One post of the conversation, `depth` steps in — `DummyConversation.depth(of:)`'s answer,
+    /// read off the post's place rather than looked up by id.
+    private func threaded(_ item: DummyItem, dimmed: Bool, depth: Int) -> some View {
+        DummyItemRow(
             item: item,
             catalogues: catalogues,
             catalogueSettled: catalogueSettled,
@@ -331,7 +336,7 @@ struct DummyThreadPane: View {
     /// **The mirror of `rest(of:)`, and deliberately not the same view.** A forum topic's
     /// replies are a list this pane draws itself, under a rule of their own; a microblog's
     /// answers *are* rows of this conversation and are already drawn above, nested, by the same
-    /// `threaded(_:dimmed:)` every other post in the pane goes through. So what is left down
+    /// `threaded(_:dimmed:depth:)` every other post in the pane goes through. So what is left down
     /// here is only what the rows cannot say: that the thread is still coming, that it could not
     /// be had, or that there is genuinely nobody else in it.
     ///
@@ -719,7 +724,7 @@ struct ForumReplyRow: View {
 /// It draws itself. A `private func quotation(_:) -> some View` that called itself would be an
 /// opaque return type defined in terms of itself, which does not compile — the recursion has to
 /// go through a nominal type, and this is it. The same shape `DummyThreadPane` uses for its own
-/// nesting one level up, where `threaded(_:dimmed:)` indents by a depth the conversation
+/// nesting one level up, where `threaded(_:dimmed:depth:)` indents by a depth the conversation
 /// carries; here the depth **is** the view tree, because a quotation's depth is its structure
 /// rather than a number beside it.
 ///

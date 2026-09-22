@@ -116,7 +116,7 @@ final class ShellReload {
             //
             // Here and not inside each read, for two reasons. They go out together, so the whole
             // reload waits one round trip rather than each source waiting its own; and the
-            // answers are in before `reloadFromStore` below projects them onto the sources, so
+            // answers are in before `reprojectSources` below projects them onto the sources, so
             // the reads under it work from what the servers just said. A host answers this once
             // and is not asked again until a Clear or a Remove.
             await withTaskGroup(of: Void.self) { group in
@@ -126,7 +126,7 @@ final class ShellReload {
                 }
             }
             guard !Task.isCancelled else { return }
-            await session.reloadFromStore()
+            await session.reprojectSources()
             let spoken = session.sources
 
             var unread: Set<String> = []
@@ -167,7 +167,7 @@ final class ShellReload {
                 if !read, !Task.isCancelled { self.failed = [ref.host] }
                 return
             }
-            guard let held = session.notes.first(where: { $0.key.rowID == item.id }) else { return }
+            guard let held = session.heldNote(item.id) else { return }
             let again = await self.again(held, in: session)
             guard !Task.isCancelled else { return }
             switch again {
@@ -441,16 +441,19 @@ final class ShellReload {
             })
         }
         // The door reads the lists' names again, where every list is read; each timeline is read
-        // through a door of its own, shown under the name the reader knows it by (#170).
+        // through a door of its own, shown under the name the reader knows it by (#170). The
+        // token is read from the Keychain once and every door is built from it.
         guard home || lists?.isEmpty == false,
-              let door = session.mastodon.authorized(host: source.host, within: deadline, for: .lists)
+              let token = session.mastodon.token(host: source.host)
         else { return true }
+        let mastodon = session.mastodon
+        let door = mastodon.authorized(token: token, within: deadline, for: .lists)
         let named = Self.names(of: source)
-        let plain = session.mastodon.authorized(host: source.host, within: deadline, for: .timeline) ?? door
+        let plain = mastodon.authorized(token: token, within: deadline, for: .timeline)
         var doors: [FediqoCore.Category: MastodonAuthorized] = [:]
         for category in [.home] + source.lists.map({ FediqoCore.Category.list(id: $0.id) }) {
-            doors[category] = session.mastodon.authorized(
-                host: source.host, within: deadline, for: .timeline, name: named(category)
+            doors[category] = mastodon.authorized(
+                token: token, within: deadline, for: .timeline, name: named(category)
             )
         }
         let account = MastodonAccount(door: door, store: session.store) { [doors] category in

@@ -932,7 +932,7 @@ public struct FediqoRootView: View {
     private var currentListItems: [DummyItem] {
         switch walk.standing {
         case .person(let person):
-            return DummyPerson.held(of: person, in: session.notes)
+            return session.heldPosts(of: person)
         case .thread(let opened):
             guard let item = session.held(opened) else { return streamItems }
             return session.conversations.conversation(around: item).inOrder

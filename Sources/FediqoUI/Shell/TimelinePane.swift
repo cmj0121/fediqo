@@ -113,10 +113,10 @@ struct TimelinePane: View {
         hasItems ? .held : .empty
     }
 
-    private var stream: Standing {
+    private func stream(hasItems: Bool) -> Standing {
         Self.standing(
             running: session.reload.running,
-            hasItems: !items.isEmpty,
+            hasItems: hasItems,
             searching: search?.isSearching == true,
             hasSources: !session.sources.isEmpty,
             failed: session.reload.failed
@@ -153,7 +153,7 @@ struct TimelinePane: View {
             case .person(let person):
                 PersonPane(
                     person: person,
-                    items: DummyPerson.held(of: person, in: session.notes),
+                    items: session.heldPosts(of: person),
                     catalogues: session.emoji,
                     catalogueSettled: settledHosts.contains(person.host),
                     posts: session.posts,
@@ -366,17 +366,22 @@ struct TimelinePane: View {
     /// conversation whose root this device no longer holds.
     @ViewBuilder
     private var underneath: some View {
-        switch stream {
-        case .held: list
+        // Bound once: the list, each row's rule under it and the jump to the top all read the
+        // same rows, and each read of `items` used to ask the session for them again.
+        let items = items
+        switch stream(hasItems: !items.isEmpty) {
+        case .held: list(items)
         case .empty: empty
         }
     }
 
-    private var list: some View {
-        ScrollViewReader { proxy in
+    private func list(_ items: [DummyItem]) -> some View {
+        let last = items.count - 1
+        return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                        let isLast = index == last
                         DummyItemRow(
                             item: item,
                             catalogues: session.emoji,
@@ -410,7 +415,7 @@ struct TimelinePane: View {
                             onToast: showToast
                         )
                         .id(item.id)
-                        if index < items.count - 1 {
+                        if !isLast {
                             Rectangle()
                                 .fill(ShellChrome.hairline(colorScheme))
                                 .frame(height: ShellSpace.hair)
@@ -693,7 +698,9 @@ struct TimelinePane: View {
             notes: session.notes,
             written: session.written,
             sources: session.sources,
-            index: session.textIndex,
+            // The folded text only where a rule reads it, as `timelineItems` asks: All and Trends
+            // read none, and an empty one of them would otherwise fold every note held to say so.
+            index: session.definition(of: timeline).readsText ? session.textIndex : TextIndex([]),
             latest: prefs.latestDate,
             // **"Asked, and there is genuinely nothing"** — which a run that skipped a source
             // cannot claim. A host that answered as something this app does not read leaves

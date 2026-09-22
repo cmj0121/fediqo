@@ -604,6 +604,16 @@ public struct NoteKey: Hashable, Sendable {
     /// The same key as one string, for a surface whose identity has to be a `String`. Joined on
     /// the record separator, which neither a hostname nor any id a server sends can contain.
     public var rowID: String { "\(host)\u{1e}\(id)" }
+
+    /// The key a row id was built from, or nothing where the string is no row id.
+    ///
+    /// Split at the first separator: a host cannot contain one, so that is where the host ends,
+    /// and two keys are equal exactly where their row ids are. So a caller holding a row id can
+    /// compare keys rather than build a row id for every note it walks past.
+    public init?(rowID: String) {
+        guard let cut = rowID.firstIndex(of: "\u{1e}") else { return nil }
+        self.init(host: String(rowID[..<cut]), id: String(rowID[rowID.index(after: cut)...]))
+    }
 }
 
 extension Note {

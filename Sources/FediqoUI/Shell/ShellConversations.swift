@@ -281,7 +281,7 @@ final class ShellConversations {
         // — neither has a conversation this unit can ask for, and neither is *waiting* for one.
         // The pane draws an unasked standing as coming, so a post this returns from in silence
         // would wait for an answer nothing is going to bring.
-        guard let held = session.notes.first(where: { $0.key.rowID == item.id }),
+        guard let held = session.heldNote(item.id),
               // The server's own answer where it has given one — #86. A host that has stopped
               // being a Mastodon has no conversation this unit can ask it for, whatever the row
               // was stored as.
@@ -311,8 +311,11 @@ final class ShellConversations {
             // from two places — the pane opening and `r` — and only one of them used to adopt
             // the store afterwards, so an edit that landed on the way past a thread showed in
             // the thread and not in the stream under it until something else asked.
-            await session.store.refresh(thread.ancestors + thread.descendants, ifSourceHere: host)
-            await session.reloadFromStore()
+            // Only where a held row did change: a thread of rows this device never held refreshes
+            // nothing, and adopting then would be a round trip to the store for nothing.
+            if await session.store.refresh(thread.ancestors + thread.descendants, ifSourceHere: host) {
+                await session.reloadFromStore()
+            }
             standings[item.id] = thread.isAlone
                 ? ShellConversationStanding.none
                 : .loaded(ancestors: thread.ancestors, descendants: thread.descendants, rootID: id)
