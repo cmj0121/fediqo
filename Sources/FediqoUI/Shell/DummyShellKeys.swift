@@ -6,17 +6,23 @@ import AppKit
 
 extension View {
     /// Dummy single keys. macOS listens through AppKit so Tab and `?` still work after compose.
-    func dummyShellKeys(handle: @escaping (Character, Bool, Bool, Bool) -> Bool) -> some View {
+    ///
+    /// `home` is bumped when a field of the shell's hands the keys back — Return in the search
+    /// (#163). On iOS the keys are heard only while this view holds the focus, and a field that
+    /// lets go leaves it with nobody, so `j` and `k` went nowhere; a change of `home` takes it
+    /// back. macOS reads the keys ahead of any responder and needs no such thing.
+    func dummyShellKeys(home: Int = 0, handle: @escaping (Character, Bool, Bool, Bool) -> Bool) -> some View {
         #if os(macOS)
         modifier(DummyKeyMonitor(handle: handle))
         #else
-        modifier(DummyKeyPresses(handle: handle))
+        modifier(DummyKeyPresses(home: home, handle: handle))
         #endif
     }
 }
 
 #if os(iOS)
 private struct DummyKeyPresses: ViewModifier {
+    var home: Int
     var handle: (Character, Bool, Bool, Bool) -> Bool
     @FocusState private var focused: Bool
 
@@ -26,6 +32,7 @@ private struct DummyKeyPresses: ViewModifier {
             .focusEffectDisabled()
             .focused($focused)
             .onAppear { focused = true }
+            .onChange(of: home) { _, _ in focused = true }
             .onKeyPress(
                 keys: [
                     "?", "/", "b", "c", "d", "f", "j", "k", "g", "v", "a", "m", "s", "q", "r", "e", "w", "p", " ",

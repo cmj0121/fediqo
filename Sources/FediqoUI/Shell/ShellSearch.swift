@@ -71,6 +71,7 @@ final class ShellSearch {
     /// `notes` for it. The last index is reused, so notes that did not change are not folded again.
     func open(from selection: String?, over notes: [Note]) {
         isOpen = true
+        litWhenIndexed = false
         text = ""
         selectionBefore = selection
         focusTick += 1
@@ -92,6 +93,7 @@ final class ShellSearch {
 
     func focus() {
         focusTick += 1
+        litWhenIndexed = false
     }
 
     /// Closes it and hands back the selection the timeline had when it opened. An index still
@@ -132,6 +134,38 @@ final class ShellSearch {
     /// open behind another page would be closed by an Escape pressed there, for nothing seen.
     func closes(leavingFor place: ShellPlace) -> Bool {
         isOpen && place != .timeline
+    }
+
+    /// Return in the field (#163): what it says is searched now, and the keys go back to the list.
+    ///
+    /// **Now, not after the pause.** The pause spares a large store a search on every key; Return
+    /// is the reader saying the typing is over, and waiting on it would hand the list the results
+    /// for an earlier part of the pattern — or, typed quickly enough that nothing had settled yet,
+    /// the timeline's own rows, so the lit row was not a result at all.
+    ///
+    /// **The keys are handed back here too**, not only through the field losing its focus, because
+    /// that is the platform's and arrives when it arrives; a `j` pressed in between must already be
+    /// the list's. `submits` counts it for whatever holds the list's keys to take them back (iOS).
+    func submit() {
+        guard isOpen else { return }
+        pattern = text
+        fieldFocused = false
+        submits += 1
+        litWhenIndexed = !isIndexed
+    }
+
+    /// Counts Returns in the field: each one asks the list to take the keys back.
+    private(set) var submits = 0
+
+    /// Return came before the index: its first result is still to be lit when it lands.
+    @ObservationIgnored private var litWhenIndexed = false
+
+    /// Whether a Return is still waiting for the index to light its first result — true once,
+    /// and never once `/` has handed the field the keys again.
+    func takeLitWhenIndexed() -> Bool {
+        guard litWhenIndexed, isIndexed, isOpen else { return false }
+        litWhenIndexed = false
+        return true
     }
 
     /// Searches for `typed` if it is still what the field says.
