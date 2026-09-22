@@ -1221,7 +1221,7 @@ public struct FediqoRootView: View {
     private var layout: some View {
         ShellArranged(answer: arrangement) { layout in
             switch layout {
-            case .narrow: tabbed
+            case .narrow: narrow
             case .wide: columns
             }
         }
@@ -1284,17 +1284,19 @@ public struct FediqoRootView: View {
         )
     }
 
-    /// The narrow arrangement: tabs instead of a rail, and only for the places it can enter.
-    /// Drawn on a Mac as well since #110, for a window dragged narrower than the rail allows.
-    /// A tab bar has no disabled state worth the name: tapping a dead tab selected it,
-    /// the binding put it back, and the reader was told nothing at all. A place that
-    /// is not ready is not a tab yet.
-    private var tabbed: some View {
-        TabView(selection: $place) {
-            ForEach(availability.enabledPlaces) { item in
-                placedPage(item)
-                    .tabItem { Label(item.title, systemImage: item.symbolName) }
-                    .tag(item)
+    /// The narrow arrangement: the places as tabs where their names fit, and as one pop-up named
+    /// for them where a Mac window is too narrow to write them side by side (#141). See
+    /// `ShellFold`.
+    ///
+    /// **The compose button and the corner it takes are the arrangement's, not the tabs'**, so
+    /// they are put on here, around either one. A fold that moved the button to make room for
+    /// its name would be moving something it did not fold.
+    private var narrow: some View {
+        ShellNarrow(titles: availability.enabledPlaces.map(\.title)) {
+            tabbed
+        } folded: {
+            FoldedPlaces(place: placeBinding, places: availability.enabledPlaces) {
+                placedPage(place)
             }
         }
         .tint(ShellChrome.phosphor(colorScheme))
@@ -1303,6 +1305,20 @@ public struct FediqoRootView: View {
         .environment(\.shellFloatingCorner, Self.composeCorner(canCompose: availability.canCompose))
         .overlay(alignment: .bottomTrailing) {
             if availability.canCompose { composeButton }
+        }
+    }
+
+    /// Tabs instead of a rail, and only for the places it can enter. Drawn on a Mac as well
+    /// since #110, for a window dragged narrower than the rail allows. A tab bar has no disabled
+    /// state worth the name: tapping a dead tab selected it, the binding put it back, and the
+    /// reader was told nothing at all. A place that is not ready is not a tab yet.
+    private var tabbed: some View {
+        TabView(selection: $place) {
+            ForEach(availability.enabledPlaces) { item in
+                placedPage(item)
+                    .tabItem { Label(item.title, systemImage: item.symbolName) }
+                    .tag(item)
+            }
         }
     }
 

@@ -10,6 +10,8 @@
 "shell.preferences.summary" = "Language, theme, and type";
 "shell.timeline.disabled" = "Add a source on Account first";
 "shell.notices.disabled" = "Notices need a signed-in source";
+"shell.places.fold" = "Places";
+"shell.places.fold.help" = "Places: %@";
 "account.rail.empty" = "Add a source";
 "account.add.title" = "Add a source";
 "account.hero.promise" = "Your timeline. Your rules.";
