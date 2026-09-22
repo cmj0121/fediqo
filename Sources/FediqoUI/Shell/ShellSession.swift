@@ -416,8 +416,9 @@ final class ShellSession {
     }
 
     /// Asks the instance where this run has not already been told, and remembers the answer.
-    func refreshPostLimit() async {
-        guard let host = composeHost else { return }
+    /// The composer's chosen source where no host is named; an answer names its own (#108).
+    func refreshPostLimit(of named: String? = nil) async {
+        guard let host = named ?? composeHost else { return }
         if postLimits[host] != nil { return }
         if case .stated(let profile) = profiles[host] {
             postLimits[host] = MastodonWrite.limit(advertised: profile.statusLimit)
@@ -527,12 +528,15 @@ final class ShellSession {
         _ body: @escaping (MastodonAuthorized, Note) async throws -> Note
     ) async {
         guard acts(on: item).offers(act) else { return }
-        guard let note = notes.first(where: { $0.key.rowID == item.id }),
+        // A store row, or an answer read in an open conversation, which #90 keeps out of the store.
+        guard let note = notes.first(where: { $0.key.rowID == item.id })
+                ?? conversations.note(item.id),
               let door = mastodon.authorized(host: item.source.host)
         else { return }
         guard acts.begin(item.id, act) else { return }
         do {
-            _ = try await body(door, note)
+            let answered = try await body(door, note)
+            conversations.replace(answered)
             acts.landed(item.id, act)
             await adopt()
             await persist?()
@@ -549,6 +553,88 @@ final class ShellSession {
             acts.failed(item.id, act)
         } catch {
             acts.failed(item.id, act)
+        }
+    }
+
+    /// The answer being written, where one is (#108). Nothing while no answer is open.
+    ///
+    /// **Observed, and the sheet is presented from it**, so a key and a press on the mark open
+    /// the one surface by writing the one value.
+    var answering: AnswerTarget?
+    /// What has been written to each post and not yet sent, by row. Kept when the sheet closes
+    /// unsent and when a send fails, so every character survives both; cleared only by a landing.
+    var answerDrafts: [String: String] = [:]
+    /// Who each unsent answer reaches, by row — chosen before it is sent, from where it started.
+    var answerReach: [String: Audience] = [:]
+
+    /// Opens the answer to `item`, inside the conversation around `root`.
+    ///
+    /// **Refused where the post does not offer it**, the same one rule the mark under it reads.
+    /// The first time a post is answered, the draft starts with its author's handle, since a
+    /// Mastodon answer reaches the person answered only where it names them — the words are the
+    /// reader's to change — and the reach starts where the post is and no wider.
+    @discardableResult
+    func openAnswer(to item: DummyItem, in root: DummyItem) -> Bool {
+        guard acts(on: item).offers(.answer) else { return false }
+        if answerDrafts[item.id] == nil, let handle = item.handle, handle.hasPrefix("@") {
+            answerDrafts[item.id] = handle + " "
+        }
+        let start = Audience.answering(
+            notes.first { $0.key.rowID == item.id }?.audience
+                ?? conversations.note(item.id)?.audience
+        )
+        if answerReach[item.id] == nil { answerReach[item.id] = start }
+        answering = AnswerTarget(item: item, root: root, start: start)
+        return true
+    }
+
+    /// The answer's text, bound for the sheet. Empty where nothing is kept for this post.
+    func answerDraft(_ target: AnswerTarget) -> String { answerDrafts[target.id] ?? "" }
+
+    func canSendAnswer(_ target: AnswerTarget) -> Bool {
+        ComposerSheet.canSend(
+            text: answerDraft(target),
+            limit: postLimit(of: target.item.source.host),
+            hasSource: acts(on: target.item).offers(.answer)
+        )
+    }
+
+    /// Sends the answer to the source the post was read through — **the post decides it; it is
+    /// not a choice** — and lays what landed into the conversation under what it answers.
+    ///
+    /// A failure throws and keeps every character: the draft is only cleared by a landing, and
+    /// only where it is still the text that was sent, `ComposerSheet.draftAfterLanding`'s rule.
+    /// 401 and 403 are read as `post()` reads them.
+    func answer(_ target: AnswerTarget) async throws {
+        let item = target.item
+        let host = item.source.host
+        let text = ComposerSheet.trimmed(answerDraft(target))
+        guard !text.isEmpty, text.count <= postLimit(of: host) else { return }
+        guard acts(on: item).offers(.answer),
+              let answered = notes.first(where: { $0.key.rowID == item.id })
+                ?? conversations.note(item.id),
+              let door = mastodon.authorized(host: host)
+        else { throw MastodonWriteError.noSource }
+        let reach = answerReach[item.id] ?? target.start
+        do {
+            let note = try await MastodonWrite(door: door, store: store)
+                .post(text, visibility: reach, answering: answered)
+            answerDrafts[item.id] = ComposerSheet.draftAfterLanding(
+                current: answerDraft(target), sent: text
+            )
+            if answerDrafts[item.id]?.isEmpty == true {
+                answerDrafts[item.id] = nil
+                answerReach[item.id] = nil
+            }
+            conversations.landed(note, under: target.root.id, rootID: target.root.statusID)
+            await adopt()
+            await persist?()
+        } catch MastodonAuthError.signedOut {
+            mastodon.endedByServer(host: host)
+            throw MastodonAuthError.signedOut
+        } catch MastodonAuthError.http(let status) where status == 403 {
+            mastodon.refusedWrite(host: host)
+            throw MastodonAuthError.http(403)
         }
     }
 

@@ -77,6 +77,8 @@ public enum PostAct: Sendable, Hashable, CaseIterable {
     case boost
     /// A note to the author and to oneself, kept on that source (#107).
     case favourite
+    /// Words written back to the post, from inside the conversation it belongs to (#108).
+    case answer
 }
 
 /// Why a post offers none of the acts. Nothing is a post that offers them.

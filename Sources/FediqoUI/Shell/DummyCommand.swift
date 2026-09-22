@@ -49,6 +49,10 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     case boost
     /// `f` — favourite the post the lamp is on on its source, or take it back (#107). `b`'s shape.
     case favourite
+    /// `w` — write an answer to the post the lamp is on, **from inside the conversation it belongs
+    /// to** (#108). `c` writes a post that answers nothing; this is the same act pointed at
+    /// something. Refused on the timeline itself, where the answer's place is not in view.
+    case answer
     case showShortcuts
     /// `/` — search what this device holds (#32). `?` is still the keys list; see `typed`.
     case search
@@ -101,6 +105,7 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         case "/": return .search
         case "b": return .boost
         case "f": return .favourite
+        case "w": return .answer
         case "c": return .compose
         case "j", KeyEquivalent.downArrow.character: return .nextPost
         case "k", KeyEquivalent.upArrow.character: return .previousPost
@@ -457,6 +462,9 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
         DummyShortcut(group: .timeline, keys: ["b"], name: "boost", commands: [.boost], touch: .press),
         // The star under the post, for `b`'s reason.
         DummyShortcut(group: .timeline, keys: ["f"], name: "favourite", commands: [.favourite], touch: .press),
+        // The answer mark under a post in an open conversation. On the timeline the same mark
+        // opens the conversation first, which is where the key is answered too.
+        DummyShortcut(group: .timeline, keys: ["w"], name: "answer", commands: [.answer], touch: .press),
         // The rail on a Mac, the tab bar on a phone.
         DummyShortcut(group: .app, keys: ["⌃Tab", "⌃⇧Tab"], name: "pages",
                       commands: [.nextPage, .previousPage], touch: .press),
