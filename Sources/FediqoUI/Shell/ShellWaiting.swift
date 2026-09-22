@@ -52,8 +52,20 @@ struct ShellWaiting: View {
     /// for. False is silence, not an empty label — see `voice(speaks:)`.
     let speaks: Bool
 
-    init(speaks: Bool = true) {
+    /// What the plate is drawn on, which decides what it is drawn in.
+    let ground: Ground
+
+    /// The two grounds a plate is ever drawn on. The chassis is every page, row and sheet, and
+    /// takes the scheme; the stage is `ShellChrome.behindPicture`, where a picture is opened, and
+    /// is nearly black whatever the scheme says.
+    enum Ground: Equatable, Sendable {
+        case chassis
+        case stage
+    }
+
+    init(speaks: Bool = true, on ground: Ground = .chassis) {
         self.speaks = speaks
+        self.ground = ground
     }
 
     @Environment(\.colorScheme) private var colorScheme
@@ -75,12 +87,27 @@ struct ShellWaiting: View {
     /// The two ends of this plate's own pulse.
     ///
     /// **Shallower than `ForumWaiting`'s, and that is a statement rather than a drift.** Those
-    /// plates trail a sentence that already carries the fact, so one of them may go nearly out
-    /// without anything being lost. This one *is* the fact — it is standing in for the thing the
-    /// reader is waiting for — and a place that empties every 1.2 seconds is a place that
-    /// flickers. The rhythm is shared; how deep the breath goes belongs to what is breathing.
-    static let banked: Double = 0.55
+    /// plates trail a sentence that already carries the fact. This one *is* the fact — it is
+    /// standing in for the thing the reader is waiting for — and a place that empties every 1.2
+    /// seconds is a place that flickers. The rhythm is shared; how deep the breath goes belongs
+    /// to what is breathing.
+    ///
+    /// **The bottom of the breath is held to `ShellChrome.placeFloor`** (#142). It was 0.55 of
+    /// `well`, which on the page in light is 1.07:1 — a row still arriving that reads as empty
+    /// space for part of every pass. The plate now wears `ShellChrome.waiting`, and 0.8 of that
+    /// is about the lowest it can bank and still clear 3:1 on every ground it is drawn on; the
+    /// lit end is 4.8:1 on the page. Measured as a swing of luminance rather than of opacity, the
+    /// breath is no smaller than it was — it is the same pass, over a plate a reader can see.
+    static let banked: Double = 0.8
     static let lit: Double = 1.0
+
+    /// What a plate on `ground` is drawn in, at full; the pulse is an opacity over this.
+    static func ink(_ scheme: ColorScheme, on ground: Ground) -> Color {
+        switch ground {
+        case .chassis: ShellChrome.waiting(scheme)
+        case .stage: ShellChrome.waitingOnStage
+        }
+    }
 
     /// A clock only where one is wanted — nothing for a reader who asked for less movement.
     ///
@@ -144,12 +171,59 @@ struct ShellWaiting: View {
         }
     }
 
-    /// The milled recess, which is the token for a container rather than for ink: what is drawn
-    /// here is the hole a thing will fill, not a thing.
+    /// **Not the milled recess any more** (#142). `well` is a container's colour and was chosen
+    /// to be quiet, and a plate quiet enough to be a container is quiet enough to be missed.
+    /// What is drawn here stands in for a thing, so it takes the ramp a thing's ink is on; see
+    /// `ShellChrome.waiting`.
     private func plate(at instant: TimeInterval) -> some View {
         RoundedRectangle(cornerRadius: ShellSpace.tight, style: .continuous)
-            .fill(ShellChrome.well(colorScheme))
+            .fill(Self.ink(colorScheme, on: ground))
             .opacity(Self.glow(at: instant))
+    }
+}
+
+/// **Nothing here, and nothing on its way** — the place a face or a picture would be when there is
+/// none to come.
+///
+/// The other half of `ShellWaiting`, drawn so the two cannot be taken for each other in any frame,
+/// moving or still: waiting is a **solid** plate in the ink ramp with nothing on it; this is a
+/// **hollow** one — the quiet `well` recess, outlined in `ShellChrome.vacantEdge`, with a glyph
+/// saying what is missing. A reader who has turned motion off sees a still solid plate for the one
+/// and a ring with a silhouette in it for the other, which is the difference #68 exists to keep.
+///
+/// The edge is what holds this to `ShellChrome.placeFloor`. The fill stays `well`, because the
+/// glyph's own contrast was measured on it and a darker fill would take the glyph under.
+///
+/// Silent: a place with nothing in it is not a fact a screen reader needs read out, and every
+/// call site already sits inside an element that speaks for it.
+struct ShellVacant: View {
+    let standing: RemoteImage.Standing
+    var radius: CGFloat = ShellSpace.tight
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// The mark that says which kind of nothing this is. A person's silhouette over a missing
+    /// attachment would be worse than no mark at all.
+    static func glyph(_ standing: RemoteImage.Standing) -> String {
+        switch standing {
+        case .avatar: "person.fill"
+        case .picture: "photo"
+        }
+    }
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: radius, style: .continuous)
+            .fill(ShellChrome.well(colorScheme))
+            .overlay {
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .strokeBorder(ShellChrome.vacantEdge(colorScheme), lineWidth: ShellSpace.hair)
+            }
+            .overlay {
+                Image(systemName: Self.glyph(standing))
+                    .shellFont(standing == .avatar ? .meta : .body)
+                    .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+            }
+            .accessibilityHidden(true)
     }
 }
 
@@ -163,6 +237,11 @@ struct ShellWaiting: View {
         ShellWaiting().frame(width: 160)
         ShellWaiting().frame(width: 44, height: 44)
         ShellWaiting().frame(height: 120)
+        // #142: waiting beside empty, the pair a still frame must keep apart.
+        HStack(spacing: ShellSpace.step) {
+            ShellWaiting().frame(width: 44, height: 44)
+            ShellVacant(standing: .avatar).frame(width: 44, height: 44)
+        }
     }
     .padding(ShellSpace.pad)
     .frame(width: 360, alignment: .leading)

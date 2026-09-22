@@ -99,6 +99,51 @@ enum ShellChrome {
         scheme == .dark ? rgb(0.898, 0.478, 0.443) : rgb(0.643, 0.212, 0.180)
     }
 
+    // MARK: On its way, and nothing here
+
+    /// The contrast a placeholder holds against the ground it is drawn on — **3:1, WCAG's floor
+    /// for a graphical object a reader needs in order to understand the screen** (1.4.11).
+    ///
+    /// A waiting plate is exactly that: it is the only thing saying a row is still coming rather
+    /// than empty, so a reader who cannot tell it from the page has been told nothing. It is not
+    /// text, so the 4.5:1 `inkFaint` holds for small type is the wrong line, and it is not
+    /// decoration, so `hatch`'s "no floor" is the wrong line too. 3:1 is the figure for this kind
+    /// of thing, chosen before the colours below and not read off them: the plates wore `well`,
+    /// which measures 1.14:1 on the page in light, 1.07:1 at the bottom of its pulse, and 1.01:1
+    /// on a selected row in dark.
+    ///
+    /// Held at **every** point of a pulse and by every still placeholder, on every ground a
+    /// placeholder is drawn on. `WaitingContrastTests` measures that rather than trusting this.
+    static let placeFloor: Double = 3
+
+    /// What a waiting plate is drawn in — the ink ramp, not the milled recess.
+    ///
+    /// `well` is a container's colour and is meant to be quiet; a plate is standing in for a
+    /// thing, so it takes the ramp the thing's own ink is on. At full this is 4.8:1 on the page
+    /// in both schemes (in light, the same step as `inkFaint`), so that the bottom of
+    /// `ShellWaiting`'s pulse still clears `placeFloor` on the page, on a selected row, and under
+    /// a pointer. Over the ground rather than opaque, so it is measured against whichever of
+    /// those it is on instead of against one of them.
+    static func waiting(_ scheme: ColorScheme) -> Color {
+        ink(scheme).opacity(scheme == .dark ? 0.52 : 0.64)
+    }
+
+    /// The waiting plate where a picture is opened, on `behindPicture`. No scheme, for the reason
+    /// that ground takes none: it is nearly black in both, and the light scheme's ink would
+    /// vanish into it.
+    static let waitingOnStage = overPicture.opacity(0.50)
+
+    /// The edge of a place that holds nothing and is waiting for nothing — no face, no picture.
+    ///
+    /// **Hollow where a waiting plate is solid**, so the two cannot be taken for each other even
+    /// in a still frame: an empty place keeps `well` as its fill, carries a glyph, and is outlined
+    /// in this; a waiting one is filled in `waiting` and carries nothing. The edge is what holds
+    /// the empty place to `placeFloor` — the fill stays the quiet recess the glyph was measured
+    /// on — and it sits a step under `waiting` so a ring does not outweigh the glyph inside it.
+    static func vacantEdge(_ scheme: ColorScheme) -> Color {
+        ink(scheme).opacity(scheme == .dark ? 0.44 : 0.56)
+    }
+
     // MARK: The cover
 
     /// The guard-plate hatch a covered post carries. Covered is neither where the reader is nor

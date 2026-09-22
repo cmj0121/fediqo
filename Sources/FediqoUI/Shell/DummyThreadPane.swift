@@ -637,8 +637,7 @@ struct ForumReplyRow: View {
                     radius: ShellSpace.tight
                 )
             } else {
-                RoundedRectangle(cornerRadius: ShellSpace.tight, style: .continuous)
-                    .fill(ShellChrome.well(colorScheme))
+                ShellVacant(standing: .avatar, radius: ShellSpace.tight)
             }
         }
         .frame(width: side, height: side)

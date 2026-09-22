@@ -484,10 +484,9 @@ struct DummyItemRow: View {
                     radius: Box.plate
                 )
             } else {
-                // Nothing to draw and nothing on its way: the bare plate, which is what this row
-                // has always drawn for an author who sent no picture.
-                RoundedRectangle(cornerRadius: Box.plate, style: .continuous)
-                    .fill(ShellChrome.well(colorScheme))
+                // Nothing to draw and nothing on its way: the empty place, hollow and marked,
+                // so it is never the solid plate an arriving face waits as (#142).
+                ShellVacant(standing: .avatar, radius: Box.plate)
             }
         }
         .frame(width: avatarSide, height: avatarSide)

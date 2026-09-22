@@ -177,7 +177,10 @@ struct AttachmentViewer: View {
             contentMode: .fit,
             alt: covered ? nil : spoken(attachment),
             speaks: !covered,
-            radius: Box.corner
+            radius: Box.corner,
+            // Drawn on `behindPicture`, which is nearly black in both schemes: the chassis'
+            // light-scheme plate would vanish into it (#142).
+            ground: .stage
         )
         .aspectRatio(attachment.aspect.map { 1 / $0 }, contentMode: .fit)
         .frame(maxWidth: ceiling?.width ?? .infinity, maxHeight: ceiling?.height ?? .infinity)

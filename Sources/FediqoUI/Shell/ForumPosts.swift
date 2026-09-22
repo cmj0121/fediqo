@@ -988,8 +988,17 @@ struct ForumPostBand: View {
         .accessibilityHidden(true)
     }
 
+    /// **The waiting plate's own ink, at full** — these are the still form of it, and they were
+    /// `well`, which is 1.14:1 on the page in light and 1.01:1 on a selected row in dark. A band
+    /// the reader cannot tell from the page is the blank band this view exists not to draw
+    /// (#142). Still rather than pulsing, as they always were; `plateInk` is what they wear.
     private func plate(_ fraction: CGFloat) -> some View {
-        Self.plate(ShellChrome.well(colorScheme), fraction: fraction)
+        Self.plate(Self.plateInk(colorScheme), fraction: fraction)
+    }
+
+    /// What the two waiting plates are drawn in, named so its contrast can be measured.
+    static func plateInk(_ scheme: ColorScheme) -> Color {
+        ShellWaiting.ink(scheme, on: .chassis)
     }
 
     /// One of this app's own sentences about the post, drawn so it cannot be mistaken for the
@@ -1137,14 +1146,25 @@ struct ForumWaiting: View {
 
     /// How bright one plate is at one instant, between banked and lit. Deeper than
     /// `ShellWaiting`'s ends for the reason written there: these plates trail a sentence that
-    /// already says what is happening, so one of them may go nearly out.
+    /// already says what is happening, so they may breathe deeper.
+    ///
+    /// **Not so deep that a plate goes out** (#142). At 0.3 a banked plate measured 1.6:1 on the
+    /// page in light, which is a run of three that reads as one plate and two gaps. 0.65 of
+    /// `inkDim` is the lowest this can bank and still clear `ShellChrome.placeFloor` on every
+    /// ground these are drawn on; the lit plate stays the sentence's own ink.
     ///
     /// Both ends are this view's own numbers, and the agreement with `ShellWaiting.lit` is a
     /// coincidence of full being full rather than a coupling. Reading the ceiling from there
     /// would mean a change made for the bare plate silently moved these, which is the drift the
     /// shared *rhythm* above is meant to prevent, not to cause.
-    static let banked: Double = 0.3
+    static let banked: Double = 0.65
     static let lit: Double = 1.0
+
+    /// What the run is drawn in at full, named so its contrast can be measured: the sentence's
+    /// own ink, for the reason the body gives.
+    static func plateInk(_ scheme: ColorScheme) -> Color {
+        ShellChrome.inkDim(scheme)
+    }
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
@@ -1187,7 +1207,7 @@ struct ForumWaiting: View {
                 // The same ink as the sentence they trail: one ink for the whole statement, so a
                 // reader meets one way of waiting rather than a sentence in one weight and a run
                 // of plates in another.
-                ForumPostBand.plate(ShellChrome.inkDim(colorScheme))
+                ForumPostBand.plate(Self.plateInk(colorScheme))
                     .frame(width: ShellSpace.snug)
                     .opacity(Self.glow(index, at: instant))
             }
