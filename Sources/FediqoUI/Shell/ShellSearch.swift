@@ -72,6 +72,7 @@ final class ShellSearch {
     func open(from selection: String?, over notes: [Note]) {
         isOpen = true
         litWhenIndexed = false
+        letGo = nil
         text = ""
         selectionBefore = selection
         focusTick += 1
@@ -94,6 +95,7 @@ final class ShellSearch {
     func focus() {
         focusTick += 1
         litWhenIndexed = false
+        letGo = nil
     }
 
     /// Closes it and hands back the selection the timeline had when it opened. An index still
@@ -105,6 +107,7 @@ final class ShellSearch {
         isOpen = false
         text = ""
         fieldFocused = false
+        letGo = nil
         selectionBefore = nil
         return selection
     }
@@ -156,6 +159,44 @@ final class ShellSearch {
 
     /// Counts Returns in the field: each one asks the list to take the keys back.
     private(set) var submits = 0
+
+    /// The press the field let go of the keys on, while nothing has been pressed since (#168).
+    ///
+    /// **A Mac text field takes the keys back after Return by itself.** AppKit sends the field's
+    /// action — which is where Return hands the keys to the list — and then selects the field's
+    /// text again, making it first responder once more, whatever the action did. In a key window
+    /// SwiftUI hears that as the field being focused, so the keys went straight back to the
+    /// field: `j` replaced the pattern instead of moving the light, and the light was on a result
+    /// the new pattern no longer found. A focus that arrives on the very press that let go of it
+    /// is that reselection, and nobody asked for it; a later press — a click on the field, `/` —
+    /// is the reader asking, and is let through.
+    @ObservationIgnored private var letGo: LetGo?
+
+    /// One press, as the platform names it: `nil` where it names none.
+    private struct LetGo {
+        let press: AnyHashable?
+    }
+
+    /// Return has handed the keys back during `press`. Recorded where the field is one that
+    /// takes them back by itself — a Mac's — so the focus it takes on that press can be refused.
+    func letGo(during press: AnyHashable?) {
+        guard isOpen else { return }
+        letGo = LetGo(press: press)
+    }
+
+    /// The field's focus changed during `press`: whether it may have it. Losing it always may;
+    /// gaining it may, unless it is the field taking back on the same press the keys it has just
+    /// let go of. Where it may, `fieldFocused` follows it, which is what the shell's keys read.
+    func fieldFocus(_ on: Bool, during press: AnyHashable?) -> Bool {
+        guard on else {
+            fieldFocused = false
+            return true
+        }
+        if let letGo, letGo.press == press { return false }
+        letGo = nil
+        fieldFocused = true
+        return true
+    }
 
     /// Return came before the index: its first result is still to be lit when it lands.
     @ObservationIgnored private var litWhenIndexed = false

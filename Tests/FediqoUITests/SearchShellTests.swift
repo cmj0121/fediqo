@@ -418,4 +418,40 @@ struct SearchShellTests {
         #expect(onAll(search, notes, revision: 0, sources: [one], latest: nil)?.first == nil)
         #expect(DummyCommand.stepped([String](), from: nil, by: 1) == nil)
     }
+
+    // MARK: The field does not take the keys back by itself (#168)
+
+    @Test("The field's focus on the press that let the keys go is refused; a later press is let through")
+    func theSamePressIsRefused() async {
+        let search = await searching("swift", over: [note("a", "swift")])
+        #expect(search.fieldFocus(true, during: "typing"))
+        #expect(search.fieldFocused)
+        search.submit()
+        search.letGo(during: "return")
+        #expect(!search.fieldFocused)
+        // AppKit selecting the field's text again, on the Return itself.
+        #expect(!search.fieldFocus(true, during: "return"))
+        #expect(!search.fieldFocused, "the keys stay the list's")
+        #expect(DummyCommand.from("j", fieldFocused: search.fieldFocused) == .nextPost)
+        // Losing it is always allowed.
+        #expect(search.fieldFocus(false, during: "return"))
+        // A click on the field afterwards is the reader asking.
+        #expect(search.fieldFocus(true, during: "click"))
+        #expect(search.fieldFocused)
+    }
+
+    @Test("`/` after Return gives the field the keys even on the same press, and iOS never refuses")
+    func slashAndIOSAreLetThrough() async {
+        let search = await searching("swift", over: [note("a", "swift")])
+        search.submit()
+        search.letGo(during: nil)
+        search.focus()
+        #expect(search.fieldFocus(true, during: nil), "`/` asked for it")
+
+        // Where nothing let go of the keys on a press — iOS — a focus is never refused.
+        let tablet = await searching("swift", over: [note("a", "swift")])
+        tablet.submit()
+        #expect(tablet.fieldFocus(true, during: nil))
+        #expect(tablet.fieldFocused)
+    }
 }
