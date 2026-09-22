@@ -212,7 +212,9 @@ struct TimelinePane: View {
                 } else {
                     underneath
                 }
-            case nil:
+            // A page read out of a post is never what this pane is handed: it is drawn over the
+            // step beneath it (`ShellWalk.beneath`, `LinkInPlace`), which is what stands here.
+            case .link, nil:
                 underneath
             }
         }

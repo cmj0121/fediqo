@@ -151,7 +151,7 @@ public struct FediqoRootView: View {
     /// the post they left because they never left it. See `ShellReader`.
     private var linkReading: Binding<ShellReading?> {
         Binding(
-            get: { linkReader.reading },
+            get: { linkReader.sheet },
             set: { shown in if shown == nil { linkReader.close() } }
         )
     }
@@ -162,6 +162,9 @@ public struct FediqoRootView: View {
             // adopted, so a window chosen last run binds what was kept and everything read after
             // (#7). `prefs` is its one owner; a change is handed on, and written only if it dropped.
             .task {
+                // Before anything can be pressed: a page read out of a post is drawn in place on
+                // a Mac (#169), and the reader asks the walk here where it may be.
+                placeLinksInPage()
                 await session.keep(months: prefs.keepMonths)
                 await session.reloadFromStore()
                 // The store has now said what is held, which is the first moment this launch can
@@ -197,7 +200,7 @@ public struct FediqoRootView: View {
             // lamp back to. Where the lamp lands is #100's, and `TimelinePane` answers it on the
             // same change. Here rather than in the pane because the walk is held here — the pane
             // used to do it through a binding whose one meaning was "close the thread".
-            .onChange(of: session.timelineID) { _, _ in walk.clear() }
+            .onChange(of: session.timelineID) { _, _ in clearWalk() }
             .sheet(isPresented: $composing) {
                 ComposerSheet()
                     #if os(iOS)
@@ -225,6 +228,11 @@ public struct FediqoRootView: View {
             // list, where it is scrolled to and which post is selected are all exactly as they
             // were when it closes. That is the whole of "the reader comes back to the post they
             // left": there is nothing to restore, because nothing was taken away.
+            //
+            // **On a Mac, only where the page cannot be drawn in place** (#169): pressed on the
+            // timeline place, the page is a step of the walk and fills that place instead —
+            // still over the page it came from, which `LinkInPlace` leaves standing — and this
+            // sheet is not presented for it. See `ShellReader.inPlace`.
             .sheet(item: linkReading) { reading in
                 LinkReaderSheet(presented: reading, reader: linkReader) { linkReader.close() }
             }
@@ -498,7 +506,7 @@ public struct FediqoRootView: View {
             // One step back, whichever kind of step it was. The two lines used to be two
             // methods over two pieces of state; they are one walk now, and unwinding it in the
             // order the reader walked is the whole of what a press to leave does (#122).
-            case .person, .thread: return leaveWalk()
+            case .person, .thread, .link: return leaveWalk()
             case .search, .shortcuts, .selection, nil: return false
             }
         case .reload:
@@ -548,7 +556,7 @@ public struct FediqoRootView: View {
             case .shortcuts:
                 showingShortcuts = false
                 return true
-            case .person, .thread: return leaveWalk()
+            case .person, .thread, .link: return leaveWalk()
             case .search:
                 closeSearch()
                 return true
@@ -585,6 +593,7 @@ public struct FediqoRootView: View {
         // most one of them, and `DummyCommand.canWalk` asks about the pair rather than either.
         case .person: walk.openedPerson != nil
         case .thread: walk.openedThread != nil
+        case .link: walk.openedLink != nil
         case .search: search.isOpen
         case .selection: selectedItemID != nil
         }
@@ -901,14 +910,14 @@ public struct FediqoRootView: View {
 
     /// The timeline back as it was, with the post that was selected before the search.
     private func closeSearch() {
-        walk.clear()
+        clearWalk()
         selectedItemID = search.close()
     }
 
     /// The field emptied: the timeline is back, so the post selected before the search is too.
     private func searchCleared() {
         search.cleared { selection in
-            walk.clear()
+            clearWalk()
             selectedItemID = selection
         }
     }
@@ -927,6 +936,10 @@ public struct FediqoRootView: View {
         case .thread(let opened):
             guard let item = session.held(opened) else { return streamItems }
             return session.conversations.conversation(around: item).inOrder
+        // A page read out of a post has no rows: nothing on it is walked with `j` and `k`, and
+        // the list under it is not what the reader is looking at (#169).
+        case .link:
+            return []
         case nil:
             return streamItems
         }
@@ -944,6 +957,9 @@ public struct FediqoRootView: View {
         switch walk.standing {
         case .thread(let opened) where session.held(opened) != nil:
             selectedItemID = opened
+        // A page read out of a post is somebody else's page, and its top is its own business.
+        case .link:
+            return false
         case .person, .thread, nil:
             guard let first = currentListItems.first else { return false }
             selectedItemID = first.id
@@ -1115,6 +1131,8 @@ public struct FediqoRootView: View {
         // rather than an oversight: what is drawn there is what this device already holds, and a
         // reload that went and got more of the world would be 0.5.0 arriving through `r`.
         case .person: return false
+        // A page read out of a post is not a timeline; there is nothing of ours on it to ask for.
+        case .link: return false
         case .thread, .selection, nil: return true
         }
     }
@@ -1187,8 +1205,53 @@ public struct FediqoRootView: View {
     /// alternated between them could not unwind in the order it was walked.
     private func leaveWalk() -> Bool {
         guard let left = walk.back() else { return false }
+        // The page read out of a post goes with its step, and the page under it — never torn
+        // down — is simply in front again (#169).
+        if case .link = left.step { linkReader.close() }
         selectedItemID = left.lamp
         return true
+    }
+
+    /// The Back on a page read out of a post: one step back out of the walk, which is that page
+    /// wherever the Back can be pressed (#169).
+    private func leaveLink() {
+        guard walk.openedLink != nil else { return }
+        _ = leaveWalk()
+    }
+
+    /// Back to the stream in one go, for a list that has been replaced. A page read out of a post
+    /// that was one of the steps goes with them: nothing is left for it to be drawn in place of,
+    /// and a reading left open would be presented as a sheet instead.
+    private func clearWalk() {
+        if walk.openedLink != nil { linkReader.close() }
+        walk.clear()
+    }
+
+    /// Hands the link reader the question of where a page opens (#169). On a Mac it is one more
+    /// step of the walk wherever one may be taken, and a sheet elsewhere; on iPad and iPhone it is
+    /// always the sheet.
+    private func placeLinksInPage() {
+        #if os(macOS)
+        linkReader.placing = { url in placeLink(url) }
+        #endif
+    }
+
+    /// A page read out of a post's words, drawn in place of the page it was pressed on: one step
+    /// of the walk, from the row the lamp is on, so leaving it gives that row back (#169).
+    ///
+    /// **Under `canWalk`'s guard**, as a conversation and a person are — so not under the viewer
+    /// or the keys list, and not from another place's page, where there is no walk to take a step
+    /// in. Those read it in the sheet, as before.
+    private func placeLink(_ url: URL) -> Bool {
+        Self.placeLink(url, on: &walk, from: selectedItemID, place: place, open: openLayers)
+    }
+
+    /// `placeLink`'s rule, given what it reads, so a test takes the step the root takes.
+    static func placeLink(
+        _ url: URL, on walk: inout ShellWalk, from lamp: String?, place: ShellPlace, open: Set<DummyLayer>
+    ) -> Bool {
+        guard canWalk(place: place, open: open) else { return false }
+        return walk.walk(to: .link(url), from: lamp) || walk.openedLink == url
     }
 
     /// Tab rotates this page's tabs: named queries on the timeline, purposes on Usage and on
@@ -1358,7 +1421,9 @@ public struct FediqoRootView: View {
             TimelinePane(
                 session: session,
                 selectedID: $selectedItemID,
-                standing: walk.standing,
+                // What the page under a link stands on: a page read out of a post is drawn over
+                // it by `LinkInPlace`, and it stays drawn (#169).
+                standing: walk.beneath,
                 onOpenPerson: { _ = openPerson($0) },
                 decks: $decks,
                 playback: playback,
@@ -1395,6 +1460,7 @@ public struct FediqoRootView: View {
                     )
                 }
             }
+            .modifier(LinkInPlace(reader: linkReader, onBack: leaveLink))
         case .notices: NoticesPane()
         case .account: AccountPane(session: session)
         case .usage: UsagePane()

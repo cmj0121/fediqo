@@ -294,6 +294,7 @@ struct LinkTests {
     @Test("Both ways to follow an address are sentences this app actually ships", arguments: [
         "link.open.here", "link.open.browser", "link.hint.pointer", "link.hint.touch",
         "link.reader.label", "link.reader.browser", "link.reader.close", "link.reader.refused",
+        "link.reader.back", "link.reader.leaveHint",
     ])
     func theSentencesExist(_ key: String) {
         // `L10n.t` answers with the key itself where there is no string for it, which is what

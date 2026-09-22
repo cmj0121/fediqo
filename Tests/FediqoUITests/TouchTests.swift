@@ -205,6 +205,11 @@ struct TouchTests {
             case .person:
                 #expect(!searchable)
                 #expect(!reloadable)
+            // A page read out of a post is somebody else's page: the search is under it, and it
+            // holds nothing of this device's to ask for (#169).
+            case .link:
+                #expect(!searchable)
+                #expect(!reloadable)
             case .viewer, .shortcuts:
                 #expect(!searchable)
                 #expect(!reloadable)

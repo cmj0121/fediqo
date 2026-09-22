@@ -608,6 +608,8 @@
 "link.reader.browser"                 = "Open in your browser";
 "link.reader.close"                   = "Done";
 "link.reader.refused"                 = "That link goes somewhere Fediqo will not open. It was not followed.";
+"link.reader.back"                    = "Back";
+"link.reader.leaveHint"               = "Esc or q";
 "post.tag.spoken"                     = "hashtag %@";
 
 /* #64 — the one way of saying something is on its way. Spoken only: the plate itself is what a
