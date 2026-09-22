@@ -202,6 +202,14 @@ public struct FediqoRootView: View {
                     .presentationDetents([.medium, .large])
                     #endif
             }
+            // An answer, over the conversation it belongs to (#108). Driven by the session's one
+            // value, so the key and the mark open the same surface by writing the same thing.
+            .sheet(item: $session.answering) { target in
+                AnswerSheet(target: target)
+                    #if os(iOS)
+                    .presentationDetents([.medium, .large])
+                    #endif
+            }
             // **A link the reader pressed in somebody's words, drawn over the shell** (#34). On
             // the root beside the other presenters and for their stated reason: one presenter
             // driven by one piece of state survives a second call site, and this one has three
@@ -582,6 +590,8 @@ public struct FediqoRootView: View {
             return boostFocused()
         case .favourite:
             return favouriteFocused()
+        case .answer:
+            return answerFocused()
         case .compose:
             guard availability.canCompose else { return false }
             showingShortcuts = false
@@ -1062,6 +1072,20 @@ public struct FediqoRootView: View {
             guard session.acts(on: item).offers(.favourite) else { return false }
             Task { await session.favourite(item) }
             return true
+        }
+    }
+
+    /// `w` — an answer to the post the lamp is on, written from inside its conversation (#108).
+    ///
+    /// **Only with a conversation open**, because that is where the answer lands and where the
+    /// post being answered is in its place; on the bare timeline the key moves nothing and yields.
+    /// Whether the post offers it is `session.openAnswer`'s one guard, the one the mark reads.
+    private func answerFocused() -> Bool {
+        guard let opened = threadStack.last,
+              let root = streamItems.first(where: { $0.id == opened })
+        else { return false }
+        return onFocusedItem { item in
+            session.openAnswer(to: item, in: root)
         }
     }
 

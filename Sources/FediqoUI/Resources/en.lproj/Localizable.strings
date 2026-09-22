@@ -54,6 +54,13 @@
 "compose.limit" = "%d / %d";
 "compose.none.title" = "Nothing to write to";
 "compose.none.detail" = "None of the sources you are signed in to can be written to from here.";
+"answer.title" = "Answer";
+"answer.to" = "Answering %@";
+"answer.goesTo" = "Goes to %@";
+"answer.reach" = "Who it reaches";
+"answer.wider" = "This reaches further than the post it answers.";
+"answer.body" = "Your answer";
+"answer.send" = "Send";
 
 "shortcut.title" = "Keys";
 "shortcut.note" = "These work while you are not writing.";
@@ -75,6 +82,7 @@
 "shortcut.back" = "Back to the list";
 "shortcut.boost" = "Boost this post to its source, or take the boost back";
 "shortcut.favourite" = "Favourite this post on its source, or take the favourite back";
+"shortcut.answer" = "Answer the post you are on, from inside its conversation";
 "shortcut.reload" = "Reload this timeline, or the open thread";
 "shortcut.dismiss" = "Close what is in front, or unfocus";
 "shortcut.search" = "Search the posts this device holds";
@@ -226,13 +234,12 @@
 "item.act.no.turnedAway" = "this source turned a write away";
 "item.act.no.unnameable" = "this post cannot be named on its server";
 "item.act.unfavourite" = "Take the favourite back";
-"item.act.reply" = "Reply";
+"item.act.answer" = "Answer";
 "item.act.quote" = "Quote";
 "item.act.favourite" = "Favourite";
 "item.act.bookmark" = "Bookmark";
 "item.act.kept" = "Kept";
 "item.act.more" = "More";
-"item.toast.reply" = "Reply stays on this device.";
 "item.toast.quote" = "A quote opens the composer. Not this session.";
 "item.toast.bookmark.on" = "Bookmarked, dummy.";
 "item.toast.bookmark.off" = "Bookmark cleared.";

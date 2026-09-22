@@ -28,6 +28,10 @@ struct ItemActing {
     var boost: (() -> Void)?
     /// Favouriting the post on its source, or taking the favourite back (#107).
     var favourite: (() -> Void)?
+    /// Answering the post (#108): from a timeline, opening the conversation it belongs to, since
+    /// that is where an answer is written; from inside the conversation, opening the answer.
+    /// Nothing where the list can do neither — somebody's page — and then no mark is drawn.
+    var answer: (() -> Void)?
 }
 
 /// The vocabulary of the acts a reader performs on a post.
@@ -58,6 +62,9 @@ enum ItemActs {
         // The star is the one act that does have a filled twin, and it has always been drawn
         // filled when done — kept, so the favourite reads as it did before it went to the source.
         case .favourite: return done ? "star.fill" : "star"
+        // An answer is never "done" on the post: the reader may answer as often as they like, and
+        // the words they wrote are rows of their own in the thread.
+        case .answer: return "arrowshape.turn.up.left"
         }
     }
 
@@ -70,6 +77,7 @@ enum ItemActs {
         case .boost: return L10n.t(done ? "item.act.unboost" : "item.act.boost", language: language)
         case .favourite:
             return L10n.t(done ? "item.act.unfavourite" : "item.act.favourite", language: language)
+        case .answer: return L10n.t("item.act.answer", language: language)
         }
     }
 

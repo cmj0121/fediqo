@@ -175,6 +175,60 @@ final class ShellConversations {
         }
     }
 
+    /// An answer the reader wrote from inside this thread, placed under what it answers (#108).
+    ///
+    /// **Laid into the halves the source handed back rather than asked for again.** The reader is
+    /// looking at the conversation they answered; a full read to show them their own words would
+    /// be a thread that blanks and refills under them, and a thread still on the wire when this
+    /// lands will bring the answer with it anyway, because the source now holds it.
+    ///
+    /// A thread that was alone, or not yet asked, becomes a thread with this one answer in it: the
+    /// reader has just made it a conversation. One that could not be had is left as it is, since
+    /// drawing a single answer under a sentence saying the thread could not be read would be two
+    /// things saying opposite things about one pane.
+    func landed(_ note: Note, under root: String, rootID: String?) {
+        switch standing(of: root) {
+        case .loaded(let ancestors, let descendants, let held):
+            standings[root] = .loaded(
+                ancestors: ancestors,
+                descendants: Self.placed(note, in: descendants, rootID: held ?? rootID),
+                rootID: held ?? rootID
+            )
+        case .unasked, .none, .coming:
+            standings[root] = .loaded(ancestors: [], descendants: [note], rootID: rootID)
+            hosts[root] = note.source.host
+        case .absent:
+            break
+        }
+    }
+
+    /// Where an answer goes among the answers already drawn: **directly after the last post under
+    /// the one it answers**, so it reads in its place rather than at the bottom of the thread.
+    ///
+    /// The depths are `DummyConversation.around`'s walk, done once more over the notes; a parent
+    /// this device cannot find among them is the post the thread is about, whose subtree is the
+    /// whole list, so the answer goes last. Already present, it is not placed twice.
+    static func placed(_ note: Note, in descendants: [Note], rootID: String?) -> [Note] {
+        guard !descendants.contains(where: { $0.key == note.key }) else { return descendants }
+        var depths: [String: Int] = [:]
+        if let rootID { depths[rootID] = 0 }
+        var depth: [Int] = []
+        for held in descendants {
+            let parent = held.reply?.inReplyToId.flatMap { depths[$0] }
+            let own = (parent ?? 0) + 1
+            if let id = held.statusID { depths[id] = own }
+            depth.append(own)
+        }
+        guard let parentID = note.reply?.inReplyToId,
+              let at = descendants.firstIndex(where: { $0.statusID == parentID })
+        else { return descendants + [note] }
+        var index = at + 1
+        while index < descendants.count, depth[index] > depth[at] { index += 1 }
+        var placed = descendants
+        placed.insert(note, at: index)
+        return placed
+    }
+
     /// Lets go of one server's threads: `Remove`, and `Clear`. Keyed by host rather than swept by
     /// reading the notes back, because the notes may be gone by the time this is called.
     func forget(host raw: String) {

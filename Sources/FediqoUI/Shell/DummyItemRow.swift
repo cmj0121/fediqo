@@ -999,10 +999,7 @@ struct DummyItemRow: View {
 
     private var passOn: some View {
         HStack(spacing: ShellSpace.snug) {
-            counted("arrowshape.turn.up.left", count: item.counts.replies,
-                    label: "item.act.reply", on: false) {
-                onToast(L10n.t("item.toast.reply"))
-            }
+            answerMark
             boostMark
             mark("quote.bubble", label: "item.act.quote", on: false) {
                 onToast(L10n.t("item.toast.quote"))
@@ -1053,6 +1050,27 @@ struct DummyItemRow: View {
                 spoken: ItemActs.spoken(.boost, done: done, standing: standing)
             ) {
                 acting.boost?()
+            }
+        }
+    }
+
+    /// Answering this post (#108). From a timeline the press opens the conversation, which is
+    /// where an answer is written; inside it, the press opens the answer.
+    ///
+    /// **Drawn only where there is somewhere for the press to go**, both halves: the post offers
+    /// an answer, and the list this row is in has an answer to give — somebody's page has none,
+    /// and a mark that did nothing there would be the control this repo keeps refusing to ship.
+    @ViewBuilder
+    private var answerMark: some View {
+        if acting.acts.offers(.answer), let answer = acting.answer {
+            counted(
+                ItemActs.symbol(.answer, done: false, standing: nil),
+                count: item.counts.replies,
+                label: "item.act.answer",
+                on: false,
+                spoken: ItemActs.spoken(.answer, done: false, standing: nil)
+            ) {
+                answer()
             }
         }
     }

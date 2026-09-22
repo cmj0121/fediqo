@@ -151,7 +151,13 @@ struct TimelinePane: View {
                     posts: session.posts,
                     selectedID: $selectedID,
                     marks: markBinding,
-                    acting: acting,
+                    // No answer from somebody's page: a conversation does not open under it, which
+                    // `DummyLayer.person` states, so the mark would be a press with nowhere to go.
+                    acting: { item in
+                        var acting = acting(item)
+                        acting.answer = nil
+                        return acting
+                    },
                     decks: $decks,
                     playback: playback,
                     onPlayRow: onPlayRow,
@@ -173,7 +179,7 @@ struct TimelinePane: View {
                     onAskAround: { Task { await session.conversations.again(opened, in: session) } },
                     selectedID: $selectedID,
                     marks: markBinding,
-                    acting: acting,
+                    acting: { acting($0, inside: opened) },
                     decks: $decks,
                     playback: playback,
                     onPlayRow: onPlayRow,
@@ -412,6 +418,12 @@ struct TimelinePane: View {
     /// away since, and three panes working it out for themselves would be three derivations free
     /// to disagree about one post.
     private func acting(_ item: DummyItem) -> ItemActing {
+        acting(item, inside: nil)
+    }
+
+    /// The same, for a row drawn inside the conversation around `root` — where the answer mark
+    /// opens the answer rather than the conversation (#108).
+    private func acting(_ item: DummyItem, inside root: DummyItem?) -> ItemActing {
         var standings: [PostAct: ShellActStanding] = [:]
         for act in PostAct.allCases {
             standings[act] = session.acts.standing(of: item.id, act)
@@ -420,7 +432,14 @@ struct TimelinePane: View {
             acts: session.acts(on: item),
             standings: standings,
             boost: { Task { await session.boost(item) } },
-            favourite: { Task { await session.favourite(item) } }
+            favourite: { Task { await session.favourite(item) } },
+            answer: {
+                if let root {
+                    session.openAnswer(to: item, in: root)
+                } else {
+                    onOpenThread(item.id)
+                }
+            }
         )
     }
 

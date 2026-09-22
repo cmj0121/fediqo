@@ -54,6 +54,13 @@
 "compose.limit" = "%d / %d";
 "compose.none.title" = "沒有可以發文的來源";
 "compose.none.detail" = "你已登入的來源裡，沒有可以從這裡發文的。";
+"answer.title" = "回應";
+"answer.to" = "回應 %@";
+"answer.goesTo" = "送往 %@";
+"answer.reach" = "誰看得到";
+"answer.wider" = "這則回應傳得比它回應的貼文更遠。";
+"answer.body" = "你的回應";
+"answer.send" = "送出";
 
 "shortcut.title" = "快捷鍵";
 "shortcut.note" = "沒有在寫的時候，這些鍵會動。";
@@ -75,6 +82,7 @@
 "shortcut.back" = "回到清單";
 "shortcut.boost" = "把這則貼文轉發到它的來源，或收回轉發";
 "shortcut.favourite" = "在這則貼文的來源收藏它，或取消收藏";
+"shortcut.answer" = "在討論串裡回應你所在的這則貼文";
 "shortcut.reload" = "重新載入這條時間軸，或打開的討論串";
 "shortcut.dismiss" = "關掉眼前的東西，或取消選取";
 "shortcut.search" = "搜尋這台裝置上的貼文";
@@ -225,13 +233,12 @@
 "item.act.no.turnedAway" = "這個來源拒絕了寫入";
 "item.act.no.unnameable" = "這則貼文在它的來源上沒有名字";
 "item.act.unfavourite" = "取消收藏";
-"item.act.reply" = "回覆";
+"item.act.answer" = "回應";
 "item.act.quote" = "引用";
 "item.act.favourite" = "收藏";
 "item.act.bookmark" = "書籤";
 "item.act.kept" = "留下";
 "item.act.more" = "更多";
-"item.toast.reply" = "回覆只在這台機器上。";
 "item.toast.quote" = "引用會開啟編輯器。這次工作階段還不行。";
 "item.toast.bookmark.on" = "已加書籤，dummy。";
 "item.toast.bookmark.off" = "已取消書籤。";
