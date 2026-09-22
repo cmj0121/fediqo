@@ -311,89 +311,11 @@ public struct FediqoRootView: View {
             .sheet(item: $session.editing) { draft in
                 TimelineEditor(session: session, draft: draft)
             }
-            // **The Remove question, on the root beside the other three presenters**, and for the
-            // same documented reason: one presenter driven by one piece of session state survives
-            // a second call site. Remove is asked from a source row today and will be asked from
-            // the source page's own header the day that grows one.
-            //
-            // It is asked at all because Remove takes the board picks the reader made, and
-            // `ShellSession.clear`'s comment is the argument: pictures come back by themselves, a
-            // pick of eight boards out of forty does not.
-            .confirmationDialog(
-                Text(session.removing.map { String(format: L10n.t("account.remove.title"), $0) } ?? ""),
-                isPresented: Binding(
-                    get: { session.removing != nil },
-                    set: { if !$0 { session.removing = nil } }
-                ),
-                // Explicit, because macOS draws no title at all on `.automatic` — and the title is
-                // the only line that names which server this is about.
-                titleVisibility: .visible,
-                presenting: session.removing
-            ) { host in
-                Button(L10n.t("account.remove.confirm"), role: .destructive) {
-                    Task { await session.remove(host: host) }
-                }
-                // **Cancel stays the default action.** No `.keyboardShortcut(.defaultAction)` on
-                // the destructive button: Return dismisses this question, it never answers it.
-                Button(L10n.t("board.choose.cancel"), role: .cancel) { session.removing = nil }
-            } message: { host in
-                Text(Self.removeDetail(for: host, in: session.sources))
-            }
-            // **The Clear question, beside Remove's and driven the same way** (decision 29). One
-            // presenter, one piece of session state, two entrances: a source row and
-            // `UsagePane`'s row, which press the same key for the same call and must
-            // therefore ask the same question.
-            //
-            // **It exists because Clear is not reversible, whatever the row looks like.** It drops
-            // the pictures, the emoji names and the first posts, all of which come back — and it
-            // calls `ForumSessions.forget(host:)`, which deletes the saved Keychain password and
-            // signs the reader out of the forum. The Account row says neither of those before the
-            // press, so this is the one place they are said.
-            .confirmationDialog(
-                Text(session.clearing.map { String(format: L10n.t("account.clear.title"), $0) } ?? ""),
-                isPresented: Binding(
-                    get: { session.clearing != nil },
-                    set: { if !$0 { session.clearing = nil } }
-                ),
-                titleVisibility: .visible,
-                presenting: session.clearing
-            ) { host in
-                // **Plain, where Remove's confirm is `.destructive`, and the difference is
-                // deliberate.** The row's icon says *this takes something away*; the dialog says
-                // exactly how much, and the weight of the confirm matches the weight of the act. A
-                // destructive Clear would be the confirmation repeating the row's overstatement,
-                // which is the one thing decision 29 asks not to happen.
-                Button(L10n.t("account.clear.confirm")) {
-                    Task { await session.clear(host: host) }
-                }
-                Button(L10n.t("board.choose.cancel"), role: .cancel) { session.clearing = nil }
-            // **This closure is the one seam of this dialog a test cannot reach** (risk 12).
-            // `clearDetailKey` is pure and is driven across all four combinations; what nothing
-            // verifies is that *this* body asks it with `hasPassword` and `reachedSignIn` for the
-            // host being confirmed, because a `message:` builder only runs inside a presented
-            // dialog. Named here rather than left to be discovered.
-            } message: { host in
-                Text(L10n.t(SourceRow.clearDetailKey(
-                    hasPassword: session.forums.hasPassword(host: host),
-                    reachedSignIn: session.isSignedIn(host: host)
-                )))
-            }
-            // A server ended a sign-in on its own side: the row already reads signed out, and this
-            // says why rather than leaving a timeline to go quiet.
-            .alert(
-                Text(L10n.t("account.mastodon.ended.title")),
-                isPresented: Binding(
-                    get: { !session.mastodon.ended.isEmpty },
-                    set: { if !$0 { session.mastodon.endedSeen() } }
-                )
-            ) {
-                Button(L10n.t("store.newer.ok"), role: .cancel) { session.mastodon.endedSeen() }
-            } message: {
-                Text(String(
-                    format: L10n.t("account.mastodon.ended.detail"),
-                    session.mastodon.ended.joined(separator: ", ")
-                ))
-            }
+            // Remove's question, Clear's, and the notice that a server ended a sign-in: each a
+            // modifier of its own rather than spelled here. See `RemoveQuestion` for why.
+            .modifier(RemoveQuestion(session: session))
+            .modifier(ClearQuestion(session: session))
+            .modifier(EndedSignInNotice(session: session))
             .alert(Text(L10n.t("store.newer.title")), isPresented: $storeIsNewer) {
                 Button(L10n.t("store.newer.ok"), role: .cancel) { storeNoticeSeen?() }
             } message: {
@@ -1453,5 +1375,122 @@ private struct WithdrawQuestion: ViewModifier {
             get: { session.withdrawing != nil },
             set: { shown in if !shown { session.cancelWithdraw() } }
         )
+    }
+}
+
+/// Remove's question (decision 29), as a modifier of its own.
+///
+/// **Out of `FediqoRootView`'s chain, and the three below with it.** Each built a `Binding` and
+/// a `presenting:` presenter with closures inside one very long modifier chain, and Xcode 26.6's
+/// Swift gave up type-checking that chain on the runner — while the compiler this is written
+/// with solved it in three seconds without a word. A local timing predicts nothing about another
+/// compiler's solver, so the chain is kept to one plain `.modifier(…)` per presenter instead,
+/// which is a cost no compiler has to solve against the rest of it. See `WithdrawQuestion`.
+private struct RemoveQuestion: ViewModifier {
+    let session: ShellSession
+
+    func body(content: Content) -> some View {
+        content
+            // **The Remove question, on the root beside the other three presenters**, and for the
+            // same documented reason: one presenter driven by one piece of session state survives
+            // a second call site. Remove is asked from a source row today and will be asked from
+            // the source page's own header the day that grows one.
+            //
+            // It is asked at all because Remove takes the board picks the reader made, and
+            // `ShellSession.clear`'s comment is the argument: pictures come back by themselves, a
+            // pick of eight boards out of forty does not.
+            .confirmationDialog(
+                Text(session.removing.map { String(format: L10n.t("account.remove.title"), $0) } ?? ""),
+                isPresented: Binding(
+                    get: { session.removing != nil },
+                    set: { if !$0 { session.removing = nil } }
+                ),
+                // Explicit, because macOS draws no title at all on `.automatic` — and the title is
+                // the only line that names which server this is about.
+                titleVisibility: .visible,
+                presenting: session.removing
+            ) { host in
+                Button(L10n.t("account.remove.confirm"), role: .destructive) {
+                    Task { await session.remove(host: host) }
+                }
+                // **Cancel stays the default action.** No `.keyboardShortcut(.defaultAction)` on
+                // the destructive button: Return dismisses this question, it never answers it.
+                Button(L10n.t("board.choose.cancel"), role: .cancel) { session.removing = nil }
+            } message: { host in
+                Text(FediqoRootView.removeDetail(for: host, in: session.sources))
+            }
+    }
+}
+
+/// Clear's question (decision 29), beside Remove's and out of the chain for its reason.
+private struct ClearQuestion: ViewModifier {
+    let session: ShellSession
+
+    func body(content: Content) -> some View {
+        content
+            // **The Clear question, beside Remove's and driven the same way** (decision 29). One
+            // presenter, one piece of session state, two entrances: a source row and
+            // `UsagePane`'s row, which press the same key for the same call and must
+            // therefore ask the same question.
+            //
+            // **It exists because Clear is not reversible, whatever the row looks like.** It drops
+            // the pictures, the emoji names and the first posts, all of which come back — and it
+            // calls `ForumSessions.forget(host:)`, which deletes the saved Keychain password and
+            // signs the reader out of the forum. The Account row says neither of those before the
+            // press, so this is the one place they are said.
+            .confirmationDialog(
+                Text(session.clearing.map { String(format: L10n.t("account.clear.title"), $0) } ?? ""),
+                isPresented: Binding(
+                    get: { session.clearing != nil },
+                    set: { if !$0 { session.clearing = nil } }
+                ),
+                titleVisibility: .visible,
+                presenting: session.clearing
+            ) { host in
+                // **Plain, where Remove's confirm is `.destructive`, and the difference is
+                // deliberate.** The row's icon says *this takes something away*; the dialog says
+                // exactly how much, and the weight of the confirm matches the weight of the act. A
+                // destructive Clear would be the confirmation repeating the row's overstatement,
+                // which is the one thing decision 29 asks not to happen.
+                Button(L10n.t("account.clear.confirm")) {
+                    Task { await session.clear(host: host) }
+                }
+                Button(L10n.t("board.choose.cancel"), role: .cancel) { session.clearing = nil }
+            // **This closure is the one seam of this dialog a test cannot reach** (risk 12).
+            // `clearDetailKey` is pure and is driven across all four combinations; what nothing
+            // verifies is that *this* body asks it with `hasPassword` and `reachedSignIn` for the
+            // host being confirmed, because a `message:` builder only runs inside a presented
+            // dialog. Named here rather than left to be discovered.
+            } message: { host in
+                Text(L10n.t(SourceRow.clearDetailKey(
+                    hasPassword: session.forums.hasPassword(host: host),
+                    reachedSignIn: session.isSignedIn(host: host)
+                )))
+            }
+    }
+}
+
+/// A server ended a sign-in on its own side, said — out of the chain for `RemoveQuestion`'s reason.
+private struct EndedSignInNotice: ViewModifier {
+    let session: ShellSession
+
+    func body(content: Content) -> some View {
+        content
+            // A server ended a sign-in on its own side: the row already reads signed out, and this
+            // says why rather than leaving a timeline to go quiet.
+            .alert(
+                Text(L10n.t("account.mastodon.ended.title")),
+                isPresented: Binding(
+                    get: { !session.mastodon.ended.isEmpty },
+                    set: { if !$0 { session.mastodon.endedSeen() } }
+                )
+            ) {
+                Button(L10n.t("store.newer.ok"), role: .cancel) { session.mastodon.endedSeen() }
+            } message: {
+                Text(String(
+                    format: L10n.t("account.mastodon.ended.detail"),
+                    session.mastodon.ended.joined(separator: ", ")
+                ))
+            }
     }
 }
