@@ -656,6 +656,10 @@ struct SourceRowView: View {
     /// this row's host here rather than filtered by the caller, so the row stays a function of its
     /// inputs and the comparison is in one place.
     let refusal: (host: String, key: String)?
+    /// What this forum's row owes the reader about its sign-in (#153) — that a launch did not sign
+    /// it in again and why, or that a password was not kept or not deleted — already a sentence.
+    /// The caller asks `ForumSessions.notice(host:)` for this row's host; nothing here looks.
+    var notice: String? = nil
 
     /// Whether the pointer is on this row. **`RailButton`'s own `@State hovering`**, and like it a
     /// seam no test reaches — `.onHover` is delivered by a rendered tree. What a test does reach
@@ -952,6 +956,14 @@ struct SourceRowView: View {
                 // and why; this host was added. Two of this row's marks are alarm-coloured, which
                 // is what keeps the distinction readable: alarm on a glyph is a control, alarm on
                 // words is a report.
+                .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        if let notice {
+            // The same weight as a refusal and for its reason: this host was added, and nothing
+            // about it is broken that a press of Sign in on this row does not answer.
+            Text(notice)
+                .shellFont(.mark)
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
         }

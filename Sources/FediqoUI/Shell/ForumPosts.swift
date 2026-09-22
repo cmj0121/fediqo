@@ -291,6 +291,8 @@ final class ForumPosts {
     init(http: any HTTPClient = ForumPosts.live, through forums: ForumSessions? = nil) {
         self.http = http
         self.forums = forums
+        // Weak: `forums` outlives this and holds the listener, and this holds `forums`.
+        forums?.whenSignedIn { [weak self] host in self?.signedIn(host: host) }
     }
 
     /// Built with this caller's own ceiling rather than the transport's default. See `maxBytes`.
@@ -447,7 +449,6 @@ final class ForumPosts {
     /// The fetch of one part, started unless one is running. `limit` bounds each request of it.
     private func work(for key: Key, within limit: Duration? = nil) -> Task<Void, Never> {
         if let running = inFlight[key] { return running }
-        let client = self.client(for: key.host, within: limit)
         let tid = key.tid
         let part = key.part
         // Unstructured on purpose, and the reason is `ShellPictures.work`'s: the caller is a
@@ -459,6 +460,13 @@ final class ForumPosts {
         // pause in `ForumPostBand`, before this is ever reached: only a view's own task knows
         // that its row went away.
         let started = Task { @MainActor in
+            // **A forum being signed in again at launch is waited for, boundedly, before it is
+            // read** (#153), and the reader is chosen after the wait rather than before it: read
+            // a moment earlier, the post would be asked for as a guest and come back withheld.
+            // Before the slot is taken, so a forum still signing in holds up nobody else's.
+            if let forums = self.forums { await forums.settled(host: key.host) }
+            let asked = self.forums?.signIns(host: key.host) ?? 0
+            let client = self.client(for: key.host, within: limit)
             await self.enter()
             let answer: Result<[DiscuzPost], Absence>
             do {
@@ -492,6 +500,15 @@ final class ForumPosts {
             // under the forum the reader has just emptied, and they would have to press Clear a
             // second time to undo the first one's own wake.
             guard !self.cleared.contains(key) else { return }
+
+            // **A guest's answer that lands after a sign-in is not kept** (#153). It was asked for
+            // before the forum knew who this was, and it is the answer the sign-in changes; kept,
+            // it would sit under a signed-in forum as "withheld" for the rest of the run. The
+            // generation moves, so the band asks again as the member it now is.
+            if asked != (self.forums?.signIns(host: key.host) ?? 0), Self.isGuestShaped(answer) {
+                self.generation += 1
+                return
+            }
 
             switch answer {
             case .success(let posts):
@@ -718,6 +735,41 @@ final class ForumPosts {
             missing.removeValue(forKey: key)
         }
         generation += 1
+    }
+
+    /// A sign-in has just landed on this forum — at launch, on the forum's own page, or by the
+    /// saved password — so every answer here that a signed-in reader could get differently is
+    /// forgotten and asked again (#153).
+    ///
+    /// **Forget and ask again, rather than only hold every read until a sign-in settles.** A
+    /// launch's own sign-in is waited for (`ForumSessions.settled`), but boundedly, and a sign-in
+    /// made by hand an hour into a run has nothing to wait for: the rows the reader already
+    /// scrolled past were read as a guest, and without this they would say "withheld" until the
+    /// app quit. What goes is exactly what a sign-in can change — a withheld post, a refusal,
+    /// and a page that was not a thread (a members-only board answers with its login page) —
+    /// and what stays is words already read, which a sign-in does not make any truer.
+    func signedIn(host raw: String) {
+        let host = raw.lowercased()
+        var dropped = false
+        for (key, held) in entries where key.host == host && held.posts.contains(where: \.isWithheld) {
+            if let gone = entries.removeValue(forKey: key) { heldBytes -= gone.cost }
+            dropped = true
+        }
+        for (key, absence) in missing where key.host == host
+            && (absence == .refused || absence == .unreadable) {
+            missing.removeValue(forKey: key)
+            dropped = true
+        }
+        // In flight too: the guard in `work` drops a guest's answer that lands after this.
+        if dropped || inFlight.keys.contains(where: { $0.host == host }) { generation += 1 }
+    }
+
+    /// Whether this is an answer a sign-in could have changed. See `signedIn(host:)`.
+    private static func isGuestShaped(_ answer: Result<[DiscuzPost], Absence>) -> Bool {
+        switch answer {
+        case .success(let posts): posts.contains(where: \.isWithheld)
+        case .failure(let absence): absence == .refused || absence == .unreadable
+        }
     }
 
     /// Keys whose fetch was in the air when the reader cleared their forum. Read after the
