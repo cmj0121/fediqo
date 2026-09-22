@@ -840,17 +840,26 @@ public struct FediqoRootView: View {
 
     /// j/k and the arrows walk whichever list is in front: the stream, or the open conversation.
     private func moveInList(by step: Int) -> Bool {
-        guard place == .timeline, let ids = currentListIDs else { return false }
-        // Entering the selection obeys the entry rule the same as any other layer. Moving an
-        // existing one does not — the lamp is already on, and `j` means move rather than enter.
-        // With a thread or the viewer open the selection is always already on, so in practice
-        // this only ever refuses a first press under the guide.
-        if selectedItemID == nil,
-           !DummyCommand.canOpen(.selection, whenOpen: openLayers) { return false }
-        let next = DummyCommand.stepped(ids, from: selectedItemID, by: step)
-        guard let next else { return false }
+        guard place == .timeline,
+              let next = Self.moved(in: currentListIDs, from: selectedItemID, by: step, open: openLayers)
+        else { return false }
         selectedItemID = next
         return true
+    }
+
+    /// Where `j` or `k` puts the lamp in the list in front, or nothing where the press moves
+    /// nothing. Static so a test that follows the reader's keys presses the rule the root does
+    /// (#168), rather than a copy of it.
+    ///
+    /// Entering the selection obeys the entry rule the same as any other layer. Moving an
+    /// existing one does not — the lamp is already on, and `j` means move rather than enter.
+    /// With a thread or the viewer open the selection is always already on, so in practice
+    /// this only ever refuses a first press under the guide — or under a search, which is why
+    /// Return lights the first result rather than leaving `j` to.
+    static func moved(in ids: [String]?, from selected: String?, by step: Int, open: Set<DummyLayer>) -> String? {
+        guard let ids else { return nil }
+        if selected == nil, !DummyCommand.canOpen(.selection, whenOpen: open) { return nil }
+        return DummyCommand.stepped(ids, from: selected, by: step)
     }
 
     /// The stream `j` and `k` move through: a search's results while one is open, otherwise the
