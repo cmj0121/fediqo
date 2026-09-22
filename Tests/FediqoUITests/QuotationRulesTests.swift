@@ -7,14 +7,14 @@ import Testing
 @testable import FediqoPersistence
 @testable import FediqoUI
 
-/// A quotation inside another has one rule per level, and whoever spoke first reads first — #160.
+/// A quotation inside another has one rule per level — #160.
 ///
 /// The structure is asked of `ForumQuotation.drawn(_:)`, which is the whole of the decision about
-/// wrappers; the rules and their order are asked of the view itself, drawn once through
-/// `ImageRenderer` and read back as columns of paint. Words there are blank lines, so the only
-/// paint on the image is the rules: a line's height without a glyph to mistake for one.
+/// wrappers; the rules are asked of the view itself, drawn once through `ImageRenderer` and read
+/// back as columns of paint. Words there are blank lines, so the only paint on the image is the
+/// rules: a line's height without a glyph to mistake for one.
 @MainActor
-@Suite("Nested quotations: one rule per level, the quoted first", .serialized)
+@Suite("Nested quotations: one rule per level", .serialized)
 struct QuotationRulesTests {
     typealias Q = DiscuzQuotation
 
@@ -98,19 +98,19 @@ struct QuotationRulesTests {
         return found
     }
 
-    @Test("Three levels with words are three rules stepping right, the quoted above the words")
+    @Test("Three levels with words are three rules stepping right, in the page's order")
     func threeLevelsThreeRules() throws {
         let chain = Q(words: Self.blank, quoting: [Q(words: Self.blank, quoting: [Q(words: Self.blank)])])
         let rules = try Self.rules([chain])
         #expect(rules.map(\.x) == [0, 8, 16], "one rule per level, a step of `snug` apart")
         #expect(rules.allSatisfy { $0.runs.count == 1 })
         let spans = rules.compactMap(\.runs.first)
-        // Each level's rule starts where its quotation starts, at the top, because what it
-        // quoted is above its words; and the deeper one ends first, above the words it
-        // answers. With the words first, the deeper rules would end at the bottom instead.
-        #expect(Set(spans.map(\.lowerBound)).count == 1)
-        #expect(spans[0].upperBound > spans[1].upperBound)
-        #expect(spans[1].upperBound > spans[2].upperBound)
+        // The order is left as the page writes it: a level's own words, then what it quoted.
+        // So every rule ends together at the bottom, and a deeper one starts below the words
+        // of the level that quoted it — never two rules the same height side by side.
+        #expect(Set(spans.map(\.upperBound)).count == 1)
+        #expect(spans[0].lowerBound < spans[1].lowerBound)
+        #expect(spans[1].lowerBound < spans[2].lowerBound)
     }
 
     @Test("A wrapper draws no rule of its own: wrapped, the same three rules")

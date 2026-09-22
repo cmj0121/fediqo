@@ -739,11 +739,13 @@ struct ForumReplyRow: View {
 /// it for both, rather than two that could disagree. `drawn(_:)` is the whole of that decision;
 /// two quotations side by side in one level stay two.
 ///
-/// ## Whoever was quoted reads first
+/// ## The order is the page's, on purpose
 ///
-/// A level draws what it quoted **above** its own words — the order `ForumReplyRow` and
-/// `ForumPostBand` (#104) already draw a post in. Whoever was quoted spoke first, so an answer
-/// never reads before the thing it answers, at any depth.
+/// Inside a level its own words come first and what it quoted after, as the page writes it.
+/// That is deliberately not the order `ForumReplyRow` and `ForumPostBand` (#104) draw a post in,
+/// and is left so: a Discuz! level's words open with its "X 发表于 …" header, and drawing the
+/// quoted part first would put that header below the quotation X was answering, parting a
+/// person's name from their words.
 ///
 /// **No cap here.** `DiscuzQuotation.deepest` bounds the tree where it is read, so what arrives
 /// is already shallow enough to draw; a second ceiling in the view would be a rule that could
@@ -753,8 +755,8 @@ struct ForumReplyRow: View {
 ///
 /// Every level carries the same "Quoted: …" label over its own words, so a reader using
 /// VoiceOver hears each person's sentence introduced as a quotation instead of one label over
-/// everybody's — innermost first, because that is the order they are drawn in and were said
-/// in. A wrapper has no words and so no label; what it wraps is read where it would have been.
+/// everybody's, in the order they are drawn. A wrapper has no words and so no label; what it
+/// wraps is read where it would have been.
 struct ForumQuotation: View {
     let quotation: DiscuzQuotation
 
@@ -778,7 +780,6 @@ struct ForumQuotation: View {
             quoted
         } else {
             VStack(alignment: .leading, spacing: ShellSpace.tight) {
-                quoted
                 Text(quotation.words)
                     .shellFont(.meta)
                     .foregroundStyle(ShellChrome.inkFaint(colorScheme))
@@ -786,6 +787,7 @@ struct ForumQuotation: View {
                     .accessibilityLabel(
                         Text(String(format: L10n.t("thread.reply.quoted"), quotation.words))
                     )
+                quoted
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.leading, ShellSpace.snug)
@@ -797,7 +799,7 @@ struct ForumQuotation: View {
         }
     }
 
-    /// What this level quoted, wrappers already taken out, one `ForumQuotation` each and above
+    /// What this level quoted, wrappers already taken out, one `ForumQuotation` each, under
     /// the words. Keyed by position, for the reason `ForumReplyRow` states.
     private var quoted: some View {
         let levels = Self.drawn(quotation.quoting)
