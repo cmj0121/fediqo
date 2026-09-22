@@ -2,9 +2,14 @@ import FediqoCore
 import SwiftUI
 
 /// Language, theme, type, and the latest date every timeline stops at (#22) — what a person
-/// chooses. What this device holds is on `UsagePane` (#21).
+/// chooses. What this device holds is on `UsagePane` (#21). Last on the page, in a section of its
+/// own, which Fediqo this is (#143) — see `BuildStampSection`.
 struct PreferencesPane: View {
     @Environment(DummyPrefs.self) private var prefs
+
+    /// What this build was stamped with. The app's own by default; a test or a preview hands in
+    /// another.
+    var stamp: BuildStamp = .main
 
     var body: some View {
         @Bindable var prefs = prefs
@@ -33,6 +38,7 @@ struct PreferencesPane: View {
                 Text(L10n.t("prefs.latest.footer"))
                     .shellFont(.meta)
             }
+            BuildStampSection(stamp: stamp)
         }
         .formStyle(.grouped)
         // **The pane the type size is chosen on has to move with it** (#96). A `Form`'s rows
