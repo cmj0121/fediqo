@@ -329,4 +329,93 @@ struct SearchShellTests {
         _ = search.close()
         #expect(await http.requested.count == asked)
     }
+
+    // MARK: Return (#163)
+
+    @Test("Return searches exactly what the field says, however soon after the last letter")
+    func returnSettles() async {
+        let notes = [note("a", "swift"), note("b", "swiftui"), note("c", "other")]
+        let search = await searching("swi", over: notes)
+        #expect(ids(onAll(search, notes, revision: 0, sources: [one], latest: nil)) == ["a", "b"])
+        // "swiftui" typed and Return pressed before the pause that would have settled it.
+        search.text = "swiftui"
+        search.submit()
+        #expect(search.pattern == "swiftui")
+        #expect(ids(onAll(search, notes, revision: 0, sources: [one], latest: nil)) == ["b"],
+                "the results for the whole pattern, not an earlier part of it")
+    }
+
+    @Test("Return pressed before any pause searches the pattern, not the timeline")
+    func returnBeforeAnyPause() async {
+        let notes = [note("a", "swift"), note("b", "other")]
+        let search = await searching("", over: notes)
+        search.text = "other"
+        // With nothing settled nothing is searched, and the first row shown is the timeline's
+        // — the row Return used to light, which is not a result.
+        search.submit()
+        #expect(ids(onAll(search, notes, revision: 0, sources: [one], latest: nil)) == ["b"])
+    }
+
+    @Test("Return hands the keys back to the list, and tells the list to take them")
+    func returnHandsTheKeysBack() async {
+        let search = await searching("swift", over: [note("a", "swift")])
+        search.fieldFocused = true
+        let before = search.submits
+        search.submit()
+        #expect(!search.fieldFocused)
+        #expect(DummyCommand.from("j", fieldFocused: search.fieldFocused) == .nextPost)
+        #expect(DummyCommand.from("k", fieldFocused: search.fieldFocused) == .previousPost)
+        #expect(search.submits == before + 1, "the list is told to take the keys")
+    }
+
+    @Test("`/` after Return gives the field the keys again, with the pattern kept")
+    func slashAfterReturn() async {
+        let notes = [note("a", "swift"), note("b", "other")]
+        let search = await searching("swift", over: notes)
+        search.submit()
+        let tick = search.focusTick
+        search.focus()
+        #expect(search.focusTick == tick + 1)
+        #expect(search.text == "swift")
+        #expect(ids(onAll(search, notes, revision: 0, sources: [one], latest: nil)) == ["a"])
+    }
+
+    @Test("Return before the index lands lights the first result once it lands, and once")
+    func returnBeforeTheIndex() async {
+        let notes = [note("a", "swift"), note("b", "other")]
+        let search = ShellSearch()
+        search.open(from: nil, over: notes)
+        search.text = "swift"
+        search.submit()
+        #expect(onAll(search, notes, revision: 0, sources: [one], latest: nil) == [])
+        await search.indexed()
+        #expect(search.takeLitWhenIndexed(), "the first result is still to be lit")
+        #expect(!search.takeLitWhenIndexed(), "once")
+        #expect(ids(onAll(search, notes, revision: 0, sources: [one], latest: nil)) == ["a"])
+    }
+
+    @Test("Nothing is left to light later when the index had landed, or once `/` took the keys back")
+    func nothingLeftToLight() async {
+        let search = await searching("swift", over: [note("a", "swift")])
+        search.submit()
+        #expect(!search.takeLitWhenIndexed())
+
+        let waiting = ShellSearch()
+        waiting.open(from: nil, over: [note("a", "swift")])
+        waiting.text = "swift"
+        waiting.submit()
+        waiting.focus()
+        await waiting.indexed()
+        #expect(!waiting.takeLitWhenIndexed(), "typing again: nothing is lit under the reader")
+    }
+
+    @Test("Return on a pattern that finds nothing lights nothing, and j has nothing to move to")
+    func returnFindsNothing() async {
+        let notes = [note("a", "swift")]
+        let search = await searching("", over: notes)
+        search.text = "nothing"
+        search.submit()
+        #expect(onAll(search, notes, revision: 0, sources: [one], latest: nil)?.first == nil)
+        #expect(DummyCommand.stepped([String](), from: nil, by: 1) == nil)
+    }
 }

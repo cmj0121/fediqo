@@ -430,8 +430,13 @@ final class ShellReload {
     ) async -> Bool {
         var read = true
         for board in boards {
+            // The same one request as before, read for the boards around this one too (#161):
+            // a sub-board the forum's front page never names is written here, and the picker
+            // then offers it with no request of its own.
             read = await land(source.host, in: session) {
-                try await client.board(board.fid, source: source, named: board.name)
+                let page = try await client.boardPage(board.fid, source: source, named: board.name)
+                session.learn(page, of: board, host: source.host)
+                return page.notes
             } && read
         }
         return read

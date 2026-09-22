@@ -424,6 +424,7 @@
 "board.choose.threads" = "%d threads";
 "board.choose.posts" = "%d posts";
 "board.choose.unstated" = "This forum stated no figures for this board";
+"board.choose.kept" = "Boards you read that this list does not place";
 "board.choose.hint.on" = "Subscribe to this board";
 "board.choose.hint.off" = "Stop subscribing to this board";
 "board.unread.some" = "%d of the boards you picked could not be read, and were not subscribed to:";
