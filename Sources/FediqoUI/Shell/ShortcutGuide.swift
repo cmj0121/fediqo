@@ -7,8 +7,9 @@ struct ShortcutGuide: View {
     @Environment(\.colorScheme) private var colorScheme
 
     enum Metrics {
-        /// The plate. Outer `ShellSpace.room` sits around it, and the pair still fits
-        /// the 520pt minimum window.
+        /// The plate at its widest. Outer `ShellSpace.room` sits around it, and the pair fits
+        /// any window the rail is drawn in. Narrower than that — a Mac window dragged down to
+        /// `ShellLayout.floor` since #110 — the plate gives up width rather than its edges.
         static let plate: CGFloat = 440
     }
 
@@ -48,7 +49,7 @@ struct ShortcutGuide: View {
             }
         }
         .padding(ShellSpace.pad)
-        .frame(width: Metrics.plate, alignment: .topLeading)
+        .frame(maxWidth: Metrics.plate, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(ShellChrome.page(colorScheme))

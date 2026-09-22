@@ -236,6 +236,8 @@ struct TimelinePane: View {
         // handed back. Writing a result's id into the timeline's place would lose that post and
         // put a result in its stead.
         .onChange(of: session.timelineID) { left, arrived in
+            // Another list, so the row the last one had at the top means nothing here.
+            session.scrolledTop = nil
             if search == nil {
                 selectedID = session.timelinePlaces.switched(
                     from: left, to: arrived, standingOn: selectedID, among: items.map(\.id)
@@ -317,6 +319,24 @@ struct TimelinePane: View {
         await store.settle(host: host)
     }
 
+    /// Where a list drawn afresh puts the reader (#110).
+    enum Landing: Equatable, Sendable {
+        /// The lamp's row, in the middle — what coming back from a thread has always done.
+        case centred(String)
+        /// The row that was at the top when the list was last drawn, at the top again.
+        case top(String)
+    }
+
+    /// **The lamp first, and the place scrolled to where there is no lamp.** A list is drawn
+    /// afresh by a thread closing and, since #110, by a window dragged across the width where
+    /// the arrangement changes — and a reader who scrolled without lighting anything was put
+    /// back at the top, which is the place scrolled to lost. A static function over the two
+    /// facts, so the order between them is a thing a test can ask.
+    static func landing(selected: String?, top: String?) -> Landing? {
+        if let id = DummyCommand.centredOnAppear(selected: selected) { return .centred(id) }
+        return top.map(Landing.top)
+    }
+
     /// The list under the walk: what is held, or the notice that says there is nothing.
     ///
     /// Written out once, because two places fall back to it — nothing walked to, and a
@@ -374,12 +394,17 @@ struct TimelinePane: View {
                         }
                     }
                 }
+                .scrollTargetLayout()
             }
             .scrollIndicators(.never)
+            .modifier(KeepsTopRow(session: session))
             .onAppear {
-                guard let id = DummyCommand.centredOnAppear(selected: selectedID) else { return }
                 // A tick later: a lazy stack just built has not laid out the row to scroll to.
-                Task { @MainActor in proxy.scrollTo(id, anchor: .center) }
+                switch Self.landing(selected: selectedID, top: session.scrolledTop) {
+                case .centred(let id): Task { @MainActor in proxy.scrollTo(id, anchor: .center) }
+                case .top(let id): Task { @MainActor in proxy.scrollTo(id, anchor: .top) }
+                case nil: break
+                }
             }
             .onChange(of: selectedID) { _, id in
                 guard let id else { return }
@@ -661,5 +686,26 @@ struct TimelinePane: View {
                 && session.reload.unspoken == nil
                 && !session.reload.stopped
         ))
+    }
+}
+
+/// Which row is at the top of the stream, written down as the reader scrolls — into the session,
+/// which outlives the pane, and past observation, so a scroll redraws nothing (#110).
+///
+/// **Watched, never steered.** A position binding also drives the scroll view it is bound to, and
+/// on a list rebuilt by a swap of arrangement it was a second hand on the scroll beside the lamp's
+/// own `scrollTo` — seen once on a running Mac, with the lamp fourteen rows down and off the
+/// screen after the swap. This only reports, so what moves the list on appearing is
+/// `TimelinePane.landing` and nothing else.
+///
+/// A modifier of its own rather than a closure in the list's chain, which is long enough already
+/// for the compiler the CI builds with.
+struct KeepsTopRow: ViewModifier {
+    let session: ShellSession
+
+    func body(content: Content) -> some View {
+        content.onScrollTargetVisibilityChange(idType: String.self) { visible in
+            session.scrolledTop = visible.first
+        }
     }
 }

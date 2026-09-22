@@ -1241,17 +1241,35 @@ public struct FediqoRootView: View {
         }
     }
 
-    @ViewBuilder
-    private var layout: some View {
+    /// The arrangement this window gets for the width it has (#110). See `ShellLayout`.
+    ///
+    /// **Asked on every pass, from a width measured on every change.** A Mac window being dragged
+    /// reports a new width for each step of the edge, so the arrangement swaps while the drag is
+    /// still happening rather than when it is let go, and a window dragged back over the line
+    /// swaps back at the same width, because the rule has one line and no memory.
+    ///
+    /// The phone and the iPad still ask the system's size class here; answering the width there
+    /// is #111's, and is not this one's to decide.
+    private func arrangement(for width: CGFloat?) -> ShellLayout {
         #if os(iOS)
-        if sizeClass == .compact {
-            tabbed
-        } else {
-            columns
-        }
+        sizeClass == .compact ? .narrow : .wide
         #else
-        columns
+        ShellLayout.answering(width: width)
         #endif
+    }
+
+    /// **Nothing the reader is standing on is held in either arrangement.** The place, the lamp,
+    /// the walk and the rail's state are all this view's own, so swapping what is drawn around
+    /// the page leaves every one of them where it was; the list drawn afresh centres on the lamp
+    /// as it does coming back from a thread, and on the row that was at the top where there is
+    /// no lamp — see `TimelinePane.list`.
+    private var layout: some View {
+        ShellArranged(answer: arrangement) { layout in
+            switch layout {
+            case .narrow: tabbed
+            case .wide: columns
+            }
+        }
     }
 
     private var columns: some View {
@@ -1272,7 +1290,6 @@ public struct FediqoRootView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(ShellChrome.page(colorScheme))
         }
-        .frame(minWidth: 520, minHeight: 360)
         .background(ShellChrome.page(colorScheme))
     }
 
@@ -1284,14 +1301,19 @@ public struct FediqoRootView: View {
         )
     }
 
-    #if os(iOS)
     private enum Compact {
         static let button: CGFloat = 56
-        /// Clear of the tab bar, which the overlay knows nothing about.
+        /// Clear of the tab bar, which the overlay knows nothing about. A Mac draws its tabs
+        /// across the top rather than the bottom, so there the button only keeps its room.
+        #if os(iOS)
         static let clearance: CGFloat = 72
+        #else
+        static let clearance: CGFloat = ShellSpace.room
+        #endif
     }
 
-    /// A phone gets tabs instead of a rail, and only for the places it can enter.
+    /// The narrow arrangement: tabs instead of a rail, and only for the places it can enter.
+    /// Drawn on a Mac as well since #110, for a window dragged narrower than the rail allows.
     /// A tab bar has no disabled state worth the name: tapping a dead tab selected it,
     /// the binding put it back, and the reader was told nothing at all. A place that
     /// is not ready is not a tab yet.
@@ -1324,7 +1346,6 @@ public struct FediqoRootView: View {
         .padding(.trailing, ShellSpace.room)
         .padding(.bottom, Compact.clearance)
     }
-    #endif
 
     @ViewBuilder
     private var page: some View {
