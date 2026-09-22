@@ -52,15 +52,27 @@ public struct MastodonWrite: Sendable {
 
     /// Posts `text` as the reader and takes the returned status into the store, only while the
     /// source is still here.
+    ///
+    /// **An answer is this call pointed at something** (#108): `answering` names the post, by the
+    /// id its own server gave it, and nothing else about the write changes — the same door, the
+    /// same refusals, the same store. A post that cannot be named on its server is not sent, rather
+    /// than sent as a new post that answers nothing, which is the one failure here a reader could
+    /// not see from the screen.
     @discardableResult
-    public func post(_ text: String, visibility: Audience) async throws -> Note {
+    public func post(
+        _ text: String, visibility: Audience, answering: Note? = nil
+    ) async throws -> Note {
         guard let source = await store.sources().first(where: { $0.host == host }) else {
             throw MastodonWriteError.noSource
         }
-        let data = try await door.post(path: "/api/v1/statuses", form: [
-            ("status", text),
-            ("visibility", visibility.mastodon),
-        ])
+        var form = [("status", text), ("visibility", visibility.mastodon)]
+        if let answering {
+            guard let id = answering.statusID, answering.source.host == host else {
+                throw MastodonWriteError.unfindable
+            }
+            form.append(("in_reply_to_id", id))
+        }
+        let data = try await door.post(path: "/api/v1/statuses", form: form)
         guard let note = try? MastodonJSON.decoder.decode(StatusDTO.self, from: data)
             .asNote(source: source, categories: Self.categories(for: visibility))
         else {

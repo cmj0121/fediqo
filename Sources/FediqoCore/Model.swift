@@ -208,6 +208,34 @@ public enum Audience: String, Sendable, Hashable, CaseIterable {
         default: return nil
         }
     }
+
+    /// How far a post travels, as a rank: the people who are mentioned are the fewest, everyone
+    /// is the most. Unlisted sits above followers because anybody may read it who looks.
+    ///
+    /// **No `default:`**, so a fifth audience has to say where it stands.
+    public var reach: Int {
+        switch self {
+        case .mentioned: 0
+        case .followers: 1
+        case .unlisted: 2
+        case .everyone: 3
+        }
+    }
+
+    /// Whether this goes further than `other`.
+    public func isWider(than other: Audience) -> Bool { reach > other.reach }
+
+    /// Where an answer's reach starts (#108): **never wider than the post it answers.**
+    ///
+    /// A followers-only post answered in public would carry a private conversation to everybody
+    /// on the first press, and the reader would learn it from the replies. So the answer starts
+    /// where the post is, and widening it is a choice the reader makes where they can see it.
+    ///
+    /// **A post whose reach this device was never told starts at the narrowest**, because that is
+    /// the only start that cannot be wider than whatever the truth is.
+    public static func answering(_ answered: Audience?) -> Audience {
+        answered ?? .mentioned
+    }
 }
 
 public struct Reply: Hashable, Sendable {
