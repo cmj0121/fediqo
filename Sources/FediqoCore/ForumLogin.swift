@@ -333,6 +333,86 @@ public enum ForumLoginScript {
     return { username: (user && user.value) || '', password: (pass && pass.value) || '' };
     """
 
+    /// Ticks the forum's own "remember me" on every login form a document carries — #153.
+    ///
+    /// **Why a sign-in by hand needs this.** Discuz! writes its member cookie, `<prefix>_auth`,
+    /// for as long as the post's `cookietime` asks, and a post without it is answered with a
+    /// cookie that has no expiry: a session cookie, which WebKit drops when the app quits however
+    /// persistent the store behind it is. `fill` has always ticked it on the automatic path; the
+    /// reader's own path, which is how every first sign-in happens, left it to them, so a forum
+    /// signed in to by hand read signed out after every relaunch.
+    ///
+    /// **Ticked where the reader can see it and untick it**, rather than added to the post
+    /// behind their back: it is the forum's own control, on the forum's own page, and a reader
+    /// who does not want to be remembered on this device still has the last word. A box the
+    /// reader has already touched is left as they left it, and a page with no such box is left
+    /// alone. It reads nothing and sends nothing; it runs at the end of every document the
+    /// forum's browser loads, in a world of this app's own that the forum's scripts cannot see.
+    public static let remember = """
+    (() => {
+        for (const form of document.querySelectorAll('form')) {
+            const action = form.getAttribute('action') || '';
+            if (!action.includes('action=login')) { continue; }
+            for (const keep of form.querySelectorAll('input[name="cookietime"]')) {
+                if (keep.type === 'checkbox' && !keep.dataset.fediqoTouched) { keep.checked = true; }
+                keep.addEventListener('click', () => { keep.dataset.fediqoTouched = '1'; });
+            }
+        }
+    })();
+    """
+
+    /// The name the typed pair is handed back under, while — and only while — the reader has
+    /// asked for it to be kept. See `watchTyped`.
+    public static let typedMessage = "fediqoTyped"
+
+    /// Hands back what the reader typed **at the moment they submit it** — #153.
+    ///
+    /// **Why at the moment of submitting and not when they press Done.** `readTyped` reads the
+    /// form in the document as it is when it is asked, and by the time a sign-in can be confirmed
+    /// the forum has answered and moved the page on: Discuz! posts the form and then sends the
+    /// reader to the page they came from, where there is no login form at all. So the pair was
+    /// looked for in a document that no longer held it, nothing was found, and nothing was kept
+    /// — silently, on every sign-in. Measured by `ForumSignInPageTests` against a page that
+    /// moves on exactly that way.
+    ///
+    /// **Installed only while the reader has the switch on**, which is D23's line: before it,
+    /// nothing in this app reads the field. Runs in this app's own content world, so the forum's
+    /// scripts cannot read what it holds or call what it calls; and it posts only to a handler
+    /// that exists while the switch is on — taken away, the listeners find nobody to hand the
+    /// pair to and hand it to nobody. What arrives is held in memory, and kept only once the
+    /// forum's page says the sign-in was reached.
+    ///
+    /// The last pair submitted wins: a reader who got the password wrong once and right the
+    /// second time keeps the second.
+    public static let watchTyped = """
+    (() => {
+        if (window.fediqoWatching) { return; }
+        window.fediqoWatching = true;
+        const isLogin = (form) => {
+            const action = (form && form.getAttribute('action')) || '';
+            return action.includes('action=login');
+        };
+        const hand = (form) => {
+            if (!isLogin(form)) { return; }
+            const handler = window.webkit && window.webkit.messageHandlers
+                && window.webkit.messageHandlers.fediqoTyped;
+            if (!handler) { return; }
+            const user = form.querySelector('input[name="username"]');
+            const pass = form.querySelector('input[name="password"]');
+            if (!user || !pass || !user.value || !pass.value) { return; }
+            handler.postMessage({ username: user.value, password: pass.value });
+        };
+        document.addEventListener('submit', (event) => hand(event.target), true);
+        document.addEventListener('click', (event) => {
+            const button = event.target && event.target.closest
+                && event.target.closest('button, input[type="submit"]');
+            if (button && button.form && (button.type || '').toLowerCase() === 'submit') {
+                hand(button.form);
+            }
+        }, true);
+    })();
+    """
+
     /// The whole document, which is what every read in this unit starts from.
     public static let document = "document.documentElement.outerHTML"
 }

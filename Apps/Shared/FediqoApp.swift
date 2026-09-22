@@ -42,6 +42,10 @@ final class Launch {
         // still honours its token, in the background, and only a 401 signs out.
         mastodon = MastodonSessions(tokens: KeychainMastodonTokens())
         Task { [mastodon] in await mastodon.verifyAll() }
+        // And each forum whose sign-in did not outlive the last run, and whose username and
+        // password the reader kept, signs in again by itself (#153) — registered here, before the
+        // first frame, so a post read a moment later waits for it rather than asking as a guest.
+        forums.signInAgain(hosts: opened.sources.filter { $0.kind == .discuz }.map(\.host))
         // Where Caches cannot be made, pictures are read from their hyperlinks only.
         if let media = try? MediaCache.caches() {
             FediqoRootView.keepPictures(in: media, for: opened.sources.map(\.host))

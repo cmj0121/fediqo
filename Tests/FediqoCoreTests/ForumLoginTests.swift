@@ -352,7 +352,10 @@ struct ForumLoginScriptTests {
     /// The single most load-bearing property in this unit.
     @Test("No script contains a place for a secret to be spliced into")
     func nothingIsInterpolated() {
-        for script in [ForumLoginScript.fill, ForumLoginScript.readTyped, ForumLoginScript.document] {
+        for script in [
+            ForumLoginScript.fill, ForumLoginScript.readTyped, ForumLoginScript.document,
+            ForumLoginScript.remember, ForumLoginScript.watchTyped,
+        ] {
             #expect(!script.contains("\\("), "a script interpolates, so a password could reach its text")
         }
         // The fill script names its inputs as bound parameters, which is what makes a password
@@ -379,5 +382,27 @@ struct ForumLoginScriptTests {
         for answer in ["'no-form'", "'no-fields'", "'submitted'"] {
             #expect(ForumLoginScript.fill.contains(answer), "\(answer) is not an answer it can give")
         }
+    }
+
+    /// #153's first cause: the reader's own sign-in never asked the forum to remember it.
+    @Test("A login form is asked to remember the sign-in, and a box the reader touched is theirs")
+    func theReadersSignInIsRemembered() {
+        let remember = ForumLoginScript.remember
+        #expect(remember.contains("input[name=\"cookietime\"]"))
+        #expect(remember.contains("keep.checked = true"))
+        #expect(remember.contains("fediqoTouched"), "a box the reader unticked would be ticked again")
+        // It reads no field and hands nothing anywhere.
+        #expect(!remember.contains("password"))
+        #expect(!remember.contains("postMessage"))
+    }
+
+    @Test("What was typed is handed over at the moment it is submitted, and only to the one handler")
+    func typedIsHandedOverOnSubmit() {
+        let watch = ForumLoginScript.watchTyped
+        #expect(watch.contains("addEventListener('submit'"))
+        #expect(watch.contains("messageHandlers.fediqoTyped"))
+        #expect(watch.contains(ForumLoginScript.typedMessage))
+        // Nothing half-typed is handed over: an empty field is not a credential.
+        #expect(watch.contains("!user.value || !pass.value"))
     }
 }

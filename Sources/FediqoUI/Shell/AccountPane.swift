@@ -587,6 +587,7 @@ struct AccountPane: View {
                             session.progress, drawnAs: session.stage, host: row.source.host
                         ),
                         refusal: session.rowRefusal,
+                        notice: session.forums.notice(host: row.source.host)?.sentence(),
                         signIn: { Task { await press(row) } },
                         clear: { askClear(row) },
                         remove: { askRemove(row) },
