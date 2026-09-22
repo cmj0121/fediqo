@@ -90,6 +90,9 @@ struct DummyThreadPane: View {
                             threaded(above, dimmed: true)
                         }
                         threaded(conversation.post, dimmed: false)
+                        if !root.otherCopies.isEmpty {
+                            carried
+                        }
                         ForEach(conversation.descendants, id: \.item.id) { entry in
                             threaded(entry.item, dimmed: false)
                         }
@@ -419,6 +422,62 @@ struct DummyThreadPane: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(ShellChrome.selectInk(colorScheme))
+    }
+
+    // MARK: - What each source carried
+
+    /// The post as each source carried it, told apart by source (#114): the row is the copy that
+    /// arrived first, and this is where a reader who wants to know why two copies differ can see
+    /// every one of them side by side.
+    ///
+    /// **Words, and not a second row per copy.** A copy drawn as a full row here would be a row
+    /// the keys cannot reach and a mark that acts on a post the timeline already marks once; what
+    /// a reader is here to compare is what each server said, so that is what is drawn. Each is
+    /// headed by its host, which is what tells them apart and the only thing this app is sure of.
+    private var carried: some View {
+        VStack(alignment: .leading, spacing: ShellSpace.snug) {
+            Text(L10n.t("thread.copies.title"))
+                .shellFont(.meta, weight: .medium)
+                .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                .accessibilityAddTraits(.isHeader)
+            ForEach(root.copies) { copy in
+                VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                    Text(String(format: L10n.t("thread.copies.from"), copy.source.host))
+                        .shellFont(.mark)
+                        .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                    Text(Self.carriedWords(copy))
+                        .shellFont(.body)
+                        .foregroundStyle(ShellChrome.ink(colorScheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+                // One copy, one thing heard: the host it came from, then what it said.
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .padding(.horizontal, ShellSpace.pad)
+        .padding(.vertical, ShellSpace.snug)
+    }
+
+    /// What one copy said, as a line to read: who, then the words.
+    ///
+    /// **A covered copy shows its cover and not its words.** The pane's rows each carry a cover a
+    /// reader lifts on purpose, and a comparison that printed a covered copy's words in plain text
+    /// underneath would lift it for them. So a covered copy says what it was covered with — or
+    /// that it was covered, where the author gave no line — which is also what differs, when one
+    /// server carried a cover the other did not.
+    static func carriedWords(_ copy: DummyItem, language: DummyLanguage? = nil) -> String {
+        let who = copy.handle.map { "\(copy.author) \($0)" } ?? copy.author
+        let said: String
+        if copy.covered {
+            let line = copy.spoiler ?? ""
+            said = line.isEmpty
+                ? L10n.t("item.covered.mark", language: language)
+                : String(format: L10n.t("item.covered.warning", language: language), line)
+        } else {
+            said = [copy.title, copy.body].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
+        }
+        return said.isEmpty ? who : who + "\n" + said
     }
 
     private func quiet(_ text: String) -> some View {

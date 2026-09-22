@@ -189,18 +189,21 @@ struct StoreTests {
         #expect(await store.all().map(\.id) == ["a", "c", "b"])
     }
 
-    /// Two sources carrying one status are two rows with the same time and the same id, so the
-    /// host is what is left to order them by. Without it their order would be whatever the
-    /// dictionary iterates to, and a timeline would swap the pair between one build and the next.
-    @Test("One item through two hosts sorts by host, whichever arrived first")
-    func sameTimeAndIdSortsByHost() async {
+    /// Two sources carrying one status are two rows with the same time and the same id, and what
+    /// orders them is the order they arrived in — the copy a merged row is drawn as (#114). It
+    /// was the host's name until then, which was stable and said nothing; arrival is as stable,
+    /// and is the fact the row needs. Either way round, so neither order is the host's by luck.
+    @Test("One item through two hosts sorts by which arrived first, and keeps its place when met again")
+    func sameTimeAndIdSortsByArrival() async {
         let uri = "https://origin.example/users/ada/statuses/1"
         for firstIn in [source, other] {
             let store = ItemStore()
             let secondIn = firstIn == source ? other : source
             await store.ingest([note(id: uri, postedAt: origin, categories: [.public], from: firstIn)])
             await store.ingest([note(id: uri, postedAt: origin, categories: [.public], from: secondIn)])
-            #expect(await store.all().map(\.source.host) == ["first.example", "second.example"])
+            #expect(await store.all().map(\.source.host) == [firstIn.host, secondIn.host])
+            await store.ingest([note(id: uri, postedAt: origin, categories: [.trends], from: secondIn)])
+            #expect(await store.all().map(\.source.host) == [firstIn.host, secondIn.host])
         }
     }
 
@@ -428,6 +431,19 @@ struct StoreTests {
             Set(left.filter { $0.id == "shared-by-two-survivors" }.map(\.source.host))
                 == ["second.example", "third.example"]
         )
+    }
+
+    @Test("A relaunch reads the copies back in the order the last run took them")
+    func arrivalSurvivesASnapshot() async {
+        let uri = "https://first.example/users/ada/statuses/1"
+        let store = ItemStore()
+        await store.ingest([note(id: uri, postedAt: origin, categories: [.public], from: other)])
+        await store.ingest([note(id: uri, postedAt: origin, categories: [.public])])
+
+        let snapshot = await store.snapshot()
+        #expect(snapshot.notes.map(\.source.host) == ["second.example", "first.example"])
+        let reloaded = ItemStore(sources: snapshot.sources, notes: snapshot.notes)
+        #expect(await reloaded.all().map(\.source.host) == ["second.example", "first.example"])
     }
 
     private func note(

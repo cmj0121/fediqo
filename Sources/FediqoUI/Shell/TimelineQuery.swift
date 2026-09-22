@@ -81,7 +81,12 @@ public enum TimelineQuery: Hashable, Identifiable, Sendable {
     /// and author rules do not fold every note on each redraw. All and Trends read no text.
     ///
     /// `latest` is the reader's latest date (#22), cut after the rules so every query stops at
-    /// the same day. It has no default, so a list drawn without asking about it does not compile.
+    /// the same day.
+    ///
+    /// **Merged last, after the rules and the date** (#114). The rules are asked of each copy, as
+    /// they always were, and a post is drawn once from the copies they let through — so a
+    /// timeline whose rule reaches only one of two copies still shows the post, drawn as that
+    /// copy and naming that source, and a copy a rule hid is not named on the row. It has no default, so a list drawn without asking about it does not compile.
     public func items(
         from notes: [Note],
         among written: [TimelineDefinition] = [],
@@ -89,6 +94,6 @@ public enum TimelineQuery: Hashable, Identifiable, Sendable {
         latest: LatestDate?
     ) -> [DummyItem] {
         let shown = CompiledTimeline(definition(among: written), sources: []).shown(notes, index)
-        return (latest?.shown(shown) ?? shown).map { DummyItem($0) }
+        return DummyItem.merged(latest?.shown(shown) ?? shown)
     }
 }

@@ -25,12 +25,15 @@ struct TimelineWays {
 struct TimelinePane: View {
     @Bindable var session: ShellSession
     @Binding var selectedID: String?
-    @Binding var openedID: String?
-    /// Whoever the reader pressed the face of, where they have pressed one (#99). Held by the
-    /// app, like the open thread beside it, because leaving it is `Escape` and `q` — which are
-    /// read where the keys are.
-    @Binding var openedPerson: DummyPerson?
-    /// A press on a face or a name, answered by the root under the layer order's own rule.
+    /// The step of the walk the reader is standing on, where they have walked anywhere (#122):
+    /// a conversation, or somebody's page. Held by the app, because leaving it is `Escape` and
+    /// `q` — which are read where the keys are.
+    ///
+    /// **One value where there were two bindings.** A person and a thread were held here as two
+    /// optionals and drawn by an `if`/`else if` whose order was the layer order restated; the
+    /// walk says which is in front, and this pane draws whatever that is.
+    var standing: ShellStep?
+    /// A press on a face or a name, answered by the root under the walk's own rule.
     var onOpenPerson: (DummyPerson) -> Void
     /// Where every deck in this pane is turned to, and which rows the reader uncovered. Held by
     /// the app rather than here, because `m` and `s` are pressed where the keys are read.
@@ -53,7 +56,9 @@ struct TimelinePane: View {
     /// the press instead, and the root lights it and opens it together.
     var onOpenThread: (String) -> Void
     var jumpToTop: Int
-    var onPopThread: () -> Void
+    /// A press to leave whatever is in front: one step back out of the walk. Both panes press
+    /// it, because both are steps of the same walk.
+    var onBack: () -> Void
     /// The search and the reload, as a finger reaches them.
     var ways: TimelineWays
     /// While open, its results are the list and the timeline waits under it (#32).
@@ -139,10 +144,11 @@ struct TimelinePane: View {
                 .fill(ShellChrome.hairline(colorScheme))
                 .frame(height: ShellSpace.hair)
 
-            // **Somebody's page is asked about first, because it is the layer in front.** A face
-            // pressed inside a conversation opens over it and `Escape` gives the conversation
-            // back, which is `DummyLayer.person`'s own order read out in this one `if`.
-            if let person = openedPerson {
+            // **Whatever step the reader is standing on** (#122). A face pressed inside a
+            // conversation opens over it, and a row pressed on that page opens over the page;
+            // which is in front is `ShellWalk` and is not decided again here. **No `default:`.**
+            switch standing {
+            case .person(let person):
                 PersonPane(
                     person: person,
                     items: DummyPerson.held(of: person, in: session.notes),
@@ -151,59 +157,61 @@ struct TimelinePane: View {
                     posts: session.posts,
                     selectedID: $selectedID,
                     marks: markBinding,
-                    // No answer from somebody's page: a conversation does not open under it, which
-                    // `DummyLayer.person` states, so the mark would be a press with nowhere to go.
-                    acting: { item in
-                        var acting = acting(item)
-                        acting.answer = nil
-                        return acting
-                    },
-                    decks: $decks,
-                    playback: playback,
-                    onPlayRow: onPlayRow,
-                    onViewRow: onViewRow,
-                    onTurnRow: onTurnRow,
-                    jumpToTop: jumpToTop,
-                    onToast: showToast,
-                    onBack: { openedPerson = nil }
-                )
-                // One pane per person, so opening a second face from inside one draws afresh.
-                .id(person.id)
-            } else if let opened = openedItem {
-                DummyThreadPane(
-                    root: opened,
-                    catalogues: session.emoji,
-                    catalogueSettled: settledHosts.contains(opened.source.host),
-                    posts: session.posts,
-                    conversations: session.conversations,
-                    onAskAround: { Task { await session.conversations.again(opened, in: session) } },
-                    selectedID: $selectedID,
-                    marks: markBinding,
-                    acting: { acting($0, inside: opened) },
+                    // A row here opens the conversation it belongs to (#122), so the answer mark
+                    // does what it does on the timeline: it opens that conversation first.
+                    acting: acting,
                     decks: $decks,
                     playback: playback,
                     onPlayRow: onPlayRow,
                     onViewRow: onViewRow,
                     onTurnRow: onTurnRow,
                     onOpenThread: onOpenThread,
-                    onOpenPerson: onOpenPerson,
                     jumpToTop: jumpToTop,
                     onToast: showToast,
-                    onBack: onPopThread
+                    onBack: onBack
                 )
-                // One pane per thread, so going back from a nested one draws its parent afresh.
-                .id(opened.id)
-                // **The ask is the pane opening** — #90. A microblog thread is one request about
-                // the post the reader has just pressed Return on, so nothing asks them a second
-                // time for a thing they have already said they want. It is the pane's own
-                // `.task`, so closing the thread cancels a read still on the wire, and asked
-                // once per post per run: reopening draws what is already held.
-                .task(id: opened.id) { await session.conversations.open(opened, in: session) }
-            } else {
-                switch stream {
-                case .held: list
-                case .empty: empty
+                // One pane per person, so opening a second face from inside one draws afresh.
+                .id(person.id)
+            case .thread(let id):
+                // A root this device no longer holds draws the stream instead, which is the same
+                // answer the pane gave when it looked the root up among the timeline's own rows.
+                if let opened = session.held(id) {
+                    DummyThreadPane(
+                        root: opened,
+                        catalogues: session.emoji,
+                        catalogueSettled: settledHosts.contains(opened.source.host),
+                        posts: session.posts,
+                        conversations: session.conversations,
+                        onAskAround: { Task { await session.conversations.again(opened, in: session) } },
+                        selectedID: $selectedID,
+                        marks: markBinding,
+                        // Inside the conversation the answer mark opens the answer (#108).
+                        acting: { acting($0, inside: opened) },
+                        decks: $decks,
+                        playback: playback,
+                        onPlayRow: onPlayRow,
+                        onViewRow: onViewRow,
+                        onTurnRow: onTurnRow,
+                        onOpenThread: onOpenThread,
+                        onOpenPerson: onOpenPerson,
+                        jumpToTop: jumpToTop,
+                        onToast: showToast,
+                        onBack: onBack
+                    )
+                    // One pane per thread, so going back from a nested one draws its parent
+                    // afresh.
+                    .id(opened.id)
+                    // **The ask is the pane opening** — #90. A microblog thread is one request
+                    // about the post the reader has just pressed Return on, so nothing asks them
+                    // a second time for a thing they have already said they want. It is the
+                    // pane's own `.task`, so closing the thread cancels a read still on the wire,
+                    // and asked once per post per run: reopening draws what is already held.
+                    .task(id: opened.id) { await session.conversations.open(opened, in: session) }
+                } else {
+                    underneath
                 }
+            case nil:
+                underneath
             }
         }
         .overlay(alignment: .bottom) {
@@ -235,7 +243,7 @@ struct TimelinePane: View {
             } else if let selectedID, !items.contains(where: { $0.id == selectedID }) {
                 self.selectedID = nil
             }
-            openedID = nil
+            // The walk ends on the same change, where it is held: `FediqoRootView` clears it.
         }
     }
 
@@ -309,9 +317,16 @@ struct TimelinePane: View {
         await store.settle(host: host)
     }
 
-    private var openedItem: DummyItem? {
-        guard let openedID else { return nil }
-        return items.first { $0.id == openedID }
+    /// The list under the walk: what is held, or the notice that says there is nothing.
+    ///
+    /// Written out once, because two places fall back to it — nothing walked to, and a
+    /// conversation whose root this device no longer holds.
+    @ViewBuilder
+    private var underneath: some View {
+        switch stream {
+        case .held: list
+        case .empty: empty
+        }
     }
 
     private var list: some View {
