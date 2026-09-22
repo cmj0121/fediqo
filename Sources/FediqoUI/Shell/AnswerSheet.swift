@@ -20,8 +20,9 @@ struct AnswerTarget: Identifiable, Equatable {
 
 /// An answer, written over the conversation it belongs to (#108).
 ///
-/// **The composer's shape pointed at something**, and its rules are the composer's own statics
-/// rather than a second copy of them: the ceiling, the send test, the draft a landing clears.
+/// **The composer's shape pointed at something** — the same `WritingSheet` — and its rules are
+/// the composer's own statics rather than a second copy of them: the ceiling, the send test, the
+/// draft a landing clears.
 /// What is different is what this surface has that the composer does not — the post being
 /// answered stays in view while the words are written, the source is named rather than chosen
 /// because the post decides it, and the reach starts no wider than the post.
@@ -29,10 +30,7 @@ struct AnswerSheet: View {
     let target: AnswerTarget
 
     @Environment(ShellSession.self) private var session
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
-    @State private var sending = false
-    @State private var failed = false
 
     /// The line naming where the answer goes. A sentence rather than a picker: the source is not
     /// a choice here.
@@ -55,7 +53,6 @@ struct AnswerSheet: View {
     var body: some View {
         let item = target.item
         let host = item.source.host
-        let limit = session.postLimit(of: host)
         let draft = Binding(
             get: { session.answerDraft(target) },
             set: { session.answerDrafts[target.id] = $0 }
@@ -64,81 +61,46 @@ struct AnswerSheet: View {
             get: { session.answerReach[target.id] ?? target.start },
             set: { session.answerReach[target.id] = $0 }
         )
-        NavigationStack {
-            VStack(alignment: .leading, spacing: ShellSpace.step) {
-                answered(item)
-                HStack(alignment: .firstTextBaseline, spacing: ShellSpace.step) {
-                    Text(Self.goesTo(host: host))
-                        .shellFont(.meta)
-                        .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                    Picker(L10n.t("answer.reach"), selection: reach) {
-                        ForEach(Audience.allCases, id: \.self) { audience in
-                            Text(L10n.t(ComposerSheet.visibilityKey(audience))).tag(audience)
-                        }
-                    }
-                    .pickerStyle(.menu)
+        WritingSheet(
+            titleKey: "answer.title",
+            sendKey: "answer.send",
+            bodyKey: "answer.body",
+            draft: draft,
+            limit: session.postLimit(of: host),
+            canSend: session.canSendAnswer(target),
+            height: 460,
+            hidesScrollIndicators: false,
+            speaksLimitLine: false,
+            send: {
+                try await session.answer(target)
+                guard session.answerDraft(target).isEmpty else { return false }
+                session.answering = nil
+                return true
+            },
+            failedAt: { host }
+        ) { sending, _ in
+            answered(item)
+            HStack(alignment: .firstTextBaseline, spacing: ShellSpace.step) {
+                Text(Self.goesTo(host: host))
                     .shellFont(.meta)
-                    .disabled(sending)
-                    .accessibilityLabel(L10n.t("answer.reach"))
-                }
-                if Self.widens(reach.wrappedValue, from: target.start) {
-                    Text(L10n.t("answer.wider"))
-                        .shellFont(.meta)
-                        .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                let remaining = ComposerSheet.remaining(draft.wrappedValue, limit: limit)
-                Text(ComposerSheet.limitLine(remaining: remaining, limit: limit))
-                    .shellFont(.reading)
-                    .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-                TextEditor(text: draft)
-                    .shellFont(.body)
-                    .scrollContentBackground(.hidden)
-                    .foregroundStyle(ShellChrome.ink(colorScheme))
-                    .disabled(sending)
-                    .accessibilityLabel(L10n.t("answer.body"))
-                if sending {
-                    ShellWaiting()
-                        .frame(height: ShellSpace.pad)
-                        .frame(maxWidth: .infinity)
-                }
-                if failed {
-                    ShellFailure(source: host) {
-                        Task { await send() }
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                Picker(L10n.t("answer.reach"), selection: reach) {
+                    ForEach(Audience.allCases, id: \.self) { audience in
+                        Text(L10n.t(ComposerSheet.visibilityKey(audience))).tag(audience)
                     }
-                    .frame(minHeight: 72)
                 }
+                .pickerStyle(.menu)
+                .shellFont(.meta)
+                .disabled(sending)
+                .accessibilityLabel(L10n.t("answer.reach"))
             }
-            .padding(ShellSpace.step)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(ShellChrome.page(colorScheme))
-            .navigationTitle(L10n.t("answer.title"))
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(L10n.t("compose.cancel")) {
-                        guard ComposerSheet.canDismiss(sending: sending) else { return }
-                        dismiss()
-                    }
-                    .disabled(!ComposerSheet.canDismiss(sending: sending))
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(L10n.t("answer.send")) {
-                        Task { await send() }
-                    }
-                    .disabled(!session.canSendAnswer(target) || sending)
-                    .accessibilityLabel(L10n.t("answer.send"))
-                }
+            if Self.widens(reach.wrappedValue, from: target.start) {
+                Text(L10n.t("answer.wider"))
+                    .shellFont(.meta)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        #if os(macOS)
-        .frame(width: 600, height: 460)
-        #else
-        .frame(minWidth: 600, minHeight: 460)
-        #endif
-        .interactiveDismissDisabled(!ComposerSheet.canDismiss(sending: sending))
         .task(id: host) { await session.refreshPostLimit(of: host) }
     }
 
@@ -162,20 +124,5 @@ struct AnswerSheet: View {
         .background(ShellChrome.floatFill(colorScheme), in: RoundedRectangle(cornerRadius: 6))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(Self.answering(item)))
-    }
-
-    private func send() async {
-        guard !sending else { return }
-        sending = true
-        failed = false
-        defer { sending = false }
-        do {
-            try await session.answer(target)
-            guard session.answerDraft(target).isEmpty else { return }
-            session.answering = nil
-            dismiss()
-        } catch {
-            failed = true
-        }
     }
 }
