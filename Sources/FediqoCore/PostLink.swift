@@ -215,34 +215,54 @@ public extension PostLink {
 }
 
 public extension EmojiRun {
-    /// A post's own words, cut into letters, pictures and the addresses they were written with.
+    /// A post's own words, cut into letters, pictures, the addresses they were written with and
+    /// the tags the author marked.
     ///
     /// **Prose, and only prose.** A name, a handle and a spoiler line are labels a stranger chose
     /// and go through `CustomEmoji.runs` instead: a person may call themselves
     /// `https://example.test`, and a row that quietly turned that into a control the reader can
     /// press would be inventing something about a post. `EmojiText` keeps the same split in its
     /// two initialisers and says so there.
+    ///
+    /// **Everything between two marks goes back through `CustomEmoji.runs`**, so a shortcode
+    /// beside a tag is still a picture, and the cut concatenated is the words exactly — which is
+    /// what lets `EmojiText` read a line aloud from its cut rather than scanning it twice.
     static func prose(in text: String, emojis: [CustomEmoji]) -> [EmojiRun] {
-        // `https://` has a colon in it and so does every shortcode, so a line with no colon has
-        // neither — one run, no scan, and that is most lines.
-        guard text.utf8.contains(UInt8(ascii: ":")) else {
-            return CustomEmoji.runs(in: text, from: emojis)
-        }
-        let spans = PostLink.spans(in: text)
-        guard !spans.isEmpty else { return CustomEmoji.runs(in: text, from: emojis) }
+        let marks = marks(in: text)
+        guard !marks.isEmpty else { return CustomEmoji.runs(in: text, from: emojis) }
 
         var runs: [EmojiRun] = []
         var cursor = text.startIndex
-        for span in spans {
-            if cursor < span.range.lowerBound {
-                runs += CustomEmoji.runs(in: String(text[cursor ..< span.range.lowerBound]), from: emojis)
+        for mark in marks {
+            if cursor < mark.range.lowerBound {
+                runs += CustomEmoji.runs(in: String(text[cursor ..< mark.range.lowerBound]), from: emojis)
             }
-            runs.append(.link(span.link))
-            cursor = span.range.upperBound
+            runs.append(mark.run)
+            cursor = mark.range.upperBound
         }
         if cursor < text.endIndex {
             runs += CustomEmoji.runs(in: String(text[cursor...]), from: emojis)
         }
         return runs
+    }
+
+    /// The addresses and the tags in a line, in the order they were written, never overlapping.
+    ///
+    /// **An address is found first and keeps every character it was written with.** A `#` is
+    /// legal in an address and `https://example.test/#top` opens a tag by the tag rule alone —
+    /// the `/` before it is not a letter — so a tag that overlaps an address is not a tag. The
+    /// other way round would cut the address short and draw a pill in the middle of a link, and
+    /// the address is the stronger claim: it is the one the reader can follow.
+    internal static func marks(in text: String) -> [(range: Range<String.Index>, run: EmojiRun)] {
+        // `https://` has a colon in it, so a line with no colon has no address — no scan, and
+        // that is most lines. `PostTag.spans` makes the same check for `#` itself.
+        let links = text.utf8.contains(UInt8(ascii: ":")) ? PostLink.spans(in: text) : []
+        let tags = PostTag.spans(in: text).filter { tag in
+            !links.contains { $0.range.overlaps(tag.range) }
+        }
+        if tags.isEmpty { return links.map { ($0.range, .link($0.link)) } }
+        if links.isEmpty { return tags.map { ($0.range, .tag($0.tag)) } }
+        return (links.map { ($0.range, EmojiRun.link($0.link)) } + tags.map { ($0.range, EmojiRun.tag($0.tag)) })
+            .sorted { $0.range.lowerBound < $1.range.lowerBound }
     }
 }
