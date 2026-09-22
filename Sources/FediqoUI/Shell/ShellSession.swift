@@ -314,6 +314,19 @@ final class ShellSession {
         return true
     }
 
+    /// Which tab Preferences is showing (#143): what a person chooses, or which Fediqo this is.
+    var preferencesPurpose: PreferencesPane.Purpose = .choices
+
+    /// Tab and ⇧Tab on Preferences, the way they rotate Usage: Preferences, This Fediqo, and
+    /// round again.
+    @discardableResult
+    func rotatePreferencesTab(by step: Int) -> Bool {
+        preferencesPurpose = DummyCommand.advanced(
+            Array(PreferencesPane.Purpose.allCases), from: preferencesPurpose, by: step
+        )
+        return true
+    }
+
     /// How many times the reader has cleared a server — decision 14's press, counted.
     ///
     /// **A signal, not a statistic.** Three caches hold this device's copy of a server, and only

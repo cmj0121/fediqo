@@ -126,6 +126,45 @@ struct BuildStampTests {
         }
     }
 
+    @Test("Preferences has two tabs, what a person chooses and this build, in both languages")
+    func preferencesTabs() {
+        #expect(PreferencesPane.Purpose.allCases == [.choices, .build])
+        #expect(L10n.t("prefs.tab.choices", language: .english) == "Settings")
+        #expect(L10n.t("prefs.tab.build", language: .english) == "This Fediqo")
+        #expect(L10n.t("prefs.tab.choices", language: .taiwanese) == "設定")
+        #expect(L10n.t("prefs.tab.build", language: .taiwanese) == "這個 Fediqo")
+    }
+
+    @Test("Tab on Preferences goes Settings, This Fediqo, and round again, as it does on Usage")
+    func preferencesTabOrder() {
+        let session = ShellSession(http: FixtureHTTP())
+        #expect(session.preferencesPurpose == .choices)
+        var visited: [PreferencesPane.Purpose] = []
+        for _ in 0..<3 {
+            #expect(session.rotatePreferencesTab(by: 1))
+            visited.append(session.preferencesPurpose)
+        }
+        #expect(visited == [.build, .choices, .build])
+        session.rotatePreferencesTab(by: -1)
+        #expect(session.preferencesPurpose == .choices)
+        #expect(session.usagePurpose == .source, "Preferences' tabs are its own, not Usage's")
+    }
+
+    /// No view inspector here, so the page is pinned by what its files say, as Usage's is: the
+    /// build tab is `BuildStampSection` and only that, the choices stay on the first tab, and the
+    /// shell's Tab reaches Preferences.
+    @Test("The build tab is its own page, and the shell's Tab reaches it")
+    func tabsAreWired() throws {
+        let shell = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/FediqoUI")
+        let pane = try String(contentsOf: shell.appendingPathComponent("Shell/PreferencesPane.swift"), encoding: .utf8)
+        let root = try String(contentsOf: shell.appendingPathComponent("FediqoRootView.swift"), encoding: .utf8)
+        #expect(pane.contains("case .build: BuildStampSection(stamp: stamp)"))
+        #expect(pane.contains("case .choices: choices"))
+        #expect(root.contains("case .preferences: session.rotatePreferencesTab(by: step)"))
+    }
+
     /// The route the stamp takes: project.yml writes the two settings into each app's Info.plist
     /// under the keys `BuildStamp` reads. A key renamed on one side and not the other would
     /// leave every build reading "not recorded", and nothing else would notice.

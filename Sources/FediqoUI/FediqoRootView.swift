@@ -1156,12 +1156,13 @@ public struct FediqoRootView: View {
         return true
     }
 
-    /// Tab rotates this page's tabs: named queries on the timeline, purposes on Usage.
-    /// Elsewhere it is the platform's.
+    /// Tab rotates this page's tabs: named queries on the timeline, purposes on Usage and on
+    /// Preferences. Elsewhere it is the platform's.
     private func rotatePlaceTab(by step: Int) -> Bool {
         switch place {
         case .timeline: session.rotateTab(by: step)
         case .usage: session.rotateUsageTab(by: step)
+        case .preferences: session.rotatePreferencesTab(by: step)
         default: false
         }
     }

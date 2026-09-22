@@ -295,6 +295,8 @@
 "prefs.latest.date" = "最晚日期";
 "prefs.latest.footer" = "每個時間軸都不顯示這一天結束後（依這台裝置的時區）發佈的貼文。較新的貼文仍留在這台裝置上；關掉這項就會再看到。";
 
+"prefs.tab.choices" = "設定";
+"prefs.tab.build" = "這個 Fediqo";
 "about.title" = "這個 Fediqo";
 "about.version" = "版本";
 "about.build" = "組建";

@@ -5,9 +5,9 @@ import AppKit
 import UIKit
 #endif
 
-/// Preferences' own place for which Fediqo this is (#143): a section of the page, after what a
-/// person chooses, on both platforms — the Form Preferences already is, rather than a second
-/// window or a sheet, so it is reached by the same walk, key and touch as the rows above it.
+/// Preferences' own place for which Fediqo this is (#143): the whole of its second tab, on both
+/// platforms — inside the Form Preferences already is, rather than a second window or a sheet,
+/// so it is reached by the same pills, Tab key and touch as Usage's tabs.
 ///
 /// Everything drawn comes from `BuildStamp`, which is where it is decided and tested; this view
 /// only lays the rows out and puts `copyText` on the clipboard. Nothing here reaches the network.

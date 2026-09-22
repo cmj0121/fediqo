@@ -296,6 +296,8 @@
 "prefs.latest.date" = "Latest date";
 "prefs.latest.footer" = "Every timeline shows nothing posted after the end of this day, in this device's time zone. Newer posts stay on this device; turn this off to see them again.";
 
+"prefs.tab.choices" = "Settings";
+"prefs.tab.build" = "This Fediqo";
 "about.title" = "This Fediqo";
 "about.version" = "Version";
 "about.build" = "Build";

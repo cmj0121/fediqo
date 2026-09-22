@@ -2,43 +2,48 @@ import FediqoCore
 import SwiftUI
 
 /// Language, theme, type, and the latest date every timeline stops at (#22) — what a person
-/// chooses. What this device holds is on `UsagePane` (#21). Last on the page, in a section of its
-/// own, which Fediqo this is (#143) — see `BuildStampSection`.
+/// chooses. What this device holds is on `UsagePane` (#21).
+///
+/// **Two tabs, in Usage's shape** (#143): what a person chooses, and which Fediqo this is. The
+/// same pills at the head of the same grouped `Form`, and the same key — Tab and ⇧Tab rotate them
+/// (`ShellSession.rotatePreferencesTab`) — so the page is reached and walked on a Mac and on a
+/// phone the way Usage already is. The second tab is `BuildStampSection`, whole.
 struct PreferencesPane: View {
     @Environment(DummyPrefs.self) private var prefs
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// Optional for the reason it is on `UsagePane`: a preview or a test can draw this pane with
+    /// no shell around it, and then the page stays on what a person chooses.
+    @Environment(ShellSession.self) private var session: ShellSession?
 
     /// What this build was stamped with. The app's own by default; a test or a preview hands in
     /// another.
     var stamp: BuildStamp = .main
 
+    /// What this page is for, one tab each (#143).
+    enum Purpose: String, CaseIterable, Identifiable {
+        case choices
+        case build
+
+        var id: Self { self }
+
+        var titleKey: String {
+            switch self {
+            case .choices: "prefs.tab.choices"
+            case .build: "prefs.tab.build"
+            }
+        }
+    }
+
+    private var purpose: Purpose { session?.preferencesPurpose ?? .choices }
+
     var body: some View {
-        @Bindable var prefs = prefs
         Form {
-            Picker(L10n.t("prefs.language"), selection: $prefs.language) {
-                ForEach(DummyLanguage.allCases) { language in
-                    Text(L10n.t("prefs.language.\(language.labelKey)")).tag(language)
-                }
+            Section { tabs }
+            switch purpose {
+            case .choices: choices
+            case .build: BuildStampSection(stamp: stamp)
             }
-            Picker(L10n.t("prefs.theme"), selection: $prefs.theme) {
-                ForEach(DummyTheme.allCases) { theme in
-                    Text(L10n.t("prefs.theme.\(theme.rawValue)")).tag(theme)
-                }
-            }
-            Picker(L10n.t("prefs.fontSize"), selection: $prefs.fontSize) {
-                ForEach(DummyFontSize.allCases) { size in
-                    Text(L10n.t("prefs.fontSize.\(size.rawValue)")).tag(size)
-                }
-            }
-            Section {
-                Toggle(L10n.t("prefs.latest"), isOn: latestIsOn)
-                if prefs.latestDate != nil {
-                    DatePicker(L10n.t("prefs.latest.date"), selection: latestDay, displayedComponents: .date)
-                }
-            } footer: {
-                Text(L10n.t("prefs.latest.footer"))
-                    .shellFont(.meta)
-            }
-            BuildStampSection(stamp: stamp)
         }
         .formStyle(.grouped)
         // **The pane the type size is chosen on has to move with it** (#96). A `Form`'s rows
@@ -53,6 +58,72 @@ struct PreferencesPane: View {
         .scrollIndicators(.never)
         .clearsFloatingCorner()
         .padding(ShellSpace.snug)
+    }
+
+    /// What a person chooses: the page as it was before it had tabs.
+    @ViewBuilder
+    private var choices: some View {
+        @Bindable var prefs = prefs
+        Picker(L10n.t("prefs.language"), selection: $prefs.language) {
+            ForEach(DummyLanguage.allCases) { language in
+                Text(L10n.t("prefs.language.\(language.labelKey)")).tag(language)
+            }
+        }
+        Picker(L10n.t("prefs.theme"), selection: $prefs.theme) {
+            ForEach(DummyTheme.allCases) { theme in
+                Text(L10n.t("prefs.theme.\(theme.rawValue)")).tag(theme)
+            }
+        }
+        Picker(L10n.t("prefs.fontSize"), selection: $prefs.fontSize) {
+            ForEach(DummyFontSize.allCases) { size in
+                Text(L10n.t("prefs.fontSize.\(size.rawValue)")).tag(size)
+            }
+        }
+        Section {
+            Toggle(L10n.t("prefs.latest"), isOn: latestIsOn)
+            if prefs.latestDate != nil {
+                DatePicker(L10n.t("prefs.latest.date"), selection: latestDay, displayedComponents: .date)
+            }
+        } footer: {
+            Text(L10n.t("prefs.latest.footer"))
+                .shellFont(.meta)
+        }
+    }
+
+    /// The same pills Usage and the timeline use: one selected, the rest a well. Tab rotates
+    /// them; they sit in the Form so the grouped chrome is the page's own.
+    private var tabs: some View {
+        HStack(spacing: ShellSpace.tight) {
+            ForEach(Purpose.allCases) { tab in
+                let selected = tab == purpose
+                Button {
+                    session?.preferencesPurpose = tab
+                } label: {
+                    Text(L10n.t(tab.titleKey))
+                        .lineLimit(1)
+                        .fixedSize()
+                        .shellFont(.meta, weight: selected ? .semibold : .regular)
+                        .foregroundStyle(
+                            selected
+                                ? ShellChrome.selectInk(colorScheme)
+                                : ShellChrome.inkDim(colorScheme)
+                        )
+                        .padding(.horizontal, ShellSpace.snug)
+                        .padding(.vertical, ShellSpace.tight)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(
+                                    selected
+                                        ? ShellChrome.selectFill(colorScheme)
+                                        : ShellChrome.well(colorScheme)
+                                )
+                        )
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+            Spacer(minLength: 0)
+        }
     }
 
     /// Off is no latest date. Turning it on starts at today, the date that hides nothing yet.
