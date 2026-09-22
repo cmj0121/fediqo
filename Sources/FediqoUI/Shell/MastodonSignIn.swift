@@ -248,7 +248,22 @@ public final class MastodonSessions {
         host: String, within limit: Duration? = nil, for purpose: SourceWork.Purpose,
         name: SourceWork.Name? = nil
     ) -> MastodonAuthorized? {
-        guard let token = (try? tokens.token(host: host)) ?? nil else { return nil }
+        guard let token = token(host: host) else { return nil }
+        return authorized(token: token, within: limit, for: purpose, name: name)
+    }
+
+    /// The token kept for a host, or nothing where none can be read. One Keychain read, for a
+    /// caller about to build several doors with `authorized(token:within:for:name:)`.
+    func token(host: String) -> MastodonToken? {
+        (try? tokens.token(host: host)) ?? nil
+    }
+
+    /// A door through a token already read — `authorized(host:within:for:name:)` without the
+    /// Keychain, so a reload building one door per timeline reads the token once.
+    func authorized(
+        token: MastodonToken, within limit: Duration? = nil, for purpose: SourceWork.Purpose,
+        name: SourceWork.Name? = nil
+    ) -> MastodonAuthorized {
         let watched = WatchedHTTP(sender: sender, for: purpose, name: name, in: work)
         let wire: any HTTPSender = limit.map { Deadline(watched as any HTTPSender, within: $0) } ?? watched
         return MastodonAuthorized(token: token, sender: wire, store: tokens)

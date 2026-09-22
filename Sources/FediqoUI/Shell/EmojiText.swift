@@ -69,12 +69,7 @@ struct EmojiText: View {
     /// which a call site has to ask for by name.
     init(_ text: String, emojis: [CustomEmoji], host: String, role: EmojiTextRole = .body,
          cache: EmojiCache = .shared) {
-        self.text = text
-        self.emojis = emojis
-        self.host = host
-        self.role = role
-        self.cache = cache
-        linked = false
+        self.init(text, emojis: emojis, host: host, role: role, cache: cache, linked: false)
     }
 
     /// A post's **own words** — the one line on a row that the author wrote as writing rather
@@ -87,12 +82,17 @@ struct EmojiText: View {
     /// would be the type scale being decided at a call site, and the roles this view offers are
     /// the three places a stranger's words are drawn.
     init(prose text: String, emojis: [CustomEmoji], host: String, cache: EmojiCache = .shared) {
+        self.init(text, emojis: emojis, host: host, role: .body, cache: cache, linked: true)
+    }
+
+    private init(_ text: String, emojis: [CustomEmoji], host: String, role: EmojiTextRole,
+                 cache: EmojiCache, linked: Bool) {
         self.text = text
         self.emojis = emojis
         self.host = host
-        role = .body
+        self.role = role
         self.cache = cache
-        linked = true
+        self.linked = linked
     }
 
     /// A post's own words, drawn as prose where the reader can read them and as plain letters
@@ -164,11 +164,10 @@ struct EmojiText: View {
 
     /// The addresses in a cut line, in the order they were written.
     static func links(in cut: [EmojiRun]) -> [PostLink] {
-        var links: [PostLink] = []
-        for run in cut {
-            if case .link(let link) = run { links.append(link) }
+        cut.compactMap { run in
+            if case .link(let link) = run { return link }
+            return nil
         }
-        return links
     }
 
     // MARK: - What this line asks the cache for

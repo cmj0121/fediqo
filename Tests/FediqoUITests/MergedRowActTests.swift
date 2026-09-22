@@ -125,8 +125,8 @@ struct MergedRowActTests {
         )
         let row = try row(session)
 
-        await session.boost(row)
-        await session.favourite(try self.row(session))
+        await session.toggle(.boost, on: row)
+        await session.toggle(.favourite, on: try self.row(session))
         let requests = await server.requests
         #expect(requests.map { $0.url?.path } == [
             "/api/v1/statuses/222/reblog", "/api/v1/statuses/222/favourite",
@@ -182,9 +182,9 @@ struct MergedRowActTests {
         }
         #expect(session.acting(on: try row(session)).through.isEmpty, "the row is its own acting copy")
 
-        await session.boost(try row(session))
-        await session.boost(try row(session))
-        await session.favourite(try row(session))
+        await session.toggle(.boost, on: try row(session))
+        await session.toggle(.boost, on: try row(session))
+        await session.toggle(.favourite, on: try row(session))
         let requests = await server.requests
         #expect(requests.map { $0.url?.path } == [
             "/api/v1/statuses/111/reblog", "/api/v1/statuses/111/unreblog",
@@ -246,12 +246,12 @@ struct MergedRowActTests {
         )
         let row = try row(session)
         let watchdog = hangGuard(gate)
-        let press = Task { await session.boost(row) }
+        let press = Task { await session.toggle(.boost, on: row) }
         #expect(await spun { await server.paths.count == 1 })
         let out = session.acting(on: row)
         #expect(out.standings[.boost] == .onItsWay)
         #expect(ItemActs.mark(.boost, on: row, acting: out).spoken == "Boost through b.example on its way")
-        await session.boost(row)
+        await session.toggle(.boost, on: row)
         #expect(await server.paths.count == 1, "one act, not two")
         await gate.open()
         await press.value
@@ -260,7 +260,7 @@ struct MergedRowActTests {
         #expect(session.acting(on: row).standings[.boost] == .failed)
         #expect(held(session, on: second)?.boosted == false, "the row is as it was")
         #expect(held(session, on: first)?.boosted == false)
-        await session.boost(try self.row(session))
+        await session.toggle(.boost, on: try self.row(session))
         #expect(await server.paths == [
             "/api/v1/statuses/222/reblog", "/api/v1/statuses/222/reblog",
         ], "tried again, through the same source")
@@ -312,8 +312,8 @@ struct MergedRowActTests {
         #expect(acts.refused == .notSignedIn)
         for act in PostAct.allCases { #expect(session.actingCopy(of: row, for: act) == nil) }
 
-        await session.boost(row)
-        await session.favourite(row)
+        await session.toggle(.boost, on: row)
+        await session.toggle(.favourite, on: row)
         #expect(!session.openAnswer(to: row, in: row))
         #expect(!session.askToWithdraw(row))
         #expect(await server.requests.isEmpty)

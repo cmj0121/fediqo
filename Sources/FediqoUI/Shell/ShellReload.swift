@@ -116,7 +116,7 @@ final class ShellReload {
             //
             // Here and not inside each read, for two reasons. They go out together, so the whole
             // reload waits one round trip rather than each source waiting its own; and the
-            // answers are in before `reloadFromStore` below projects them onto the sources, so
+            // answers are in before `reprojectSources` below projects them onto the sources, so
             // the reads under it work from what the servers just said. A host answers this once
             // and is not asked again until a Clear or a Remove.
             await withTaskGroup(of: Void.self) { group in
@@ -126,7 +126,7 @@ final class ShellReload {
                 }
             }
             guard !Task.isCancelled else { return }
-            await session.reloadFromStore()
+            await session.reprojectSources()
             let spoken = session.sources
 
             var unread: Set<String> = []
@@ -167,7 +167,7 @@ final class ShellReload {
                 if !read, !Task.isCancelled { self.failed = [ref.host] }
                 return
             }
-            guard let held = session.notes.first(where: { $0.key.rowID == item.id }) else { return }
+            guard let held = session.heldNote(item.id) else { return }
             let again = await self.again(held, in: session)
             guard !Task.isCancelled else { return }
             switch again {
@@ -313,11 +313,10 @@ final class ShellReload {
     /// Clear between two of its requests ends it before the next goes out on a forgotten token.
     private func againOnMastodon(_ held: Note, stamp: Source, in session: ShellSession) async throws -> Again {
         let host = stamp.host
-        guard let door = session.mastodon.authorized(host: host, within: deadline, for: .conversation) else {
-            let post = MastodonPost(http: timed(session.http, for: .conversation, in: session), host: host)
+        let (post, signedIn) = session.conversationPost(host: host, within: deadline)
+        guard signedIn else {
             return try await Self.again(held, stamp: stamp, through: post, signedIn: false, in: session)
         }
-        let post = MastodonPost(door: door)
         return try await asReader(host) {
             try await Self.again(held, stamp: stamp, through: post, signedIn: true, in: session)
         }
@@ -390,19 +389,32 @@ final class ShellReload {
                 )
             }
             let read: Bool
+            // Whether a board or the front page was read at all — a Trends-only ask reads neither.
+            let listed: Bool
             if let categories {
                 let asked = source.boards.filter { categories.contains(.board(id: String($0.fid))) }
                 read = await boards(asked, of: stamp, through: client, in: session)
+                listed = !asked.isEmpty
             } else if source.boards.isEmpty {
                 read = await land(host, in: session) { try await client(nil).latest(source: stamp) }
+                listed = true
             } else {
                 read = await boards(source.boards, of: stamp, through: client, in: session)
+                listed = true
+            }
+            // **Its Trends, where the timeline reaches them** — the Trends tab, All, and a written
+            // timeline whose rules can show them: `categories` names `.trends`, or is nil for the
+            // source's usual reads, which on a Discuz! are its boards and its ranking lists as on
+            // a Mastodon they are its public timeline and its trends. After the boards, so a
+            // ranked thread lands on the row its board already made rather than first.
+            if categories?.contains(.trends) ?? true, !Task.isCancelled {
+                await ranked(stamp, through: http, in: session)
             }
             // **A board read again reads its rows' opening posts again too** (#154) — when each
             // row is reached, not now. The words kept with a row are what the forum said the
             // last time; a reader who pressed `r` asked what it says now. Only where the forum
             // answered: a reload that did not get through leaves the kept words standing.
-            if read, !Task.isCancelled { session.posts.revisit(host: host) }
+            if listed, read, !Task.isCancelled { session.posts.revisit(host: host) }
             return read
         case .discourse:
             // A Discourse's front page is its one read; it has no boards this app picks.
@@ -428,16 +440,19 @@ final class ShellReload {
             })
         }
         // The door reads the lists' names again, where every list is read; each timeline is read
-        // through a door of its own, shown under the name the reader knows it by (#170).
+        // through a door of its own, shown under the name the reader knows it by (#170). The
+        // token is read from the Keychain once and every door is built from it.
         guard home || lists?.isEmpty == false,
-              let door = session.mastodon.authorized(host: source.host, within: deadline, for: .lists)
+              let token = session.mastodon.token(host: source.host)
         else { return true }
+        let mastodon = session.mastodon
+        let door = mastodon.authorized(token: token, within: deadline, for: .lists)
         let named = Self.names(of: source)
-        let plain = session.mastodon.authorized(host: source.host, within: deadline, for: .timeline) ?? door
+        let plain = mastodon.authorized(token: token, within: deadline, for: .timeline)
         var doors: [FediqoCore.Category: MastodonAuthorized] = [:]
         for category in [.home] + source.lists.map({ FediqoCore.Category.list(id: $0.id) }) {
-            doors[category] = session.mastodon.authorized(
-                host: source.host, within: deadline, for: .timeline, name: named(category)
+            doors[category] = mastodon.authorized(
+                token: token, within: deadline, for: .timeline, name: named(category)
             )
         }
         let account = MastodonAccount(door: door, store: session.store) { [doors] category in
@@ -473,6 +488,25 @@ final class ShellReload {
             } && read
         }
         return read
+    }
+
+    /// A Discuz!'s Trends: the week's ranked threads, then the week's ranked blogs, one page each
+    /// and one after the other, through the forum's own transport — shown as its Trends while they
+    /// run (#164, #170).
+    ///
+    /// **Never a failure.** A forum may switch its ranking lists off, keep them for members, or
+    /// have nothing ranked this week, and none of that is the forum not answering: the reader
+    /// asked for its boards and its Trends, and a Trends that is not there is simply no rows.
+    /// So what these two pages bring lands, and what they could not bring is not reported.
+    private func ranked(
+        _ source: Source, through http: any HTTPClient, in session: ShellSession
+    ) async {
+        let client = DiscuzClient(
+            http: timed(http, for: .timeline, name: .trends, in: session), host: source.host
+        )
+        _ = await land(source.host, in: session) { try await client.rankedThreads(source: source) }
+        guard !Task.isCancelled else { return }
+        _ = await land(source.host, in: session) { try await client.rankedBlogs(source: source) }
     }
 
     /// One read into the store, while its source is still here and the reload is not stopped.
@@ -520,8 +554,7 @@ final class ShellReload {
 
     /// A forum signed in to is read through its own browser, as a join reads it.
     private func transport(_ host: String, in session: ShellSession) -> any HTTPClient {
-        guard session.forums.readsThroughEngine(host: host) else { return session.http }
-        return ForumJoinTransport(session.forums.transport(host: host))
+        session.forums.readTransport(host: host, else: session.http)
     }
 }
 

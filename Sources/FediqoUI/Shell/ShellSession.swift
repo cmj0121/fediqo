@@ -256,6 +256,8 @@ final class ShellSession {
     /// The last timeline drawn and what it was drawn from, so a redraw that reads it several
     /// times evaluates the rules once.
     @ObservationIgnored var drawnTimeline: DrawnTimeline?
+    /// The person's page last drawn and what it was drawn from. See `heldPosts(of:)`.
+    @ObservationIgnored var drawnPerson: HeldByPerson?
     /// How many times the rules ran for the stream: the test's window on `drawnTimeline`.
     @ObservationIgnored var timelineEvaluations = 0
     /// Each tab's missing-rule mark as last worked out, so a redraw compiles no tab again.
@@ -268,7 +270,17 @@ final class ShellSession {
     /// Every change is handed on to `forums`, which is the one place that knows which of them
     /// are forums a sign-in can be held for.
     var sources: [Source] = [] {
-        didSet { forums.watch(forums: sources.filter { $0.kind == .discuz }.map(\.host)) }
+        didSet {
+            let discuz = sources.filter { $0.kind == .discuz }
+            forums.watch(forums: discuz.map(\.host))
+            // The boards each forum is read for, which is what decides whether reaching a ranked
+            // thread may read it (`ForumPosts.readsWhenReached`). Written only when it changed,
+            // so a reload that leaves the picks alone does not wake every forum row.
+            let read = Dictionary(
+                discuz.map { ($0.host, Set($0.boards.map(\.fid))) }, uniquingKeysWith: { a, _ in a }
+            )
+            if posts.boardsRead != read { posts.boardsRead = read }
+        }
     }
     var notes: [Note] = [] {
         didSet {
@@ -294,10 +306,23 @@ final class ShellSession {
     /// page is opened from a post of theirs, and what is theirs is everything held rather than
     /// what the query in front lets through — so a root looked for among the timeline's rows is
     /// a root a rule can hide, and the pane would draw the timeline under the press instead of
-    /// the conversation the reader pressed for. The comparison is one string per note; the row
-    /// is built once, for the one note that matched.
+    /// the conversation the reader pressed for. The row id is split once and each note's key
+    /// compared to it, so walking past a note builds nothing; the row is built once, for the one
+    /// note that matched.
     func held(_ rowID: String) -> DummyItem? {
-        notes.first { $0.key.rowID == rowID }.map(DummyItem.init)
+        heldNote(rowID).map(DummyItem.init)
+    }
+
+    /// The store row one row id stands for, in `notes`. See `held(_:)`.
+    func heldNote(_ rowID: String) -> Note? {
+        guard let key = NoteKey(rowID: rowID) else { return nil }
+        return notes.first { $0.source.host == key.host && $0.id == key.id }
+    }
+
+    /// The note behind a row, wherever this run holds it: a store row, or an answer read in an
+    /// open conversation, which #90 keeps out of the store.
+    func note(ofRow rowID: String) -> Note? {
+        heldNote(rowID) ?? conversations.note(rowID)
     }
 
     /// What `notes` holds, counted (#7) — rebuilt where `notes` is assigned or the breakdown
@@ -470,7 +495,7 @@ final class ShellSession {
     /// Writes the draft to the chosen source and takes the returned post into the store.
     /// Empty or over-long text is not sent. A failure keeps the draft.
     func post() async throws {
-        let text = composeDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = ComposerSheet.trimmed(composeDraft)
         guard !text.isEmpty, let host = composeHost else { return }
         guard writableSources.contains(where: { $0.host == host }) else {
             throw MastodonWriteError.noSource
@@ -485,12 +510,23 @@ final class ShellSession {
             composeDraft = ComposerSheet.draftAfterLanding(current: composeDraft, sent: text)
             await adopt()
             await persist?()
-        } catch MastodonAuthError.signedOut {
-            mastodon.endedByServer(host: host)
-            throw MastodonAuthError.signedOut
-        } catch MastodonAuthError.http(let status) where status == 403 {
-            mastodon.refusedWrite(host: host)
-            throw MastodonAuthError.http(403)
+        } catch {
+            writeFailed(error, host: host)
+            throw error
+        }
+    }
+
+    /// What a write's failure says about the sign-in it went through, written against `host`:
+    /// a 401 the account check confirmed signs the source out, and a 403 marks the source as
+    /// having turned a write away. **One reading for every write** — a post, an answer and each
+    /// act — because they are the same two answers from the same door, and a second reading of
+    /// them is how two writes come to tell a reader different things about one sign-in. Any
+    /// other failure says nothing about the sign-in.
+    private func writeFailed(_ error: any Error, host: String) {
+        switch error as? MastodonAuthError {
+        case .signedOut?: mastodon.endedByServer(host: host)
+        case .http(403)?: mastodon.refusedWrite(host: host)
+        default: break
         }
     }
 
@@ -513,7 +549,12 @@ final class ShellSession {
     /// preview, a row left over from a Remove. That is `PostActs.none` rather than a refusal,
     /// because there is no source for a sentence to be about.
     func acts(on item: DummyItem) -> PostActs {
-        let each = item.copies.map(ownActs(on:))
+        Self.acts(from: item.copies.map(ownActs(on:)))
+    }
+
+    /// The row's acts out of each copy's own, in the row's order — `acts(on:)` over copies
+    /// whose acts are already worked out.
+    private static func acts(from each: [PostActs]) -> PostActs {
         let offered = each.reduce(into: Set<PostAct>()) { $0.formUnion($1.offered) }
         guard offered.isEmpty else { return PostActs(offered: offered) }
         return each.first { $0.refused != nil } ?? .none
@@ -539,10 +580,15 @@ final class ShellSession {
     /// **Each standing is read off the copy its act goes through** (#136), which is where
     /// `perform` keeps it, so a press through a merged row's second source is drawn on its way
     /// and a failure there is drawn as one. `through` names only a copy that is not the row.
+    ///
+    /// Each copy's own acts are worked out once, and both the offer and each act's copy are read
+    /// off them — `acts(on:)` and `actingCopy(of:for:)` asked separately would ask every copy
+    /// again for every act.
     func acting(on item: DummyItem) -> ItemActing {
-        var acting = ItemActing(acts: acts(on: item))
+        let each = item.copies.map { (copy: $0, acts: ownActs(on: $0)) }
+        var acting = ItemActing(acts: Self.acts(from: each.map(\.acts)))
         for act in PostAct.allCases {
-            let copy = actingCopy(of: item, for: act) ?? item
+            let copy = each.first { $0.acts.offers(act) }?.copy ?? item
             acting.standings[act] = acts.standing(of: copy.id, act)
             if copy.id != item.id { acting.through[act] = copy }
         }
@@ -628,29 +674,25 @@ final class ShellSession {
         }
     }
 
-    /// Boosts the post, or takes the boost back — the same press either way (#106).
+    /// Boosts the post or takes the boost back (#106), or favourites it or takes the favourite
+    /// back (#107) — the same press either way, and one press with two meanings. The other two
+    /// acts are not toggles, and do nothing here.
     ///
     /// **Which way it goes is read off the post and not off the press.** The acting copy's
-    /// `boosted` is what the source it goes through last said, so a row the reader boosted in another app and this device has since
-    /// fetched takes the boost back on its first press here, which is what the mark under it says
-    /// it will do.
+    /// `boosted` or `favourited` is what the source it goes through last said, so a row the reader
+    /// boosted in another app and this device has since fetched takes the boost back on its first
+    /// press here, which is what the mark under it says it will do.
     ///
     /// Nothing is written down about the press landing: the store takes the server's answer, and
     /// what the row draws afterwards is that. A refusal leaves the post exactly as it was and
     /// leaves a failure the same press clears by trying again.
-    func boost(_ item: DummyItem) async {
-        await perform(.boost, on: item) { door, note in
-            try await MastodonWrite(door: door, store: self.store)
-                .boost(note, on: note.boosted != true)
-        }
-    }
-
-    /// Favourites the post, or takes the favourite back — `boost`'s press with a different meaning
-    /// (#107). Which way it goes is read off what the source last said.
-    func favourite(_ item: DummyItem) async {
-        await perform(.favourite, on: item) { door, note in
-            try await MastodonWrite(door: door, store: self.store)
-                .favourite(note, on: note.favourited != true)
+    func toggle(_ act: PostAct, on item: DummyItem) async {
+        guard act == .boost || act == .favourite else { return }
+        await perform(act, on: item) { door, note in
+            let write = MastodonWrite(door: door, store: self.store)
+            return act == .boost
+                ? try await write.boost(note, on: note.boosted != true)
+                : try await write.favourite(note, on: note.favourited != true)
         }
     }
 
@@ -668,9 +710,12 @@ final class ShellSession {
     /// between them can answer differently.
     ///
     /// A 401 the account check confirms signs the source out, and a 403 marks the source as
-    /// having turned a write away — both exactly as `post()` does, because they are the same two
-    /// answers from the same door and a second reading of them is how two acts come to tell a
-    /// reader different things about one sign-in.
+    /// having turned a write away — `writeFailed`, exactly as `post()` reads them.
+    ///
+    /// **Every failure leaves the act failed**, a cancelled one included: a cancelled act is one
+    /// that did not arrive, said in the one sentence a reader can act on — press again. There is
+    /// no third thing to tell them, and leaving no standing at all would draw the post as though
+    /// the press had landed.
     private func perform(
         _ act: PostAct,
         on item: DummyItem,
@@ -679,8 +724,7 @@ final class ShellSession {
         guard let copy = actingCopy(of: item, for: act) else { return }
         let host = copy.source.host
         // A store row, or an answer read in an open conversation, which #90 keeps out of the store.
-        guard let note = notes.first(where: { $0.key.rowID == copy.id })
-                ?? conversations.note(copy.id),
+        guard let note = note(ofRow: copy.id),
               let door = mastodon.authorized(host: host, for: .write)
         else { return }
         guard acts.begin(copy.id, act) else { return }
@@ -690,18 +734,8 @@ final class ShellSession {
             acts.landed(copy.id, act)
             await adopt()
             await persist?()
-        } catch MastodonAuthError.signedOut {
-            mastodon.endedByServer(host: host)
-            acts.failed(copy.id, act)
-        } catch MastodonAuthError.http(403) {
-            mastodon.refusedWrite(host: host)
-            acts.failed(copy.id, act)
-        } catch let error where Cancellation.happened(error) {
-            // A cancelled act is one that did not arrive, said in the one sentence a reader can
-            // act on: press again. There is no third thing to tell them, and leaving no standing
-            // at all would draw the post as though the press had landed.
-            acts.failed(copy.id, act)
         } catch {
+            writeFailed(error, host: host)
             acts.failed(copy.id, act)
         }
     }
@@ -733,8 +767,9 @@ final class ShellSession {
             answerDrafts[item.id] = handle + " "
         }
         let start = Audience.answering(
-            notes.first { $0.key.rowID == item.id }?.audience
-                ?? conversations.note(item.id)?.audience
+            // Each half asked for an audience in turn: a store row that carries none leaves the
+            // conversation's copy to say, as `note(ofRow:)` would not.
+            heldNote(item.id)?.audience ?? conversations.note(item.id)?.audience
         )
         if answerReach[item.id] == nil { answerReach[item.id] = start }
         answering = AnswerTarget(item: item, root: root, start: start)
@@ -764,8 +799,7 @@ final class ShellSession {
         let text = ComposerSheet.trimmed(answerDraft(target))
         guard !text.isEmpty, text.count <= postLimit(of: host) else { return }
         guard acts(on: item).offers(.answer),
-              let answered = notes.first(where: { $0.key.rowID == item.id })
-                ?? conversations.note(item.id),
+              let answered = note(ofRow: item.id),
               let door = mastodon.authorized(host: host, for: .write)
         else { throw MastodonWriteError.noSource }
         let reach = answerReach[item.id] ?? target.start
@@ -782,12 +816,9 @@ final class ShellSession {
             conversations.landed(note, under: target.root.id, rootID: target.root.statusID)
             await adopt()
             await persist?()
-        } catch MastodonAuthError.signedOut {
-            mastodon.endedByServer(host: host)
-            throw MastodonAuthError.signedOut
-        } catch MastodonAuthError.http(let status) where status == 403 {
-            mastodon.refusedWrite(host: host)
-            throw MastodonAuthError.http(403)
+        } catch {
+            writeFailed(error, host: host)
+            throw error
         }
     }
 
@@ -1818,22 +1849,50 @@ final class ShellSession {
         await adopt()
     }
 
+    /// Only the sources, projected again through what each server has just said it is — for a
+    /// reload that has asked every server and has not read anything yet, so has no notes to adopt.
+    func reprojectSources() async {
+        await adoptSources()
+        rebuildQueries()
+    }
+
     /// What the store now holds, and the queries that draw it.
+    ///
+    /// **Each half assigned only where it moved.** Both have observers behind them — the forums
+    /// watched, the boards each forum is read for, the holdings counted and the text index
+    /// dropped — and every view reading the session redraws on an assignment, so a reload that
+    /// changed nothing used to pay for all of it. The notes are compared by the store's revision
+    /// rather than row by row: unchanged since the last adopt, and nothing here has assigned
+    /// `notes` since either, they are what the store holds.
     private func adopt() async {
+        await adoptSources()
+        let revision = await store.revision
+        if adopted?.store != revision || adopted?.notes != notesRevision {
+            notes = await store.all()
+            adopted = (store: revision, notes: notesRevision)
+        }
+        rebuildQueries()
+    }
+
+    /// The store's revision and `notesRevision` as the last adopt left them. Read in a hop before
+    /// the notes, so a write landing between the two is adopted again next time, never missed.
+    @ObservationIgnored private var adopted: (store: Int, notes: Int)?
+
+    private func adoptSources() async {
         // **Projected through what each server says it is** — #86. One place, so the row, the
         // tabs, a rule and a read all speak to a host under the name its own server gave rather
         // than the one written down when it was joined. Identity where nothing has been said,
         // which is every host until a read asks one.
-        sources = await store.sources().map(flavours.spoken)
-        notes = await store.all()
-        rebuildQueries()
+        let spoken = await store.sources().map(flavours.spoken)
+        if spoken != sources { sources = spoken }
     }
 
     /// The tabs, rebuilt from what is actually joined.
     ///
     /// **All and Trends, then the reader's own timelines in their order.** Boards stay a property of
-    /// the source — what this device fetches next — not a third timeline. A forum is not
+    /// the source — what this device fetches next — not a third timeline. A Discourse is not
     /// offered Trends: it has no trending read, and an empty tab is a promise the app cannot keep.
+    /// A Discuz! is, for its ranking lists.
     ///
     /// Rebuilt rather than appended to, because a second join changes what the first one's tabs
     /// should be: joining a forum after a microblog must not take Trends away, and the only way
@@ -1844,8 +1903,9 @@ final class ShellSession {
             timelineID = nil
             return
         }
-        queries = sources.contains(where: { Self.hasTrends($0.kind) }) ? [.all, .trends] : [.all]
-        queries += written.map { .written($0.id) }
+        var rebuilt: [TimelineQuery] = sources.contains(where: { Self.hasTrends($0.kind) }) ? [.all, .trends] : [.all]
+        rebuilt += written.map { .written($0.id) }
+        if rebuilt != queries { queries = rebuilt }
         if !queries.contains(where: { $0 == timelineID }) {
             timelineID = .all
         }
@@ -1853,30 +1913,35 @@ final class ShellSession {
 
     /// Whether a source of this kind has a trending timeline to offer.
     ///
-    /// **`ProtocolKind.hasTimelines`, not a second list**, so the Trends tab and the Trends
-    /// timeline's own rule cannot disagree about which servers have trends. A forum has none;
-    /// its boards choose what is fetched and are not tabs.
+    /// **`ProtocolKind.hasTrends`, not a second list**, so the Trends tab and the Trends
+    /// timeline's own rule cannot disagree about which servers have trends. A Discuz! has them —
+    /// its ranking lists — and a Discourse has none; a forum's boards choose what is fetched and
+    /// are not tabs.
     static func hasTrends(_ kind: ProtocolKind) -> Bool {
-        kind.hasTimelines
+        kind.hasTrends
     }
 
     /// The client a join of this host should go through.
     ///
-    /// **The forum's own browser, but only where this run already has one.** An engine exists for
-    /// a host exactly when the reader has been offered a sign-in for it, which is the moment the
-    /// session it holds starts to matter: a second `begin` after a sign-in has to go through the
-    /// thing that was signed in, or the reader watches a sheet clear a challenge and then gets
-    /// the same refusal from a client that was never there. `hasEngine` is asked rather than
-    /// `engine(host:)` so that a plain microblog join never starts a web process.
+    /// **The forum's own browser where this run has one, or where this device holds a sign-in
+    /// for it** — `ForumSessions.readTransport`, the same door a reload and a post fetch read
+    /// through. An engine exists for a host the moment the reader has been offered a sign-in for
+    /// it, which is when the session it holds starts to matter: a second `begin` after a sign-in
+    /// has to go through the thing that was signed in, or the reader watches a sheet clear a
+    /// challenge and then gets the same refusal from a client that was never there. And a
+    /// sign-in kept across a relaunch leaves cookies and no engine, so asking about this run
+    /// alone sent the board picker, a restate and `around(_:)` through `URLSession` and back to
+    /// the challenge's 403.
     /// **It has to be the engine, and nothing can stand in for it.** A host behind an
     /// interactive challenge cannot be read by `URLSessionClient` at all — not with a different
     /// agent, and not with a cookie copied out of the browser. The check is cleared by a person
     /// in a browser, and the only thing holding what that produced is the engine they cleared it
     /// in; reading a second time through anything else gets the challenge back.
     ///
-    /// **`hasEngine` rather than `transport`**, because `transport(host:)` would *build* one — a
-    /// reader adding an ordinary microblog would silently start a web process for a host that
-    /// never needed it, and this app does not spend a reader's battery on a maybe.
+    /// **`readTransport` rather than `transport`**, because `transport(host:)` would *build* one —
+    /// a reader adding an ordinary microblog would silently start a web process for a host that
+    /// never needed it, and this app does not spend a reader's battery on a maybe. A signed-in
+    /// host is a forum, so this still starts none for a microblog.
     ///
     /// `purpose` is what its requests are shown as while they run (#164), and `name` the one
     /// board they read, by the name the reader knows it by — nil for a read of no one board,
@@ -1884,10 +1949,7 @@ final class ShellSession {
     private func joiner(
         for host: String, for purpose: SourceWork.Purpose, name: SourceWork.Name? = nil
     ) -> SourceJoin {
-        var client: any HTTPClient = http
-        if forums.hasEngine(host: host) {
-            client = ForumJoinTransport(forums.transport(host: host))
-        }
+        let client = forums.readTransport(host: host, else: http)
         return SourceJoin(http: WatchedHTTP(client, for: purpose, name: name, in: work), store: store, catalogues: emoji)
     }
 

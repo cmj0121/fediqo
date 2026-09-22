@@ -147,16 +147,19 @@ public actor ItemStore {
     /// with it. Unlike `ingest`, a row already held is **replaced** by what the server says now —
     /// an edited post shows its new words — keeping the categories it arrived through and its
     /// booster (`Note.refreshed(over:)`). **A post not held is dropped**: reading one post again
-    /// updates what is here, and brings in nothing the reader did not already have.
-    public func refresh(_ incoming: [Note], ifSourceHere host: String) {
+    /// updates what is here, and brings in nothing the reader did not already have. Returns
+    /// whether anything was held to replace, so a caller adopts the store only then.
+    @discardableResult
+    public func refresh(_ incoming: [Note], ifSourceHere host: String) -> Bool {
         let host = host.lowercased()
-        guard sourceList.contains(where: { $0.host == host }) else { return }
+        guard sourceList.contains(where: { $0.host == host }) else { return false }
         let held = incoming.filter { $0.source.host == host && notes[$0.key] != nil }
-        guard !held.isEmpty else { return }
+        guard !held.isEmpty else { return false }
         revision += 1
         for note in held {
             notes[note.key] = notes[note.key].map(note.refreshed(over:))
         }
+        return true
     }
 
     /// Keeps a forum row's opening post as just read, with the row (#154). Only for rows held,

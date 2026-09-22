@@ -1023,12 +1023,12 @@ struct DummyItemRow: View {
 
     private var passOn: some View {
         HStack(spacing: ShellSpace.snug) {
-            answerMark
-            boostMark
+            actMark(.answer)
+            actMark(.boost)
             mark("quote.bubble", label: "item.act.quote", on: false) {
                 onToast(L10n.t("item.toast.quote"))
             }
-            favouriteMark
+            actMark(.favourite)
         }
     }
 
@@ -1044,7 +1044,7 @@ struct DummyItemRow: View {
                 marks.kept.toggle()
                 onToast(L10n.t(marks.kept ? "item.toast.kept.on" : "item.toast.kept.off"))
             }
-            withdrawMark
+            actMark(.withdraw)
             mark("ellipsis", label: "item.act.more", on: false) {
                 onToast(L10n.t("item.toast.more"))
             }
@@ -1052,88 +1052,32 @@ struct DummyItemRow: View {
         }
     }
 
-    /// Boosting this post to the source it was read through, or taking the boost back (#106).
+    /// One of #54's acts, as a mark under the post: answering (#108), boosting (#106),
+    /// favouriting (#107) and taking back what the reader wrote (#109).
     ///
-    /// **Absent rather than disabled where the post cannot be boosted**, which is decision 4 on
+    /// **Absent rather than disabled where the post does not offer it**, which is decision 4 on
     /// this repo's controls and is what `DummyItem.outwardURL` argues at length: a mark the reader
     /// cannot press is a question about this app, and the honest answer to "you are not signed in
-    /// here" is the sentence `refusal` draws, not a greyed arrow.
+    /// here" is the sentence `refusal` draws, not a greyed arrow. **And absent where the list has
+    /// nowhere for the press to go** — a row drawn with no session behind it — for the same reason.
     ///
-    /// Whether it is done is what the source the boost goes through said — never what this
-    /// device remembers pressing, and on a row two sources carried, never the other source's
-    /// word (#136); `ItemActs.mark` reads it. Nothing is not `false`: a post whose source never
-    /// said carries no mark at all, because `acts` has already refused it as unnameable or
-    /// unsigned.
+    /// Whether it is done is what the source the act goes through said — never what this device
+    /// remembers pressing, and on a row two sources carried, never the other source's word
+    /// (#136); `ItemActs.mark` reads it, the count beside it and its name. Boost and favourite are
+    /// one shape with two meanings, so a reader who learns one does not have to learn the other.
+    /// An answer and a take-back are never done: the reader may answer as often as they like, and
+    /// a post taken back is not on the row to be drawn. The take-back's press is the question and
+    /// never the act; on its way and failed every mark changes shape, and a failure is pressed
+    /// again to try again. Nothing is not a reading: a count of zero is left off rather than drawn
+    /// as a nought beside every glyph in the list.
     @ViewBuilder
-    private var boostMark: some View {
-        if acting.acts.offers(.boost) {
-            let shown = ItemActs.mark(.boost, on: item, acting: acting)
-            counted(
-                shown.symbol,
-                count: shown.count,
-                label: "item.act.boost",
-                on: shown.done,
-                spoken: shown.spoken
-            ) {
-                acting.boost?()
-            }
-        }
-    }
-
-    /// Answering this post (#108). From a timeline the press opens the conversation, which is
-    /// where an answer is written; inside it, the press opens the answer.
-    ///
-    /// **Drawn only where there is somewhere for the press to go**, both halves: the post offers
-    /// an answer, and the list this row is in has an answer to give — somebody's page has none,
-    /// and a mark that did nothing there would be the control this repo keeps refusing to ship.
-    @ViewBuilder
-    private var answerMark: some View {
-        if acting.acts.offers(.answer), let answer = acting.answer {
-            let shown = ItemActs.mark(.answer, on: item, acting: acting)
-            counted(
-                shown.symbol,
-                count: shown.count,
-                label: "item.act.answer",
-                on: false,
-                spoken: shown.spoken
-            ) {
-                answer()
-            }
-        }
-    }
-
-    /// Favouriting this post on the source it was read through, or taking it back (#107).
-    ///
-    /// `boostMark`'s rule in every particular — absent rather than disabled, done as the source
-    /// said and never as pressed — because the two marks are one shape with two meanings, and a
-    /// reader who learns one should not have to learn the other.
-    @ViewBuilder
-    private var favouriteMark: some View {
-        if acting.acts.offers(.favourite) {
-            let shown = ItemActs.mark(.favourite, on: item, acting: acting)
-            counted(
-                shown.symbol,
-                count: shown.count,
-                label: "item.act.favourite",
-                on: shown.done,
-                spoken: shown.spoken
-            ) {
-                acting.favourite?()
-            }
-        }
-    }
-
-    /// Taking back what the reader wrote (#109). **Drawn only on their own posts**, and the press
-    /// is the question and never the act: nothing goes until it is answered.
-    ///
-    /// On its way and failed it changes shape, as every act's mark does; a failure is pressed
-    /// again to be asked again.
-    @ViewBuilder
-    private var withdrawMark: some View {
-        if acting.acts.offers(.withdraw), let withdraw = acting.withdraw {
-            let shown = ItemActs.mark(.withdraw, on: item, acting: acting)
-            mark(shown.symbol, spoken: shown.spoken) {
-                withdraw()
+    private func actMark(_ act: PostAct) -> some View {
+        if acting.acts.offers(act), let perform = acting.perform {
+            let shown = ItemActs.mark(act, on: item, acting: acting)
+            DummyMarkButton(symbol: shown.symbol, count: (shown.count ?? 0) > 0 ? shown.count : nil,
+                            label: shown.spoken, on: shown.done, quiet: !reading, glyph: glyph,
+                            countWidth: countBox, touch: touch) {
+                perform(act)
             }
         }
     }
@@ -1151,28 +1095,10 @@ struct DummyItemRow: View {
         }
     }
 
-    /// Nothing is not a reading. A count of zero is left off rather than drawn as a
-    /// nought beside every glyph in the list.
-    private func counted(_ symbol: String, count: Int?, label: String, on: Bool,
-                         spoken: String? = nil,
-                         action: @escaping () -> Void) -> some View {
-        let shown = (count ?? 0) > 0 ? count : nil
-        return DummyMarkButton(symbol: symbol, count: shown, label: spoken ?? L10n.t(label),
-                               on: on, quiet: !reading, glyph: glyph,
-                               countWidth: countBox, touch: touch, action: action)
-    }
-
     private func mark(_ symbol: String, label: String, on: Bool,
                       action: @escaping () -> Void) -> some View {
         DummyMarkButton(symbol: symbol, count: nil, label: L10n.t(label),
                         on: on, quiet: !reading, glyph: glyph,
-                        countWidth: countBox, touch: touch, action: action)
-    }
-
-    /// An act's mark with no count, named by the sentence `ItemActs.spoken` builds.
-    private func mark(_ symbol: String, spoken: String, action: @escaping () -> Void) -> some View {
-        DummyMarkButton(symbol: symbol, count: nil, label: spoken,
-                        on: false, quiet: !reading, glyph: glyph,
                         countWidth: countBox, touch: touch, action: action)
     }
 

@@ -449,6 +449,7 @@
    writing, which is why each is drawn in the row's quiet register. */
 "item.forum.coming" = "Loading the first post";
 "item.forum.withheld" = "This forum keeps this post for readers who are signed in.";
+"item.forum.unread" = "Read when you open it — its board is not one you read.";
 "item.forum.silent" = "There are no words in this post.";
 "item.forum.refused" = "This forum would not let this app read this thread.";
 "item.forum.unreadable" = "This forum answered, but there was no post this app could read.";

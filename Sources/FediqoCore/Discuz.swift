@@ -77,6 +77,48 @@ public struct DiscuzClient: Sendable {
         return try await read(url, source: source)
     }
 
+    /// The threads the forum ranks by replies this week — half of its Trends.
+    ///
+    /// **One page, and the week's.** `orderby=thisweek` is the ranking list's own default span,
+    /// and replies are what a thread's row already counts. Each comes back as the same row its
+    /// board's listing makes (`DiscuzRankedThread.asNote`), with `.trends` beside its board.
+    ///
+    /// **Nothing is an answer here, where it is not on a board's page.** A board with no threads
+    /// is a page this app could not read; a ranking with nothing in it is a quiet week, or a
+    /// forum that switched its ranking lists off — so an empty page is `[]` and not `noThreads`.
+    /// What the page itself refuses (a challenge, a notice, the sign-in page) still throws, for
+    /// the caller to decide what that is worth.
+    public func rankedThreads(source: Source) async throws -> [Note] {
+        let html = try await page(try ranklistURL(type: "thread", view: "replies"))
+        return DiscuzRanklist.threads(in: html).map { $0.asNote(source: source, host: host) }
+    }
+
+    /// The blogs (日誌) the forum ranks by how often they were read this week — the other half of
+    /// its Trends, and a kind of row of its own (`DiscuzRankedBlog`). Empty where there are none;
+    /// `rankedThreads`' reasoning.
+    public func rankedBlogs(source: Source) async throws -> [Note] {
+        let html = try await page(try ranklistURL(type: "blog", view: "heats"))
+        return DiscuzRanklist.blogs(in: html).map { $0.asNote(source: source, host: host) }
+    }
+
+    /// `misc.php?mod=ranklist&type=…&view=…&orderby=thisweek`, built out of the host and words
+    /// this file chose — never lifted off a page.
+    private func ranklistURL(type: String, view: String) throws -> URL {
+        guard let url = Host.httpsURL(
+            host: host,
+            path: "/misc.php",
+            query: [
+                URLQueryItem(name: "mod", value: "ranklist"),
+                URLQueryItem(name: "type", value: type),
+                URLQueryItem(name: "view", value: view),
+                URLQueryItem(name: "orderby", value: "thisweek"),
+            ]
+        ) else {
+            throw DiscuzRequestError.invalidURL
+        }
+        return url
+    }
+
     /// One board's thread list, newest thread first.
     ///
     /// The same page as the guide with one column fewer, and the same parser reads both. A board
@@ -623,7 +665,7 @@ enum DiscuzIndex {
     /// board by permission and still renders its heading, and a section header with nothing
     /// beneath it is not something to put in front of somebody choosing.
     static func categories(in html: String) -> [DiscuzCategory] {
-        guard let patterns = Patterns() else { return [] }
+        guard let patterns = Patterns.shared else { return [] }
         let full = NSRange(html.startIndex..., in: html)
 
         var names: [Int: String] = [:]
@@ -704,7 +746,7 @@ enum DiscuzIndex {
     /// of its own**: the page does not say which section it sits in, and a caller files it
     /// under its parent's (`DiscuzBoard.placed(under:)`).
     static func subBoards(in html: String, under fid: Int) -> [DiscuzBoard] {
-        guard fid > 0, let patterns = Patterns() else { return [] }
+        guard fid > 0, let patterns = Patterns.shared else { return [] }
         let full = NSRange(html.startIndex..., in: html)
         let opening = patterns.subforum.matches(in: html, range: full).first { match in
             guard let range = Range(match.range(at: 1), in: html) else { return false }
@@ -739,7 +781,7 @@ enum DiscuzIndex {
     /// because a reader may have picked a sub-board and not its parent: the parent's page is
     /// then never read, and this is the one place the sub-board's place is still written.
     static func parent(of fid: Int, in html: String) -> Int? {
-        guard fid > 0, let patterns = Patterns(),
+        guard fid > 0, let patterns = Patterns.shared,
               let trail = patterns.trail.capture(1, in: html)
         else { return nil }
         let boards = patterns.anchor.captures(1, in: trail).compactMap {
@@ -770,9 +812,11 @@ enum DiscuzIndex {
             .map(\.board)
     }
 
-    /// The patterns, compiled once per page. A value rather than a global, for the reason
-    /// `DiscuzPage.Patterns` gives: `NSRegularExpression` is not `Sendable`.
-    struct Patterns {
+    /// The patterns, compiled once for the life of the process — `DiscuzPage.Patterns`' reason.
+    struct Patterns: @unchecked Sendable {
+        /// Compiled on first use and shared by every page read after it.
+        static let shared = Patterns()
+
         /// `<h2><a href="…gid=N">Name</a>` — the category, and what it is called.
         let heading: NSRegularExpression
         /// `<div id="category_N"` — where that category's boards begin.
@@ -810,9 +854,7 @@ enum DiscuzIndex {
         let date: NSRegularExpression
 
         init?() {
-            func attribute(_ name: String, _ value: String) -> String {
-                "\(name)\\s*=\\s*[\"'][^\"']*\\b\(value)\\b[^\"']*[\"']"
-            }
+            let attribute = DiscuzMarkup.attribute
             func wrapped(_ tag: String) -> String { "<\(tag)[^>]*>(.*?)</\(tag)>" }
             let options: NSRegularExpression.Options = [
                 .dotMatchesLineSeparators, .caseInsensitive,
@@ -871,10 +913,7 @@ enum DiscuzIndex {
                 // `37-1/news-feed.html`, `install-b.example`. Anchored to the start of a path
                 // segment so that a number inside a word can never be read as a board.
                 let seo = try? NSRegularExpression(pattern: "(?:^|/)(\\d+)-\\d+/"),
-                let date = try? NSRegularExpression(
-                    pattern:
-                        "(\\d{4})-(\\d{1,2})-(\\d{1,2})(?:[\\s\u{00A0}]+(\\d{1,2}):(\\d{2})(?::(\\d{2}))?)?"
-                )
+                let date = try? NSRegularExpression(pattern: DiscuzDate.pattern)
             else { return nil }
             self.heading = heading
             self.section = section
@@ -904,12 +943,19 @@ enum DiscuzIndex {
     /// the one place a stranger's href is looked at at all. An `Int` that does not parse, or a
     /// number that is not positive, is markup doing something rather than a board.
     static func fid(inHref raw: String, patterns: Patterns) -> Int? {
+        number(inHref: raw, shapes: patterns.addresses)
+    }
+
+    /// A positive number out of an address, by the first of `shapes` whose first capture finds
+    /// one — `fid(inHref:patterns:)`'s reading, for any number an address carries. Read for its
+    /// number and never fetched, for the same reason.
+    static func number(inHref raw: String, shapes: [NSRegularExpression]) -> Int? {
         let href = raw.replacingOccurrences(of: "&amp;", with: "&", options: .caseInsensitive)
-        for address in patterns.addresses {
-            guard let found = address.capture(1, in: href), let fid = Int(found), fid > 0 else {
+        for shape in shapes {
+            guard let found = shape.capture(1, in: href), let number = Int(found), number > 0 else {
                 continue
             }
-            return fid
+            return number
         }
         return nil
     }
@@ -1367,7 +1413,7 @@ enum DiscuzPage {
     /// Getting this wrong is not a parse error, it is a **plausible wrong answer** — the row
     /// would carry a real person's name, spelled correctly, who did not write the thing.
     static func threads(in html: String) -> [DiscuzThread] {
-        guard let patterns = Patterns() else { return [] }
+        guard let patterns = Patterns.shared else { return [] }
         let range = NSRange(html.startIndex..., in: html)
         return patterns.row.matches(in: html, range: range).compactMap { match in
             guard let idRange = Range(match.range(at: 1), in: html),
@@ -1403,7 +1449,7 @@ enum DiscuzPage {
             // nobody can check.
             replies: patterns.numCell.capture(1, in: row)
                 .flatMap { patterns.anchor.capture(1, in: $0) }
-                .flatMap { Int(HTMLText.plain($0).trimmingCharacters(in: .whitespaces)) }
+                .flatMap { Int(HTMLText.plain($0)) }
         )
     }
 
@@ -1414,7 +1460,7 @@ enum DiscuzPage {
     /// no link in it. Taking the heading's plain text instead would file every row of every guide
     /// page under a board that does not exist.
     static func boardHeading(in html: String) -> String? {
-        guard let patterns = Patterns(),
+        guard let patterns = Patterns.shared,
               let heading = patterns.h1.capture(1, in: html),
               let anchor = patterns.anchor.capture(1, in: heading)
         else { return nil }
@@ -1467,12 +1513,17 @@ enum DiscuzPage {
             || html.range(of: "id='messagetext'", options: .caseInsensitive) != nil
     }
 
-    /// The patterns, compiled once per page rather than once per row.
+    /// The patterns, compiled once for the life of the process rather than once per page — or,
+    /// worse, once per row, which would build eight of them fifty times for one page.
     ///
-    /// A value passed down instead of a global: `NSRegularExpression` is not `Sendable`, and a
-    /// `static let` of one would be a shared mutable-looking global this package has no need of.
-    /// Compiling per row instead would build eight of them fifty times for one page.
-    struct Patterns {
+    /// **`@unchecked Sendable`, and it is not a promise made lightly.** `NSRegularExpression` is
+    /// not marked `Sendable`, but it is immutable once compiled and documented as safe to use
+    /// from any thread at once; this struct holds nothing else and has no `var`. So one set is
+    /// compiled on first use and every page, on any task, reads through it.
+    struct Patterns: @unchecked Sendable {
+        /// Compiled on first use and shared by every page read after it.
+        static let shared = Patterns()
+
         let row: NSRegularExpression
         let title: NSRegularExpression
         let byCell: NSRegularExpression
@@ -1505,9 +1556,7 @@ enum DiscuzPage {
             // is filed under is the board it was *read in* rather than the board it is in. The
             // marker that would tell the two apart was found on one skin out of four, which is
             // not enough to start dropping rows on.
-            func attribute(_ name: String, _ value: String) -> String {
-                "\(name)\\s*=\\s*[\"'][^\"']*\\b\(value)\\b[^\"']*[\"']"
-            }
+            let attribute = DiscuzMarkup.attribute
             guard
                 let row = try? NSRegularExpression(
                     pattern: "<tbody[^>]*\\bid\\s*=\\s*[\"'](?:normal|stick)thread_(\\d+)[\"'][^>]*>(.*?)</tbody>",
@@ -1541,9 +1590,7 @@ enum DiscuzPage {
                     pattern: "<h1[^>]*>(.*?)</h1>",
                     options: [.dotMatchesLineSeparators, .caseInsensitive]
                 ),
-                let date = try? NSRegularExpression(
-                    pattern: "(\\d{4})-(\\d{1,2})-(\\d{1,2})(?:[\\s\u{00A0}]+(\\d{1,2}):(\\d{2})(?::(\\d{2}))?)?"
-                )
+                let date = try? NSRegularExpression(pattern: DiscuzDate.pattern)
             else { return nil }
             self.row = row
             self.title = title
@@ -1757,7 +1804,7 @@ enum DiscuzThreadPage {
     /// it is the number Discuz! itself gives a post, and it is the same number in all three
     /// templates — `id="pid58035493"` and `id="post_58035493"` are the same post.
     static func posts(in html: String, tid: Int, host: String) -> [DiscuzPost] {
-        guard let patterns = Patterns() else { return [] }
+        guard let patterns = Patterns.shared else { return [] }
         var seen: Set<Int> = []
         return DiscuzPostLayout.allCases
             .flatMap { $0.posts(in: html, tid: tid, host: host, patterns: patterns) }
@@ -1766,9 +1813,11 @@ enum DiscuzThreadPage {
             .map(\.post)
     }
 
-    /// The patterns, compiled once per page. A value rather than a global, for the reason
-    /// `DiscuzPage.Patterns` gives: `NSRegularExpression` is not `Sendable`.
-    struct Patterns {
+    /// The patterns, compiled once for the life of the process — `DiscuzPage.Patterns`' reason.
+    struct Patterns: @unchecked Sendable {
+        /// Compiled on first use and shared by every page read after it.
+        static let shared = Patterns()
+
         /// Where one post begins, on each of the three layouts. Each captures the `pid`.
         let touchPost: NSRegularExpression
         let comiisPost: NSRegularExpression
@@ -1836,9 +1885,7 @@ enum DiscuzThreadPage {
             let options: NSRegularExpression.Options = [
                 .dotMatchesLineSeparators, .caseInsensitive,
             ]
-            func attribute(_ name: String, _ value: String) -> String {
-                "\(name)\\s*=\\s*[\"'][^\"']*\\b\(value)\\b[^\"']*[\"']"
-            }
+            let attribute = DiscuzMarkup.attribute
             func opening(_ tag: String, _ value: String) -> String {
                 "<\(tag)[^>]*\(attribute("class", value))[^>]*>"
             }
@@ -1903,10 +1950,7 @@ enum DiscuzThreadPage {
                 let lists = compile(nesting("ul")),
                 let italics = compile(nesting("i")),
                 let emphasis = compile(nesting("em")),
-                let date = try? NSRegularExpression(
-                    pattern:
-                        "(\\d{4})-(\\d{1,2})-(\\d{1,2})(?:[\\s\u{00A0}]+(\\d{1,2}):(\\d{2})(?::(\\d{2}))?)?"
-                )
+                let date = try? NSRegularExpression(pattern: DiscuzDate.pattern)
             else { return nil }
             self.touchPost = touchPost
             self.comiisPost = comiisPost
@@ -2421,6 +2465,18 @@ enum DiscuzMarkup {
     }
 }
 
+/// The one way every Discuz! pattern in this package names an attribute holding a word.
+extension DiscuzMarkup {
+    /// `name="… value …"`, in either quote, with `value` a whole word of it: `class="bm_c xst"`
+    /// has the class `xst`, and `class="xstx"` does not.
+    static func attribute(_ name: String, _ value: String) -> String {
+        "\(name)\\s*=\\s*[\"'][^\"']*\\b\(value)\\b[^\"']*[\"']"
+    }
+
+    /// `attribute("class", value)`: an element of that class.
+    static func classed(_ value: String) -> String { attribute("class", value) }
+}
+
 /// The date in a thread row, which Discuz! writes two ways in the same table.
 ///
 /// A row posted recently reads `<span title="2026-9-15">5&nbsp;小时前</span>` — the words are
@@ -2437,6 +2493,13 @@ enum DiscuzMarkup {
 /// clock time, so the error is invisible except at a midnight. Said out loud here rather than
 /// discovered in a bug report.
 enum DiscuzDate {
+    /// Every date shape a Discuz! page writes — `2026-9-15`, `2026-06-08 16:45`, seconds or not,
+    /// a space or a no-break space before the clock — for each page's own `Patterns` to compile.
+    /// One spelling, so the thread table, the index, a thread's page and the ranking lists cannot
+    /// come to disagree about what a date looks like.
+    static let pattern =
+        "(\\d{4})-(\\d{1,2})-(\\d{1,2})(?:[\\s\u{00A0}]+(\\d{1,2}):(\\d{2})(?::(\\d{2}))?)?"
+
     static func parse(_ raw: String, using patterns: DiscuzPage.Patterns) -> Date? {
         parse(raw, date: patterns.date)
     }

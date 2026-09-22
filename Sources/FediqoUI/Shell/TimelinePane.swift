@@ -86,43 +86,6 @@ struct TimelinePane: View {
             ?? session.timelineItems(latest: prefs.latestDate)
     }
 
-    /// What the stream in front is, from facts a test can name without drawing the pane.
-    enum Standing: Equatable, Sendable {
-        /// Posts this device already holds. Drawn at once — a skeleton on top of them would hide
-        /// what is already here.
-        case held
-        /// Nothing in the list: `EmptyNotice`. A wait and a miss are the toast, not this
-        /// standing; the distinctions inside empty — rules, held, answered, search — live on
-        /// that notice.
-        case empty
-    }
-
-    /// Held or empty. A wait and a miss are the bottom toast, so they do not take the stream.
-    ///
-    /// **Held wins.** What is already here is read at once, including while a reload runs.
-    /// **Empty stays empty.** Running, a failed source, a search, and nobody joined are all
-    /// empty when there are no rows: waiting rows would be a wait that never ended, and a
-    /// pane-sized failure would hide that this timeline has nothing to show.
-    static func standing(
-        running _: Bool,
-        hasItems: Bool,
-        searching _: Bool,
-        hasSources _: Bool,
-        failed _: [String] = []
-    ) -> Standing {
-        hasItems ? .held : .empty
-    }
-
-    private var stream: Standing {
-        Self.standing(
-            running: session.reload.running,
-            hasItems: !items.isEmpty,
-            searching: search?.isSearching == true,
-            hasSources: !session.sources.isEmpty,
-            failed: session.reload.failed
-        )
-    }
-
     /// Running first; a live note replaces a leftover line; otherwise the reload
     /// line. Loading and a miss do not auto-dismiss: a 2s flash is a fact the
     /// reader has to act on, gone.
@@ -153,7 +116,7 @@ struct TimelinePane: View {
             case .person(let person):
                 PersonPane(
                     person: person,
-                    items: DummyPerson.held(of: person, in: session.notes),
+                    items: session.heldPosts(of: person),
                     catalogues: session.emoji,
                     catalogueSettled: settledHosts.contains(person.host),
                     posts: session.posts,
@@ -364,19 +327,31 @@ struct TimelinePane: View {
     ///
     /// Written out once, because two places fall back to it — nothing walked to, and a
     /// conversation whose root this device no longer holds.
+    ///
+    /// **Rows win, and nothing else decides.** What is already here is read at once, including
+    /// while a reload runs; and a reload running, a failed source, a search and nobody joined are
+    /// all the notice where there are no rows — waiting rows would be a wait that never ended,
+    /// and a pane-sized failure would hide that this timeline has nothing to show. A wait and a
+    /// miss are the bottom toast, and the distinctions inside empty live on `EmptyNotice`.
     @ViewBuilder
     private var underneath: some View {
-        switch stream {
-        case .held: list
-        case .empty: empty
+        // Bound once: the list, each row's rule under it and the jump to the top all read the
+        // same rows, and each read of `items` used to ask the session for them again.
+        let items = items
+        if items.isEmpty {
+            empty
+        } else {
+            list(items)
         }
     }
 
-    private var list: some View {
-        ScrollViewReader { proxy in
+    private func list(_ items: [DummyItem]) -> some View {
+        let last = items.count - 1
+        return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                        let isLast = index == last
                         DummyItemRow(
                             item: item,
                             catalogues: session.emoji,
@@ -387,7 +362,7 @@ struct TimelinePane: View {
                             selected: item.id == selectedID,
                             top: decks.top(of: item.id, of: item.attachments.count),
                             lifted: decks.isLifted(item.id),
-                            player: player(of: item),
+                            player: playback.rowPlayer(for: item, decks: decks),
                             // A press lights the row; a second press on the row it is already on
                             // opens the conversation, which is what `Return` does (#33). The rule
                             // is `DummyCommand.tapped` and is read by both lists.
@@ -410,7 +385,7 @@ struct TimelinePane: View {
                             onToast: showToast
                         )
                         .id(item.id)
-                        if index < items.count - 1 {
+                        if !isLast {
                             Rectangle()
                                 .fill(ShellChrome.hairline(colorScheme))
                                 .frame(height: ShellSpace.hair)
@@ -466,16 +441,6 @@ struct TimelinePane: View {
         }
     }
 
-    /// The player for this row's slot, where this row's card is the thing that is playing. There
-    /// is at most one in the app, so at most one row ever gets it back.
-    private func player(of item: DummyItem) -> AVPlayer? {
-        playback.player(
-            for: ShellPlaying.playable(decks.showing(item.attachments, of: item.id)),
-            of: item.id,
-            on: .row
-        )
-    }
-
     /// One row's share of #54's acts (#106).
     ///
     /// **Built here and handed down**, so the timeline, a conversation and somebody's page all
@@ -490,16 +455,20 @@ struct TimelinePane: View {
     /// opens the answer rather than the conversation (#108).
     private func acting(_ item: DummyItem, inside root: DummyItem?) -> ItemActing {
         var acting = session.acting(on: item)
-        acting.boost = { Task { await session.boost(item) } }
-        acting.favourite = { Task { await session.favourite(item) } }
-        acting.answer = {
-            if let root {
-                session.openAnswer(to: item, in: root)
-            } else {
-                onOpenThread(item.id)
+        acting.perform = { act in
+            switch act {
+            case .boost, .favourite:
+                Task { await session.toggle(act, on: item) }
+            case .answer:
+                if let root {
+                    session.openAnswer(to: item, in: root)
+                } else {
+                    onOpenThread(item.id)
+                }
+            case .withdraw:
+                session.askToWithdraw(item)
             }
         }
-        acting.withdraw = { session.askToWithdraw(item) }
         return acting
     }
 
@@ -693,7 +662,9 @@ struct TimelinePane: View {
             notes: session.notes,
             written: session.written,
             sources: session.sources,
-            index: session.textIndex,
+            // The folded text only where a rule reads it, as `timelineItems` asks: All and Trends
+            // read none, and an empty one of them would otherwise fold every note held to say so.
+            index: session.definition(of: timeline).readsText ? session.textIndex : TextIndex([]),
             latest: prefs.latestDate,
             // **"Asked, and there is genuinely nothing"** — which a run that skipped a source
             // cannot claim. A host that answered as something this app does not read leaves

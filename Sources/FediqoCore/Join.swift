@@ -984,31 +984,26 @@ public struct SourceJoin: Sendable {
     /// Throws `JoinError.unsupportedKind` for an offer from a kind that has no boards, and what
     /// reading the page throws, as `index` names it.
     public func subBoards(of board: DiscuzBoard, in offer: JoinOffer) async throws -> [DiscuzBoard] {
-        switch offer.kind {
-        case .discuz:
-            do {
-                return try await DiscuzClient(http: http, host: offer.host).subBoards(of: board)
-            } catch let error where Cancellation.happened(error) {
-                throw CancellationError()
-            } catch let error as DiscuzRequestError {
-                throw DiscuzJoin.refusal(error)
-            } catch {
-                throw JoinError.unreachable
-            }
-        case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
-            .gotosocial, .discourse, .unknown:
-            throw JoinError.unsupportedKind(offer.kind)
-        }
+        try await onDiscuz(offer) { try await $0.subBoards(of: board) }
     }
 
     /// One board's own page, read for the boards around it — see `DiscuzClient.around(_:)`.
     ///
     /// Read by a restate for each board the reader already reads, when the picker opens.
     public func around(_ fid: Int, in offer: JoinOffer) async throws -> DiscuzBoardPage {
+        try await onDiscuz(offer) { try await $0.around(fid) }
+    }
+
+    /// One read of a forum's board page through `offer`'s host, with every way it can fail said
+    /// as the join says it — or `JoinError.unsupportedKind` for an offer from a kind that has no
+    /// boards. What `subBoards(of:in:)` and `around(_:in:)` share.
+    private func onDiscuz<T>(
+        _ offer: JoinOffer, _ read: (DiscuzClient) async throws -> T
+    ) async throws -> T {
         switch offer.kind {
         case .discuz:
             do {
-                return try await DiscuzClient(http: http, host: offer.host).around(fid)
+                return try await read(DiscuzClient(http: http, host: offer.host))
             } catch let error where Cancellation.happened(error) {
                 throw CancellationError()
             } catch let error as DiscuzRequestError {

@@ -440,6 +440,7 @@
 /* Unit F6 — a thread's first post, and the four things it can be. */
 "item.forum.coming" = "正在讀第一篇";
 "item.forum.withheld" = "這個論壇只讓登入的人看這篇。";
+"item.forum.unread" = "開啟時才讀取——這不是你訂閱的版塊。";
 "item.forum.silent" = "這篇沒有文字。";
 "item.forum.refused" = "這個論壇不讓這個 App 讀這個主題。";
 "item.forum.unreadable" = "這個論壇有回應，但裡面沒有這個 App 讀得到的文章。";

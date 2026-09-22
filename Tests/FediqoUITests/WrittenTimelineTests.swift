@@ -412,7 +412,7 @@ struct WrittenTimelineTests {
         }
     }
 
-    @Test("A board or list is only for its own source; trends never offers a forum; a forum author is forced")
+    @Test("A board or list is only for its own source; trends offers a Discuz! but never a Discourse; a forum author is forced")
     func refusedScopesNotOffered() {
         let sources = [microblog, forum]
         let board = RuleBuilder.scopes(for: .category(.board(id: "42"), on: "f.example"), sources: sources)
@@ -423,9 +423,14 @@ struct WrittenTimelineTests {
             == [.source(host: "m.example")])
         #expect(Rule.category(.list(id: "7"), in: .every, sources: sources) == nil)
 
-        let trends = RuleBuilder.scopes(for: .category(.trends, on: "m.example"), sources: sources)
-        #expect(trends == [.every, .source(host: "m.example")])
-        #expect(Rule.category(.trends, in: .source(host: "f.example"), sources: sources) == nil)
+        // A Discuz!'s ranking lists are its Trends; a Discourse has none to offer.
+        let talk = Source(host: "t.example", kind: .discourse)
+        let trends = RuleBuilder.scopes(for: .category(.trends, on: "m.example"), sources: sources + [talk])
+        #expect(trends == [.every, .source(host: "m.example"), .source(host: "f.example")])
+        #expect(Rule.category(.trends, in: .source(host: "f.example"), sources: sources) != nil)
+        #expect(Rule.category(.trends, in: .source(host: "t.example"), sources: sources + [talk]) == nil)
+        let publicScopes = RuleBuilder.scopes(for: .category(.public, on: "m.example"), sources: sources)
+        #expect(publicScopes == [.every, .source(host: "m.example")], "public is still never a forum's")
 
         #expect(RuleBuilder.scopes(for: .author("@kim@f.example"), sources: sources) == [.source(host: "f.example")])
         #expect(RuleBuilder.scopes(for: .source("m.example"), sources: sources).isEmpty)
@@ -449,7 +454,7 @@ struct WrittenTimelineTests {
         #expect(groups.map(\.host) == ["m.example", "f.example"])
         // Home is not offered for a signed-out source, but it is where held posts came through it.
         #expect(groups[0].categories == [.public, .trends, .home])
-        #expect(groups[1].categories == [.board(id: "42")])
+        #expect(groups[1].categories == [.trends, .board(id: "42")])
         #expect(RuleText.categoryName(.board(id: "42"), host: "f.example", sources: [forum]) == "Dev")
         #expect(RuleBuilder.authors(in: notes) == ["ada@m.example", "kim@f.example"])
     }
@@ -463,7 +468,7 @@ struct WrittenTimelineTests {
         #expect(out[0].categories == [.public, .trends, .list(id: "7"), .list(id: "9")])
         let signedIn = RuleBuilder.categories(in: sources, notes: [], signedIn: { $0 == "m.example" })
         #expect(signedIn[0].categories == [.public, .trends, .home, .list(id: "7"), .list(id: "9")])
-        #expect(signedIn[1].categories == [.board(id: "42")])
+        #expect(signedIn[1].categories == [.trends, .board(id: "42")])
 
         #expect(RuleText.categoryName(.list(id: "7"), host: "m.example", sources: sources) == "Friends")
         let friends = try #require(Rule.category(.list(id: "7"), in: .source(host: "m.example"), sources: sources))
@@ -816,6 +821,11 @@ struct WrittenTimelineTests {
             #expect(adding.scope == .source(host: "n.example"), "\(category)")
             #expect(adding.rule(sources)?.kind == .category(category, in: .source(host: "n.example")))
             adding.nextScope(sources)
+            // Trends is also the Discuz!'s to have, so it comes one step before every source.
+            if category == .trends {
+                #expect(adding.scope == .source(host: "f.example"))
+                adding.nextScope(sources)
+            }
             #expect(adding.scope == .every)
         }
     }

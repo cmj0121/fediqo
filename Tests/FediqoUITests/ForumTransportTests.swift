@@ -335,6 +335,32 @@ struct ForumTransportTests {
                 "a host nobody signed in to would start a web process")
     }
 
+    /// **Every read asks the same question, a join's included.** The board picker, a restate and
+    /// `around(_:)` read through `ShellSession.joiner`, which asked `hasEngine` alone after the
+    /// reload and the post fetch had moved to `readsThroughEngine` — so after a relaunch with a
+    /// sign-in kept, the picker on a challenge-fronted forum went through `URLSession` and got
+    /// the 403 back. All three now take `readTransport`, and this is what it hands them.
+    ///
+    /// The door is asserted rather than the picker driven through it: past this point the forum
+    /// transport is a `WKWebView` loading a real address, which a package test does not do.
+    @Test("A sign-in kept across a relaunch sends the picker's reads through the forum's browser")
+    func thePickerFollowsAKeptSignIn() async {
+        let fresh = ForumSessions(credentials: MemoryCredentials())
+        let plain = FixtureHTTP()
+        let session = ShellSession(http: plain, forums: fresh)
+        session.sources = [Source(host: "cookie.example", kind: .discuz)]
+        await fresh.plantSession(host: "cookie.example")
+        #expect(!fresh.hasEngine(host: "cookie.example"), "the premise: this run built no browser")
+
+        let signedIn = fresh.readTransport(host: "COOKIE.Example", else: plain)
+        #expect(signedIn is ForumJoinTransport, "a kept sign-in was read through URLSession")
+        #expect(fresh.hasEngine(host: "cookie.example"), "the read did not go to the forum's browser")
+
+        let stranger = fresh.readTransport(host: "social.example", else: plain)
+        #expect((stranger as? FixtureHTTP) === plain, "a host nobody signed in to left URLSession")
+        #expect(!fresh.hasEngine(host: "social.example"), "a microblog started a web process")
+    }
+
     /// Cleared by `forget(host:)` and therefore by Clear and by Remove, which is decision 13's
     /// other half: the cookies that sign-in produced have just gone, so a row still offering to
     /// sign the reader out would be offering to end a session that no longer exists.

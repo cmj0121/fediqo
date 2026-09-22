@@ -78,12 +78,7 @@ struct PersonPane: View {
     /// bar, so a reader who has learnt to leave a conversation has learnt to leave this.
     private var bar: some View {
         HStack(spacing: ShellSpace.snug) {
-            Button(action: onBack) {
-                Label(L10n.t("person.back"), systemImage: "chevron.left")
-                    .shellFont(.meta, weight: .medium)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(ShellChrome.selectInk(colorScheme))
+            ShellBackButton("person.back", action: onBack)
             Spacer()
             Text(L10n.t("person.leaveHint"))
                 .shellFont(.meta)
@@ -220,11 +215,7 @@ struct PersonPane: View {
             selected: item.id == selectedID,
             top: decks.top(of: item.id, of: item.attachments.count),
             lifted: decks.isLifted(item.id),
-            player: playback.player(
-                for: ShellPlaying.playable(decks.showing(item.attachments, of: item.id)),
-                of: item.id,
-                on: .row
-            ),
+            player: playback.rowPlayer(for: item, decks: decks),
             // A press lights the row; a second press on the row it is already on opens the
             // conversation, which is `DummyCommand.tapped` and is exactly what a press does on
             // the stream (#122). This page used to answer only the first half.

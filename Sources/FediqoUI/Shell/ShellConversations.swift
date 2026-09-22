@@ -281,7 +281,7 @@ final class ShellConversations {
         // — neither has a conversation this unit can ask for, and neither is *waiting* for one.
         // The pane draws an unasked standing as coming, so a post this returns from in silence
         // would wait for an answer nothing is going to bring.
-        guard let held = session.notes.first(where: { $0.key.rowID == item.id }),
+        guard let held = session.heldNote(item.id),
               // The server's own answer where it has given one — #86. A host that has stopped
               // being a Mastodon has no conversation this unit can ask it for, whatever the row
               // was stored as.
@@ -296,7 +296,7 @@ final class ShellConversations {
         standings[item.id] = .coming
         let stamp = Source(host: host, kind: held.source.kind)
         do {
-            let post = door(host: host, in: session)
+            let post = session.conversationPost(host: host, within: deadline).post
             guard let id = try await post.id(of: held) else {
                 standings[item.id] = .absent(.unfindable)
                 return
@@ -311,8 +311,11 @@ final class ShellConversations {
             // from two places — the pane opening and `r` — and only one of them used to adopt
             // the store afterwards, so an edit that landed on the way past a thread showed in
             // the thread and not in the stream under it until something else asked.
-            await session.store.refresh(thread.ancestors + thread.descendants, ifSourceHere: host)
-            await session.reloadFromStore()
+            // Only where a held row did change: a thread of rows this device never held refreshes
+            // nothing, and adopting then would be a round trip to the store for nothing.
+            if await session.store.refresh(thread.ancestors + thread.descendants, ifSourceHere: host) {
+                await session.reloadFromStore()
+            }
             standings[item.id] = thread.isAlone
                 ? ShellConversationStanding.none
                 : .loaded(ancestors: thread.ancestors, descendants: thread.descendants, rootID: id)
@@ -324,17 +327,6 @@ final class ShellConversations {
         } catch {
             standings[item.id] = .absent(Self.absence(for: error))
         }
-    }
-
-    /// As the reader where this device is signed in to the host, unsigned otherwise — the one
-    /// rule `ShellReload` reads a single post by, spelled once more here because this unit asks
-    /// its own question and must not ask it through a door the reader has closed.
-    private func door(host: String, in session: ShellSession) -> MastodonPost {
-        if let door = session.mastodon.authorized(host: host, within: deadline, for: .conversation) {
-            return MastodonPost(door: door)
-        }
-        let watched = WatchedHTTP(session.http, for: .conversation, in: session.work)
-        return MastodonPost(http: Deadline(watched as any HTTPClient, within: deadline), host: host)
     }
 
     /// Every failure a thread read can end in, as one of three sentences.
@@ -352,5 +344,19 @@ final class ShellConversations {
 
     private static func chosen(_ status: Int) -> Absence {
         (400..<500).contains(status) ? .refused : .unreachable
+    }
+}
+
+extension ShellSession {
+    /// One microblog post and the conversation around it, read as the reader where this device
+    /// is signed in to the host and unsigned otherwise — **the one rule** a thread read and a
+    /// reload's read of a single post both go by, so neither can ask through a door the reader
+    /// has closed. Each request ends within `limit`, and `signedIn` says which door it was.
+    func conversationPost(host: String, within limit: Duration) -> (post: MastodonPost, signedIn: Bool) {
+        if let door = mastodon.authorized(host: host, within: limit, for: .conversation) {
+            return (MastodonPost(door: door), true)
+        }
+        let watched = WatchedHTTP(http, for: .conversation, in: work)
+        return (MastodonPost(http: Deadline(watched as any HTTPClient, within: limit), host: host), false)
     }
 }

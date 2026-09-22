@@ -251,30 +251,7 @@ public struct FediqoRootView: View {
             .onChange(of: session.signingIn) { _, request in
                 if let request {
                     signInWindows.show(request, sessions: session.forums) { reached in
-                        // **The same two lines as the sheet below, and they have to be.** A
-                        // sign-in that was reached goes straight back to the join: the reader
-                        // typed a host, was turned away, went and signed in, and the errand was
-                        // always "add this forum". Without the retry the window closes onto the
-                        // refusal it was opened from, which reads as a sign-in that did nothing.
-                        //
-                        // **`resumeAfterSignIn` and not `add`**, because `add` stops at the
-                        // preview — a screen this reader has already read and already answered.
-                        // They pressed Subscribe before they were turned away; this finishes that
-                        // press rather than asking for it again.
-                        //
-                        // **And the `if` is not only "was it reached".** A sign-in pressed on a
-                        // row of a server already joined is an errand that ends with the sign-in
-                        // itself, and `signInFinished` says no to those — see its doc comment for
-                        // what the reader sees instead, and for what this branch shipped without
-                        // it.
-                        //
-                        // This branch lost both the retry and the host when the page moved out of
-                        // the sheet — the window was given the body the sheet had at the time,
-                        // and the sheet grew them afterwards. Whatever is done to one of these
-                        // two callbacks belongs in the other on the same day.
-                        if session.signInFinished(reached: reached, host: request.host) {
-                            Task { await session.resumeAfterSignIn() }
-                        }
+                        signInReturned(reached: reached, host: request.host)
                     }
                 } else {
                     signInWindows.close()
@@ -283,22 +260,7 @@ public struct FediqoRootView: View {
             #else
             .sheet(item: $session.signingIn) { request in
                 ForumSignInSheet(request: request, sessions: session.forums) { reached in
-                    // **A sign-in that was reached goes straight back to the join.** The reader
-                    // typed a host, was turned away, and went and signed in; the errand was
-                    // always "add this forum", and landing them at an empty field having lost
-                    // what they typed would make them start it again. This second pass goes
-                    // through the browser that now holds the session — see `ShellSession.joiner`.
-                    //
-                    // **`resumeAfterSignIn` and not `add`**: the preview is a question this
-                    // reader has already answered, so the retry finishes the press instead of
-                    // asking for it a second time.
-                    //
-                    // **And the `if` is not only "was it reached".** A sign-in pressed on a row
-                    // of a server already joined ends with the sign-in itself, and
-                    // `signInFinished` says no to those — see its doc comment.
-                    if session.signInFinished(reached: reached, host: request.host) {
-                        Task { await session.resumeAfterSignIn() }
-                    }
+                    signInReturned(reached: reached, host: request.host)
                 }
             }
             #endif
@@ -323,9 +285,9 @@ public struct FediqoRootView: View {
                 TimelineEditor(session: session, draft: draft)
             }
             // Remove's question, Clear's, and the notice that a server ended a sign-in: each a
-            // modifier of its own rather than spelled here. See `RemoveQuestion` for why.
-            .modifier(RemoveQuestion(session: session))
-            .modifier(ClearQuestion(session: session))
+            // modifier of its own rather than spelled here. See `HostQuestion` for why.
+            .modifier(HostQuestion.remove(session))
+            .modifier(HostQuestion.clear(session))
             .modifier(EndedSignInNotice(session: session))
             .alert(Text(L10n.t("store.newer.title")), isPresented: $storeIsNewer) {
                 Button(L10n.t("store.newer.ok"), role: .cancel) { storeNoticeSeen?() }
@@ -423,6 +385,30 @@ public struct FediqoRootView: View {
         let boards = sources.first { $0.host == host }?.boards.count ?? 0
         guard boards > 0 else { return L10n.t("account.remove.detail") }
         return String(format: L10n.t("account.remove.detail.boards"), boards)
+    }
+
+    /// A forum's own page closed, on the window a Mac opens it in or the sheet elsewhere — **one
+    /// body for both**, because this branch once lost the retry and the host when the page moved
+    /// out of the sheet: the window was given the body the sheet had at the time, and the sheet
+    /// grew them afterwards.
+    ///
+    /// **A sign-in that was reached goes straight back to the join.** The reader typed a host,
+    /// was turned away, and went and signed in; the errand was always "add this forum", and
+    /// without the retry the page closes onto the refusal it was opened from, which reads as a
+    /// sign-in that did nothing. This second pass goes through the browser that now holds the
+    /// session — see `ShellSession.joiner`.
+    ///
+    /// **`resumeAfterSignIn` and not `add`**, because `add` stops at the preview — a screen this
+    /// reader has already read and already answered. They pressed Subscribe before they were
+    /// turned away; this finishes that press rather than asking for it again.
+    ///
+    /// **And the `if` is not only "was it reached".** A sign-in pressed on a row of a server
+    /// already joined is an errand that ends with the sign-in itself, and `signInFinished` says
+    /// no to those — see its doc comment for what the reader sees instead.
+    private func signInReturned(reached: Bool, host: String) {
+        if session.signInFinished(reached: reached, host: host) {
+            Task { await session.resumeAfterSignIn() }
+        }
     }
 
     private func performDummyKey(
@@ -524,9 +510,9 @@ public struct FediqoRootView: View {
         case .search:
             return openSearch()
         case .boost:
-            return boostFocused()
+            return actFocused(.boost)
         case .favourite:
-            return favouriteFocused()
+            return actFocused(.favourite)
         case .answer:
             return answerFocused()
         case .withdraw:
@@ -932,7 +918,7 @@ public struct FediqoRootView: View {
     private var currentListItems: [DummyItem] {
         switch walk.standing {
         case .person(let person):
-            return DummyPerson.held(of: person, in: session.notes)
+            return session.heldPosts(of: person)
         case .thread(let opened):
             guard let item = session.held(opened) else { return streamItems }
             return session.conversations.conversation(around: item).inOrder
@@ -1002,8 +988,8 @@ public struct FediqoRootView: View {
         }
     }
 
-    /// `b` — the post the lamp is on, boosted to the source it was read through, or the boost
-    /// taken back (#106).
+    /// `b` and `f` — the post the lamp is on, boosted to the source it was read through or the
+    /// boost taken back (#106), and favourited there or the favourite taken back (#107).
     ///
     /// **The acting half only.** Whether this post offers the act at all is `session.acts(on:)`,
     /// read here and by the mark under the post from the one place, so a key that acted where no
@@ -1013,20 +999,10 @@ public struct FediqoRootView: View {
     ///
     /// `onFocusedItem` and not `onActedItem`: the viewer is a picture over a post, and the post
     /// it is over is the one the lamp is on, so there is no second post for this key to mean.
-    private func boostFocused() -> Bool {
+    private func actFocused(_ act: PostAct) -> Bool {
         onFocusedItem { item in
-            guard session.acts(on: item).offers(.boost) else { return false }
-            Task { await session.boost(item) }
-            return true
-        }
-    }
-
-    /// `f` — the post the lamp is on, favourited on its source or the favourite taken back (#107).
-    /// `boostFocused`'s acting half, for its reasons.
-    private func favouriteFocused() -> Bool {
-        onFocusedItem { item in
-            guard session.acts(on: item).offers(.favourite) else { return false }
-            Task { await session.favourite(item) }
+            guard session.acts(on: item).offers(act) else { return false }
+            Task { await session.toggle(act, on: item) }
             return true
         }
     }
@@ -1104,6 +1080,10 @@ public struct FediqoRootView: View {
     private func openThread(_ id: String) -> Bool {
         guard Self.canWalk(place: place, open: openLayers) else { return false }
         selectedItemID = id
+        // **A forum's ranked blog is a page, not a conversation**: opening it reads its page in
+        // the app's own reader, as a link pressed in its words would — on a Mac in place of the
+        // timeline (#169), and Back returns to this row.
+        if let page = session.held(id)?.page { return linkReader.open(page) }
         // The lamp is read back after the press has moved it, which is how a conversation comes
         // back to its own opening post and a person's page comes back to the row the lamp was
         // on: one sentence for what used to be two. See `ShellWalk`.
@@ -1523,99 +1503,108 @@ private struct WithdrawQuestion: ViewModifier {
     }
 }
 
-/// Remove's question (decision 29), as a modifier of its own.
+/// Remove's question and Clear's (decision 29), each as a modifier of its own — one shape for
+/// the two, since they differ only in what they ask about, how heavy the confirm is, what it does
+/// and what the detail says.
 ///
-/// **Out of `FediqoRootView`'s chain, and the three below with it.** Each built a `Binding` and
-/// a `presenting:` presenter with closures inside one very long modifier chain, and Xcode 26.6's
-/// Swift gave up type-checking that chain on the runner — while the compiler this is written
-/// with solved it in three seconds without a word. A local timing predicts nothing about another
-/// compiler's solver, so the chain is kept to one plain `.modifier(…)` per presenter instead,
-/// which is a cost no compiler has to solve against the rest of it. See `WithdrawQuestion`.
-private struct RemoveQuestion: ViewModifier {
+/// **Out of `FediqoRootView`'s chain, and the presenters below with it.** Each built a `Binding`
+/// and a `presenting:` presenter with closures inside one very long modifier chain, and Xcode
+/// 26.6's Swift gave up type-checking that chain on the runner — while the compiler this is
+/// written with solved it in three seconds without a word. A local timing predicts nothing about
+/// another compiler's solver, so the chain is kept to one plain `.modifier(…)` per presenter
+/// instead, which is a cost no compiler has to solve against the rest of it. See
+/// `WithdrawQuestion`.
+///
+/// **On the root beside the other presenters**, and for the same documented reason: one
+/// presenter driven by one piece of session state survives a second call site.
+private struct HostQuestion: ViewModifier {
     let session: ShellSession
+    /// The host being asked about, where one is; the question is presented from it.
+    let asking: ReferenceWritableKeyPath<ShellSession, String?>
+    let titleKey: String
+    let confirmKey: String
+    let role: ButtonRole?
+    let act: @MainActor (String) async -> Void
+    let detail: @MainActor (String) -> String
+
+    /// **The Remove question.** Remove is asked from a source row today and will be asked from
+    /// the source page's own header the day that grows one.
+    ///
+    /// It is asked at all because Remove takes the board picks the reader made, and
+    /// `ShellSession.clear`'s comment is the argument: pictures come back by themselves, a pick
+    /// of eight boards out of forty does not.
+    static func remove(_ session: ShellSession) -> HostQuestion {
+        HostQuestion(
+            session: session, asking: \.removing,
+            titleKey: "account.remove.title", confirmKey: "account.remove.confirm",
+            role: .destructive,
+            act: { await session.remove(host: $0) },
+            detail: { FediqoRootView.removeDetail(for: $0, in: session.sources) }
+        )
+    }
+
+    /// **The Clear question, beside Remove's and driven the same way.** One presenter, one piece
+    /// of session state, two entrances: a source row and `UsagePane`'s row, which press the same
+    /// key for the same call and must therefore ask the same question.
+    ///
+    /// **It exists because Clear is not reversible, whatever the row looks like.** It drops the
+    /// pictures, the emoji names and the first posts, all of which come back — and it calls
+    /// `ForumSessions.forget(host:)`, which deletes the saved Keychain password and signs the
+    /// reader out of the forum. The Account row says neither of those before the press, so this
+    /// is the one place they are said.
+    ///
+    /// **Plain, where Remove's confirm is `.destructive`, and the difference is deliberate.** The
+    /// row's icon says *this takes something away*; the dialog says exactly how much, and the
+    /// weight of the confirm matches the weight of the act. A destructive Clear would be the
+    /// confirmation repeating the row's overstatement, which is the one thing decision 29 asks
+    /// not to happen.
+    ///
+    /// **The detail is the one seam of this dialog a test cannot reach** (risk 12).
+    /// `clearDetailKey` is pure and is driven across all four combinations; what nothing verifies
+    /// is that *this* closure asks it with `hasPassword` and `reachedSignIn` for the host being
+    /// confirmed, because a `message:` builder only runs inside a presented dialog. Named here
+    /// rather than left to be discovered.
+    static func clear(_ session: ShellSession) -> HostQuestion {
+        HostQuestion(
+            session: session, asking: \.clearing,
+            titleKey: "account.clear.title", confirmKey: "account.clear.confirm",
+            role: nil,
+            act: { await session.clear(host: $0) },
+            detail: { host in
+                L10n.t(SourceRow.clearDetailKey(
+                    hasPassword: session.forums.hasPassword(host: host),
+                    reachedSignIn: session.isSignedIn(host: host)
+                ))
+            }
+        )
+    }
 
     func body(content: Content) -> some View {
         content
-            // **The Remove question, on the root beside the other three presenters**, and for the
-            // same documented reason: one presenter driven by one piece of session state survives
-            // a second call site. Remove is asked from a source row today and will be asked from
-            // the source page's own header the day that grows one.
-            //
-            // It is asked at all because Remove takes the board picks the reader made, and
-            // `ShellSession.clear`'s comment is the argument: pictures come back by themselves, a
-            // pick of eight boards out of forty does not.
             .confirmationDialog(
-                Text(session.removing.map { String(format: L10n.t("account.remove.title"), $0) } ?? ""),
+                Text(session[keyPath: asking].map { String(format: L10n.t(titleKey), $0) } ?? ""),
                 isPresented: Binding(
-                    get: { session.removing != nil },
-                    set: { if !$0 { session.removing = nil } }
+                    get: { session[keyPath: asking] != nil },
+                    set: { if !$0 { session[keyPath: asking] = nil } }
                 ),
                 // Explicit, because macOS draws no title at all on `.automatic` — and the title is
                 // the only line that names which server this is about.
                 titleVisibility: .visible,
-                presenting: session.removing
+                presenting: session[keyPath: asking]
             ) { host in
-                Button(L10n.t("account.remove.confirm"), role: .destructive) {
-                    Task { await session.remove(host: host) }
+                Button(L10n.t(confirmKey), role: role) {
+                    Task { await act(host) }
                 }
                 // **Cancel stays the default action.** No `.keyboardShortcut(.defaultAction)` on
-                // the destructive button: Return dismisses this question, it never answers it.
-                Button(L10n.t("board.choose.cancel"), role: .cancel) { session.removing = nil }
+                // the confirm: Return dismisses this question, it never answers it.
+                Button(L10n.t("board.choose.cancel"), role: .cancel) { session[keyPath: asking] = nil }
             } message: { host in
-                Text(FediqoRootView.removeDetail(for: host, in: session.sources))
+                Text(detail(host))
             }
     }
 }
 
-/// Clear's question (decision 29), beside Remove's and out of the chain for its reason.
-private struct ClearQuestion: ViewModifier {
-    let session: ShellSession
-
-    func body(content: Content) -> some View {
-        content
-            // **The Clear question, beside Remove's and driven the same way** (decision 29). One
-            // presenter, one piece of session state, two entrances: a source row and
-            // `UsagePane`'s row, which press the same key for the same call and must
-            // therefore ask the same question.
-            //
-            // **It exists because Clear is not reversible, whatever the row looks like.** It drops
-            // the pictures, the emoji names and the first posts, all of which come back — and it
-            // calls `ForumSessions.forget(host:)`, which deletes the saved Keychain password and
-            // signs the reader out of the forum. The Account row says neither of those before the
-            // press, so this is the one place they are said.
-            .confirmationDialog(
-                Text(session.clearing.map { String(format: L10n.t("account.clear.title"), $0) } ?? ""),
-                isPresented: Binding(
-                    get: { session.clearing != nil },
-                    set: { if !$0 { session.clearing = nil } }
-                ),
-                titleVisibility: .visible,
-                presenting: session.clearing
-            ) { host in
-                // **Plain, where Remove's confirm is `.destructive`, and the difference is
-                // deliberate.** The row's icon says *this takes something away*; the dialog says
-                // exactly how much, and the weight of the confirm matches the weight of the act. A
-                // destructive Clear would be the confirmation repeating the row's overstatement,
-                // which is the one thing decision 29 asks not to happen.
-                Button(L10n.t("account.clear.confirm")) {
-                    Task { await session.clear(host: host) }
-                }
-                Button(L10n.t("board.choose.cancel"), role: .cancel) { session.clearing = nil }
-            // **This closure is the one seam of this dialog a test cannot reach** (risk 12).
-            // `clearDetailKey` is pure and is driven across all four combinations; what nothing
-            // verifies is that *this* body asks it with `hasPassword` and `reachedSignIn` for the
-            // host being confirmed, because a `message:` builder only runs inside a presented
-            // dialog. Named here rather than left to be discovered.
-            } message: { host in
-                Text(L10n.t(SourceRow.clearDetailKey(
-                    hasPassword: session.forums.hasPassword(host: host),
-                    reachedSignIn: session.isSignedIn(host: host)
-                )))
-            }
-    }
-}
-
-/// A server ended a sign-in on its own side, said — out of the chain for `RemoveQuestion`'s reason.
+/// A server ended a sign-in on its own side, said — out of the chain for `HostQuestion`'s reason.
 private struct EndedSignInNotice: ViewModifier {
     let session: ShellSession
 

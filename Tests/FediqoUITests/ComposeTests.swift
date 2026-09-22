@@ -111,7 +111,7 @@ struct ComposeTests {
         _ session: ShellSession, failed: String? = nil
     ) -> ComposerSheet.Surface {
         ComposerSheet.surface(
-            offered: ComposerSheet.offered(session.rows),
+            offered: session.writableSources,
             draft: session.composeDraft,
             failed: failed
         )
@@ -121,14 +121,14 @@ struct ComposeTests {
     func onlyWritableSourcesAreOffered() async throws {
         let (session, _, _) = try await shell(scopes: writing)
         session.mastodon.refusedWrite(host: host)
-        #expect(ComposerSheet.offered(session.rows).isEmpty)
+        #expect(session.writableSources.isEmpty)
 
         let (reads, _, _) = try await shell(scopes: MastodonOAuth.reading)
-        #expect(ComposerSheet.offered(reads.rows).isEmpty)
+        #expect(reads.writableSources.isEmpty)
         #expect(reads.rows.first { $0.source.host == forum }?.writing == .never)
 
         let (writes, _, _) = try await shell(scopes: writing)
-        #expect(ComposerSheet.offered(writes.rows).map(\.host) == [host])
+        #expect(writes.writableSources.map(\.host) == [host])
         writes.prepareCompose()
         #expect(writes.composeHost == host)
         #expect(writes.availability.canCompose)
@@ -189,7 +189,7 @@ struct ComposeTests {
         }
         #expect(session.composeDraft == "kept")
         #expect(session.rows.first { $0.source.host == host }?.writing == .refused)
-        #expect(ComposerSheet.offered(session.rows).isEmpty)
+        #expect(session.writableSources.isEmpty)
         #expect(session.isSignedIn(host: host))
         #expect(surface(session, failed: host) == .composing, "the failure is not the empty notice")
         #expect(surface(session) == .composing, "the draft alone keeps the editor")
@@ -211,7 +211,7 @@ struct ComposeTests {
         }
         #expect(session.composeDraft == "kept")
         #expect(!session.isSignedIn(host: host))
-        #expect(ComposerSheet.offered(session.rows).isEmpty)
+        #expect(session.writableSources.isEmpty)
         #expect(surface(session, failed: host) == .composing)
         #expect(
             ComposerSheet.surface(offered: [], draft: "", failed: nil) == .empty,

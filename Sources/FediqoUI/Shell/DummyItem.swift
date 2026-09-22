@@ -141,6 +141,10 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// A forum thread's opening post as this device last read it — `Note.opening`, carried so a
     /// row reached before this run draws its words without asking (#154). Nothing elsewhere.
     public var opening: ForumOpening?
+    /// What this post arrived through — `Note.categories`, carried so a forum row knows whether it
+    /// was ranked and which board it is in, which is what decides whether reaching it may read
+    /// its opening post (`ForumPosts.readsWhenReached`). Empty on a fixture.
+    public var categories: Set<FediqoCore.Category> = []
     /// Whether the author covered it, or nothing where the source never said. Carried as the
     /// three answers it has, not folded down to two — see `covered`.
     public let sensitive: Bool?
@@ -252,6 +256,14 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         return url
     }
 
+    /// The page opening this row reads, where opening it reads a page rather than a
+    /// conversation: a forum's ranked blog, whose words the ranking list gave and whose page is
+    /// the rest of it. Read in the app's own reader (#34), in place on a Mac (#169) — never by a
+    /// parser of this app's, and never before the reader opens it. Nothing for every other row.
+    public var page: URL? {
+        DiscuzBlogRow.isBlog(noteID) ? outwardURL : nil
+    }
+
     /// What the way out is called, wherever it is drawn: the act, and the host it leads to.
     ///
     /// **`thread.open` reused, not twinned.** The key is named for the pane that first needed it
@@ -332,6 +344,7 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         url = note.url
         attachments = note.attachments
         opening = note.opening
+        categories = note.categories
         sensitive = note.sensitive
         spoiler = note.spoiler
         emojis = note.emojis

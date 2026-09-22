@@ -211,16 +211,43 @@ struct SourceWorkTests {
         #expect(work.now.isEmpty)
     }
 
-    @Test("A forum with no boards picked reads its front page under no board's name")
+    @Test("A forum with no boards picked reads its front page under no board's name, and its ranking lists as its Trends")
     func aFrontPageReload() async {
         let work = SourceWork()
         let (session, http) = await Self.boardForum([], work: work)
 
         await session.reload.timeline(.all, in: session)
 
+        let host = SubBoardChoiceTests.host
         let running = await http.everything
         #expect(!running.isEmpty, "the premise: the front page was asked for")
-        #expect(running.allSatisfy { $0 == ["\(SubBoardChoiceTests.host) timeline -"] })
+        #expect(running.allSatisfy {
+            $0 == ["\(host) timeline -"] || $0 == ["\(host) timeline Trends"]
+        })
+        #expect(await http.seen("https://\(host)/forum.php?mod=guide&view=newthread") == ["\(host) timeline -"])
+        #expect(await http.seen(Self.ranks(host, "thread", "replies")) == ["\(host) timeline Trends"])
+        #expect(await http.seen(Self.ranks(host, "blog", "heats")) == ["\(host) timeline Trends"])
+    }
+
+    /// A forum's ranking list, as a reload asks for it.
+    private static func ranks(_ host: String, _ type: String, _ view: String) -> String {
+        "https://\(host)/misc.php?mod=ranklist&type=\(type)&view=\(view)&orderby=thisweek"
+    }
+
+    /// #164, #170: a forum's Trends are read under the name the reader knows the tab by, so the
+    /// toast reads "Reloading <forum> Trends".
+    @Test("A forum's ranking lists are listed as its Trends while the Trends tab reloads")
+    func aForumTrendsReload() async {
+        let work = SourceWork()
+        let (session, http) = await Self.boardForum([BoardSubscription(fid: 434, name: "Child")], work: work)
+
+        await session.reload.timeline(.trends, in: session)
+
+        let host = SubBoardChoiceTests.host
+        #expect(await http.seen(Self.ranks(host, "thread", "replies")) == ["\(host) timeline Trends"])
+        #expect(await http.seen(Self.ranks(host, "blog", "heats")) == ["\(host) timeline Trends"])
+        #expect(await http.seen(SubBoardChoiceTests.read(434)).isEmpty, "Trends reads no board")
+        #expect(work.now.isEmpty)
     }
 
     @Test("The picker's front page names no board; a board's own page names that board")

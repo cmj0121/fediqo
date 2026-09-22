@@ -8,7 +8,7 @@ import Testing
 /// What is assertable without a screen is the copy the place speaks, that empty is not
 /// arriving and not failed, that a timeline the rules emptied names that rule, and that
 /// a search miss is not the timeline's empty. The suite is `@MainActor` for the reason
-/// `WaitingTests` is: `TimelinePane.standing` belongs to a `View`.
+/// `WaitingTests` is: what it reads belongs to a `View`.
 @Suite("Nothing to show reads as empty")
 @MainActor
 struct TimelineEmptyTests {
@@ -52,22 +52,16 @@ struct TimelineEmptyTests {
         )
     }
 
-    /// Standing stays two places. Empty is not a wait, and not a miss: those are the toast.
+    /// The stream is rows or this notice, and nothing else: which is decided by whether there
+    /// are rows alone. Empty is not a wait, and not a miss: those are the toast — so the notice
+    /// a running reload, a finished one and a missed one leave is never either.
     @Test("Empty is not arriving and not failed")
     func emptyIsNotArrivingOrFailed() {
-        let emptyStanding = TimelinePane.standing(
-            running: false, hasItems: false, searching: false, hasSources: true
-        )
-        let running = TimelinePane.standing(
-            running: true, hasItems: false, searching: false, hasSources: true
-        )
-        let missed = TimelinePane.standing(
-            running: false, hasItems: false, searching: false, hasSources: true,
-            failed: ["one.example"]
-        )
-        #expect(emptyStanding == .empty)
-        #expect(running == .empty)
-        #expect(missed == .empty)
+        for asked in [false, true] {
+            let place = empty(sources: [source], asked: asked)
+            #expect(place.spoken != ShellWaiting.spoken)
+            #expect(place.title != ShellFailure.spoken(["one.example"]))
+        }
 
         let notice = empty(sources: [source])
         #expect(notice.kind == .held)
@@ -82,10 +76,6 @@ struct TimelineEmptyTests {
     /// the indexing notice the fold still uses.
     @Test("An empty search is not the timeline's empty")
     func emptySearchIsNotTimelineEmpty() {
-        #expect(TimelinePane.standing(
-            running: true, hasItems: false, searching: true, hasSources: true
-        ) == .empty)
-
         let indexing = empty(searching: true, indexed: false, sources: [source])
         let search = empty(searching: true, indexed: true, sources: [source])
         let held = empty(sources: [source])

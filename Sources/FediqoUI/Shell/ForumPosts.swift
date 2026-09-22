@@ -29,6 +29,12 @@ struct ForumThreadRef: Hashable, Sendable {
     /// The row in the store this thread is, where the ref came from a row — what a read landing
     /// is kept under. See `ForumPosts.keeping`.
     let note: NoteKey?
+    /// Whether the forum's ranking lists named this thread — it arrived as its Trends. Carried,
+    /// like `kept`, and not part of what the thread is.
+    let ranked: Bool
+    /// The boards the row says the thread is in, by number: its board's own listing, or the
+    /// ranking list's board cell. Carried, like `kept`.
+    let boards: Set<Int>
 
     /// The thread a row is standing on, or nothing where this row is not a Discuz! thread at all.
     ///
@@ -43,13 +49,23 @@ struct ForumThreadRef: Hashable, Sendable {
         self.tid = tid
         kept = item.opening
         note = NoteKey(host: item.source.host, id: item.noteID)
+        ranked = item.categories.contains(.trends)
+        boards = Set(item.categories.compactMap { category -> Int? in
+            guard case .board(let id) = category else { return nil }
+            return Int(id)
+        })
     }
 
-    init(host: String, tid: Int, kept: ForumOpening? = nil) {
+    init(
+        host: String, tid: Int, kept: ForumOpening? = nil,
+        ranked: Bool = false, boards: Set<Int> = []
+    ) {
         self.host = host.lowercased()
         self.tid = tid
         self.kept = kept
         note = nil
+        self.ranked = ranked
+        self.boards = boards
     }
 
     static func == (a: ForumThreadRef, b: ForumThreadRef) -> Bool {
@@ -89,6 +105,10 @@ enum ForumReading: Equatable, Sendable {
     case silent
     /// It cannot be had. Which kind, because the row says different things about them.
     case absent(ForumPosts.Absence)
+    /// Not read, **on purpose, until the reader opens it**: a thread the forum's ranking lists
+    /// named, from a board the reader does not read. See `ForumPosts.readsWhenReached`. Only a row
+    /// in a list says this; the opened thread reads it.
+    case unread
 
     /// What one fetched post is worth to a row: the words, or the reason there are none.
     ///
@@ -377,6 +397,43 @@ final class ForumPosts {
         return .coming
     }
 
+    /// The boards the reader reads on each forum, by number — what `readsWhenReached` asks. Kept
+    /// here by the session as its sources change; empty until it does.
+    var boardsRead: [String: Set<Int>] = [:]
+
+    /// **Whether reaching this row may read its opening post** — the points guard.
+    ///
+    /// Some forums charge the reader points just to open a thread in some boards, and D30 reads a
+    /// row's opening post the moment it is reached. A reader who chose a board has chosen what
+    /// reading it costs; a thread the forum's ranking lists named from a board they never chose
+    /// has not been chosen by them at all, and scrolling past it must not spend their points. So a
+    /// ranked thread is read when reached **only when one of its boards is one the reader reads**
+    /// — and is otherwise read when they open it, which is them choosing it. Every thread that was
+    /// not ranked is D30's as it always was.
+    ///
+    /// **Strict where it cannot tell.** A ranked thread with no board this device knows of — the
+    /// row wrote none — is not read, and neither is one on a forum read through its front page
+    /// with no board chosen: the front page makes no row a board's.
+    func readsWhenReached(_ ref: ForumThreadRef) -> Bool {
+        guard ref.ranked else { return true }
+        return !ref.boards.isDisjoint(with: boardsRead[ref.host] ?? [])
+    }
+
+    /// Whether a band standing on this thread should read it now: `asks`, and — in a list rather
+    /// than the opened thread — the points guard. The one answer the band's wait and its read
+    /// both ask, so the two cannot disagree.
+    func fetches(_ ref: ForumThreadRef, opened: Bool) -> Bool {
+        asks(ref) && (opened || readsWhenReached(ref))
+    }
+
+    /// `reading(_:)`, as a band in a list or in the opened thread draws it: a row the guard keeps
+    /// from reading says so, where it would otherwise wait for a read that is not coming.
+    func reading(_ ref: ForumThreadRef, opened: Bool) -> ForumReading {
+        let reading = reading(ref)
+        if reading == .coming, !opened, !readsWhenReached(ref) { return .unread }
+        return reading
+    }
+
     /// Whether a row standing on this thread should ask the forum for its opening post now.
     ///
     /// **Only a row that has nothing to draw, or whose board was just read again.** A row kept
@@ -580,7 +637,7 @@ final class ForumPosts {
             // row is the store's, and so is when it is saved.
             if part == .opening, case .success(let posts) = answer,
                let first = posts.first, let opening = ForumOpening(first) {
-                self.keeping?(self.rows[key] ?? ForumThreadRef(host: key.host, tid: key.tid).noteKey, opening)
+                self.keeping?(self.noteKey(for: key), opening)
             }
 
             switch answer {
@@ -609,13 +666,10 @@ final class ForumPosts {
     /// this is not an optimisation: a cookie jar is not something a `URLSession` may borrow, so a
     /// thread on a forum the reader signed in to comes back withheld — or as a login page, or a
     /// challenge's 403 — if it is fetched any other way, a relaunch included.
-    /// `readsThroughEngine` rather than `transport`, because `transport(host:)` would *build* one
-    /// for every host and this app does not start a web process for a host that never needed it.
+    /// `readTransport` rather than `transport`, because `transport(host:)` would *build* one for
+    /// every host and this app does not start a web process for a host that never needed it.
     private func client(for host: String, part: Part, within limit: Duration?) -> DiscuzClient {
-        var transport = http
-        if let forums, forums.readsThroughEngine(host: host) {
-            transport = ForumJoinTransport(forums.transport(host: host))
-        }
+        var transport = forums?.readTransport(host: host, else: http) ?? http
         transport = WatchedHTTP(
             transport, for: part == .opening ? .forumPost : .forumReplies, in: work
         )
@@ -665,6 +719,18 @@ final class ForumPosts {
 
     // MARK: - Admission and eviction
 
+    /// Lets one thread's posts go, and what they cost with them — the one place `heldBytes` is
+    /// taken down for a post that leaves.
+    private func dropEntry(_ key: Key) {
+        if let gone = entries.removeValue(forKey: key) { heldBytes -= gone.cost }
+    }
+
+    /// The store row a thread's posts belong to: the row it was read for, or the spelling
+    /// `DiscuzThread.asNote` writes where no row was.
+    private func noteKey(for key: Key) -> NoteKey {
+        rows[key] ?? ForumThreadRef(host: key.host, tid: key.tid).noteKey
+    }
+
     /// Admits what came back, or declines it.
     ///
     /// Room is made oldest-first and never past something a band has wanted since this fetch
@@ -696,7 +762,7 @@ final class ForumPosts {
             return
         }
         for old in evictable {
-            if let gone = entries.removeValue(forKey: old) { heldBytes -= gone.cost }
+            dropEntry(old)
         }
 
         heldBytes -= already
@@ -811,7 +877,7 @@ final class ForumPosts {
             cleared.insert(key)
         }
         for key in Array(entries.keys) where key.host == host {
-            if let gone = entries.removeValue(forKey: key) { heldBytes -= gone.cost }
+            dropEntry(key)
         }
         for key in Array(missing.keys) where key.host == host {
             missing.removeValue(forKey: key)
@@ -837,7 +903,7 @@ final class ForumPosts {
         let host = raw.lowercased()
         var dropped = false
         for (key, held) in entries where key.host == host && held.posts.contains(where: \.isWithheld) {
-            if let gone = entries.removeValue(forKey: key) { heldBytes -= gone.cost }
+            dropEntry(key)
             dropped = true
         }
         for (key, absence) in missing where key.host == host
@@ -879,7 +945,7 @@ final class ForumPosts {
         let host = raw.lowercased()
         due.insert(host)
         for key in Array(entries.keys) where key.host == host && key.part == .opening {
-            if let gone = entries.removeValue(forKey: key) { heldBytes -= gone.cost }
+            dropEntry(key)
         }
         for key in Array(missing.keys) where key.host == host && key.part == .opening {
             missing.removeValue(forKey: key)
@@ -894,7 +960,7 @@ final class ForumPosts {
         var found: [NoteKey: ForumOpening] = [:]
         for (key, held) in entries where key.host == host && key.part == .opening {
             guard let first = held.posts.first, let opening = ForumOpening(first) else { continue }
-            found[rows[key] ?? ForumThreadRef(host: key.host, tid: key.tid).noteKey] = opening
+            found[noteKey(for: key)] = opening
         }
         return found
     }
@@ -1074,7 +1140,7 @@ struct ForumPostBand: View {
         // band on screen re-stamps its interest between one arrival and the next; a band that
         // stops reading looks infinitely stale to the eviction predicate however recently it was
         // drawn. Do not move this, and do not wrap this view in an `EquatableView`.
-        let reading = posts.reading(thread)
+        let reading = posts.reading(thread, opened: inFull)
         // Read in `body` for the same reason, and drawn above the words the way `ForumReplyRow`
         // draws a reply's: whoever was quoted spoke first, so their sentence comes first.
         let quoted = Self.quotations(posts.quoted(of: thread), inFull: inFull)
@@ -1090,7 +1156,7 @@ struct ForumPostBand: View {
         .task(
             id: Wanting(
                 thread: thread,
-                settled: !posts.asks(thread),
+                settled: !posts.fetches(thread, opened: inFull),
                 generation: posts.generation,
                 active: placeIsActive
             )
@@ -1098,7 +1164,10 @@ struct ForumPostBand: View {
             // Decision 20: a post is fetched only for the place the reader is in. **Only the
             // fetch is gated** — `posts.reading(…)` above still runs and still stamps interest on
             // every pass, on every page, or I8 breaks.
-            guard placeIsActive, posts.asks(thread) else { return }
+            //
+            // **And in a list, only a thread the reader's boards make theirs** — the points guard,
+            // `ForumPosts.readsWhenReached`. The opened thread (`inFull`) is the reader's choice.
+            guard placeIsActive, posts.fetches(thread, opened: inFull) else { return }
             // Cancelled by the row going away, which is the whole point of it. A thrown
             // cancellation here means this row did not stay, so nothing is asked for.
             do { try await Task.sleep(for: Self.settle) } catch { return }
@@ -1140,6 +1209,8 @@ struct ForumPostBand: View {
                 Color.clear.frame(height: 0)
             case .absent(let absence):
                 said("exclamationmark.triangle", Self.sentence(for: absence))
+            case .unread:
+                said("hand.raised", L10n.t("item.forum.unread"))
             }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -1185,12 +1256,21 @@ struct ForumPostBand: View {
     /// figures in `BoardPickerSheet` use — and the glyph is what says at a glance that this line
     /// is a condition rather than content.
     private func said(_ symbol: String, _ text: String) -> some View {
+        Self.said(symbol, text, lines: lines, colorScheme: colorScheme)
+    }
+
+    /// The same line for any post's words — a reply's in the thread pane included, so the forum
+    /// keeping a post from a signed-out reader reads the same on the row and under it.
+    ///
+    /// One line fewer than the words get, so a long sentence of this app's own cannot fill a band
+    /// meant for somebody's post — and no limit at all where the words have none (`lines` nil),
+    /// because there is no band to overflow.
+    static func said(
+        _ symbol: String, _ text: String, lines: Int?, colorScheme: ColorScheme
+    ) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: ShellSpace.tight) {
             Image(systemName: symbol)
             Text(text)
-                // One line fewer than the words get, so a long sentence of this app's own cannot
-                // fill a band meant for somebody's post — and no limit at all where the words
-                // have none, because there is no band to overflow.
                 .lineLimit(lines.map { max(1, $0 - 1) })
                 .multilineTextAlignment(.leading)
         }
@@ -1251,6 +1331,7 @@ struct ForumPostBand: View {
         case .withheld: L10n.t("item.forum.withheld")
         case .silent: L10n.t("item.forum.silent")
         case .absent(let absence): sentence(for: absence)
+        case .unread: L10n.t("item.forum.unread")
         }
     }
 }

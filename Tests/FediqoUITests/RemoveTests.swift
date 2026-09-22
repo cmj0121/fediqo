@@ -105,7 +105,7 @@ struct RemoveTests {
 
         // The premise, stated rather than assumed: a Remove that started with nothing measures
         // nothing at all.
-        #expect(session.queries.map(\.id) == ["all"])
+        #expect(session.queries.map(\.id) == ["all", "trends"])
         #expect(await session.emoji.catalogue(host: alpha)?.count == 1)
         #expect(pictures.holding(host: alpha).count == 1)
 

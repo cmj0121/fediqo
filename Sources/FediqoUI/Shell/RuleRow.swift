@@ -33,8 +33,11 @@ enum RuleBuilder {
             switch category {
             case .board, .list:
                 return [.source(host: host)]
-            case .public, .trends, .home:
+            case .public, .home:
                 return [.every] + sources.filter(\.kind.hasTimelines).map { .source(host: $0.host) }
+            // A Discuz!'s ranking lists are its Trends; public and home are still never a forum's.
+            case .trends:
+                return [.every] + sources.filter(\.kind.hasTrends).map { .source(host: $0.host) }
             }
         }
     }
@@ -51,14 +54,15 @@ enum RuleBuilder {
         }
     }
 
-    /// The categories each source can be picked by: public and trends on a Mastodon, Home where
-    /// it is signed in, every list chosen on it, a forum's subscribed boards, and any other its
+    /// The categories each source can be picked by: public and trends on a Mastodon, trends on a
+    /// Discuz! (its ranking lists), Home where it is signed in, every list chosen on it, a forum's subscribed boards, and any other its
     /// held posts arrived through.
     static func categories(
         in sources: [Source], notes: [Note], signedIn: (String) -> Bool
     ) -> [(host: String, categories: [FediqoCore.Category])] {
         sources.compactMap { source in
-            var picked: [FediqoCore.Category] = source.kind.hasTimelines ? [.public, .trends] : []
+            var picked: [FediqoCore.Category] = source.kind.hasTimelines ? [.public] : []
+            if source.kind.hasTrends { picked.append(.trends) }
             if source.kind.hasTimelines, signedIn(source.host) { picked.append(.home) }
             picked += source.lists.map { .list(id: $0.id) }
             picked += source.boards.map { .board(id: String($0.fid)) }
