@@ -218,7 +218,7 @@ struct TimelinePane: View {
         }
         .overlay(alignment: .bottom) {
             if let banner {
-                TimelineToastBanner(toast: banner)
+                TimelineToastBanner(toast: banner, work: session.work, reading: session.reload.reading)
                     .padding(.bottom, ShellSpace.pad)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }

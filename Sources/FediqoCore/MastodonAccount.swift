@@ -12,10 +12,18 @@ import os
 public struct MastodonAccount: Sendable {
     private let door: MastodonAuthorized
     private let store: ItemStore
+    /// The door one timeline — Home, or one list — is read through. `door` unless the caller
+    /// asked for its own per timeline: the app names each one while it is on the wire, and only
+    /// the caller knows the names (#170). Every one of them is the same token to the same host.
+    private let reading: @Sendable (Category) -> MastodonAuthorized
 
-    public init(door: MastodonAuthorized, store: ItemStore) {
+    public init(
+        door: MastodonAuthorized, store: ItemStore,
+        reading: (@Sendable (Category) -> MastodonAuthorized)? = nil
+    ) {
         self.door = door
         self.store = store
+        self.reading = reading ?? { _ in door }
     }
 
     private var host: String { door.token.host }
@@ -128,7 +136,9 @@ public struct MastodonAccount: Sendable {
     }
 
     private func statuses(_ path: String, source: Source, category: Category) async throws -> [Note] {
-        let data = try await door.get(path: path, query: [URLQueryItem(name: "limit", value: "40")])
+        let data = try await reading(category).get(
+            path: path, query: [URLQueryItem(name: "limit", value: "40")]
+        )
         return try MastodonJSON.decoder.decode([StatusDTO].self, from: data).map {
             $0.asNote(source: source, category: category)
         }
