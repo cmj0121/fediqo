@@ -13,7 +13,10 @@ import SwiftUI
 // post the source did give, that posts may be missing there, which is said and nothing more.
 //
 // **Reaching it is an ask for more**, as the end of the list is (#87), and not `r`: nothing is
-// re-centred, so the row being read stays where it is, and the newer posts land above it.
+// re-centred, so the row being read stays where it is, and the newer posts land above it. So it
+// keeps that ask's company: `r` ends it, the wait and an open thread's renewal (#198) do not
+// start while it is out, and it may run beside a renewal already on its way — it reads one
+// Mastodon timeline, never a forum, so no stranger's forum is asked twice at once.
 //
 // **Only where the timeline in front reads that timeline.** A post Home and a list both carry can
 // be whole in the one and not the other, and Trends reads neither.
