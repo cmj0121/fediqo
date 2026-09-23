@@ -180,6 +180,10 @@ struct TimelinePane: View {
                         posts: session.posts,
                         conversations: session.conversations,
                         onAskAround: { Task { await session.conversations.again(opened, in: session) } },
+                        onReadFurther: { Task { await session.conversations.press(opened, in: session) } },
+                        onReachFurther: { appeared in
+                            Task { await session.conversations.reached(opened, appeared: appeared, in: session) }
+                        },
                         selectedID: $selectedID,
                         marks: markBinding,
                         // Inside the conversation the answer mark opens the answer (#108).
@@ -206,7 +210,11 @@ struct TimelinePane: View {
                     .task(id: opened.id) { await session.conversations.open(opened, in: session) }
                     // What `r` last said about this thread goes with it (#175): the timeline under
                     // it does not go on saying a thread nobody is reading could not be reloaded.
-                    .onDisappear { session.reload.forget(.thread) }
+                    // And a page still on its way for it stops (#177): nobody is reading on.
+                    .onDisappear {
+                        session.reload.forget(.thread)
+                        session.stopReadingFurther(of: opened)
+                    }
                 } else {
                     underneath
                 }

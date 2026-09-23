@@ -466,6 +466,13 @@ final class ShellSession {
         self.posts = posts ?? ForumPosts(through: forums)
         // An opening post read is kept with its row (#154). Weak: the cache is this session's.
         self.posts.keeping = { [weak self] key, opening in self?.keep(opening, for: key) }
+        // A topic's replies land in the store and are read back from it (#177). Weak, likewise.
+        self.posts.landing = { [weak self] host, tid, replies in
+            await self?.land(replies, host: host, tid: tid) ?? []
+        }
+        self.posts.reading = { [weak self] host, tid in
+            await self?.keptReplies(host: host, tid: tid) ?? []
+        }
         switch timelines?.load() {
         case .timelines(let kept)?: written = kept
         case .unreadable?: timelinesUnreadable = true
@@ -1935,8 +1942,12 @@ final class ShellSession {
         }
         // What is held aside has a count of its own, as what is drawn has, so a landing only
         // the timelines see neither reads it again nor redraws a search (#176).
+        //
+        // **A forum topic's kept replies are not among them** (#177): each is a post of a thread,
+        // not a thread, and a search drawing one would draw it as a row that opens nowhere. A
+        // microblog answer is a post in its own right, and stays.
         if adoptedAside != asideRevision {
-            aside = await store.aside()
+            aside = await store.aside().filter { DiscuzPost(held: $0) == nil }
             adoptedAside = asideRevision
         }
         rebuildQueries()
@@ -2167,6 +2178,61 @@ final class ShellSession {
             guard await store.keep([key: opening]) else { return }
             await persist?()
         }
+    }
+
+    /// One page of a topic's replies, landed in the store **held aside** and saved, and the topic
+    /// as the store now holds it (#177).
+    ///
+    /// Aside, because a reply read in a thread is not a row All grew by (#175). A reply already
+    /// held takes the words just read — **never the forum's notice over them**, #154's rule for an
+    /// opening post, so a guest's read of a page does not undo what a member's read kept.
+    ///
+    /// **A reply the page gave no date keeps the one it was first kept with.** Stamped with each
+    /// read's moment, every re-read would move the row, write the whole store down again, and keep
+    /// it inside the reader's keep-for window for ever.
+    func land(_ replies: [DiscuzPost], host: String, tid: Int) async -> [DiscuzPost] {
+        let read = Date()
+        let first = Dictionary(
+            await store.held(host: host, idPrefix: DiscuzPost.heldPrefix(host: host, tid: tid))
+                .map { ($0.id, $0.postedAt) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let notes = replies.map { reply in
+            let id = DiscuzPost.heldPrefix(host: host, tid: tid) + String(reply.pid)
+            return reply.asNote(host: host, read: first[id] ?? read)
+        }
+        await store.hold(notes, ifSourceHere: host)
+        await store.refresh(notes.filter { $0.opening != nil }, ifSourceHere: host)
+        await persist?()
+        return await keptReplies(host: host, tid: tid)
+    }
+
+    /// Every reply of one topic this device holds, in reading order: by page, and on a page in the
+    /// order the store took them — which is the order the page wrote them, so a forum that lists a
+    /// topic newest first reads back newest first too.
+    func keptReplies(host: String, tid: Int) async -> [DiscuzPost] {
+        await store.held(host: host, idPrefix: DiscuzPost.heldPrefix(host: host, tid: tid))
+            .compactMap(DiscuzPost.init(held:))
+            .enumerated()
+            .sorted { ($0.element.page, $0.offset) < ($1.element.page, $1.offset) }
+            .map(\.element)
+    }
+
+    /// Every further read of an open thread stopped — a forum's next page, a conversation's next
+    /// part (#177). The thread closing, and Esc, which stops these as it stops a reload.
+    @discardableResult
+    func stopReadingFurther() -> Bool {
+        let paging = posts.stopPaging()
+        let further = conversations.stopReadingFurther()
+        return paging || further
+    }
+
+    /// The further reads of one thread stopped — **its pane closing**. Only its own: a reader who
+    /// opens a reply's thread from inside this one closes this pane as the next one opens, and the
+    /// next one's first ask is not this pane's to stop.
+    func stopReadingFurther(of item: DummyItem) {
+        if let thread = ForumThreadRef(item) { posts.stopPaging(of: thread) }
+        conversations.stopReadingFurther(of: item.id)
     }
 
     /// This run's opening posts for rows still held, handed to the store **and** to the rows drawn

@@ -427,6 +427,18 @@ public actor ItemStore {
         notes[key]
     }
 
+    /// Every row held from `host` whose id starts `idPrefix` — **aside ones included**, which is
+    /// the point: a thread read to its end (#177) is read back from here, answers and all, and
+    /// `all()` would hand over none of them. In the order they arrived; a caller that means
+    /// another order says so.
+    public func held(host raw: String, idPrefix: String = "") -> [Note] {
+        let host = raw.lowercased()
+        let arrival = self.arrival
+        return notes.values
+            .filter { $0.source.host == host && $0.id.hasPrefix(idPrefix) }
+            .sorted { (arrival[$0.key] ?? 0) < (arrival[$1.key] ?? 0) }
+    }
+
     public func trends() -> [Note] {
         all().filter { $0.categories.contains(.trends) }
     }

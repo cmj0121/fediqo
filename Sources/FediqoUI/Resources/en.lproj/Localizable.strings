@@ -499,6 +499,17 @@
 "thread.reply.floor" = "#%d";
 "thread.reply.quoted" = "Quoted: %@";
 
+/* #177 — the foot of a thread read to its end. The end is said as the end, and a part that did
+   not arrive is said where it would have been. */
+"thread.more.loading" = "Reading further…";
+"thread.more.end" = "This is the end of the thread.";
+"thread.more.read" = "Read further";
+"thread.more.cut" = "%@ gives no more of this thread here. There are answers it did not hand over.";
+"thread.more.again" = "Try the rest again";
+"thread.more.unreachable" = "The rest of this thread did not arrive.";
+"thread.more.refused" = "%@ would not let this app read further into this thread.";
+"thread.more.unreadable" = "The next page answered, but there was nothing on it this app could read.";
+
 /* Unit F7 — reading a thread properly. */
 "thread.open" = "Open on %@";
 "thread.open.hint" = "Opens %@ in your browser";
