@@ -430,7 +430,72 @@ struct ThreadToEndTests {
 
         #expect(Self.pids(session.posts.standing(of: Self.ref)) == [2], "the stopped page did not land")
         #expect(session.posts.further(of: Self.ref) == .more, "and it will be asked again when reached")
-        #expect(!session.stopReadingFurther(), "nothing left on the wire")
+
+        // **The foot still in view does not ask again by itself** — else the next Esc would be
+        // spent stopping that, and the reader could never leave the thread by key.
+        #expect(ThreadFoot.said(
+            session.posts.further(of: Self.ref)!, held: session.posts.isHeldBack(Self.ref), host: Self.forum
+        ) == .held)
+        await session.posts.reached(Self.ref, appeared: false)
+        #expect(await http.asks == 1, "a page landing under the foot asks nothing after a stop")
+        #expect(!session.stopReadingFurther(), "so the second Esc has nothing to stop, and closes the thread")
+
+        // The foot coming into view again is the reader reaching it, and reads on.
+        await session.posts.reached(Self.ref, appeared: true)
+        #expect(await http.asks == 2)
+        #expect(Self.pids(session.posts.standing(of: Self.ref)) == [2, 3, 4])
+    }
+
+    @Test("A stopped foot reads on when pressed, or when s is")
+    func aStoppedFootReadsOnWhenPressed() async {
+        let http = GatedHTTP(Self.threePages, holding: Self.page(2))
+        let guardian = hangGuard(http.gate)
+        defer { guardian.cancel() }
+        let session = await forumShell(http)
+        await session.posts.fetchReplies(Self.ref)
+        let reading = Task { await session.posts.more(Self.ref) }
+        #expect(await spun { await http.reached })
+        session.stopReadingFurther()
+        await http.gate.open()
+        await reading.value
+
+        #expect(session.posts.wantsPressing(Self.ref), "s is still offered")
+        await session.posts.press(Self.ref)
+        #expect(!session.posts.isHeldBack(Self.ref))
+        #expect(Self.pids(session.posts.standing(of: Self.ref)) == [2, 3, 4])
+    }
+
+    /// A chain of answers, each one's own thread handing back only the next: `9` → `10` → … → `20`.
+    private static let longChain: [String: FixtureHTTP.Outcome] = {
+        var routes: [String: FixtureHTTP.Outcome] = [threadPath: context([status("10", answering: "9", replies: 1)])]
+        for id in 10..<20 {
+            routes["/api/v1/statuses/\(id)/context"] = context([status("\(id + 1)", answering: "\(id)", replies: 1)])
+        }
+        return routes
+    }()
+
+    @Test("A conversation's foot reads on by itself only so many times, then waits for a press")
+    func automaticAsksAreCapped() async {
+        let http = FixtureHTTP(Self.longChain)
+        let (session, item) = await conversationShell(http)
+        let conversations = session.conversations
+        await conversations.open(item, in: session)
+
+        for _ in 0..<ShellConversations.autoAsks {
+            await conversations.reached(item, appeared: false, in: session)
+        }
+        let asked = await http.paths.count
+        #expect(asked == 1 + ShellConversations.autoAsks)
+        await conversations.reached(item, appeared: false, in: session)
+        await conversations.reached(item, appeared: true, in: session)
+        #expect(await http.paths.count == asked, "past the cap, reaching the foot asks nothing")
+        #expect(conversations.isHeldBack(item.id))
+        #expect(ThreadFoot.said(conversations.further(of: item.id)!, held: true, host: Self.host) == .held)
+
+        await conversations.press(item, in: session)
+        #expect(await http.paths.count == asked + 1, "a press asks, and the count starts again")
+        await conversations.reached(item, appeared: false, in: session)
+        #expect(await http.paths.count == asked + 2)
     }
 }
 

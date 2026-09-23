@@ -616,8 +616,30 @@ final class ForumPosts {
         if standing(of: ref).wantsPressing {
             await fetchReplies(ref)
         } else {
+            heldBack.remove(Key(ref, .replies))
             await more(ref)
         }
+    }
+
+    /// Topics whose next page the reader stopped (Esc, or closing the thread): **the foot does not
+    /// ask for them by itself** until it is pressed, `s` is, or it comes into view again. Without
+    /// this a stop put the foot back at "more", the foot in view asked again at once, and the next
+    /// Esc was spent stopping that — so a reader on the keys could never leave the thread.
+    private(set) var heldBack: Set<Key> = []
+
+    /// Whether the foot of `ref` is waiting for the reader rather than reading on by itself.
+    func isHeldBack(_ ref: ForumThreadRef) -> Bool {
+        heldBack.contains(Key(ref, .replies))
+    }
+
+    /// The foot of `ref` in view — **the automatic ask**. `appeared` is the foot coming into view,
+    /// which is the reader scrolling to it again and lets go of a stop; a page landing under a foot
+    /// already in view does not.
+    func reached(_ ref: ForumThreadRef, appeared: Bool) async {
+        let key = Key(ref, .replies)
+        if appeared { heldBack.remove(key) }
+        guard !heldBack.contains(key) else { return }
+        await more(ref)
     }
 
     /// The replies this device kept of `ref`, drawn with no request — **a topic opened again, or
@@ -661,6 +683,7 @@ final class ForumPosts {
     func stopPaging() -> Bool {
         guard !pageWork.isEmpty else { return false }
         for task in pageWork.values { task.cancel() }
+        heldBack.formUnion(pageWork.keys)
         pageWork = [:]
         return true
     }
@@ -1087,6 +1110,7 @@ final class ForumPosts {
         for key in Array(paging.keys) where key.host == host {
             paging.removeValue(forKey: key)
         }
+        heldBack = heldBack.filter { $0.host != host }
         generation += 1
     }
 

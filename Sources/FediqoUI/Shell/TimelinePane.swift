@@ -149,7 +149,10 @@ struct TimelinePane: View {
                         posts: session.posts,
                         conversations: session.conversations,
                         onAskAround: { Task { await session.conversations.again(opened, in: session) } },
-                        onReadFurther: { Task { await session.conversations.more(opened, in: session) } },
+                        onReadFurther: { Task { await session.conversations.press(opened, in: session) } },
+                        onReachFurther: { appeared in
+                            Task { await session.conversations.reached(opened, appeared: appeared, in: session) }
+                        },
                         selectedID: $selectedID,
                         marks: markBinding,
                         // Inside the conversation the answer mark opens the answer (#108).

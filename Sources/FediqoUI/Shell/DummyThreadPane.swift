@@ -23,6 +23,8 @@ struct DummyThreadPane: View {
     /// The conversation read further as the reader nears its foot (#177) — the pane above's to
     /// ask, for `onAskAround`'s reason.
     var onReadFurther: () -> Void = {}
+    /// The foot reaching for more by itself, which the conversation may decline — see `ThreadFoot`.
+    var onReachFurther: (_ appeared: Bool) -> Void = { _ in }
     @Binding var selectedID: String?
     var marks: (DummyItem) -> Binding<DummyMarks>
     /// Each row's share of #54's acts, asked of the pane above rather than worked out here: the
@@ -315,9 +317,11 @@ struct DummyThreadPane: View {
                 }
                 // The topic read to its end, a page at a time, below every reply already drawn.
                 if let further = posts.further(of: thread) {
-                    ThreadFoot(said: ThreadFoot.said(further, host: thread.host)) {
-                        Task { await posts.more(thread) }
-                    }
+                    ThreadFoot(
+                        said: ThreadFoot.said(further, held: posts.isHeldBack(thread), host: thread.host),
+                        ask: { Task { await posts.press(thread) } },
+                        reach: { appeared in Task { await posts.reached(thread, appeared: appeared) } }
+                    )
                 }
             case .absent(let absence):
                 quiet(ForumPostBand.sentence(for: absence))
@@ -366,8 +370,14 @@ struct DummyThreadPane: View {
         case .loaded:
             // The answers are the rows above. What belongs down here is how far they go (#177).
             if let further = conversations.further(of: root.id) {
-                ThreadFoot(said: ThreadFoot.said(further, host: root.source.host), ask: onReadFurther)
-                    .padding(.top, ShellSpace.snug)
+                ThreadFoot(
+                    said: ThreadFoot.said(
+                        further, held: conversations.isHeldBack(root.id), host: root.source.host
+                    ),
+                    ask: onReadFurther,
+                    reach: onReachFurther
+                )
+                .padding(.top, ShellSpace.snug)
             }
         case .absent(let absence):
             let standing = conversations.standing(of: root.id)
@@ -520,6 +530,10 @@ struct DummyThreadPane: View {
 /// reader can see it, and a foot in view that says more is coming has to mean it. One off screen
 /// asks nothing, so a long page that pushed it away waits for the reader to reach it again.
 ///
+/// **Those two are the automatic asks, and the model may decline them** (`reach`): a foot the
+/// reader stopped, or one that has asked enough times running, is `held` — drawn as a button that
+/// waits for them, and never asking again by itself the moment a stop puts it back.
+///
 /// **The end is a sentence, not an absence.** A thread with nothing under its last reply and a
 /// thread still waiting for its next page were drawn alike; the reader could not tell one from the
 /// other, which is the whole of #177's complaint.
@@ -527,6 +541,8 @@ struct ThreadFoot: View {
     /// What the foot says, with each kind of source's reason already worded.
     enum Said: Equatable {
         case more
+        /// More to read, and the foot waits for the reader to ask — after a stop, or enough asks.
+        case held
         case coming
         case end
         /// The source counts more than it will hand over here, and names itself. The way to read
@@ -536,7 +552,10 @@ struct ThreadFoot: View {
     }
 
     let said: Said
+    /// The reader asking: the button, held or failed.
     let ask: () -> Void
+    /// The foot asking by itself — `true` as it comes into view, `false` as a page lands under it.
+    let reach: (_ appeared: Bool) -> Void
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var inView = false
@@ -547,6 +566,13 @@ struct ThreadFoot: View {
             switch said {
             case .more, .coming:
                 ForumWaiting(line: L10n.t("thread.more.loading"))
+            case .held:
+                Button(action: ask) {
+                    Label(L10n.t("thread.more.read"), systemImage: "arrow.down.circle")
+                        .shellFont(.meta, weight: .medium)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(ShellChrome.selectInk(colorScheme))
             case .end:
                 HStack(alignment: .firstTextBaseline, spacing: ShellSpace.tight) {
                     Image(systemName: "checkmark.circle")
@@ -588,19 +614,22 @@ struct ThreadFoot: View {
         .padding(.vertical, ShellSpace.snug)
         .onAppear {
             inView = true
-            if said == .more { ask() }
+            // A held foot coming into view is the reader reaching it again, which lets a stop go.
+            if said == .more || said == .held { reach(true) }
         }
         .onDisappear { inView = false }
         .onChange(of: said) { _, now in
-            if inView, now == .more { ask() }
+            if inView, now == .more { reach(false) }
         }
     }
 
     /// A forum topic's foot. The reasons are `ForumPosts.Absence`'s, worded for a page rather than
     /// a post — the replies above are still there, and it is the next page that is not.
-    static func said(_ further: ShellThreadFurther<ForumPosts.Absence>, host: String) -> Said {
+    static func said(
+        _ further: ShellThreadFurther<ForumPosts.Absence>, held: Bool = false, host: String
+    ) -> Said {
         switch further {
-        case .more: .more
+        case .more: held ? .held : .more
         case .coming: .coming
         case .end: .end
         case .cut: .cut(sentence: String(format: L10n.t("thread.more.cut"), host))
@@ -610,9 +639,11 @@ struct ThreadFoot: View {
     }
 
     /// A conversation's foot, in `ShellConversations.Absence`'s terms.
-    static func said(_ further: ShellThreadFurther<ShellConversations.Absence>, host: String) -> Said {
+    static func said(
+        _ further: ShellThreadFurther<ShellConversations.Absence>, held: Bool = false, host: String
+    ) -> Said {
         switch further {
-        case .more: .more
+        case .more: held ? .held : .more
         case .coming: .coming
         case .end: .end
         case .cut: .cut(sentence: String(format: L10n.t("thread.more.cut"), host))

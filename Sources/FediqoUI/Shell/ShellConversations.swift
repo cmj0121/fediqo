@@ -170,6 +170,39 @@ final class ShellConversations {
     /// Threads whose foot failed on **the thread itself** — its first read, or `r` — rather than
     /// on a part further down: trying again there asks the whole thread again.
     @ObservationIgnored private var failedAtRoot: Set<String> = []
+    /// Threads whose foot waits for the reader rather than reading on by itself: one the reader
+    /// stopped (Esc, or closing it), and one that has asked `autoAsks` times running with nobody
+    /// pressing — so a thread of hundreds does not chain request after request as it scrolls.
+    /// `ForumPosts.heldBack`'s rule, and for its reason: a stop that the foot undid at once would
+    /// spend every Esc on stopping, and the reader could not leave by key.
+    private(set) var heldBack: Set<String> = []
+    /// How many further asks the foot made by itself since the reader last pressed.
+    @ObservationIgnored private var asksRunning: [String: Int] = [:]
+    /// How many a foot may make by itself before it waits for a press.
+    nonisolated static let autoAsks = 5
+
+    /// Whether the foot of the thread around `id` is waiting for the reader.
+    func isHeldBack(_ id: String) -> Bool { heldBack.contains(id) }
+
+    /// The foot in view — **the automatic ask**. `appeared` is the foot coming into view again,
+    /// which lets go of a stop, and never of the count: only a press does that.
+    func reached(_ item: DummyItem, appeared: Bool, in session: ShellSession) async {
+        if appeared { heldBack.remove(item.id) }
+        guard !heldBack.contains(item.id), furthers[item.id] == .more else { return }
+        guard asksRunning[item.id, default: 0] < Self.autoAsks else {
+            heldBack.insert(item.id)
+            return
+        }
+        asksRunning[item.id, default: 0] += 1
+        await more(item, in: session)
+    }
+
+    /// The reader pressing the foot, or its button: asked at once, and the count starts again.
+    func press(_ item: DummyItem, in session: ShellSession) async {
+        heldBack.remove(item.id)
+        asksRunning[item.id] = 0
+        await more(item, in: session)
+    }
 
     func standing(of id: String) -> ShellConversationStanding {
         standings[id] ?? .unasked
@@ -320,6 +353,8 @@ final class ShellConversations {
             furthers[id] = nil
             asked[id] = nil
             failedAtRoot.remove(id)
+            heldBack.remove(id)
+            asksRunning[id] = nil
         }
     }
 
@@ -332,6 +367,8 @@ final class ShellConversations {
         furthers = [:]
         asked = [:]
         failedAtRoot = []
+        heldBack = []
+        asksRunning = [:]
         hosts = [:]
     }
 
@@ -379,7 +416,8 @@ final class ShellConversations {
         do {
             let (post, signedIn) = session.conversationPost(host: host, within: deadline)
             guard let id = try await post.id(of: held) else {
-                standings[item.id] = .absent(.unfindable)
+                // The rule every other failure keeps: a thread already drawn stays drawn.
+                await failed(item, held: held, before: before, why: .unfindable, in: session)
                 return
             }
             try Task.checkCancellation()
@@ -519,6 +557,7 @@ final class ShellConversations {
     func stopReadingFurther() -> Bool {
         guard !furtherWork.isEmpty else { return false }
         for task in furtherWork.values { task.cancel() }
+        heldBack.formUnion(furtherWork.keys)
         furtherWork = [:]
         return true
     }
