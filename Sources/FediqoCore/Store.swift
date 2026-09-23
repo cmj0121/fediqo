@@ -31,8 +31,43 @@ public actor ItemStore {
     /// note bumps it. A saver that remembers the revision it last wrote skips a save with nothing
     /// new in it. Starts at 0 for any store, a relaunched one included.
     public private(set) var revision = 0
+    /// Everyone listening for a change. See `changes()`.
+    private var listeners: [UUID: AsyncStream<Int>.Continuation] = [:]
 
     public init() {}
+
+    /// The revision, each time something here really changed — so a screen reading this store
+    /// renews itself with no key pressed (#175).
+    ///
+    /// **A stream rather than observation**, because a Swift 6 actor cannot be `@Observable`: what
+    /// the store can offer is something to await, and one listener turns it back into a redraw.
+    ///
+    /// **Only the newest is kept.** A listener that was busy while three reads landed has one
+    /// thing to do about them and does it once; what a renewal needs to know is that something
+    /// changed, never how many times. A call that changed nothing says nothing at all, which is
+    /// what keeps a wait that brought nothing new off the screen.
+    ///
+    /// Each call is its own stream, and a stream nobody reads any more drops itself.
+    public func changes() -> AsyncStream<Int> {
+        let id = UUID()
+        let (stream, continuation) = AsyncStream<Int>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        listeners[id] = continuation
+        continuation.onTermination = { [weak self] _ in
+            Task { await self?.stopListening(id) }
+        }
+        return stream
+    }
+
+    private func stopListening(_ id: UUID) {
+        listeners[id] = nil
+    }
+
+    /// Something here changed: the revision moves and everyone listening is told. **The one place
+    /// either happens**, so a call that tells a saver it changed cannot forget to tell a screen.
+    private func changed() {
+        revision += 1
+        for listener in listeners.values { listener.yield(revision) }
+    }
 
     /// A store holding what a relaunch read back from disk — the one way a snapshot gets in.
     ///
@@ -59,7 +94,7 @@ public actor ItemStore {
     public func add(_ source: Source) {
         if sourceList.contains(where: { $0.host == source.host }) { return }
         sourceList.append(source)
-        revision += 1
+        changed()
     }
 
     /// Restates which boards a source is subscribed to, where that source is here.
@@ -81,7 +116,7 @@ public actor ItemStore {
         sourceList[index] = Source(
             host: existing.host, kind: existing.kind, boards: boards, lists: existing.lists
         )
-        revision += 1
+        changed()
     }
 
     /// Restates which Mastodon lists a source reads — a choice, or the same lists relabelled with
@@ -94,7 +129,7 @@ public actor ItemStore {
         sourceList[index] = Source(
             host: existing.host, kind: existing.kind, boards: existing.boards, lists: lists
         )
-        revision += 1
+        changed()
     }
 
     /// Gives the lists a source reads **now** the names in `names`, by id. Only relabels: a list
@@ -109,7 +144,7 @@ public actor ItemStore {
         sourceList[index] = Source(
             host: existing.host, kind: existing.kind, boards: existing.boards, lists: lists
         )
-        revision += 1
+        changed()
     }
 
     /// `ingest(_:)`, only while `host` is still a source here — in the same step, so a source
@@ -120,6 +155,20 @@ public actor ItemStore {
         ingest(incoming)
     }
 
+    /// Takes in posts this device went and fetched for one place — a search, a thread, a
+    /// hashtag — **held aside**: `note(_:)` hands each over and a save writes it, and `all()` never
+    /// draws it (#175). `ingest(_:ifSourceHere:)` in every other respect, the one way such a post
+    /// gets in, so no caller spells `Holding` for itself.
+    ///
+    /// A post already here as one a timeline brought stays one: holding only ever widens.
+    public func hold(_ incoming: [Note], ifSourceHere host: String) {
+        ingest(incoming.map { note in
+            var aside = note
+            aside.holding = .aside
+            return aside
+        }, ifSourceHere: host)
+    }
+
     /// Takes notes in. The same item through one source stays one row: the first copy wins and
     /// categories grow, so All and Trends of one host share a row. A fetch with fewer takes none
     /// away: a category is what the copy arrived through, and that stays true (#25). The same
@@ -127,20 +176,35 @@ public actor ItemStore {
     /// merge (#114) is a way of drawing what is held, never a way of holding less of it.
     ///
     /// A note posted before the retention window is refused: the reader chose not to keep it.
+    ///
+    /// **A landing that added and merged nothing says nothing** (#175). A source asked again on a
+    /// wait answers with the same page it answered with a minute ago far more often than not, and
+    /// a revision moved for that page would write the whole store to disk and redraw every screen
+    /// reading it, every minute, for nothing. `refresh`, `keep` and `setRetention` already only
+    /// speak when something really moved; this is the fourth.
     public func ingest(_ incoming: [Note]) {
         guard !incoming.isEmpty else { return }
-        revision += 1
+        var moved = false
         for note in incoming where retention.map({ note.postedAt >= $0 }) ?? true {
             let key = note.key
-            if var existing = notes[key] {
-                existing.categories.formUnion(note.categories)
-                notes[key] = existing
+            if let existing = notes[key] {
+                let categories = existing.categories.union(note.categories)
+                let holding = existing.holding.widened(by: note.holding)
+                guard categories != existing.categories || holding != existing.holding else {
+                    continue
+                }
+                var merged = existing
+                merged.categories = categories
+                merged.holding = holding
+                notes[key] = merged
             } else {
                 notes[key] = note
                 arrival[key] = arrivals
                 arrivals += 1
             }
+            moved = true
         }
+        if moved { changed() }
     }
 
     /// Posts read again (#29), only while `host` is still a source here and only those stamped
@@ -148,18 +212,23 @@ public actor ItemStore {
     /// an edited post shows its new words — keeping the categories it arrived through and its
     /// booster (`Note.refreshed(over:)`). **A post not held is dropped**: reading one post again
     /// updates what is here, and brings in nothing the reader did not already have. Returns
-    /// whether anything was held to replace, so a caller adopts the store only then.
+    /// whether anything held really changed, so a caller adopts the store only then.
     @discardableResult
     public func refresh(_ incoming: [Note], ifSourceHere host: String) -> Bool {
         let host = host.lowercased()
         guard sourceList.contains(where: { $0.host == host }) else { return false }
-        let held = incoming.filter { $0.source.host == host && notes[$0.key] != nil }
-        guard !held.isEmpty else { return false }
-        revision += 1
-        for note in held {
-            notes[note.key] = notes[note.key].map(note.refreshed(over:))
+        var moved = false
+        for note in incoming where note.source.host == host {
+            guard let existing = notes[note.key] else { continue }
+            // The same words read again are not a change (#175): a thread re-read with nothing
+            // edited in it neither writes the store down again nor renews a screen.
+            let refreshed = note.refreshed(over: existing)
+            guard refreshed != existing else { continue }
+            notes[note.key] = refreshed
+            moved = true
         }
-        return true
+        if moved { changed() }
+        return moved
     }
 
     /// Keeps a forum row's opening post as just read, with the row (#154). Only for rows held,
@@ -167,16 +236,16 @@ public actor ItemStore {
     /// not a way back in. Returns whether anything changed, so a caller saves only then.
     @discardableResult
     public func keep(_ openings: [NoteKey: ForumOpening]) -> Bool {
-        var changed = false
+        var moved = false
         for (key, opening) in openings {
             guard let held = notes[key], held.opening != opening,
                   sourceList.contains(where: { $0.host == key.host })
             else { continue }
             notes[key] = held.with(opening: opening)
-            changed = true
+            moved = true
         }
-        if changed { revision += 1 }
-        return changed
+        if moved { changed() }
+        return moved
     }
 
     /// Lets go of one server: the source, the boards the reader picked on it, and the notes it
@@ -196,7 +265,7 @@ public actor ItemStore {
         sourceList.removeAll { $0.host == host }
         notes = notes.filter { $0.key.host != host }
         arrival = arrival.filter { $0.key.host != host }
-        revision += 1
+        changed()
     }
 
     public func sources() -> [Source] {
@@ -215,7 +284,7 @@ public actor ItemStore {
         notes = notes.filter { $0.value.postedAt >= retention }
         if notes.count != before {
             arrival = arrival.filter { notes[$0.key] != nil }
-            revision += 1
+            changed()
         }
         return before - notes.count
     }
@@ -234,9 +303,16 @@ public actor ItemStore {
         return (sourceList, ordered, revision)
     }
 
+    /// Every row a timeline may show, newest first — and **never one held aside** (#175).
+    ///
+    /// This device can hold a post no timeline shows: one found by a search, one read inside a
+    /// thread, one brought under a hashtag. It is here, `note(_:)` hands it over, and a save
+    /// writes it; what it is not is a row All grew by. Everything that feeds All reads this, so
+    /// the distinction is made once and honoured everywhere rather than remembered by each caller.
     public func all() -> [Note] {
         let arrival = self.arrival
-        return notes.values.sorted { Self.storeOrder($0, $1, arrival) }
+        return notes.values.filter { $0.holding == .arrived }
+            .sorted { Self.storeOrder($0, $1, arrival) }
     }
 
     /// Lets go of one row — a post its author took back (#109). Silent where it is not held.
@@ -246,7 +322,7 @@ public actor ItemStore {
     /// sources are theirs to say about.
     public func forget(_ key: NoteKey) {
         guard notes.removeValue(forKey: key) != nil else { return }
-        revision += 1
+        changed()
     }
 
     /// One row, or nothing where this store does not hold it.

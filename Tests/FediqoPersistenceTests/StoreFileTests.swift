@@ -44,6 +44,17 @@ struct StoreFileTests {
         #expect(loaded.notes == [saved])
     }
 
+    @Test("A post held aside is still held aside after a relaunch, and one that arrived still arrived")
+    func holdingSurvivesRelaunch() async throws {
+        let file = try StoreFile(database: DatabaseQueue())
+        var found = note(id: "2")
+        found.holding = .aside
+        try await file.save(sources: [mastodon], notes: [note(id: "1"), found])
+        let loaded = try file.load().notes
+        #expect(loaded.first { $0.id == "1" }?.holding == .arrived)
+        #expect(loaded.first { $0.id == "2" }?.holding == .aside)
+    }
+
     @Test("A loaded note has every row fact and its multimedia hyperlinks")
     func rowFactsWithMultimedia() async throws {
         let file = try StoreFile(database: DatabaseQueue())
