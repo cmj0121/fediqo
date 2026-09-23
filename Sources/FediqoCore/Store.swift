@@ -31,6 +31,10 @@ public actor ItemStore {
     /// note bumps it. A saver that remembers the revision it last wrote skips a save with nothing
     /// new in it. Starts at 0 for any store, a relaunched one included.
     public private(set) var revision = 0
+    /// Counts the changes to what `all()` draws, which is fewer than `revision`'s (#175): a
+    /// source's boards restated, or a post held aside, is a change a save writes and no timeline
+    /// shows. A reader that has adopted `all()` at this count has nothing new to adopt.
+    public private(set) var drawn = 0
     /// Everyone listening for a change. See `changes()`.
     private var listeners: [UUID: AsyncStream<Int>.Continuation] = [:]
 
@@ -64,8 +68,10 @@ public actor ItemStore {
 
     /// Something here changed: the revision moves and everyone listening is told. **The one place
     /// either happens**, so a call that tells a saver it changed cannot forget to tell a screen.
-    private func changed() {
+    /// `shown` says whether it changed what `all()` draws too, and moves `drawn` where it did.
+    private func changed(shown: Bool) {
         revision += 1
+        if shown { drawn += 1 }
         for listener in listeners.values { listener.yield(revision) }
     }
 
@@ -94,7 +100,7 @@ public actor ItemStore {
     public func add(_ source: Source) {
         if sourceList.contains(where: { $0.host == source.host }) { return }
         sourceList.append(source)
-        changed()
+        changed(shown: false)
     }
 
     /// Restates which boards a source is subscribed to, where that source is here.
@@ -116,7 +122,7 @@ public actor ItemStore {
         sourceList[index] = Source(
             host: existing.host, kind: existing.kind, boards: boards, lists: existing.lists
         )
-        changed()
+        changed(shown: false)
     }
 
     /// Restates which Mastodon lists a source reads — a choice, or the same lists relabelled with
@@ -129,7 +135,7 @@ public actor ItemStore {
         sourceList[index] = Source(
             host: existing.host, kind: existing.kind, boards: existing.boards, lists: lists
         )
-        changed()
+        changed(shown: false)
     }
 
     /// Gives the lists a source reads **now** the names in `names`, by id. Only relabels: a list
@@ -144,7 +150,7 @@ public actor ItemStore {
         sourceList[index] = Source(
             host: existing.host, kind: existing.kind, boards: existing.boards, lists: lists
         )
-        changed()
+        changed(shown: false)
     }
 
     /// `ingest(_:)`, only while `host` is still a source here — in the same step, so a source
@@ -185,6 +191,7 @@ public actor ItemStore {
     public func ingest(_ incoming: [Note]) {
         guard !incoming.isEmpty else { return }
         var moved = false
+        var shown = false
         for note in incoming where retention.map({ note.postedAt >= $0 }) ?? true {
             let key = note.key
             if let existing = notes[key] {
@@ -197,14 +204,16 @@ public actor ItemStore {
                 merged.categories = categories
                 merged.holding = holding
                 notes[key] = merged
+                shown = shown || holding == .arrived
             } else {
                 notes[key] = note
                 arrival[key] = arrivals
                 arrivals += 1
+                shown = shown || note.holding == .arrived
             }
             moved = true
         }
-        if moved { changed() }
+        if moved { changed(shown: shown) }
     }
 
     /// Posts read again (#29), only while `host` is still a source here and only those stamped
@@ -218,6 +227,7 @@ public actor ItemStore {
         let host = host.lowercased()
         guard sourceList.contains(where: { $0.host == host }) else { return false }
         var moved = false
+        var shown = false
         for note in incoming where note.source.host == host {
             guard let existing = notes[note.key] else { continue }
             // The same words read again are not a change (#175): a thread re-read with nothing
@@ -226,8 +236,9 @@ public actor ItemStore {
             guard refreshed != existing else { continue }
             notes[note.key] = refreshed
             moved = true
+            shown = shown || refreshed.holding == .arrived
         }
-        if moved { changed() }
+        if moved { changed(shown: shown) }
         return moved
     }
 
@@ -244,7 +255,10 @@ public actor ItemStore {
             notes[key] = held.with(opening: opening)
             moved = true
         }
-        if moved { changed() }
+        // Written down, and not a change to what is drawn: the screen draws an opening from the
+        // forum's own cache as it is read, and replacing every row for each one kept as the reader
+        // scrolls is what #154 set out not to do. The next landing carries it along.
+        if moved { changed(shown: false) }
         return moved
     }
 
@@ -265,7 +279,7 @@ public actor ItemStore {
         sourceList.removeAll { $0.host == host }
         notes = notes.filter { $0.key.host != host }
         arrival = arrival.filter { $0.key.host != host }
-        changed()
+        changed(shown: true)
     }
 
     public func sources() -> [Source] {
@@ -284,7 +298,7 @@ public actor ItemStore {
         notes = notes.filter { $0.value.postedAt >= retention }
         if notes.count != before {
             arrival = arrival.filter { notes[$0.key] != nil }
-            changed()
+            changed(shown: true)
         }
         return before - notes.count
     }
@@ -321,8 +335,8 @@ public actor ItemStore {
     /// this is a server saying one post no longer exists, and the other copies of it through other
     /// sources are theirs to say about.
     public func forget(_ key: NoteKey) {
-        guard notes.removeValue(forKey: key) != nil else { return }
-        changed()
+        guard let gone = notes.removeValue(forKey: key) else { return }
+        changed(shown: gone.holding == .arrived)
     }
 
     /// One row, or nothing where this store does not hold it.

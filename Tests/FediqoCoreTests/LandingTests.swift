@@ -94,6 +94,20 @@ struct LandingTests {
         #expect(await store.note(NoteKey(host: source.host, id: "2"))?.holding == .arrived)
     }
 
+    @Test("A post held aside and read again stays aside; only what is drawn moves the drawn count")
+    func readAgainKeepsItAside() async {
+        let store = ItemStore(sources: [source], notes: [note("1")])
+        await store.hold([note("found")], ifSourceHere: source.host)
+        #expect(await store.drawn == 0, "held aside: written down, drawn nowhere")
+        #expect(await store.refresh([note("found", body: "edited")], ifSourceHere: source.host))
+        #expect(await store.all().map(\.id) == ["1"], "a read again is not an arrival")
+        #expect(await store.note(NoteKey(host: source.host, id: "found"))?.body == "edited")
+        #expect(await store.drawn == 0)
+        #expect(await store.revision == 2, "yet both are there for a save to write")
+        #expect(await store.refresh([note("1", body: "edited")], ifSourceHere: source.host))
+        #expect(await store.drawn == 1)
+    }
+
     @Test("Nothing is held aside for a host that is not a source here")
     func asideNeedsASource() async {
         let store = ItemStore(sources: [source], notes: [])

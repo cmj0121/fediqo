@@ -570,10 +570,10 @@ public struct Note: Identifiable, Hashable, Sendable {
             // A read of the row that says nothing of its opening post — a board listing, which
             // never does — leaves the one this device read where it is (#154).
             opening: opening ?? held.opening,
-            // A row a timeline brought stays a row a timeline brought, however it was read again
-            // (#175): a thread page reads its answers aside, and the row it refreshes on the way
-            // past is not thereby taken out of All.
-            holding: held.holding.widened(by: holding)
+            // Where the row is held does not move on a read again (#175): a post read again is
+            // not a post a timeline brought, so a row held aside stays aside and one in All stays
+            // there. Only `ItemStore.ingest` widens it.
+            holding: held.holding
         )
     }
 
