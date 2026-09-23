@@ -210,8 +210,13 @@
 "search.placeholder" = "搜尋「%@」：* 任意多字，? 一個字";
 "search.label" = "搜尋「%@」顯示的貼文";
 "search.found" = "找到 %d 則";
+"search.asking" = "正在搜尋 %@…";
+"search.failed" = "無法搜尋 %@。";
+"search.scope" = "無法搜尋 %@：請重新登入，讓 Fediqo 能在那裡搜尋。";
+"search.reach.asked" = "也問了 %@。";
+"search.reach.notAsked" = "沒有問，因為從這裡無法搜尋：%@。";
 "search.empty.title" = "「%@」裡沒有相符的貼文";
-"search.empty.detail" = "只會搜尋這個時間軸會顯示、已經在這台裝置上的貼文。試著少打幾個字，或用 * 代表任意多字。";
+"search.empty.detail" = "只會搜尋這個時間軸會顯示的貼文：這台裝置上有的，以及問過的來源送回來的。試著少打幾個字，或用 * 代表任意多字。";
 "search.indexing.title" = "搜尋中…";
 "search.indexing.detail" = "正在讀一次這台裝置上的貼文，之後每打一個字只需比對。";
 
@@ -331,6 +336,7 @@
 "work.purpose.signIn" = "登入中";
 "work.purpose.signOut" = "登出中";
 "work.purpose.write" = "送出你寫的或按下的內容";
+"work.purpose.search" = "搜尋一個來源";
 "about.title" = "這個 Fediqo";
 "about.version" = "版本";
 "about.build" = "組建";
