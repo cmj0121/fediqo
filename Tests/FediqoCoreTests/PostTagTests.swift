@@ -160,11 +160,16 @@ struct PostTagTests {
         #expect(PostTag("#台灣") != nil)
         #expect(PostTag("#ക്ഷ") != nil)
         #expect(PostTag("#a\u{200D}b") != nil)
+        // A Persian word with the zero-width non-joiner inside it is one tag, not `#م`.
+        let persian = "#\u{0645}\u{06CC}\u{200C}\u{062E}\u{0648}\u{0627}\u{0647}\u{0645}"
+        #expect(PostTag(persian) != nil)
+        #expect(Self.tags("say \(persian) now") == [persian])
     }
 
     @Test("A tag's timeline is the name as one segment, and nothing else")
     func oneSegment() throws {
-        for text in ["#swift", "#台灣", "#café", "#snake_case", "#2024"] {
+        let persian = "#\u{0645}\u{06CC}\u{200C}\u{062E}\u{0648}\u{0627}\u{0647}\u{0645}"
+        for text in ["#swift", "#台灣", "#café", "#snake_case", "#2024", persian] {
             let tag = try #require(PostTag(text))
             let path = try MastodonTag.path(under: tag, host: "one.example")
             #expect(path == "/api/v1/timelines/tag/" + tag.name)

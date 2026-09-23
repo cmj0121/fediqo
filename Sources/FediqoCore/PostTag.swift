@@ -107,7 +107,9 @@ public extension PostTag {
     /// first scalar is alphabetic and whose second is a bare `/`. Judged by its first scalar, `#ൎ/x`
     /// was a tag, and its name — sent as a path segment to a server, with the reader's token —
     /// carried a slash into the path. Each scalar is now a letter, a digit, a mark, the zero-width
-    /// joiner an emoji-style sequence is built with, or a variation selector.
+    /// joiner an emoji-style sequence is built with, the zero-width non-joiner Persian and Kurdish
+    /// words carry inside them (`#می‌خواهم`, as Mastodon's own tag pattern allows), or a
+    /// variation selector.
     private static func isTagCharacter(_ character: Character) -> Bool {
         character == "_" || character.unicodeScalars.allSatisfy(isTagScalar)
     }
@@ -119,6 +121,6 @@ public extension PostTag {
         default: break
         }
         return properties.isAlphabetic || properties.numericType != nil
-            || scalar == "\u{200D}" || properties.isVariationSelector
+            || scalar == "\u{200D}" || scalar == "\u{200C}" || properties.isVariationSelector
     }
 }
