@@ -708,7 +708,13 @@ final class ForumPosts {
         }
         // A topic the forum said had no replies is one page with nothing on it.
         let before = paging[key] ?? Paging(last: 1, next: 1, further: .end)
-        paging[key] = Paging(last: before.last, next: before.next, further: .coming)
+        // Its foot says it is on its way — under replies, every wait; under nobody, only where the
+        // last ask did not arrive and this is it asked again, as a lone post's is. A topic nobody
+        // answered does not say "on its way" once a minute.
+        let retry = if case .failed = before.further { true } else { false }
+        if entries[key]?.posts.isEmpty == false || retry {
+            paging[key] = Paging(last: before.last, next: before.next, further: .coming)
+        }
         let task = Task { @MainActor in await self.page(before.last, of: key, was: before) }
         renewWork[key] = task
         await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }

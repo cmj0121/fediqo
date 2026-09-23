@@ -535,7 +535,7 @@ struct ThreadRenewsTests {
         #expect(Self.bodies(session, item) == ["answer 10", "answer 11", "answer 16"], "and what it read lands")
     }
 
-    @Test("Asked again after a failed renewal, a lone post's foot and a no-reply topic's say it is on its way")
+    @Test("A lone post and a topic nobody answered say they are on their way only when asked again after a failure")
     func aLoneRenewalShowsProgress() async {
         let alone = Changing([Self.threadPath: Self.context([])])
         let (session, item) = await conversationShell(alone)
@@ -557,14 +557,30 @@ struct ThreadRenewsTests {
         let (forum, topic) = await forumShell(http)
         await forum.reload.opened(topic, in: forum)
         #expect(forum.posts.further(of: Self.ref) == nil)
+
+        // A plain wait: asked, and no foot says so — nothing flickers under the notice.
         await http.hold(Self.page(1))
         let renewing = Task { await forum.reload.renew(in: forum) }
-        #expect(await spun { await http.parked })
-        #expect(forum.posts.further(of: Self.ref) == .coming)
+        #expect(await spun { await Self.pageAsks(http) == 2 })
+        #expect(forum.posts.further(of: Self.ref).map(ThreadFoot.underNobody) != true)
         await http.release()
         await renewing.value
         #expect(forum.posts.further(of: Self.ref) == .end)
         #expect(!ThreadFoot.underNobody(forum.posts.further(of: Self.ref)!), "its end is the notice already drawn")
+
+        // A wait that failed, then asked again: its foot says it is on its way.
+        await http.answer(Self.page(1), with: .fail)
+        await oneWait(forum)
+        #expect(forum.posts.further(of: Self.ref) == .failed(.unreachable))
+        await http.answer(Self.page(1), with: .text(Self.post(1, floor: 1)))
+        await http.hold(Self.page(1))
+        let retrying = Task { await forum.reload.renew(in: forum) }
+        #expect(await spun { await Self.pageAsks(http) == 4 })
+        #expect(forum.posts.further(of: Self.ref) == .coming)
+        #expect(ThreadFoot.underNobody(forum.posts.further(of: Self.ref)!))
+        await http.release()
+        await retrying.value
+        #expect(forum.posts.further(of: Self.ref) == .end)
     }
 }
 
