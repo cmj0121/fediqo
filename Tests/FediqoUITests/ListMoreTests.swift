@@ -224,6 +224,33 @@ struct ListMoreTests {
         #expect(await gated.asks == before + 1, "page two asked again, not page three")
     }
 
+    @Test("r ends an ask for more still out, and what it had not landed does not land")
+    func rEndsMore() async {
+        let gated = GatedHTTP([
+            Self.older(than: "5"): Self.page(),
+            Self.board(page: 2): Self.board((40100, "二")),
+            Self.newest(): Self.page(),
+            Self.trends: Self.page(),
+            Self.boardFirst: Self.board((40125, "工具箱一键下载安装")),
+            MastodonInstance.address(Self.one): MastodonInstance.mastodon(Self.one),
+        ], holding: Self.board(page: 2))
+        let guardTask = hangGuard(gated.gate)
+        defer { guardTask.cancel() }
+        let session = await shell(gated)
+        let more = Task { await session.reload.more(.all, in: session) }
+        #expect(await spun { await gated.asks == 1 })
+        let reload = Task { await session.reload.timeline(.all, in: session) }
+        #expect(await spun { session.reload.asking.contains(.timeline) })
+        #expect(!session.reload.asking.contains(.more), "ended as r started, before r read the forum")
+        await more.value
+        await reload.value
+        await gated.gate.open()
+        #expect(await spun { await gated.requested().contains(Self.board(page: 2)) })
+        for _ in 0..<50 { await Task.yield() }
+        #expect(!ids(session).contains("discuz:\(Self.forum):40100"))
+        #expect(!session.reload.stopped, "nobody stopped anything")
+    }
+
     @Test("A host the ask for more missed is not still named once r reads it whole")
     func answeredClears() async {
         let http = FixtureHTTP([

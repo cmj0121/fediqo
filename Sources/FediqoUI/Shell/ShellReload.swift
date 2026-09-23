@@ -483,14 +483,14 @@ final class ShellReload {
         }
     }
 
-    /// What the last reload of `ask` said, let go of — as it starts again, and as the thread it
-    /// was about is closed, so a line about a thread nobody is reading does not stand under the
-    /// timeline.
     /// What `ask` could not read, as it ends.
     func record(_ hosts: [String], for ask: Ask) {
         failures[ask] = hosts
     }
 
+    /// What the last reload of `ask` said, let go of — as it starts again, and as the thread it
+    /// was about is closed, so a line about a thread nobody is reading does not stand under the
+    /// timeline.
     func forget(_ ask: Ask) {
         failures[ask] = nil
         halted.remove(ask)
@@ -536,6 +536,9 @@ final class ShellReload {
             // page read again moves every page under it along by what it brought (#87).
             forget(.more)
             stretches.restart()
+            // An ask for more still out ends here, so `r` and it never read one forum at once;
+            // what it had not landed does not land, and the next scroll asks again.
+            end(.more)
         }
         await withCheckedContinuation { continuation in
             let work = Task { @MainActor in
