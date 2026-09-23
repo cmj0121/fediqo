@@ -67,6 +67,24 @@ struct TagPressTests {
         #expect(session.heldPosts(under: PostTag("#nothing")!).isEmpty)
     }
 
+    @Test("A forum reply kept for its thread is not on a tag's page; a microblog answer held aside is")
+    func keptForumReplyIsNotUnderTheTag() async {
+        let session = await shell(FixtureHTTP([:]))
+        let reply = Note(
+            id: "discuz:\(Self.forum):40125:post:9101", source: Source(host: Self.forum, kind: .discuz),
+            author: "tinbox", handle: "tinbox", body: "a reply about #swift",
+            postedAt: Date(timeIntervalSince1970: 50), categories: []
+        )
+        #expect(DiscuzPost(held: reply) != nil, "the premise: a reply kept for its thread")
+        await session.store.hold([reply], ifSourceHere: Self.forum)
+        await session.store.hold([Self.note("8", "an answer, #swift", categories: [])], ifSourceHere: Self.one)
+        await session.reloadFromStore()
+        #expect(await session.store.note(reply.key) != nil, "held on this device")
+        let ids = session.heldPosts(under: Self.swift).map(\.id)
+        #expect(!ids.contains(reply.key.rowID), "a row that opens nowhere is not drawn as one")
+        #expect(ids.contains(Self.note("8", "").key.rowID))
+    }
+
     @Test("A press asks the Mastodon of the timeline in front; what it sends is held aside, and the page renews")
     func asksAndRenews() async throws {
         let http = FixtureHTTP([Self.tagAddress: Self.underTag])
