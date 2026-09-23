@@ -92,6 +92,7 @@ struct TimelinePane: View {
     private var banner: TimelineToast? {
         TimelineToast.shown(
             running: session.reload.running,
+            waiting: session.reload.onlyWaiting,
             line: session.reload.line,
             stopped: session.reload.stopped,
             note: toast
