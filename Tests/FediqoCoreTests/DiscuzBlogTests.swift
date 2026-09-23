@@ -97,11 +97,15 @@ struct DiscuzBlogTests {
         #expect(blog.avatarURL?.absoluteString == "https://discuz.localhost/data/avatar/000/00/00/01_avatar_small.jpg")
     }
 
-    @Test("A real install's refusals — sign in, no such blog, blogs switched off — are refused")
+    @Test("A real install's refusals — sign in, no such blog, blogs switched off — are refused, each as itself")
     func realRefusals() async {
-        for page in [DiscuzBlogCaptures.signInNotice, DiscuzBlogCaptures.missing, DiscuzBlogCaptures.switchedOff] {
+        for (page, refusal) in [
+            (DiscuzBlogCaptures.signInNotice, DiscuzRefusal.signIn),
+            (DiscuzBlogCaptures.missing, .gone),
+            (DiscuzBlogCaptures.switchedOff, .blogsOff),
+        ] {
             let client = DiscuzClient(http: FixtureHTTP([Self.address: .text(page)]), host: Self.host)
-            await #expect(throws: DiscuzRequestError.restricted) { try await client.blog(uid: 21, id: 500) }
+            await #expect(throws: DiscuzRequestError.refusal(refusal)) { try await client.blog(uid: 21, id: 500) }
             #expect(DiscuzBlogPage.blog(in: page, id: 500, uid: 21, host: Self.host) == nil)
         }
     }

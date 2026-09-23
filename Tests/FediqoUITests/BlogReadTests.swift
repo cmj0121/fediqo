@@ -206,7 +206,7 @@ struct BlogReadTests {
         for language in DummyLanguage.allCases {
             for key in [
                 "blog.title", "blog.reading", "blog.refused", "blog.unreadable", "blog.unreachable",
-                "blog.again", "blog.page", "blog.page.hint",
+                "blog.page",
             ] {
                 let text = L10n.t(key, language: language)
                 #expect(!text.isEmpty && text != key, "\(key) \(language)")

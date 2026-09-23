@@ -116,8 +116,13 @@ public struct DiscuzClient: Sendable {
         guard uid > 0, id > 0, let url = DiscuzRankedBlog.address(host: host, uid: uid, id: id) else {
             throw DiscuzRequestError.invalidURL
         }
-        let html = try await page(url, judged: DiscuzBlogPage.withoutWords)
+        let html = try await page(url, judged: DiscuzBlogPage.withoutWords, classifying: true)
         guard let blog = DiscuzBlogPage.blog(in: html, id: id, uid: uid, host: host) else {
+            // Two refusals are pages of their own rather than notices (#213): the author's
+            // password form, and the privacy page a friends-only or author-only blog answers with.
+            if let refusal = DiscuzRefusalReader.blog(in: html, uid: uid) {
+                throw DiscuzRequestError.refusal(refusal)
+            }
             throw DiscuzRequestError.noPosts
         }
         return blog
@@ -302,10 +307,17 @@ public struct DiscuzClient: Sendable {
     /// order is the fallback rather than the rule because one of the four measured templates —
     /// the third-party one on `install-a.example` — numbers every reply and leaves the opening post
     /// unnumbered.
+    ///
+    /// **A thread its author sells is refused, and says its price** (#213): the opening post comes
+    /// back locked, and the lock holds a way to pay for this thread. What the forum asked is said;
+    /// nothing here pays. A post locked for any other reason is withheld, as it always was.
     public func post(tid: Int) async throws -> DiscuzPost {
-        let posts = try await self.posts(tid: tid)
+        let (posts, html) = try await self.posts(tid: tid, page: 1)
         guard let opening = posts.first(where: { $0.floor == 1 }) ?? posts.first else {
             throw DiscuzRequestError.noPosts
+        }
+        if opening.isWithheld, let price = DiscuzRefusalReader.price(in: html, tid: tid) {
+            throw DiscuzRequestError.refusal(price)
         }
         return opening
     }
@@ -380,12 +392,9 @@ public struct DiscuzClient: Sendable {
     /// answer on `install-b.example` and `install-d.example`, which is exactly what makes it unusable —
     /// a source that is there on some installs and absent on others cannot be the one that is
     /// asked first without asking twice everywhere it is missing.
-    private func posts(tid: Int) async throws -> [DiscuzPost] {
-        try await posts(tid: tid, page: 1).posts
-    }
-
-    /// `posts(tid:)` for one page of the thread, and the page it was read off. The first page's
-    /// address is the one it always was, with no `page` in it, so nothing already asked moves.
+    ///
+    /// One page of the thread, and the page it was read off. The first page's address is the one
+    /// it always was, with no `page` in it, so nothing already asked moves.
     private func posts(tid: Int, page number: Int) async throws -> (posts: [DiscuzPost], html: String) {
         var query = [
             URLQueryItem(name: "mod", value: "viewthread"),
@@ -396,7 +405,7 @@ public struct DiscuzClient: Sendable {
         guard tid > 0, let url = Host.httpsURL(host: host, path: "/forum.php", query: query) else {
             throw DiscuzRequestError.invalidURL
         }
-        let html = try await page(url)
+        let html = try await page(url, classifying: true)
         let posts = DiscuzThreadPage.posts(in: html, tid: tid, host: host)
         // The rule `read` states for an empty thread table, one page down and for the same
         // reason: a parser that meets markup it cannot read and answers `[]` gives the reader a
@@ -432,8 +441,14 @@ public struct DiscuzClient: Sendable {
     /// `judged` is what of the page the two markers are looked for in — all of it, except where a
     /// caller knows part of it is somebody's own words (#209): a blog that quotes a challenge page
     /// or writes `id="messagetext"` is still a blog.
+    ///
+    /// `classifying` is a reader of one blog or one thread asking **which** refusal a notice is
+    /// (#213): Discuz!'s notice on either template — the touch one writes `div.jump_c`, not
+    /// `messagetext` — is read before the status, since a deleted thread is a 404 that says so,
+    /// and a redirect to sign in is `refusal(.signIn)`. A notice whose words this does not know
+    /// is `restricted`, as every notice was. The index, a board and a join ask nothing of it.
     private func page(
-        _ url: URL, judged: (String) -> String = { $0 }
+        _ url: URL, judged: (String) -> String = { $0 }, classifying: Bool = false
     ) async throws -> String {
         let (data, response) = try await http.data(from: url)
         guard let html = DiscuzHTML.text(data, response) else {
@@ -441,6 +456,16 @@ public struct DiscuzClient: Sendable {
         }
         let judging = judged(html)
         if DiscuzPage.isChallenge(judging) { throw DiscuzRequestError.challenged }
+        if classifying {
+            if DiscuzPage.isSignInPage(response.url) { throw DiscuzRequestError.refusal(.signIn) }
+            if DiscuzRefusalReader.isNotice(judging) {
+                if let refusal = DiscuzRefusalReader.refusal(inNotice: judging) {
+                    throw DiscuzRequestError.refusal(refusal)
+                }
+                try Self.check(response.statusCode)
+                throw DiscuzRequestError.restricted
+            }
+        }
         try Self.check(response.statusCode)
         if DiscuzPage.isRestricted(judging) { throw DiscuzRequestError.restricted }
         // **Asked for a thread, handed the sign-in page.** Measured on `install-a.example`: a thread
@@ -531,6 +556,9 @@ public enum DiscuzRequestError: Error, Equatable, Sendable {
     /// The server answered with a status that says no, in the way a filter says it. See `check`.
     case refused(Int)
     case http(Int)
+    /// The forum's notice, or a page of its own, saying **why** this one blog or thread is not
+    /// shown (#213) — only where a reader of one blog or thread asked which. See `DiscuzRefusal`.
+    case refusal(DiscuzRefusal)
     /// It answered, it decoded, it was not a challenge and not a notice, and there was no thread
     /// in it. See the guard in `read`.
     case noThreads

@@ -371,4 +371,10 @@ public enum DiscuzBlogRow {
         else { return nil }
         return (uid, id)
     }
+
+    /// The page a blog's row stands for, built as `DiscuzClient.blog` builds it — where the
+    /// author's password is typed (#213).
+    public static func page(host: String, uid: Int, id: Int) -> URL? {
+        DiscuzRankedBlog.address(host: host, uid: uid, id: id)
+    }
 }

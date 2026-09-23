@@ -391,6 +391,25 @@ public final class ForumSessions {
         return ForumJoinTransport(transport(host: host))
     }
 
+    /// Types a blog's password into that forum, through the browser that holds its sign-in —
+    /// **only where there is one** (#213). A forum read without one never sees a password here:
+    /// what a signed-out reader is offered is signing in.
+    func sendBlogPassword(_ password: String, host: String, page: URL) async throws {
+        guard readsThroughEngine(host: host) else { throw ForumBlogs.NotSignedIn() }
+        try await engine(host: host).sendBlogPassword(password, on: page)
+    }
+
+    /// Lets go of what a right password left in this forum's jar — the session cookie that
+    /// opens that one blog, holding a hash of the password. Nothing else is touched.
+    func forgetBlogPassword(host: String, blog id: Int) async {
+        let jar = dataStore.httpCookieStore
+        for cookie in await jar.allCookies()
+        where DiscuzBlogPasswordScript.isUnlock(cookie: cookie.name, blog: id)
+            && ForumWebEngine.holds(cookie.domain, for: host) {
+            await jar.deleteCookie(cookie)
+        }
+    }
+
     // MARK: - Signing in
 
     /// Signs in from the saved credential, or says why the reader has to.

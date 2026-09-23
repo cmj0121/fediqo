@@ -244,9 +244,23 @@ final class ForumPosts {
         /// posts and a screen wants at most a dozen, so if a reader ever sees it, something has
         /// asked for far more at once than a screen can show.
         case crowded
+        /// The forum said **why** (#213): a sign-in, a password, its author's privacy, gone, blogs
+        /// switched off, or standing, points or a price it asked for. Each is said in its own way
+        /// and offers only what could help — `ForumRefusalView`.
+        case refusal(DiscuzRefusal)
 
         /// Whether asking again could ever change the answer by itself.
         var asksAgain: Bool { self == .unreachable }
+
+        /// Whether a sign-in landing on the forum could change this answer — what is forgotten
+        /// and asked again when one does (#153).
+        var signInMayChange: Bool {
+            switch self {
+            case .refused, .unreadable: true
+            case .refusal(let refusal): refusal.signInMayChange
+            case .unreachable, .crowded: false
+            }
+        }
     }
 
     /// How much post text is held, in bytes.
@@ -1008,6 +1022,8 @@ final class ForumPosts {
         switch discuz {
         case .challenged, .restricted, .refused, .http, .invalidURL:
             return .refused
+        case .refusal(let refusal):
+            return .refusal(refusal)
         case .undecodable, .noThreads, .noBoards, .noPosts:
             return .unreadable
         }
@@ -1227,8 +1243,7 @@ final class ForumPosts {
             dropEntry(key)
             dropped = true
         }
-        for (key, absence) in missing where key.host == host
-            && (absence == .refused || absence == .unreadable) {
+        for (key, absence) in missing where key.host == host && absence.signInMayChange {
             missing.removeValue(forKey: key)
             dropped = true
         }
@@ -1240,7 +1255,7 @@ final class ForumPosts {
     private static func isGuestShaped(_ answer: Result<[DiscuzPost], Absence>) -> Bool {
         switch answer {
         case .success(let posts): posts.contains(where: \.isWithheld)
-        case .failure(let absence): absence == .refused || absence == .unreadable
+        case .failure(let absence): absence.signInMayChange
         }
     }
 
@@ -1529,7 +1544,7 @@ struct ForumPostBand: View {
                 // and it is told apart from the waiting state by the plates above.
                 Color.clear.frame(height: 0)
             case .absent(let absence):
-                said("exclamationmark.triangle", Self.sentence(for: absence))
+                said(ForumRefusalView.glyph(for: absence), Self.sentence(for: absence))
             case .unread:
                 said("hand.raised", L10n.t("item.forum.unread"))
             }
@@ -1611,6 +1626,7 @@ struct ForumPostBand: View {
         case .unreadable: L10n.t("item.forum.unreadable")
         case .unreachable: L10n.t("item.forum.unreachable")
         case .crowded: L10n.t("item.forum.crowded")
+        case .refusal(let refusal): ForumRefusalView.sentence(for: refusal)
         }
     }
 

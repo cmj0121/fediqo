@@ -261,7 +261,7 @@ public struct DiscuzJoin: Sendable {
         // and `JoinError.refused` is the one case that says the host is fine, the spelling is
         // fine, and somebody said no on purpose — which is true of both. 403 is the number
         // that refusal means, and it is what the reader's message is written from.
-        case .challenged, .restricted:
+        case .challenged, .restricted, .refusal:
             return JoinError.refused(403)
         // **A forum with no board this reader may see is a refusal too.** `install-e.example`
         // serves a signed-out reader a complete, unchallenged, entirely ordinary index page
@@ -789,7 +789,7 @@ public struct SourceJoin: Sendable {
             // server they have not joined, and a case swept into somebody else's sentence here is
             // a policy invented for a forum that never stated one.
             switch error {
-            case .restricted, .noBoards:
+            case .restricted, .refusal, .noBoards:
                 return (stated(false), [])
             // 403 because a challenge page is routinely dressed as a 200, and 403 is the number
             // refusal means in this app — `SourceJoin.kind(of:)` states the same rule.
