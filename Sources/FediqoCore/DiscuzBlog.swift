@@ -51,13 +51,15 @@ public struct DiscuzBlog: Hashable, Sendable {
 /// A Discuz! blog page, read as structure — `DiscuzThreadPage`'s rule applied to the page a blog
 /// lives on: `home.php?mod=space&uid=…&do=blog&id=…`.
 ///
-/// **What X3.x's own template writes, and what this reads of it.**
+/// **What the page writes, and what this reads of it** — measured on a real X5.0.2 install, the
+/// local one in `servers/`:
 ///
 /// ```text
-///   div#pt       breadcrumb: … › <a …mod=space&uid=N>author</a> › <a …do=blog…>日誌</a> › …
-///   div.vw       h1.ph(title)  p.xg2(span.xg1(date) …)
+///   div#pt       breadcrumb: … › <a …mod=space&uid=N>author</a> › <a …do=blog…>日志</a>
+///   div#uhd      div.avt(<a …mod=space&uid=N><img data-src=avatar></a>)  h2.mt(author)
+///   div.vw       h1.ph(title)  p.xg2(span.xg1(read count) span.xg1(date))
 ///                div#blog_article(the words)
-///   div#pcd      <a …mod=space&uid=N class="avtm"><img avatar></a>  h2(<a …uid=N>author</a>)
+///                div#click_div(buttons)  …  comments
 /// ```
 ///
 /// **Anchored on an id, a tag and a number, never on a label** — `DiscuzRanklist`'s rule. The
@@ -67,12 +69,19 @@ public struct DiscuzBlog: Hashable, Sendable {
 /// person's space with a name on it — so a reader's own name in the page's header, a visitor in
 /// the sidebar or a commenter under the words cannot be taken for them.
 ///
-/// **Measured on no install.** The ranking list's markup was measured on `install-g.example`;
-/// this page's is Discuz! X3.x's shipped template (`home/space_blog_view`), and no capture of a
-/// live blog page stood behind it. So nothing here is more than the template promises, and every
-/// part but the words is optional: a page whose heading, date or author this does not find still
-/// reads, with the row's own title, author and date in their place. A page with no
-/// `blog_article` is not a blog this device can read, and says so.
+/// The date line leads with the read count, so the date is the first one *in* it rather than its
+/// first words; the avatar is lazy-loaded into `data-src`, which `DiscuzPostLayout.address` reads
+/// first, and an author with none is the template's `noavatar`, which is no picture. Discuz!'s
+/// own notice answers every refusal measured — a blog only its author may read, one behind a
+/// password and a number with no blog, each to a signed-out reader, and a forum with blogs
+/// switched off, which is how X5.0 installs — so `DiscuzClient.page` refuses them all.
+///
+/// **Measured on X5.0 and not on the reader's X3.2.** The ranking list was measured on
+/// `install-g.example`; its blog pages were not, and X3.2's template is the same
+/// `home/space_blog_view` lineage. So every part but the words is optional: a page whose
+/// heading, date or author this does not find still reads, with the row's own title, author and
+/// date in their place. A page with no `blog_article` is not a blog this device can read, and
+/// says so.
 enum DiscuzBlogPage {
     static func blog(in html: String, id: Int, uid: Int, host: String) -> DiscuzBlog? {
         guard let patterns = Patterns.shared, let post = DiscuzThreadPage.Patterns.shared,
