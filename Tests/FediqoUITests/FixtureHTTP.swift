@@ -139,6 +139,11 @@ actor GatedHTTP: HTTPClient {
     /// cannot ask `paths`. It has to ask here, in front of the gate.
     private(set) var asks = 0
 
+    /// Every address that got past the gate, whole.
+    func requested() async -> [String] {
+        await inner.requested.map(\.absoluteString)
+    }
+
     /// Matched on the path as well as the whole address, because a Mastodon's timeline carries a
     /// query a test has no business knowing the value of.
     func data(from url: URL) async throws -> (Data, HTTPURLResponse) {

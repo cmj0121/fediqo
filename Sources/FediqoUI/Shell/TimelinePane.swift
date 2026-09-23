@@ -342,6 +342,17 @@ struct TimelinePane: View {
         await store.settle(host: host)
     }
 
+    /// Whether the row at `index` of `count`, coming into view, asks the timeline in front for its
+    /// next stretch (#87): one of the last `moreAhead`, so the next stretch is on its way before
+    /// the reader reaches the end rather than after. **Never a search's**: a search shows what this
+    /// device holds, and the end of its results is not the end of any source's timeline.
+    static func asksForMore(at index: Int, of count: Int, searching: Bool) -> Bool {
+        !searching && index >= count - moreAhead
+    }
+
+    /// How many rows from the end reading starts asking for more.
+    static let moreAhead = 5
+
     /// Where a list drawn afresh puts the reader (#110).
     enum Landing: Equatable, Sendable {
         /// The lamp's row, in the middle — what coming back from a thread has always done.
@@ -422,6 +433,12 @@ struct TimelinePane: View {
                             onToast: showToast
                         )
                         .id(item.id)
+                        // Reading toward the end asks for the next stretch (#87): a lazy row
+                        // appears as it is scrolled or walked to, and nothing else asks.
+                        .modifier(AsksForMore(
+                            asks: Self.asksForMore(at: index, of: items.count, searching: searching),
+                            timeline: timeline, session: session
+                        ))
                         if !isLast {
                             Rectangle()
                                 .fill(ShellChrome.hairline(colorScheme))
