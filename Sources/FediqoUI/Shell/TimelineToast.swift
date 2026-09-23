@@ -27,13 +27,18 @@ struct TimelineToast: Equatable, Sendable {
     /// What the toast says, one at a time. Running first; a live note replaces a
     /// leftover line; otherwise the reload line. A stack would be four facts for
     /// one capsule.
+    ///
+    /// `waiting` is a run nobody pressed for — the wait's alone (#95). A note the reader
+    /// has just caused says its two seconds over it: the wait comes round every minute,
+    /// and would otherwise swallow every note that happened to land while it ran.
     static func shown(
         running: Bool,
+        waiting: Bool = false,
         line: String?,
         stopped: Bool,
         note: String?
     ) -> TimelineToast? {
-        if running {
+        if running, !(waiting && note != nil) {
             return TimelineToast(
                 kind: .loading,
                 text: line ?? L10n.t("timeline.reload.progress")
