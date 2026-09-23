@@ -8,7 +8,7 @@ import Testing
 /// X5.0 in `servers/`. `page` below is written by hand in the X3.x template's shape, as a
 /// signed-in reader on a busy forum is served it — the reader's own name in the header, a
 /// visitor's and a commenter's around the words — which a fresh local install has none of, so
-/// that none of them can be taken for the author.
+/// that none of their faces can be taken for the author's.
 @Suite("A forum's blog, read")
 struct DiscuzBlogTests {
     private static let host = "install-g.example"
@@ -74,13 +74,11 @@ struct DiscuzBlogTests {
 
     // MARK: - A real install's page
 
-    @Test("A real X5.0 blog page gives its title, author, date and words")
+    @Test("A real X5.0 blog page gives its date and words")
     func readsARealPage() throws {
         let blog = try #require(DiscuzBlogPage.blog(
             in: DiscuzBlogCaptures.blog, id: 1, uid: 1, host: "discuz.localhost"
         ))
-        #expect(blog.title == "A blog & more")
-        #expect(blog.author == "admin", "the breadcrumb's link to the author's own space")
         // The date comes after the read count on the same line, in the forum's own time zone.
         #expect(blog.postedAt == Self.date(2026, 9, 11, 5, 30))
         #expect(blog.body == "First line.\n\nSecond line.")
@@ -110,12 +108,10 @@ struct DiscuzBlogTests {
 
     // MARK: - The page, as X3.x's template promises it
 
-    @Test("A blog's page gives its title, its author, when it was written and its words")
+    @Test("A blog's page gives when it was written, its words and its author's picture")
     func readsTheBlog() throws {
         let blog = try #require(DiscuzBlogPage.blog(in: Self.page, id: 500, uid: 21, host: Self.host))
         #expect(blog.id == 500 && blog.uid == 21)
-        #expect(blog.title == "一篇日誌 & 其他")
-        #expect(blog.author == "某人", "the author by number — not the reader, a visitor or a commenter")
         #expect(blog.postedAt == Self.date(2026, 9, 10, 21, 30))
         // The words, and nobody else's: the quotation kept apart, the picture leaving nothing.
         #expect(blog.body.contains("第一行字。"))
@@ -125,6 +121,7 @@ struct DiscuzBlogTests {
         #expect(!blog.body.contains("說得好"), "a comment is under the words, not in them")
         #expect(!blog.body.contains("收藏"))
         #expect(blog.quoted == [DiscuzQuotation(words: "別人說過的話。")])
+        // The author's card, not a commenter's or a visitor's face.
         #expect(blog.avatarURL?.absoluteString == "https://install-g.example/uc_server/avatar.php?uid=21&size=middle")
         // What is kept with its row, as a thread's opening post is.
         #expect(blog.opening == ForumOpening(
@@ -142,12 +139,41 @@ struct DiscuzBlogTests {
         #expect(blog.postedAt == Self.date(2026, 9, 22, 9, 5))
     }
 
-    @Test("Only the words are required: a page with no heading or author still reads")
+    @Test("Only the words are required: a page with no date or picture still reads")
     func onlyTheWordsAreRequired() throws {
         let page = #"<html><body><div id="blog_article" class="d cl">只有字。</div></body></html>"#
         let blog = try #require(DiscuzBlogPage.blog(in: page, id: 500, uid: 21, host: Self.host))
         #expect(blog.body == "只有字。")
-        #expect(blog.title.isEmpty && blog.author.isEmpty && blog.postedAt == nil && blog.avatarURL == nil)
+        #expect(blog.postedAt == nil && blog.avatarURL == nil)
+    }
+
+    @Test("A face is never taken from under the words, even the author's own in a comment")
+    func noFaceFromTheComments() throws {
+        // No author card: the only picture linked to the author's space is in a comment they
+        // left under their own blog, and one in the words themselves.
+        let page = Self.page
+            .replacingOccurrences(of: #"<div id="pcd""#, with: #"<div id="elsewhere""#)
+            .replacingOccurrences(
+                of: #"<dl class="bbda cl"><dd class="m avt"><a href="home.php?mod=space&amp;uid=33">"#,
+                with: #"<dl class="bbda cl"><dd class="m avt"><a href="home.php?mod=space&amp;uid=21">"#
+            )
+            .replacingOccurrences(
+                of: "第一行字。<br />",
+                with: #"第一行字。<a href="home.php?mod=space&amp;uid=21"><img src="data/attachment/me.jpg" /></a><br />"#
+            )
+        let blog = try #require(DiscuzBlogPage.blog(in: page, id: 500, uid: 21, host: Self.host))
+        #expect(blog.avatarURL == nil)
+    }
+
+    @Test("A blog whose words look like a refusal is still read")
+    func wordsThatLookLikeARefusal() async throws {
+        let page = Self.page.replacingOccurrences(
+            of: "第一行字。<br />",
+            with: #"第一行字：Just a moment… <code>&lt;div id="messagetext"&gt;</code> <span id="messagetext">x</span><br />"#
+        )
+        let http = FixtureHTTP([Self.address: .text(page)])
+        let blog = try await DiscuzClient(http: http, host: Self.host).blog(uid: 21, id: 500)
+        #expect(blog.body.contains("Just a moment"))
     }
 
     @Test("A page with no blog on it is no blog")
@@ -163,7 +189,7 @@ struct DiscuzBlogTests {
         let http = FixtureHTTP([Self.address: .text(Self.page)])
         let blog = try await DiscuzClient(http: http, host: Self.host).blog(uid: 21, id: 500)
         #expect(await http.requested.map(\.absoluteString) == [Self.address])
-        #expect(blog.author == "某人")
+        #expect(blog.body.contains("第一行字。"))
     }
 
     @Test("A blog the forum refuses is refused as a thread is, and one it cannot show is unreadable")

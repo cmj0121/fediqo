@@ -2,23 +2,21 @@ import Foundation
 
 // MARK: - A ranked blog, read off its own page — #209
 
-/// One blog (日誌) as its own page carries it: who wrote it, when, what it is called, and **their
-/// words and nobody else's** — `DiscuzPost.body`'s rule, read by the same hands.
+/// One blog (日誌) as its own page carries it: when it was written, the author's picture, and
+/// **their words and nobody else's** — `DiscuzPost.body`'s rule, read by the same hands.
 ///
 /// A blog is one post by one person, so it is read as a topic's opening post is: its words are
 /// taken out of their container with the forum's furniture removed (`DiscuzPostLayout.words`), a
-/// picture leaves nothing behind in them, and what it quoted is kept apart. What the ranking list
-/// already said of it — its title, author and date — is read again here because the page says it
-/// with more care: a date to the minute where the list gave one, and the author's picture.
+/// picture leaves nothing behind in them, and what it quoted is kept apart.
+///
+/// **No title and no author**, which the ranking list already gave its row and which stay the
+/// row's: what a reader saw in Trends is what the opened blog is called and who it is by. The
+/// page is read for what the list could not say — a date to the minute where the list gave one,
+/// and the author's picture.
 public struct DiscuzBlog: Hashable, Sendable {
     public let id: Int
     /// Its author, by number — half the address it is served at.
     public let uid: Int
-    /// What the page calls it. Empty where the page's heading could not be read, which the row's
-    /// own title — the ranking list's — stands in for.
-    public let title: String
-    /// Whoever the page names as its author. Empty where it names nobody this device can read.
-    public let author: String
     public let postedAt: Date?
     public let body: String
     public let quoted: [DiscuzQuotation]
@@ -27,13 +25,11 @@ public struct DiscuzBlog: Hashable, Sendable {
     public let avatarURL: URL?
 
     public init(
-        id: Int, uid: Int, title: String, author: String, postedAt: Date?, body: String,
+        id: Int, uid: Int, postedAt: Date?, body: String,
         quoted: [DiscuzQuotation] = [], avatarURL: URL? = nil
     ) {
         self.id = id
         self.uid = uid
-        self.title = title
-        self.author = author
         self.postedAt = postedAt
         self.body = body
         self.quoted = quoted
@@ -64,10 +60,15 @@ public struct DiscuzBlog: Hashable, Sendable {
 ///
 /// **Anchored on an id, a tag and a number, never on a label** — `DiscuzRanklist`'s rule. The
 /// words are the one element Discuz! gives the id `blog_article`, which no other page has; the
-/// title is the page's heading; the date is the first one written between the heading and the
-/// words; and the author is found by the number the row already holds — the first link to *that*
-/// person's space with a name on it — so a reader's own name in the page's header, a visitor in
-/// the sidebar or a commenter under the words cannot be taken for them.
+/// date is the first one written between the page's heading and the words; and the picture is
+/// found by the number the row already holds — a link to *that* person's space whose words are
+/// only a picture.
+///
+/// **The picture is looked for above the words, and in X3.x's author card, and nowhere else.**
+/// Under the words are the comments, and a commenter is somebody else; the author's own blog
+/// can link their own space too, but what it links is their writing, not their face. X5.0 draws
+/// the face in `#uhd`, above the words; X3.x's template has it in a sidebar card `#pcd`, which
+/// may come after them in the page, so that card is read by name.
 ///
 /// The date line leads with the read count, so the date is the first one *in* it rather than its
 /// first words; the avatar is lazy-loaded into `data-src`, which `DiscuzPostLayout.address` reads
@@ -78,74 +79,77 @@ public struct DiscuzBlog: Hashable, Sendable {
 ///
 /// **Measured on X5.0 and not on the reader's X3.2.** The ranking list was measured on
 /// `install-g.example`; its blog pages were not, and X3.2's template is the same
-/// `home/space_blog_view` lineage. So every part but the words is optional: a page whose
-/// heading, date or author this does not find still reads, with the row's own title, author and
-/// date in their place. A page with no `blog_article` is not a blog this device can read, and
-/// says so.
+/// `home/space_blog_view` lineage. So every part but the words is optional: a page whose date or
+/// picture this does not find still reads, with the row's own date in its place. A page with no
+/// `blog_article` is not a blog this device can read, and says so.
 enum DiscuzBlogPage {
     static func blog(in html: String, id: Int, uid: Int, host: String) -> DiscuzBlog? {
         guard let patterns = Patterns.shared, let post = DiscuzThreadPage.Patterns.shared,
-              let opened = patterns.article.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
-              let start = Range(opened.range, in: html),
-              let article = DiscuzMarkup.balanced(in: html, nesting: post.divs, from: start.upperBound)
+              let article = Self.article(in: html, patterns: patterns, divs: post.divs)
         else { return nil }
-        let words = DiscuzPostLayout.words(in: String(html[article.range]), patterns: post)
+        let words = DiscuzPostLayout.words(in: String(html[article.words]), patterns: post)
         // Everything above the words: the heading, then the line under it with the date.
-        let above = String(html[..<start.lowerBound])
+        let above = String(html[..<article.whole.lowerBound])
         let heading = patterns.heading.matches(in: above, range: NSRange(above.startIndex..., in: above)).last
-        let title = heading
-            .flatMap { Range($0.range(at: 1), in: above) }
-            .map { HTMLText.plain(String(above[$0])) } ?? ""
         let byline = heading
             .flatMap { Range($0.range, in: above) }
             .map { String(above[$0.upperBound...]) } ?? ""
         let line = patterns.dateLine.capture(1, in: byline) ?? byline
         let posted = line.isEmpty ? nil : DiscuzDate.parse(line, date: post.date)
-        let person = Self.person(uid, in: html, patterns: patterns)
+        let card = DiscuzMarkup.content(patterns.card, nesting: post.divs, in: html) ?? ""
+        let picture = Self.picture(of: uid, in: above + card, patterns: patterns)
         return DiscuzBlog(
             id: id,
             uid: uid,
-            title: title,
-            author: person.name,
             postedAt: posted,
             body: words.body,
             quoted: words.quoted,
-            avatarURL: person.picture.flatMap { DiscuzPostLayout.address(in: $0, host: host, patterns: post) }
+            avatarURL: picture.flatMap { DiscuzPostLayout.address(in: $0, host: host, patterns: post) }
         )
     }
 
-    /// The author's name, and the `<img>` tag of their picture, out of the links the page makes
-    /// to their space.
+    /// The page with the blog's own words taken out — what `DiscuzClient.page` looks for a
+    /// challenge or the forum's notice in. Somebody's blog may say `Just a moment` or write
+    /// `id="messagetext"` in its words; the forum's own markup around them never does. A page
+    /// with no words on it is judged whole.
+    static func withoutWords(_ html: String) -> String {
+        guard let patterns = Patterns.shared, let divs = DiscuzThreadPage.Patterns.shared?.divs,
+              let article = Self.article(in: html, patterns: patterns, divs: divs)
+        else { return html }
+        return String(html[..<article.whole.lowerBound]) + String(html[article.whole.upperBound...])
+    }
+
+    /// Where `div#blog_article` is: the element whole, and its words inside it.
+    private static func article(
+        in html: String, patterns: Patterns, divs: NSRegularExpression
+    ) -> (whole: Range<String.Index>, words: Range<String.Index>)? {
+        guard let opened = patterns.article.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
+              let start = Range(opened.range, in: html),
+              let inside = DiscuzMarkup.balanced(in: html, nesting: divs, from: start.upperBound)
+        else { return nil }
+        return (start.lowerBound..<inside.after, inside.range)
+    }
+
+    /// The `<img>` tag of the author's picture, out of the links `markup` makes to their space.
     ///
     /// **Their space, by number, and nothing else of it.** `mod=space&uid=N` with no `do=` is a
     /// person's own page; the same address with `do=blog` is the blog list the breadcrumb names
-    /// next, and `mod=spacecp` is a control. The first such link with words in it is the name —
-    /// the breadcrumb's, on the template — and the first whose words are only a picture is the
-    /// face. A link whose words are an address (`https://…/?21`, the space's own short link) is
-    /// not a name.
-    private static func person(
-        _ uid: Int, in html: String, patterns: Patterns
-    ) -> (name: String, picture: String?) {
-        var name = ""
-        var picture: String?
-        let range = NSRange(html.startIndex..., in: html)
-        for match in patterns.link.matches(in: html, range: range) {
-            guard let hrefRange = Range(match.range(at: 1), in: html),
-                  let labelRange = Range(match.range(at: 2), in: html)
+    /// next, and `mod=spacecp` is a control. The first such link whose words are only a picture is
+    /// the face; the breadcrumb's, which names them, is passed over.
+    private static func picture(of uid: Int, in markup: String, patterns: Patterns) -> String? {
+        let range = NSRange(markup.startIndex..., in: markup)
+        for match in patterns.link.matches(in: markup, range: range) {
+            guard let hrefRange = Range(match.range(at: 1), in: markup),
+                  let labelRange = Range(match.range(at: 2), in: markup)
             else { continue }
-            let href = html[hrefRange].replacingOccurrences(of: "&amp;", with: "&", options: .caseInsensitive)
+            let href = markup[hrefRange].replacingOccurrences(of: "&amp;", with: "&", options: .caseInsensitive)
             guard Self.isSpace(of: uid, href) else { continue }
-            let label = String(html[labelRange])
-            let plain = HTMLText.plain(label)
-            if name.isEmpty, !plain.isEmpty, !plain.lowercased().hasPrefix("http"), !plain.hasPrefix("?") {
-                name = plain
+            let label = String(markup[labelRange])
+            if HTMLText.plain(label).isEmpty, let tag = patterns.image.capture(0, in: label) {
+                return tag
             }
-            if picture == nil, plain.isEmpty, let tag = patterns.image.capture(0, in: label) {
-                picture = tag
-            }
-            if !name.isEmpty, picture != nil { break }
         }
-        return (name, picture)
+        return nil
     }
 
     /// Whether an address is person `uid`'s own space: `mod=space`, `uid=` exactly this number,
@@ -166,9 +170,11 @@ enum DiscuzBlogPage {
 
         /// `<div id="blog_article">`, the words.
         let article: NSRegularExpression
+        /// `<div id="pcd">`, X3.x's author card.
+        let card: NSRegularExpression
         /// Every `<h1>`, the last of which above the words is the blog's own heading.
         let heading: NSRegularExpression
-        /// `<p class="xg2">` under the heading, where the template writes the date first.
+        /// `<p class="xg2">` under the heading, where the template writes the date.
         let dateLine: NSRegularExpression
         let link: NSRegularExpression
         let image: NSRegularExpression
@@ -180,12 +186,14 @@ enum DiscuzBlogPage {
             }
             guard
                 let article = compile("<div[^>]*\(DiscuzMarkup.attribute("id", "blog_article"))[^>]*>"),
+                let card = compile("<div[^>]*\(DiscuzMarkup.attribute("id", "pcd"))[^>]*>"),
                 let heading = compile("<h1\\b[^>]*>(.*?)</h1>"),
                 let dateLine = compile("<p[^>]*\(DiscuzMarkup.classed("xg2"))[^>]*>(.*?)</p>"),
                 let link = compile("<a\\b[^>]*\\bhref\\s*=\\s*[\"']([^\"']*)[\"'][^>]*>(.*?)</a>"),
                 let image = compile("<img\\b[^>]*>")
             else { return nil }
             self.article = article
+            self.card = card
             self.heading = heading
             self.dateLine = dateLine
             self.link = link
