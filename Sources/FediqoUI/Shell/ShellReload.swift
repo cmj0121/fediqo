@@ -54,7 +54,8 @@ final class ShellReload {
         /// A hashtag's posts, asked of the sources of the timeline in front that keep tags (#197).
         case tag
         /// The next, older stretch of the timeline in front, asked as the reader nears its end
-        /// (#87). See `ShellMore.swift`.
+        /// (#87), or one timeline read on from a place that says more belong there (#201). See
+        /// `ShellMore.swift` and `ShellReadOn.swift`.
         case more
         /// The thread open in front, asked again on the wait (#198). Said at the thread's own
         /// foot, not in the toast. See `ShellRenewal.swift`.
@@ -112,6 +113,10 @@ final class ShellReload {
     @ObservationIgnored var deadline: Duration = .seconds(30)
     /// Where each stretch a listing reads toward its end has got to (#87).
     @ObservationIgnored var stretches = ShellStretches()
+    /// Places reached while another ask for more was out, each read on as that one ends (#201).
+    @ObservationIgnored var pendingReadOn = PendingReadOn()
+    /// The hosts each running read of many sources — `r`'s, the wait's — is reading (#201).
+    @ObservationIgnored var readingHosts: [Ask: Set<String>] = [:]
     /// The thread open in front of this window, which the wait asks again (#198). Nothing with no
     /// thread in front. See `ShellRenewal.swift`.
     @ObservationIgnored var inFront: DummyItem?
@@ -565,8 +570,9 @@ final class ShellReload {
 
     /// `asks`, each source read into the store as it answers, as `kind`: what did not answer is
     /// that kind's to say.
-    private func read(_ asks: [FetchAsk], as kind: Ask, in session: ShellSession) async {
+    func read(_ asks: [FetchAsk], as kind: Ask, in session: ShellSession) async {
         let sources = session.sources
+        readingHosts[kind] = Set(asks.map(\.host))
         // What the last run found is not this run's fact about any server. Cleared here
         // rather than at the end, so a run that is stopped halfway leaves nothing standing.
         unspokens[kind] = nil
@@ -756,8 +762,10 @@ final class ShellReload {
         guard let run = runs[ask], run.generation == generation else { return }
         runs[ask] = nil
         asking.remove(ask)
+        readingHosts[ask] = nil
         if ask == .timeline { landed += 1 }
         run.waiter.resume()
+        if ask == .more { readOnPending() }
     }
 
     private static func purposes(of ask: Ask) -> Set<SourceWork.Purpose> {
@@ -911,16 +919,17 @@ final class ShellReload {
                     http: self.timed(session.http, for: .timeline, name: name, in: session), host: host
                 )
             }
-            let publicRead = { try await client(.public).publicTimeline(source: stamp) }
+            // Read on from the newest post held of it, not its newest stretch alone (#201).
+            let publicRead = { await self.readOnPublic(client(.public), stamp: stamp, in: session) }
             let trendsRead = { try await client(.trends).trending(source: stamp) }
             var read: Bool
             if let categories {
                 read = true
-                if categories.contains(.public) { read = await land(host, in: session, publicRead) && read }
+                if categories.contains(.public) { read = await publicRead() && read }
                 if categories.contains(.trends) { read = await land(host, in: session, trendsRead) && read }
             } else {
                 // The join's rule: a server with no trends still has a timeline, and the reverse.
-                let publicCame = await land(host, in: session, publicRead)
+                let publicCame = await publicRead()
                 let trendsCame = await land(host, in: session, trendsRead)
                 read = publicCame || trendsCame
             }

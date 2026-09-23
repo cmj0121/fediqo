@@ -122,6 +122,8 @@
 "timeline.reload.failed" = "Could not reload %@.";
 "timeline.reload.unspoken" = "%1$@ now answers as %2$@, which Fediqo does not read. What it brought here is still here.";
 "timeline.reload.stopped" = "Reload stopped.";
+"timeline.gap.more" = "More posts from %@ belong here. Reaching this reads them.";
+"timeline.gap.missing" = "Posts from %@ may be missing here: the server no longer gives them back.";
 "thread.reload.unfindable" = "This post can't be reloaded: sign in to %@ to find it there.";
 "thread.reload.notfound" = "This post can't be reloaded: %@ did not find it.";
 "thread.reload.scope" = "This post can't be reloaded: sign in to %@ again to let Fediqo find it.";

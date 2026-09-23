@@ -207,14 +207,16 @@ public actor ItemStore {
             if let existing = notes[key] {
                 let categories = existing.categories.union(note.categories)
                 let holding = existing.holding.widened(by: note.holding)
+                let listed = existing.listed.later(note.listed)
                 // The same source handing the post over again is the source having it (#179):
                 // a mark it once earned comes off.
                 guard categories != existing.categories || holding != existing.holding
-                        || existing.goneSince != nil
+                        || listed != existing.listed || existing.goneSince != nil
                 else { continue }
                 var merged = existing
                 merged.categories = categories
                 merged.holding = holding
+                merged.listed = listed
                 merged.goneSince = nil
                 notes[key] = merged
                 shown = shown || holding == .arrived
@@ -281,6 +283,56 @@ public actor ItemStore {
         // it onto the screen's rows.
         if moved { changed(shown: false, aside: aside) }
         return moved
+    }
+
+    /// The anchor a timeline is read on from (#201): the newest id a read of `category` from
+    /// `host` listed a post under, of a post its source has not said is gone. A post the reader
+    /// wrote, or one held aside, was listed by no read, and is never it.
+    public func newestListedID(host raw: String, category: Category) -> String? {
+        let host = raw.lowercased()
+        return notes.values
+            .filter { $0.source.host == host && $0.goneSince == nil }
+            .compactMap { $0.listed[category] }
+            .max { StatusID.later($1, than: $0) }
+    }
+
+    /// The posts held of `category` from `host` that a timeline brought (#201): what a read with
+    /// no anchor looks for in the newest stretch, to tell whether it reached what was held.
+    public func held(host raw: String, category: Category) -> Set<NoteKey> {
+        let host = raw.lowercased()
+        return Set(notes.values.filter {
+            $0.source.host == host && $0.holding == .arrived && $0.categories.contains(category)
+        }.map(\.key))
+    }
+
+    /// One timeline read on (#201), taken in as `ingest(_:ifSourceHere:)` takes a read, with where
+    /// it is not whole kept on the posts it sits against — in the same step, so a screen never
+    /// draws the posts without what is said about them.
+    ///
+    /// **Newer posts remaining is said once per timeline**: a read on from its newest post is what
+    /// reaching it asks for, so whatever this read says replaces what the last one said. Posts
+    /// that may be missing stay said; nothing read later can show they were not.
+    public func land(_ read: ReadOn, of category: Category, ifSourceHere raw: String) {
+        let host = raw.lowercased()
+        guard sourceList.contains(where: { $0.host == host }) else { return }
+        ingest(read.notes)
+        let remain = TimelineGap(.newerRemain, in: category)
+        var marked: [NoteKey: Set<TimelineGap>] = [:]
+        for (key, note) in notes where key.host == host && note.gaps.contains(remain) {
+            marked[key] = note.gaps.subtracting([remain])
+        }
+        if let key = read.newerRemainAbove, let held = notes[key] {
+            marked[key] = (marked[key] ?? held.gaps).union([remain])
+        }
+        if let key = read.missingBelow, let held = notes[key] {
+            marked[key] = (marked[key] ?? held.gaps).union([TimelineGap(.mayBeMissing, in: category)])
+        }
+        var moved = false
+        for (key, gaps) in marked where notes[key]?.gaps != gaps {
+            notes[key]?.gaps = gaps
+            moved = true
+        }
+        if moved { changed(shown: true, aside: false) }
     }
 
     /// Lets go of one server: the source, the boards the reader picked on it, and the notes it

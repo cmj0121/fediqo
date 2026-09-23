@@ -414,6 +414,9 @@ struct TimelinePane: View {
 
     private func list(_ items: [DummyItem]) -> some View {
         let last = items.count - 1
+        // Where the timeline in front is not whole, said at its place (#201). A search's results
+        // are not a timeline, and say nothing of the kind.
+        let gaps = searching ? [:] : session.gapMarks(in: items)
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -458,6 +461,7 @@ struct TimelinePane: View {
                             asks: Self.asksForMore(at: index, of: items.count, searching: searching),
                             timeline: timeline, session: session
                         ))
+                        .modifier(TimelineGapMarked(marks: gaps[item.id], session: session))
                         if !isLast {
                             Rectangle()
                                 .fill(ShellChrome.hairline(colorScheme))
