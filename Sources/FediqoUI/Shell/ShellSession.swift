@@ -607,7 +607,8 @@ final class ShellSession {
         return PostActs.on(
             mastodon.writing(host: copy.source.host, kind: kind),
             nameable: copy.statusID != nil,
-            mine: isMine(copy)
+            mine: isMine(copy),
+            gone: copy.goneSince != nil
         )
     }
 
@@ -787,7 +788,7 @@ final class ShellSession {
         ComposerSheet.canSend(
             text: answerDraft(target),
             limit: postLimit(of: target.item.source.host),
-            hasSource: acts(on: target.item).offers(.answer)
+            hasSource: acts(on: held(target.item.id) ?? target.item).offers(.answer)
         )
     }
 
@@ -802,7 +803,9 @@ final class ShellSession {
         let host = item.source.host
         let text = ComposerSheet.trimmed(answerDraft(target))
         guard !text.isEmpty, text.count <= postLimit(of: host) else { return }
-        guard acts(on: item).offers(.answer),
+        // Asked of the row as it is now, not as the sheet opened on it: a post its source said
+        // was gone while the answer was being written offers nothing to answer (#179).
+        guard acts(on: held(item.id) ?? item).offers(.answer),
               let answered = note(ofRow: item.id),
               let door = mastodon.authorized(host: host, for: .write)
         else { throw MastodonWriteError.noSource }

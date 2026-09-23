@@ -65,8 +65,8 @@ struct ForumOpeningStoreTests {
         }
         // No migration id of its own is written, so a build that knows the rest finds nothing
         // it does not know and opens the store rather than setting it aside as a newer build's.
-        // `v3-holding` is #175's, which does mean an older build to refuse it.
-        #expect(migrations == ["v1-index", "v2-categories", "v3-holding"])
+        // `v3-holding` is #175's and `v4-gone` #179's, which do mean an older build to refuse it.
+        #expect(migrations == ["v1-index", "v2-categories", "v3-holding", "v4-gone"])
         #expect(facts[0].contains(#""opening""#))
         #expect(!facts[1].contains(#""opening""#), "a row nobody reached is written as before")
         // What an earlier build decodes a row into: the facts it knew, and nothing else.

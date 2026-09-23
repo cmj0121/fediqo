@@ -180,6 +180,8 @@ public struct FediqoRootView: View {
             .onChange(of: prefs.keepMonths) { _, months in
                 Task { await session.keep(months: months) }
             }
+            // Posts their source deleted go on this device's wait (#179).
+            .modifier(LettingGoneGo(session: session))
             .modifier(AsksOnAWait(session: session, minutes: prefs.askMinutes))
             .onChange(of: place) { old, new in
                 let accepted = availability.placing(old, as: new)

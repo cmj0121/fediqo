@@ -289,6 +289,7 @@ final class ShellReload {
                 // adopted by that read — see `ShellConversations.read`.
                 await session.reloadFromStore()
                 await session.conversations.again(item, in: session)
+            case .gone: break
             case .failed: self.failures[.thread] = [held.source.host]
             case .unfindable(let why): self.unfindable = why
             }
@@ -404,6 +405,9 @@ final class ShellReload {
 
     private enum Again: Sendable {
         case read
+        /// Its source said it no longer has the post, and the row is marked so (#179). There is
+        /// no thread to ask for around a post that is not there, and nothing failed.
+        case gone
         case failed
         case unfindable(Unfindable)
     }
@@ -476,7 +480,19 @@ final class ShellReload {
             return .unfindable(signedIn ? .notFound(host: host) : .signedOut(host: host))
         }
         try Task.checkCancellation()
-        let note = try await post.post(id: id, source: stamp)
+        let note: Note
+        do {
+            note = try await post.post(id: id, source: stamp)
+        } catch {
+            // The source has just said, of this one post, that it no longer has it (#179). The
+            // post stays, marked; what the reader asked for — the post read again — was answered.
+            guard await session.sourceSaysGone(
+                error, of: held, id: id, signedIn: signedIn, within: session.reload.deadline
+            ) else { throw error }
+            try Task.checkCancellation()
+            await session.markGone(held.key)
+            return .gone
+        }
         try Task.checkCancellation()
         await session.store.refresh([note], ifSourceHere: host)
         // **The thread around it is not asked for here.** It was, until #90 gave the conversation

@@ -98,6 +98,13 @@ final class DummyPrefs {
         didSet { write("keepMonths", keepMonths.map(String.init) ?? "") }
     }
 
+    /// How many days a post its source deleted stays, marked, before it is let go (#179); nil, the
+    /// default, keeps it until the reader says. The keep-for window above still wins where it is
+    /// the shorter (`GoneWait`).
+    var goneDays: Int? {
+        didSet { write("goneDays", goneDays.map(String.init) ?? "") }
+    }
+
     /// The last day every timeline shows (#22); nil, the default, shows up to now.
     var latestDate: LatestDate? {
         didSet { write("latestDate", latestDate?.text ?? "") }
@@ -118,6 +125,7 @@ final class DummyPrefs {
         self.defaults = defaults
         func read(_ name: String) -> String? { defaults.string(forKey: Self.prefix + name) }
         keepMonths = Int(read("keepMonths") ?? "").flatMap { $0 > 0 ? $0 : nil }
+        goneDays = Int(read("goneDays") ?? "").flatMap { $0 > 0 ? $0 : nil }
         latestDate = LatestDate(read("latestDate") ?? "")
         askMinutes = Int(read("askMinutes") ?? "").flatMap { Self.waits.contains($0) ? $0 : nil } ?? 1
         language = DummyLanguage(rawValue: read("language") ?? "") ?? .system

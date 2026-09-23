@@ -296,13 +296,24 @@ final class ShellConversations {
         standings[item.id] = .coming
         let stamp = Source(host: host, kind: held.source.kind)
         do {
-            let post = session.conversationPost(host: host, within: deadline).post
+            let (post, signedIn) = session.conversationPost(host: host, within: deadline)
             guard let id = try await post.id(of: held) else {
                 standings[item.id] = .absent(.unfindable)
                 return
             }
             try Task.checkCancellation()
-            let thread = try await post.conversation(id: id, source: stamp)
+            let thread: MastodonThread
+            do {
+                thread = try await post.conversation(id: id, source: stamp)
+            } catch {
+                // Asked by the post's own id, so this is the source speaking of this one post
+                // (#179): it stays, marked, and the thread still says it could not be had.
+                if await session.sourceSaysGone(error, of: held, id: id, signedIn: signedIn, within: deadline) {
+                    try Task.checkCancellation()
+                    await session.markGone(held.key)
+                }
+                throw error
+            }
             try Task.checkCancellation()
             // Held rows that appear in the thread are refreshed on the way past — an answer this
             // device already has shows its new words in the timeline too. Nothing is admitted.
