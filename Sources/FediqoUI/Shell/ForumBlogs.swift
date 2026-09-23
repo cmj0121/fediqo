@@ -192,7 +192,9 @@ final class ForumBlogs {
     /// could change is read again, as the member the reader now is.
     func signedIn(host raw: String) {
         let host = raw.lowercased()
-        for (key, item) in refusedAsGuest where key.host == host {
+        // A password on its way is left to finish: cleared under it, a second could be sent whose
+        // cookie the first's clean-up then lets go of, and a right password would read as wrong.
+        for (key, item) in refusedAsGuest where key.host == host && locks[key] != .trying {
             refusedAsGuest.removeValue(forKey: key)
             missing.removeValue(forKey: key)
             locks.removeValue(forKey: key)
@@ -225,7 +227,9 @@ final class ForumBlogs {
         for key in Array(inFlight.keys) where key.host == host { cleared.insert(key) }
         for key in Array(missing.keys) where key.host == host { missing.removeValue(forKey: key) }
         for key in Array(landed.keys) where key.host == host { landed.removeValue(forKey: key) }
-        for key in Array(locks.keys) where key.host == host { locks.removeValue(forKey: key) }
+        for key in Array(locks.keys) where key.host == host && locks[key] != .trying {
+            locks.removeValue(forKey: key)
+        }
         for key in Array(refusedAsGuest.keys) where key.host == host { refusedAsGuest.removeValue(forKey: key) }
     }
 

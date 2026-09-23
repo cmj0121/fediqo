@@ -248,12 +248,12 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
         await acquire()
         defer { release() }
         if case .wall(let wall) = try await settled(page) { throw ForumTransportError.wall(wall) }
-        // The origin is the row's page's own — pinned here and checked again inside the script,
-        // so a page that moves between this look and the run is refused there.
-        guard let host = page.host()?.lowercased(),
-              let there = view.url, Host.allowsFetch(there), there.host()?.lowercased() == host
-        else { throw ForumTransportError.wrongHost }
-        let origin = "https://" + host + (page.port.map { ":\($0)" } ?? "")
+        // The origin is pinned from where the page settled — this forum, `www.` or not — and
+        // checked again inside the script, so a page that moves between this look and the run
+        // is refused there.
+        guard let origin = Self.passwordOrigin(settledAt: view.url, host: host) else {
+            throw ForumTransportError.wrongHost
+        }
         let answer: Any?
         do {
             answer = try await view.callAsyncJavaScript(
@@ -265,6 +265,15 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
             throw Self.translate(error)
         }
         guard (answer as? String) == "sent" else { throw ForumTransportError.unreadable }
+    }
+
+    /// The origin a blog's password may go to: where the blog page settled, where that is `https`
+    /// and this forum — its `www.` spelling included, as `belongs` allows — and nothing otherwise.
+    static func passwordOrigin(settledAt there: URL?, host: String) -> String? {
+        guard let there, Host.allowsFetch(there), belongs(there, to: host),
+              let settled = there.host()?.lowercased()
+        else { return nil }
+        return "https://" + settled + (there.port.map { ":\($0)" } ?? "")
     }
 
     /// What the reader typed into the forum's own form.

@@ -292,6 +292,48 @@ struct RefusalReadTests {
         #expect(await sent.forgotten == [Self.host + "#4"])
     }
 
+    @Test("A sign-in or a Clear landing while a password is on its way leaves it to finish, and sends no second")
+    func aPasswordOnItsWayIsLeftToFinish() async throws {
+        let http = LockedBlog(form: Self.passwordForm, blog: Self.blogPage)
+        let session = await Self.session(http)
+        let gate = Gate()
+        let sent = Sent()
+        session.blogs.unlocking = { host, page, password in
+            await sent.note(host: host, page: page, password: password)
+            await gate.wait()
+            await http.open()
+        }
+        session.blogs.forgetting = { host, blog in await sent.forgot(host: host, blog: blog) }
+        await session.reload.opened(try #require(session.held(Self.rowID)), in: session)
+        let row = try #require(session.held(Self.rowID))
+
+        let first = Task { await session.blogs.unlock(row, password: Self.password) }
+        #expect(await spun { session.blogs.reading(of: row) == .locked(.trying) })
+        session.blogs.signedIn(host: Self.host)
+        session.blogs.forget(host: Self.host)
+        #expect(session.blogs.reading(of: row) == .locked(.trying))
+        #expect(!(await session.blogs.unlock(row, password: Self.password)), "no second while the first is out")
+        await gate.open()
+        #expect(await first.value)
+        #expect(await sent.asked.count == 1)
+        #expect(await sent.forgotten.count == 1)
+    }
+
+    @Test("The password's origin is where the blog page settled — this forum, its www. spelling included — over https")
+    func thePasswordOrigin() throws {
+        let www = try #require(URL(string: "https://www.\(Self.host)/home.php?mod=space&uid=1&do=blog&id=4"))
+        // A bare row host whose page settled on `www.`: sent, to the www origin.
+        #expect(ForumWebEngine.passwordOrigin(settledAt: www, host: Self.host) == "https://www.\(Self.host)")
+        #expect(ForumWebEngine.passwordOrigin(settledAt: URL(string: Self.address), host: Self.host) == "https://\(Self.host)")
+        #expect(ForumWebEngine.passwordOrigin(
+            settledAt: URL(string: "https://\(Self.host):8443/home.php"), host: Self.host
+        ) == "https://\(Self.host):8443")
+        // Anywhere else, or not https, or nowhere: nothing is sent.
+        #expect(ForumWebEngine.passwordOrigin(settledAt: URL(string: "https://evil.example/home.php"), host: Self.host) == nil)
+        #expect(ForumWebEngine.passwordOrigin(settledAt: URL(string: "http://\(Self.host)/home.php"), host: Self.host) == nil)
+        #expect(ForumWebEngine.passwordOrigin(settledAt: nil, host: Self.host) == nil)
+    }
+
     @Test("A read begun before the password is not read as its answer")
     func aStaleReadIsNotTheAnswer() async throws {
         let gate = Gate()
