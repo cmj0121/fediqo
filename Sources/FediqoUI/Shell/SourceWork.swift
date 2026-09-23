@@ -56,6 +56,7 @@ final class SourceWork {
         case signIn
         case signOut
         case write
+        case search
 
         var titleKey: String { "work.purpose.\(rawValue)" }
 

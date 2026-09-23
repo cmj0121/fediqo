@@ -25,6 +25,11 @@ import SwiftUI
 // every other ask, and leaves the page where the reader had it: the list keeps its top row
 // (`HoldsPlace`) and only a pressed timeline re-centres the lamp. Esc does not stop it, since
 // nobody started it; the next wait simply asks again.
+//
+// **The fourth is a search's** (#176): Return in the search field asks the sources of the timeline
+// in front that can be searched for posts matching its words. What they send is held aside —
+// found by a search, drawn by no timeline — and the search, which reads the store and nothing
+// else, renews as it lands. A new search ends the last one's ask; closing the search ends it too.
 
 /// One reload of each kind at a time, and the sources the last one could not read.
 @MainActor
@@ -39,6 +44,8 @@ final class ShellReload {
         case thread
         /// Every source this device holds, each for its usual reads, on the wait it keeps (#95).
         case held
+        /// A search's words, asked of the sources of the timeline in front that can be searched.
+        case search
         /// The next, older stretch of the timeline in front, asked as the reader nears its end
         /// (#87). See `ShellMore.swift`.
         case more
@@ -57,6 +64,11 @@ final class ShellReload {
         return [Ask.timeline, .more, .thread, .held].flatMap { failures[$0] ?? [] }
             .filter { named.insert($0).inserted }
     }
+    /// What the last search asked of the sources, and what it could not ask (#176). Nothing while
+    /// no search has been sent to them.
+    private(set) var reach: SearchReach?
+    /// The sources the last search asked that did not answer, in the timeline's order.
+    var searchFailed: [String] { failures[.search] ?? [] }
     /// Each kind's own `failed`, cleared as that kind starts again — and a host's name let go of
     /// as soon as another timeline read, `r`'s or the wait's, reads it whole.
     private(set) var failures: [Ask: [String]] = [:]
@@ -140,16 +152,170 @@ final class ShellReload {
 
     /// The timeline's one quiet line about `r`: on the wire, stopped, or what did not answer.
     /// Nothing once a reload has landed whole.
+    ///
+    /// A search's ask says it is on its way, and afterwards which sources it could not search, in
+    /// the same line and after everything a reload has to say (#176).
     var line: String? {
-        if running { return L10n.t("timeline.reload.progress") }
+        if asking.contains(where: { $0 != .search }) { return L10n.t("timeline.reload.progress") }
+        if asking.contains(.search), let reach {
+            return String(format: L10n.t("search.asking"), reach.asked.joined(separator: ", "))
+        }
         if stopped { return L10n.t("timeline.reload.stopped") }
         if let unfindable { return unfindable.sentence }
         // **Before the failures, because it is the more particular fact.** A server that told
         // this app what it now speaks answered perfectly well; saying "did not answer" about it
         // would be this device reporting its own refusal to read as the server's silence.
         if let unspoken { return unspoken.sentence }
-        guard !failed.isEmpty else { return nil }
-        return String(format: L10n.t("timeline.reload.failed"), failed.joined(separator: ", "))
+        if !failed.isEmpty {
+            return String(format: L10n.t("timeline.reload.failed"), failed.joined(separator: ", "))
+        }
+        if !searchFailed.isEmpty {
+            return String(format: L10n.t("search.failed"), searchFailed.joined(separator: ", "))
+        }
+        guard !searchRefused.isEmpty else { return nil }
+        return String(format: L10n.t("search.scope"), searchRefused.joined(separator: ", "))
+    }
+
+    /// Which sources a search asked, and which of the timeline's it did not because they cannot be
+    /// searched from here (#176) — said under the field, so the results say where they came from.
+    struct SearchReach: Equatable, Sendable {
+        /// Asked, in the timeline's order.
+        let asked: [String]
+        /// The timeline's sources that cannot be searched from here, and so were not asked.
+        let unasked: [String]
+
+        /// Nothing where the timeline has no source at all.
+        var sentence: String? {
+            var said: [String] = []
+            if !asked.isEmpty {
+                said.append(String(format: L10n.t("search.reach.asked"), asked.joined(separator: ", ")))
+            }
+            if !unasked.isEmpty {
+                said.append(String(format: L10n.t("search.reach.notAsked"), unasked.joined(separator: ", ")))
+            }
+            return said.isEmpty ? nil : said.joined(separator: " ")
+        }
+
+        /// **Only a Mastodon this device is signed in to can be searched.** Its server answers a
+        /// search of its posts to an account it knows (`MastodonSearch`); a forum's search pages
+        /// are not something this app reads, and a source it does not speak is not asked at all.
+        ///
+        /// **Nor one the timeline reads only some categories of** — Trends, a written timeline
+        /// of somebody's Home or one board. What a search finds arrives through no category, so
+        /// no such rule could ever let it through: asking would put finds in the store that this
+        /// timeline can never show, and the line would say a source was asked for nothing.
+        @MainActor
+        static func of(_ asks: [FetchAsk], in session: ShellSession) -> SearchReach {
+            let asked = asks.filter { ask in
+                ask.categories == nil
+                    && session.sources.first { $0.host == ask.host }?.kind == .mastodon
+                    && session.mastodon.token(host: ask.host) != nil
+            }.map(\.host)
+            return SearchReach(asked: asked, unasked: asks.map(\.host).filter { !asked.contains($0) })
+        }
+    }
+
+    /// Return in the search field: `pattern`'s words asked of the sources of `query` that can be
+    /// searched, each landing — held aside — as it answers, so what this device held is shown at
+    /// once and what a source finds joins it (#176). Ends the last search's ask first: the reader
+    /// has moved on from it. Nothing asked where the pattern has no words or no source can be
+    /// searched, and the reach still says which were not asked.
+    func search(_ pattern: String, timeline query: TimelineQuery, in session: ShellSession) async {
+        // The same search still on its way — a Return that waited for the index, lighting its
+        // first result — is let run rather than asked again.
+        if asking.contains(.search), searchedFor == SearchedFor(pattern: pattern, query: query) { return }
+        endSearch()
+        searchedFor = SearchedFor(pattern: pattern, query: query)
+        guard let words = MastodonSearch.words(of: pattern) else { return }
+        let asks = CompiledTimeline(query.definition(among: session.written), sources: session.sources)
+            .sourcesToAsk()
+        let reach = SearchReach.of(asks, in: session)
+        self.reach = reach
+        guard !reach.asked.isEmpty else { return }
+        await run(.search) {
+            var came: [String: Found] = [:]
+            await withTaskGroup(of: (String, Found).self) { group in
+                for host in reach.asked {
+                    group.addTask { (host, await self.found(words, on: host, in: session)) }
+                }
+                for await (host, answer) in group {
+                    came[host] = answer
+                    await session.reloadFromStore()
+                }
+            }
+            guard !Task.isCancelled else { return }
+            self.failures[.search] = reach.asked.filter { came[$0] == .missed }
+            self.searchRefused = reach.asked.filter { came[$0] == .refused }
+        }
+    }
+
+    /// The timeline under an open search changed (#145): a search sent to the sources is sent
+    /// again to the new one's, whose sources and rules are what the results are now asked of —
+    /// rather than the last timeline's ask running on and its line naming sources this one may
+    /// not have. Nothing where no Return has been made since the search opened.
+    ///
+    /// **Only what was sent, and only to what is in front.** Where the field has been typed in
+    /// since Return (`pattern` differs), what was sent is no longer the search, so its ask ends
+    /// and nothing is sent until the next Return. And a switch answered late — another switch
+    /// since — sends nothing to a timeline that is no longer in front.
+    func searchSwitched(to query: TimelineQuery, pattern: String, in session: ShellSession) async {
+        guard reach != nil, let last = searchedFor, last.query != query,
+              query == session.currentTimeline
+        else { return }
+        guard pattern == last.pattern else {
+            endSearch()
+            return
+        }
+        await search(last.pattern, timeline: query, in: session)
+    }
+
+    /// The sources the last search asked whose token may not search — issued before `read:search`
+    /// was asked for. Said as a sign-in to make again, not as a server that did not answer.
+    private(set) var searchRefused: [String] = []
+
+    private enum Found: Sendable {
+        case answered
+        case missed
+        case refused
+    }
+
+    /// What the search on its way was sent for.
+    @ObservationIgnored private var searchedFor: SearchedFor?
+
+    private struct SearchedFor: Equatable {
+        let pattern: String
+        let query: TimelineQuery
+    }
+
+    /// The search closed, or another sent: its ask ends where it is, and what it said goes.
+    func endSearch() {
+        end(.search)
+        failures[.search] = nil
+        searchRefused = []
+        reach = nil
+    }
+
+    /// One source searched for `words`, what it found held aside. Whether it answered.
+    private func found(_ words: String, on host: String, in session: ShellSession) async -> Found {
+        guard let source = session.sources.first(where: { $0.host == host }),
+              let door = session.mastodon.authorized(host: host, within: deadline, for: .search)
+        else { return .missed }
+        let stamp = Source(host: host, kind: source.kind)
+        do {
+            let notes = try await asReader(host) {
+                try await MastodonSearch(door: door).statuses(matching: words, source: stamp)
+            }
+            try Task.checkCancellation()
+            await session.store.hold(notes, ifSourceHere: host)
+            return .answered
+        } catch MastodonAuthError.signedOut {
+            session.mastodon.endedByServer(host: host)
+            return .missed
+        } catch MastodonAuthError.http(403) {
+            return .refused
+        } catch {
+            return Cancellation.happened(error) ? .answered : .missed
+        }
     }
 
     /// The newest posts for `query`, from its own sources only — a written timeline's as the
@@ -333,11 +499,11 @@ final class ShellReload {
 
     /// Stops every running reload that was pressed for — Esc. What they had not landed does not
     /// land. The ask on a wait goes on: nobody started it, and Esc has a thread or a search to
-    /// close instead of being spent on it once a minute (#95). Nor the ask for more: scrolling
-    /// started it, not a key (#87).
+    /// close instead of being spent on it once a minute (#95). A search's goes when Esc closes
+    /// the search (`endSearch`). Nor the ask for more: scrolling started it, not a key (#87).
     @discardableResult
     func stop() -> Bool {
-        let pressed = asking.subtracting([.held, .more])
+        let pressed = asking.subtracting([.held, .search, .more])
         guard !pressed.isEmpty else { return false }
         halted.formUnion(pressed)
         for (ask, run) in runs where pressed.contains(ask) {
@@ -402,6 +568,9 @@ final class ShellReload {
         case .timeline: [.timeline]
         case .thread: [.conversation, .forumPost, .forumReplies]
         case .held: [.timeline]
+        // None, so the toast says the search's own line rather than naming its pieces as a
+        // reload's; they are still listed under Preferences as a search's.
+        case .search: []
         case .more: [.timeline]
         }
     }
