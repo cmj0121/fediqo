@@ -92,6 +92,7 @@
 "shortcut.answer" = "在討論串裡回應你所在的這則貼文";
 "shortcut.withdraw" = "收回你所在的這則貼文（限你自己寫的）";
 "shortcut.person" = "打開你所在這則貼文的作者";
+"shortcut.tag" = "打開這篇的主題標籤：這台裝置上在它底下的貼文";
 "shortcut.reload" = "重新載入這條時間軸，或打開的討論串";
 "shortcut.dismiss" = "關掉眼前的東西，或取消選取";
 "shortcut.search" = "搜尋這台裝置上的貼文";
@@ -652,6 +653,10 @@
 "person.through" = "從 %@ 讀到的";
 "person.held" = "這裡有 %d 則";
 "person.none" = "這台裝置上還沒有他們的貼文。";
+"tag.asking" = "正在向 %1$@ 詢問 %2$@…";
+"tag.failed" = "無法向 %1$@ 詢問 %2$@。";
+"tag.retry" = "再試一次";
+"tag.none" = "這台裝置上還沒有 %@ 底下的貼文。";
 "item.person.open" = "打開 %@";
 
 /* One post more than one source carried (#114). The row is drawn as the first; these name the rest. */

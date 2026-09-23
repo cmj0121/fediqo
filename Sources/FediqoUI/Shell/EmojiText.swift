@@ -51,6 +51,10 @@ struct EmojiText: View {
     /// the menu below reaches the system rather than the override this view installs for the
     /// press. The two gestures must not be able to become the same gesture.
     @Environment(\.openURL) private var openURL
+    /// Where a press on a hashtag goes (#124), and the row these words stand on. Nothing outside
+    /// the shell, where a tag stays the label #123 drew.
+    @Environment(\.shellTags) private var tags
+    @Environment(\.shellRow) private var row
 
     /// Not `@State`: the cache is one object for the whole app, and this view owns none of it.
     /// What it watches is `arrived` — its own state, filled by its own task — so one emoji
@@ -124,17 +128,20 @@ struct EmojiText: View {
         let cut = self.cut
         let baseline = request.metrics.baseline
         let links = Self.links(in: cut)
+        let tagged = Self.tags(in: cut)
         let ink = ShellChrome.selectInk(colorScheme)
+        // A tag takes the control's ink once a press opens something (#124), and only then.
+        let tagInk: Color? = tags == nil ? nil : ink
         let plate = ShellChrome.well(colorScheme)
 
         Group {
             if let clock = Self.clock(for: pictures, reduceMotion: reduceMotion) {
                 TimelineView(.periodic(from: .now, by: clock)) { instant in
                     Self.line(cut, pictures, at: instant.date.timeIntervalSinceReferenceDate,
-                              baseline: baseline, linkInk: ink)
+                              baseline: baseline, linkInk: ink, tagInk: tagInk)
                 }
             } else {
-                Self.line(cut, pictures, at: 0, baseline: baseline, linkInk: ink)
+                Self.line(cut, pictures, at: 0, baseline: baseline, linkInk: ink, tagInk: tagInk)
             }
         }
         // Only where a pill is drawn: a line with no tag keeps the system's own drawing.
@@ -149,8 +156,14 @@ struct EmojiText: View {
         // and a secondary press on the words are both gestures, and a reader who makes neither
         // would otherwise be read an address and given no way to follow it. `DummyItemRow`'s way
         // out already keeps this rule for the same reason.
-        .accessibilityActions { LinkWays(links: links, reader: reader, browser: openURL) }
-        .modifier(ProseLinks(links: links, reader: reader, browser: openURL))
+        .accessibilityActions {
+            LinkWays(links: links, reader: reader, browser: openURL)
+            TagWays(tags: tagged, pressing: tags, row: row)
+        }
+        .modifier(ProseLinks(
+            links: links, reader: reader, browser: openURL,
+            tags: tags == nil ? [] : tagged, pressing: tags, row: row
+        ))
         .task(id: request) {
             await cache.fetch(request)
             arrived = Arrived(request: request, frames: cache.held(request))
@@ -160,6 +173,14 @@ struct EmojiText: View {
     /// Whether a cut line has a tag in it, and so a pill to draw.
     static func hasTags(_ cut: [EmojiRun]) -> Bool {
         cut.contains { if case .tag = $0 { true } else { false } }
+    }
+
+    /// The hashtags in a cut line, in the order they were written. None in a label's cut.
+    static func tags(in cut: [EmojiRun]) -> [PostTag] {
+        cut.compactMap { run in
+            if case .tag(let tag) = run { return tag }
+            return nil
+        }
     }
 
     /// The addresses in a cut line, in the order they were written.
@@ -207,9 +228,8 @@ struct EmojiText: View {
     /// words exactly — `EmojiRun.prose` promises it — so a line with no tag is read as it always
     /// was, and reading it costs a walk of runs the cache already holds rather than a second scan.
     ///
-    /// A tag is read as the word the author wrote, named as a tag, and **named rather than
-    /// actioned**: there is no action on it, because there is nothing yet for one to do, and an
-    /// action that did nothing would be the control the drawing refuses to look like.
+    /// A tag is read as the word the author wrote, named as a tag. Where a press opens it (#124)
+    /// the way in is an action on the element (`TagWays`), not a word in the label.
     static func spoken(_ cut: [EmojiRun]) -> Text {
         Text(verbatim: cut.reduce(into: "") { spoken, run in
             switch run {
@@ -245,7 +265,7 @@ struct EmojiText: View {
     /// build can be compared against an expected `Text` without a screen.
     static func line(_ cut: [EmojiRun], _ pictures: [String: EmojiCache.Frames],
                      at instant: TimeInterval, baseline: CGFloat,
-                     linkInk: Color = .accentColor) -> Text {
+                     linkInk: Color = .accentColor, tagInk: Color? = nil) -> Text {
         cut.reduce(Text(verbatim: "")) { line, run in
             switch run {
             case .text(let words):
@@ -253,7 +273,7 @@ struct EmojiText: View {
             case .link(let link):
                 return line + Self.drawn(link, in: linkInk)
             case .tag(let tag):
-                return line + Self.drawn(tag)
+                return line + Self.drawn(tag, ink: tagInk)
             case .emoji(let emoji):
                 // Until the picture is here the shortcode stands in for it, which is what the
                 // reader would have seen anyway and is never a blank.
@@ -311,8 +331,20 @@ struct EmojiText: View {
     /// cannot be split from its word at the end of a line and the line breaks round the pill as
     /// it would round the word. The spaces are drawing only: `tag.text` is still exactly what
     /// was typed, and what a screen reader hears is built from the tag and not from this.
-    static func drawn(_ tag: PostTag) -> Text {
-        Text(verbatim: tagRoom + tag.text + tagRoom).customAttribute(PostTagMark())
+    ///
+    /// **Pressable once there is somewhere to go** (#124). With `ink` — inside the shell, where a
+    /// press opens what this device holds under the tag — the letters take the control's ink and
+    /// carry `ShellTags.url(for:)`, which is how a press on them reaches `ProseLinks`; the pill,
+    /// its grey and the absence of an underline stay exactly as they were. That is the whole of
+    /// what #124 may change about how a tag looks.
+    static func drawn(_ tag: PostTag, ink: Color? = nil) -> Text {
+        guard let ink, let url = ShellTags.url(for: tag) else {
+            return Text(verbatim: tagRoom + tag.text + tagRoom).customAttribute(PostTagMark())
+        }
+        var letters = AttributedString(tagRoom + tag.text + tagRoom)
+        letters.link = url
+        letters.foregroundColor = ink
+        return Text(letters).customAttribute(PostTagMark())
     }
 
     /// The room inside a tag's plate, each side: `U+202F NARROW NO-BREAK SPACE`.
@@ -511,21 +543,22 @@ private struct ProseLinks: ViewModifier {
     let reader: ShellReader?
     /// The way out of the app, taken from above this view — see `EmojiText.openURL`.
     let browser: OpenURLAction
+    /// The line's hashtags, where a press on one opens something (#124), where it goes, and the
+    /// row the line stands on.
+    var tags: [PostTag] = []
+    var pressing: ShellTags?
+    var row: String?
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        if links.isEmpty {
+        if links.isEmpty && tags.isEmpty {
             content
+        } else if links.isEmpty {
+            // Only tags: the press, and no menu — a tag has no browser to be opened in.
+            content.environment(\.openURL, press)
         } else {
             content
-                .environment(\.openURL, OpenURLAction { url in
-                    // **Decision 9 once more, at the one place a press becomes a navigation.**
-                    // Everything drawn as a link came through `PostLink` and is already checked;
-                    // what this refuses is anything that reaches this action by another route.
-                    guard Host.allowsFetch(url) else { return .discarded }
-                    guard let reader else { return .systemAction }
-                    return reader.open(url) ? .handled : .discarded
-                })
+                .environment(\.openURL, press)
                 .contextMenu {
                     ForEach(links, id: \.self) { link in
                         Button {
@@ -537,6 +570,22 @@ private struct ProseLinks: ViewModifier {
                     }
                 }
                 .linkHint()
+        }
+    }
+
+    /// What a press on the words means: a tag's page for a tag (#124), and for an address the
+    /// reader in the app.
+    private var press: OpenURLAction {
+        OpenURLAction { url in
+            if let tag = ShellTags.tag(in: url) {
+                return pressing?.press(tag, from: row) == true ? .handled : .discarded
+            }
+            // **Decision 9 once more, at the one place a press becomes a navigation.**
+            // Everything drawn as a link came through `PostLink` and is already checked;
+            // what this refuses is anything that reaches this action by another route.
+            guard Host.allowsFetch(url) else { return .discarded }
+            guard let reader else { return .systemAction }
+            return reader.open(url) ? .handled : .discarded
         }
     }
 }
