@@ -37,8 +37,10 @@ extension ShellReload {
     /// about where it is not whole. A reader walking away is not a failure; anything else is.
     func readOnPublic(_ client: MastodonClient, stamp: Source, in session: ShellSession) async -> Bool {
         do {
-            let anchor = await session.store.newestListedID(host: stamp.host, category: .public)
-            let read = try await client.publicTimeline(source: stamp, readingOnFrom: anchor)
+            let store = session.store
+            let anchor = await store.newestListedID(host: stamp.host, category: .public)
+            let held = anchor == nil ? await store.held(host: stamp.host, category: .public) : []
+            let read = try await client.publicTimeline(source: stamp, readingOnFrom: anchor, holding: held)
             try Task.checkCancellation()
             await session.store.land(read, of: .public, ifSourceHere: stamp.host)
             // What came before a stretch that failed has landed; the read still did not come back.
@@ -66,12 +68,21 @@ extension ShellReload {
     }
 
     /// The places reached while an ask for more was out, read on now it has ended — one after
-    /// another, since each is an ask for more of its own.
+    /// another, since each is an ask for more of its own. Only those the timeline in front still
+    /// says more belong at, asked as each comes up: the reader may have moved on since, or a read
+    /// meanwhile reached them.
     func readOnPending() {
         guard let (stretches, session) = pendingReadOn.take() else { return }
         Task { @MainActor in
-            for stretch in stretches { await self.readOn(stretch, in: session) }
+            for stretch in stretches where Self.saysMore(stretch, in: session) {
+                await self.readOn(stretch, in: session)
+            }
         }
+    }
+
+    /// Whether the timeline in front says more belong somewhere of `stretch`'s.
+    static func saysMore(_ stretch: Stretch, in session: ShellSession) -> Bool {
+        session.gapMarks(in: session.timelineItems(latest: nil)).values.contains { $0.above.contains(stretch) }
     }
 }
 

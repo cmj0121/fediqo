@@ -14,7 +14,7 @@ public struct MastodonClient: Sendable {
     public func publicTimeline(source: Source, olderThan maxID: String? = nil) async throws -> [Note] {
         try await statuses(
             path: "/api/v1/timelines/public",
-            limit: 40,
+            limit: MastodonReadOn.limit,
             olderThan: maxID,
             source: source,
             category: .public
@@ -23,8 +23,11 @@ public struct MastodonClient: Sendable {
 
     /// The public timeline read on from `anchor`, the newest post held of it (#201): stretch
     /// after stretch toward the newest, or the newest stretch alone where nothing is held.
-    public func publicTimeline(source: Source, readingOnFrom anchor: String?) async throws -> ReadOn {
-        try await MastodonReadOn.read(from: anchor) { minID in
+    /// `held` is the posts held of it, which a read with no anchor looks for (`MastodonReadOn`).
+    public func publicTimeline(
+        source: Source, readingOnFrom anchor: String?, holding held: Set<NoteKey> = []
+    ) async throws -> ReadOn {
+        try await MastodonReadOn.read(from: anchor, holding: held) { minID in
             try await listed(
                 path: "/api/v1/timelines/public", limit: MastodonReadOn.limit,
                 query: try MastodonPage.newer(than: minID), source: source, category: .public

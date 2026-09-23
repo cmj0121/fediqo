@@ -130,8 +130,9 @@ struct ReadOnTests {
 
     private func readPublic(_ store: ItemStore, from server: TimelineServer) async throws -> ReadOn {
         let anchor = await store.newestListedID(host: Self.host, category: .public)
+        let held = anchor == nil ? await store.held(host: Self.host, category: .public) : []
         let read = try await MastodonClient(http: server, host: Self.host)
-            .publicTimeline(source: Self.source, readingOnFrom: anchor)
+            .publicTimeline(source: Self.source, readingOnFrom: anchor, holding: held)
         await store.land(read, of: .public, ifSourceHere: Self.host)
         return read
     }
@@ -172,6 +173,32 @@ struct ReadOnTests {
         #expect(await server.cursors == ["newest"])
         #expect(await held(store) == Array(61...100))
         #expect(read.missingBelow == nil && read.newerRemainAbove == nil)
+    }
+
+    /// A store as a relaunch reads it back from rows saved before `listed` was kept: posts of the
+    /// public timeline that no read is recorded as listing.
+    private func upgraded(holding ids: ClosedRange<Int>) -> ItemStore {
+        ItemStore(sources: [Self.source], notes: ids.map { Self.note($0, listed: false) })
+    }
+
+    @Test("Held from before listings were kept, and the newest stretch meets none of it: posts may be missing")
+    func upgradedHole() async throws {
+        let server = TimelineServer(1...300)
+        let store = upgraded(holding: 1...10)
+        let read = try await readPublic(store, from: server)
+        #expect(await server.cursors == ["newest"], "no anchor: the newest stretch, as before")
+        #expect(read.missingBelow == Self.key(261), "below its oldest, where the hole is")
+        #expect(await store.note(Self.key(261))?.gaps == [TimelineGap(.mayBeMissing, in: .public)])
+    }
+
+    @Test("Held from before listings were kept, and the newest stretch meets it: nothing is said")
+    func upgradedMeets() async throws {
+        let server = TimelineServer(1...300)
+        let store = upgraded(holding: 271...280)
+        let read = try await readPublic(store, from: server)
+        #expect(read.missingBelow == nil)
+        #expect(await store.all().allSatisfy { $0.gaps.isEmpty })
+        #expect(await store.newestListedID(host: Self.host, category: .public) == "300", "and it is read on from next")
     }
 
     @Test("More new posts than one stretch holds all arrive, in order, with no hole")

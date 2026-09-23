@@ -296,6 +296,15 @@ public actor ItemStore {
             .max { StatusID.later($1, than: $0) }
     }
 
+    /// The posts held of `category` from `host` that a timeline brought (#201): what a read with
+    /// no anchor looks for in the newest stretch, to tell whether it reached what was held.
+    public func held(host raw: String, category: Category) -> Set<NoteKey> {
+        let host = raw.lowercased()
+        return Set(notes.values.filter {
+            $0.source.host == host && $0.holding == .arrived && $0.categories.contains(category)
+        }.map(\.key))
+    }
+
     /// One timeline read on (#201), taken in as `ingest(_:ifSourceHere:)` takes a read, with where
     /// it is not whole kept on the posts it sits against — in the same step, so a screen never
     /// draws the posts without what is said about them.

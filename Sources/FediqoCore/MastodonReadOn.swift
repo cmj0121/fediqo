@@ -31,8 +31,11 @@ import Foundation
 // that is not a number has no "one before", and says nothing either way rather than claim a gap
 // it cannot see.
 //
-// **With no anchor**, a timeline this device holds nothing of, the newest stretch is read, as
-// it always was.
+// **With no anchor**, the newest stretch is read, as it always was. Where this device holds
+// posts of that timeline all the same — rows stored before `Note.listed` was kept, which name no
+// anchor — and the newest stretch shares none of them, what lay between was not read, and posts
+// may be missing below its oldest. It is not read on from their ids instead: a post the reader
+// wrote is among them, and reading on from it is the hole this rule exists against.
 
 /// Mastodon's ids, compared and stepped as the numbers they are.
 public enum StatusID {
@@ -116,12 +119,21 @@ enum MastodonReadOn {
     /// One timeline, read on from `anchor`. `newer` asks one stretch: the posts listed after the
     /// id it is handed, or the newest where it is handed nothing. `older` asks the stretch before
     /// an id, to tell an anchor deleted from what the source let go.
+    ///
+    /// `held` is the posts this device holds of that timeline, asked only where there is no anchor.
     static func read(
-        from anchor: String?, bound: Int = bound,
+        from anchor: String?, holding held: Set<NoteKey> = [], bound: Int = bound,
         newer: (String?) async throws -> [Listed],
         older: (String) async throws -> [Listed]
     ) async throws -> ReadOn {
-        guard let anchor else { return ReadOn(notes: try await newer(nil).map(\.note)) }
+        guard let anchor else {
+            let posts = try await newer(nil)
+            var read = ReadOn(notes: posts.map(\.note))
+            if !held.isEmpty, let oldest = oldest(posts), !posts.contains(where: { held.contains($0.note.key) }) {
+                read.missingBelow = oldest.note.key
+            }
+            return read
+        }
         let before = StatusID.before(anchor)
         var cursor = before ?? anchor
         var last: NoteKey?

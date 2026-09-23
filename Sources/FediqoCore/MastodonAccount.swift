@@ -142,7 +142,8 @@ public struct MastodonAccount: Sendable {
     /// A stretch that failed after the first lands what came before it, then fails the read.
     private func readOn(_ path: String, source: Source, category: Category) async throws {
         let anchor = await store.newestListedID(host: host, category: category)
-        let read = try await MastodonReadOn.read(from: anchor) { minID in
+        let held = anchor == nil ? await store.held(host: host, category: category) : []
+        let read = try await MastodonReadOn.read(from: anchor, holding: held) { minID in
             try await listed(path, source: source, category: category, query: try MastodonPage.newer(than: minID))
         } older: { maxID in
             try await listed(path, source: source, category: category, query: try MastodonPage.older(than: maxID))
@@ -164,7 +165,7 @@ public struct MastodonAccount: Sendable {
         _ path: String, source: Source, category: Category, query: [URLQueryItem]
     ) async throws -> [Listed] {
         let data = try await reading(category).get(
-            path: path, query: [URLQueryItem(name: "limit", value: "40")] + query
+            path: path, query: [URLQueryItem(name: "limit", value: String(MastodonReadOn.limit))] + query
         )
         return try MastodonJSON.decoder.decode([StatusDTO].self, from: data).map {
             $0.listed(source: source, category: category)

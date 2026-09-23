@@ -241,6 +241,27 @@ struct ReadOnTests {
         #expect(await spun { drawn(session).first == 300 && session.reload.asking.isEmpty }, "read on once that one ended")
     }
 
+    @Test("A place waiting is not read once the timeline in front no longer says more belong there")
+    func waitingLeftBehind() async throws {
+        let server = TimelineServer(host: Self.one, 1...10)
+        let session = await shell(server, store: await store(holding: 1...10))
+        await server.post(11...300)
+        await session.reload.timeline(.all, in: session)
+
+        await server.hold("max_id")
+        let guardTask = hangGuard(server.gate)
+        defer { guardTask.cancel() }
+        let more = Task { await session.reload.more(.all, in: session) }
+        #expect(await spun { await server.parked == 1 })
+        await session.reload.readOn(Self.stretch, in: session)
+        session.timelineID = .trends
+        await server.gate.open()
+        await more.value
+        for _ in 0..<200 { await Task.yield() }
+        #expect(session.reload.asking.isEmpty)
+        #expect(await server.cursors.filter { $0 == "min_id=208" }.isEmpty, "Trends reads no public timeline")
+    }
+
     @Test("A place reached while r reads its source asks nothing: r reads it on from there")
     func reachedWhileR() async throws {
         let server = TimelineServer(host: Self.one, 1...10)
