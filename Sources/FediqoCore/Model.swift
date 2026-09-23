@@ -490,6 +490,17 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// **A `var`, as `categories` is, and for its reason**: the store widens it where the same
     /// post arrives a second time through a timeline, and that is the one way it moves.
     public var holding: Holding
+    /// When a read of this one post heard its source say it no longer has it (#179), or nothing
+    /// while the source has said no such thing.
+    ///
+    /// **Only a read of the post itself sets it.** A post missing from a listing merely did not
+    /// arrive, and a listing is never a statement about any one post — so nothing that reads a
+    /// timeline, a search or a thread's page touches it. What the reader took back themselves
+    /// (#109) is let go, not marked: `ItemStore.forget` is that path, and it never passes here.
+    ///
+    /// A `var` for `holding`'s reason: the store sets it on a row it already holds, and a read
+    /// that finds the post again takes it off.
+    public var goneSince: Date?
 
     public init(
         id: String,
@@ -516,7 +527,8 @@ public struct Note: Identifiable, Hashable, Sendable {
         counts: Counts = Counts(),
         statusID: String? = nil,
         opening: ForumOpening? = nil,
-        holding: Holding = .arrived
+        holding: Holding = .arrived,
+        goneSince: Date? = nil
     ) {
         self.id = id
         self.source = source
@@ -543,6 +555,7 @@ public struct Note: Identifiable, Hashable, Sendable {
         self.statusID = statusID
         self.opening = opening
         self.holding = holding
+        self.goneSince = goneSince
     }
 
     /// This copy, read again, laid over the one held for the same row (#29): what the server says
@@ -573,7 +586,10 @@ public struct Note: Identifiable, Hashable, Sendable {
             // Where the row is held does not move on a read again (#175): a post read again is
             // not a post a timeline brought, so a row held aside stays aside and one in All stays
             // there. Only `ItemStore.ingest` widens it.
-            holding: held.holding
+            holding: held.holding,
+            // **No mark survives a read that found the post** (#179): the source has just handed
+            // it over, which is the one thing a post gone from it cannot be.
+            goneSince: nil
         )
     }
 
@@ -585,7 +601,8 @@ public struct Note: Identifiable, Hashable, Sendable {
             boostedBy: boostedBy, boosterHandle: boosterHandle, boosted: boosted,
             favourited: favourited, audience: audience, avatarURL: avatarURL,
             attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis,
-            url: url, counts: counts, statusID: statusID, opening: opening, holding: holding
+            url: url, counts: counts, statusID: statusID, opening: opening, holding: holding,
+            goneSince: goneSince
         )
     }
 }

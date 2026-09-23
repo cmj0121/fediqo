@@ -231,6 +231,17 @@ private var migrator: DatabaseMigrator {
             t.add(column: "holding", .text).notNull().defaults(to: Holding.arrived.rawValue)
         }
     }
+    // When a read of one post heard its source say it no longer has it (#179), or NULL. Every row
+    // already stored is one no source has said that of, so the NULL every row takes is the truth.
+    //
+    // **A migration id for `v3-holding`'s reason.** An older build reading this store would draw
+    // a post its source deleted with no mark and every act offered on it — a boost pressed on a
+    // post that is not there. The id makes it refuse the store instead.
+    migrator.registerMigration("v4-gone") { db in
+        try db.alter(table: "note") { t in
+            t.add(column: "gone_at", .datetime)
+        }
+    }
     return migrator
 }
 
@@ -497,12 +508,15 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
     /// behind it, because an older build must refuse this store rather than show a row nobody
     /// read from a timeline in All.
     var holding: String
+    /// `Note.goneSince` (#179). A column behind its own migration id, for `holding`'s reason.
+    var gone_at: Date?
 
     init(_ note: Note) {
         host = note.source.host
         id = note.id
         posted_at = note.postedAt
         holding = note.holding.rawValue
+        gone_at = note.goneSince
         categories = note.categories.map(CategoryRow.init).sorted()
         facts = NoteFacts(
             author: note.author,
@@ -560,7 +574,8 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             // A spelling this build does not know cannot reach here — the migration id makes an
             // older store's rows carry the default and a newer store be refused outright — so the
             // fallback is the one every row written before this column had.
-            holding: Holding(rawValue: holding) ?? .arrived
+            holding: Holding(rawValue: holding) ?? .arrived,
+            goneSince: gone_at
         )
     }
 }
