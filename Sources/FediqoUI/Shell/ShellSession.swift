@@ -314,6 +314,10 @@ final class ShellSession {
     }
 
     /// The store row one row id stands for, in `notes`. See `held(_:)`.
+    ///
+    /// **Never a post held aside** (#175): `notes` is what `ItemStore.all()` draws, and a search
+    /// hit, a thread's answer or a post under a hashtag is not in it. A place that shows those
+    /// reads them through `store.note(_:)`, which hands over every row this device holds.
     func heldNote(_ rowID: String) -> Note? {
         guard let key = NoteKey(rowID: rowID) else { return nil }
         return notes.first { $0.source.host == key.host && $0.id == key.id }
@@ -1877,20 +1881,21 @@ final class ShellSession {
     /// **Each half assigned only where it moved.** Both have observers behind them — the forums
     /// watched, the boards each forum is read for, the holdings counted and the text index
     /// dropped — and every view reading the session redraws on an assignment, so a reload that
-    /// changed nothing used to pay for all of it. The notes are compared by the store's revision
-    /// rather than row by row: unchanged since the last adopt, and nothing here has assigned
-    /// `notes` since either, they are what the store holds.
+    /// changed nothing used to pay for all of it. The notes are compared by the store's count of
+    /// what `all()` draws rather than row by row: unchanged since the last adopt, and nothing here
+    /// has assigned `notes` since either, they are what the store holds. **That count and not the
+    /// revision** (#175), so a post held aside — written down, drawn nowhere — replaces nothing.
     private func adopt() async {
         await adoptSources()
-        let revision = await store.revision
-        if adopted?.store != revision || adopted?.notes != notesRevision {
+        let drawn = await store.drawn
+        if adopted?.store != drawn || adopted?.notes != notesRevision {
             notes = await store.all()
-            adopted = (store: revision, notes: notesRevision)
+            adopted = (store: drawn, notes: notesRevision)
         }
         rebuildQueries()
     }
 
-    /// The store's revision and `notesRevision` as the last adopt left them. Read in a hop before
+    /// The store's `drawn` and `notesRevision` as the last adopt left them. Read in a hop before
     /// the notes, so a write landing between the two is adopted again next time, never missed.
     @ObservationIgnored private var adopted: (store: Int, notes: Int)?
 

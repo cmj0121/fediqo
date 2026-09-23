@@ -733,13 +733,68 @@ struct ReloadTests {
         #expect(session.notes.first { $0.key.rowID == item.id }?.body == "edited words",
                 "the thread was not refused because the timeline was running")
         #expect(session.reload.asking == [.timeline], "and the timeline's reload is still on its way")
-        #expect(session.reload.landed == 1)
+        #expect(session.reload.landed == 0, "a thread read again does not move the list under it")
 
         await gated.gate.open()
         await timeline.value
         #expect(!session.reload.running)
-        #expect(session.reload.landed == 2, "both finished")
+        #expect(session.reload.landed == 1, "both finished")
         #expect(session.reload.failed.isEmpty)
+    }
+
+    @Test("One kind failing and the other answering: the failure is still said when both are done")
+    func failureOutlivesTheOtherKind() async throws {
+        var routes = Self.everything
+        routes["https://\(Self.one)/api/v1/statuses/9"] = .text(Self.status("9", "edited words"))
+        routes["https://\(Self.one)/api/v1/statuses/9/context"] = .text(Self.context)
+        routes[Self.publicAddress(Self.two)] = .text("", status: 500)
+        routes[Self.trendsAddress(Self.two)] = .text("", status: 500)
+        let gated = GatedHTTP(routes, holding: "/api/v1/trends/statuses")
+        let guardTask = hangGuard(gated.gate)
+        defer { guardTask.cancel() }
+        let (session, _) = await shell(http: gated)
+        let item = await holding(Self.mastodonNote(statusID: "9"), in: session)
+
+        let timeline = Task { await session.reload.timeline(.all, in: session) }
+        #expect(await spun { await gated.asks == 2 })
+        await gated.gate.open()
+        await timeline.value
+        #expect(session.reload.failed == [Self.two], "the premise: the timeline's reload missed one")
+
+        await session.reload.thread(item, in: session)
+        #expect(session.notes.first { $0.key.rowID == item.id }?.body == "edited words")
+        #expect(session.reload.failed == [Self.two], "the thread answering did not clear it")
+        #expect(session.reload.line == String(format: L10n.t("timeline.reload.failed"), Self.two))
+    }
+
+    @Test("A post held aside neither enters All nor replaces what the screen draws")
+    func asideRenewsNothing() async throws {
+        let (session, _) = await shell()
+        let item = await holding(Self.mastodonNote(statusID: "9"), in: session)
+        let following = Task { await session.followStore() }
+        defer { following.cancel() }
+        #expect(await spun { await session.store.drawn > 0 })
+        let drawn = session.notesRevision
+
+        let found = Note(
+            id: "https://\(Self.one)/users/ada/statuses/30", source: Source(host: Self.one, kind: .mastodon),
+            author: "Ada", handle: "@ada@\(Self.one)", body: "found", postedAt: Date(timeIntervalSince1970: 90),
+            categories: []
+        )
+        await session.store.hold([found], ifSourceHere: Self.one)
+        // A read of it again — an act pressed on it, a thread re-read — leaves it aside too.
+        let edited = Note(
+            id: found.id, source: found.source, author: "Ada", handle: found.handle,
+            body: "found, edited", postedAt: found.postedAt, categories: []
+        )
+        #expect(await session.store.refresh([edited], ifSourceHere: Self.one))
+        for _ in 0..<2_000 { await Task.yield() }
+        // And asked outright, rather than trusting the follower to have come round.
+        await session.reloadFromStore()
+        #expect(session.notesRevision == drawn, "nothing drawn changed, so nothing was replaced")
+        #expect(session.notes.map(\.key.rowID) == [item.id])
+        #expect(session.heldNote(found.key.rowID) == nil, "the timeline's rows never include it")
+        #expect(await session.store.note(found.key)?.body == "found, edited", "and it is still here to read")
     }
 
     @Test("Opening a thread and making a search both finish while a reload is on its way")

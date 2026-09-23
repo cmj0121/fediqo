@@ -11,9 +11,12 @@ import Observation
 // selected.
 //
 // Every request a reload makes has its own deadline, and a reload can be stopped: a server that
-// trickles cannot hold `r` for ever. **One of each kind at a time, not one at a time** (#175): a
-// thread read again does not wait on the timeline's reload, nor the timeline's on the thread. What is read as the reader is registered per host, so a
+// trickles cannot hold `r` for ever. What is read as the reader is registered per host, so a
 // sign-out, Clear or Remove stops it before anything it brings lands.
+//
+// **One of each kind at a time, not one at a time** (#175): a thread read again does not wait on
+// the timeline's reload, nor the timeline's on the thread. So what each kind last said is kept as
+// that kind's, and a thread starting or ending neither clears nor overwrites the timeline's.
 
 /// One reload of each kind at a time, and the sources the last one could not read.
 @MainActor
@@ -32,18 +35,27 @@ final class ShellReload {
     private(set) var asking: Set<Ask> = []
     /// Whether any reload is on the wire.
     var running: Bool { !asking.isEmpty }
-    /// The hosts the last reload could not read, in the order they were asked.
-    private(set) var failed: [String] = []
-    /// Bumped as each reload ends, so the list can centre the selected post again.
+    /// The hosts the last reload of each kind could not read, the timeline's first and each in
+    /// the order they were asked — a host both missed named once.
+    var failed: [String] {
+        var named: Set<String> = []
+        return [Ask.timeline, .thread].flatMap { failures[$0] ?? [] }.filter { named.insert($0).inserted }
+    }
+    /// Each kind's own `failed`, cleared only as that kind starts again.
+    private var failures: [Ask: [String]] = [:]
+    /// Bumped as each reload of the timeline ends, so the list can centre the selected post again.
+    /// A thread read again leaves the list under it where it was.
     private(set) var landed = 0
-    /// An open post the last reload could not find on its server, and why. Never guessed at.
+    /// An open post the last thread reload could not find on its server, and why. Never guessed at.
     private(set) var unfindable: Unfindable?
     /// A source the last reload found speaking something this app does not read (#86). One, not
     /// a list, for `unfindable`'s reason: the sentence names one host and there is one line to
     /// say it on.
     private(set) var unspoken: Unspoken?
-    /// The last reload was stopped by the reader before it finished.
-    private(set) var stopped = false
+    /// The last reload of some kind was stopped by the reader before it finished.
+    var stopped: Bool { !halted.isEmpty }
+    /// The kinds whose last reload was stopped, each cleared as that kind starts again.
+    private var halted: Set<Ask> = []
     /// What the running reloads' own pieces of work are listed as on `SourceWork` (#170): a
     /// timeline's reads, an open thread's, or both. The toast names one of those and counts the
     /// rest, and nothing else that happens to be on the wire meanwhile — a picture, an emoji, a
@@ -165,7 +177,7 @@ final class ShellReload {
                 }
             }
             guard !Task.isCancelled else { return }
-            self.failed = asks.map(\.host).filter(unread.contains)
+            self.failures[.timeline] = asks.map(\.host).filter(unread.contains)
         }
     }
 
@@ -181,7 +193,7 @@ final class ShellReload {
         await run(.thread) {
             if let ref = ForumThreadRef(item) {
                 let read = await session.posts.reload(ref, within: self.deadline)
-                if !read, !Task.isCancelled { self.failed = [ref.host] }
+                if !read, !Task.isCancelled { self.failures[.thread] = [ref.host] }
                 return
             }
             guard let held = session.heldNote(item.id) else { return }
@@ -200,7 +212,7 @@ final class ShellReload {
                 // adopted by that read — see `ShellConversations.read`.
                 await session.reloadFromStore()
                 await session.conversations.again(item, in: session)
-            case .failed: self.failed = [held.source.host]
+            case .failed: self.failures[.thread] = [held.source.host]
             case .unfindable(let why): self.unfindable = why
             }
         }
@@ -224,7 +236,7 @@ final class ShellReload {
     @discardableResult
     func stop() -> Bool {
         guard running else { return false }
-        stopped = true
+        halted.formUnion(asking)
         for (ask, run) in runs {
             run.work.cancel()
             finish(ask, run.generation)
@@ -240,15 +252,15 @@ final class ShellReload {
 
     /// One reload: its state set, its work started, and this waiting until it ends or is stopped.
     ///
-    /// What the last reload said is cleared as this one starts, whichever kind it was: the line
-    /// under the timeline speaks of the newest press, and a failure it named is asked again now.
+    /// What the last reload of this kind said is cleared as this one starts, and only that: a
+    /// failure it named is asked again now, and the other kind's is none of this run's business.
     private func run(_ ask: Ask, _ body: @escaping @MainActor () async -> Void) async {
         generation += 1
         let mine = generation
         asking.insert(ask)
-        failed = []
-        unfindable = nil
-        stopped = false
+        failures[ask] = nil
+        halted.remove(ask)
+        if ask == .thread { unfindable = nil }
         await withCheckedContinuation { continuation in
             let work = Task { @MainActor in
                 await body()
@@ -263,7 +275,7 @@ final class ShellReload {
         guard let run = runs[ask], run.generation == generation else { return }
         runs[ask] = nil
         asking.remove(ask)
-        landed += 1
+        if ask == .timeline { landed += 1 }
         run.waiter.resume()
     }
 
