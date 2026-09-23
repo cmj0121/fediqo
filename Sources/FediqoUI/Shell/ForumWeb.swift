@@ -248,14 +248,17 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
         await acquire()
         defer { release() }
         if case .wall(let wall) = try await settled(page) { throw ForumTransportError.wall(wall) }
-        guard let there = view.url, Host.allowsFetch(there), belongsHere(there) else {
-            throw ForumTransportError.wrongHost
-        }
+        // The origin is the row's page's own — pinned here and checked again inside the script,
+        // so a page that moves between this look and the run is refused there.
+        guard let host = page.host()?.lowercased(),
+              let there = view.url, Host.allowsFetch(there), there.host()?.lowercased() == host
+        else { throw ForumTransportError.wrongHost }
+        let origin = "https://" + host + (page.port.map { ":\($0)" } ?? "")
         let answer: Any?
         do {
             answer = try await view.callAsyncJavaScript(
                 DiscuzBlogPasswordScript.send,
-                arguments: ["password": password],
+                arguments: ["password": password, "origin": origin],
                 contentWorld: .defaultClient
             )
         } catch {

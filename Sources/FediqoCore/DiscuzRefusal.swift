@@ -235,10 +235,12 @@ enum DiscuzRefusalReader {
 /// that opens the blog page; a wrong one with a notice and no cookie. So nothing is read out of the
 /// answer: whether it opened is what the blog page says when it is read again.
 ///
-/// **Only to the page's own origin, over `https`, and nowhere else.** The form's action is resolved
-/// against the page and refused unless it is the page's origin; the post is a `fetch` from the
-/// page, `credentials: same-origin` and `redirect: error`, so it carries this forum's cookies to
-/// this forum and follows no redirect at all. It is sent from a content world the page's own
+/// **Only to the forum's own origin, over `https`, and nowhere else.** `origin` is bound in by the
+/// caller — `https://` and the row's own host — and the page and the form's resolved action must
+/// both be exactly it, checked in the script itself, so a page that navigated away between the
+/// caller's look and the run is refused. The post is a `fetch`, `credentials: same-origin` and
+/// `redirect: manual`, so it carries this forum's cookies to this forum and follows no redirect
+/// at all; a right password some forums answer with a redirect is still sent. It is sent from a content world the page's own
 /// scripts cannot reach, and nothing of it is written into the page, so the forum's script sees
 /// the password only as the forum's server does. Nothing leaves this script but a word.
 public enum DiscuzBlogPasswordScript {
@@ -248,17 +250,18 @@ public enum DiscuzBlogPasswordScript {
     );
     if (!form) { return 'no-form'; }
     if (!form.querySelector('input[name="viewpwd"]')) { return 'no-field'; }
+    if (!origin.startsWith('https://') || location.origin !== origin) { return 'elsewhere'; }
     const action = new URL(form.getAttribute('action') || '', location.href);
-    if (location.protocol !== 'https:' || action.origin !== location.origin) { return 'elsewhere'; }
+    if (action.protocol !== 'https:' || action.origin !== origin) { return 'elsewhere'; }
     const body = new URLSearchParams();
     for (const field of form.querySelectorAll('input[type="hidden"]')) {
         body.append(field.name, field.value);
     }
     body.set('viewpwd', password);
     const answer = await fetch(action.href, {
-        method: 'POST', body: body, credentials: 'same-origin', redirect: 'error', cache: 'no-store'
+        method: 'POST', body: body, credentials: 'same-origin', redirect: 'manual', cache: 'no-store'
     });
-    return answer.ok ? 'sent' : 'refused';
+    return (answer.ok || answer.type === 'opaqueredirect') ? 'sent' : 'refused';
     """
 
     /// The session cookie a right password is answered with, for the blog numbered `id`, with the

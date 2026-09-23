@@ -176,14 +176,20 @@ struct DiscuzRefusalTests {
 
     // MARK: - The password
 
-    @Test("The password goes in as a bound argument, to the page's own origin, following no redirect")
+    @Test("The password goes in as a bound argument, to the pinned origin, following no redirect")
     func thePasswordScript() {
         let script = DiscuzBlogPasswordScript.send
         #expect(script.contains("body.set('viewpwd', password)"))
-        #expect(script.contains("redirect: 'error'"))
+        // Follows no redirect, and a right password answered by one is still sent.
+        #expect(script.contains("redirect: 'manual'"))
+        #expect(script.contains("answer.type === 'opaqueredirect'"))
+        #expect(!script.contains("redirect: 'follow'"))
         #expect(script.contains("credentials: 'same-origin'"))
-        #expect(script.contains("action.origin !== location.origin"))
-        #expect(script.contains("location.protocol !== 'https:'"))
+        // The origin is the caller's, bound in, and both the page and the action must be it.
+        #expect(script.contains("location.origin !== origin"))
+        #expect(script.contains("action.origin !== origin"))
+        #expect(script.contains("origin.startsWith('https://')"))
+        #expect(script.contains("action.protocol !== 'https:'"))
         #expect(DiscuzBlogPasswordScript.isUnlock(cookie: "eA11_2132_view_pwd_blog_4", blog: 4))
         #expect(!DiscuzBlogPasswordScript.isUnlock(cookie: "eA11_2132_view_pwd_blog_14", blog: 4))
         #expect(!DiscuzBlogPasswordScript.isUnlock(cookie: "eA11_2132_view_pwd_blog_4", blog: 14))
