@@ -59,7 +59,7 @@ final class ShellReload {
     }
     /// Each kind's own `failed`, cleared as that kind starts again — and a host's name let go of
     /// as soon as another timeline read, `r`'s or the wait's, reads it whole.
-    var failures: [Ask: [String]] = [:]
+    private(set) var failures: [Ask: [String]] = [:]
     /// Bumped as each reload of the timeline ends, so the list can centre the selected post again.
     /// A thread read again leaves the list under it where it was.
     private(set) var landed = 0
@@ -170,9 +170,10 @@ final class ShellReload {
     ///
     /// **Nor while `r` reads the timeline.** Both would read the same servers at once — a
     /// stranger's forum, which is never asked in parallel, among them — for what `r` is already
-    /// bringing; the next wait asks again.
+    /// bringing; the next wait asks again. **Nor while an ask for more is out** (#87), which may be
+    /// on a forum's next page.
     func held(in session: ShellSession) async {
-        guard !asking.contains(.held), !asking.contains(.timeline), !session.sources.isEmpty else { return }
+        guard asking.isDisjoint(with: [.held, .timeline, .more]), !session.sources.isEmpty else { return }
         await run(.held) {
             let asks = session.sources.map { FetchAsk(host: $0.host, categories: nil) }
             await self.read(asks, as: .held, in: session)
@@ -257,7 +258,7 @@ final class ShellReload {
         // when a wait reads it whole, and the reverse, rather than standing until that kind runs
         // again. A thread's failure is about its post, which this did not read.
         let answered = Set(asks.map(\.host)).subtracting(unread)
-        for other in [Ask.timeline, .held] where other != kind {
+        for other in [Ask.timeline, .held, .more] where other != kind {
             if let named = failures[other], named.contains(where: answered.contains) {
                 failures[other] = named.filter { !answered.contains($0) }
             }
@@ -319,6 +320,11 @@ final class ShellReload {
     /// What the last reload of `ask` said, let go of — as it starts again, and as the thread it
     /// was about is closed, so a line about a thread nobody is reading does not stand under the
     /// timeline.
+    /// What `ask` could not read, as it ends.
+    func record(_ hosts: [String], for ask: Ask) {
+        failures[ask] = hosts
+    }
+
     func forget(_ ask: Ask) {
         failures[ask] = nil
         halted.remove(ask)
@@ -327,10 +333,11 @@ final class ShellReload {
 
     /// Stops every running reload that was pressed for — Esc. What they had not landed does not
     /// land. The ask on a wait goes on: nobody started it, and Esc has a thread or a search to
-    /// close instead of being spent on it once a minute (#95).
+    /// close instead of being spent on it once a minute (#95). Nor the ask for more: scrolling
+    /// started it, not a key (#87).
     @discardableResult
     func stop() -> Bool {
-        let pressed = asking.subtracting([.held])
+        let pressed = asking.subtracting([.held, .more])
         guard !pressed.isEmpty else { return false }
         halted.formUnion(pressed)
         for (ask, run) in runs where pressed.contains(ask) {

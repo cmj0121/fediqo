@@ -137,17 +137,108 @@ struct ListMoreTests {
     @Test("A stretch is not asked twice, and not past its end")
     func notTwiceNorPastTheEnd() async {
         let http = FixtureHTTP([
-            // Nothing older on the Mastodon; the forum's second page is its first again, as a
+            // Nothing older on the Mastodon; the forum's third page is its second again, as a
             // Discuz! answers past its last page.
             Self.older(than: "5"): Self.page(),
-            Self.board(page: 2): Self.board((40125, "工具箱一键下载安装")),
+            Self.board(page: 2): Self.board((40100, "二")),
+            Self.board(page: 3): Self.board((40100, "二")),
         ])
         let session = await shell(http)
         await session.reload.more(.all, in: session)
+        #expect(await http.requested.count == 2)
+        await session.reload.more(.all, in: session)
+        #expect(await http.requested.map(\.absoluteString).last == Self.board(page: 3), "the Mastodon is at its end")
         let asked = await http.requested.count
-        #expect(asked == 2)
+        #expect(asked == 3)
         await session.reload.more(.all, in: session)
         #expect(await http.requested.count == asked, "both at their end: nothing asked again")
+    }
+
+    @Test("A page this device already holds is not the end: an earlier run's page two leads on to page three")
+    func heldIsNotTheEnd() async {
+        let http = FixtureHTTP([
+            Self.older(than: "5"): Self.page(),
+            Self.board(page: 2): Self.board((40125, "工具箱一键下载安装")),
+            Self.board(page: 3): Self.board((40090, "三")),
+        ])
+        let session = await shell(http)
+        await session.reload.more(.all, in: session)
+        await session.reload.more(.all, in: session)
+        #expect(await http.requested.map(\.absoluteString).contains(Self.board(page: 3)))
+        #expect(ids(session).contains("discuz:\(Self.forum):40090"))
+    }
+
+    @Test("Esc does not stop an ask for more: scrolling started it, not a key")
+    func escLeavesIt() async {
+        let gated = GatedHTTP([
+            Self.older(than: "5"): Self.page(),
+            Self.board(page: 2): Self.board((40100, "二")),
+        ], holding: Self.older(than: "5"))
+        let guardTask = hangGuard(gated.gate)
+        defer { guardTask.cancel() }
+        let session = await shell(gated)
+        let more = Task { await session.reload.more(.all, in: session) }
+        #expect(await spun { await gated.asks == 1 })
+        #expect(!session.reload.stop(), "nothing pressed to stop")
+        #expect(session.reload.asking == [.more])
+        #expect(!session.reload.stopped)
+        await gated.gate.open()
+        await more.value
+        #expect(ids(session).contains("discuz:\(Self.forum):40100"))
+    }
+
+    @Test("The wait does not start while an ask for more is out")
+    func waitHoldsOff() async {
+        let gated = GatedHTTP([Self.older(than: "5"): Self.page()], holding: Self.older(than: "5"))
+        let guardTask = hangGuard(gated.gate)
+        defer { guardTask.cancel() }
+        let session = await shell(gated)
+        let more = Task { await session.reload.more(.all, in: session) }
+        #expect(await spun { await gated.asks == 1 })
+        await session.reload.held(in: session)
+        #expect(session.reload.asking == [.more], "the wait asked nothing")
+        await gated.gate.open()
+        await more.value
+    }
+
+    @Test("A forum page read before r started its pages over is not recorded over the restart")
+    func staleRestart() async {
+        let gated = GatedHTTP([
+            Self.older(than: "5"): Self.page(),
+            Self.board(page: 2): Self.board((40100, "二")),
+            Self.newest(): Self.page(),
+            Self.trends: Self.page(),
+            Self.boardFirst: Self.board((40125, "工具箱一键下载安装")),
+            MastodonInstance.address(Self.one): MastodonInstance.mastodon(Self.one),
+        ], holding: Self.board(page: 2))
+        let guardTask = hangGuard(gated.gate)
+        defer { guardTask.cancel() }
+        let session = await shell(gated)
+        let more = Task { await session.reload.more(.all, in: session) }
+        #expect(await spun { await gated.asks == 1 })
+        await session.reload.timeline(.all, in: session)
+        await gated.gate.open()
+        await more.value
+        let before = await gated.asks
+        await session.reload.more(.all, in: session)
+        #expect(await gated.asks == before + 1, "page two asked again, not page three")
+    }
+
+    @Test("A host the ask for more missed is not still named once r reads it whole")
+    func answeredClears() async {
+        let http = FixtureHTTP([
+            Self.older(than: "5"): .text("", status: 500),
+            Self.board(page: 2): Self.board((40100, "二")),
+            Self.newest(): Self.page(),
+            Self.trends: Self.page(),
+            Self.boardFirst: Self.board((40125, "工具箱一键下载安装")),
+            MastodonInstance.address(Self.one): MastodonInstance.mastodon(Self.one),
+        ])
+        let session = await shell(http)
+        await session.reload.more(.all, in: session)
+        #expect(session.reload.failed == [Self.one])
+        await session.reload.held(in: session)
+        #expect(session.reload.failed.isEmpty)
     }
 
     @Test("A forum's stretch goes on a page at a time while each brings something new")
@@ -198,32 +289,34 @@ struct ListMoreTests {
         #expect(await http.requested.count == 4)
     }
 
-    @Test("While it is on its way the toast says so; r beside it does not wait on it; both landing leave one row")
+    @Test("Asked while r reads: only the Mastodon's next stretch, the forum left to r; both landing leave one row")
     func landingTogether() async throws {
         let shared = Self.status("4", day: 4)
         let gated = GatedHTTP([
             Self.older(than: "5"): Self.page(shared),
-            Self.board(page: 2): Self.board((40125, "工具箱一键下载安装")),
+            Self.board(page: 2): Self.board((40100, "二")),
             Self.newest(): Self.page(shared),
             Self.trends: Self.page(),
             Self.boardFirst: Self.board((40125, "工具箱一键下载安装")),
             MastodonInstance.address(Self.one): MastodonInstance.mastodon(Self.one),
-        ], holding: Self.older(than: "5"))
+        ], holding: Self.newest())
         let guardTask = hangGuard(gated.gate)
         defer { guardTask.cancel() }
         let session = await shell(gated)
 
-        let more = Task { await session.reload.more(.all, in: session) }
+        let reload = Task { await session.reload.timeline(.all, in: session) }
         #expect(await spun { await gated.asks == 1 })
-        #expect(session.reload.asking == [.more])
+        await session.reload.more(.all, in: session)
+        #expect(session.reload.asking == [.timeline], "the ask for more ran beside r and finished")
+        let asked = await gated.requested()
+        #expect(!asked.contains(Self.board(page: 2)), "no forum asked twice at once")
+        #expect(asked.contains(Self.older(than: "5")))
         #expect(TimelineToast.shown(
             running: session.reload.running, waiting: session.reload.onlyWaiting,
             line: session.reload.line, stopped: session.reload.stopped, note: nil
         )?.kind == .loading, "on its way, as every other wait says it")
-        await session.reload.timeline(.all, in: session)
-        #expect(session.reload.asking == [.more], "r ran beside it and finished")
         await gated.gate.open()
-        await more.value
+        await reload.value
 
         let key = "https://\(Self.one)/users/ada/statuses/4"
         #expect(ids(session).filter { $0 == key }.count == 1)
@@ -325,6 +418,6 @@ struct StretchAddressTests {
         let http = FixtureHTTP([:])
         _ = try? await MastodonClient(http: http, host: "m.example")
             .publicTimeline(source: Source(host: "m.example", kind: .mastodon), olderThan: "../x")
-        #expect(await http.requested.map(\.absoluteString) == ["https://m.example/api/v1/timelines/public?limit=40"])
+        #expect(await http.requested.isEmpty, "not the newest page in its place")
     }
 }

@@ -402,10 +402,10 @@ struct TimelinePane: View {
                         .id(item.id)
                         // Reading toward the end asks for the next stretch (#87): a lazy row
                         // appears as it is scrolled or walked to, and nothing else asks.
-                        .onAppear {
-                            guard Self.asksForMore(at: index, of: items.count, searching: searching) else { return }
-                            Task { await session.reload.more(timeline, in: session) }
-                        }
+                        .modifier(AsksForMore(
+                            asks: Self.asksForMore(at: index, of: items.count, searching: searching),
+                            timeline: timeline, session: session
+                        ))
                         if !isLast {
                             Rectangle()
                                 .fill(ShellChrome.hairline(colorScheme))

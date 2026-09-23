@@ -158,7 +158,7 @@ public struct MastodonAccount: Sendable {
         _ path: String, source: Source, category: Category, olderThan maxID: String? = nil
     ) async throws -> [Note] {
         let data = try await reading(category).get(
-            path: path, query: [URLQueryItem(name: "limit", value: "40")] + MastodonPage.older(than: maxID)
+            path: path, query: [URLQueryItem(name: "limit", value: "40")] + (try MastodonPage.older(than: maxID))
         )
         return try MastodonJSON.decoder.decode([StatusDTO].self, from: data).map {
             $0.asNote(source: source, category: category)

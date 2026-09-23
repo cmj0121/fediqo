@@ -1,5 +1,6 @@
 import FediqoCore
 import Foundation
+import SwiftUI
 
 // Listing a timeline asks for more as you go (#87).
 //
@@ -16,8 +17,14 @@ import Foundation
 //
 // **Asked once, and not past the end.** A Mastodon stretch is asked before one post once: a page
 // that brought nothing older leaves the same oldest post, and the same ask is not made again. A
-// forum's stretch ends at a page that brought no thread this device did not already hold — which
-// is also what a Discuz! answers past its last page, the last page again.
+// forum's stretch ends at a page with no thread on it, or at a page the same as the one before —
+// which is what a Discuz! answers past its last page, the last page again. **Not at a page this
+// device already holds**: what an earlier run read is still here, and ending there would stop
+// every later run's listing at its second page.
+//
+// **Never the same forum twice at once.** A stranger's forum is asked one page after another; so
+// while `r` or the wait is reading, the forums are left out of an ask for more, and the wait does
+// not start while one is out.
 
 /// One read of one source a listing can ask the next stretch of (#87).
 struct Stretch: Hashable, Sendable {
@@ -32,8 +39,13 @@ struct ShellStretches {
     private var asked: [Stretch: Set<String>] = [:]
     /// How many pages past its first each forum stretch has read.
     private var further: [Stretch: Int] = [:]
+    /// The threads each forum stretch's last page carried, to tell a page repeated past the end.
+    private var lastPage: [Stretch: Set<NoteKey>] = [:]
     /// Forum stretches read to their end.
     private var ended: Set<Stretch> = []
+    /// Counts the restarts. A forum page read under an earlier one is about pages that have since
+    /// moved along, and is dropped rather than recorded over the restart.
+    private(set) var generation = 0
 
     func hasAsked(_ stretch: Stretch, before id: String) -> Bool {
         asked[stretch]?.contains(id) == true
@@ -49,16 +61,25 @@ struct ShellStretches {
         ended.contains(stretch) ? nil : (further[stretch] ?? 0) + 1
     }
 
-    /// One forum page read: the end where it brought nothing new, and the page after it otherwise.
-    mutating func read(_ stretch: Stretch, page: Int, broughtNew: Bool) {
-        if broughtNew { further[stretch] = page } else { ended.insert(stretch) }
+    /// One forum page read under `generation`, carrying `threads`: the end where it carried none
+    /// or the same as the page before it, and the page after it otherwise.
+    mutating func read(_ stretch: Stretch, page: Int, threads: Set<NoteKey>, generation: Int) {
+        guard generation == self.generation else { return }
+        if threads.isEmpty || threads == lastPage[stretch] {
+            ended.insert(stretch)
+        } else {
+            further[stretch] = page
+            lastPage[stretch] = threads
+        }
     }
 
     /// A forum's newest page was read again, which moves every page under it along. The Mastodon
     /// half is kept: an id says exactly what is older than it, whatever arrived since.
     mutating func restart() {
         further = [:]
+        lastPage = [:]
         ended = []
+        generation += 1
     }
 }
 
@@ -80,10 +101,12 @@ extension ShellReload {
     /// The next stretch of `query`'s reads, from its own sources only — the timeline in front,
     /// neared its end. In the background: nothing waits on it, and a stretch already asked, or at
     /// its source's end, is not asked. Nothing while the timeline editor is up, or while another
-    /// ask for more is on its way.
+    /// ask for more is on its way; and no forum while `r` or the wait is reading.
     func more(_ query: TimelineQuery, in session: ShellSession) async {
         guard !asking.contains(.more), session.editing == nil else { return }
+        let readingNewest = asking.contains(.timeline) || asking.contains(.held)
         let due = Self.due(query, in: session, stretches: stretches)
+            .filter { !readingNewest || $0.source.kind == .mastodon }
         guard !due.isEmpty else { return }
         let hosts = due.map(\.stretch.host).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
         await run(.more) {
@@ -101,7 +124,7 @@ extension ShellReload {
                 }
             }
             guard !Task.isCancelled else { return }
-            self.failures[.more] = hosts.filter(unread.contains)
+            self.record(hosts.filter(unread.contains), for: .more)
         }
     }
 
@@ -182,6 +205,7 @@ extension ShellReload {
                 try await mastodon(due, before: id, stamp: stamp, in: session)
                 stretches.asked(due.stretch, before: id)
             case .page(let page):
+                let generation = stretches.generation
                 let notes: [Note]
                 do {
                     notes = try await forum(due, page: page, stamp: stamp, in: session)
@@ -190,13 +214,10 @@ extension ShellReload {
                     notes = []
                 }
                 try Task.checkCancellation()
-                var broughtNew = false
-                for note in notes where await session.store.note(note.key) == nil {
-                    broughtNew = true
-                    break
-                }
                 await session.store.ingest(notes, ifSourceHere: host)
-                stretches.read(due.stretch, page: page, broughtNew: broughtNew)
+                stretches.read(
+                    due.stretch, page: page, threads: Set(notes.map(\.key)), generation: generation
+                )
             }
             return true
         } catch MastodonAuthError.signedOut {
@@ -218,7 +239,9 @@ extension ShellReload {
         case .some(let category):
             // As the reader, through a door named for the timeline it reads, and ended by a
             // sign-out or a Clear before anything it brings lands.
-            guard let token = session.mastodon.token(host: host) else { return }
+            // Signed out since this was worked out: nothing is asked, and the stretch is not
+            // recorded as asked — a walk away, as a sign-out ends a read already on its way.
+            guard let token = session.mastodon.token(host: host) else { throw CancellationError() }
             let name: SourceWork.Name? = switch category {
             case .home: .home
             case .list(let listID): due.source.lists.first { $0.id == listID }.map { .called($0.name) }
@@ -253,6 +276,22 @@ extension ShellReload {
             return try await client.latest(source: stamp, page: further)
         default:
             return []
+        }
+    }
+}
+
+/// A row that, coming into view, asks the timeline in front for its next stretch (#87) — where
+/// `asks` says it is near enough the end to. A modifier of its own so the list's row stays one
+/// chain the type-checker reads quickly.
+struct AsksForMore: ViewModifier {
+    let asks: Bool
+    let timeline: TimelineQuery
+    let session: ShellSession
+
+    func body(content: Content) -> some View {
+        content.onAppear {
+            guard asks else { return }
+            Task { await session.reload.more(timeline, in: session) }
         }
     }
 }

@@ -146,7 +146,7 @@ public struct MastodonClient: Sendable {
         guard let url = Host.httpsURL(
             host: host,
             path: path,
-            query: [URLQueryItem(name: "limit", value: String(limit))] + MastodonPage.older(than: maxID)
+            query: [URLQueryItem(name: "limit", value: String(limit))] + (try MastodonPage.older(than: maxID))
         ) else {
             throw MastodonRequestError.invalidURL
         }
@@ -515,10 +515,12 @@ final class Box<Wrapped: Decodable & Sendable>: Decodable, Sendable {
 }
 
 /// The one way a Mastodon read asks for the stretch before a post (#87): `max_id`, checked as a
-/// list id is, since the id came back out of the store.
+/// list id is, since the id came back out of the store. **One that is not an id asks nothing**:
+/// dropping it would ask for the newest page instead, which is not the page anybody asked for.
 enum MastodonPage {
-    static func older(than maxID: String?) -> [URLQueryItem] {
-        guard let maxID, ListSubscription.isPathSegment(maxID) else { return [] }
+    static func older(than maxID: String?) throws -> [URLQueryItem] {
+        guard let maxID else { return [] }
+        guard ListSubscription.isPathSegment(maxID) else { throw MastodonRequestError.invalidURL }
         return [URLQueryItem(name: "max_id", value: maxID)]
     }
 }
