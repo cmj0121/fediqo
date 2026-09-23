@@ -241,22 +241,99 @@ struct SearchSourcesTests {
         #expect(MastodonSearch.words(of: "cats") == "cats")
         #expect(MastodonSearch.words(of: " c*t  do?s ") == "c t do s")
         #expect(MastodonSearch.words(of: "* ?") == nil)
+        #expect(MastodonSearch.words(of: "＊ ？") == nil, "a wildcard in any width")
+        #expect(MastodonSearch.words(of: "a＊b") == "a b")
+    }
+
+    // MARK: - Review (#176)
+
+    @Test("From a timeline that reads only some categories, nobody is asked, and that is said")
+    func categoriesAskNobody() async throws {
+        let server = Searchable([Self.one: Self.found])
+        let session = try await shell(server)
+        await session.reload.search("cats", timeline: .trends, in: session)
+        #expect(await server.asked.isEmpty, "a find arrives through no category, so Trends could never show it")
+        #expect(session.reload.reach?.asked == [])
+        #expect(session.reload.reach?.unasked.contains(Self.one) == true)
+        #expect(!session.reload.running)
+    }
+
+    @Test("Switching timeline with a search sent re-sends it to the new one's sources, and only then")
+    func switchingReasks() async throws {
+        let server = Searchable([Self.one: Self.found])
+        let session = try await shell(server)
+        await session.reload.searchSwitched(to: .trends, in: session)
+        #expect(await server.asked.isEmpty, "no Return made yet: nothing to send again")
+
+        await session.reload.search("cats", timeline: .all, in: session)
+        #expect(await server.asked.count == 1)
+        await session.reload.searchSwitched(to: .trends, in: session)
+        #expect(await server.asked.count == 1, "Trends' sources cannot be searched")
+        #expect(session.reload.reach?.asked == [], "the line is Trends', not All's")
+
+        var draft = TimelineDraft(new: session.written.count + 1)
+        draft.name = "Wire"
+        draft.rules = [try #require(Rule.keyword("wire", in: .every))]
+        session.commit(draft)
+        await session.reload.searchSwitched(to: .written(draft.id), in: session)
+        #expect(await server.asked.count == 2, "sent again, to the new timeline's sources")
+        #expect(session.reload.reach?.asked == [Self.one])
+    }
+
+    @Test("A token that may not search is said as a sign-in to make again, not as silence")
+    func refusedIsSaid() async throws {
+        let session = try await shell(Searchable([Self.one: "{}"], refusing: [Self.one]))
+        await session.reload.search("cats", timeline: .all, in: session)
+        #expect(session.reload.searchFailed.isEmpty)
+        #expect(session.reload.searchRefused == [Self.one])
+        #expect(session.reload.line == "Could not search one.example: sign in to it again to let Fediqo search there.")
+        #expect(L10n.t("search.scope", language: .taiwanese) != "search.scope")
+        session.reload.endSearch()
+        #expect(session.reload.line == nil)
+    }
+
+    @Test("What is held aside is counted apart: a landing only the timelines see does not move it")
+    func asideIsCountedApart() async {
+        let store = ItemStore()
+        let source = Source(host: Self.one, kind: .mastodon)
+        await store.add(source)
+        func note(_ id: String) -> Note {
+            Note(id: id, source: source, author: "Ada", handle: "@ada@\(Self.one)", body: id,
+                 postedAt: Date(timeIntervalSince1970: 0), categories: [])
+        }
+        await store.ingest([note("drawn")])
+        #expect(await store.asideRevision == 0)
+        await store.hold([note("aside")], ifSourceHere: Self.one)
+        #expect(await store.asideRevision == 1)
+        await store.hold([note("aside")], ifSourceHere: Self.one)
+        #expect(await store.asideRevision == 1, "the same again changed nothing")
+        await store.ingest([note("aside")])
+        #expect(await store.asideRevision == 2, "widened out of aside")
+        await store.hold([note("gone")], ifSourceHere: Self.one)
+        await store.forget(note("gone").key)
+        #expect(await store.asideRevision == 4)
+        await store.ingest([note("more")])
+        #expect(await store.asideRevision == 4)
     }
 }
 
 /// A signed-in door answering `/api/v2/search` per host, remembering who was asked and with what.
-/// `failing` hosts answer 500; `holding` parks every search until the gate opens.
+/// `failing` hosts answer 500, `refusing` ones 403; `holding` parks every search until the gate opens.
 private actor Searchable: HTTPSender {
     private let bodies: [String: String]
     private let failing: Set<String>
+    private let refusing: Set<String>
     private let holding: Bool
     let gate = Gate()
     private(set) var asked: [String] = []
     private(set) var queries: [[URLQueryItem]] = []
 
-    init(_ bodies: [String: String], failing: Set<String> = [], holding: Bool = false) {
+    init(
+        _ bodies: [String: String], failing: Set<String> = [], refusing: Set<String> = [], holding: Bool = false
+    ) {
         self.bodies = bodies
         self.failing = failing
+        self.refusing = refusing
         self.holding = holding
     }
 
@@ -267,7 +344,7 @@ private actor Searchable: HTTPSender {
         asked.append(host)
         queries.append(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? [])
         if holding { await gate.wait() }
-        let status = failing.contains(host) ? 500 : 200
+        let status = refusing.contains(host) ? 403 : failing.contains(host) ? 500 : 200
         return (Data(body.utf8), HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)!)
     }
 }

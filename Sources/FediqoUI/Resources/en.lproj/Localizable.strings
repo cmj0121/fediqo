@@ -213,6 +213,7 @@
 "search.found" = "%d found";
 "search.asking" = "Searching %@…";
 "search.failed" = "Could not search %@.";
+"search.scope" = "Could not search %@: sign in to it again to let Fediqo search there.";
 "search.reach.asked" = "Also asked %@.";
 "search.reach.notAsked" = "Not asked, as they cannot be searched from here: %@.";
 "search.empty.title" = "Nothing in %@ matches";

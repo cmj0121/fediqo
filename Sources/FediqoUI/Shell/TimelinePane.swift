@@ -234,6 +234,9 @@ struct TimelinePane: View {
                 if let selectedID, !items.contains(where: { $0.id == selectedID }) {
                     self.selectedID = nil
                 }
+                // A search sent to the last timeline's sources is sent to this one's (#176).
+                let now = session.currentTimeline
+                Task { await session.reload.searchSwitched(to: now, in: session) }
             }
             // The walk ends on the same change, where it is held: `FediqoRootView` clears it.
         }

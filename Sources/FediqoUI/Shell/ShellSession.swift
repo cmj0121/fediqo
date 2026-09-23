@@ -1917,24 +1917,22 @@ final class ShellSession {
     /// revision** (#175), so a post held aside — written down, drawn nowhere — replaces nothing.
     private func adopt() async {
         await adoptSources()
-        let revision = await store.revision
+        let asideRevision = await store.asideRevision
         let drawn = await store.drawn
         if adopted?.store != drawn || adopted?.notes != notesRevision {
             notes = await store.all()
             adopted = (store: drawn, notes: notesRevision)
         }
-        // What is held aside moves the revision and not `drawn`, so it is read again on the
-        // revision — and assigned only where it changed, so a landing only the timelines see
-        // does not redraw a search (#176).
-        if adoptedAside != revision {
-            let held = await store.aside()
-            if held != aside { aside = held }
-            adoptedAside = revision
+        // What is held aside has a count of its own, as what is drawn has, so a landing only
+        // the timelines see neither reads it again nor redraws a search (#176).
+        if adoptedAside != asideRevision {
+            aside = await store.aside()
+            adoptedAside = asideRevision
         }
         rebuildQueries()
     }
 
-    /// The store's revision as the last adopt read what is held aside.
+    /// The store's `asideRevision` as the last adopt read what is held aside.
     @ObservationIgnored private var adoptedAside: Int?
 
     /// The store's `drawn` and `notesRevision` as the last adopt left them. Read in a hop before

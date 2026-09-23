@@ -163,8 +163,11 @@ final class ShellReload {
         if !failed.isEmpty {
             return String(format: L10n.t("timeline.reload.failed"), failed.joined(separator: ", "))
         }
-        guard !searchFailed.isEmpty else { return nil }
-        return String(format: L10n.t("search.failed"), searchFailed.joined(separator: ", "))
+        if !searchFailed.isEmpty {
+            return String(format: L10n.t("search.failed"), searchFailed.joined(separator: ", "))
+        }
+        guard !searchRefused.isEmpty else { return nil }
+        return String(format: L10n.t("search.scope"), searchRefused.joined(separator: ", "))
     }
 
     /// Which sources a search asked, and which of the timeline's it did not because they cannot be
@@ -190,13 +193,19 @@ final class ShellReload {
         /// **Only a Mastodon this device is signed in to can be searched.** Its server answers a
         /// search of its posts to an account it knows (`MastodonSearch`); a forum's search pages
         /// are not something this app reads, and a source it does not speak is not asked at all.
+        ///
+        /// **Nor one the timeline reads only some categories of** — Trends, a written timeline
+        /// of somebody's Home or one board. What a search finds arrives through no category, so
+        /// no such rule could ever let it through: asking would put finds in the store that this
+        /// timeline can never show, and the line would say a source was asked for nothing.
         @MainActor
-        static func of(_ hosts: [String], in session: ShellSession) -> SearchReach {
-            let asked = hosts.filter { host in
-                session.sources.first { $0.host == host }?.kind == .mastodon
-                    && session.mastodon.token(host: host) != nil
-            }
-            return SearchReach(asked: asked, unasked: hosts.filter { !asked.contains($0) })
+        static func of(_ asks: [FetchAsk], in session: ShellSession) -> SearchReach {
+            let asked = asks.filter { ask in
+                ask.categories == nil
+                    && session.sources.first { $0.host == ask.host }?.kind == .mastodon
+                    && session.mastodon.token(host: ask.host) != nil
+            }.map(\.host)
+            return SearchReach(asked: asked, unasked: asks.map(\.host).filter { !asked.contains($0) })
         }
     }
 
@@ -212,25 +221,45 @@ final class ShellReload {
         endSearch()
         searchedFor = SearchedFor(pattern: pattern, query: query)
         guard let words = MastodonSearch.words(of: pattern) else { return }
-        let hosts = CompiledTimeline(query.definition(among: session.written), sources: session.sources)
-            .sourcesToAsk().map(\.host)
-        let reach = SearchReach.of(hosts, in: session)
+        let asks = CompiledTimeline(query.definition(among: session.written), sources: session.sources)
+            .sourcesToAsk()
+        let reach = SearchReach.of(asks, in: session)
         self.reach = reach
         guard !reach.asked.isEmpty else { return }
         await run(.search) {
-            var missed: Set<String> = []
-            await withTaskGroup(of: (String, Bool).self) { group in
+            var came: [String: Found] = [:]
+            await withTaskGroup(of: (String, Found).self) { group in
                 for host in reach.asked {
                     group.addTask { (host, await self.found(words, on: host, in: session)) }
                 }
-                for await (host, came) in group {
-                    if !came { missed.insert(host) }
+                for await (host, answer) in group {
+                    came[host] = answer
                     await session.reloadFromStore()
                 }
             }
             guard !Task.isCancelled else { return }
-            self.failures[.search] = reach.asked.filter(missed.contains)
+            self.failures[.search] = reach.asked.filter { came[$0] == .missed }
+            self.searchRefused = reach.asked.filter { came[$0] == .refused }
         }
+    }
+
+    /// The timeline under an open search changed (#145): a search sent to the sources is sent
+    /// again to the new one's, whose sources and rules are what the results are now asked of —
+    /// rather than the last timeline's ask running on and its line naming sources this one may
+    /// not have. Nothing where no Return has been made since the search opened.
+    func searchSwitched(to query: TimelineQuery, in session: ShellSession) async {
+        guard reach != nil, let last = searchedFor, last.query != query else { return }
+        await search(last.pattern, timeline: query, in: session)
+    }
+
+    /// The sources the last search asked whose token may not search — issued before `read:search`
+    /// was asked for. Said as a sign-in to make again, not as a server that did not answer.
+    private(set) var searchRefused: [String] = []
+
+    private enum Found: Sendable {
+        case answered
+        case missed
+        case refused
     }
 
     /// What the search on its way was sent for.
@@ -245,14 +274,15 @@ final class ShellReload {
     func endSearch() {
         end(.search)
         failures[.search] = nil
+        searchRefused = []
         reach = nil
     }
 
     /// One source searched for `words`, what it found held aside. Whether it answered.
-    private func found(_ words: String, on host: String, in session: ShellSession) async -> Bool {
+    private func found(_ words: String, on host: String, in session: ShellSession) async -> Found {
         guard let source = session.sources.first(where: { $0.host == host }),
               let door = session.mastodon.authorized(host: host, within: deadline, for: .search)
-        else { return false }
+        else { return .missed }
         let stamp = Source(host: host, kind: source.kind)
         do {
             let notes = try await asReader(host) {
@@ -260,12 +290,14 @@ final class ShellReload {
             }
             try Task.checkCancellation()
             await session.store.hold(notes, ifSourceHere: host)
-            return true
+            return .answered
         } catch MastodonAuthError.signedOut {
             session.mastodon.endedByServer(host: host)
-            return false
+            return .missed
+        } catch MastodonAuthError.http(403) {
+            return .refused
         } catch {
-            return Cancellation.happened(error)
+            return Cancellation.happened(error) ? .answered : .missed
         }
     }
 

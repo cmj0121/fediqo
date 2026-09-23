@@ -33,10 +33,18 @@ public struct MastodonSearch: Sendable {
     /// What a search pattern (#32) sends a server: its words, with `*` and `?` let go — a server
     /// has its own idea of matching, and what comes back is matched against the pattern here
     /// anyway. Nil where nothing but wildcards and spaces is left.
+    ///
+    /// **A wildcard in any width.** The pattern is matched folded (`Fold.key`), so `＊` and `？`
+    /// are wildcards there too, and sending one to a server would ask it for a full-width star.
     public static func words(of pattern: String) -> String? {
-        let words = String(pattern.map { $0 == "*" || $0 == "?" ? " " : $0 })
+        let words = String(pattern.map { isWildcard($0) ? " " : $0 })
             .split(whereSeparator: \.isWhitespace)
             .joined(separator: " ")
         return words.isEmpty ? nil : words
+    }
+
+    private static func isWildcard(_ character: Character) -> Bool {
+        let folded = String(character).folding(options: .widthInsensitive, locale: nil)
+        return folded == "*" || folded == "?"
     }
 }

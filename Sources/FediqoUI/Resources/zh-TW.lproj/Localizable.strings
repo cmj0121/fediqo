@@ -212,6 +212,7 @@
 "search.found" = "找到 %d 則";
 "search.asking" = "正在搜尋 %@…";
 "search.failed" = "無法搜尋 %@。";
+"search.scope" = "無法搜尋 %@：請重新登入，讓 Fediqo 能在那裡搜尋。";
 "search.reach.asked" = "也問了 %@。";
 "search.reach.notAsked" = "沒有問，因為從這裡無法搜尋：%@。";
 "search.empty.title" = "「%@」裡沒有相符的貼文";

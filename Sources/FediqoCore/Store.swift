@@ -35,6 +35,11 @@ public actor ItemStore {
     /// source's boards restated, or a post held aside, is a change a save writes and no timeline
     /// shows. A reader that has adopted `all()` at this count has nothing new to adopt.
     public private(set) var drawn = 0
+    /// Counts the changes to what `aside()` hands over (#176): a row held aside arriving, changing
+    /// or going, or widening into one a timeline draws. A reader that has adopted `aside()` at
+    /// this count has nothing new to adopt — so a landing only the timelines see does not make a
+    /// search read every row held aside again.
+    public private(set) var asideRevision = 0
     /// Everyone listening for a change. See `changes()`.
     private var listeners: [UUID: AsyncStream<Int>.Continuation] = [:]
 
@@ -68,10 +73,12 @@ public actor ItemStore {
 
     /// Something here changed: the revision moves and everyone listening is told. **The one place
     /// either happens**, so a call that tells a saver it changed cannot forget to tell a screen.
-    /// `shown` says whether it changed what `all()` draws too, and moves `drawn` where it did.
-    private func changed(shown: Bool) {
+    /// `shown` says whether it changed what `all()` draws too, and moves `drawn` where it did;
+    /// `aside` the same of what `aside()` hands over, and `asideRevision`.
+    private func changed(shown: Bool, aside: Bool = false) {
         revision += 1
         if shown { drawn += 1 }
+        if aside { asideRevision += 1 }
         for listener in listeners.values { listener.yield(revision) }
     }
 
@@ -192,6 +199,7 @@ public actor ItemStore {
         guard !incoming.isEmpty else { return }
         var moved = false
         var shown = false
+        var aside = false
         for note in incoming where retention.map({ note.postedAt >= $0 }) ?? true {
             let key = note.key
             if let existing = notes[key] {
@@ -205,15 +213,18 @@ public actor ItemStore {
                 merged.holding = holding
                 notes[key] = merged
                 shown = shown || holding == .arrived
+                // Held aside before: it changed there, or it widened out of there.
+                aside = aside || existing.holding == .aside
             } else {
                 notes[key] = note
                 arrival[key] = arrivals
                 arrivals += 1
                 shown = shown || note.holding == .arrived
+                aside = aside || note.holding == .aside
             }
             moved = true
         }
-        if moved { changed(shown: shown) }
+        if moved { changed(shown: shown, aside: aside) }
     }
 
     /// Posts read again (#29), only while `host` is still a source here and only those stamped
@@ -228,6 +239,7 @@ public actor ItemStore {
         guard sourceList.contains(where: { $0.host == host }) else { return false }
         var moved = false
         var shown = false
+        var aside = false
         for note in incoming where note.source.host == host {
             guard let existing = notes[note.key] else { continue }
             // The same words read again are not a change (#175): a thread re-read with nothing
@@ -237,8 +249,9 @@ public actor ItemStore {
             notes[note.key] = refreshed
             moved = true
             shown = shown || refreshed.holding == .arrived
+            aside = aside || refreshed.holding == .aside
         }
-        if moved { changed(shown: shown) }
+        if moved { changed(shown: shown, aside: aside) }
         return moved
     }
 
@@ -248,18 +261,20 @@ public actor ItemStore {
     @discardableResult
     public func keep(_ openings: [NoteKey: ForumOpening]) -> Bool {
         var moved = false
+        var aside = false
         for (key, opening) in openings {
             guard let held = notes[key], held.opening != opening,
                   sourceList.contains(where: { $0.host == key.host })
             else { continue }
             notes[key] = held.with(opening: opening)
             moved = true
+            aside = aside || held.holding == .aside
         }
         // Written down, and not a change to what is drawn: the screen draws an opening from the
         // forum's own cache as it is read, and replacing every row for each one kept as the reader
         // scrolls is what #154 set out not to do. Only a later change to what All shows carries
         // it onto the screen's rows.
-        if moved { changed(shown: false) }
+        if moved { changed(shown: false, aside: aside) }
         return moved
     }
 
@@ -278,9 +293,10 @@ public actor ItemStore {
     public func remove(host raw: String) {
         let host = raw.lowercased()
         sourceList.removeAll { $0.host == host }
+        let aside = notes.contains { $0.key.host == host && $0.value.holding == .aside }
         notes = notes.filter { $0.key.host != host }
         arrival = arrival.filter { $0.key.host != host }
-        changed(shown: true)
+        changed(shown: true, aside: aside)
     }
 
     public func sources() -> [Source] {
@@ -296,10 +312,11 @@ public actor ItemStore {
         retention = KeepPolicy.cutoff(keepingMonths: months, from: now, calendar: calendar)
         guard let retention else { return 0 }
         let before = notes.count
+        let asideBefore = notes.values.filter { $0.holding == .aside }.count
         notes = notes.filter { $0.value.postedAt >= retention }
         if notes.count != before {
             arrival = arrival.filter { notes[$0.key] != nil }
-            changed(shown: true)
+            changed(shown: true, aside: notes.values.filter { $0.holding == .aside }.count != asideBefore)
         }
         return before - notes.count
     }
@@ -348,7 +365,7 @@ public actor ItemStore {
     /// sources are theirs to say about.
     public func forget(_ key: NoteKey) {
         guard let gone = notes.removeValue(forKey: key) else { return }
-        changed(shown: gone.holding == .arrived)
+        changed(shown: gone.holding == .arrived, aside: gone.holding == .aside)
     }
 
     /// One row, or nothing where this store does not hold it.
