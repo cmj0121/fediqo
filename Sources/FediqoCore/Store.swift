@@ -330,6 +330,17 @@ public actor ItemStore {
             .sorted { Self.storeOrder($0, $1, arrival) }
     }
 
+    /// Every row held aside, newest first — what `all()` leaves out, and nothing it draws.
+    ///
+    /// **For the one place that reads past a timeline** (#176): a search finds what this device
+    /// holds, and what a search brought back is held aside so All does not grow by it. Nothing
+    /// else draws these; a search still passes them through the rules of the timeline in front.
+    public func aside() -> [Note] {
+        let arrival = self.arrival
+        return notes.values.filter { $0.holding == .aside }
+            .sorted { Self.storeOrder($0, $1, arrival) }
+    }
+
     /// Lets go of one row — a post its author took back (#109). Silent where it is not held.
     ///
     /// **One row and never a host's worth.** `remove(host:)` is the reader letting go of a server;

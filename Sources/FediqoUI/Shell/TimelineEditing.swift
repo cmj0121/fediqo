@@ -163,12 +163,16 @@ extension ShellSession {
     /// **One call for the list and the keys.** The pane draws this and `j`, `k` and Return walk
     /// it; two readers each spelling the timeline, the notes and the text index out for
     /// themselves would be two answers to "what did the search find" that could come apart.
+    ///
+    /// **What is held aside too** (#176): what a search brought back from the sources is held
+    /// aside so All does not grow by it, and is found here — through the same rules — with the
+    /// network on or off.
     func searched(_ search: ShellSearch, latest: LatestDate?) -> [DummyItem]? {
         search.items(
             in: definition(of: currentTimeline),
-            text: textIndex,
-            from: notes,
-            revision: notesRevision,
+            text: searchTextIndex,
+            from: searchable,
+            revision: heldRevision,
             sources: sources,
             latest: latest
         )

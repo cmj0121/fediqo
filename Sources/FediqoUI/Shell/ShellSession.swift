@@ -287,8 +287,38 @@ final class ShellSession {
             holdings = Holdings(notes: notes, per: heldPeriod)
             textIndexIsCurrent = false
             notesRevision += 1
+            heldRevision += 1
+            searchTextIsCurrent = false
         }
     }
+
+    /// Every post this device holds aside (#175) — what a search brought back, a thread's answers
+    /// — which no timeline draws. **Read by the search alone** (#176): a search finds what this
+    /// device holds, and holding a search's finds aside is what keeps All from growing by them.
+    private(set) var aside: [Note] = [] {
+        didSet {
+            heldRevision += 1
+            searchTextIsCurrent = false
+        }
+    }
+    /// Bumped as `notes` or `aside` is assigned: what a search's answer is kept against.
+    private(set) var heldRevision = 0
+
+    /// Everything a search reads: what the timelines draw, and what is held aside.
+    var searchable: [Note] { aside.isEmpty ? notes : notes + aside }
+
+    /// `textIndex` over `searchable`, for a search through a timeline whose rules read text. The
+    /// same as it where nothing is held aside, which is most of the time.
+    var searchTextIndex: TextIndex {
+        guard !aside.isEmpty else { return textIndex }
+        if !searchTextIsCurrent {
+            builtSearchText = TextIndex(searchable, reusing: builtSearchText ?? builtTextIndex)
+            searchTextIsCurrent = true
+        }
+        return builtSearchText ?? TextIndex([])
+    }
+    @ObservationIgnored private var builtSearchText: TextIndex?
+    @ObservationIgnored private var searchTextIsCurrent = false
 
     /// The row at the top of the stream, as the reader last left it scrolled (#110).
     ///
@@ -1887,13 +1917,25 @@ final class ShellSession {
     /// revision** (#175), so a post held aside — written down, drawn nowhere — replaces nothing.
     private func adopt() async {
         await adoptSources()
+        let revision = await store.revision
         let drawn = await store.drawn
         if adopted?.store != drawn || adopted?.notes != notesRevision {
             notes = await store.all()
             adopted = (store: drawn, notes: notesRevision)
         }
+        // What is held aside moves the revision and not `drawn`, so it is read again on the
+        // revision — and assigned only where it changed, so a landing only the timelines see
+        // does not redraw a search (#176).
+        if adoptedAside != revision {
+            let held = await store.aside()
+            if held != aside { aside = held }
+            adoptedAside = revision
+        }
         rebuildQueries()
     }
+
+    /// The store's revision as the last adopt read what is held aside.
+    @ObservationIgnored private var adoptedAside: Int?
 
     /// The store's `drawn` and `notesRevision` as the last adopt left them. Read in a hop before
     /// the notes, so a write landing between the two is adopted again next time, never missed.

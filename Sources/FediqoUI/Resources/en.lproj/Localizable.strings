@@ -211,8 +211,12 @@
 "search.placeholder" = "Search %@: * any run, ? one character";
 "search.label" = "Search the posts %@ shows";
 "search.found" = "%d found";
+"search.asking" = "Searching %@…";
+"search.failed" = "Could not search %@.";
+"search.reach.asked" = "Also asked %@.";
+"search.reach.notAsked" = "Not asked, as they cannot be searched from here: %@.";
 "search.empty.title" = "Nothing in %@ matches";
-"search.empty.detail" = "Only the posts this timeline shows, already on this device, are searched. Try fewer characters, or * for any run of them.";
+"search.empty.detail" = "Only the posts this timeline shows are searched: what this device holds, and what its sources sent back when asked. Try fewer characters, or * for any run of them.";
 "search.indexing.title" = "Searching…";
 "search.indexing.detail" = "Reading the posts this device holds, once, so each key only matches.";
 
@@ -333,6 +337,7 @@
 "work.purpose.signIn" = "Signing in";
 "work.purpose.signOut" = "Signing out";
 "work.purpose.write" = "Sending what you wrote or pressed";
+"work.purpose.search" = "Searching a server";
 "about.title" = "This Fediqo";
 "about.version" = "Version";
 "about.build" = "Build";
