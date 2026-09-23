@@ -110,7 +110,7 @@ public struct MastodonAccount: Sendable {
         _ category: Category, below key: NoteKey, writtenBy me: String? = nil, at moment: Date = Date()
     ) async throws {
         guard let source = await source(), let path = Self.path(of: category, in: source),
-              let place = await store.missing(below: key, in: category, writtenBy: me)
+              let place = await store.missing(below: key, in: category, writtenBy: me, signedIn: true)
         else { return }
         let down = try await MastodonReadOn.readDown(from: place) { maxID in
             try await listed(path, source: source, category: category, query: try MastodonPage.older(than: maxID))

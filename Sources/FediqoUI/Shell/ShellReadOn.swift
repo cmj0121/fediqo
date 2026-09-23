@@ -122,7 +122,10 @@ extension ShellReload {
             switch category {
             case .public:
                 let me = session.mastodon.handles[host]
-                guard let place = await session.store.missing(below: post, in: .public, writtenBy: me) else {
+                let signedIn = session.mastodon.isSignedIn(host: host)
+                guard let place = await session.store.missing(
+                    below: post, in: .public, writtenBy: me, signedIn: signedIn
+                ) else {
                     return true
                 }
                 let client = MastodonClient(

@@ -141,13 +141,20 @@ public struct MissingPlace: Sendable {
     /// The newest id among them. A read down listing at or below it has passed the hole, even
     /// where the post under that id is one the source has since deleted.
     public let floor: String?
+    /// Whether anything at all of that timeline is held below it — `held` less what it leaves out.
+    /// Where nothing is, there is no hole; where only what `held` leaves out is, there still is.
+    public let hasBelow: Bool
 
-    public init(post: NoteKey, category: Category, listed: String, held: Set<NoteKey>, floor: String?) {
+    public init(
+        post: NoteKey, category: Category, listed: String, held: Set<NoteKey>, floor: String?,
+        hasBelow: Bool? = nil
+    ) {
         self.post = post
         self.category = category
         self.listed = listed
         self.held = held
         self.floor = floor
+        self.hasBelow = hasBelow ?? (!held.isEmpty || floor != nil)
     }
 
     /// Whether `post`, read down, is one held below the mark or reaches down past them. A boost
@@ -279,12 +286,14 @@ enum MastodonReadOn {
     /// **Meeting what is held ends it**: the hole is filled. **A stretch that comes back empty
     /// ends it too**, and says the source has nothing more there. A short stretch does not: a
     /// server that filters what it lists answers short and still has more, so only nothing is
-    /// nothing. With nothing held below the mark there is no hole to fill, and nothing is asked.
+    /// nothing. With nothing at all held below the mark there is no hole to fill, and nothing is
+    /// asked; with only posts it cannot meet held there, it reads on, and ends by settling or at
+    /// the bound.
     /// A first stretch that fails fails the read, and the mark stays as it was.
     static func readDown(
         from place: MissingPlace, bound: Int = bound, older: (String) async throws -> [Listed]
     ) async throws -> ReadDown {
-        guard !place.held.isEmpty || place.floor != nil else { return ReadDown(end: .met) }
+        guard place.hasBelow else { return ReadDown(end: .met) }
         var cursor = place.listed
         var read = ReadDown(end: .settled)
         for stretch in 0..<bound {

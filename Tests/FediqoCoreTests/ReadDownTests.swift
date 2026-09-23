@@ -237,6 +237,34 @@ struct ReadDownTests {
         #expect(place.held.contains(Self.key(1)))
     }
 
+    @Test("Held from before listings were kept, and signed in as nobody known yet: nothing is guessed or asked")
+    func fallbackWaitsForWho() async throws {
+        let store = ItemStore()
+        await store.add(Self.source)
+        await store.ingest((1...10).map { Self.note($0, listed: false) } + [Self.note(100)])
+        await store.land(ReadOn(missingBelow: Self.key(100)), of: .public, ifSourceHere: Self.host)
+        #expect(await store.missing(below: Self.key(100), in: .public, signedIn: true) == nil)
+        #expect(await store.missing(below: Self.key(100), in: .public) != nil, "signed out, nothing is theirs")
+        #expect(await store.missing(below: Self.key(100), in: .public, writtenBy: "@me@\(Self.host)", signedIn: true) != nil)
+        #expect(await store.note(Self.key(100))?.gaps == [Self.missing], "the mark stays")
+    }
+
+    @Test("Where all held below is what a read down cannot meet, it still reads down rather than call the hole filled")
+    func onlyUnmeetableBelow() async throws {
+        let server = TimelineServer(90...100)
+        let store = ItemStore()
+        await store.add(Self.source)
+        let me = "@me@\(Self.host)"
+        await store.ingest([Self.note(20, listed: false, handle: me), Self.note(100)])
+        await store.land(ReadOn(missingBelow: Self.key(100)), of: .public, ifSourceHere: Self.host)
+        let place = try #require(await store.missing(below: Self.key(100), in: .public, writtenBy: me))
+        #expect(place.held.isEmpty && place.hasBelow)
+        let down = try await MastodonClient(http: server, host: Self.host)
+            .publicTimeline(source: Self.source, readingDownFrom: place)
+        #expect(down.end == .settled, "asked, and the source had nothing below 90")
+        #expect(await server.cursors == ["max_id=100", "max_id=90"])
+    }
+
     @Test("A mark moved down reads down from where the read stopped, whatever lists that post again later")
     func movedMarkKeepsItsID() async throws {
         let server = TimelineServer(1...500)

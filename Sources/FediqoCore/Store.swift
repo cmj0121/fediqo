@@ -343,8 +343,12 @@ public actor ItemStore {
     /// listed under an id below the mark's, as themselves and not as boosts. Only where it listed
     /// none of them — a timeline held from before listings were kept (#201) — is below read off
     /// when each was posted, and then never of a post `me` wrote or boosted, nor any boost: those
-    /// are held for when they were written or boosted, not for where their timeline stands.
-    public func missing(below key: NoteKey, in category: Category, writtenBy me: String? = nil) -> MissingPlace? {
+    /// are held for when they were written or boosted, not for where their timeline stands. And
+    /// never while the reader is `signedIn` there and who they are is not known yet: which posts
+    /// are theirs cannot be told, so nothing is guessed, nothing is asked, and the mark stays.
+    public func missing(
+        below key: NoteKey, in category: Category, writtenBy me: String? = nil, signedIn: Bool = false
+    ) -> MissingPlace? {
         let mark = TimelineGap(.mayBeMissing, in: category)
         guard let marked = notes[key], let gap = marked.gaps.first(where: { $0 == mark }),
               let listed = gap.from ?? marked.listed[category]
@@ -361,11 +365,16 @@ public actor ItemStore {
                 held: Set(listedBelow.filter { $0.boostedBy == nil }.map(\.key)), floor: floor
             )
         }
-        let postedBelow = timeline.filter { note in
-            note.listed[category] == nil && note.postedAt <= marked.postedAt && note.boostedBy == nil
-                && note.boosted != true && me.map { note.handle.caseInsensitiveCompare($0) != .orderedSame } ?? true
+        let postedBelow = timeline.filter { $0.listed[category] == nil && $0.postedAt <= marked.postedAt }
+        if !postedBelow.isEmpty, signedIn, me == nil { return nil }
+        let held = postedBelow.filter { note in
+            note.boostedBy == nil && note.boosted != true
+                && me.map { note.handle.caseInsensitiveCompare($0) != .orderedSame } ?? true
         }
-        return MissingPlace(post: key, category: category, listed: listed, held: Set(postedBelow.map(\.key)), floor: nil)
+        return MissingPlace(
+            post: key, category: category, listed: listed, held: Set(held.map(\.key)), floor: nil,
+            hasBelow: !postedBelow.isEmpty
+        )
     }
 
     /// One place posts may be missing, read down (#204), taken in as `land(_:of:ifSourceHere:)`
