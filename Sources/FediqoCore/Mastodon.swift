@@ -9,10 +9,13 @@ public struct MastodonClient: Sendable {
         self.host = host
     }
 
-    public func publicTimeline(source: Source) async throws -> [Note] {
+    /// The public timeline's newest page, or where `olderThan` names a post, the page of posts
+    /// older than it — the next stretch of a listing read toward its end (#87).
+    public func publicTimeline(source: Source, olderThan maxID: String? = nil) async throws -> [Note] {
         try await statuses(
             path: "/api/v1/timelines/public",
             limit: 40,
+            olderThan: maxID,
             source: source,
             category: .public
         )
@@ -136,13 +139,14 @@ public struct MastodonClient: Sendable {
     private func statuses(
         path: String,
         limit: Int,
+        olderThan maxID: String? = nil,
         source: Source,
         category: Category
     ) async throws -> [Note] {
         guard let url = Host.httpsURL(
             host: host,
             path: path,
-            query: [URLQueryItem(name: "limit", value: String(limit))]
+            query: [URLQueryItem(name: "limit", value: String(limit))] + (try MastodonPage.older(than: maxID))
         ) else {
             throw MastodonRequestError.invalidURL
         }
@@ -507,5 +511,16 @@ final class Box<Wrapped: Decodable & Sendable>: Decodable, Sendable {
     let value: Wrapped
     init(from decoder: any Decoder) throws {
         value = try Wrapped(from: decoder)
+    }
+}
+
+/// The one way a Mastodon read asks for the stretch before a post (#87): `max_id`, checked as a
+/// list id is, since the id came back out of the store. **One that is not an id asks nothing**:
+/// dropping it would ask for the newest page instead, which is not the page anybody asked for.
+enum MastodonPage {
+    static func older(than maxID: String?) throws -> [URLQueryItem] {
+        guard let maxID else { return [] }
+        guard ListSubscription.isPathSegment(maxID) else { throw MastodonRequestError.invalidURL }
+        return [URLQueryItem(name: "max_id", value: maxID)]
     }
 }

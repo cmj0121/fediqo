@@ -103,6 +103,25 @@ public struct MastodonAccount: Sendable {
         return all
     }
 
+    /// The stretch of Home, or of one list this source reads, older than the post `maxID` names —
+    /// the next of a listing read toward its end (#87). Into the store, and handed back as the page
+    /// carried it so the caller can tell a stretch that brought nothing from one that did.
+    ///
+    /// Throws what the read threw: this is one read, and a caller asked for exactly it.
+    public func older(_ category: Category, than maxID: String) async throws -> [Note] {
+        guard let source = await source() else { return [] }
+        let path: String
+        switch category {
+        case .home: path = "/api/v1/timelines/home"
+        case .list(let id) where source.lists.contains(where: { $0.id == id }) && ListSubscription.isPathSegment(id):
+            path = "/api/v1/timelines/list/\(id)"
+        default: return []
+        }
+        let notes = try await statuses(path, source: source, category: category, olderThan: maxID)
+        try await ingest(notes)
+        return notes
+    }
+
     private func source() async -> Source? {
         await store.sources().first { $0.host == host }
     }
@@ -135,9 +154,11 @@ public struct MastodonAccount: Sendable {
         return (notes, all)
     }
 
-    private func statuses(_ path: String, source: Source, category: Category) async throws -> [Note] {
+    private func statuses(
+        _ path: String, source: Source, category: Category, olderThan maxID: String? = nil
+    ) async throws -> [Note] {
         let data = try await reading(category).get(
-            path: path, query: [URLQueryItem(name: "limit", value: "40")]
+            path: path, query: [URLQueryItem(name: "limit", value: "40")] + (try MastodonPage.older(than: maxID))
         )
         return try MastodonJSON.decoder.decode([StatusDTO].self, from: data).map {
             $0.asNote(source: source, category: category)
