@@ -45,13 +45,16 @@ final class ShellReload {
     private(set) var asking: Set<Ask> = []
     /// Whether any reload is on the wire.
     var running: Bool { !asking.isEmpty }
+    /// Whether the only reload on the wire is the wait's, which nobody pressed for (#95).
+    var onlyWaiting: Bool { asking == [.held] }
     /// The hosts the last reload of each kind could not read, the timeline's first and each in
     /// the order they were asked — a host both missed named once.
     var failed: [String] {
         var named: Set<String> = []
         return [Ask.timeline, .thread, .held].flatMap { failures[$0] ?? [] }.filter { named.insert($0).inserted }
     }
-    /// Each kind's own `failed`, cleared only as that kind starts again.
+    /// Each kind's own `failed`, cleared as that kind starts again — and a host's name let go of
+    /// as soon as another timeline read, `r`'s or the wait's, reads it whole.
     private var failures: [Ask: [String]] = [:]
     /// Bumped as each reload of the timeline ends, so the list can centre the selected post again.
     /// A thread read again leaves the list under it where it was.
@@ -60,8 +63,11 @@ final class ShellReload {
     private(set) var unfindable: Unfindable?
     /// A source the last reload found speaking something this app does not read (#86). One, not
     /// a list, for `unfindable`'s reason: the sentence names one host and there is one line to
-    /// say it on.
-    private(set) var unspoken: Unspoken?
+    /// say it on. The timeline's first, then the wait's.
+    var unspoken: Unspoken? { unspokens[.timeline] ?? unspokens[.held] }
+    /// Each kind's own `unspoken`, as `failures` is kept: a wait starting does not take back what
+    /// the timeline's `r` found, nor the reverse (#95).
+    private var unspokens: [Ask: Unspoken] = [:]
     /// The last reload of some kind was stopped by the reader before it finished.
     var stopped: Bool { !halted.isEmpty }
     /// The kinds whose last reload was stopped, each cleared as that kind starts again. Never
@@ -155,8 +161,12 @@ final class ShellReload {
     /// Every source this device holds, each for its usual reads — the ask nobody presses (#95).
     /// Each lands as it answers, as a timeline's do, and one that fails is named while the others
     /// land. Nothing while one is already on its way, and nothing where no source is held.
+    ///
+    /// **Nor while `r` reads the timeline.** Both would read the same servers at once — a
+    /// stranger's forum, which is never asked in parallel, among them — for what `r` is already
+    /// bringing; the next wait asks again.
     func held(in session: ShellSession) async {
-        guard !asking.contains(.held), !session.sources.isEmpty else { return }
+        guard !asking.contains(.held), !asking.contains(.timeline), !session.sources.isEmpty else { return }
         await run(.held) {
             let asks = session.sources.map { FetchAsk(host: $0.host, categories: nil) }
             await self.read(asks, as: .held, in: session)
@@ -164,18 +174,30 @@ final class ShellReload {
     }
 
     /// `held(in:)` each time `wait` has passed, until the task running this is cancelled — the
-    /// root view's, so a window closed or a wait chosen anew ends this one (#95).
+    /// root view's, so a window closed or a wait chosen anew ends this one, and an ask of it
+    /// still on the wire with it (#95). That is not the reader stopping it, so it says nothing.
     ///
     /// **The wait is counted from the end of the last ask**, not on a clock of its own: a slow
     /// round cannot pile the next one up behind it, and an ask still running as the wait comes
     /// round starts nothing. `sleep` is `Task.sleep` but for a test, which drives it by hand.
+    ///
+    /// **One clock per store, not per window.** Every window of the app reads the one store, and
+    /// each runs this; the wait is the device's, so only the window that asked first asks
+    /// (`WaitKeeper`), and the rest renew from what it lands. It closing hands the clock on.
     func keepAsking(
         every wait: Duration, in session: ShellSession,
         sleep: (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
     ) async {
+        let me = UUID()
+        defer { WaitKeeper.release(session.store, from: me) }
         while true {
             do { try await sleep(wait) } catch { return }
-            await held(in: session)
+            guard WaitKeeper.claim(session.store, for: me) else { continue }
+            await withTaskCancellationHandler {
+                await held(in: session)
+            } onCancel: {
+                Task { @MainActor in self.end(.held) }
+            }
         }
     }
 
@@ -185,7 +207,7 @@ final class ShellReload {
         let sources = session.sources
         // What the last run found is not this run's fact about any server. Cleared here
         // rather than at the end, so a run that is stopped halfway leaves nothing standing.
-        self.unspoken = nil
+        unspokens[kind] = nil
 
         // **Every server is asked what it is before any of them is spoken to** — #86.
         //
@@ -211,7 +233,7 @@ final class ShellReload {
                 // It answered, and it answered as something this app does not read. Nothing
                 // failed, so it is not reported silent; it is its own sentence, said once.
                 guard SourceJoin.reads(source.kind) else {
-                    self.unspoken = self.unspoken ?? Unspoken(host: source.host, kind: source.kind)
+                    self.unspokens[kind] = self.unspokens[kind] ?? Unspoken(host: source.host, kind: source.kind)
                     continue
                 }
                 group.addTask {
@@ -224,7 +246,16 @@ final class ShellReload {
             }
         }
         guard !Task.isCancelled else { return }
-        self.failures[kind] = asks.map(\.host).filter(unread.contains)
+        failures[kind] = asks.map(\.host).filter(unread.contains)
+        // **A host that answered now is not still failing** (#95): what `r` said about it goes
+        // when a wait reads it whole, and the reverse, rather than standing until that kind runs
+        // again. A thread's failure is about its post, which this did not read.
+        let answered = Set(asks.map(\.host)).subtracting(unread)
+        for other in [Ask.timeline, .held] where other != kind {
+            if let named = failures[other], named.contains(where: answered.contains) {
+                failures[other] = named.filter { !answered.contains($0) }
+            }
+        }
     }
 
     /// The open thread's post and its thread, from the host it came through, and not the
@@ -327,6 +358,14 @@ final class ShellReload {
             }
             runs[ask] = Run(generation: mine, work: work, waiter: continuation)
         }
+    }
+
+    /// Ends `ask`'s run, if one is running, without saying it was stopped: nobody stopped it,
+    /// its window went (#95).
+    private func end(_ ask: Ask) {
+        guard let run = runs[ask] else { return }
+        run.work.cancel()
+        finish(ask, run.generation)
     }
 
     /// Ends run `generation` of `ask`, once, and only while it is still that kind's current one.
@@ -658,6 +697,29 @@ final class ShellReload {
     /// A forum signed in to is read through its own browser, as a join reads it.
     private func transport(_ host: String, in session: ShellSession) -> any HTTPClient {
         session.forums.readTransport(host: host, else: session.http)
+    }
+}
+
+/// Which window's wait asks, per store (#95). The first to reach its wait takes the clock and
+/// keeps it until its loop ends; every other window's wait passes and asks nothing, and renews
+/// from what the store is brought all the same. Keyed on the store rather than held on it, since
+/// the store is an actor of the core and knows nothing of windows.
+@MainActor
+enum WaitKeeper {
+    private static var keepers: [ObjectIdentifier: UUID] = [:]
+
+    /// Whether `me` asks on `store`'s wait: it already does, or nobody does.
+    static func claim(_ store: ItemStore, for me: UUID) -> Bool {
+        let key = ObjectIdentifier(store)
+        if let keeper = keepers[key], keeper != me { return false }
+        keepers[key] = me
+        return true
+    }
+
+    /// `me`'s loop ended: the next window to reach its wait asks.
+    static func release(_ store: ItemStore, from me: UUID) {
+        let key = ObjectIdentifier(store)
+        if keepers[key] == me { keepers[key] = nil }
     }
 }
 

@@ -1222,9 +1222,10 @@ struct ReloadTests {
         let guardTask = hangGuard(gated.gate)
         defer { guardTask.cancel() }
         let (session, _) = await shell(http: gated)
-        let pressed = Task { await session.reload.timeline(.all, in: session) }
         let waited = Task { await session.reload.held(in: session) }
-        #expect(await spun { await gated.asks == 4 }, "both kinds on the wire at once")
+        #expect(await spun { await gated.asks == 2 })
+        let pressed = Task { await session.reload.timeline(.all, in: session) }
+        #expect(await spun { await gated.asks == 4 }, "both kinds on the wire at once: r is not refused")
         await gated.gate.open()
         await pressed.value
         await waited.value
@@ -1234,6 +1235,142 @@ struct ReloadTests {
         #expect(session.notes.count == 5)
     }
 
+    @Test("A wait coming round while r reads the timeline asks nothing beside it")
+    func noWaitBesideAPress() async {
+        let gated = GatedHTTP(Self.everything, holding: "/api/v1/trends/statuses")
+        let guardTask = hangGuard(gated.gate)
+        defer { guardTask.cancel() }
+        let (session, _) = await shell(http: gated)
+        let pressed = Task { await session.reload.timeline(.all, in: session) }
+        #expect(await spun { await gated.asks == 2 })
+        await session.reload.held(in: session)
+        #expect(session.reload.onlyWaiting == false)
+        #expect(await gated.asks == 2, "nothing asked twice at once")
+        await gated.gate.open()
+        await pressed.value
+    }
+
+    @Test("Two windows on one store: one of them asks on the wait, and the clock passes on as it goes")
+    func oneClockPerStore() async {
+        let (first, firstHTTP) = await shell()
+        let secondHTTP = FixtureHTTP(Self.everything)
+        let second = ShellSession(
+            http: secondHTTP, store: first.store,
+            mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: Refuse()),
+            posts: ForumPosts(http: secondHTTP)
+        )
+        let following = Task { await second.followStore() }
+        defer { following.cancel() }
+
+        // The first window reaches its wait, asks, and waits again — keeping the clock.
+        let slept = Counter()
+        let firstLoop = Task {
+            await first.reload.keepAsking(every: .seconds(60), in: first) { _ in
+                slept.count += 1
+                if slept.count > 1 { try await Task.sleep(for: .seconds(3_600)) }
+            }
+        }
+        #expect(await spun { slept.count == 2 })
+        #expect(await !firstHTTP.requested.isEmpty)
+
+        var waits = 0
+        await second.reload.keepAsking(every: .seconds(60), in: second) { _ in
+            waits += 1
+            if waits > 2 { throw CancellationError() }
+        }
+        #expect(await secondHTTP.requested.isEmpty, "two waits passed and the other window had them")
+        #expect(await spun { second.notes.count == 5 }, "yet it holds what the first one's wait brought")
+
+        firstLoop.cancel()
+        await firstLoop.value
+        waits = 0
+        await second.reload.keepAsking(every: .seconds(60), in: second) { _ in
+            waits += 1
+            if waits > 1 { throw CancellationError() }
+        }
+        #expect(await !secondHTTP.requested.isEmpty, "the first window gone, this one asks")
+    }
+
+    @Test("A window that goes while its wait is on the wire ends it, saying nothing, and none of it lands")
+    func closingEndsTheWait() async {
+        let gated = GatedHTTP(Self.everything, holding: "/api/v1/trends/statuses")
+        let guardTask = hangGuard(gated.gate)
+        defer { guardTask.cancel() }
+        let (session, _) = await shell(http: gated)
+        let loop = Task {
+            await session.reload.keepAsking(every: .seconds(60), in: session) { _ in
+                if Task.isCancelled { throw CancellationError() }
+            }
+        }
+        #expect(await spun { await gated.asks == 2 })
+        loop.cancel()
+        await loop.value
+        #expect(!session.reload.running)
+        #expect(!session.reload.stopped, "nobody stopped it")
+        #expect(session.reload.line == nil)
+        await gated.gate.open()
+        for _ in 0..<2_000 { await Task.yield() }
+        #expect(await !session.store.all().contains { $0.categories.contains(.trends) })
+    }
+
+    @Test("What r said about a host goes once a wait reads it whole, and the reverse")
+    func aRecoveredHostIsNotStillFailing() async {
+        let down = Down(Self.one, then: FixtureHTTP(Self.everything))
+        let (session, _) = await shell(http: down)
+
+        await session.reload.timeline(.all, in: session)
+        #expect(session.reload.failed == [Self.one])
+        await down.recover()
+        await session.reload.held(in: session)
+        #expect(session.reload.failed.isEmpty)
+        #expect(session.reload.line == nil)
+        #expect(session.reload.landed > 0 && session.reload.unspoken == nil && !session.reload.stopped,
+                "an empty timeline may now say it was asked and there is nothing")
+
+        await down.fail()
+        await session.reload.held(in: session)
+        #expect(session.reload.failed == [Self.one])
+        await down.recover()
+        await session.reload.timeline(.all, in: session)
+        #expect(session.reload.failed.isEmpty)
+    }
+
+    @Test("A note the reader caused says its piece over a wait nobody pressed, and not over r")
+    func aNoteOverTheWait() {
+        let note = "Can't edit All."
+        #expect(TimelineToast.shown(running: true, waiting: true, line: "Reloading…", stopped: false, note: note)
+            == TimelineToast(kind: .note, text: note))
+        #expect(TimelineToast.shown(running: true, waiting: false, line: "Reloading…", stopped: false, note: note)
+            == TimelineToast(kind: .loading, text: "Reloading…"))
+        #expect(TimelineToast.shown(running: true, waiting: true, line: "Reloading…", stopped: false, note: nil)
+            == TimelineToast(kind: .loading, text: "Reloading…"))
+    }
+}
+
+/// A count a test's own closure keeps, read by the test while that closure runs elsewhere.
+@MainActor
+private final class Counter {
+    var count = 0
+}
+
+/// Every request to `host` but the one asking what it is fails while it is down.
+private actor Down: HTTPClient {
+    private let host: String
+    private let inner: FixtureHTTP
+    private var down = true
+
+    init(_ host: String, then inner: FixtureHTTP) {
+        self.host = host
+        self.inner = inner
+    }
+
+    func recover() { down = false }
+    func fail() { down = true }
+
+    func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
+        if down, url.host == host, url.path != "/api/v2/instance" { throw FixtureHTTPError.unreachable }
+        return try await inner.data(from: url)
+    }
 }
 
 /// A signed-in door that answers every request with one status.
