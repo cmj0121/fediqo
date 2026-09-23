@@ -212,6 +212,67 @@ struct StoreFileTests {
         #expect(loaded.allSatisfy { $0.boosted == false })
     }
 
+    /// #208: who a post was written for reads back after a relaunch — from the file alone, which
+    /// is a relaunch with the network off — and a source that never said still never said.
+    @Test("Who a post was written for survives a relaunch, and silence stays silence", arguments: Audience.allCases)
+    func audienceSurvivesRelaunch(audience: Audience) async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let said = Note(
+            id: "1", source: mastodon, author: "Ada", handle: "@ada@first.example", body: "hello",
+            postedAt: origin, categories: [.home], audience: audience, statusID: "1"
+        )
+        try await StoreFile(at: dir).save(sources: [mastodon], notes: [said, note(id: "2")])
+        let loaded = StoreFile.open(at: dir).notes
+        #expect(loaded.first { $0.id == "1" }?.audience == audience)
+        #expect(loaded.first { $0.id == "2" }?.audience == nil)
+    }
+
+    /// #208: what the source last counted reads back after a relaunch, each count apart, and a
+    /// count it never gave stays ungiven rather than becoming a zero.
+    @Test("What the source counted survives a relaunch, and an uncounted post stays uncounted")
+    func countsSurviveRelaunch() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let counted = Note(
+            id: "1", source: mastodon, author: "Ada", handle: "@ada@first.example", body: "hello",
+            postedAt: origin, categories: [.home], counts: Counts(replies: 3, reblogs: 0), statusID: "1"
+        )
+        try await StoreFile(at: dir).save(sources: [mastodon], notes: [counted, note(id: "2")])
+        let loaded = StoreFile.open(at: dir).notes
+        #expect(loaded.first { $0.id == "1" }?.counts == Counts(replies: 3, reblogs: 0))
+        #expect(loaded.first { $0.id == "2" }?.counts == Counts())
+    }
+
+    /// #208: a row written before audience and counts were — its facts carry neither key — loads
+    /// as one whose source never said, rather than failing the load.
+    @Test("A row written before audience and counts were kept loads as never said")
+    func rowWithoutAudienceLoads() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let said = Note(
+            id: "1", source: mastodon, author: "Ada", handle: "@ada@first.example", body: "hello",
+            postedAt: origin, categories: [.home], audience: .followers,
+            counts: Counts(replies: 1), statusID: "1"
+        )
+        try await StoreFile(at: dir).save(sources: [mastodon], notes: [said])
+        let queue = try DatabaseQueue(path: dir.appendingPathComponent("index.sqlite").path)
+        try await queue.write { db in
+            let facts = try String.fetchOne(db, sql: "SELECT facts FROM note WHERE id = '1'") ?? ""
+            var object = try JSONSerialization.jsonObject(with: Data(facts.utf8)) as? [String: Any] ?? [:]
+            #expect(object["audience"] as? String == "followers")
+            object["audience"] = nil
+            object["counts"] = nil
+            let older = String(decoding: try JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+            try db.execute(sql: "UPDATE note SET facts = ? WHERE id = '1'", arguments: [older])
+        }
+        try queue.close()
+        let loaded = StoreFile.open(at: dir).notes
+        #expect(loaded.map(\.id) == ["1"])
+        #expect(loaded.first?.audience == nil)
+        #expect(loaded.first?.counts == Counts())
+    }
+
     /// #109: what went stays gone after a relaunch, because the store the save writes no
     /// longer holds it — and only it went.
     @Test("A post taken back stays gone after a relaunch, and nothing else goes")
