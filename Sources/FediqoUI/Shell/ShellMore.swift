@@ -11,6 +11,15 @@ import SwiftUI
 // and the listing renews from the store: older rows arrive below the place being read, so the
 // selected post stays selected and nothing is scrolled.
 //
+// **Before the oldest post held, because no hole lies above it unsaid** (#201). A read used to
+// bring a timeline's newest stretch alone, so after a relaunch the oldest post held lay past a
+// hole between that stretch and what an earlier run held, and asking before it skipped the hole.
+// Every read of a Mastodon timeline now reads on from the newest post held of it: what lay
+// between is read, or said at its place where it could not be (`ShellReadOn.swift`). So this
+// run's newest stretch reaches down, unbroken but for what is said, to the oldest post held, and
+// that is where it reads on from. Asking before a post further up instead would ask again for
+// pages this device holds, and bring nothing new below a reader already at the end.
+//
 // **What a stretch does not carry says nothing.** A post missing from a page merely did not
 // arrive on it; nothing here drops a row or marks one (#179 is what a post its source really
 // deleted becomes, and only a read of that one post says so).

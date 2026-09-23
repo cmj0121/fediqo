@@ -107,6 +107,11 @@ struct ReloadTests {
     private static var everything: [String: FixtureHTTP.Outcome] {
         [
             publicAddress(one): timeline(one, "1"),
+            // Read on from the newest held of each (#201): nothing newer since the first read,
+            // and for the thread's post 9, held alone, only 1 — which says 9 may be missing.
+            publicAddress(one) + "&min_id=0": timeline(one, "1"),
+            publicAddress(one) + "&min_id=8": timeline(one, "1"),
+            publicAddress(two) + "&min_id=2": timeline(two, "3"),
             trendsAddress(one): timeline(one, "2"),
             publicAddress(two): timeline(two, "3"),
             trendsAddress(two): timeline(two, "4"),
@@ -604,7 +609,9 @@ struct ReloadTests {
         let before = TimelineQuery.all.items(from: session.notes, latest: nil)
         let selected = before[2].id
         var routes = Self.everything
-        routes[Self.publicAddress(Self.two)] = Self.timeline(Self.two, "3", "6")
+        // Read on from 3, the newest held of it (#201): 6 arrived since, and nothing after 6.
+        routes[Self.publicAddress(Self.two) + "&min_id=2"] = Self.timeline(Self.two, "3", "6")
+        routes[Self.publicAddress(Self.two) + "&min_id=6"] = .text("[]")
         let fixture = FixtureHTTP(routes)
         let again = ShellSession(
             http: fixture, store: session.store,
@@ -1112,9 +1119,11 @@ struct ReloadTests {
             Self.publicAddress(Self.two), Self.trendsAddress(Self.two),
             Self.boardAddress, Self.threadRanksAddress, Self.blogRanksAddress,
             Self.flavourAddress(Self.one), Self.flavourAddress(Self.two),
+            // The second wait reads each public timeline on from what the first brought (#201).
+            Self.publicAddress(Self.one) + "&min_id=0", Self.publicAddress(Self.two) + "&min_id=2",
         ]
         #expect(await asked(http) == once, "every source, each for its usual reads")
-        let reads = await http.requested.filter { $0.absoluteString == Self.publicAddress(Self.one) }
+        let reads = await http.requested.filter { $0.absoluteString.hasPrefix(Self.publicAddress(Self.one)) }
         #expect(reads.count == 2, "asked once for each wait that passed")
         #expect(session.notes.count == 5)
         #expect(session.reload.landed == 0, "the lamp is not re-centred: nobody pressed")

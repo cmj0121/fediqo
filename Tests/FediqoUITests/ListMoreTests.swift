@@ -318,15 +318,18 @@ struct ListMoreTests {
 
     @Test("Asked while r reads: only the Mastodon's next stretch, the forum left to r; both landing leave one row")
     func landingTogether() async throws {
-        let shared = Self.status("4", day: 4)
+        // r reads on from 6, the newest held (#201), and brings 6 again with 7; the ask for more
+        // brings 4 from before 5. 6 lands twice and is one row.
+        let readOn = Self.newest() + "&min_id=5"
         let gated = GatedHTTP([
-            Self.older(than: "5"): Self.page(shared),
+            Self.older(than: "5"): Self.page(Self.status("4", day: 4)),
             Self.board(page: 2): Self.board((40100, "二")),
-            Self.newest(): Self.page(shared),
+            readOn: Self.page(Self.status("7", day: 7), Self.status("6", day: 6)),
+            Self.newest() + "&min_id=7": Self.page(),
             Self.trends: Self.page(),
             Self.boardFirst: Self.board((40125, "工具箱一键下载安装")),
             MastodonInstance.address(Self.one): MastodonInstance.mastodon(Self.one),
-        ], holding: Self.newest())
+        ], holding: readOn)
         let guardTask = hangGuard(gated.gate)
         defer { guardTask.cancel() }
         let session = await shell(gated)
@@ -345,9 +348,11 @@ struct ListMoreTests {
         await gated.gate.open()
         await reload.value
 
-        let key = "https://\(Self.one)/users/ada/statuses/4"
-        #expect(ids(session).filter { $0 == key }.count == 1)
-        #expect(await session.store.snapshot().notes.filter { $0.id == key }.count == 1)
+        for id in ["4", "6", "7"] {
+            let key = "https://\(Self.one)/users/ada/statuses/\(id)"
+            #expect(ids(session).filter { $0 == key }.count == 1)
+            #expect(await session.store.snapshot().notes.filter { $0.id == key }.count == 1)
+        }
     }
 
     @Test("r starts a forum's stretches over: its newest page moved every page under it along")

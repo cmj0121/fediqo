@@ -53,7 +53,8 @@ final class ShellReload {
         /// A hashtag's posts, asked of the Mastodons of the timeline in front (#124).
         case tag
         /// The next, older stretch of the timeline in front, asked as the reader nears its end
-        /// (#87). See `ShellMore.swift`.
+        /// (#87), or one timeline read on from a place that says more belong there (#201). See
+        /// `ShellMore.swift` and `ShellReadOn.swift`.
         case more
     }
 
@@ -454,7 +455,7 @@ final class ShellReload {
 
     /// `asks`, each source read into the store as it answers, as `kind`: what did not answer is
     /// that kind's to say.
-    private func read(_ asks: [FetchAsk], as kind: Ask, in session: ShellSession) async {
+    func read(_ asks: [FetchAsk], as kind: Ask, in session: ShellSession) async {
         let sources = session.sources
         // What the last run found is not this run's fact about any server. Cleared here
         // rather than at the end, so a run that is stopped halfway leaves nothing standing.
@@ -794,16 +795,17 @@ final class ShellReload {
                     http: self.timed(session.http, for: .timeline, name: name, in: session), host: host
                 )
             }
-            let publicRead = { try await client(.public).publicTimeline(source: stamp) }
+            // Read on from the newest post held of it, not its newest stretch alone (#201).
+            let publicRead = { await self.readOnPublic(client(.public), stamp: stamp, in: session) }
             let trendsRead = { try await client(.trends).trending(source: stamp) }
             var read: Bool
             if let categories {
                 read = true
-                if categories.contains(.public) { read = await land(host, in: session, publicRead) && read }
+                if categories.contains(.public) { read = await publicRead() && read }
                 if categories.contains(.trends) { read = await land(host, in: session, trendsRead) && read }
             } else {
                 // The join's rule: a server with no trends still has a timeline, and the reverse.
-                let publicCame = await land(host, in: session, publicRead)
+                let publicCame = await publicRead()
                 let trendsCame = await land(host, in: session, trendsRead)
                 read = publicCame || trendsCame
             }

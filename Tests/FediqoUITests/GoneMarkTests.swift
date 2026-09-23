@@ -110,7 +110,9 @@ struct GoneMarkTests {
     @Test("A post missing from a listing merely did not arrive: it is not marked, and no press lets it go")
     func notArrivedIsNotMarked() async throws {
         let (session, _) = await shell(routes: [
-            "https://\(Self.host)/api/v1/timelines/public?limit=40": .text("[" + Self.status("10") + "]"),
+            // Read on from 9, the newest held (#201): 10 comes, 9 does not, and nothing after 10.
+            "https://\(Self.host)/api/v1/timelines/public?limit=40&min_id=8": .text("[" + Self.status("10") + "]"),
+            "https://\(Self.host)/api/v1/timelines/public?limit=40&min_id=10": .text("[]"),
             "https://\(Self.host)/api/v1/trends/statuses?limit=20": .text("[]"),
             "https://\(Self.other)/api/v1/timelines/public?limit=40": .text("[]"),
             "https://\(Self.other)/api/v1/trends/statuses?limit=20": .text("[]"),
