@@ -1304,7 +1304,8 @@ public struct FediqoRootView: View {
         let hadLink = walk.openedLink != nil
         guard let tag = Self.timelineSwitched(
             on: &walk, places: &session.timelinePlaces, from: left, to: arrived,
-            shown: session.timelineItems(latest: prefs.latestDate).map(\.id), searching: search.isOpen
+            shown: session.timelineItems(latest: prefs.latestDate).map(\.id),
+            results: session.searched(search, latest: prefs.latestDate)?.map(\.id)
         ) else { return clearWalk() }
         if hadLink { linkReader.close() }
         if let lamp = selectedItemID,
@@ -1317,13 +1318,18 @@ public struct FediqoRootView: View {
 
     /// `timelineSwitched`'s walk and places, given what it reads, so a test takes the step the
     /// root takes. With a search open the row under the page is a result, and the timeline's place
-    /// is the search's parked post, which `TimelinePane` files (#145): the row is kept as it is.
+    /// is the search's parked post, which `TimelinePane` files (#145): the row is kept where the
+    /// new timeline's `results` still hold it, and goes out where they do not. `results` is
+    /// nothing with no search open.
     static func timelineSwitched(
         on walk: inout ShellWalk, places: inout TimelinePlaces,
-        from left: TimelineQuery?, to arrived: TimelineQuery?, shown: [String], searching: Bool
+        from left: TimelineQuery?, to arrived: TimelineQuery?, shown: [String], results: [String]?
     ) -> PostTag? {
         walk.timelineSwitched { lamp in
-            searching ? lamp : places.switched(from: left, to: arrived, standingOn: lamp, among: shown)
+            guard let results else {
+                return places.switched(from: left, to: arrived, standingOn: lamp, among: shown)
+            }
+            return lamp.flatMap { results.contains($0) ? $0 : nil }
         }
     }
 

@@ -287,25 +287,35 @@ struct TagTimelineTests {
         _ = walk.walk(to: .tag(Self.swift), from: "all-1")
 
         let kept = FediqoRootView.timelineSwitched(
-            on: &walk, places: &places, from: .all, to: .trends, shown: ["trend-1", "trend-2"], searching: false
+            on: &walk, places: &places, from: .all, to: .trends, shown: ["trend-1", "trend-2"], results: nil
         )
         #expect(kept == Self.swift)
         #expect(walk.back()?.lamp == "trend-1", "leaving lands on Trends' own place")
 
         _ = walk.walk(to: .tag(Self.swift), from: "trend-2")
         _ = FediqoRootView.timelineSwitched(
-            on: &walk, places: &places, from: .trends, to: .all, shown: ["all-1", "all-2"], searching: false
+            on: &walk, places: &places, from: .trends, to: .all, shown: ["all-1", "all-2"], results: nil
         )
         #expect(walk.back()?.lamp == "all-1", "All's place, filed before the page, given back")
         #expect(places.arriving(at: .trends, among: ["trend-2"]) == "trend-2", "Trends filed where the page was taken from")
 
-        // With a search open its parked post is the timeline's place; the result row is kept.
+        // With a search open its parked post is the timeline's place; the result row is kept
+        // where the new timeline's results still hold it.
         _ = walk.walk(to: .tag(Self.swift), from: "result-1")
         _ = FediqoRootView.timelineSwitched(
-            on: &walk, places: &places, from: .all, to: .trends, shown: ["trend-2"], searching: true
+            on: &walk, places: &places, from: .all, to: .trends, shown: ["trend-2"],
+            results: ["result-1", "result-2"]
         )
         #expect(walk.back()?.lamp == "result-1")
         #expect(places.arriving(at: .all, among: ["all-1"]) == "all-1", "not filed over by a result")
+
+        // And goes out where they no longer do.
+        _ = walk.walk(to: .tag(Self.swift), from: "result-1")
+        _ = FediqoRootView.timelineSwitched(
+            on: &walk, places: &places, from: .trends, to: .all, shown: ["all-1"], results: ["result-2"]
+        )
+        #expect(walk.back()?.lamp == nil)
+        #expect(walk.isEmpty)
     }
 
     @Test("The page stops at the latest date, and a post two sources carried is one row")
