@@ -680,3 +680,11 @@
 "item.source.join" = "、";
 "thread.copies.title" = "各來源帶來的樣子";
 "thread.copies.from" = "來自 %@";
+"blog.title" = "日誌";
+"blog.reading" = "正在讀這篇日誌…";
+"blog.refused" = "%@ 不讓這個 app 讀這篇日誌。";
+"blog.unreadable" = "這個論壇有回應，但上面沒有這個 app 讀得懂的日誌。";
+"blog.unreachable" = "連不上這篇日誌。";
+"blog.again" = "再讀一次這篇日誌";
+"blog.page" = "讀它的網頁";
+"blog.page.hint" = "打開論壇上這篇日誌的網頁。";

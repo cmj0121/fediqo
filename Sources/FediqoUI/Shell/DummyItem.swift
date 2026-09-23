@@ -272,10 +272,10 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         return url
     }
 
-    /// The page opening this row reads, where opening it reads a page rather than a
-    /// conversation: a forum's ranked blog, whose words the ranking list gave and whose page is
-    /// the rest of it. Read in the app's own reader (#34), in place on a Mac (#169) — never by a
-    /// parser of this app's, and never before the reader opens it. Nothing for every other row.
+    /// The forum's own page for this row, where there is one worth offering beside what the app
+    /// reads of it: a forum's ranked blog. Opening the row reads the blog in the app (#209); this
+    /// is what its pane offers where that read could not be had — read in the app's own reader
+    /// (#34), in place on a Mac (#169). Nothing for every other row.
     public var page: URL? {
         DiscuzBlogRow.isBlog(noteID) ? outwardURL : nil
     }
@@ -345,10 +345,17 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         handle = note.handle
         titleKey = nil
         titleText = note.title
-        body = note.body
+        // **A ranked blog read is drawn from what was read of it** (#209): its words, its date and
+        // its author's picture, where its page gave them, over what the ranking list wrote. A
+        // thread's opening post is not — its row draws it through `ForumPostBand`, which also
+        // knows when it is on its way.
+        let blog = DiscuzBlogRow.isBlog(note.id) ? note.opening : nil
+        // A blog read and found to hold no words keeps what the list wrote of it: the excerpt is
+        // still the forum's own line about it, and the pane says the page had no words.
+        body = blog.map(\.words).flatMap { $0.isEmpty ? nil : $0 } ?? note.body
         boardKey = nil
         boardText = note.board
-        postedAt = note.postedAt
+        postedAt = blog?.postedAt ?? note.postedAt
         workRelated = false
         answering = Self.answering(note.reply)
         boostedBy = note.boostedBy
@@ -356,7 +363,7 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         favourited = note.favourited
         statusID = note.statusID
         audience = note.audience.map(DummyAudience.init)
-        avatarURL = note.avatarURL
+        avatarURL = note.avatarURL ?? blog?.avatarURL
         url = note.url
         attachments = note.attachments
         opening = note.opening

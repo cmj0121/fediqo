@@ -284,8 +284,13 @@ public actor ItemStore {
     /// Keeps a forum row's opening post as just read, with the row (#154). Only for rows held,
     /// and only while their source is: an opening that arrives for a row a Remove took away is
     /// not a way back in. Returns whether anything changed, so a caller saves only then.
+    ///
+    /// `shown` is whether the screen draws what was kept from here (#209): a ranked blog opened
+    /// is drawn from its row and nothing else, so its keep is a change to what is drawn, and a
+    /// read of the store already on its way when it landed is read again rather than left to draw
+    /// the row as it was. A thread's opening post, kept as the reader scrolls, is not (#154).
     @discardableResult
-    public func keep(_ openings: [NoteKey: ForumOpening]) -> Bool {
+    public func keep(_ openings: [NoteKey: ForumOpening], shown: Bool = false) -> Bool {
         var moved = false
         var aside = false
         for (key, opening) in openings {
@@ -299,8 +304,8 @@ public actor ItemStore {
         // Written down, and not a change to what is drawn: the screen draws an opening from the
         // forum's own cache as it is read, and replacing every row for each one kept as the reader
         // scrolls is what #154 set out not to do. Only a later change to what All shows carries
-        // it onto the screen's rows.
-        if moved { changed(shown: false, aside: aside) }
+        // it onto the screen's rows — unless the caller says the screen draws it from here.
+        if moved { changed(shown: shown, aside: aside) }
         return moved
     }
 

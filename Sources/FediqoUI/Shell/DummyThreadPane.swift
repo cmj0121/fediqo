@@ -25,6 +25,12 @@ struct DummyThreadPane: View {
     var onReadFurther: () -> Void = {}
     /// The foot reaching for more by itself, which the conversation may decline — see `ThreadFoot`.
     var onReachFurther: (_ appeared: Bool) -> Void = { _ in }
+    /// Where the pane stands on a forum's ranked blog it is open on (#209) — `ForumBlogs`' answer,
+    /// read by the pane above, which holds the session. Nothing where the root is no blog.
+    var blog: ForumBlogReading?
+    /// The blog's page read again, after a read that did not arrive — the pane above's to ask,
+    /// for `onAskAround`'s reason.
+    var onReadBlog: () -> Void = {}
     @Binding var selectedID: String?
     var marks: (DummyItem) -> Binding<DummyMarks>
     /// Each row's share of #54's acts, asked of the pane above rather than worked out here: the
@@ -51,6 +57,8 @@ struct DummyThreadPane: View {
     var onBack: () -> Void
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openURL) private var openURL
+    /// The app's own reader, where a blog that could not be read offers its page (#209).
+    @Environment(\.shellReader) private var reader
     /// The post at the top of the view, kept there as the thread renews under it (#198): an answer
     /// laid in above it moves what is below the reader, never the post they are reading.
     @State private var topID: String?
@@ -74,7 +82,7 @@ struct DummyThreadPane: View {
         return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: ShellSpace.snug) {
                 ShellBackButton("thread.back", action: onBack)
-                Text(L10n.t("thread.title"))
+                Text(L10n.t(blog == nil ? "thread.title" : "blog.title"))
                     .shellFont(.pane)
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                 Spacer()
@@ -105,6 +113,8 @@ struct DummyThreadPane: View {
                         }
                         if let thread {
                             rest(of: thread)
+                        } else if let blog {
+                            written(blog)
                         } else {
                             around
                         }
@@ -351,6 +361,75 @@ struct DummyThreadPane: View {
         }
         .padding(.top, ShellSpace.snug)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: - A forum's ranked blog — #209
+
+    /// What is under a blog where its words would be: nothing once they are read — the row above
+    /// draws them, from what this device keeps — and otherwise that its page is being read, or
+    /// why it could not be, with the forum's own page offered.
+    ///
+    /// **No replies, and no conversation to wait for.** A blog's comments are not read (#209's own
+    /// boundary), so this stands where `rest(of:)` and `around` stand for a topic and a microblog
+    /// post, and says only what a blog has to say. **No `default:`.**
+    @ViewBuilder
+    private func written(_ blog: ForumBlogReading) -> some View {
+        switch blog {
+        case .read:
+            EmptyView()
+        case .coming:
+            ForumWaiting(line: L10n.t("blog.reading"))
+                .padding(.top, ShellSpace.snug)
+        case .silent:
+            quiet(L10n.t("item.forum.silent"))
+                .padding(.top, ShellSpace.snug)
+        case .absent(let absence):
+            VStack(alignment: .leading, spacing: ShellSpace.snug) {
+                quiet(Self.sentence(forBlog: absence, host: root.source.host))
+                HStack(spacing: ShellSpace.step) {
+                    if absence.asksAgain {
+                        Button(action: onReadBlog) {
+                            Label(L10n.t("blog.again"), systemImage: "arrow.clockwise")
+                                .shellFont(.meta, weight: .medium)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(ShellChrome.selectInk(colorScheme))
+                    }
+                    blogPage
+                }
+            }
+            .padding(.top, ShellSpace.snug)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// The forum's own page for the blog, in the app's own reader — what opening a ranked blog
+    /// did before it was read in the app, kept for where it cannot be. Nothing where the row names
+    /// no page this device will open, decision 4's rule.
+    @ViewBuilder
+    private var blogPage: some View {
+        if let page = root.page {
+            Button {
+                _ = reader?.open(page)
+            } label: {
+                Label(L10n.t("blog.page"), systemImage: "doc.richtext")
+                    .shellFont(.meta, weight: .medium)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(ShellChrome.selectInk(colorScheme))
+            .accessibilityHint(Text(L10n.t("blog.page.hint")))
+        }
+    }
+
+    /// Why a blog could not be read, worded for a blog. `crowded` cannot arise — nothing about a
+    /// blog is held in a budget — and is given the forum's sentence rather than a fifth.
+    static func sentence(forBlog absence: ForumPosts.Absence, host: String) -> String {
+        switch absence {
+        case .refused: String(format: L10n.t("blog.refused"), host)
+        case .unreadable: L10n.t("blog.unreadable")
+        case .unreachable: L10n.t("blog.unreachable")
+        case .crowded: L10n.t("item.forum.crowded")
+        }
     }
 
     // MARK: - The conversation around a microblog post — #90

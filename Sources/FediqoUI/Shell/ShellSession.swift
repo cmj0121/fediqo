@@ -53,6 +53,10 @@ final class ShellSession {
     /// to comes back withheld.
     let posts: ForumPosts
 
+    /// A forum's ranked blogs, read as the reader opens them (#209). Beside `posts` and for its
+    /// reason: what the blog's pane draws and what a Clear presses are the same object.
+    let blogs: ForumBlogs
+
     /// Every act on a post this run has in the air, and every one that did not land — #106.
     ///
     /// On the session for `conversations`' reason: what a row draws and what a key presses have to
@@ -452,6 +456,7 @@ final class ShellSession {
         forums: ForumSessions = ForumSessions(),
         mastodon: MastodonSessions = MastodonSessions(),
         posts: ForumPosts? = nil,
+        blogs: ForumBlogs? = nil,
         timelines: WrittenTimelineStore? = nil
     ) {
         self.http = http
@@ -470,6 +475,8 @@ final class ShellSession {
         // 274KB — so it carries its own far tighter ceiling. See `ForumPosts.maxBytes`, and the
         // plan's standing item about per-caller response ceilings, of which this is the first.
         self.posts = posts ?? ForumPosts(through: forums)
+        // Built with the same forum browsers, for `posts`' reason (#209).
+        self.blogs = blogs ?? ForumBlogs(through: forums)
         // An opening post read is kept with its row (#154). Weak: the cache is this session's.
         self.posts.keeping = { [weak self] key, opening in self?.keep(opening, for: key) }
         // A topic's replies land in the store and are read back from it (#177). Weak, likewise.
@@ -479,6 +486,8 @@ final class ShellSession {
         self.posts.reading = { [weak self] host, tid in
             await self?.keptReplies(host: host, tid: tid) ?? []
         }
+        // A blog read is kept with its row (#209). Weak, likewise.
+        self.blogs.landing = { [weak self] key, blog in await self?.keep(blog, for: key) }
         switch timelines?.load() {
         case .timelines(let kept)?: written = kept
         case .unreadable?: timelinesUnreadable = true
@@ -2140,6 +2149,9 @@ final class ShellSession {
         // then there is nothing to hand them to.
         keep(posts.openings(host: host))
         posts.forget(host: host)
+        // A blog read is already its row's (#209); what goes is a read on the wire, and why one
+        // came to nothing.
+        blogs.forget(host: host)
         // Seven became eight, for the same reason: an open thread's answers are this device's
         // copy of that server's words too.
         conversations.forget(host: host)
@@ -2205,6 +2217,23 @@ final class ShellSession {
             guard await store.keep([key: opening]) else { return }
             await persist?()
         }
+    }
+
+    /// A ranked blog just read, kept with its row and saved — **and drawn at once** (#209).
+    ///
+    /// Written into `notes` where `keep(_:for:)` above is not, and for the opposite of its reason:
+    /// that one lands as the reader scrolls, and a row redrawn for each would be the timeline
+    /// redrawn for each; this one lands because the reader opened this very blog, whose pane is
+    /// drawn from the row and has nothing else to draw the words from. One row, once.
+    ///
+    /// **And kept as a change to what is drawn**, so a read of the store that was already on its
+    /// way — begun before the keep, and handing back the row without it — is followed by another
+    /// that has it, rather than drawing the row as it was until something else moves.
+    func keep(_ blog: DiscuzBlog, for key: NoteKey) async {
+        let opening = blog.opening
+        notes = notes.map { $0.key == key && $0.opening != opening ? $0.with(opening: opening) : $0 }
+        guard await store.keep([key: opening], shown: true) else { return }
+        await persist?()
     }
 
     /// One page of a topic's replies, landed in the store **held aside** and saved, and the topic

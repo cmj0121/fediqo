@@ -102,6 +102,27 @@ public struct DiscuzClient: Sendable {
         return DiscuzRanklist.blogs(in: html).map { $0.asNote(source: source, host: host) }
     }
 
+    /// One ranked blog read off its own page — its words, its date and its author's picture (#209).
+    ///
+    /// **The page the ranking list names, and nothing past it.** The address is built out of the
+    /// host and the two numbers the row was written from (`DiscuzRankedBlog.address`), never
+    /// lifted, and it is judged by `page` as a thread's is — **the blog's own words left out of
+    /// the judging**, which are somebody's writing and may say anything: a challenge, a status that
+    /// says no, Discuz!'s own notice and a redirect to sign in are each thrown as they are for a
+    /// thread, so a blog kept private, behind points, or from a signed-out reader is refused in
+    /// the same words. A page that is none of those and has no blog in it — a blog behind its
+    /// author's password answers with a form — is `noPosts`, "a page this app could not read".
+    public func blog(uid: Int, id: Int) async throws -> DiscuzBlog {
+        guard uid > 0, id > 0, let url = DiscuzRankedBlog.address(host: host, uid: uid, id: id) else {
+            throw DiscuzRequestError.invalidURL
+        }
+        let html = try await page(url, judged: DiscuzBlogPage.withoutWords)
+        guard let blog = DiscuzBlogPage.blog(in: html, id: id, uid: uid, host: host) else {
+            throw DiscuzRequestError.noPosts
+        }
+        return blog
+    }
+
     /// `misc.php?mod=ranklist&type=…&view=…&orderby=thisweek`, built out of the host and words
     /// this file chose — never lifted off a page.
     private func ranklistURL(type: String, view: String) throws -> URL {
@@ -407,14 +428,21 @@ public struct DiscuzClient: Sendable {
     /// Written once and called twice rather than restated at each door: this branch's second
     /// convention is that a rule enforced at each consumer is a rule consumer N+1 misses, and the
     /// index reader *is* consumer N+1 to the thread reader.
-    private func page(_ url: URL) async throws -> String {
+    ///
+    /// `judged` is what of the page the two markers are looked for in — all of it, except where a
+    /// caller knows part of it is somebody's own words (#209): a blog that quotes a challenge page
+    /// or writes `id="messagetext"` is still a blog.
+    private func page(
+        _ url: URL, judged: (String) -> String = { $0 }
+    ) async throws -> String {
         let (data, response) = try await http.data(from: url)
         guard let html = DiscuzHTML.text(data, response) else {
             throw DiscuzRequestError.undecodable
         }
-        if DiscuzPage.isChallenge(html) { throw DiscuzRequestError.challenged }
+        let judging = judged(html)
+        if DiscuzPage.isChallenge(judging) { throw DiscuzRequestError.challenged }
         try Self.check(response.statusCode)
-        if DiscuzPage.isRestricted(html) { throw DiscuzRequestError.restricted }
+        if DiscuzPage.isRestricted(judging) { throw DiscuzRequestError.restricted }
         // **Asked for a thread, handed the sign-in page.** Measured on `install-a.example`: a thread
         // in a members-only board answers `&mobile=2` with a 302 to
         // `member.php?mod=logging&action=login`, which then answers **200** with a real login form
@@ -2461,7 +2489,7 @@ enum DiscuzPostLayout: CaseIterable, Sendable {
     /// `HTMLText.plain` takes the tag and there is no text in it — so a post that is only a
     /// photograph has an empty `body`, which is true. Carrying its filename instead would put
     /// `Screenshot_20260916_094759.jpeg` on the row as though somebody had written it.
-    private static func words(
+    static func words(
         in message: String,
         patterns: DiscuzThreadPage.Patterns
     ) -> (body: String, quoted: [DiscuzQuotation], isWithheld: Bool) {
