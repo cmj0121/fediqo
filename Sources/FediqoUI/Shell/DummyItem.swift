@@ -145,6 +145,11 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// was ranked and which board it is in, which is what decides whether reaching it may read
     /// its opening post (`ForumPosts.readsWhenReached`). Empty on a fixture.
     public var categories: Set<FediqoCore.Category> = []
+    /// When this copy's source said it no longer has this post — `Note.goneSince`, carried so
+    /// every place a row is drawn marks it the same way (#179). Nothing on a post its source still
+    /// has. **This copy's fact**, which is what its acts are read off; what the row says is
+    /// `goneEverywhere`.
+    public var goneSince: Date?
     /// Whether the author covered it, or nothing where the source never said. Carried as the
     /// three answers it has, not folded down to two — see `covered`.
     public let sensitive: Bool?
@@ -169,6 +174,14 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// they came rather than one this app assembled out of the two. What counts as the same post
     /// is `SamePost`'s answer, a fact the sources stated; this only carries it.
     public private(set) var otherCopies: [DummyItem] = []
+
+    /// Whether the row is marked as gone from its source (#179): **every** copy's source has said
+    /// so. A post one server deleted and another still carries is still there to read and to act
+    /// on through the other, and a row saying nothing can be sent while its acts go through the
+    /// live copy would be the mark and the acts disagreeing about one post.
+    public var goneEverywhere: Bool {
+        goneSince != nil && otherCopies.allSatisfy { $0.goneSince != nil }
+    }
 
     /// Every source this post came through, the row's own first. One for most rows.
     public var sources: [DummySource] { [source] + otherCopies.map(\.source) }
@@ -345,6 +358,7 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         attachments = note.attachments
         opening = note.opening
         categories = note.categories
+        goneSince = note.goneSince
         sensitive = note.sensitive
         spoiler = note.spoiler
         emojis = note.emojis

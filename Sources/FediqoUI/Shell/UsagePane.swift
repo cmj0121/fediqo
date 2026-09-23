@@ -214,6 +214,7 @@ struct UsagePane: View {
             case .time:
                 breakdown(session)
                 keep
+                GoneSection(session: session)
             case .copies:
                 copies(session)
             }

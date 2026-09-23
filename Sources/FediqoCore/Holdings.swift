@@ -64,3 +64,27 @@ public enum KeepPolicy {
         return new < old
     }
 }
+
+/// How long a post its source deleted stays on this device, marked, before it is let go (#179):
+/// a number of days, or never where nil — the default.
+///
+/// **This device's wait, and the keep-for window beside it.** Both are about how long a post
+/// stays, so where they disagree the shorter one wins: a post kept for at most three months is
+/// not kept for ninety days because its source let it go. `cutoff` answers with which one did.
+public enum GoneWait {
+    /// The moment at or before which a post marked gone goes, as of `now`, and whether the keep-for
+    /// window set it rather than the wait. Nothing where neither is set — keep them all, marked.
+    public static func cutoff(
+        days: Int?, keepingMonths months: Int?, from now: Date, calendar: Calendar = .current
+    ) -> (cutoff: Date?, keepWins: Bool) {
+        let waited = days.flatMap { $0 > 0 ? calendar.date(byAdding: .day, value: -$0, to: now) : nil }
+        let kept = KeepPolicy.cutoff(keepingMonths: months, from: now, calendar: calendar)
+        switch (waited, kept) {
+        case (nil, nil): return (nil, false)
+        case (let waited?, nil): return (waited, false)
+        case (nil, let kept?): return (kept, true)
+        // The later moment is the shorter wait. A tie is the wait's own.
+        case (let waited?, let kept?): return kept > waited ? (kept, true) : (waited, false)
+        }
+    }
+}
