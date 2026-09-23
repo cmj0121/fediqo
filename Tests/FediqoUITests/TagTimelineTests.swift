@@ -37,6 +37,8 @@ struct TagTimelineTests {
        "category_id":6,"tags":["swift"],"posters":[{"description":"Original Poster","user_id":1}]}]}}
     """#
     private static let site = #"{"categories":[{"id":6,"name":"Dev"}]}"#
+    /// Discourse's own 404, which is how it says a feature is turned off.
+    private static let notFound = #"{"errors":["The requested URL or resource could not be found."],"error_type":"not_found"}"#
     private static let topicKey = Note(
         id: "discourse:\(forum):41207", source: Source(host: forum, kind: .discourse), author: "",
         handle: "", body: "", postedAt: .distantPast, categories: []
@@ -79,11 +81,11 @@ struct TagTimelineTests {
     func rulesHold() async throws {
         let session = await shell(FixtureHTTP([:]))
         session.timelineID = .all
-        #expect(session.heldPosts(under: Self.swift).count == 2)
+        #expect(session.heldPosts(under: Self.swift, latest: nil).count == 2)
         _ = try friends(in: session)
-        #expect(session.heldPosts(under: Self.swift).map(\.id) == [Self.note("1", "").key.rowID])
+        #expect(session.heldPosts(under: Self.swift, latest: nil).map(\.id) == [Self.note("1", "").key.rowID])
         session.timelineID = .trends
-        #expect(session.heldPosts(under: Self.swift).isEmpty, "no post under the tag is a trend")
+        #expect(session.heldPosts(under: Self.swift, latest: nil).isEmpty, "no post under the tag is a trend")
     }
 
     @Test("On Trends nothing is asked, and the page says why of each source")
@@ -120,7 +122,7 @@ struct TagTimelineTests {
         #expect(!(await http.requested.contains { $0.host == Self.board }), "the Discuz! is not")
         #expect(session.reload.tagAsk?.reach.asked == [Self.one, Self.forum])
         #expect(session.reload.tagAsk?.reach.tagless == [Self.board])
-        let under = session.heldPosts(under: Self.swift).map(\.id)
+        let under = session.heldPosts(under: Self.swift, latest: nil).map(\.id)
         #expect(under.filter { $0 == Self.topicKey.rowID }.count == 1, "once")
         #expect(session.searchable.filter { $0.key == Self.topicKey }.count == 1, "one row in the store")
         #expect(await session.store.note(Self.topicKey)?.holding == .arrived, "the front page's own row")
@@ -138,13 +140,14 @@ struct TagTimelineTests {
         #expect(await session.store.note(Self.topicKey)?.holding == .aside)
         #expect(await session.store.note(Self.topicKey)?.board == "Dev", "named as the front page names it")
         #expect(!session.notes.contains { $0.key == Self.topicKey })
-        #expect(session.heldPosts(under: Self.swift).map(\.id).contains(Self.topicKey.rowID))
+        #expect(session.heldPosts(under: Self.swift, latest: nil).map(\.id).contains(Self.topicKey.rowID))
     }
 
     @Test("A forum with tags turned off says so, is not a failure, and is not asked again")
     func tagsOff() async {
         let http = FixtureHTTP([
-            Self.mastodonTag: .text("[]"), Self.forumTag: .text("", status: 404), "/tags.json": .text("", status: 404),
+            Self.mastodonTag: .text("[]"), Self.forumTag: .text(Self.notFound, status: 404),
+            "/tags.json": .text(Self.notFound, status: 404),
         ])
         let session = await shell(http)
         await session.reload.tag(Self.swift, timeline: .all, in: session)
@@ -158,6 +161,20 @@ struct TagTimelineTests {
         await session.reload.tag(Self.swift, timeline: .all, in: session)
         #expect(await http.paths.filter { $0 == Self.forumTag }.count == 1, "not asked a second time")
         #expect(session.reload.tagAsk?.reach.tagsOff == [Self.forum])
+    }
+
+    @Test("A 404 page not in Discourse's words is a failure to try again, never remembered as tags off")
+    func proxiedNotFound() async {
+        let http = FixtureHTTP([
+            Self.mastodonTag: .text("[]"), Self.forumTag: .text("", status: 404),
+            "/tags.json": .text("<html>Not Found</html>", status: 404),
+        ])
+        let session = await shell(http)
+        await session.reload.tag(Self.swift, timeline: .all, in: session)
+        #expect(session.reload.tagAsk?.reach.tagsOff == [])
+        #expect(session.reload.tagFailed == [Self.forum])
+        await session.reload.tag(Self.swift, timeline: .all, in: session)
+        #expect(await http.paths.filter { $0 == Self.forumTag }.count == 2, "asked again")
     }
 
     @Test("A tag the forum has never used is nothing under it, not tags off and not a failure")
@@ -239,20 +256,73 @@ struct TagTimelineTests {
         #expect(await http.requested.isEmpty)
     }
 
-    @Test("A switch keeps a tag's page in front, alone; any other walk ends")
+    @Test("A switch keeps a tag's page in front, alone; any other walk is left for the root to end")
     func theWalkKeepsTheTag() {
         var walk = ShellWalk()
         _ = walk.walk(to: .thread("a"), from: "row-1")
         _ = walk.walk(to: .tag(Self.swift), from: "a")
-        #expect(walk.timelineSwitched() == Self.swift)
+        var handed: String?
+        #expect(walk.timelineSwitched { handed = $0; return "place" } == Self.swift)
+        #expect(handed == "row-1", "the row the walk left the stream from")
         #expect(walk.depth == 1)
         #expect(walk.openedTag == Self.swift)
-        #expect(walk.back()?.lamp == nil, "the row it was pressed on is on a list that is gone")
+        #expect(walk.back()?.lamp == "place")
 
         _ = walk.walk(to: .tag(Self.swift), from: "row-1")
+        _ = walk.walk(to: .link(URL(string: "https://one.example/a")!), from: "row-1")
+        #expect(walk.timelineSwitched { $0 } == Self.swift, "a page read over the tag's goes, the tag's stays")
+        #expect(walk.depth == 1)
+
         _ = walk.walk(to: .thread("b"), from: "row-2")
-        #expect(walk.timelineSwitched() == nil)
-        #expect(walk.isEmpty)
+        #expect(walk.timelineSwitched { $0 } == nil)
+        #expect(walk.depth == 2, "untouched: the root clears it")
+    }
+
+    @Test("Switched with the page open, leaving it lights the new timeline's place, and switching back the old one's")
+    func placesAcrossTheSwitch() {
+        var walk = ShellWalk()
+        var places = TimelinePlaces()
+        // All was last on "all-1" and Trends on "trend-1", each written down as it was left.
+        _ = places.switched(from: .trends, to: .all, standingOn: "trend-1", among: [])
+        _ = walk.walk(to: .tag(Self.swift), from: "all-1")
+
+        let kept = FediqoRootView.timelineSwitched(
+            on: &walk, places: &places, from: .all, to: .trends, shown: ["trend-1", "trend-2"], searching: false
+        )
+        #expect(kept == Self.swift)
+        #expect(walk.back()?.lamp == "trend-1", "leaving lands on Trends' own place")
+
+        _ = walk.walk(to: .tag(Self.swift), from: "trend-2")
+        _ = FediqoRootView.timelineSwitched(
+            on: &walk, places: &places, from: .trends, to: .all, shown: ["all-1", "all-2"], searching: false
+        )
+        #expect(walk.back()?.lamp == "all-1", "All's place, filed before the page, given back")
+        #expect(places.arriving(at: .trends, among: ["trend-2"]) == "trend-2", "Trends filed where the page was taken from")
+
+        // With a search open its parked post is the timeline's place; the result row is kept.
+        _ = walk.walk(to: .tag(Self.swift), from: "result-1")
+        _ = FediqoRootView.timelineSwitched(
+            on: &walk, places: &places, from: .all, to: .trends, shown: ["trend-2"], searching: true
+        )
+        #expect(walk.back()?.lamp == "result-1")
+        #expect(places.arriving(at: .all, among: ["all-1"]) == "all-1", "not filed over by a result")
+    }
+
+    @Test("The page stops at the latest date, and a post two sources carried is one row")
+    func latestAndMerged() async {
+        let session = await shell(FixtureHTTP([:]))
+        let other = Note(
+            id: "https://one.example/users/ada/statuses/1", source: Source(host: "two.example", kind: .mastodon),
+            author: "Ada", handle: "@ada@one.example", body: "hello #swift friends",
+            postedAt: Date(timeIntervalSince1970: 1), categories: []
+        )
+        await session.store.add(Source(host: "two.example", kind: .mastodon))
+        await session.store.hold([other], ifSourceHere: "two.example")
+        await session.reloadFromStore()
+        session.timelineID = .all
+        #expect(session.heldPosts(under: Self.swift, latest: nil).count == 2, "posts 1 and 2, the copy merged")
+        let before = LatestDate(year: 1969, month: 12, day: 1)
+        #expect(session.heldPosts(under: Self.swift, latest: before).isEmpty)
     }
 
     // MARK: - Said, and drawn

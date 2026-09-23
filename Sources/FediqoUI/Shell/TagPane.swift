@@ -62,13 +62,12 @@ extension EnvironmentValues {
 /// **Or sent under it** (#197): a forum files a topic under a tag beside its words, not in them,
 /// so what a source sent when asked for the tag is under it too.
 enum HeldUnderTag {
-    static func held(under tag: PostTag, in notes: [Note], sent: Set<NoteKey> = []) -> [DummyItem] {
+    static func held(under tag: PostTag, in notes: [Note], sent: Set<NoteKey> = []) -> [Note] {
         let name = folded(tag)
         return notes.filter { note in
             sent.contains(note.key) || PostTag.found(in: note.body).contains { folded($0) == name }
         }
             .sorted { $0.postedAt > $1.postedAt }
-            .map(DummyItem.init)
     }
 
     static func folded(_ tag: PostTag) -> String {
@@ -87,6 +86,7 @@ struct HeldTag {
         let heldRevision: Int
         let definition: TimelineDefinition
         let sent: Set<NoteKey>
+        let latest: LatestDate?
     }
 
     let key: Key

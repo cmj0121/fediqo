@@ -141,7 +141,7 @@ struct TimelinePane: View {
             case .tag(let tag):
                 TagPane(
                     tag: tag,
-                    items: session.heldPosts(under: tag),
+                    items: session.heldPosts(under: tag, latest: prefs.latestDate),
                     // What the ask says only where it is this tag's: another tag's, or one left
                     // behind, is not this page's to say.
                     asking: session.reload.tagAsk?.tag == tag ? session.reload.tagAsking : [],
@@ -262,16 +262,21 @@ struct TimelinePane: View {
         .onChange(of: session.timelineID) { left, arrived in
             // Another list, so the row the last one had at the top means nothing here.
             session.scrolledTop = nil
+            // A tag's page stays over the switch, and its lamp and the place under it are
+            // `FediqoRootView.timelineSwitched`'s (#197): only the search's parked post is filed here.
+            let onTag = if case .tag = standing { true } else { false }
             if !searching {
-                selectedID = session.timelinePlaces.switched(
-                    from: left, to: arrived, standingOn: selectedID, among: items.map(\.id)
-                )
+                if !onTag {
+                    selectedID = session.timelinePlaces.switched(
+                        from: left, to: arrived, standingOn: selectedID, among: items.map(\.id)
+                    )
+                }
             } else {
                 let shown = session.timelineItems(latest: prefs.latestDate).map(\.id)
                 search?.switched { parked in
                     session.timelinePlaces.switched(from: left, to: arrived, standingOn: parked, among: shown)
                 }
-                if let selectedID, !items.contains(where: { $0.id == selectedID }) {
+                if !onTag, let selectedID, !items.contains(where: { $0.id == selectedID }) {
                     self.selectedID = nil
                 }
                 // A search sent to the last timeline's sources is sent to this one's (#176).

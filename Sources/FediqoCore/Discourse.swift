@@ -51,8 +51,9 @@ public struct DiscourseClient: Sendable {
     ///
     /// **Tags off is asked, not guessed.** A tag's listing answers 404 both where the forum has
     /// no such tag and where it keeps no tags at all. Only on a 404 is the tag index asked, which
-    /// answers wherever tagging is on: 404 again is the forum saying it keeps no tags, and any
-    /// other answer is a tag nobody has used there — nothing under it, and no fault.
+    /// answers wherever tagging is on: Discourse's own not-found again is the forum saying it
+    /// keeps no tags, and any other success is a tag nobody has used there — nothing under it,
+    /// and no fault.
     public func topics(under tag: PostTag, source: Source) async throws -> DiscourseTagged {
         let path = try Self.path(under: tag, host: host)
         do {
@@ -61,8 +62,14 @@ public struct DiscourseClient: Sendable {
             guard let url = Host.httpsURL(host: host, path: "/tags.json") else {
                 throw DiscourseRequestError.invalidURL
             }
-            let (_, response) = try await http.data(from: url)
-            if response.statusCode == 404 { return .tagsOff }
+            let (data, response) = try await http.data(from: url)
+            // **Only in Discourse's own words.** A 404 page from whatever stands in front of the
+            // forum is not the forum saying anything, and is a miss to try again, not a setting.
+            if response.statusCode == 404 {
+                guard (try? DiscourseJSON.decoder.decode(NotFoundDTO.self, from: data))?.errorType == "not_found"
+                else { throw DiscourseRequestError.http(404) }
+                return .tagsOff
+            }
             try Self.check(response.statusCode)
             return .topics([])
         }
@@ -420,6 +427,11 @@ struct TopicDTO: Decodable, Sendable {
             )
         )
     }
+}
+
+/// The body Discourse answers a 404 with: `{"errors":[…],"error_type":"not_found"}`.
+struct NotFoundDTO: Decodable, Sendable {
+    let errorType: String?
 }
 
 struct SiteDTO: Decodable, Sendable {
