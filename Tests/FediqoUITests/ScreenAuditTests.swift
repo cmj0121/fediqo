@@ -51,13 +51,49 @@ struct ScreenAuditTests {
         #expect(await session.store.note(aside.key)?.holding == .aside)
     }
 
-    /// The same post as a row to act on: what an act on it answers is laid over the store's row,
-    /// which stays held aside — a boost is not a timeline bringing it.
-    @Test("A post held aside is the row its acts reach, and stays aside")
-    func aPostHeldAsideIsActedOn() async {
-        let aside = Self.note("20", holding: .aside)
-        let session = await shell([aside])
-        #expect(session.note(ofRow: aside.key.rowID)?.key == aside.key)
+    /// The same post as a row to act on: the boost reaches its source, what the source answers is
+    /// laid over the store's row, and the row stays held aside — a boost is not a timeline
+    /// bringing it. Pressed again, the boost is taken back.
+    @Test("A post held aside is boosted and unboosted, and stays aside")
+    func aPostHeldAsideIsActedOn() async throws {
+        let host = "social.example"
+        let tokens = MemoryMastodonTokens()
+        try tokens.save(MastodonToken(
+            host: host, accessToken: "tok-123", clientID: "cid", clientSecret: "csecret",
+            scopes: MastodonOAuth.scopes(writing: true)
+        ))
+        let server = ActServer([
+            "/api/v1/statuses/9/reblog": .json(ActTests.status(reblogged: true)),
+            "/api/v1/statuses/9/unreblog": .json(ActTests.status(reblogged: false)),
+        ])
+        var aside = Note(
+            id: "https://\(host)/users/ada/statuses/9", source: Source(host: host, kind: .mastodon),
+            author: "Ada", handle: "@ada@\(host)", body: "hello",
+            postedAt: Date(timeIntervalSince1970: 1_700_000_000), categories: [],
+            boosted: false, statusID: "9"
+        )
+        aside.holding = .aside
+        let store = ItemStore()
+        await store.add(Source(host: host, kind: .mastodon))
+        await store.ingest([aside])
+        let session = ShellSession(
+            http: FixtureHTTP(), store: store, mastodon: MastodonSessions(tokens: tokens, sender: server)
+        )
+        session.mastodon.refresh()
+        await session.reloadFromStore()
+
+        let row = try #require(session.held(aside.key.rowID))
+        #expect(session.acts(on: row).offers(.boost), "a post held aside offers its marks")
+        await session.toggle(.boost, on: row)
+        #expect(await server.paths == ["/api/v1/statuses/9/reblog"], "the boost reached its source")
+        #expect(await store.note(aside.key)?.boosted == true, "the source's answer is the row's")
+        #expect(await store.note(aside.key)?.holding == .aside, "and the row stays held aside")
+        #expect(session.notes.isEmpty, "All does not grow by a boost")
+
+        await session.toggle(.boost, on: try #require(session.held(aside.key.rowID)))
+        #expect(await server.paths == ["/api/v1/statuses/9/reblog", "/api/v1/statuses/9/unreblog"])
+        #expect(await store.note(aside.key)?.boosted == false)
+        #expect(await store.note(aside.key)?.holding == .aside)
         #expect(session.notes.isEmpty)
     }
 
