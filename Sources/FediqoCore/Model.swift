@@ -645,8 +645,8 @@ public struct ForumOpening: Hashable, Sendable {
     public let avatarURL: URL?
     /// A kept reply's floor, where its page numbered it. Never an opening post's.
     public let floor: Int?
-    /// A kept reply's own date, where its page gave one a device can read. Never an opening
-    /// post's.
+    /// A kept reply's own date, or a read blog's (#209), where its page gave one a device can
+    /// read. Never a thread's opening post's.
     public let postedAt: Date?
 
     public init(
