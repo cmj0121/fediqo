@@ -99,12 +99,26 @@ public extension PostTag {
 
     /// What a tag may be spelled with: a letter or a digit in any script, a mark, or `_`.
     ///
-    /// `Unicode.Scalar.Properties` rather than `Character.isLetter`, because the question is about
-    /// the scalar a grapheme opens with — a letter carrying a combining mark is one character and
-    /// is one the tag keeps.
+    /// `Unicode.Scalar.Properties` rather than `Character.isLetter`, because a letter carrying a
+    /// combining mark is one character and is one the tag keeps.
+    ///
+    /// **Every scalar of the character, not the first** (#124). A grapheme can open with a letter
+    /// and carry anything after it: U+0D4E is a prepend letter, so `ൎ/` is one character whose
+    /// first scalar is alphabetic and whose second is a bare `/`. Judged by its first scalar, `#ൎ/x`
+    /// was a tag, and its name — sent as a path segment to a server, with the reader's token —
+    /// carried a slash into the path. Each scalar is now a letter, a digit, a mark, the zero-width
+    /// joiner an emoji-style sequence is built with, or a variation selector.
     private static func isTagCharacter(_ character: Character) -> Bool {
-        character == "_" || character.unicodeScalars.first.map {
-            $0.properties.isAlphabetic || $0.properties.numericType != nil
-        } == true
+        character == "_" || character.unicodeScalars.allSatisfy(isTagScalar)
+    }
+
+    private static func isTagScalar(_ scalar: Unicode.Scalar) -> Bool {
+        let properties = scalar.properties
+        switch properties.generalCategory {
+        case .nonspacingMark, .spacingMark, .enclosingMark: return true
+        default: break
+        }
+        return properties.isAlphabetic || properties.numericType != nil
+            || scalar == "\u{200D}" || properties.isVariationSelector
     }
 }

@@ -184,6 +184,13 @@ struct TagPressTests {
         #expect(FediqoRootView.tagToOpen(in: DummyItem(covered), lifted: true, standing: nil)?.text == "#swift")
     }
 
+    @Test("The same tag in another case, pressed on its own page, opens nothing")
+    func sameTagOtherCase() {
+        #expect(!FediqoRootView.opensAnew(PostTag("#SWIFT")!, standing: Self.swift))
+        #expect(FediqoRootView.opensAnew(PostTag("#ios")!, standing: Self.swift))
+        #expect(FediqoRootView.opensAnew(Self.swift, standing: nil))
+    }
+
     @Test("Leaving a tag's page gives back the post the press was made from, on its row")
     func leavingGivesBackTheRow() {
         var walk = ShellWalk()

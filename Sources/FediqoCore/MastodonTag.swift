@@ -34,7 +34,7 @@ public struct MastodonTag: Sendable {
     /// The name goes into the path as a path segment, percent-encoded where it is not ASCII — a
     /// tag written in any script is a tag (`PostTag`) — and never with its `#`.
     public func posts(under tag: PostTag, source: Source) async throws -> [Note] {
-        let path = "/api/v1/timelines/tag/" + tag.name
+        let path = try Self.path(under: tag, host: host)
         let query = [URLQueryItem(name: "limit", value: "40")]
         let data: Data
         switch door {
@@ -52,5 +52,22 @@ public struct MastodonTag: Sendable {
         }
         return try MastodonJSON.decoder.decode([StatusDTO].self, from: data)
             .map { $0.asNote(source: source, categories: []) }
+    }
+
+    /// The tag's timeline, as a path whose last segment is the name and nothing else (#124).
+    ///
+    /// **Refused rather than trusted.** `PostTag` admits no `/`, `?`, `#` or `%` into a name, and
+    /// this does not lean on that alone: the path is built as the request will build it, and is
+    /// refused unless it is exactly the five segments before the name and the name itself — so a
+    /// name that would add a segment, climb one or end the path early never reaches a server with
+    /// the reader's token beside it.
+    static func path(under tag: PostTag, host: String) throws -> String {
+        let name = tag.name
+        let path = "/api/v1/timelines/tag/" + name
+        guard !name.contains(where: { "/?#%\\".contains($0) }),
+              let url = Host.httpsURL(host: host, path: path),
+              url.pathComponents == ["/", "api", "v1", "timelines", "tag", name]
+        else { throw MastodonRequestError.invalidURL }
+        return path
     }
 }

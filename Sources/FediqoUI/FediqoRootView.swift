@@ -1174,12 +1174,28 @@ public struct FediqoRootView: View {
     /// because a face is not a post; the words a tag is written in are. Words that stand on no
     /// row leave the lamp where it is.
     private func openTag(_ tag: PostTag, from row: String?) -> Bool {
-        guard Self.canWalk(place: place, open: openLayers) else { return false }
-        if let row { selectedItemID = row }
-        guard walk.walk(to: .tag(tag), from: selectedItemID) else { return false }
+        guard Self.canWalk(place: place, open: openLayers),
+              Self.opensAnew(tag, standing: walk.openedTag)
+        else { return false }
+        // Refused before anything moves, as `openThread` is: a press that opens nothing leaves
+        // the lamp where it was.
+        let lamp = row ?? selectedItemID
+        guard walk.walk(to: .tag(tag), from: lamp) else { return false }
+        selectedItemID = lamp
         let timeline = session.currentTimeline
-        Task { await session.reload.tag(tag, timeline: timeline, in: session) }
+        Task {
+            // Asked only while this is still the page in front: a press answered after the page
+            // was left, or another tag opened, asks for nothing nobody is reading.
+            guard walk.openedTag == tag else { return }
+            await session.reload.tag(tag, timeline: timeline, in: session)
+        }
         return true
+    }
+
+    /// Whether pressing `tag` opens a page, where `standing` is the tag whose page is in front:
+    /// `#SWIFT` pressed on `#Swift`'s page is the page already open (#124).
+    static func opensAnew(_ tag: PostTag, standing: PostTag?) -> Bool {
+        standing.map { !HeldUnderTag.same($0, tag) } ?? true
     }
 
     /// `t` — a hashtag of the post the lamp is on (#124): the press a finger makes on its pill,

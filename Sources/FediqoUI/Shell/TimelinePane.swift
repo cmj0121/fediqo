@@ -142,8 +142,10 @@ struct TimelinePane: View {
                 TagPane(
                     tag: tag,
                     items: session.heldPosts(under: tag),
-                    asking: session.reload.tagAsking,
-                    failed: session.reload.tagFailed,
+                    // What the ask says only where it is this tag's: another tag's, or one left
+                    // behind, is not this page's to say.
+                    asking: session.reload.tagAsk?.tag == tag ? session.reload.tagAsking : [],
+                    failed: session.reload.tagAsk?.tag == tag ? session.reload.tagFailed : [],
                     catalogues: session.emoji,
                     catalogueSettled: false,
                     posts: session.posts,
