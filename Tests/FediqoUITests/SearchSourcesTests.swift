@@ -262,12 +262,15 @@ struct SearchSourcesTests {
     func switchingReasks() async throws {
         let server = Searchable([Self.one: Self.found])
         let session = try await shell(server)
-        await session.reload.searchSwitched(to: .trends, in: session)
+        session.timelineID = .trends
+        await session.reload.searchSwitched(to: .trends, pattern: "cats", in: session)
         #expect(await server.asked.isEmpty, "no Return made yet: nothing to send again")
 
+        session.timelineID = .all
         await session.reload.search("cats", timeline: .all, in: session)
         #expect(await server.asked.count == 1)
-        await session.reload.searchSwitched(to: .trends, in: session)
+        session.timelineID = .trends
+        await session.reload.searchSwitched(to: .trends, pattern: "cats", in: session)
         #expect(await server.asked.count == 1, "Trends' sources cannot be searched")
         #expect(session.reload.reach?.asked == [], "the line is Trends', not All's")
 
@@ -275,9 +278,61 @@ struct SearchSourcesTests {
         draft.name = "Wire"
         draft.rules = [try #require(Rule.keyword("wire", in: .every))]
         session.commit(draft)
-        await session.reload.searchSwitched(to: .written(draft.id), in: session)
+        session.timelineID = .written(draft.id)
+        await session.reload.searchSwitched(to: .written(draft.id), pattern: "cats", in: session)
         #expect(await server.asked.count == 2, "sent again, to the new timeline's sources")
         #expect(session.reload.reach?.asked == [Self.one])
+    }
+
+    @Test("Typed over since Return, a switch sends nothing and the old ask ends")
+    func retypedSendsNothing() async throws {
+        let server = Searchable([Self.one: Self.found])
+        let session = try await shell(server)
+        var draft = TimelineDraft(new: session.written.count + 1)
+        draft.name = "Wire"
+        draft.rules = [try #require(Rule.keyword("wire", in: .every))]
+        session.commit(draft)
+        session.timelineID = .all
+        await session.reload.search("cats", timeline: .all, in: session)
+        #expect(await server.asked.count == 1)
+
+        session.timelineID = .written(draft.id)
+        await session.reload.searchSwitched(to: .written(draft.id), pattern: "dogs", in: session)
+        #expect(await server.asked.count == 1, "\"cats\" is no longer the search")
+        #expect(session.reload.reach == nil)
+    }
+
+    @Test("A switch answered after another sends nothing to a timeline no longer in front")
+    func lateSwitchSendsNothing() async throws {
+        let server = Searchable([Self.one: Self.found])
+        let session = try await shell(server)
+        var draft = TimelineDraft(new: session.written.count + 1)
+        draft.name = "Wire"
+        draft.rules = [try #require(Rule.keyword("wire", in: .every))]
+        session.commit(draft)
+        session.timelineID = .all
+        await session.reload.search("cats", timeline: .all, in: session)
+
+        session.timelineID = .trends
+        await session.reload.searchSwitched(to: .written(draft.id), pattern: "cats", in: session)
+        #expect(await server.asked.count == 1)
+        #expect(session.reload.reach?.asked == [Self.one], "the last search's line, untouched")
+    }
+
+    @Test("Letting go of a gone row held aside moves what is counted aside")
+    func goneAsideIsCounted() async {
+        let store = ItemStore()
+        let source = Source(host: Self.one, kind: .mastodon)
+        await store.add(source)
+        let aside = Note(id: "aside", source: source, author: "Ada", handle: "@ada@\(Self.one)", body: "x",
+                         postedAt: Date(timeIntervalSince1970: 0), categories: [])
+        await store.hold([aside], ifSourceHere: Self.one)
+        let held = await store.asideRevision
+        #expect(await store.markGone(aside.key))
+        #expect(await store.asideRevision == held + 1, "marked: the row held aside changed")
+        #expect(await store.letGoneGo() == 1)
+        #expect(await store.asideRevision == held + 2, "let go: the row held aside went")
+        #expect(await store.aside().isEmpty)
     }
 
     @Test("A token that may not search is said as a sign-in to make again, not as silence")

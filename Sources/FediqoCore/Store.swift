@@ -74,8 +74,10 @@ public actor ItemStore {
     /// Something here changed: the revision moves and everyone listening is told. **The one place
     /// either happens**, so a call that tells a saver it changed cannot forget to tell a screen.
     /// `shown` says whether it changed what `all()` draws too, and moves `drawn` where it did;
-    /// `aside` the same of what `aside()` hands over, and `asideRevision`.
-    private func changed(shown: Bool, aside: Bool = false) {
+    /// `aside` the same of what `aside()` hands over, and `asideRevision`. **Both said at every
+    /// call**, so a change added later has to answer for the rows held aside rather than fall
+    /// silent about them by default.
+    private func changed(shown: Bool, aside: Bool) {
         revision += 1
         if shown { drawn += 1 }
         if aside { asideRevision += 1 }
@@ -107,7 +109,7 @@ public actor ItemStore {
     public func add(_ source: Source) {
         if sourceList.contains(where: { $0.host == source.host }) { return }
         sourceList.append(source)
-        changed(shown: false)
+        changed(shown: false, aside: false)
     }
 
     /// Restates which boards a source is subscribed to, where that source is here.
@@ -129,7 +131,7 @@ public actor ItemStore {
         sourceList[index] = Source(
             host: existing.host, kind: existing.kind, boards: boards, lists: existing.lists
         )
-        changed(shown: false)
+        changed(shown: false, aside: false)
     }
 
     /// Restates which Mastodon lists a source reads — a choice, or the same lists relabelled with
@@ -142,7 +144,7 @@ public actor ItemStore {
         sourceList[index] = Source(
             host: existing.host, kind: existing.kind, boards: existing.boards, lists: lists
         )
-        changed(shown: false)
+        changed(shown: false, aside: false)
     }
 
     /// Gives the lists a source reads **now** the names in `names`, by id. Only relabels: a list
@@ -157,7 +159,7 @@ public actor ItemStore {
         sourceList[index] = Source(
             host: existing.host, kind: existing.kind, boards: existing.boards, lists: lists
         )
-        changed(shown: false)
+        changed(shown: false, aside: false)
     }
 
     /// `ingest(_:)`, only while `host` is still a source here — in the same step, so a source
@@ -386,7 +388,7 @@ public actor ItemStore {
         else { return false }
         held.goneSince = moment
         notes[key] = held
-        changed(shown: held.holding == .arrived)
+        changed(shown: held.holding == .arrived, aside: held.holding == .aside)
         return true
     }
 
@@ -411,7 +413,7 @@ public actor ItemStore {
             notes[note.key] = nil
             arrival[note.key] = nil
         }
-        changed(shown: going.contains { $0.holding == .arrived })
+        changed(shown: going.contains { $0.holding == .arrived }, aside: going.contains { $0.holding == .aside })
         return going.count
     }
 

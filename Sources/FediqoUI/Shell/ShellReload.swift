@@ -247,8 +247,19 @@ final class ShellReload {
     /// again to the new one's, whose sources and rules are what the results are now asked of —
     /// rather than the last timeline's ask running on and its line naming sources this one may
     /// not have. Nothing where no Return has been made since the search opened.
-    func searchSwitched(to query: TimelineQuery, in session: ShellSession) async {
-        guard reach != nil, let last = searchedFor, last.query != query else { return }
+    ///
+    /// **Only what was sent, and only to what is in front.** Where the field has been typed in
+    /// since Return (`pattern` differs), what was sent is no longer the search, so its ask ends
+    /// and nothing is sent until the next Return. And a switch answered late — another switch
+    /// since — sends nothing to a timeline that is no longer in front.
+    func searchSwitched(to query: TimelineQuery, pattern: String, in session: ShellSession) async {
+        guard reach != nil, let last = searchedFor, last.query != query,
+              query == session.currentTimeline
+        else { return }
+        guard pattern == last.pattern else {
+            endSearch()
+            return
+        }
         await search(last.pattern, timeline: query, in: session)
     }
 

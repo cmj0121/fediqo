@@ -236,7 +236,8 @@ struct TimelinePane: View {
                 }
                 // A search sent to the last timeline's sources is sent to this one's (#176).
                 let now = session.currentTimeline
-                Task { await session.reload.searchSwitched(to: now, in: session) }
+                let pattern = search?.pattern ?? ""
+                Task { await session.reload.searchSwitched(to: now, pattern: pattern, in: session) }
             }
             // The walk ends on the same change, where it is held: `FediqoRootView` clears it.
         }
