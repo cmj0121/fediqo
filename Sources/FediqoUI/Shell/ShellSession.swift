@@ -1849,6 +1849,22 @@ final class ShellSession {
         await adopt()
     }
 
+    /// The store, followed: each time it says it changed, what it holds is adopted again — so a
+    /// landing renews the screen reading it with no key pressed (#175), whoever asked for it.
+    ///
+    /// **Until the task running it is cancelled**, which is the one way it ends: the root view's
+    /// own `.task`, so a window closed stops following. A store that changed nothing says nothing
+    /// (`ItemStore.changes()`), so an ask that brought nothing new redraws nothing. The rows keep
+    /// their ids across an adopt, which is what keeps the selected post selected.
+    func followStore() async {
+        // Listening before the first adopt, so a landing between the two is not missed.
+        let changes = await store.changes()
+        await adopt()
+        for await _ in changes {
+            await adopt()
+        }
+    }
+
     /// Only the sources, projected again through what each server has just said it is — for a
     /// reload that has asked every server and has not read anything yet, so has no notes to adopt.
     func reprojectSources() async {

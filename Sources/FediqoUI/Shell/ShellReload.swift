@@ -11,15 +11,27 @@ import Observation
 // selected.
 //
 // Every request a reload makes has its own deadline, and a reload can be stopped: a server that
-// trickles cannot hold `r` for ever. What is read as the reader is registered per host, so a
+// trickles cannot hold `r` for ever. **One of each kind at a time, not one at a time** (#175): a
+// thread read again does not wait on the timeline's reload, nor the timeline's on the thread. What is read as the reader is registered per host, so a
 // sign-out, Clear or Remove stops it before anything it brings lands.
 
-/// One reload at a time, and the sources the last one could not read.
+/// One reload of each kind at a time, and the sources the last one could not read.
 @MainActor
 @Observable
 final class ShellReload {
-    /// Whether a reload is on the wire. A second `r` meanwhile starts nothing.
-    private(set) var running = false
+    /// What a reload asks for. Two of the same kind are one too many — the second would ask the
+    /// same servers the same thing — and two of different kinds are two errands, each let run.
+    enum Ask: Hashable, Sendable {
+        /// The timeline in front: its sources, each for what its rules draw.
+        case timeline
+        /// The open thread: its post and what is around it.
+        case thread
+    }
+
+    /// The kinds of reload on the wire now. A second `r` of a kind already here starts nothing.
+    private(set) var asking: Set<Ask> = []
+    /// Whether any reload is on the wire.
+    var running: Bool { !asking.isEmpty }
     /// The hosts the last reload could not read, in the order they were asked.
     private(set) var failed: [String] = []
     /// Bumped as each reload ends, so the list can centre the selected post again.
@@ -32,21 +44,28 @@ final class ShellReload {
     private(set) var unspoken: Unspoken?
     /// The last reload was stopped by the reader before it finished.
     private(set) var stopped = false
-    /// What the running reload's own pieces of work are listed as on `SourceWork` (#170): a
-    /// timeline's reads, or an open thread's. The toast names one of those and counts the rest,
-    /// and nothing else that happens to be on the wire meanwhile — a picture, an emoji, a
+    /// What the running reloads' own pieces of work are listed as on `SourceWork` (#170): a
+    /// timeline's reads, an open thread's, or both. The toast names one of those and counts the
+    /// rest, and nothing else that happens to be on the wire meanwhile — a picture, an emoji, a
     /// server asked what it is.
-    private(set) var reading: Set<SourceWork.Purpose> = []
+    var reading: Set<SourceWork.Purpose> {
+        asking.reduce(into: []) { $0.formUnion(Self.purposes(of: $1)) }
+    }
 
     /// How long one request of a reload may take before it counts as failed.
     @ObservationIgnored var deadline: Duration = .seconds(30)
 
-    /// The running reload's work, and its waiter — resumed when the work ends or is stopped.
-    @ObservationIgnored private var work: Task<Void, Never>?
-    @ObservationIgnored private var waiter: CheckedContinuation<Void, Never>?
-    /// Which run `work` and `waiter` belong to. A stopped run's work goes on until it notices;
-    /// when it ends it must not end whichever run started after it.
+    /// Each running reload's work, and its waiter — resumed when the work ends or is stopped.
+    @ObservationIgnored private var runs: [Ask: Run] = [:]
+    /// Counts every run started. A stopped run's work goes on until it notices; when it ends it
+    /// must not end whichever run of its kind started after it.
     @ObservationIgnored private var generation = 0
+
+    private struct Run {
+        let generation: Int
+        let work: Task<Void, Never>
+        let waiter: CheckedContinuation<Void, Never>
+    }
     /// Work read as the reader, per host, so `stop(host:)` can end it.
     @ObservationIgnored private var asYou: [String: [UUID: () -> Void]] = [:]
 
@@ -102,9 +121,8 @@ final class ShellReload {
     /// session holds it now. Each source lands as it answers, so one that fails or is slow holds
     /// back none of the others. Nothing while the timeline editor is up: it owns the keys.
     func timeline(_ query: TimelineQuery, in session: ShellSession) async {
-        guard !running, session.editing == nil else { return }
-        reading = [.timeline]
-        await run {
+        guard !asking.contains(.timeline), session.editing == nil else { return }
+        await run(.timeline) {
             let sources = session.sources
             let asks = CompiledTimeline(query.definition(among: session.written), sources: sources)
                 .sourcesToAsk()
@@ -159,9 +177,8 @@ final class ShellReload {
     /// topic from its own page; both replace only rows already held (`ItemStore.refresh`), so an
     /// edited post shows its new words and a post this device never held does not arrive in All.
     func thread(_ item: DummyItem, in session: ShellSession) async {
-        guard !running, session.editing == nil else { return }
-        reading = [.conversation, .forumPost, .forumReplies]
-        await run {
+        guard !asking.contains(.thread), session.editing == nil else { return }
+        await run(.thread) {
             if let ref = ForumThreadRef(item) {
                 let read = await session.posts.reload(ref, within: self.deadline)
                 if !read, !Task.isCancelled { self.failed = [ref.host] }
@@ -189,10 +206,11 @@ final class ShellReload {
         }
     }
 
-    /// `r`: a reload of `thread` where one is open, or else of `query` — unless one is running,
-    /// which a second press leaves alone: it starts nothing and stops nothing (#29). Esc stops it.
+    /// `r`: a reload of `thread` where one is open, or else of `query` — unless that one is
+    /// running, which a second press leaves alone: it starts nothing and stops nothing (#29). A
+    /// reload of the other kind running meanwhile is no reason to refuse (#175). Esc stops both.
     func press(thread: DummyItem?, timeline query: TimelineQuery, in session: ShellSession) {
-        guard !running else { return }
+        guard !asking.contains(thread == nil ? .timeline : .thread) else { return }
         Task {
             if let thread {
                 await self.thread(thread, in: session)
@@ -202,13 +220,15 @@ final class ShellReload {
         }
     }
 
-    /// Stops the running reload — Esc. What it had not landed does not land.
+    /// Stops every running reload — Esc. What they had not landed does not land.
     @discardableResult
     func stop() -> Bool {
-        guard running, let work else { return false }
-        work.cancel()
+        guard running else { return false }
         stopped = true
-        finish(generation)
+        for (ask, run) in runs {
+            run.work.cancel()
+            finish(ask, run.generation)
+        }
         return true
     }
 
@@ -219,30 +239,39 @@ final class ShellReload {
     }
 
     /// One reload: its state set, its work started, and this waiting until it ends or is stopped.
-    private func run(_ body: @escaping @MainActor () async -> Void) async {
+    ///
+    /// What the last reload said is cleared as this one starts, whichever kind it was: the line
+    /// under the timeline speaks of the newest press, and a failure it named is asked again now.
+    private func run(_ ask: Ask, _ body: @escaping @MainActor () async -> Void) async {
         generation += 1
         let mine = generation
-        running = true
+        asking.insert(ask)
         failed = []
         unfindable = nil
         stopped = false
         await withCheckedContinuation { continuation in
-            waiter = continuation
-            work = Task { @MainActor in
+            let work = Task { @MainActor in
                 await body()
-                self.finish(mine)
+                self.finish(ask, mine)
             }
+            runs[ask] = Run(generation: mine, work: work, waiter: continuation)
         }
     }
 
-    /// Ends run `run`, once, and only while it is still the current one.
-    private func finish(_ run: Int) {
-        guard run == generation, let waiter else { return }
-        self.waiter = nil
-        work = nil
-        running = false
+    /// Ends run `generation` of `ask`, once, and only while it is still that kind's current one.
+    private func finish(_ ask: Ask, _ generation: Int) {
+        guard let run = runs[ask], run.generation == generation else { return }
+        runs[ask] = nil
+        asking.remove(ask)
         landed += 1
-        waiter.resume()
+        run.waiter.resume()
+    }
+
+    private static func purposes(of ask: Ask) -> Set<SourceWork.Purpose> {
+        switch ask {
+        case .timeline: [.timeline]
+        case .thread: [.conversation, .forumPost, .forumReplies]
+        }
     }
 
     /// Work read as the reader on `host`, registered so `stop(host:)` can end it, and ended too

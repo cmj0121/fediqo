@@ -124,12 +124,24 @@ struct ReloadToastTests {
 
     // MARK: - What each reload names
 
-    @Test("A reload says which of its purposes are its own")
+    @Test("A reload says which of its purposes are its own, while it runs", .timeLimit(.minutes(1)))
     func whatAReloadReads() async {
-        let session = ShellSession(http: FixtureHTTP(), store: ItemStore())
+        let asked = MastodonInstance.address(Self.one)
+        let gated = GatedHTTP([asked: MastodonInstance.mastodon(Self.one)], holding: asked)
+        let guardTask = hangGuard(gated.gate)
+        defer { guardTask.cancel() }
+        let store = ItemStore()
+        await store.add(Source(host: Self.one, kind: .mastodon))
+        let session = ShellSession(http: gated, store: store)
         session.work = SourceWork()
-        await session.reload.timeline(.all, in: session)
+        await session.reloadFromStore()
+        let running = Task { await session.reload.timeline(.all, in: session) }
+        #expect(await spun { await gated.asks == 1 })
         #expect(session.reload.reading == [.timeline])
+        await gated.gate.open()
+        await running.value
+        // Several reloads may run at once (#175), so what is read is what is running: nothing now.
+        #expect(session.reload.reading.isEmpty)
     }
 
     @Test("A Mastodon's Public and Trends are read under those names", .timeLimit(.minutes(1)))
