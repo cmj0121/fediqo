@@ -317,7 +317,7 @@ struct SearchTests {
     // MARK: Cost
 
     @Test("10,000 notes are searched quickly enough to type into")
-    func performance() {
+    func performance() throws {
         let hosts = (0..<10).map { Source(host: "h\($0).example", kind: .mastodon) }
         let words = ["swift", "kotlin", "rust", "#fediverse", "ｶﾀｶﾅ", "Café", "coffee", "tea", "news", "art"]
         let notes = (0..<10_000).map { i in
@@ -330,23 +330,27 @@ struct SearchTests {
                 boosterHandle: i % 11 == 0 ? "@booster@h1.example" : nil
             )
         }
-        let clock = ContinuousClock()
         var index = SearchIndex([])
-        let indexing = clock.measure { index = SearchIndex(notes) }
-        var counts: [Int] = []
+        let indexing = Pace(notes) { index = SearchIndex(notes) }
         // A keyword that never matches reads every field of every note; the wildcard ones walk.
         let patterns = ["nothingatall", "coffee", "*fediverse*", "user?@*", "*d?y*zzz", "s*t"]
-        var slowest: Duration = .zero
-        for pattern in patterns {
+        var counts = [Int](repeating: 0, count: patterns.count)
+        let paces = Pace.each(notes, patterns.enumerated().map { i, pattern in
             let search = NoteSearch(pattern, sources: hosts)!
-            let took = clock.measure { counts.append(search.found(notes, index).count) }
-            slowest = max(slowest, took)
-        }
+            return { counts[i] = search.found(notes, index).count }
+        })
         #expect(counts[0] == 0 && counts[1] == 1_000 && counts[2] == 1_000 && counts[3] == 10_000)
-        // Release measured about 105 ms to index and 15 ms for the slowest search (`*d?y*zzz`,
-        // which walks every body); debug about 235 and 90. The bounds catch a search that has
-        // become a different order of cost, not a slow runner.
-        #expect(indexing < .seconds(2), "indexing took \(indexing)")
-        #expect(slowest < .milliseconds(500), "slowest search took \(slowest)")
+        let (slowest, searching) = try #require(zip(patterns, paces).max { $0.1.reads < $1.1.reads })
+        // Each against plain reads of the same notes (`Pace`), and printed so a runner's log
+        // shows them. Debug measured about 3.0 to index and 1.2 for the slowest search
+        // (`*d?y*zzz`, which walks every body); across seventy-one runs at normal and background
+        // priority, counting coverage, and beside twice as many busy threads as cores, at most
+        // 4.8 and 2.1. The lines are about twice those: an index or a search made five times
+        // dearer fails, three times may not. They are drawn for the debug build `swift test`
+        // makes; release measured 1.35 and 0.22, as the plain read is library code either way.
+        print("Search index: \(indexing)")
+        print("Slowest search, `\(slowest)`: \(searching)")
+        #expect(indexing.reads < 10, "indexing took \(indexing)")
+        #expect(searching.reads < 4, "searching `\(slowest)` took \(searching)")
     }
 }

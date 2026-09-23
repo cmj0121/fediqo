@@ -485,7 +485,7 @@ struct RuleTests {
     }
 
     @Test("10,000 notes against 20 rules stay inside the budget")
-    func performance() throws {
+    func performance() {
         let hosts = (0..<10).map { Source(host: "h\($0).example", kind: .mastodon) }
         let words = ["swift", "kotlin", "rust", "#fediverse", "ｶﾀｶﾅ", "Café", "coffee", "tea", "news", "art"]
         let notes = (0..<10_000).map { i in
@@ -507,29 +507,23 @@ struct RuleTests {
         ]
         #expect(rules.count == 20)
 
-        let clock = ContinuousClock()
         var index = TextIndex([])
         var shown: [Note] = []
-        // **The fastest of three, and the lines are unchanged.** Measured once, this ran beside
-        // every other suite on a shared runner and came in just over the line twice in a week
-        // (302 and 254 ms) on changes that never touched a rule. Time the machine spent elsewhere
-        // only ever adds to a measurement, so the fastest is the one closest to what the rules
-        // cost — and a timeline made an order of magnitude dearer is dearer in all three.
-        var indexings: [Duration] = []
-        var evaluatings: [Duration] = []
-        for _ in 0 ..< 3 {
-            indexings.append(clock.measure { index = TextIndex(notes) })
-            evaluatings.append(clock.measure {
-                shown = CompiledTimeline(TimelineDefinition(name: "t", rules: rules), sources: hosts).shown(notes, index)
-            })
+        let indexing = Pace(notes) { index = TextIndex(notes) }
+        let evaluating = Pace(notes) {
+            shown = CompiledTimeline(TimelineDefinition(name: "t", rules: rules), sources: hosts).shown(notes, index)
         }
-        let indexing = try #require(indexings.min())
-        let evaluating = try #require(evaluatings.min())
         #expect(!shown.isEmpty)
-        // The budget is release: 300 ms to index, 50 ms to evaluate — measured at about 56 and
-        // 16. A debug build measured about 130 and 50, and a shared runner is slower again, so
-        // these bounds catch a timeline that has become a different order of cost, not a slow day.
-        #expect(indexing < .seconds(1), "indexing took \(indexing)")
-        #expect(evaluating < .milliseconds(250), "evaluating took \(evaluating)")
+        // Each against plain reads of the same notes (`Pace`), and printed so a runner's log
+        // shows them. Debug measured about 2.2 to index and 0.67 to evaluate; across seventy-one
+        // runs at normal and background priority, counting coverage, and beside twice as many
+        // busy threads as cores, at most 2.9 and 1.2. The lines are about twice those: an index
+        // or a timeline made five times dearer fails, three times may not. They are drawn for
+        // the debug build `swift test` makes; release measured 0.83 and 0.26, as the plain read
+        // is library code either way.
+        print("Rules index: \(indexing)")
+        print("Rules evaluated: \(evaluating)")
+        #expect(indexing.reads < 6, "indexing took \(indexing)")
+        #expect(evaluating.reads < 2.4, "evaluating took \(evaluating)")
     }
 }
