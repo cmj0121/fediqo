@@ -51,6 +51,9 @@ struct DummyThreadPane: View {
     var onBack: () -> Void
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openURL) private var openURL
+    /// The post at the top of the view, kept there as the thread renews under it (#198): an answer
+    /// laid in above it moves what is below the reader, never the post they are reading.
+    @State private var topID: String?
 
     private let step: CGFloat = 16
     /// How many steps a reply is indented by at most — **the conversation's depth, not a
@@ -108,7 +111,9 @@ struct DummyThreadPane: View {
                     }
                     .padding(.vertical, 8)
                     .padding(.trailing, 8)
+                    .scrollTargetLayout()
                 }
+                .scrollPosition(id: $topID, anchor: .top)
                 .scrollIndicators(.never)
                 .clearsFloatingCorner()
                 .onAppear {
@@ -296,8 +301,11 @@ struct DummyThreadPane: View {
                 .frame(height: ShellSpace.hair)
             // **No `default:`.** A sixth standing has to be given a shape here.
             switch standing {
-            // `unasked` is one pass: the pane opening asks (#198), so it waits rather than
-            // offering a press for what is already being asked for — `around`'s rule.
+            // `unasked` is on its way while the pane opening asks (#198) — `around`'s rule — and
+            // offers the way in once nothing is asking: a Clear, or the network coming back, can
+            // put a topic already opened back to unasked.
+            case .unasked where !posts.isOpening(thread):
+                way(in: thread)
             case .unasked, .coming:
                 // **The reader asked for something — opened the topic, or pressed — and is owed
                 // a sign that it took.** A static
@@ -311,6 +319,15 @@ struct DummyThreadPane: View {
                     standing: ForumRepliesStanding.none
                 ) {
                     ShellNotice(notice)
+                }
+                // Nobody answered when it was last read, and asking again on the wait did not
+                // arrive (#198): said where the thread says what it is doing.
+                if let further = posts.further(of: thread), case .failed = further {
+                    ThreadFoot(
+                        said: ThreadFoot.said(further, host: thread.host),
+                        ask: { Task { await posts.press(thread) } },
+                        reach: { _ in }
+                    )
                 }
             case .loaded(let replies):
                 Text(String(format: L10n.t("thread.replies.count"), replies.count))
@@ -370,6 +387,16 @@ struct DummyThreadPane: View {
                 descendantCount: 0, replyCount: 0, standing: ForumRepliesStanding.none
             ) {
                 ShellNotice(notice)
+            }
+            // Asked again on the wait, and that did not arrive (#198). The foot's button asks the
+            // whole thread again, as it does where the first read of a thread failed.
+            if let further = conversations.further(of: root.id), case .failed = further {
+                ThreadFoot(
+                    said: ThreadFoot.said(further, host: root.source.host),
+                    ask: onReadFurther,
+                    reach: { _ in }
+                )
+                .padding(.top, ShellSpace.snug)
             }
         case .loaded:
             // The answers are the rows above. What belongs down here is how far they go (#177).

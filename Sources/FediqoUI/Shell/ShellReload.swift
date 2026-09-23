@@ -455,9 +455,9 @@ final class ShellReload {
         sleep: (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
     ) async {
         let me = UUID()
-        WaitKeeper.join(session.store, as: me) { [weak self, weak session] in
-            guard let self, let session else { return }
-            await self.renew(in: session)
+        WaitKeeper.join(session.store, as: me) { [weak self, weak session] asked in
+            guard let self, let session else { return nil }
+            return await self.renew(in: session, asked: asked)
         }
         defer {
             WaitKeeper.release(session.store, from: me)
@@ -646,6 +646,9 @@ final class ShellReload {
             // what it had not landed does not land, and the next scroll asks again.
             end(.more)
         }
+        // `r` reads what a renewal is reading, so the renewal ends rather than ask one forum
+        // beside it (#198); the next wait asks again.
+        if ask == .timeline || ask == .thread { end(.renew) }
         await withCheckedContinuation { continuation in
             let work = Task { @MainActor in
                 await body()
@@ -1043,10 +1046,13 @@ enum WaitKeeper {
     /// Each window's way to renew the thread it has open, per store (#198) — every window's, the
     /// keeper's own among them, so a thread open in a window that does not keep the clock is
     /// asked again on the one that does.
-    private static var renewers: [ObjectIdentifier: [UUID: @MainActor () async -> Void]] = [:]
+    private static var renewers: [ObjectIdentifier: [UUID: Renewer]] = [:]
+
+    /// One window's renewal: handed what this round has asked already, and saying what it asked.
+    typealias Renewer = @MainActor (_ asked: Set<String>) async -> String?
 
     /// `me`'s window, on `store`'s round of open threads while its loop runs.
-    static func join(_ store: ItemStore, as me: UUID, renew: @escaping @MainActor () async -> Void) {
+    static func join(_ store: ItemStore, as me: UUID, renew: @escaping Renewer) {
         renewers[ObjectIdentifier(store), default: [:]][me] = renew
     }
 
@@ -1057,11 +1063,13 @@ enum WaitKeeper {
         if renewers[key]?.isEmpty == true { renewers[key] = nil }
     }
 
-    /// Every window's open thread on `store`, asked again one window after the other.
+    /// Every window's open thread on `store`, asked again one window after the other — a thread
+    /// open in two windows asked once, and the second drawn from what the first landed.
     static func renewThreads(on store: ItemStore) async {
+        var asked: Set<String> = []
         for renew in Array((renewers[ObjectIdentifier(store)] ?? [:]).values) {
             guard !Task.isCancelled else { return }
-            await renew()
+            if let id = await renew(asked) { asked.insert(id) }
         }
     }
 }

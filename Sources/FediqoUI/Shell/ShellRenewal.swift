@@ -23,7 +23,8 @@ import Foundation
 // **Only the thread in front, and only while it is.** Leaving it takes it off the wait and ends a
 // renewal still on the wire. Nor beside another ask of the same thread or the same sources: not
 // while `r` reads the thread, the timeline or its next stretch — a stranger's forum is never asked
-// in parallel — and never twice at once. Esc does not stop it, as it does not stop the wait.
+// in parallel — and never twice at once; `r` on the thread or the timeline ends one on the wire.
+// Esc does not stop it, as it does not stop the wait.
 
 extension ShellReload {
     /// The pane of `item` opening: in front from now, and its thread read at once — a topic's kept
@@ -34,6 +35,8 @@ extension ShellReload {
             await session.posts.open(ref)
         } else {
             await session.conversations.open(item, in: session)
+            // A thread read earlier this run, drawn from what is held now.
+            if inFront?.id == item.id { session.renewConversation() }
         }
     }
 
@@ -47,10 +50,22 @@ extension ShellReload {
 
     /// The thread in front of this window, asked again — a round of the wait (#198). Nothing with
     /// no thread in front, or beside another ask of it or of its sources.
-    func renew(in session: ShellSession) async {
-        guard let item = inFront, session.editing == nil,
-              asking.isDisjoint(with: [.renew, .thread, .timeline, .more])
-        else { return }
+    ///
+    /// **Once a round, however many windows have it open**: `asked` is what this round asked
+    /// already, and a thread in it is drawn again from what that ask landed instead of asked a
+    /// second time. Returns the thread this window renewed, or nothing.
+    @discardableResult
+    func renew(in session: ShellSession, asked: Set<String> = []) async -> String? {
+        guard let item = inFront, session.editing == nil else { return nil }
+        guard !asked.contains(item.id) else {
+            if let ref = ForumThreadRef(item) {
+                await session.posts.redraw(ref)
+            } else {
+                await session.conversations.redraw(item, in: session)
+            }
+            return nil
+        }
+        guard asking.isDisjoint(with: [.renew, .thread, .timeline, .more]) else { return nil }
         renewing = item.id
         defer { renewing = nil }
         await run(.renew) {
@@ -60,5 +75,6 @@ extension ShellReload {
                 await session.conversations.renew(item, in: session)
             }
         }
+        return item.id
     }
 }

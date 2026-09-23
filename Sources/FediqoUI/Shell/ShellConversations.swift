@@ -250,9 +250,11 @@ final class ShellConversations {
     func renew(_ item: DummyItem, in session: ShellSession) async {
         guard inFlight[item.id] == nil, furtherWork[item.id] == nil else { return }
         switch standing(of: item.id) {
-        case .loaded, .none: break
+        // Unasked too: a Clear lets go of an open thread, and it is asked for again here rather
+        // than left saying it is on its way.
+        case .loaded, .none, .unasked: break
         case .absent(let absence) where absence.asksAgain: break
-        case .unasked, .coming, .absent: return
+        case .coming, .absent: return
         }
         let task = Task { @MainActor in await self.read(item, in: session) }
         inFlight[item.id] = task
@@ -260,30 +262,52 @@ final class ShellConversations {
         if inFlight[item.id] == task { inFlight[item.id] = nil }
     }
 
-    /// Every post drawn in a loaded thread, by key — what `renew(from:)` asks the store for.
-    var drawnKeys: Set<NoteKey> {
-        var keys: Set<NoteKey> = []
-        for standing in standings.values {
-            guard case .loaded(let ancestors, let descendants, _) = standing else { continue }
-            keys.formUnion((ancestors + descendants).map(\.key))
-        }
-        return keys
+    /// Every post drawn in the thread around `id`, by key — what `renew(_:from:)` asks the store
+    /// for. Nothing where it is not loaded.
+    func drawnKeys(around id: String) -> Set<NoteKey> {
+        guard case .loaded(let ancestors, let descendants, _) = standing(of: id) else { return [] }
+        return Set((ancestors + descendants).map(\.key))
     }
 
-    /// **What this device now holds of each drawn post, drawn in its place** (#193, #198). A thread
-    /// keeps the order its source gave and the posts it drew; each post is the store's copy of it,
-    /// so an answer another read edited, or its source said was gone (#179), reads so here with no
-    /// key pressed. A post the store no longer holds keeps the copy drawn. Nothing is assigned
-    /// where nothing moved, so an adopt that changed no drawn post redraws no thread.
-    func renew(from held: [NoteKey: Note]) {
-        guard !held.isEmpty else { return }
-        for (id, standing) in standings {
-            guard case .loaded(let ancestors, let descendants, let rootID) = standing else { continue }
-            let swap = { (drawn: Note) in held[drawn.key] ?? drawn }
-            let renewed = ShellConversationStanding.loaded(
-                ancestors: ancestors.map(swap), descendants: descendants.map(swap), rootID: rootID
+    /// **What this device now holds of each drawn post, drawn in its place** (#193, #198). The
+    /// thread keeps the order its source gave and the posts it drew; each post is the store's copy
+    /// of it, so an answer another read edited, or its source said was gone (#179), reads so here
+    /// with no key pressed. A post the store no longer holds keeps the copy drawn. Nothing is
+    /// assigned where nothing moved, so an adopt that changed no drawn post redraws nothing.
+    ///
+    /// **The thread in front only** — the session's to say — so an adopt walks one thread, not
+    /// every thread read this run; one closed is drawn again from the store as it opens.
+    func renew(_ id: String, from held: [NoteKey: Note]) {
+        guard !held.isEmpty,
+              case .loaded(let ancestors, let descendants, let rootID) = standing(of: id)
+        else { return }
+        let swap = { (drawn: Note) in held[drawn.key] ?? drawn }
+        let renewed = ShellConversationStanding.loaded(
+            ancestors: ancestors.map(swap), descendants: descendants.map(swap), rootID: rootID
+        )
+        if renewed != standing(of: id) { standings[id] = renewed }
+    }
+
+    /// The open thread drawn again from what this device holds, where another window's renewal
+    /// has just read it (#198): an answer the store holds around the post and this thread does
+    /// not draw yet is laid in under what it answers. Nothing asked of the source.
+    func redraw(_ item: DummyItem, in session: ShellSession) async {
+        guard case .loaded(_, let drawn, let rootID) = standing(of: item.id),
+              let held = session.heldNote(item.id)
+        else { return }
+        let kept = await session.store.held(host: held.source.host)
+        guard case .loaded(let ancestors, let now, _) = standing(of: item.id), now == drawn,
+              let around = Self.kept(around: held, among: kept)
+        else { return }
+        let renewed = Self.renewed(drawn, with: around.descendants.filter { note in
+            !drawn.contains { $0.key == note.key }
+        }, rootID: rootID ?? held.statusID)
+        guard renewed != drawn else { return }
+        standings[item.id] = .loaded(ancestors: ancestors, descendants: renewed, rootID: rootID)
+        if let rootID {
+            furthers[item.id] = Self.settled(
+                root: held, rootID: rootID, descendants: renewed, asked: asked[item.id] ?? []
             )
-            if renewed != standing { standings[id] = renewed }
         }
     }
 
@@ -354,6 +378,16 @@ final class ShellConversations {
         case .absent:
             break
         }
+    }
+
+    /// `drawn`, each post the copy in `read` where it has one, and every post of `read` not drawn
+    /// yet laid in where it belongs — in the order the source gave them, so an answer to one just
+    /// laid in follows it.
+    static func renewed(_ drawn: [Note], with read: [Note], rootID: String?) -> [Note] {
+        let copies = Dictionary(read.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
+        var renewed = drawn.map { copies[$0.key] ?? $0 }
+        for note in read { renewed = placed(note, in: renewed, rootID: rootID) }
+        return renewed
     }
 
     /// Where an answer goes among the answers already drawn: **directly after the last post under
@@ -500,12 +534,14 @@ final class ShellConversations {
                 furthers[item.id] = nil
                 return
             }
-            // A thread read again keeps what was read further of it before, below what the
-            // source handed back this time: the reader is not sent back to its first answer.
+            // **A thread read again keeps what is drawn, where it is drawn** (#198): each post
+            // takes the copy just read, and only a post new to the thread is laid in — under what
+            // it answers. What was read further (#177), which the source's first answer leaves
+            // out, stays in its own subtree rather than going to the bottom, and the reader is not
+            // sent back to the first answer.
             var descendants = thread.descendants
             if case .loaded(_, let drawn, _)? = before {
-                let fresh = Set(descendants.map(\.key))
-                descendants += drawn.filter { !fresh.contains($0.key) }
+                descendants = Self.renewed(drawn, with: thread.descendants, rootID: id)
             }
             asked[item.id] = (asked[item.id] ?? []).union([id])
             standings[item.id] = .loaded(ancestors: thread.ancestors, descendants: descendants, rootID: id)
@@ -535,6 +571,13 @@ final class ShellConversations {
         // arrive, and that was the whole thread, not a part further down it.
         if case .loaded? = before {
             standings[item.id] = before
+            furthers[item.id] = .failed(why)
+            failedAtRoot.insert(item.id)
+            return
+        }
+        // A post the source said was alone stays alone, and its foot says the renewal did not
+        // arrive (#198): a thread nobody answered is not a thread that could not be had.
+        if before == ShellConversationStanding.none {
             furthers[item.id] = .failed(why)
             failedAtRoot.insert(item.id)
             return

@@ -339,6 +339,179 @@ struct ThreadRenewsTests {
         await oneWait(keeper)
         #expect(await Self.threadAsks(http) == 2, "its loop gone, its thread is off the round")
     }
+
+    // MARK: - Review fixes
+
+    private static func counted(_ id: String, answering parent: String, replies: Int) -> String {
+        """
+        {"id":"\(id)","uri":"https://\(host)/users/ada/statuses/\(id)","in_reply_to_id":"\(parent)",
+         "replies_count":\(replies),
+         "created_at":"2024-01-01T00:00:00.000Z","content":"<p>answer \(id)</p>",
+         "account":{"username":"ada","acct":"ada","display_name":"Ada"}}
+        """
+    }
+
+    @Test("An answer read further stays in its place when a wait renews the thread")
+    func aFurtherAnswerStaysInPlace() async {
+        let first = Self.context([Self.status("10", answering: "9"), Self.counted("11", answering: "9", replies: 1)])
+        let http = Changing([Self.threadPath: first, "/api/v1/statuses/11/context": Self.context([
+            Self.status("12", answering: "11"),
+        ])])
+        let (session, item) = await conversationShell(http)
+        await session.reload.opened(item, in: session)
+        await session.conversations.more(item, in: session)
+        #expect(Self.bodies(session, item) == ["answer 10", "answer 11", "answer 12"])
+
+        // The source's first answer still leaves 12 out, and now has an answer to the post itself.
+        await http.answer(Self.threadPath, with: Self.context([
+            Self.status("10", answering: "9"), Self.counted("11", answering: "9", replies: 1),
+            Self.status("14", answering: "9"),
+        ]))
+        await oneWait(session)
+        #expect(Self.bodies(session, item) == ["answer 10", "answer 11", "answer 12", "answer 14"],
+                "12 stays under 11, and the new answer goes where it belongs")
+        #expect(session.conversations.conversation(around: item).descendants.map(\.depth) == [1, 1, 2, 1])
+    }
+
+    @Test("A topic cleared while open, or put back to unasked by the network returning, is asked again and offers the way in")
+    func anUnaskedTopicIsAskedAgain() async {
+        let http = Changing(Self.onePage)
+        let (session, topic) = await forumShell(http)
+        await session.reload.opened(topic, in: session)
+        #expect(Self.pids(session) == [2, 3])
+
+        session.posts.forget(host: Self.forum)
+        #expect(session.posts.standing(of: Self.ref) == .unasked)
+        #expect(!session.posts.isOpening(Self.ref), "nothing is asking, so the pane offers the way in")
+        await oneWait(session)
+        #expect(Self.pids(session) == [2, 3], "and the wait asks for it")
+
+        // A first page that did not arrive, then let go of as another page lands.
+        let dark = Changing([Self.page(1): .fail])
+        let (other, otherTopic) = await forumShell(dark)
+        await other.reload.opened(otherTopic, in: other)
+        #expect(other.posts.standing(of: Self.ref) == .absent(.unreachable))
+        await dark.answer(Self.page(1), with: Self.onePage[Self.page(1)]!)
+        await other.posts.fetch(Self.ref)  // the opening post landing forgets what was unreachable
+        #expect(other.posts.standing(of: Self.ref) == .unasked)
+        #expect(!other.posts.isOpening(Self.ref))
+        await oneWait(other)
+        #expect(Self.pids(other) == [2, 3])
+    }
+
+    @Test("A conversation cleared while open is asked again on the wait rather than waiting for ever")
+    func anUnaskedConversationIsAskedAgain() async {
+        let http = Changing([Self.threadPath: Self.twoAnswers])
+        let (session, item) = await conversationShell(http)
+        await session.reload.opened(item, in: session)
+        session.conversations.forget(host: Self.host)
+        #expect(session.conversations.standing(of: item.id) == .unasked)
+        await oneWait(session)
+        #expect(Self.bodies(session, item) == ["answer 10", "answer 11"])
+    }
+
+    @Test("Esc during a forum renewal has nothing to stop, and does not hold the foot back")
+    func escLeavesARenewalBe() async {
+        let http = Changing(Self.onePage)
+        let (session, topic) = await forumShell(http)
+        await session.reload.opened(topic, in: session)
+        await http.hold(Self.page(1))
+        let renewing = Task { await session.reload.renew(in: session) }
+        #expect(await spun { await http.parked })
+        #expect(!session.stopReadingFurther(), "Esc is not spent on it")
+        #expect(!session.posts.isHeldBack(Self.ref))
+        await http.release()
+        await renewing.value
+        #expect(session.posts.further(of: Self.ref) == .end)
+    }
+
+    @Test("r on the open topic ends a renewal on the wire, so the forum is not asked twice at once")
+    func aPressEndsTheRenewal() async {
+        let http = Changing(Self.onePage)
+        let (session, topic) = await forumShell(http)
+        await session.reload.opened(topic, in: session)
+        await http.hold(Self.page(1))
+        let renewing = Task { await session.reload.renew(in: session) }
+        #expect(await spun { await http.parked })
+        session.reload.press(thread: topic, timeline: .all, in: session)
+        #expect(await spun { !session.reload.asking.contains(.renew) }, "the renewal ended as r began")
+        await http.release()
+        await renewing.value
+        #expect(await spun { !session.reload.asking.contains(.thread) })
+    }
+
+    @Test("A failed renewal of a topic nobody answered says so at its foot, and so does a lone post's")
+    func aFailedRenewalOfNothingSaysSo() async {
+        let http = Changing([Self.page(1): .text(Self.post(1, floor: 1))])
+        let (forum, topic) = await forumShell(http)
+        await forum.reload.opened(topic, in: forum)
+        #expect(forum.posts.standing(of: Self.ref) == ForumRepliesStanding.none)
+        await http.answer(Self.page(1), with: .fail)
+        await oneWait(forum)
+        #expect(forum.posts.standing(of: Self.ref) == ForumRepliesStanding.none, "still nobody answered")
+        #expect(forum.posts.further(of: Self.ref) == .failed(.unreachable), "and the foot says the ask did not arrive")
+
+        let alone = Changing([Self.threadPath: Self.context([])])
+        let (session, item) = await conversationShell(alone)
+        await session.reload.opened(item, in: session)
+        #expect(session.conversations.standing(of: item.id) == ShellConversationStanding.none)
+        await alone.answer(Self.threadPath, with: .fail)
+        await oneWait(session)
+        #expect(session.conversations.standing(of: item.id) == ShellConversationStanding.none,
+                "a lone post is not turned into a thread that could not be had")
+        #expect(session.conversations.further(of: item.id) == .failed(.unreachable))
+        await alone.answer(Self.threadPath, with: Self.context([]))
+        await session.conversations.press(item, in: session)
+        #expect(session.conversations.further(of: item.id) == nil, "the foot's button asks it again")
+    }
+
+    @Test("A failed renewal keeps the page that was to come next")
+    func aFailedRenewalKeepsTheNextPage() async {
+        let pager = #"<div class="pg"><a href="forum.php?mod=viewthread&amp;tid=\#(Self.tid)&amp;page=2&amp;mobile=2" class="nxt">下一页</a></div>"#
+        let http = Changing([
+            Self.page(1): .text(Self.post(1, floor: 1) + Self.post(2) + pager),
+            Self.page(2): .text(Self.post(3)),
+        ])
+        let (session, topic) = await forumShell(http)
+        await session.reload.opened(topic, in: session)
+        let key = ForumPosts.Key(Self.ref, .replies)
+        #expect(session.posts.paging[key]?.next == 2)
+        await http.answer(Self.page(1), with: .fail)
+        await session.reload.renew(in: session)
+        #expect(session.posts.paging[key]?.next == 2)
+        #expect(session.posts.further(of: Self.ref) == .failed(.unreachable))
+        await session.posts.press(Self.ref)
+        #expect(Self.pids(session) == [2, 3], "trying again reads on, not the page read before")
+    }
+
+    @Test("A thread open in two windows is asked once a round, and both draw what it brought")
+    func twoWindowsOneAsk() async {
+        let store = ItemStore()
+        let http = Changing([Self.threadPath: Self.twoAnswers])
+        let (first, item) = await conversationShell(http, store: store)
+        let second = ShellSession(http: http, store: store, posts: ForumPosts(http: http))
+        await second.reloadFromStore()
+        await first.reload.opened(item, in: first)
+        await second.reload.opened(item, in: second)
+        #expect(await Self.threadAsks(http) == 2)
+        await http.answer(Self.threadPath, with: Self.context([
+            Self.status("10", answering: "9"), Self.status("11", answering: "9"), Self.status("15", answering: "10"),
+        ]))
+
+        let started = Counter()
+        let secondLoop = Task {
+            await second.reload.keepAsking(every: .seconds(60), in: second) { _ in
+                started.count += 1
+                try await Task.sleep(for: .seconds(3_600))
+            }
+        }
+        await oneWait(first) { _ = await spun { started.count == 1 } }
+        secondLoop.cancel()
+        await secondLoop.value
+        #expect(await Self.threadAsks(http) == 3, "one ask for the thread, not one per window")
+        #expect(Self.bodies(first, item) == ["answer 10", "answer 15", "answer 11"])
+        #expect(Self.bodies(second, item) == ["answer 10", "answer 15", "answer 11"], "drawn from what it landed")
+    }
 }
 
 private final class Counter {
