@@ -29,7 +29,8 @@ public actor ItemStore {
     private(set) var retention: Date?
     /// Counts the changes to what a save writes: every call that may have changed a source or a
     /// note bumps it. A saver that remembers the revision it last wrote skips a save with nothing
-    /// new in it. Starts at 0 for any store, a relaunched one included.
+    /// new in it. Starts at 0 for any store, a relaunched one included. **A count recounted is
+    /// the one change it does not move** (#208): that is drawn now and written with the next.
     public private(set) var revision = 0
     /// Counts the changes to what `all()` draws, which is fewer than `revision`'s (#175): a
     /// source's boards restated, or a post held aside, is a change a save writes and no timeline
@@ -77,8 +78,11 @@ public actor ItemStore {
     /// `aside` the same of what `aside()` hands over, and `asideRevision`. **Both said at every
     /// call**, so a change added later has to answer for the rows held aside rather than fall
     /// silent about them by default.
-    private func changed(shown: Bool, aside: Bool) {
-        revision += 1
+    ///
+    /// `kept` false is a change nothing need write down (#208): the screens are told and renewed,
+    /// and the revision a saver reads stays where it is, so no save is made for it alone.
+    private func changed(shown: Bool, aside: Bool, kept: Bool = true) {
+        if kept { revision += 1 }
         if shown { drawn += 1 }
         if aside { asideRevision += 1 }
         for listener in listeners.values { listener.yield(revision) }
@@ -200,6 +204,7 @@ public actor ItemStore {
     public func ingest(_ incoming: [Note]) {
         guard !incoming.isEmpty else { return }
         var moved = false
+        var recounted = false
         var shown = false
         var aside = false
         for note in incoming where retention.map({ note.postedAt >= $0 }) ?? true {
@@ -210,13 +215,15 @@ public actor ItemStore {
                 let listed = existing.listed.later(note.listed)
                 // What the held copy never said, this one may (#208): a row kept before its
                 // audience was written down takes it from the next timeline that brings it.
-                let filled = existing.filled(from: note)
+                var merged = existing.filled(from: note)
                 // The same source handing the post over again is the source having it (#179):
                 // a mark it once earned comes off.
-                guard categories != existing.categories || holding != existing.holding
-                        || listed != existing.listed || existing.goneSince != nil || filled != existing
-                else { continue }
-                var merged = filled
+                let kept = categories != existing.categories || holding != existing.holding
+                    || listed != existing.listed || existing.goneSince != nil || merged != existing
+                // The counts this copy states are the source's figure now (#208), and a later
+                // figure than the one held.
+                merged.counts = note.counts.filled(from: existing.counts)
+                guard kept || merged.counts != existing.counts else { continue }
                 merged.categories = categories
                 merged.holding = holding
                 merged.listed = listed
@@ -225,16 +232,25 @@ public actor ItemStore {
                 shown = shown || holding == .arrived
                 // Held aside before: it changed there, or it widened out of there.
                 aside = aside || existing.holding == .aside
+                if kept { moved = true } else { recounted = true }
             } else {
                 notes[key] = note
                 arrival[key] = arrivals
                 arrivals += 1
                 shown = shown || note.holding == .arrived
                 aside = aside || note.holding == .aside
+                moved = true
             }
-            moved = true
         }
-        if moved { changed(shown: shown, aside: aside) }
+        // **A landing that only recounted is drawn and not written down** (#208). A timeline read
+        // every minute moves some count on nearly every page, and a save for each would be the
+        // every-minute write this function exists not to make; the next change that is kept
+        // carries the figures to disk with it.
+        if moved {
+            changed(shown: shown, aside: aside)
+        } else if recounted {
+            changed(shown: shown, aside: aside, kept: false)
+        }
     }
 
     /// Posts read again (#29), only while `host` is still a source here and only those stamped

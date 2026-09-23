@@ -78,13 +78,58 @@ struct AudienceKeptTests {
         #expect(await store.all().first?.audience == .everyone)
     }
 
-    @Test("A row with no counts takes them from the next timeline, each count apart, and a read again leaves the unsaid ones")
-    func countsFilledAndKept() async {
+    @Test("A timeline's counts replace the held ones and are drawn, without a save for them alone")
+    func timelineRecounts() async {
+        let store = ItemStore(sources: [source], notes: [copy(counts: Counts(replies: 2, reblogs: 7))])
+        let drawn = await store.drawn
+        let revision = await store.revision
+        await store.ingest([copy(counts: Counts(replies: 9, favourites: 4))])
+        #expect(await store.all().first?.counts == Counts(replies: 9, reblogs: 7, favourites: 4),
+                "each count stated wins; the one left unstated is kept")
+        #expect(await store.drawn > drawn, "the new figure is drawn")
+        #expect(await store.revision == revision, "and not written down for itself")
+    }
+
+    @Test("A recount of a row held aside renews what is held aside, and not what a timeline draws")
+    func asideRecounts() async {
+        let store = ItemStore(sources: [source], notes: [copy(holding: .aside, counts: Counts(replies: 1))])
+        let aside = await store.asideRevision
+        let drawn = await store.drawn
+        let revision = await store.revision
+        await store.hold([copy(counts: Counts(replies: 3))], ifSourceHere: source.host)
+        #expect(await store.aside().first?.counts == Counts(replies: 3))
+        #expect(await store.asideRevision > aside)
+        #expect(await store.drawn == drawn)
+        #expect(await store.revision == revision)
+    }
+
+    @Test("The same counts again move nothing")
+    func sameCountsMoveNothing() async {
+        let store = ItemStore(sources: [source], notes: [copy(counts: Counts(replies: 2, reblogs: 1))])
+        let drawn = await store.drawn
+        let revision = await store.revision
+        await store.ingest([copy(counts: Counts(replies: 2, reblogs: 1))])
+        #expect(await store.drawn == drawn)
+        #expect(await store.revision == revision)
+    }
+
+    @Test("A recount rides to disk with the next change that is kept")
+    func recountWrittenWithNextChange() async {
         let store = ItemStore(sources: [source], notes: [copy(counts: Counts(replies: 2))])
-        await store.ingest([copy(counts: Counts(replies: 9, reblogs: 1, favourites: 4))])
-        #expect(await store.all().first?.counts == Counts(replies: 2, reblogs: 1, favourites: 4))
+        let revision = await store.revision
+        await store.ingest([copy(counts: Counts(replies: 5))])
+        await store.ingest([copy(audience: .followers)])
+        let snapshot = await store.snapshot()
+        #expect(snapshot.revision > revision)
+        #expect(snapshot.notes.first?.counts == Counts(replies: 5))
+        #expect(snapshot.notes.first?.audience == .followers)
+    }
+
+    @Test("A read again that leaves a count unsaid keeps the held one")
+    func readAgainKeepsCounts() async {
+        let store = ItemStore(sources: [source], notes: [copy(counts: Counts(replies: 2, reblogs: 1))])
         await store.refresh([copy(counts: Counts(replies: 5))], ifSourceHere: source.host)
-        #expect(await store.all().first?.counts == Counts(replies: 5, reblogs: 1, favourites: 4))
+        #expect(await store.all().first?.counts == Counts(replies: 5, reblogs: 1))
     }
 
     @Test("A row kept without boost, favourite or its server's id takes each from the next timeline")
@@ -114,6 +159,15 @@ struct AudienceKeptTests {
         let held = await store.all().first
         #expect(held?.sensitive == true)
         #expect(held?.spoiler == "cw")
+    }
+
+    @Test("A cover the author took off is taken off on a read again")
+    func readAgainUncovers() async {
+        let store = ItemStore(sources: [source], notes: [copy(sensitive: true, spoiler: "cw")])
+        #expect(await store.refresh([copy(sensitive: false, spoiler: "")], ifSourceHere: source.host))
+        let held = await store.all().first
+        #expect(held?.sensitive == false)
+        #expect(held?.spoiler == "")
     }
 
     @Test("A booster is never filled in: an original is not drawn as a boost because a boost of it came later")

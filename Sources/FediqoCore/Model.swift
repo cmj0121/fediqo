@@ -487,7 +487,13 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// What the source last counted of answers, boosts and favourites, each nothing where it
     /// never said. Kept with the row (#208): a figure of the moment it was read, and still the
     /// source's latest word on it until a read says otherwise, which beats drawing none.
-    public let counts: Counts
+    ///
+    /// **Unlike every other fact here, a later timeline copy's figure wins** — a count is only
+    /// ever the source's latest, and the first copy's would be days stale by the end of the
+    /// keep-for window. A count the later copy does not state keeps the one held. A `var` for
+    /// `holding`'s reason: the store sets it on a row it already holds, and draws the new figure
+    /// without writing the store down for it alone (`ItemStore.ingest`).
+    public var counts: Counts
     /// The id the server this copy came through gives the status, where it is a microblog's —
     /// what reading the post again (#29) asks for. Nothing on a row stored before 0.2.0 learned
     /// it, and on every forum post.
@@ -612,7 +618,9 @@ public struct Note: Identifiable, Hashable, Sendable {
             boosted: boosted ?? held.boosted,
             favourited: favourited ?? held.favourited,
             // Who it was for, whether it is covered and with what, and each count: what this read
-            // left unsaid is what was held (#208), for `boosted`'s reason.
+            // left unsaid is what was held (#208), for `boosted`'s reason. A Mastodon source
+            // always sends its cover line, empty where there is none, so a nil spoiler here is a
+            // source that has no such idea — and a cover the author took off reads as "" and wins.
             audience: audience ?? held.audience, avatarURL: avatarURL, attachments: attachments,
             sensitive: sensitive ?? held.sensitive, spoiler: spoiler ?? held.spoiler, emojis: emojis,
             url: url, counts: counts.filled(from: held.counts),
@@ -642,7 +650,8 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// nothing is an answer ("not a reply"); not attachments or emoji, where empty is an answer
     /// too; not the opening post, which no listing carries (#154). A title, the post's address
     /// and its author's picture are not here either: a source that has them sent them with the
-    /// first copy, and one that did not has none to send.
+    /// first copy, and one that did not has none to send. Nor the counts, where the later copy
+    /// wins rather than fills (`counts`).
     func filled(from other: Note) -> Note {
         Note(
             id: id, source: source, author: author, handle: handle, body: body, title: title,
@@ -651,7 +660,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             boosted: boosted ?? other.boosted, favourited: favourited ?? other.favourited,
             audience: audience ?? other.audience, avatarURL: avatarURL, attachments: attachments,
             sensitive: sensitive ?? other.sensitive, spoiler: spoiler ?? other.spoiler,
-            emojis: emojis, url: url, counts: counts.filled(from: other.counts),
+            emojis: emojis, url: url, counts: counts,
             statusID: statusID ?? other.statusID, opening: opening, holding: holding,
             goneSince: goneSince, gaps: gaps, listed: listed
         )
