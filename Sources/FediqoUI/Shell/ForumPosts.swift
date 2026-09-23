@@ -1543,6 +1543,9 @@ struct ForumPostBand: View {
                 // here would be this app talking over an author who simply posted a photograph,
                 // and it is told apart from the waiting state by the plates above.
                 Color.clear.frame(height: 0)
+            case .absent where Self.saidBelow(reading, inFull: inFull):
+                // The opened thread says it once, under this post, with its help (#213).
+                Color.clear.frame(height: 0)
             case .absent(let absence):
                 said(ForumRefusalView.glyph(for: absence), Self.sentence(for: absence))
             case .unread:
@@ -1552,6 +1555,7 @@ struct ForumPostBand: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(Self.spoken(reading)))
+        .accessibilityHidden(Self.saidBelow(reading, inFull: inFull))
         // **Here rather than inside the words**, because `.ignore` above throws away everything
         // the children offered, the actions `EmojiText` hangs on its own element included. See
         // `SpokenLinks`. Nothing to offer in the four states that have no words — and nothing
@@ -1613,6 +1617,13 @@ struct ForumPostBand: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .shellFont(.meta)
         .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+    }
+
+    /// Whether the band keeps quiet because the opened thread's refusal view says it (#213) — a
+    /// refusal, in the opened thread and not in a list, so it is said and spoken once.
+    static func saidBelow(_ reading: ForumReading, inFull: Bool) -> Bool {
+        guard inFull, case .absent(.refusal) = reading else { return false }
+        return true
     }
 
     /// Which sentence one kind of nothing gets. **No `default:`** — a fifth `Absence` has to be

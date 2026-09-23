@@ -109,6 +109,7 @@ struct ForumRefusalView: View {
                 SecureField(L10n.t("refusal.password.field"), text: $password)
                     .textFieldStyle(.roundedBorder)
                     .autocorrectionDisabled()
+                    .notOfferedToKeychain()
                     .frame(maxWidth: 280)
                     .disabled(lock == .trying)
                     .onSubmit(unlock)
@@ -222,5 +223,18 @@ struct ForumRefusalView: View {
     static func spoken(_ absence: ForumPosts.Absence, sentence: String) -> String {
         guard let asked = asked(in: absence) else { return sentence }
         return sentence + " " + String(format: L10n.t("refusal.asked"), asked)
+    }
+}
+
+private extension View {
+    /// A password used once and never kept is not one the system should offer to save or fill:
+    /// on iPhone, marked as a one-time code so no keychain save is asked (#213).
+    @ViewBuilder
+    func notOfferedToKeychain() -> some View {
+        #if os(iOS)
+        textContentType(.oneTimeCode)
+        #else
+        self
+        #endif
     }
 }

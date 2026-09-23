@@ -90,6 +90,10 @@ final class ForumBlogs {
     /// A password asked to be sent to a forum with no sign-in to send it through.
     struct NotSignedIn: Error {}
 
+    /// How many passwords have been sent for each row. A read carries the count it began under,
+    /// and a failure from before the last password is not that password's answer, and is dropped.
+    @ObservationIgnored private var epochs: [NoteKey: Int] = [:]
+
     /// The rows whose last read came to a refusal a sign-in could change, kept so the read can be
     /// asked again when one lands.
     @ObservationIgnored private var refusedAsGuest: [NoteKey: DummyItem] = [:]
@@ -148,20 +152,34 @@ final class ForumBlogs {
             return false
         }
         locks[key] = .trying
+        var failure: (any Error)?
         do {
             try await unlocking(key.host, page, password)
-        } catch is NotSignedIn {
-            locks[key] = nil
-            missing[key] = .refusal(.signIn)
-            refusedAsGuest[key] = item
-            return false
         } catch {
+            failure = error
+        }
+        if failure == nil {
+            // **Only a read begun after the password counts.** One already on the wire was asked
+            // before it, and its form is not this password's answer: it is waited out, and what
+            // it failed with is dropped (`epochs`).
+            epochs[key, default: 0] += 1
+            if let stale = inFlight[key] { await stale.value }
+            await read(item)
+        }
+        // **Once a password was sent, what it may have left is let go of, whatever came back** —
+        // a right one, a wrong one, a throw or a cancel. A forum can set the cookie and still be
+        // answered as a failure here: a redirect, a timeout after the headers.
+        await forgetting?(key.host, address.id)
+        if let failure {
             locks[key] = nil
-            missing[key] = ForumPosts.absence(for: error)
+            if failure is NotSignedIn {
+                missing[key] = .refusal(.signIn)
+                refusedAsGuest[key] = item
+            } else {
+                missing[key] = ForumPosts.absence(for: failure)
+            }
             return false
         }
-        await read(item)
-        await forgetting?(key.host, address.id)
         if missing[key] == .refusal(.password) {
             locks[key] = .wrong
             return false
@@ -222,6 +240,7 @@ final class ForumBlogs {
             missing[key] = .unreadable
             return
         }
+        let epoch = epochs[key, default: 0]
         let task = Task { @MainActor in
             defer {
                 self.inFlight[key] = nil
@@ -250,6 +269,7 @@ final class ForumBlogs {
                 self.missing.removeValue(forKey: key)
                 self.refusedAsGuest.removeValue(forKey: key)
             case .failure(let absence):
+                guard epoch == self.epochs[key, default: 0] else { return }
                 self.missing[key] = absence
                 if absence.signInMayChange { self.refusedAsGuest[key] = item } else { self.refusedAsGuest.removeValue(forKey: key) }
             }

@@ -267,6 +267,58 @@ struct RefusalReadTests {
         }
     }
 
+    @Test("Once a password was sent, what it may have left is let go of — also when sending it threw, or was cancelled")
+    func forgottenWhateverCameBack() async throws {
+        for thrown in [URLError(.timedOut) as any Error, CancellationError()] {
+            let http = LockedBlog(form: Self.passwordForm, blog: Self.blogPage)
+            let session = await Self.session(http)
+            let sent = Sent()
+            session.blogs.unlocking = { _, _, _ in throw thrown }
+            session.blogs.forgetting = { host, blog in await sent.forgot(host: host, blog: blog) }
+            await session.reload.opened(try #require(session.held(Self.rowID)), in: session)
+
+            #expect(!(await session.blogs.unlock(try #require(session.held(Self.rowID)), password: Self.password)))
+            #expect(await sent.forgotten == [Self.host + "#4"], "\(thrown)")
+            #expect(session.blogs.reading(of: try #require(session.held(Self.rowID))) == .absent(.unreachable))
+        }
+        // A wrong one too.
+        let http = LockedBlog(form: Self.passwordForm, blog: Self.blogPage)
+        let session = await Self.session(http)
+        let sent = Sent()
+        session.blogs.unlocking = { _, _, _ in }
+        session.blogs.forgetting = { host, blog in await sent.forgot(host: host, blog: blog) }
+        await session.reload.opened(try #require(session.held(Self.rowID)), in: session)
+        _ = await session.blogs.unlock(try #require(session.held(Self.rowID)), password: "not-it")
+        #expect(await sent.forgotten == [Self.host + "#4"])
+    }
+
+    @Test("A read begun before the password is not read as its answer")
+    func aStaleReadIsNotTheAnswer() async throws {
+        let gate = Gate()
+        let http = HeldLockedBlog(form: Self.passwordForm, blog: Self.blogPage, gate: gate)
+        let session = await Self.session(http)
+        session.blogs.forgetting = { _, _ in }
+        // The pane's first read lands the form.
+        await gate.open()
+        await session.reload.opened(try #require(session.held(Self.rowID)), in: session)
+        let row = try #require(session.held(Self.rowID))
+        #expect(session.blogs.reading(of: row) == .locked(.asking))
+
+        // `r` asks again, and that read is held on the wire with the form in hand.
+        await http.hold()
+        let stale = Task { await session.blogs.again(row) }
+        #expect(await spun { await http.waiting })
+        session.blogs.unlocking = { _, _, password in
+            if password == Self.password { await http.open() }
+        }
+        let unlocked = Task { await session.blogs.unlock(row, password: Self.password) }
+        #expect(await spun { session.blogs.reading(of: row) == .locked(.trying) })
+        await http.release()
+        _ = await stale.value
+        #expect(await unlocked.value, "the stale form did not read as a wrong password")
+        #expect(session.blogs.reading(of: try #require(session.held(Self.rowID))) != .locked(.wrong))
+    }
+
     // MARK: - Signed out
 
     @Test("Signed out, a blog offers signing in, and reads once a sign-in lands")
@@ -335,6 +387,9 @@ struct RefusalReadTests {
             #expect(DummyThreadPane.refusal(opening: opening, replies: posts.standing(of: ref)) == expected)
             #expect(ForumPostBand.sentence(for: .refusal(expected)) == ForumRefusalView.sentence(for: expected))
             #expect(ForumPostBand.spoken(opening) == ForumRefusalView.sentence(for: expected))
+            // Said once in the opened thread: the band keeps quiet there, and in a list says it.
+            #expect(ForumPostBand.saidBelow(opening, inFull: true))
+            #expect(!ForumPostBand.saidBelow(opening, inFull: false))
             #expect(!ForumRefusalView.actions(for: .refusal(expected)).contains(.again))
         }
         // A thread that asks a sign-in offers signing in, as a blog does.
@@ -370,6 +425,37 @@ private actor LockedBlog: HTTPClient {
     func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
         let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)
         return (Data((opened ? blog : form).utf8), try #require(response))
+    }
+}
+
+/// `LockedBlog`, whose answer can be held on the wire after the page has been read — a read
+/// begun before a password, landing after it.
+private actor HeldLockedBlog: HTTPClient {
+    private let form: String
+    private let blog: String
+    private var gate: Gate
+    private var opened = false
+    private(set) var waiting = false
+
+    init(form: String, blog: String, gate: Gate) {
+        self.form = form
+        self.blog = blog
+        self.gate = gate
+    }
+
+    func open() { opened = true }
+
+    func hold() { gate = Gate() }
+
+    func release() async { await gate.open() }
+
+    func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
+        let page = opened ? blog : form
+        waiting = true
+        await gate.wait()
+        waiting = false
+        let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)
+        return (Data(page.utf8), try #require(response))
     }
 }
 
