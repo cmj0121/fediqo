@@ -484,6 +484,14 @@
 "thread.replies.count" = "%d 則回覆";
 "thread.reply.floor" = "#%d";
 "thread.reply.quoted" = "引用：%@";
+"thread.more.loading" = "正在往下讀…";
+"thread.more.end" = "討論串到這裡結束。";
+"thread.more.read" = "繼續往下讀";
+"thread.more.cut" = "%@ 在這裡不再給出這個討論串的其餘部分，還有它沒交出來的回覆。";
+"thread.more.again" = "再讀一次後面的部分";
+"thread.more.unreachable" = "這個討論串後面的部分沒有送達。";
+"thread.more.refused" = "%@ 不讓這個 app 往下讀這個討論串。";
+"thread.more.unreadable" = "下一頁有回應，但上面沒有這個 app 讀得懂的內容。";
 
 /* Unit F7 — reading a thread properly. */
 "thread.open" = "在 %@ 開啟";

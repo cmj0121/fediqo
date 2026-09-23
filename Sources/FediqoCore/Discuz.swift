@@ -298,11 +298,35 @@ public struct DiscuzClient: Sendable {
     ///
     /// Everything the page listed except the opening post, in the order it listed them.
     public func replies(tid: Int) async throws -> [DiscuzPost] {
-        let posts = try await self.posts(tid: tid)
-        guard let opening = posts.first(where: { $0.floor == 1 }) ?? posts.first else {
-            throw DiscuzRequestError.noPosts
+        try await replies(tid: tid, page: 1).posts
+    }
+
+    /// One page of a topic's replies, and whether the forum has another — #177, which is the
+    /// "later pages are their own question" above, asked.
+    ///
+    /// **The first page is `replies(tid:)`'s**, the opening post taken out. A later page has no
+    /// opening post on it, and a floor-one post found there anyway is still not a reply. **A later
+    /// page with no post on it is not the end** but a page this device could not read, as the
+    /// first page's is: Discuz! answers a page past the last with its last page, posts and all, so
+    /// an empty one is markup this parser does not know or a sign-in page — and calling that the
+    /// end would say a thread ended that simply was not read.
+    public func replies(tid: Int, page: Int) async throws -> DiscuzReplies {
+        let page = max(1, page)
+        let (posts, html) = try await self.posts(tid: tid, page: page)
+        let replies: [DiscuzPost]
+        if page == 1 {
+            guard let opening = posts.first(where: { $0.floor == 1 }) ?? posts.first else {
+                throw DiscuzRequestError.noPosts
+            }
+            replies = posts.filter { $0.pid != opening.pid }
+        } else {
+            replies = posts.filter { $0.floor != 1 }
         }
-        return posts.filter { $0.pid != opening.pid }
+        return DiscuzReplies(
+            posts: replies.map { $0.on(page: page) },
+            page: page,
+            continues: DiscuzThreadPage.continues(in: html, tid: tid, after: page)
+        )
     }
 
     /// One thread page fetched, judged by `page`, and turned into posts.
@@ -336,15 +360,19 @@ public struct DiscuzClient: Sendable {
     /// a source that is there on some installs and absent on others cannot be the one that is
     /// asked first without asking twice everywhere it is missing.
     private func posts(tid: Int) async throws -> [DiscuzPost] {
-        guard tid > 0, let url = Host.httpsURL(
-            host: host,
-            path: "/forum.php",
-            query: [
-                URLQueryItem(name: "mod", value: "viewthread"),
-                URLQueryItem(name: "tid", value: String(tid)),
-                URLQueryItem(name: "mobile", value: "2"),
-            ]
-        ) else {
+        try await posts(tid: tid, page: 1).posts
+    }
+
+    /// `posts(tid:)` for one page of the thread, and the page it was read off. The first page's
+    /// address is the one it always was, with no `page` in it, so nothing already asked moves.
+    private func posts(tid: Int, page number: Int) async throws -> (posts: [DiscuzPost], html: String) {
+        var query = [
+            URLQueryItem(name: "mod", value: "viewthread"),
+            URLQueryItem(name: "tid", value: String(tid)),
+        ]
+        if number > 1 { query.append(URLQueryItem(name: "page", value: String(number))) }
+        query.append(URLQueryItem(name: "mobile", value: "2"))
+        guard tid > 0, let url = Host.httpsURL(host: host, path: "/forum.php", query: query) else {
             throw DiscuzRequestError.invalidURL
         }
         let html = try await page(url)
@@ -357,7 +385,7 @@ public struct DiscuzClient: Sendable {
         // challenge nor Discuz!'s own `messagetext` notice, so nothing above catches it and this
         // does.
         guard !posts.isEmpty else { throw DiscuzRequestError.noPosts }
-        return posts
+        return (posts, html)
     }
 
     /// One page fetched, decoded, and judged — everything the two readers below share.
@@ -1738,6 +1766,9 @@ public struct DiscuzPost: Identifiable, Hashable, Sendable {
     /// template drew no picture, where it drew the forum's own `noavatar` placeholder, or where
     /// the address is one this device will not fetch.
     public let avatarURL: URL?
+    /// Which page of the thread it was read off (#177): one for every post on the page a thread
+    /// opens on, which was every post this package handed out before a thread was read further.
+    public let page: Int
 
     public init(
         pid: Int,
@@ -1749,7 +1780,8 @@ public struct DiscuzPost: Identifiable, Hashable, Sendable {
         body: String,
         quoted: [DiscuzQuotation] = [],
         isWithheld: Bool = false,
-        avatarURL: URL? = nil
+        avatarURL: URL? = nil,
+        page: Int = 1
     ) {
         self.pid = pid
         self.tid = tid
@@ -1761,6 +1793,15 @@ public struct DiscuzPost: Identifiable, Hashable, Sendable {
         self.quoted = quoted
         self.isWithheld = isWithheld
         self.avatarURL = avatarURL
+        self.page = max(1, page)
+    }
+
+    /// The same post, as read off `page`.
+    func on(page: Int) -> DiscuzPost {
+        DiscuzPost(
+            pid: pid, tid: tid, floor: floor, author: author, handle: handle, postedAt: postedAt,
+            body: body, quoted: quoted, isWithheld: isWithheld, avatarURL: avatarURL, page: page
+        )
     }
 
     /// Where this one post lives on the forum it was read from, for a reader who wants to go and
@@ -1781,30 +1822,101 @@ public struct DiscuzPost: Identifiable, Hashable, Sendable {
     ///
     /// ## Why the anchor is honest here, and the one thing that would make it dishonest
     ///
-    /// An anchor only reaches a post that is **on the page the address opens**, and that address
-    /// opens a thread's first page. Every `DiscuzPost` this package hands out is a first-page
-    /// post: `replies(tid:)` states it in as many words — "a Discuz! thread paginates at the
-    /// forum's own configured size and this reads the first page only" — and `post(tid:)` reads
-    /// the same page. So the anchor resolves for every post that can reach a caller, and it is
-    /// not luck that it does; it is that invariant.
-    ///
-    /// **If later pages are ever fetched, this becomes wrong and silently so** — a reply from
-    /// page four would open page one and land the reader at the top of it, which is worse than
-    /// offering them nothing. Whoever adds pagination adds `&page=` here, or removes this. There
-    /// is no compiler stop for it, so this paragraph is the whole of the warning.
+    /// An anchor only reaches a post that is **on the page the address opens**. Until #177 every
+    /// post this package handed out was off a thread's first page, and the address opened that
+    /// page; a thread is now read past it, so the address names the page the post was read off —
+    /// `&page=` from the second on, and nothing on the first, which is how the forum writes it.
+    /// A reply from page four opens page four, where its anchor is, rather than the top of page
+    /// one.
     public func url(onHost host: String) -> URL? {
-        guard let base = Host.httpsURL(
-            host: host,
-            path: "/forum.php",
-            query: [
-                URLQueryItem(name: "mod", value: "viewthread"),
-                URLQueryItem(name: "tid", value: String(tid)),
-            ]
-        ) else { return nil }
+        var query = [
+            URLQueryItem(name: "mod", value: "viewthread"),
+            URLQueryItem(name: "tid", value: String(tid)),
+        ]
+        if page > 1 { query.append(URLQueryItem(name: "page", value: String(page))) }
+        guard let base = Host.httpsURL(host: host, path: "/forum.php", query: query) else { return nil }
         var parts = URLComponents(url: base, resolvingAgainstBaseURL: false)
         parts?.fragment = "pid\(pid)"
         guard let url = parts?.url, Host.isFetchable(url) else { return nil }
         return url
+    }
+
+    // MARK: - Kept on this device (#177)
+
+    /// What every reply of one thread is kept under in the store: `discuz:<host>:<tid>:post:`,
+    /// and the post's own number after it.
+    ///
+    /// **Four fields and not three**, so no reply is ever read back as a thread: `ForumThreadRef`
+    /// takes exactly `discuz:<host>:<tid>`, and the blog spelling `DiscuzRanklist` writes is its
+    /// own. The number is the post's and not its floor, for the reason `pid` is this type's key.
+    public static func heldPrefix(host: String, tid: Int) -> String {
+        "discuz:\(host.lowercased()):\(tid):post:"
+    }
+
+    /// This reply as the store keeps it — **held aside by whoever lands it**, since a reply read
+    /// in a thread is not a row a timeline grew by (#175).
+    ///
+    /// A `Note` is the store's one shape, and a reply is not a thread, so what a reply has that a
+    /// row does not is carried in `Note.opening`: its words and quotation as the opening post's
+    /// are, and its floor and its own date beside them. **A withheld reply carries no opening**,
+    /// which is how it is read back as withheld — the forum's notice is never kept as words.
+    ///
+    /// `read` stands in for `postedAt` where the page gave no date a device can read, which a
+    /// mobile template usually does not: a note has to have one, and the moment it was read is
+    /// the one that keeps it inside the reader's keep-for window for as long as they read the
+    /// thread. The reply's own answer — none — is `opening.postedAt`, and that is what is drawn.
+    public func asNote(host raw: String, read: Date) -> Note {
+        let host = raw.lowercased()
+        return Note(
+            id: Self.heldPrefix(host: host, tid: tid) + String(pid),
+            source: Source(host: host, kind: .discuz),
+            author: author,
+            handle: handle,
+            body: body,
+            postedAt: postedAt ?? read,
+            categories: [],
+            url: url(onHost: host),
+            opening: isWithheld ? nil : ForumOpening(reply: self)
+        )
+    }
+
+    /// A reply the store kept, read back — or nothing where `note` is not one.
+    ///
+    /// The page comes off the address, which `asNote` built and nothing else writes.
+    public init?(held note: Note) {
+        let prefix = "discuz:\(note.source.host):"
+        guard note.id.hasPrefix(prefix) else { return nil }
+        let parts = note.id.dropFirst(prefix.count).split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 3, parts[1] == "post",
+              let tid = Int(parts[0]), let pid = Int(parts[2]), tid > 0, pid > 0
+        else { return nil }
+        let page = note.url
+            .flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems }?
+            .first { $0.name == "page" }?.value
+            .flatMap(Int.init) ?? 1
+        self.init(
+            pid: pid, tid: tid, floor: note.opening?.floor, author: note.author,
+            handle: note.handle, postedAt: note.opening?.postedAt,
+            body: note.opening?.words ?? "", quoted: note.opening?.quoted ?? [],
+            isWithheld: note.opening == nil, avatarURL: note.opening?.avatarURL, page: page
+        )
+    }
+}
+
+/// One page of a thread's replies (#177): what was on it, and whether the forum has another.
+public struct DiscuzReplies: Hashable, Sendable {
+    /// Every post on the page but the opening one, in the order it wrote them, each knowing the
+    /// page it was read off.
+    public let posts: [DiscuzPost]
+    public let page: Int
+    /// Whether the page points at the one after it. **The page's own word**, never a count
+    /// worked out from a page size — a forum's page size is its own setting.
+    public let continues: Bool
+
+    public init(posts: [DiscuzPost], page: Int, continues: Bool) {
+        self.posts = posts
+        self.page = page
+        self.continues = continues
     }
 }
 
@@ -1826,6 +1938,39 @@ enum DiscuzThreadPage {
             .sorted { $0.at < $1.at }
             .filter { seen.insert($0.post.pid).inserted }
             .map(\.post)
+    }
+
+    /// Whether this page of thread `tid` points at the page after `page` — **the page's own word
+    /// that the thread goes on** (#177).
+    ///
+    /// Read off the addresses and not off any one template's pager. Discuz!'s own pager is a
+    /// `<div class="pg">` with a `nxt` link on the desktop page and on its touch template, and
+    /// the third-party one on `install-a.example` draws its own; what every one of them has to do
+    /// is link to the next page, in one of the two spellings Discuz! answers —
+    /// `forum.php?mod=viewthread&tid=N&page=P` in any order, or the rewritten `thread-N-P-1.html`.
+    /// A link to that page of this thread is the only thing asked for, so a pager's own furniture,
+    /// a page number of another thread or the page this one already is cannot say it goes on.
+    static func continues(in html: String, tid: Int, after page: Int) -> Bool {
+        guard let links = Self.links else { return false }
+        let next = page + 1
+        let range = NSRange(html.startIndex..., in: html)
+        for match in links.matches(in: html, range: range) {
+            guard let found = Range(match.range(at: 1), in: html) else { continue }
+            let href = html[found].replacingOccurrences(of: "&amp;", with: "&")
+            if href.range(of: "thread-\(tid)-\(next)-", options: .literal) != nil { return true }
+            if Self.names(href, "tid", tid), Self.names(href, "page", next) { return true }
+        }
+        return false
+    }
+
+    /// Every `href`, whichever quote it is written in. Compiled once, `Patterns`' reason.
+    private static let links = try? NSRegularExpression(
+        pattern: #"href\s*=\s*["']([^"']*)["']"#, options: [.caseInsensitive]
+    )
+
+    /// Whether an address's query sets `name` to exactly `value` — `tid=12` is not `tid=123`.
+    private static func names(_ href: String, _ name: String, _ value: Int) -> Bool {
+        href.range(of: #"(?:^|[?&])\#(name)=\#(value)(?![0-9])"#, options: .regularExpression) != nil
     }
 
     /// The patterns, compiled once for the life of the process — `DiscuzPage.Patterns`' reason.
