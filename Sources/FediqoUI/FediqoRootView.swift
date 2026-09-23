@@ -210,7 +210,8 @@ public struct FediqoRootView: View {
             // lamp back to. Where the lamp lands is #100's, and `TimelinePane` answers it on the
             // same change. Here rather than in the pane because the walk is held here — the pane
             // used to do it through a binding whose one meaning was "close the thread".
-            .onChange(of: session.timelineID) { _, _ in clearWalk() }
+            // A tag's page in front stays, and is asked again of the new timeline (#197).
+            .onChange(of: session.timelineID) { left, arrived in timelineSwitched(from: left, to: arrived) }
             .sheet(isPresented: $composing) {
                 ComposerSheet()
                     #if os(iOS)
@@ -949,7 +950,7 @@ public struct FediqoRootView: View {
         case .person(let person):
             return session.heldPosts(of: person)
         case .tag(let tag):
-            return session.heldPosts(under: tag)
+            return session.heldPosts(under: tag, latest: prefs.latestDate)
         case .thread(let opened):
             guard let item = session.held(opened) else { return streamItems }
             return session.conversations.conversation(around: item).inOrder
@@ -1290,6 +1291,47 @@ public struct FediqoRootView: View {
     private func leaveLink() {
         guard walk.openedLink != nil else { return }
         _ = leaveWalk()
+    }
+
+    /// A timeline switched: the walk ends, unless a tag's page is in front — that stays, and asks
+    /// the sources of the timeline now in front (#197). `tagSwitched` asks nothing of a timeline
+    /// already switched away from by the time it runs.
+    ///
+    /// **The places are this handler's, whole, where the page stays**, and `TimelinePane` leaves
+    /// them alone while it stands on a tag: two handlers of one change, each writing the lamp,
+    /// would answer by whichever ran last. The lamp stays on the page's row where the page still
+    /// shows it under the new timeline's rules, and goes out where it does not.
+    private func timelineSwitched(from left: TimelineQuery?, to arrived: TimelineQuery?) {
+        let hadLink = walk.openedLink != nil
+        guard let tag = Self.timelineSwitched(
+            on: &walk, places: &session.timelinePlaces, from: left, to: arrived,
+            shown: session.timelineItems(latest: prefs.latestDate).map(\.id),
+            results: session.searched(search, latest: prefs.latestDate)?.map(\.id)
+        ) else { return clearWalk() }
+        if hadLink { linkReader.close() }
+        if let lamp = selectedItemID,
+           !session.heldPosts(under: tag, latest: prefs.latestDate).contains(where: { $0.id == lamp }) {
+            selectedItemID = nil
+        }
+        let timeline = session.currentTimeline
+        Task { await session.reload.tagSwitched(to: timeline, in: session) }
+    }
+
+    /// `timelineSwitched`'s walk and places, given what it reads, so a test takes the step the
+    /// root takes. With a search open the row under the page is a result, and the timeline's place
+    /// is the search's parked post, which `TimelinePane` files (#145): the row is kept where the
+    /// new timeline's `results` still hold it, and goes out where they do not. `results` is
+    /// nothing with no search open.
+    static func timelineSwitched(
+        on walk: inout ShellWalk, places: inout TimelinePlaces,
+        from left: TimelineQuery?, to arrived: TimelineQuery?, shown: [String], results: [String]?
+    ) -> PostTag? {
+        walk.timelineSwitched { lamp in
+            guard let results else {
+                return places.switched(from: left, to: arrived, standingOn: lamp, among: shown)
+            }
+            return lamp.flatMap { results.contains($0) ? $0 : nil }
+        }
     }
 
     /// Back to the stream in one go, for a list that has been replaced. A page read out of a post

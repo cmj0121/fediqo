@@ -147,10 +147,22 @@ extension ShellSession {
 
     /// What this device holds under one hashtag, newest first — every timeline's rows and what
     /// is held aside alike (#124) — kept until either changes, for `heldPosts(of:)`'s reason.
-    func heldPosts(under tag: PostTag) -> [DummyItem] {
-        let key = HeldTag.Key(tag: HeldUnderTag.folded(tag), heldRevision: heldRevision)
+    ///
+    /// **Through the rules of the timeline in front** (#197), as a search's results are (#145):
+    /// a tag's page is a search for a tag, and shows only what that timeline lets through — up to
+    /// the latest date, and one row per post however many sources carried it, as the search does.
+    func heldPosts(under tag: PostTag, latest: LatestDate?) -> [DummyItem] {
+        let definition = definition(of: currentTimeline)
+        let name = HeldUnderTag.folded(tag)
+        let sent = reload.sentUnderTag[name] ?? []
+        let key = HeldTag.Key(
+            tag: name, heldRevision: heldRevision, definition: definition, sent: sent, latest: latest
+        )
         if let drawnTag, drawnTag.key == key { return drawnTag.items }
-        let items = HeldUnderTag.held(under: tag, in: searchable)
+        let shown = CompiledTimeline(definition, sources: [])
+            .shown(searchable, definition.readsText ? searchTextIndex : TextIndex([]))
+        let found = HeldUnderTag.held(under: tag, in: shown, sent: sent)
+        let items = DummyItem.merged(latest?.shown(found) ?? found)
         drawnTag = HeldTag(key: key, items: items)
         return items
     }

@@ -31,9 +31,10 @@ import SwiftUI
 // found by a search, drawn by no timeline — and the search, which reads the store and nothing
 // else, renews as it lands. A new search ends the last one's ask; closing the search ends it too.
 //
-// **The fifth is a hashtag's** (#124): a tag pressed asks the Mastodons of the timeline in front
-// for their posts under it, held aside as a search's are. It is said on the tag's own page, where
-// the answer would be, and not in the toast; leaving the page ends it.
+// **The fifth is a hashtag's** (#124): a tag pressed asks the sources of the timeline in front that
+// keep tags — a Mastodon, a Discourse with tagging on (#197) — for their posts under it, held aside
+// as a search's are. It is said on the tag's own page, where the answer would be, and not in the
+// toast; leaving the page ends it, and switching timeline under it asks the new one's sources.
 
 /// One reload of each kind at a time, and the sources the last one could not read.
 @MainActor
@@ -50,7 +51,7 @@ final class ShellReload {
         case held
         /// A search's words, asked of the sources of the timeline in front that can be searched.
         case search
-        /// A hashtag's posts, asked of the Mastodons of the timeline in front (#124).
+        /// A hashtag's posts, asked of the sources of the timeline in front that keep tags (#197).
         case tag
         /// The next, older stretch of the timeline in front, asked as the reader nears its end
         /// (#87). See `ShellMore.swift`.
@@ -304,44 +305,119 @@ final class ShellReload {
         let query: TimelineQuery
     }
 
-    /// The tag whose page asked its sources, and which it asked (#124). Nothing with no such page.
+    /// The tag whose page asked its sources, the timeline it asked them for, and which it asked
+    /// and which it did not (#124, #197). Nothing with no such page.
     private(set) var tagAsk: TagAsk?
     /// The sources the tag's ask could not reach.
     var tagFailed: [String] { failures[.tag] ?? [] }
     /// The sources the tag's ask is waiting on now, or nothing once it has finished.
-    var tagAsking: [String] { asking.contains(.tag) ? tagAsk?.asked ?? [] : [] }
+    var tagAsking: [String] { asking.contains(.tag) ? tagAsk?.reach.asked ?? [] : [] }
+    /// What the sources sent under each tag this run, by the tag as `HeldUnderTag` folds it
+    /// (#197). A forum's topic carries its tags beside its words and not in them, so the page
+    /// finds what a source filed under the tag by this as well as by the words.
+    private(set) var sentUnderTag: [String: Set<NoteKey>] = [:]
+    /// The forums that said this run that they keep no tags: not asked again until the next.
+    @ObservationIgnored private var tagsTurnedOff: Set<String> = []
 
     struct TagAsk: Equatable, Sendable {
         let tag: PostTag
-        let asked: [String]
+        let timeline: TimelineQuery
+        let reach: TagReach
     }
 
-    /// A tag pressed: the Mastodons of `query`'s sources asked for their posts under `tag`, each
-    /// landing — held aside — as it answers, so what this device held is on the page at once and
-    /// what they send joins it (#124). A tag's timeline is public where the server's are, so a
-    /// source is asked as the reader where signed in and unsigned otherwise. A forum has no such
-    /// page this app reads, and is not asked. Ends the last tag's ask first.
+    /// Which of the timeline's sources a tag's page asked, and why each of the rest was not (#197)
+    /// — said on the page, so what it shows says where it came from, as a search's reach does.
+    struct TagReach: Equatable, Sendable {
+        /// Asked, in the timeline's order.
+        let asked: [String]
+        /// Read by the timeline for only some of their categories.
+        let partial: [String]
+        /// Of a kind that keeps no tags of its own.
+        let tagless: [String]
+        /// Forums that said they have tagging turned off.
+        let tagsOff: [String]
+
+        /// Nothing where the timeline has no source at all.
+        var sentence: String? {
+            let said = [
+                (asked, "tag.reach.asked"), (partial, "tag.reach.partial"),
+                (tagless, "tag.reach.tagless"), (tagsOff, "tag.reach.tagsOff"),
+            ].filter { !$0.0.isEmpty }.map { String(format: L10n.t($0.1), $0.0.joined(separator: ", ")) }
+            return said.isEmpty ? nil : said.joined(separator: " ")
+        }
+
+        /// **A tag's page is a search for a tag**, so a source is asked only where a search's
+        /// finds could show: never one the timeline reads only some categories of, since what
+        /// arrives under a tag arrives through none (`SearchReach.of`'s reason).
+        ///
+        /// **And only where the tag is the source's own idea.** A Mastodon keeps a timeline per
+        /// tag, public where its timelines are, so it is asked signed in or not; a Discourse
+        /// files topics under tags where the forum has tagging on, and says so when asked. A
+        /// Discuz! has no tags, and reading a tag as a word to search its text for is a search,
+        /// not this.
+        @MainActor
+        static func of(_ asks: [FetchAsk], in session: ShellSession, tagsOff: Set<String>) -> TagReach {
+            var asked: [String] = [], partial: [String] = [], tagless: [String] = [], off: [String] = []
+            for ask in asks {
+                switch (ask.categories, session.sources.first { $0.host == ask.host }?.kind) {
+                case (.some, _): partial.append(ask.host)
+                case (nil, .mastodon): asked.append(ask.host)
+                case (nil, .discourse) where tagsOff.contains(ask.host): off.append(ask.host)
+                case (nil, .discourse): asked.append(ask.host)
+                default: tagless.append(ask.host)
+                }
+            }
+            return TagReach(asked: asked, partial: partial, tagless: tagless, tagsOff: off)
+        }
+    }
+
+    /// A tag pressed: the sources of `query` that keep tags asked for their posts under `tag`,
+    /// each landing — held aside — as it answers, so what this device held is on the page at once
+    /// and what they send joins it (#124). Which are asked is `TagReach.of`'s (#197), and a forum
+    /// that answers that it keeps no tags is said to. Ends the last tag's ask first.
     func tag(_ tag: PostTag, timeline query: TimelineQuery, in session: ShellSession) async {
         endTag()
-        let hosts = CompiledTimeline(query.definition(among: session.written), sources: session.sources)
-            .sourcesToAsk().map(\.host)
-            .filter { host in session.sources.first { $0.host == host }?.kind == .mastodon }
-        tagAsk = TagAsk(tag: tag, asked: hosts)
-        guard !hosts.isEmpty else { return }
+        let asks = CompiledTimeline(query.definition(among: session.written), sources: session.sources)
+            .sourcesToAsk()
+        let reach = TagReach.of(asks, in: session, tagsOff: tagsTurnedOff)
+        tagAsk = TagAsk(tag: tag, timeline: query, reach: reach)
+        guard !reach.asked.isEmpty else { return }
         await run(.tag) {
-            var missed: Set<String> = []
-            await withTaskGroup(of: (String, Bool).self) { group in
-                for host in hosts {
+            var came: [String: Tagged] = [:]
+            await withTaskGroup(of: (String, Tagged).self) { group in
+                for host in reach.asked {
                     group.addTask { (host, await self.under(tag, on: host, in: session)) }
                 }
-                for await (host, came) in group {
-                    if !came { missed.insert(host) }
+                for await (host, answer) in group {
+                    came[host] = answer
                     await session.reloadFromStore()
                 }
             }
             guard !Task.isCancelled else { return }
-            self.failures[.tag] = hosts.filter(missed.contains)
+            self.failures[.tag] = reach.asked.filter { came[$0] == .missed }
+            let off = reach.asked.filter { came[$0] == .tagsOff }
+            guard !off.isEmpty else { return }
+            // Asked, and answered that there are no tags to ask for: said as such, not as asked.
+            self.tagsTurnedOff.formUnion(off)
+            self.tagAsk = TagAsk(tag: tag, timeline: query, reach: TagReach(
+                asked: reach.asked.filter { !off.contains($0) }, partial: reach.partial,
+                tagless: reach.tagless, tagsOff: reach.tagsOff + off
+            ))
         }
+    }
+
+    /// The timeline under an open tag's page changed (#197): the tag is asked again of the new
+    /// one's sources, and the reach follows. `searchSwitched`'s guard: a switch answered late —
+    /// another since — asks nothing of a timeline no longer in front.
+    func tagSwitched(to query: TimelineQuery, in session: ShellSession) async {
+        guard let last = tagAsk, last.timeline != query, query == session.currentTimeline else { return }
+        await tag(last.tag, timeline: query, in: session)
+    }
+
+    private enum Tagged: Sendable {
+        case answered
+        case missed
+        case tagsOff
     }
 
     /// The tag's page left: its ask ends where it is, and what it said goes.
@@ -351,14 +427,22 @@ final class ShellReload {
         tagAsk = nil
     }
 
-    /// One Mastodon asked for its posts under `tag`, what it sent held aside. Whether it answered.
-    private func under(_ tag: PostTag, on host: String, in session: ShellSession) async -> Bool {
-        guard let source = session.sources.first(where: { $0.host == host }) else { return false }
+    /// One source asked for its posts under `tag`, what it sent held aside and remembered as sent
+    /// under it. A forum's topics land as the rows its front page draws, under the same ids, so a
+    /// topic on both is one row.
+    private func under(_ tag: PostTag, on host: String, in session: ShellSession) async -> Tagged {
+        guard let source = session.sources.first(where: { $0.host == host }) else { return .missed }
         let stamp = Source(host: host, kind: source.kind)
         let name = SourceWork.Name.called(tag.text)
         do {
             let notes: [Note]
-            if let door = session.mastodon.authorized(host: host, within: deadline, for: .timeline, name: name) {
+            if source.kind == .discourse {
+                let http = timed(transport(host, in: session), for: .timeline, name: name, in: session)
+                guard case .topics(let topics) = try await DiscourseClient(http: http, host: host)
+                    .topics(under: tag, source: stamp)
+                else { return .tagsOff }
+                notes = topics
+            } else if let door = session.mastodon.authorized(host: host, within: deadline, for: .timeline, name: name) {
                 notes = try await asReader(host) { try await MastodonTag(door: door).posts(under: tag, source: stamp) }
             } else {
                 let http = timed(session.http, for: .timeline, name: name, in: session)
@@ -366,12 +450,13 @@ final class ShellReload {
             }
             try Task.checkCancellation()
             await session.store.hold(notes, ifSourceHere: host)
-            return true
+            sentUnderTag[HeldUnderTag.folded(tag), default: []].formUnion(notes.map(\.key))
+            return .answered
         } catch MastodonAuthError.signedOut {
             session.mastodon.endedByServer(host: host)
-            return false
+            return .missed
         } catch {
-            return Cancellation.happened(error)
+            return Cancellation.happened(error) ? .answered : .missed
         }
     }
 

@@ -63,8 +63,8 @@ struct TagPressTests {
     @Test("A tag's page is the posts held that carry it, whatever case it was typed in, and nothing that only says the word")
     func heldUnderTheTag() async {
         let session = await shell(FixtureHTTP([:]))
-        #expect(session.heldPosts(under: Self.swift).map(\.id) == [Self.note("1", "").key.rowID])
-        #expect(session.heldPosts(under: PostTag("#nothing")!).isEmpty)
+        #expect(session.heldPosts(under: Self.swift, latest: nil).map(\.id) == [Self.note("1", "").key.rowID])
+        #expect(session.heldPosts(under: PostTag("#nothing")!, latest: nil).isEmpty)
     }
 
     @Test("A forum reply kept for its thread is not on a tag's page; a microblog answer held aside is")
@@ -80,7 +80,7 @@ struct TagPressTests {
         await session.store.hold([Self.note("8", "an answer, #swift", categories: [])], ifSourceHere: Self.one)
         await session.reloadFromStore()
         #expect(await session.store.note(reply.key) != nil, "held on this device")
-        let ids = session.heldPosts(under: Self.swift).map(\.id)
+        let ids = session.heldPosts(under: Self.swift, latest: nil).map(\.id)
         #expect(!ids.contains(reply.key.rowID), "a row that opens nowhere is not drawn as one")
         #expect(ids.contains(Self.note("8", "").key.rowID))
     }
@@ -94,9 +94,9 @@ struct TagPressTests {
 
         await session.reload.tag(Self.swift, timeline: .all, in: session)
         #expect(await http.requested.map(\.absoluteString) == [Self.tagAddress], "the forum is not asked")
-        #expect(session.reload.tagAsk?.asked == [Self.one])
-        #expect(await spun { session.heldPosts(under: Self.swift).count == 2 }, "renewed with no press")
-        #expect(session.heldPosts(under: Self.swift).first?.id == Self.fromTheWire.rowID)
+        #expect(session.reload.tagAsk?.reach.asked == [Self.one])
+        #expect(await spun { session.heldPosts(under: Self.swift, latest: nil).count == 2 }, "renewed with no press")
+        #expect(session.heldPosts(under: Self.swift, latest: nil).first?.id == Self.fromTheWire.rowID)
         #expect(await session.store.note(Self.fromTheWire)?.holding == .aside, "the store's answer, held aside")
         #expect(!session.notes.contains { $0.key == Self.fromTheWire }, "All did not grow")
         #expect(session.held(Self.fromTheWire.rowID) != nil, "a row held aside still opens its conversation")
@@ -126,7 +126,7 @@ struct TagPressTests {
         #expect(session.reload.tagAsking == [Self.one])
         #expect(TagPane.said(asking: session.reload.tagAsking, failed: [], tag: Self.swift)
             == .asking("Asking one.example for #Swift…"))
-        #expect(session.heldPosts(under: Self.swift).count == 1, "what was held, not waiting")
+        #expect(session.heldPosts(under: Self.swift, latest: nil).count == 1, "what was held, not waiting")
 
         await gated.gate.open()
         await asking.value
@@ -145,7 +145,7 @@ struct TagPressTests {
         let session = await shell(http)
         let nothing = PostTag("#nothing")!
         await session.reload.tag(nothing, timeline: .all, in: session)
-        #expect(session.heldPosts(under: nothing).isEmpty)
+        #expect(session.heldPosts(under: nothing, latest: nil).isEmpty)
         #expect(session.reload.tagAsking.isEmpty)
         #expect(TagPane.said(asking: [], failed: session.reload.tagFailed, tag: nothing) == nil)
         #expect(TagPane.none(nothing) == "Nothing under #nothing has reached this device.")

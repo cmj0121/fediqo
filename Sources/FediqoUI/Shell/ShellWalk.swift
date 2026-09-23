@@ -134,4 +134,18 @@ struct ShellWalk: Hashable, Sendable {
     /// switched, a search closed — so the rows every step was standing on are gone and there is
     /// nothing to give the lamp back to. Whoever changed the list says where the lamp lands.
     mutating func clear() { taken.removeAll() }
+
+    /// The timeline under the walk switched with a tag's page in front — or under a page read out
+    /// of a post, which goes: the tag's page stays, alone, because it answers to the timeline in
+    /// front and is asked again of the new one (#197). The tag kept, or nothing and the walk
+    /// untouched, for whoever switched to `clear()` it.
+    ///
+    /// **The row it gives back is parked, as a search's is** (#145). The row the walk was taken
+    /// from on the stream is the timeline left's place, and leaving the page now gives back the
+    /// place of the timeline arrived at: `place` is handed the one and answers the other.
+    mutating func timelineSwitched(_ place: (String?) -> String?) -> PostTag? {
+        guard case .tag(let tag) = beneath else { return nil }
+        taken = [Taken(step: .tag(tag), lamp: place(taken.first?.lamp))]
+        return tag
+    }
 }
