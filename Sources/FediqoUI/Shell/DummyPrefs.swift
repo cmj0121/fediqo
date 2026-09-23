@@ -110,6 +110,15 @@ final class DummyPrefs {
         didSet { write("latestDate", latestDate?.text ?? "") }
     }
 
+    /// How many minutes this device waits before asking the sources it holds again (#95). One
+    /// wait for every source, and a minute unless a person picks another of `waits`.
+    var askMinutes: Int {
+        didSet { write("askMinutes", String(askMinutes)) }
+    }
+
+    /// The waits a person picks from, in minutes.
+    static let waits = [1, 5, 15, 30, 60]
+
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -118,6 +127,7 @@ final class DummyPrefs {
         keepMonths = Int(read("keepMonths") ?? "").flatMap { $0 > 0 ? $0 : nil }
         goneDays = Int(read("goneDays") ?? "").flatMap { $0 > 0 ? $0 : nil }
         latestDate = LatestDate(read("latestDate") ?? "")
+        askMinutes = Int(read("askMinutes") ?? "").flatMap { Self.waits.contains($0) ? $0 : nil } ?? 1
         language = DummyLanguage(rawValue: read("language") ?? "") ?? .system
         theme = DummyTheme(rawValue: read("theme") ?? "") ?? .system
         fontSize = DummyFontSize(rawValue: read("fontSize") ?? "") ?? .standard

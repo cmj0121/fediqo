@@ -182,6 +182,7 @@ public struct FediqoRootView: View {
             }
             // Posts their source deleted go on this device's wait (#179).
             .modifier(LettingGoneGo(session: session))
+            .modifier(AsksOnAWait(session: session, minutes: prefs.askMinutes))
             .onChange(of: place) { old, new in
                 let accepted = availability.placing(old, as: new)
                 if accepted != new { place = accepted }

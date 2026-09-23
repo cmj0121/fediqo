@@ -303,6 +303,10 @@
 "prefs.latest" = "Stop at a latest date";
 "prefs.latest.date" = "Latest date";
 "prefs.latest.footer" = "Every timeline shows nothing posted after the end of this day, in this device's time zone. Newer posts stay on this device; turn this off to see them again.";
+"prefs.askEvery" = "Ask the sources again";
+"prefs.askEvery.one" = "Every minute";
+"prefs.askEvery.many" = "Every %d minutes";
+"prefs.askEvery.footer" = "While Fediqo is open, every source on this device is asked again after this wait, and the timeline in front renews itself. r still reloads at once.";
 
 "prefs.tab.choices" = "Settings";
 "prefs.tab.build" = "This Fediqo";
