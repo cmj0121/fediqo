@@ -124,7 +124,7 @@ enum ForumReading: Equatable, Sendable {
 }
 
 /// One thread's opening post, fetched when its row is scrolled to, and cached — **D30** — and
-/// the rest of the same topic on request — **D31**.
+/// the rest of the same topic as its thread opens — **D31**, asked at once since #198.
 ///
 /// ## Why this is a cache and not a fetch
 ///
@@ -197,7 +197,7 @@ final class ForumPosts {
     enum Part: Hashable, Sendable, CaseIterable {
         /// The first post of the topic — D30, fetched when the row is scrolled to.
         case opening
-        /// Everything else the first page of the topic carried — D31, fetched on request — and
+        /// Everything else the first page of the topic carried — D31, fetched as it opens — and
         /// every later page read since, as the reader neared the foot (#177). See `Paging`.
         case replies
     }
@@ -655,6 +655,86 @@ final class ForumPosts {
         paging[key] = Paging(last: last, next: last, further: .more)
     }
 
+    /// The topic opened (#198): the replies this device kept drawn at once, and — where it kept
+    /// none — the first page of them asked for with no press. **D31's press is gone for the first
+    /// page**; see `DummyThreadPane.rest(of:)` for why.
+    func open(_ ref: ForumThreadRef) async {
+        let key = Key(ref, .replies)
+        opened.insert(key)
+        opening.insert(key)
+        defer { opening.remove(key) }
+        await recall(ref)
+        if standing(of: ref).wantsPressing { await fetchReplies(ref) }
+    }
+
+    /// Topics whose pane is opening them now, and topics a pane has opened this run — so an
+    /// unasked topic reads as on its way while its opening is, or before it has begun, and offers
+    /// the way in once nothing is asking: a Clear, or the network coming back, can put a topic
+    /// already opened back to unasked (#198).
+    private(set) var opening: Set<Key> = []
+    @ObservationIgnored private var opened: Set<Key> = []
+
+    /// Whether `ref`'s unasked replies are being asked for by its opening, rather than waiting
+    /// for the reader.
+    func isOpening(_ ref: ForumThreadRef) -> Bool {
+        let key = Key(ref, .replies)
+        return opening.contains(key) || !opened.contains(key)
+    }
+
+    /// A renewal's page on the wire, per topic — **apart from `pageWork`**, so Esc, which stops
+    /// what the reader's scrolling asked for, is not spent on what the wait asked for and does not
+    /// hold the foot back. Only the topic being left ends it (`stopPaging(of:)`).
+    @ObservationIgnored private var renewWork: [Key: Task<Void, Never>] = [:]
+
+    /// The open topic asked again on this device's wait (#198): **the last page read**, which is
+    /// where a reply added since turns up, and where a reply already drawn shows its new words.
+    /// What it brings lands in the store first and is laid in as a page for more is — nothing
+    /// drawn moves — and a page that does not arrive says so at the foot, above which every reply
+    /// already drawn stays.
+    ///
+    /// A topic whose first read did not arrive is asked for it again, where asking could help. A
+    /// page already on the wire for it is let be: the next wait asks again. Cancelled — the topic
+    /// left — nothing it brings lands.
+    func renew(_ ref: ForumThreadRef) async {
+        let key = Key(ref, .replies)
+        guard pageWork[key] == nil, renewWork[key] == nil, inFlight[key] == nil else { return }
+        // Never read, or read and let go of — a Clear, the network coming back: its first page,
+        // unless the forum said something asking again cannot change.
+        guard entries[key] != nil else {
+            guard missing[key]?.asksAgain ?? true else { return }
+            let first = work(for: key)
+            await withTaskCancellationHandler { await first.value } onCancel: { first.cancel() }
+            return
+        }
+        // A topic the forum said had no replies is one page with nothing on it.
+        let before = paging[key] ?? Paging(last: 1, next: 1, further: .end)
+        // Its foot says it is on its way — under replies, every wait; under nobody, only where the
+        // last ask did not arrive and this is it asked again, as a lone post's is. A topic nobody
+        // answered does not say "on its way" once a minute.
+        let retry = if case .failed = before.further { true } else { false }
+        if entries[key]?.posts.isEmpty == false || retry {
+            paging[key] = Paging(last: before.last, next: before.next, further: .coming)
+        }
+        let task = Task { @MainActor in await self.page(before.last, of: key, was: before) }
+        renewWork[key] = task
+        await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+        if renewWork[key] == task { renewWork[key] = nil }
+    }
+
+    /// The open topic drawn again from what this device holds, where another window's renewal
+    /// has just read it (#198): each reply drawn takes the words kept, in its place, and a reply
+    /// only the store has follows them. Nothing asked of the forum.
+    func redraw(_ ref: ForumThreadRef) async {
+        let key = Key(ref, .replies)
+        guard let held = entries[key], let reading else { return }
+        let kept = await reading(key.host, key.tid)
+        guard entries[key] != nil, !kept.isEmpty else { return }
+        let drawn = Self.merged(held: held.posts, read: kept, kept: [])
+        guard drawn != held.posts else { return }
+        keep(drawn, for: key, startedAt: interest[key] ?? 0)
+        if paging[key] == nil { paging[key] = Paging(last: 1, next: 1, further: .end) }
+    }
+
     /// The next page of `ref`'s replies, asked of the forum — **the reader nearing the foot of the
     /// topic**, or pressing for it. Nothing where the topic is not being read further: not asked
     /// yet, at its end, or failed in a way asking again cannot change.
@@ -668,6 +748,9 @@ final class ForumPosts {
             await running.value
             return
         }
+        // A renewal is reading this topic: the forum is not asked twice at once, and the foot
+        // asks again once it lands.
+        guard renewWork[key] == nil else { return }
         guard let before = paging[key], before.further.wantsAsking else { return }
         paging[key]?.further = .coming
         let task = Task { @MainActor in await self.page(before.next, of: key, was: before) }
@@ -692,6 +775,7 @@ final class ForumPosts {
     /// in its place.
     func stopPaging(of ref: ForumThreadRef) {
         let key = Key(ref, .replies)
+        renewWork.removeValue(forKey: key)?.cancel()
         guard let task = pageWork.removeValue(forKey: key) else { return }
         task.cancel()
         heldBack.insert(key)
@@ -730,7 +814,9 @@ final class ForumPosts {
                 further: page.continues ? .more : .end
             )
         case .failure(let absence):
-            paging[key] = Paging(last: before.last, next: number, further: .failed(absence))
+            // The page that was to come next stays the one asked for next: a renewal's page is the
+            // last read again, and failing it does not move the foot back onto it.
+            paging[key] = Paging(last: before.last, next: before.next, further: .failed(absence))
         }
     }
 
@@ -1113,7 +1199,7 @@ final class ForumPosts {
             rows.removeValue(forKey: key)
         }
         // A page on the wire lands nothing afterwards, and how far a topic was read goes with it.
-        for key in Array(pageWork.keys) where key.host == host {
+        for key in Array(pageWork.keys) + Array(renewWork.keys) where key.host == host {
             clearedPages.insert(key)
         }
         for key in Array(paging.keys) where key.host == host {

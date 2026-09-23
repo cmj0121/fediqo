@@ -51,6 +51,9 @@ struct DummyThreadPane: View {
     var onBack: () -> Void
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openURL) private var openURL
+    /// The post at the top of the view, kept there as the thread renews under it (#198): an answer
+    /// laid in above it moves what is below the reader, never the post they are reading.
+    @State private var topID: String?
 
     private let step: CGFloat = 16
     /// How many steps a reply is indented by at most — **the conversation's depth, not a
@@ -108,13 +111,11 @@ struct DummyThreadPane: View {
                     }
                     .padding(.vertical, 8)
                     .padding(.trailing, 8)
+                    .scrollTargetLayout()
                 }
+                .scrollPosition(id: $topID, anchor: .top)
                 .scrollIndicators(.never)
                 .clearsFloatingCorner()
-                // A topic whose replies this device kept opens with them, network or none (#177).
-                .task(id: thread) {
-                    if let thread { await posts.recall(thread) }
-                }
                 .onAppear {
                     guard let id = DummyCommand.centredOnAppear(selected: selectedID, opening: root.id)
                     else { return }
@@ -278,11 +279,18 @@ struct DummyThreadPane: View {
     ///    fetching a conversation was out of the branch that wrote it. A forum thread is the
     ///    first thing this app has ever had real answers for.
     ///
-    /// **Pressed, not automatic**, which is the other half of D31. Opening a thread already costs
-    /// a request for the page the opening post came off — `post(tid:)` and `replies(tid:)` each
-    /// fetch it for themselves, which is Core's shape and is recorded for the plan rather than
-    /// worked around here. So the reader gets the topic they opened and asks for the rest of it
-    /// if they want it, which is the same bargain the row makes one level up.
+    /// **Automatic now, where it was pressed** — the other half of D31, reversed by #198 for the
+    /// first page. It was pressed because opening a thread already costs a request for the page the
+    /// opening post came off — `post(tid:)` and `replies(tid:)` each fetch it for themselves, which
+    /// is Core's shape — and the reader was to ask for the rest if they wanted it, the bargain the
+    /// row makes one level up. But the row's bargain is about a list scrolled past; this pane is a
+    /// topic the reader chose by pressing Return on it, a microblog's conversation beside it was
+    /// read at once without a second press (#90), and since #177 what a first page brings is kept
+    /// and drawn from this device with no request at all the next time. So a second press for the
+    /// same topic was the reader asked twice for one thing, and a topic that renews itself on the
+    /// wait could not wait on a press to have anything to renew. The first page is asked as the
+    /// pane opens (`ShellReload.opened`); every later page is still asked only as the reader nears
+    /// the foot, and the way in below stays for a first page that did not arrive.
     @ViewBuilder
     private func rest(of thread: ForumThreadRef) -> some View {
         // Read in `body`, so this pane's interest in the replies is stamped on every pass. I8.
@@ -293,10 +301,14 @@ struct DummyThreadPane: View {
                 .frame(height: ShellSpace.hair)
             // **No `default:`.** A sixth standing has to be given a shape here.
             switch standing {
-            case .unasked:
+            // `unasked` is on its way while the pane opening asks (#198) — `around`'s rule — and
+            // offers the way in once nothing is asking: a Clear, or the network coming back, can
+            // put a topic already opened back to unasked.
+            case .unasked where !posts.isOpening(thread):
                 way(in: thread)
-            case .coming:
-                // **The reader pressed something and is owed a sign that it took.** A static
+            case .unasked, .coming:
+                // **The reader asked for something — opened the topic, or pressed — and is owed
+                // a sign that it took.** A static
                 // "Loading the replies…" is indistinguishable from the same sentence a minute
                 // later, which is what the reader wrote in about first. See `ForumWaiting`.
                 ForumWaiting(line: L10n.t("thread.replies.loading"))
@@ -307,6 +319,15 @@ struct DummyThreadPane: View {
                     standing: ForumRepliesStanding.none
                 ) {
                     ShellNotice(notice)
+                }
+                // Nobody answered when it was last read, and asking again on the wait is on its
+                // way or did not arrive (#198): said where the thread says what it is doing.
+                if let further = posts.further(of: thread), ThreadFoot.underNobody(further) {
+                    ThreadFoot(
+                        said: ThreadFoot.said(further, host: thread.host),
+                        ask: { Task { await posts.press(thread) } },
+                        reach: { _ in }
+                    )
                 }
             case .loaded(let replies):
                 Text(String(format: L10n.t("thread.replies.count"), replies.count))
@@ -366,6 +387,16 @@ struct DummyThreadPane: View {
                 descendantCount: 0, replyCount: 0, standing: ForumRepliesStanding.none
             ) {
                 ShellNotice(notice)
+            }
+            // Asked again on the wait, and that did not arrive (#198) — or is being asked again.
+            // The foot's button asks the whole thread again, as where a first read failed.
+            if let further = conversations.further(of: root.id), ThreadFoot.underNobody(further) {
+                ThreadFoot(
+                    said: ThreadFoot.said(further, host: root.source.host),
+                    ask: onReadFurther,
+                    reach: { _ in }
+                )
+                .padding(.top, ShellSpace.snug)
             }
         case .loaded:
             // The answers are the rows above. What belongs down here is how far they go (#177).
@@ -657,6 +688,15 @@ struct ThreadFoot: View {
         case .cut: .cut(sentence: String(format: L10n.t("thread.more.cut"), host))
         case .failed(let absence):
             .failed(sentence: sentence(for: absence, host: host), again: absence.asksAgain)
+        }
+    }
+
+    /// Whether a thread nobody answered draws its foot (#198): only while it is asked again, or
+    /// where that did not arrive. Its end is the notice already above it. No `default:`.
+    static func underNobody<Absence>(_ further: ShellThreadFurther<Absence>) -> Bool {
+        switch further {
+        case .coming, .failed: true
+        case .more, .end, .cut: false
         }
     }
 
