@@ -40,6 +40,17 @@ public struct MastodonClient: Sendable {
         }
     }
 
+    /// The public timeline read down from a place posts may be missing (#204), toward what is held
+    /// below it (`MastodonReadOn.readDown`).
+    public func publicTimeline(source: Source, readingDownFrom place: MissingPlace) async throws -> ReadDown {
+        try await MastodonReadOn.readDown(from: place) { maxID in
+            try await listed(
+                path: "/api/v1/timelines/public", limit: MastodonReadOn.limit,
+                query: try MastodonPage.older(than: maxID), source: source, category: .public
+            )
+        }
+    }
+
     public func trending(source: Source) async throws -> [Note] {
         try await statuses(
             path: "/api/v1/trends/statuses",

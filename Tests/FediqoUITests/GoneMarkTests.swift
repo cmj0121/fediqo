@@ -120,7 +120,7 @@ struct GoneMarkTests {
         await session.reload.timeline(.all, in: session)
         #expect(session.notes.contains { $0.statusID == "10" }, "the premise: the listing landed without 9")
         #expect(session.notes.allSatisfy { $0.goneSince == nil })
-        #expect(await session.letAllGoneGo() == 0)
+        #expect(await session.letAllGoneGo() == WentGone(posts: 0))
         #expect(session.notes.count == 2)
     }
 
@@ -316,12 +316,12 @@ struct GoneMarkTests {
         await session.markGone(Self.note().key, at: Self.posted)
         await session.markGone(Self.note("7").key, at: Self.posted)
         let kept = try row(session, "8")
-        #expect(await session.letAllGoneGo() == 2)
+        #expect(await session.letAllGoneGo() == WentGone(posts: 2))
         #expect(session.held(Self.note().key.rowID) == nil, "gone from the timeline and the thread")
         #expect(session.timelineItems(latest: nil).map(\.id) == [kept.id])
         #expect(try row(session, "8") == kept)
         #expect(await session.store.snapshot().notes.map(\.statusID) == ["8"], "and from what a save writes")
-        #expect(await session.letAllGoneGo() == 0)
+        #expect(await session.letAllGoneGo() == WentGone(posts: 0))
     }
 
     @Test("The wait lets go what has waited long enough, and never keeps them all")
@@ -329,9 +329,9 @@ struct GoneMarkTests {
         let (session, _) = await shell([Self.note(), Self.note("8")])
         await session.markGone(Self.note().key, at: Self.posted)
         let day: TimeInterval = 86_400
-        #expect(await session.letGoneGo(waitingDays: nil, keepingMonths: nil, from: Self.posted.addingTimeInterval(400 * day)) == 0)
-        #expect(await session.letGoneGo(waitingDays: 7, keepingMonths: nil, from: Self.posted.addingTimeInterval(day)) == 0)
-        #expect(await session.letGoneGo(waitingDays: 7, keepingMonths: nil, from: Self.posted.addingTimeInterval(8 * day)) == 1)
+        #expect(await session.letGoneGo(waitingDays: nil, keepingMonths: nil, from: Self.posted.addingTimeInterval(400 * day)) == WentGone(posts: 0))
+        #expect(await session.letGoneGo(waitingDays: 7, keepingMonths: nil, from: Self.posted.addingTimeInterval(day)) == WentGone(posts: 0))
+        #expect(await session.letGoneGo(waitingDays: 7, keepingMonths: nil, from: Self.posted.addingTimeInterval(8 * day)) == WentGone(posts: 1))
         #expect(session.notes.map(\.statusID) == ["8"], "a post never marked is not reached by the wait")
     }
 
@@ -340,7 +340,7 @@ struct GoneMarkTests {
         let (session, _) = await shell()
         await session.markGone(Self.note().key, at: Self.posted)
         let fortyDays = Self.posted.addingTimeInterval(40 * 86_400)
-        #expect(await session.letGoneGo(waitingDays: 90, keepingMonths: 1, from: fortyDays) == 1)
+        #expect(await session.letGoneGo(waitingDays: 90, keepingMonths: 1, from: fortyDays) == WentGone(posts: 1))
 
         #expect(GoneSection.keepWinsLine(days: 90, keepingMonths: 1, language: .english) != nil)
         #expect(GoneSection.keepWinsLine(days: nil, keepingMonths: 3, language: .english) != nil, "never is longer")

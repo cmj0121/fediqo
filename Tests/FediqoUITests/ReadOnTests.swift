@@ -15,6 +15,8 @@ actor TimelineServer: HTTPClient {
     private(set) var asked: [URL] = []
     /// A query the next ask carrying it waits on `gate` for, where one is set.
     private var holding: String?
+    /// A query every ask carrying it fails on, where one is set.
+    private var refusing: String?
     let gate = Gate()
     /// How many asks reached `gate`.
     private(set) var parked = 0
@@ -41,12 +43,16 @@ actor TimelineServer: HTTPClient {
     /// Holds the asks whose query carries `query` until the gate opens.
     func hold(_ query: String) { holding = query }
 
+    /// Fails every ask whose query carries `query`, or none where nil.
+    func refuse(_ query: String?) { refusing = query }
+
     func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
         if let holding, url.query?.contains(holding) == true {
             parked += 1
             await gate.wait()
         }
         asked.append(url)
+        if let refusing, url.query?.contains(refusing) == true { throw URLError(.timedOut) }
         let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!
         if url.path == "/api/v2/instance" {
             return (Data(#"{"domain":"\#(host)","title":"\#(host)","version":"4.3.1"}"#.utf8), response)
@@ -201,7 +207,8 @@ struct ReadOnTests {
 
         #expect(drawn(session) == Array((31...60).reversed()) + Array((1...10).reversed()), "nothing invented")
         let marks = session.gapMarks(in: session.timelineItems(latest: nil))
-        #expect(marks == [Self.row(31): TimelineGapMarks(below: [Self.stretch])], "said below the oldest it gave")
+        #expect(marks.keys.sorted() == [Self.row(31)], "said below the oldest it gave")
+        #expect(marks[Self.row(31)]?.below == [Self.stretch])
         #expect(session.reload.line == nil, "the source answered: nothing failed")
     }
 

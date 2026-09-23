@@ -9,6 +9,10 @@ import SwiftUI
 /// shorter one wins, and this says so rather than leaving a reader to wonder why a ninety-day
 /// wait let a post go in a month.
 ///
+/// **And the places a read down settled** (#204), where a timeline's source no longer has what lay
+/// between two posts: the same wait and the same press let their marks go, and count them apart
+/// from the posts, so the press never says it let go of posts it did not.
+///
 /// A view of its own rather than more of `UsagePane`, so the page keeps one section per fact and
 /// this one can be read, and tested, alone.
 struct GoneSection: View {
@@ -16,13 +20,13 @@ struct GoneSection: View {
     @Environment(\.colorScheme) private var colorScheme
     let session: ShellSession
 
-    /// How many the last press let go, and nothing before a press — "none went" would be an answer
+    /// What the last press let go, and nothing before a press — "none went" would be an answer
     /// to a question nobody asked yet.
-    @State private var went: Int?
+    @State private var went: WentGone?
     /// The press has counted what it would let go and is asking first, as every other drop on
     /// this page does; `counted` is what the question names.
     @State private var confirming = false
-    @State private var counted = 0
+    @State private var counted = WentGone()
 
     /// The waits offered, in days. Never, the default, is offered beside them.
     static let dayChoices = [1, 7, 30, 90]
@@ -44,11 +48,11 @@ struct GoneSection: View {
                     Task {
                         // Nothing to let go is said at once; anything is asked about first.
                         counted = await session.goneHeld()
-                        if counted == 0 { went = 0 } else { confirming = true }
+                        if counted.isNone { went = counted } else { confirming = true }
                     }
                 }
                 if let went {
-                    reading(Self.wentLine(went))
+                    reading(Self.wentLine(went.posts, places: went.places))
                 }
             }
         } header: {
@@ -59,20 +63,36 @@ struct GoneSection: View {
                 .foregroundStyle(ShellChrome.inkFaint(colorScheme))
         }
         .confirmationDialog(
-            Text(Self.askLine(counted)), isPresented: $confirming, titleVisibility: .visible
+            Text(Self.askLine(counted.posts, places: counted.places)), isPresented: $confirming,
+            titleVisibility: .visible
         ) {
             Button(L10n.t("prefs.gone.confirm"), role: .destructive) {
                 Task { went = await session.letAllGoneGo() }
             }
             Button(L10n.t("board.choose.cancel"), role: .cancel) {}
         } message: {
-            Text(L10n.t("prefs.gone.ask.detail"))
+            Text(Self.askDetail(posts: counted.posts, places: counted.places))
         }
     }
 
-    /// What the press asks before it lets `count` posts go.
-    static func askLine(_ count: Int, language: DummyLanguage? = nil) -> String {
-        L10n.count("prefs.gone.ask", count, language: language)
+    /// What the press asks before it lets `count` posts and `places` settled places go (#204):
+    /// each counted apart, and one left unsaid where there are none of it.
+    static func askLine(_ count: Int, places: Int = 0, language: DummyLanguage? = nil) -> String {
+        if places == 0 { return L10n.count("prefs.gone.ask", count, language: language) }
+        if count == 0 { return L10n.count("prefs.gone.ask.places", places, language: language) }
+        return String(
+            format: L10n.t("prefs.gone.ask.both", language: language),
+            L10n.count("prefs.gone.posts", count, language: language),
+            L10n.count("prefs.gone.places", places, language: language)
+        )
+    }
+
+    /// What the question says under it: where places go too, that only their marks do — and where
+    /// only places go, nothing of posts going.
+    static func askDetail(posts: Int, places: Int, language: DummyLanguage? = nil) -> String {
+        let key = places == 0 ? "prefs.gone.ask.detail"
+            : posts == 0 ? "prefs.gone.ask.detail.placesonly" : "prefs.gone.ask.detail.places"
+        return L10n.t(key, language: language)
     }
 
     /// What the page says where the keep-for window is the shorter of the two, and nothing where
@@ -85,11 +105,19 @@ struct GoneSection: View {
         return L10n.count("prefs.gone.keepwins", months, language: language)
     }
 
-    /// What the press says back: how many went, or that there were none.
-    static func wentLine(_ count: Int, language: DummyLanguage? = nil) -> String {
-        count == 0
-            ? L10n.t("prefs.gone.went.none", language: language)
-            : L10n.count("prefs.gone.went", count, language: language)
+    /// What the press says back: how many posts and places went, or that there were none.
+    static func wentLine(_ count: Int, places: Int = 0, language: DummyLanguage? = nil) -> String {
+        switch (count, places) {
+        case (0, 0): L10n.t("prefs.gone.went.none", language: language)
+        case (_, 0): L10n.count("prefs.gone.went", count, language: language)
+        case (0, _): L10n.count("prefs.gone.went.places", places, language: language)
+        default:
+            String(
+                format: L10n.t("prefs.gone.went.both", language: language),
+                L10n.count("prefs.gone.posts", count, language: language),
+                L10n.count("prefs.gone.places", places, language: language)
+            )
+        }
     }
 
     private func reading(_ line: String) -> some View {

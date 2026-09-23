@@ -123,7 +123,8 @@
 "timeline.reload.unspoken" = "%1$@ 現在自稱是 %2$@，Fediqo 讀不了。它先前帶來的東西仍然都在。";
 "timeline.reload.stopped" = "已停止重新載入。";
 "timeline.gap.more" = "這裡還有來自 %@ 的貼文，捲到或按下這裡就會讀取。";
-"timeline.gap.missing" = "這裡可能缺少來自 %@ 的貼文：來源已不再提供。";
+"timeline.gap.missing" = "這裡可能缺少來自 %@ 的貼文，捲到或按下這裡就會往下讀到已有的貼文。";
+"timeline.gap.settled" = "%1$@：來源 %2$@ 已不再有這裡原本的貼文。";
 "thread.reload.unfindable" = "這篇無法重新載入：登入 %@ 才能在那裡找到它。";
 "thread.reload.notfound" = "這篇無法重新載入：%@ 找不到它。";
 "thread.reload.scope" = "這篇無法重新載入：請重新登入 %@，讓 Fediqo 能找到它。";
@@ -386,7 +387,15 @@
 "prefs.gone.confirm" = "放下";
 "prefs.gone.went" = "已放下 %d 則貼文。";
 "prefs.gone.went.none" = "沒有這樣的貼文。";
-"prefs.gone.footer" = "只有在這台裝置再次讀取那一則貼文、而來源表示它已不在時，才會標為已刪除。單純沒有送達的貼文不會被標記，也不會在這裡被放下。你自己收回的貼文會立即移除。";
+"prefs.gone.footer" = "只有在這台裝置再次讀取那一則貼文、而來源表示它已不在時，才會標為已刪除。單純沒有送達的貼文不會被標記，也不會在這裡被放下。你自己收回的貼文會立即移除。時間軸上來源已不再有兩則貼文之間原本內容的地方，也會以同樣方式標記、同樣方式放下；旁邊的貼文仍會保留。";
+"prefs.gone.posts" = "%d 則";
+"prefs.gone.places" = "%d 處";
+"prefs.gone.ask.places" = "要放下 %d 處來源已不再有原本貼文的標記嗎？";
+"prefs.gone.ask.both" = "要放下 %1$@來源已刪除的貼文，以及 %2$@來源已不再有原本貼文的標記嗎？";
+"prefs.gone.ask.detail.places" = "貼文會立即從這台裝置、從每個畫面上移除。標記只會移除標記本身，旁邊的貼文仍會保留。其他內容都不受影響，每個來源仍保持加入。";
+"prefs.gone.ask.detail.placesonly" = "只會移除標記本身，旁邊的貼文仍會保留。其他內容都不受影響，每個來源仍保持加入。";
+"prefs.gone.went.places" = "已放下 %d 處標記。";
+"prefs.gone.went.both" = "已放下 %1$@貼文和 %2$@標記。";
 "prefs.drop.copies" = "捨棄圖片副本";
 "prefs.drop.copies.title" = "捨棄這台裝置上所有的圖片副本？";
 "prefs.drop.copies.detail" = "所有來源存在記憶體與磁碟上的圖片都會移除。每則貼文都會留下並照常顯示；捲動時會從連結重新讀取圖片。";

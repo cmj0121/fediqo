@@ -36,6 +36,23 @@ struct ReadOnHostedTests {
         }
     }
 
+    /// Every place in the timeline in front where posts may be missing, as the list draws them (#204).
+    private struct Missing: View {
+        let session: ShellSession
+
+        var body: some View {
+            let marks = session.gapMarks(in: session.timelineItems(latest: nil))
+            VStack(spacing: 0) {
+                ForEach(marks.keys.sorted(), id: \.self) { row in
+                    TimelineGapRows(
+                        kind: .mayBeMissing, stretches: marks[row]?.below ?? [], session: session,
+                        posts: marks[row]?.posts ?? [:]
+                    )
+                }
+            }
+        }
+    }
+
     private static func settle(_ view: NSView) {
         view.layoutSubtreeIfNeeded()
         RunLoop.main.run(until: Date().addingTimeInterval(0.01))
@@ -76,6 +93,44 @@ struct ReadOnHostedTests {
         for _ in 0..<5 { Self.settle(view) }
         #expect(await server.cursors.count == before + 3, "one read on: 208 to 300 in three stretches")
         #expect(view.fittingSize.height == 0, "and the place is gone")
+    }
+
+    /// #204: a place where posts may be missing reads down as it comes into view — and, its read
+    /// failing, stays, and does not ask again while it stays in view.
+    @Test("A place where posts may be missing reads down once as it comes into view, and a failure does not loop")
+    func readsDownOnce() async throws {
+        let source = Source(host: Self.one, kind: .mastodon)
+        let store = ItemStore()
+        await store.add(source)
+        await store.ingest((1...10).map { id in
+            Note(
+                id: "https://\(Self.one)/users/ada/statuses/\(id)", source: source, author: "Ada",
+                handle: "@ada", body: "\(id)", postedAt: ReadOnTests.posted(id), categories: [.public],
+                statusID: "\(id)", listed: [.public: "\(id)"]
+            )
+        })
+        let server = TimelineServer(host: Self.one, 1...10)
+        let session = ShellSession(
+            http: server, store: store,
+            mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: ActServer([:]))
+        )
+        await session.reloadFromStore()
+        await server.post(11...60)
+        await server.keep(from: 31)
+        await session.reload.timeline(.all, in: session)
+        await server.refuse("max_id=31")
+        let before = await server.cursors.count
+
+        let view = NSHostingView(rootView: Missing(session: session))
+        view.frame = NSRect(x: 0, y: 0, width: 400, height: 300)
+        Self.settle(view)
+        #expect(await spun {
+            Self.settle(view)
+            return await server.cursors.count == before + 1 && session.reload.asking.isEmpty
+        }, "reached, it read down")
+        for _ in 0..<10 { Self.settle(view) }
+        #expect(await server.cursors.count == before + 1, "and failing, it did not ask again while in view")
+        #expect(view.fittingSize.height > 0, "the place stays")
     }
 }
 #endif
