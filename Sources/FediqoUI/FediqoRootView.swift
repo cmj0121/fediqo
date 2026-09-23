@@ -173,6 +173,9 @@ public struct FediqoRootView: View {
                 if let landing = launch.settle(availability, standingOn: place) {
                     place = landing
                 }
+                // Last, because it does not return: from here every landing renews what is in
+                // front, with no key pressed (#175).
+                await session.followStore()
             }
             .onChange(of: prefs.keepMonths) { _, months in
                 Task { await session.keep(months: months) }
@@ -1118,8 +1121,8 @@ public struct FediqoRootView: View {
     }
 
     /// `r`: the open thread, or else the selected timeline — and only on what the reader can see,
-    /// so not under the viewer, the keys list or the timeline editor. A second press while one
-    /// runs is taken and does nothing; Esc is what stops it.
+    /// so not under the viewer, the keys list or the timeline editor. A second press while the
+    /// same one runs is taken and does nothing (`ShellReload.press`); Esc is what stops it.
     private func reload() -> Bool {
         guard Self.canReload(
             place: place,
@@ -1127,7 +1130,6 @@ public struct FediqoRootView: View {
             hasSources: !session.sources.isEmpty,
             open: openLayers
         ) else { return false }
-        if session.reload.running { return true }
         // The thread as `TimelinePane` draws it: one it cannot find draws the timeline instead.
         let opened = walk.openedThread.flatMap(session.held)
         session.reload.press(thread: opened, timeline: session.currentTimeline, in: session)

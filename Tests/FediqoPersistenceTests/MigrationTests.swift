@@ -167,7 +167,9 @@ struct MigrationTests {
         #expect(opened.notes.first { $0.id == "m5" }?.boosterHandle == nil)
         #expect(Holdings(notes: opened.notes, per: .month, calendar: utc) == counted)
         #expect(counted.posts == 8)
-        #expect(try migrations(index) == ["v1-index", "v2-categories"])
+        #expect(try migrations(index) == ["v1-index", "v2-categories", "v3-holding"])
+        // Every row 0.1.0 kept arrived through a timeline, which is what the new column says.
+        #expect(opened.notes.allSatisfy { $0.holding == .arrived })
 
         // Written the way a 0.2.0 save writes it, so the next save changes nothing about a row.
         let written = try await DatabaseQueue(path: index.path).read { db in

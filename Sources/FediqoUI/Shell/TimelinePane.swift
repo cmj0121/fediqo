@@ -172,6 +172,9 @@ struct TimelinePane: View {
                     // pane's own `.task`, so closing the thread cancels a read still on the wire,
                     // and asked once per post per run: reopening draws what is already held.
                     .task(id: opened.id) { await session.conversations.open(opened, in: session) }
+                    // What `r` last said about this thread goes with it (#175): the timeline under
+                    // it does not go on saying a thread nobody is reading could not be reloaded.
+                    .onDisappear { session.reload.forget(.thread) }
                 } else {
                     underneath
                 }
@@ -398,6 +401,7 @@ struct TimelinePane: View {
             // The end of the list stops short of whatever floats over the page (#112).
             .clearsFloatingCorner()
             .modifier(KeepsTopRow(session: session))
+            .modifier(HoldsPlace(session: session, proxy: proxy))
             .onAppear {
                 // A tick later: a lazy stack just built has not laid out the row to scroll to.
                 switch Self.landing(selected: selectedID, top: session.scrolledTop) {
@@ -696,6 +700,25 @@ struct KeepsTopRow: ViewModifier {
     func body(content: Content) -> some View {
         content.onScrollTargetVisibilityChange(idType: String.self) { visible in
             session.scrolledTop = visible.first
+        }
+    }
+}
+
+/// The row the reader is reading stays where it is when the store renews the list under them
+/// (#175). A landing nobody pressed for puts newer rows above it; the row at the top before is
+/// put back at the top, rather than the stream sliding down under the reader's eyes.
+///
+/// **The top row, not the lamp.** `r` centres the lamp as it ends, because the reader asked and
+/// is looking for what came; a renewal the reader did not ask for leaves the page as it was read.
+/// A modifier of its own for `KeepsTopRow`'s reason.
+struct HoldsPlace: ViewModifier {
+    let session: ShellSession
+    let proxy: ScrollViewProxy
+
+    func body(content: Content) -> some View {
+        content.onChange(of: session.notesRevision) { _, _ in
+            guard let top = session.scrolledTop else { return }
+            proxy.scrollTo(top, anchor: .top)
         }
     }
 }

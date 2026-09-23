@@ -314,6 +314,10 @@ final class ShellSession {
     }
 
     /// The store row one row id stands for, in `notes`. See `held(_:)`.
+    ///
+    /// **Never a post held aside** (#175): `notes` is what `ItemStore.all()` draws, and a search
+    /// hit, a thread's answer or a post under a hashtag is not in it. A place that shows those
+    /// reads them through `store.note(_:)`, which hands over every row this device holds.
     func heldNote(_ rowID: String) -> Note? {
         guard let key = NoteKey(rowID: rowID) else { return nil }
         return notes.first { $0.source.host == key.host && $0.id == key.id }
@@ -1849,6 +1853,22 @@ final class ShellSession {
         await adopt()
     }
 
+    /// The store, followed: each time it says it changed, what it holds is adopted again — so a
+    /// landing renews the screen reading it with no key pressed (#175), whoever asked for it.
+    ///
+    /// **Until the task running it is cancelled**, which is the one way it ends: the root view's
+    /// own `.task`, so a window closed stops following. A store that changed nothing says nothing
+    /// (`ItemStore.changes()`), so an ask that brought nothing new redraws nothing. The rows keep
+    /// their ids across an adopt, which is what keeps the selected post selected.
+    func followStore() async {
+        // Listening before the first adopt, so a landing between the two is not missed.
+        let changes = await store.changes()
+        await adopt()
+        for await _ in changes {
+            await adopt()
+        }
+    }
+
     /// Only the sources, projected again through what each server has just said it is — for a
     /// reload that has asked every server and has not read anything yet, so has no notes to adopt.
     func reprojectSources() async {
@@ -1861,20 +1881,21 @@ final class ShellSession {
     /// **Each half assigned only where it moved.** Both have observers behind them — the forums
     /// watched, the boards each forum is read for, the holdings counted and the text index
     /// dropped — and every view reading the session redraws on an assignment, so a reload that
-    /// changed nothing used to pay for all of it. The notes are compared by the store's revision
-    /// rather than row by row: unchanged since the last adopt, and nothing here has assigned
-    /// `notes` since either, they are what the store holds.
+    /// changed nothing used to pay for all of it. The notes are compared by the store's count of
+    /// what `all()` draws rather than row by row: unchanged since the last adopt, and nothing here
+    /// has assigned `notes` since either, they are what the store holds. **That count and not the
+    /// revision** (#175), so a post held aside — written down, drawn nowhere — replaces nothing.
     private func adopt() async {
         await adoptSources()
-        let revision = await store.revision
-        if adopted?.store != revision || adopted?.notes != notesRevision {
+        let drawn = await store.drawn
+        if adopted?.store != drawn || adopted?.notes != notesRevision {
             notes = await store.all()
-            adopted = (store: revision, notes: notesRevision)
+            adopted = (store: drawn, notes: notesRevision)
         }
         rebuildQueries()
     }
 
-    /// The store's revision and `notesRevision` as the last adopt left them. Read in a hop before
+    /// The store's `drawn` and `notesRevision` as the last adopt left them. Read in a hop before
     /// the notes, so a write landing between the two is adopted again next time, never missed.
     @ObservationIgnored private var adopted: (store: Int, notes: Int)?
 

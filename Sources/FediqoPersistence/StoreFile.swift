@@ -218,6 +218,19 @@ private var migrator: DatabaseMigrator {
             try db.execute(sql: "UPDATE note SET categories = ? WHERE rowid = ?", arguments: [json, rowid])
         }
     }
+    // Whether a timeline may show a row, or whether this device only holds it (#175). Nothing
+    // already stored is disturbed: every row on disk arrived through a timeline read, which is the
+    // only way a row could get here before this existed, and the column's default says so.
+    //
+    // **A migration id rather than an optional field in `facts`.** An older build knows nothing of
+    // this column, and an older build that read this store would draw every search hit and every
+    // thread answer in All — silently putting rows somewhere nobody read them from. The id is what
+    // makes it refuse the store instead, which is `CategoryRow`'s rule reaching a second marker.
+    migrator.registerMigration("v3-holding") { db in
+        try db.alter(table: "note") { t in
+            t.add(column: "holding", .text).notNull().defaults(to: Holding.arrived.rawValue)
+        }
+    }
     return migrator
 }
 
@@ -471,11 +484,16 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
     var categories: [CategoryRow]
     /// A `facts` that is not JSON throws when the row is fetched, so the load fails closed.
     var facts: NoteFacts
+    /// `Note.holding` (#175). A column rather than a field in `facts`, and with a migration id
+    /// behind it, because an older build must refuse this store rather than show a row nobody
+    /// read from a timeline in All.
+    var holding: String
 
     init(_ note: Note) {
         host = note.source.host
         id = note.id
         posted_at = note.postedAt
+        holding = note.holding.rawValue
         categories = note.categories.map(CategoryRow.init).sorted()
         facts = NoteFacts(
             author: note.author,
@@ -529,7 +547,11 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             emojis: facts.emojis.map(\.emoji),
             url: facts.url,
             statusID: facts.statusID,
-            opening: facts.opening?.opening
+            opening: facts.opening?.opening,
+            // A spelling this build does not know cannot reach here — the migration id makes an
+            // older store's rows carry the default and a newer store be refused outright — so the
+            // fallback is the one every row written before this column had.
+            holding: Holding(rawValue: holding) ?? .arrived
         )
     }
 }

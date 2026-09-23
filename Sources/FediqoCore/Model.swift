@@ -203,6 +203,31 @@ public enum Category: Hashable, Sendable {
     case board(id: String)
 }
 
+/// How a row came to be held, and so whether a timeline may show it (#175).
+///
+/// **Holding a post is not the same as it arriving.** A post a source handed over as part of a
+/// timeline it serves arrived, and All draws it. A post this device went and fetched for one
+/// place — a search hit, an answer read inside a thread, a post brought under a hashtag — is held
+/// so it can be read where it was found, and All does not grow because a search was made. #90 said
+/// this in passing about a thread's answers; here it is a fact of the store, said once, so the
+/// tasks that need it do not each invent their own.
+///
+/// **It only ever widens.** A row held aside that later arrives through a timeline is a row that
+/// arrived, and nothing takes that back — `Note.categories`' rule, for its reason: what a copy
+/// arrived through is a fact about it, and a later read that did not come through a timeline is
+/// not that fact going away.
+public enum Holding: String, Sendable, Hashable {
+    /// It arrived through a read of a source's timeline. Every timeline may show it.
+    case arrived
+    /// This device holds it, and no timeline shows it.
+    case aside
+
+    /// The wider of the two.
+    func widened(by other: Holding) -> Holding {
+        self == .arrived || other == .arrived ? .arrived : .aside
+    }
+}
+
 public enum Audience: String, Sendable, Hashable, CaseIterable {
     case everyone
     case unlisted
@@ -460,6 +485,11 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// arrives here (`ForumOpening.init?(_:)`). It goes when the row goes — a Remove, or the
     /// reader's keep-for window — and stays when a Clear keeps the row.
     public let opening: ForumOpening?
+    /// Whether a timeline may show this row, or whether this device only holds it (#175).
+    ///
+    /// **A `var`, as `categories` is, and for its reason**: the store widens it where the same
+    /// post arrives a second time through a timeline, and that is the one way it moves.
+    public var holding: Holding
 
     public init(
         id: String,
@@ -485,7 +515,8 @@ public struct Note: Identifiable, Hashable, Sendable {
         url: URL? = nil,
         counts: Counts = Counts(),
         statusID: String? = nil,
-        opening: ForumOpening? = nil
+        opening: ForumOpening? = nil,
+        holding: Holding = .arrived
     ) {
         self.id = id
         self.source = source
@@ -511,6 +542,7 @@ public struct Note: Identifiable, Hashable, Sendable {
         self.counts = counts
         self.statusID = statusID
         self.opening = opening
+        self.holding = holding
     }
 
     /// This copy, read again, laid over the one held for the same row (#29): what the server says
@@ -537,7 +569,11 @@ public struct Note: Identifiable, Hashable, Sendable {
             statusID: statusID ?? held.statusID,
             // A read of the row that says nothing of its opening post — a board listing, which
             // never does — leaves the one this device read where it is (#154).
-            opening: opening ?? held.opening
+            opening: opening ?? held.opening,
+            // Where the row is held does not move on a read again (#175): a post read again is
+            // not a post a timeline brought, so a row held aside stays aside and one in All stays
+            // there. Only `ItemStore.ingest` widens it.
+            holding: held.holding
         )
     }
 
@@ -549,7 +585,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             boostedBy: boostedBy, boosterHandle: boosterHandle, boosted: boosted,
             favourited: favourited, audience: audience, avatarURL: avatarURL,
             attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis,
-            url: url, counts: counts, statusID: statusID, opening: opening
+            url: url, counts: counts, statusID: statusID, opening: opening, holding: holding
         )
     }
 }
