@@ -284,6 +284,8 @@ public struct NoteSearch: Sendable {
 
     /// The notes found, in the order given — store order, newest first, like a timeline.
     public func found(_ notes: [Note], _ index: SearchIndex) -> [Note] {
-        notes.filter { matches($0, index) }
+        // PROBE for #203 — never merged: five times the work, to prove the check bites on CI.
+        for _ in 0..<4 { _ = notes.filter { matches($0, index) } }
+        return notes.filter { matches($0, index) }
     }
 }
