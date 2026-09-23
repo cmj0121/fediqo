@@ -33,6 +33,10 @@ extension ShellReload {
         inFront = item
         if let ref = ForumThreadRef(item) {
             await session.posts.open(ref)
+        } else if DiscuzBlogRow.isBlog(item.noteID) {
+            // A ranked blog's page, read now that the reader has opened it (#209) — and not again
+            // where this device already holds what it said.
+            await session.blogs.open(item)
         } else {
             await session.conversations.open(item, in: session)
             // A thread read earlier this run, drawn from what is held now.
@@ -57,6 +61,9 @@ extension ShellReload {
     @discardableResult
     func renew(in session: ShellSession, asked: Set<String> = []) async -> String? {
         guard let item = inFront, session.editing == nil else { return nil }
+        // A blog has no thread to renew — no replies this app reads (#209) — and its page is read
+        // when the reader asks, never on the wait: the points guard's rule, one step on.
+        guard !DiscuzBlogRow.isBlog(item.noteID) else { return nil }
         guard !asked.contains(item.id) else {
             if let ref = ForumThreadRef(item) {
                 await session.posts.redraw(ref)

@@ -185,6 +185,9 @@ struct TimelinePane: View {
                         onReachFurther: { appeared in
                             Task { await session.conversations.reached(opened, appeared: appeared, in: session) }
                         },
+                        // A ranked blog's standing, read here where the session is (#209).
+                        blog: session.blogs.reading(of: opened),
+                        onReadBlog: { Task { await session.blogs.again(opened) } },
                         selectedID: $selectedID,
                         marks: markBinding,
                         // Inside the conversation the answer mark opens the answer (#108).

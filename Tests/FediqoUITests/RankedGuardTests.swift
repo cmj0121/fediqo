@@ -3,7 +3,8 @@ import Foundation
 import Testing
 @testable import FediqoUI
 
-/// A forum's Trends, as rows: **the points guard**, and a blog opened as a page.
+/// A forum's Trends, as rows: **the points guard**, and a blog's page. Reading a blog in the app
+/// is `BlogReadTests` (#209).
 ///
 /// Some boards on the reader's forum charge points just to open a thread, and D30 reads a row's
 /// opening post the moment it is reached. A thread the forum's ranking lists named from a board
@@ -174,8 +175,8 @@ struct RankedGuardTests {
 
     // MARK: - A blog
 
-    @Test("A ranked blog is no thread to fetch, and opening it reads its page")
-    func aBlogOpensItsPage() {
+    @Test("A ranked blog is no thread to fetch, and its page is there to offer")
+    func aBlogOffersItsPage() {
         let blog = Note(
             id: DiscuzBlogRow.id(host: Self.host, blog: 500), source: Self.source, author: "writer",
             handle: "@writer@\(Self.host)", body: "The excerpt ...", title: "A blog",

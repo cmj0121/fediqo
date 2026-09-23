@@ -641,6 +641,13 @@ final class ShellReload {
                 if !read, !Task.isCancelled { self.failures[.thread] = [ref.host] }
                 return
             }
+            // A ranked blog's page, read again (#209). What is kept stays drawn if it does not
+            // come back, and the pane says why where its words would be.
+            if DiscuzBlogRow.isBlog(item.noteID) {
+                let read = await session.blogs.again(item)
+                if !read, !Task.isCancelled { self.failures[.thread] = [item.source.host] }
+                return
+            }
             guard let held = session.heldNote(item.id) else { return }
             let again = await self.again(held, in: session)
             guard !Task.isCancelled else { return }
