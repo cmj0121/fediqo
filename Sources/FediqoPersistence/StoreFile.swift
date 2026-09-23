@@ -406,6 +406,30 @@ private struct NoteFacts: Codable {
     /// timeline is read on from. Additive and optional for `gaps`' reasons: a row written before
     /// reads as listed by nothing, which leaves its timeline to be read as one held nowhere.
     var listed: [ListedRow]?
+    /// `Note.audience` (#208), as `Audience`'s own spelling. Additive and optional for `boosted`'s
+    /// reasons: a row written before reads as a source that never said, which the next read that
+    /// does say fills in, and a spelling this build does not know reads the same way.
+    var audience: String?
+    /// `Note.counts` (#208), or nothing where the source counted nothing. Additive and optional
+    /// for `boosted`'s reasons: a row written before reads as counted by nobody.
+    var counts: CountsRow?
+}
+
+/// `Counts` as `NoteFacts` writes it.
+private struct CountsRow: Codable {
+    var replies: Int?
+    var reblogs: Int?
+    var favourites: Int?
+
+    /// Nothing for counts that state nothing, so a row with none writes no key.
+    init?(_ counts: Counts) {
+        guard counts != Counts() else { return nil }
+        replies = counts.replies
+        reblogs = counts.reblogs
+        favourites = counts.favourites
+    }
+
+    var counts: Counts { Counts(replies: replies, reblogs: reblogs, favourites: favourites) }
 }
 
 /// One timeline's listing of a row, as `NoteFacts` writes it.
@@ -584,7 +608,9 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             gaps: note.gaps.isEmpty ? nil : note.gaps.map(GapRow.init).sorted { ($0.kind, $0.category) < ($1.kind, $1.category) },
             listed: note.listed.isEmpty ? nil : note.listed
                 .map { ListedRow(category: CategoryRow($0.key), id: $0.value) }
-                .sorted { $0.category < $1.category }
+                .sorted { $0.category < $1.category },
+            audience: note.audience?.rawValue,
+            counts: CountsRow(note.counts)
         )
     }
 
@@ -611,12 +637,14 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             boosterHandle: facts.boosterHandle,
             boosted: facts.boosted,
             favourited: facts.favourited,
+            audience: facts.audience.flatMap(Audience.init(rawValue:)),
             avatarURL: facts.avatarURL,
             attachments: facts.attachments.map(\.attachment),
             sensitive: facts.sensitive,
             spoiler: facts.spoiler,
             emojis: facts.emojis.map(\.emoji),
             url: facts.url,
+            counts: facts.counts?.counts ?? Counts(),
             statusID: facts.statusID,
             opening: facts.opening?.opening,
             // A spelling this build does not know cannot reach here — the migration id makes an
