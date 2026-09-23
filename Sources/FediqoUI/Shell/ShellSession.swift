@@ -342,12 +342,12 @@ final class ShellSession {
     /// compared to it, so walking past a note builds nothing; the row is built once, for the one
     /// note that matched.
     ///
-    /// **A row held aside too** (#176, #124): a search's find or a post under a tag is a row a
-    /// reader presses like any other, and the conversation it opens is looked up here.
+    /// **A row held aside too** (#176, #124, #178): a search's find, a post under a tag or an
+    /// answer read in a thread is a row a reader presses like any other, and the conversation it
+    /// opens is looked up here — `heldNote(_:)`'s one rule, so the row a press opens and the note
+    /// its marks act on are found the same way.
     func held(_ rowID: String) -> DummyItem? {
-        if let drawn = heldNote(rowID) { return DummyItem(drawn) }
-        guard !aside.isEmpty, let key = NoteKey(rowID: rowID) else { return nil }
-        return aside.first { $0.source.host == key.host && $0.id == key.id }.map(DummyItem.init)
+        heldNote(rowID).map(DummyItem.init)
     }
 
     /// The store row one row id stands for: in `notes`, and **in what is held aside too** (#178).
