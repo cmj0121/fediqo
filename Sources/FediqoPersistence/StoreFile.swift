@@ -393,15 +393,24 @@ private struct OpeningRow: Codable {
     var words: String
     var quoted: [QuotationRow]
     var avatarURL: URL?
+    /// A kept reply's floor and date (#177). Additive and optional, for `opening`'s reasons: a row
+    /// written before reads as an opening post, which it is, and an older build ignores the keys.
+    var floor: Int?
+    var postedAt: Date?
 
     init(_ opening: ForumOpening) {
         words = opening.words
         quoted = opening.quoted.map(QuotationRow.init)
         avatarURL = opening.avatarURL
+        floor = opening.floor
+        postedAt = opening.postedAt
     }
 
     var opening: ForumOpening {
-        ForumOpening(words: words, quoted: quoted.map(\.quotation), avatarURL: avatarURL)
+        ForumOpening(
+            words: words, quoted: quoted.map(\.quotation), avatarURL: avatarURL,
+            floor: floor, postedAt: postedAt
+        )
     }
 }
 

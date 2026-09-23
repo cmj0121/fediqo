@@ -983,7 +983,8 @@ public struct FediqoRootView: View {
                 return decks.toggleCover(item.id)
             case .replies:
                 guard let thread = ForumThreadRef(item) else { return false }
-                Task { await session.posts.fetchReplies(thread) }
+                // The replies, or the next page of them where they are drawn (#177).
+                Task { await session.posts.press(thread) }
                 return true
             case .nothing:
                 return false
@@ -1037,7 +1038,9 @@ public struct FediqoRootView: View {
     ///    further out. With the viewer open `s` keeps its one old meaning and nothing else.
     /// 3. **It is a Discuz! thread whose replies want asking for.** A Discourse topic and a
     ///    microblog post are both `nil` at `ForumThreadRef`, for the reason that type gives, and
-    ///    `wantsPressing` is where "asking again could change the answer" already lives.
+    ///    `wantsPressing` is where "asking again could change the answer" already lives — and,
+    ///    since #177, whether the next page of them could: a reply is no row the keys walk, so
+    ///    `s` is how a reader on the keys reads a topic past its first page.
     ///
     /// **`standing(of:)` stamps interest, and that is fine here.** It is the same read the pane's
     /// body makes on every pass; stamping more often can only make an entry look *less* stale to
@@ -1046,7 +1049,7 @@ public struct FediqoRootView: View {
         guard place == .timeline, viewedItem == nil, walk.openedThread == item.id,
               let thread = ForumThreadRef(item)
         else { return false }
-        return session.posts.standing(of: thread).wantsPressing
+        return session.posts.wantsPressing(thread)
     }
 
     /// Whether the reader may walk one step further out from where they are: `Return` and the

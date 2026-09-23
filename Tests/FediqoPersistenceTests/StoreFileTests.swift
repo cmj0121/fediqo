@@ -55,6 +55,33 @@ struct StoreFileTests {
         #expect(loaded.first { $0.id == "2" }?.holding == .aside)
     }
 
+    /// #177: a topic read to its end is there with the network off, which is a relaunch reading
+    /// its replies back — their floor, their own date where the page gave one, and none where it
+    /// did not, and the page each was read off.
+    @Test("A forum reply read in a thread comes back after a relaunch as the reply it was")
+    func keptReplySurvivesRelaunch() async throws {
+        let file = try StoreFile(database: DatabaseQueue())
+        let forum = Source(host: "forum.example", kind: .discuz)
+        let read = Date(timeIntervalSince1970: 1_800_000_000)
+        let dated = DiscuzPost(
+            pid: 71, tid: 5, floor: 21, author: "linlu", handle: "@linlu@forum.example",
+            postedAt: origin, body: "第三页的回复",
+            quoted: [DiscuzQuotation(words: "上面那句")], page: 3
+        )
+        let undated = DiscuzPost(
+            pid: 72, tid: 5, floor: 22, author: "muyu", handle: "@muyu@forum.example",
+            body: "没有日期", page: 3
+        )
+        var notes = [dated, undated].map { $0.asNote(host: forum.host, read: read) }
+        for index in notes.indices { notes[index].holding = .aside }
+        try await file.save(sources: [forum], notes: notes)
+
+        let back = try file.load().notes.compactMap(DiscuzPost.init(held:)).sorted { $0.pid < $1.pid }
+        #expect(back == [dated, undated], "floor, date, quotation and page, each as read")
+        #expect(back[1].postedAt == nil, "a reply the page gave no date to is not given the read's")
+        #expect(try file.load().notes.allSatisfy { $0.holding == .aside })
+    }
+
     @Test("A loaded note has every row fact and its multimedia hyperlinks")
     func rowFactsWithMultimedia() async throws {
         let file = try StoreFile(database: DatabaseQueue())

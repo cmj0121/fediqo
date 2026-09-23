@@ -429,6 +429,13 @@ final class ShellSession {
         self.posts = posts ?? ForumPosts(through: forums)
         // An opening post read is kept with its row (#154). Weak: the cache is this session's.
         self.posts.keeping = { [weak self] key, opening in self?.keep(opening, for: key) }
+        // A topic's replies land in the store and are read back from it (#177). Weak, likewise.
+        self.posts.landing = { [weak self] host, tid, replies in
+            await self?.land(replies, host: host, tid: tid) ?? []
+        }
+        self.posts.reading = { [weak self] host, tid in
+            await self?.keptReplies(host: host, tid: tid) ?? []
+        }
         switch timelines?.load() {
         case .timelines(let kept)?: written = kept
         case .unreadable?: timelinesUnreadable = true
@@ -2117,6 +2124,29 @@ final class ShellSession {
             guard await store.keep([key: opening]) else { return }
             await persist?()
         }
+    }
+
+    /// One page of a topic's replies, landed in the store **held aside** and saved, and the topic
+    /// as the store now holds it (#177).
+    ///
+    /// Aside, because a reply read in a thread is not a row All grew by (#175). A reply already
+    /// held takes the words just read — **never the forum's notice over them**, #154's rule for an
+    /// opening post, so a guest's read of a page does not undo what a member's read kept.
+    func land(_ replies: [DiscuzPost], host: String, tid: Int) async -> [DiscuzPost] {
+        let read = Date()
+        let notes = replies.map { $0.asNote(host: host, read: read) }
+        await store.hold(notes, ifSourceHere: host)
+        await store.refresh(notes.filter { $0.opening != nil }, ifSourceHere: host)
+        await persist?()
+        return await keptReplies(host: host, tid: tid)
+    }
+
+    /// Every reply of one topic this device holds, in reading order: by page, and on a page by
+    /// the post's own number, which a forum hands out in the order the posts were written.
+    func keptReplies(host: String, tid: Int) async -> [DiscuzPost] {
+        await store.held(host: host, idPrefix: DiscuzPost.heldPrefix(host: host, tid: tid))
+            .compactMap(DiscuzPost.init(held:))
+            .sorted { ($0.page, $0.pid) < ($1.page, $1.pid) }
     }
 
     /// This run's opening posts for rows still held, handed to the store **and** to the rows drawn

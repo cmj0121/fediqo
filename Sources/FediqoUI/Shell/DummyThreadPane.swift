@@ -20,6 +20,9 @@ struct DummyThreadPane: View {
     /// The reader pressing for the conversation again, after one that could not be had. The ask
     /// itself is the pane above's, which is the one place that has the session to ask through.
     var onAskAround: () -> Void = {}
+    /// The conversation read further as the reader nears its foot (#177) — the pane above's to
+    /// ask, for `onAskAround`'s reason.
+    var onReadFurther: () -> Void = {}
     @Binding var selectedID: String?
     var marks: (DummyItem) -> Binding<DummyMarks>
     /// Each row's share of #54's acts, asked of the pane above rather than worked out here: the
@@ -106,6 +109,10 @@ struct DummyThreadPane: View {
                 }
                 .scrollIndicators(.never)
                 .clearsFloatingCorner()
+                // A topic whose replies this device kept opens with them, network or none (#177).
+                .task(id: thread) {
+                    if let thread { await posts.recall(thread) }
+                }
                 .onAppear {
                     guard let id = DummyCommand.centredOnAppear(selected: selectedID, opening: root.id)
                     else { return }
@@ -306,6 +313,12 @@ struct DummyThreadPane: View {
                 ForEach(replies) { reply in
                     ForumReplyRow(post: reply, host: thread.host)
                 }
+                // The topic read to its end, a page at a time, below every reply already drawn.
+                if let further = posts.further(of: thread) {
+                    ThreadFoot(said: ThreadFoot.said(further, host: thread.host)) {
+                        Task { await posts.more(thread) }
+                    }
+                }
             case .absent(let absence):
                 quiet(ForumPostBand.sentence(for: absence))
                 if standing.wantsPressing { way(in: thread) }
@@ -351,8 +364,11 @@ struct DummyThreadPane: View {
                 ShellNotice(notice)
             }
         case .loaded:
-            // The answers are the rows above. Nothing belongs down here.
-            EmptyView()
+            // The answers are the rows above. What belongs down here is how far they go (#177).
+            if let further = conversations.further(of: root.id) {
+                ThreadFoot(said: ThreadFoot.said(further, host: root.source.host), ask: onReadFurther)
+                    .padding(.top, ShellSpace.snug)
+            }
         case .absent(let absence):
             let standing = conversations.standing(of: root.id)
             VStack(alignment: .leading, spacing: ShellSpace.snug) {
@@ -491,6 +507,119 @@ struct DummyThreadPane: View {
                 .frame(width: ShellSpace.hair)
                 .padding(.leading, indent(depth) - ShellSpace.snug)
                 .padding(.vertical, 6)
+        }
+    }
+}
+
+/// The foot of an open thread, read to its end (#177): more on its way, the end, or the next part
+/// not arrived — **said where the next part would have been**, under everything already drawn.
+///
+/// **It asks as it comes into view**, which is the reader nearing the bottom: a lazy stack builds
+/// it only then, whether they scrolled, walked the rows with `j`, or swiped to it with VoiceOver.
+/// And again when a page lands and it is still in view — a short page leaves the foot where the
+/// reader can see it, and a foot in view that says more is coming has to mean it. One off screen
+/// asks nothing, so a long page that pushed it away waits for the reader to reach it again.
+///
+/// **The end is a sentence, not an absence.** A thread with nothing under its last reply and a
+/// thread still waiting for its next page were drawn alike; the reader could not tell one from the
+/// other, which is the whole of #177's complaint.
+struct ThreadFoot: View {
+    /// What the foot says, with each kind of source's reason already worded.
+    enum Said: Equatable {
+        case more
+        case coming
+        case end
+        case failed(sentence: String, again: Bool)
+    }
+
+    let said: Said
+    let ask: () -> Void
+
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var inView = false
+
+    var body: some View {
+        Group {
+            // **No `default:`.** A fifth thing to say has to be given a shape.
+            switch said {
+            case .more, .coming:
+                ForumWaiting(line: L10n.t("thread.more.loading"))
+            case .end:
+                HStack(alignment: .firstTextBaseline, spacing: ShellSpace.tight) {
+                    Image(systemName: "checkmark.circle")
+                    Text(L10n.t("thread.more.end"))
+                }
+                .shellFont(.meta)
+                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text(L10n.t("thread.more.end")))
+            case .failed(let sentence, let again):
+                VStack(alignment: .leading, spacing: ShellSpace.snug) {
+                    Text(sentence)
+                        .shellFont(.meta)
+                        .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                    if again {
+                        Button(action: ask) {
+                            Label(L10n.t("thread.more.again"), systemImage: "arrow.clockwise")
+                                .shellFont(.meta, weight: .medium)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(ShellChrome.selectInk(colorScheme))
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, ShellSpace.pad)
+        .padding(.vertical, ShellSpace.snug)
+        .onAppear {
+            inView = true
+            if said == .more { ask() }
+        }
+        .onDisappear { inView = false }
+        .onChange(of: said) { _, now in
+            if inView, now == .more { ask() }
+        }
+    }
+
+    /// A forum topic's foot. The reasons are `ForumPosts.Absence`'s, worded for a page rather than
+    /// a post — the replies above are still there, and it is the next page that is not.
+    static func said(_ further: ShellThreadFurther<ForumPosts.Absence>, host: String) -> Said {
+        switch further {
+        case .more: .more
+        case .coming: .coming
+        case .end: .end
+        case .failed(let absence):
+            .failed(sentence: sentence(for: absence, host: host), again: absence.asksAgain)
+        }
+    }
+
+    /// A conversation's foot, in `ShellConversations.Absence`'s terms.
+    static func said(_ further: ShellThreadFurther<ShellConversations.Absence>, host: String) -> Said {
+        switch further {
+        case .more: .more
+        case .coming: .coming
+        case .end: .end
+        case .failed(let absence):
+            .failed(sentence: sentence(for: absence, host: host), again: absence.asksAgain)
+        }
+    }
+
+    /// **No `default:`** in either: a new reason has to be given words here.
+    static func sentence(for absence: ForumPosts.Absence, host: String) -> String {
+        switch absence {
+        case .unreachable: L10n.t("thread.more.unreachable")
+        case .refused: String(format: L10n.t("thread.more.refused"), host)
+        case .unreadable: L10n.t("thread.more.unreadable")
+        case .crowded: L10n.t("item.forum.crowded")
+        }
+    }
+
+    static func sentence(for absence: ShellConversations.Absence, host: String) -> String {
+        switch absence {
+        case .unreachable: L10n.t("thread.more.unreachable")
+        case .refused, .unfindable: String(format: L10n.t("thread.more.refused"), host)
         }
     }
 }

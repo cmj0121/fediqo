@@ -596,17 +596,40 @@ public struct Note: Identifiable, Hashable, Sendable {
 /// picture the same page carried. Not the floor, the post number or when it was posted — the row
 /// already has its author and its date from the thread table, and a second copy of either would
 /// be a second answer to a question the row has already answered.
+///
+/// **A reply kept from a thread read to its end (#177) is the one exception**, and carries its
+/// floor and its own date too: a reply is not a row, has no thread table to answer either, and
+/// its note's date may be only when it was read (`DiscuzPost.asNote`). Nothing for an opening post.
 public struct ForumOpening: Hashable, Sendable {
     /// The author's own words. Empty where the post has none — a picture, a poll — which is an
     /// answer, and is kept as one so the row is not asked again for words that do not exist.
     public let words: String
     public let quoted: [DiscuzQuotation]
     public let avatarURL: URL?
+    /// A kept reply's floor, where its page numbered it. Never an opening post's.
+    public let floor: Int?
+    /// A kept reply's own date, where its page gave one a device can read. Never an opening
+    /// post's.
+    public let postedAt: Date?
 
-    public init(words: String, quoted: [DiscuzQuotation] = [], avatarURL: URL? = nil) {
+    public init(
+        words: String, quoted: [DiscuzQuotation] = [], avatarURL: URL? = nil,
+        floor: Int? = nil, postedAt: Date? = nil
+    ) {
         self.words = words
         self.quoted = quoted
         self.avatarURL = avatarURL
+        self.floor = floor
+        self.postedAt = postedAt
+    }
+
+    /// A reply's words kept, with the two things only a reply needs. Withheld or not, which is
+    /// the caller's to decide: `DiscuzPost.asNote` keeps none for a withheld one.
+    public init(reply post: DiscuzPost) {
+        self.init(
+            words: post.body, quoted: post.quoted, avatarURL: post.avatarURL,
+            floor: post.floor, postedAt: post.postedAt
+        )
     }
 
     /// The opening post worth keeping, or nothing where it is not: **a post the forum withheld

@@ -197,7 +197,8 @@ final class ForumPosts {
     enum Part: Hashable, Sendable, CaseIterable {
         /// The first post of the topic — D30, fetched when the row is scrolled to.
         case opening
-        /// Everything else the first page of the topic carried — D31, fetched on request.
+        /// Everything else the first page of the topic carried — D31, fetched on request — and
+        /// every later page read since, as the reader neared the foot (#177). See `Paging`.
         case replies
     }
 
@@ -220,7 +221,7 @@ final class ForumPosts {
     /// a fourth that is about this device rather than about the forum. Every Core case is mapped
     /// in `absence(for:)` **over a `switch` with no `default:`**, so a ninth breaks the build
     /// there rather than arriving on screen as the wrong sentence.
-    enum Absence: Error, Equatable, Sendable {
+    enum Absence: Error, ShellThreadAbsence {
         /// The forum answered and said no: a filter, a notice page, a challenge, a status that
         /// means refused. Signing in is what would change this answer, not waiting.
         case refused
@@ -566,6 +567,172 @@ final class ForumPosts {
         await work(for: key).value
     }
 
+    // MARK: - The topic read to its end — #177
+
+    /// How far one topic's replies have been read, and what the next ask is.
+    struct Paging: Equatable, Sendable {
+        /// The furthest page that has landed.
+        var last: Int
+        /// The page the next ask is for: the one after `last` where it pointed at one, and `last`
+        /// itself again where it did not — a last page is where a new reply turns up.
+        var next: Int
+        var further: ShellThreadFurther<Absence>
+    }
+
+    /// Each open topic's paging, keyed as its replies are. Observed: the foot of the thread draws it.
+    private(set) var paging: [Key: Paging] = [:]
+
+    /// A later page on the wire, so a foot drawn twice waits on one ask rather than making two.
+    @ObservationIgnored private var pageWork: [Key: Task<Void, Never>] = [:]
+
+    /// Pages whose forum was cleared while they were on the wire — `cleared`'s rule, kept apart
+    /// from it because a page and the first read can be in the air for one topic at once.
+    @ObservationIgnored private var clearedPages: Set<Key> = []
+
+    /// Where what a page brought is landed — **the store, held aside and saved** — and what it
+    /// hands back is every reply of that topic the store now holds, in reading order. Set by the
+    /// session; nothing where there is none, which is a test's, and then this run's own copy is
+    /// the whole of it.
+    @ObservationIgnored var landing: (@MainActor (_ host: String, _ tid: Int, [DiscuzPost]) async -> [DiscuzPost])?
+
+    /// What the store holds of a topic's replies, read back — so a topic read on another day, or
+    /// with the network off, opens with what was read. Set by the session, as `landing` is.
+    @ObservationIgnored var reading: (@MainActor (_ host: String, _ tid: Int) async -> [DiscuzPost])?
+
+    /// How far `ref`'s replies have been read, where they have been read at all.
+    func further(of ref: ForumThreadRef) -> ShellThreadFurther<Absence>? {
+        paging[Key(ref, .replies)]?.further
+    }
+
+    /// Whether `s` on this open topic could do anything: its replies asked for, or the next page
+    /// of them. **The one answer the key and the pane's two ways in read.**
+    func wantsPressing(_ ref: ForumThreadRef) -> Bool {
+        standing(of: ref).wantsPressing || further(of: ref)?.wantsAsking == true
+    }
+
+    /// `s`, or a press on either way in: the replies where nobody has asked for them, and the
+    /// next page of them where somebody has.
+    func press(_ ref: ForumThreadRef) async {
+        if standing(of: ref).wantsPressing {
+            await fetchReplies(ref)
+        } else {
+            await more(ref)
+        }
+    }
+
+    /// The replies this device kept of `ref`, drawn with no request — **a topic opened again, or
+    /// opened with the network off**. Only where this run holds none of its own yet; the foot then
+    /// asks the last page read again, which is where a reply added since would be.
+    func recall(_ ref: ForumThreadRef) async {
+        let key = Key(ref, .replies)
+        guard entries[key] == nil, inFlight[key] == nil, let reading else { return }
+        let kept = await reading(key.host, key.tid)
+        guard entries[key] == nil, inFlight[key] == nil, !kept.isEmpty else { return }
+        keep(kept, for: key, startedAt: interest[key] ?? 0)
+        let last = kept.map(\.page).max() ?? 1
+        paging[key] = Paging(last: last, next: last, further: .more)
+    }
+
+    /// The next page of `ref`'s replies, asked of the forum — **the reader nearing the foot of the
+    /// topic**, or pressing for it. Nothing where the topic is not being read further: not asked
+    /// yet, at its end, or failed in a way asking again cannot change.
+    ///
+    /// What the page brings lands in the store first and the topic is drawn again from what it
+    /// holds, below what is already drawn — so the reply being read does not move. A page that
+    /// does not arrive leaves every reply already drawn where it was and says so at the foot.
+    func more(_ ref: ForumThreadRef) async {
+        let key = Key(ref, .replies)
+        if let running = pageWork[key] {
+            await running.value
+            return
+        }
+        guard let before = paging[key], before.further.wantsAsking else { return }
+        paging[key]?.further = .coming
+        let task = Task { @MainActor in await self.page(before.next, of: key, was: before) }
+        pageWork[key] = task
+        await task.value
+    }
+
+    private func page(_ number: Int, of key: Key, was before: Paging) async {
+        defer {
+            pageWork[key] = nil
+            clearedPages.remove(key)
+        }
+        // The rules `work` states for the first page, in its order: a forum still signing in is
+        // waited for, the reader is chosen after it, and the gate is taken last.
+        if let forums { await forums.settled(host: key.host) }
+        let client = client(for: key.host, part: .replies, within: nil)
+        await enter()
+        let answer: Result<DiscuzReplies, Absence>
+        do {
+            answer = .success(try await client.replies(tid: key.tid, page: number))
+        } catch {
+            answer = .failure(Self.absence(for: error))
+        }
+        leave()
+        guard !clearedPages.contains(key) else { return }
+        switch answer {
+        case .success(let page):
+            let landed = await landed(page.posts, for: key)
+            guard !clearedPages.contains(key) else { return }
+            keep(landed, for: key, startedAt: interest[key] ?? 0)
+            // **The page's own word, and only that**: it points at the next one, or this is the
+            // last. A forum answers a page past its last with its last, which points nowhere.
+            paging[key] = Paging(
+                last: number,
+                next: page.continues ? number + 1 : number,
+                further: page.continues ? .more : .end
+            )
+        case .failure(let absence):
+            paging[key] = Paging(last: before.last, next: number, further: .failed(absence))
+        }
+    }
+
+    /// The replies' first page has just landed: the topic is read further from here. **A reload of
+    /// the first page does not forget how far the reader got** — they are asked on from the last
+    /// page they read rather than sent back to the second.
+    private func paged(_ key: Key, first continues: Bool, landed: Bool) {
+        guard landed else {
+            paging[key] = nil
+            return
+        }
+        if let known = paging[key], known.last > 1 {
+            paging[key] = Paging(last: known.last, next: known.last, further: .more)
+        } else {
+            paging[key] = Paging(
+                last: 1, next: continues ? 2 : 1, further: continues ? .more : .end
+            )
+        }
+    }
+
+    /// What one page brought, landed, and the topic as it now stands: this run's replies with the
+    /// page's laid in where they were, then whatever else the store holds of it.
+    private func landed(_ read: [DiscuzPost], for key: Key) async -> [DiscuzPost] {
+        let kept = await landing?(key.host, key.tid, read) ?? []
+        return Self.merged(held: entries[key]?.posts ?? [], read: read, kept: kept)
+    }
+
+    /// One topic from three answers. **Nothing already drawn moves**: a reply held keeps its place
+    /// and takes the words just read, a reply new to this run follows everything held, and what
+    /// only the store had comes last. Keyed by the post's number, `DiscuzPost`'s key.
+    static func merged(held: [DiscuzPost], read: [DiscuzPost], kept: [DiscuzPost]) -> [DiscuzPost] {
+        var order = held
+        var at = Dictionary(held.enumerated().map { ($1.pid, $0) }, uniquingKeysWith: { first, _ in first })
+        for post in read {
+            if let index = at[post.pid] {
+                order[index] = post
+            } else {
+                at[post.pid] = order.count
+                order.append(post)
+            }
+        }
+        for post in kept where at[post.pid] == nil {
+            at[post.pid] = order.count
+            order.append(post)
+        }
+        return order
+    }
+
     // MARK: - The wire
 
     /// The fetch of one part, started unless one is running. `limit` bounds each request of it.
@@ -591,13 +758,18 @@ final class ForumPosts {
             let client = self.client(for: key.host, part: part, within: limit)
             await self.enter()
             let answer: Result<[DiscuzPost], Absence>
+            // Whether the replies' first page points at a second (#177).
+            var continues = false
             do {
                 // **No `default:`.** A part falling through would fetch the wrong half of a
                 // thread and draw it in the right place, which is a wrong answer the compiler
                 // would not mention.
                 switch part {
                 case .opening: answer = .success([try await client.post(tid: tid)])
-                case .replies: answer = .success(try await client.replies(tid: tid))
+                case .replies:
+                    let first = try await client.replies(tid: tid, page: 1)
+                    continues = first.continues
+                    answer = .success(first.posts)
                 }
             } catch {
                 answer = .failure(Self.absence(for: error))
@@ -641,6 +813,15 @@ final class ForumPosts {
             }
 
             switch answer {
+            case .success(let posts) where part == .replies:
+                // **The store first, then the thread** (#177): what the page brought is held
+                // aside and saved, and what is drawn is what the store now holds of this topic —
+                // so a topic read once is there with the network off. Re-read after the landing's
+                // suspension, for the reason the guard above gives.
+                let landed = await self.landed(posts, for: key)
+                guard !self.cleared.contains(key) else { return }
+                self.keep(landed, for: key, startedAt: self.interest[key] ?? 0)
+                self.paged(key, first: continues, landed: !landed.isEmpty)
             case .success(let posts):
                 self.keep(
                     posts,
@@ -884,6 +1065,13 @@ final class ForumPosts {
         }
         for key in Array(rows.keys) where key.host == host {
             rows.removeValue(forKey: key)
+        }
+        // A page on the wire lands nothing afterwards, and how far a topic was read goes with it.
+        for key in Array(pageWork.keys) where key.host == host {
+            clearedPages.insert(key)
+        }
+        for key in Array(paging.keys) where key.host == host {
+            paging.removeValue(forKey: key)
         }
         generation += 1
     }
