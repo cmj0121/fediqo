@@ -451,15 +451,19 @@ final class ShellConversations {
     }
 
     /// One ask, deduplicated: a second while the first is out waits on it.
+    ///
+    /// **Not on one already cancelled**: `r` ends a renewal as it starts (#198), and waiting on
+    /// that read would be the press answered by a read that lands nothing.
     private func ask(_ item: DummyItem, in session: ShellSession) async {
-        if let running = inFlight[item.id] {
+        if let running = inFlight[item.id], !running.isCancelled {
             await running.value
             return
         }
         let task = Task { @MainActor in await self.read(item, in: session) }
         inFlight[item.id] = task
         await task.value
-        inFlight[item.id] = nil
+        // Only this ask's own record: a cancelled one ending late must not clear the next.
+        if inFlight[item.id] == task { inFlight[item.id] = nil }
     }
 
     /// The read itself. Cancelled — the reader closed the thread, or stopped the reload — it
@@ -489,7 +493,9 @@ final class ShellConversations {
         // (#198), it would otherwise say it is loading once a minute.
         switch before {
         case .loaded?: furthers[item.id] = .coming
-        case .some(ShellConversationStanding.none): break
+        // …unless its foot says the last ask did not arrive: asked again, it says it is coming.
+        case .some(ShellConversationStanding.none):
+            if failedAtRoot.contains(item.id) { furthers[item.id] = .coming }
         default: standings[item.id] = .coming
         }
         let stamp = Source(host: host, kind: held.source.kind)

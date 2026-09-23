@@ -512,6 +512,60 @@ struct ThreadRenewsTests {
         #expect(Self.bodies(first, item) == ["answer 10", "answer 15", "answer 11"])
         #expect(Self.bodies(second, item) == ["answer 10", "answer 15", "answer 11"], "drawn from what it landed")
     }
+
+    @Test("r right after it ends a renewal reads the thread, rather than waiting on the read it ended")
+    func aPressAfterARenewalIsNotSwallowed() async {
+        let http = Changing([
+            Self.threadPath: Self.twoAnswers,
+            "/api/v1/statuses/9": .text(Self.status("9", answering: "1", words: "the post")),
+        ])
+        let (session, item) = await conversationShell(http)
+        await session.reload.opened(item, in: session)
+        await http.hold(Self.threadPath)
+        let renewing = Task { await session.reload.renew(in: session) }
+        #expect(await spun { await http.parked })
+        await http.answer(Self.threadPath, with: Self.context([
+            Self.status("10", answering: "9"), Self.status("11", answering: "9"), Self.status("16", answering: "9"),
+        ]))
+        let pressed = Task { await session.reload.thread(item, in: session) }
+        #expect(await spun { await Self.threadAsks(http) == 3 }, "r asks the thread itself")
+        await http.release()
+        await renewing.value
+        await pressed.value
+        #expect(Self.bodies(session, item) == ["answer 10", "answer 11", "answer 16"], "and what it read lands")
+    }
+
+    @Test("Asked again after a failed renewal, a lone post's foot and a no-reply topic's say it is on its way")
+    func aLoneRenewalShowsProgress() async {
+        let alone = Changing([Self.threadPath: Self.context([])])
+        let (session, item) = await conversationShell(alone)
+        await session.reload.opened(item, in: session)
+        await alone.answer(Self.threadPath, with: .fail)
+        await oneWait(session)
+        #expect(session.conversations.further(of: item.id) == .failed(.unreachable))
+        await alone.answer(Self.threadPath, with: Self.context([]))
+        await alone.hold(Self.threadPath)
+        let pressed = Task { await session.conversations.press(item, in: session) }
+        #expect(await spun { await alone.parked })
+        #expect(session.conversations.further(of: item.id) == .coming)
+        #expect(ThreadFoot.underNobody(session.conversations.further(of: item.id)!))
+        await alone.release()
+        await pressed.value
+        #expect(session.conversations.further(of: item.id) == nil)
+
+        let http = Changing([Self.page(1): .text(Self.post(1, floor: 1))])
+        let (forum, topic) = await forumShell(http)
+        await forum.reload.opened(topic, in: forum)
+        #expect(forum.posts.further(of: Self.ref) == nil)
+        await http.hold(Self.page(1))
+        let renewing = Task { await forum.reload.renew(in: forum) }
+        #expect(await spun { await http.parked })
+        #expect(forum.posts.further(of: Self.ref) == .coming)
+        await http.release()
+        await renewing.value
+        #expect(forum.posts.further(of: Self.ref) == .end)
+        #expect(!ThreadFoot.underNobody(forum.posts.further(of: Self.ref)!), "its end is the notice already drawn")
+    }
 }
 
 private final class Counter {

@@ -708,7 +708,7 @@ final class ForumPosts {
         }
         // A topic the forum said had no replies is one page with nothing on it.
         let before = paging[key] ?? Paging(last: 1, next: 1, further: .end)
-        paging[key]?.further = .coming
+        paging[key] = Paging(last: before.last, next: before.next, further: .coming)
         let task = Task { @MainActor in await self.page(before.last, of: key, was: before) }
         renewWork[key] = task
         await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }

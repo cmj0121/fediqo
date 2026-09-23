@@ -320,9 +320,9 @@ struct DummyThreadPane: View {
                 ) {
                     ShellNotice(notice)
                 }
-                // Nobody answered when it was last read, and asking again on the wait did not
-                // arrive (#198): said where the thread says what it is doing.
-                if let further = posts.further(of: thread), case .failed = further {
+                // Nobody answered when it was last read, and asking again on the wait is on its
+                // way or did not arrive (#198): said where the thread says what it is doing.
+                if let further = posts.further(of: thread), ThreadFoot.underNobody(further) {
                     ThreadFoot(
                         said: ThreadFoot.said(further, host: thread.host),
                         ask: { Task { await posts.press(thread) } },
@@ -388,9 +388,9 @@ struct DummyThreadPane: View {
             ) {
                 ShellNotice(notice)
             }
-            // Asked again on the wait, and that did not arrive (#198). The foot's button asks the
-            // whole thread again, as it does where the first read of a thread failed.
-            if let further = conversations.further(of: root.id), case .failed = further {
+            // Asked again on the wait, and that did not arrive (#198) — or is being asked again.
+            // The foot's button asks the whole thread again, as where a first read failed.
+            if let further = conversations.further(of: root.id), ThreadFoot.underNobody(further) {
                 ThreadFoot(
                     said: ThreadFoot.said(further, host: root.source.host),
                     ask: onReadFurther,
@@ -688,6 +688,15 @@ struct ThreadFoot: View {
         case .cut: .cut(sentence: String(format: L10n.t("thread.more.cut"), host))
         case .failed(let absence):
             .failed(sentence: sentence(for: absence, host: host), again: absence.asksAgain)
+        }
+    }
+
+    /// Whether a thread nobody answered draws its foot (#198): only while it is asked again, or
+    /// where that did not arrive. Its end is the notice already above it. No `default:`.
+    static func underNobody<Absence>(_ further: ShellThreadFurther<Absence>) -> Bool {
+        switch further {
+        case .coming, .failed: true
+        case .more, .end, .cut: false
         }
     }
 
