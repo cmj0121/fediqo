@@ -4,10 +4,11 @@ import Testing
 
 /// A ranked blog, read off its own page (#209).
 ///
-/// **The shape is Discuz! X3.x's shipped `home/space_blog_view` template, trimmed and with every
-/// name replaced** — not a capture: no live blog page stood behind these, which `DiscuzBlogPage`
-/// says. The page is written as a signed-in reader is served it, so the reader's own name is in
-/// its header, a visitor's and a commenter's are around it, and none of them is the author.
+/// **Two kinds of page.** `DiscuzBlogCaptures` is a real install's, fetched off the local Discuz!
+/// X5.0 in `servers/`. `page` below is written by hand in the X3.x template's shape, as a
+/// signed-in reader on a busy forum is served it — the reader's own name in the header, a
+/// visitor's and a commenter's around the words — which a fresh local install has none of, so
+/// that none of them can be taken for the author.
 @Suite("A forum's blog, read")
 struct DiscuzBlogTests {
     private static let host = "install-g.example"
@@ -71,7 +72,43 @@ struct DiscuzBlogTests {
     </body></html>
     """#
 
-    // MARK: - The page
+    // MARK: - A real install's page
+
+    @Test("A real X5.0 blog page gives its title, author, date and words")
+    func readsARealPage() throws {
+        let blog = try #require(DiscuzBlogPage.blog(
+            in: DiscuzBlogCaptures.blog, id: 1, uid: 1, host: "discuz.localhost"
+        ))
+        #expect(blog.title == "A blog & more")
+        #expect(blog.author == "admin", "the breadcrumb's link to the author's own space")
+        // The date comes after the read count on the same line, in the forum's own time zone.
+        #expect(blog.postedAt == Self.date(2026, 9, 11, 5, 30))
+        #expect(blog.body == "First line.\n\nSecond line.")
+        #expect(blog.quoted == [DiscuzQuotation(words: "Somebody else said this.")])
+        #expect(!blog.body.contains("路过"), "the click buttons are under the words, not in them")
+        // The author uploaded no picture: the template's lazy `noavatar` placeholder is none.
+        #expect(blog.avatarURL == nil)
+    }
+
+    @Test("A real page's lazy-loaded avatar is read where the author has one")
+    func readsARealAvatar() throws {
+        let page = DiscuzBlogCaptures.blog.replacingOccurrences(
+            of: "./data/avatar/noavatar.svg", with: "./data/avatar/000/00/00/01_avatar_small.jpg"
+        )
+        let blog = try #require(DiscuzBlogPage.blog(in: page, id: 1, uid: 1, host: "discuz.localhost"))
+        #expect(blog.avatarURL?.absoluteString == "https://discuz.localhost/data/avatar/000/00/00/01_avatar_small.jpg")
+    }
+
+    @Test("A real install's refusals — sign in, no such blog, blogs switched off — are refused")
+    func realRefusals() async {
+        for page in [DiscuzBlogCaptures.signInNotice, DiscuzBlogCaptures.missing, DiscuzBlogCaptures.switchedOff] {
+            let client = DiscuzClient(http: FixtureHTTP([Self.address: .text(page)]), host: Self.host)
+            await #expect(throws: DiscuzRequestError.restricted) { try await client.blog(uid: 21, id: 500) }
+            #expect(DiscuzBlogPage.blog(in: page, id: 500, uid: 21, host: Self.host) == nil)
+        }
+    }
+
+    // MARK: - The page, as X3.x's template promises it
 
     @Test("A blog's page gives its title, its author, when it was written and its words")
     func readsTheBlog() throws {
