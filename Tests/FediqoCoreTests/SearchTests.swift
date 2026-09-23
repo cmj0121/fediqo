@@ -330,23 +330,28 @@ struct SearchTests {
                 boosterHandle: i % 11 == 0 ? "@booster@h1.example" : nil
             )
         }
-        let clock = ContinuousClock()
+        let plain = Pace.plainRead(notes)
         var index = SearchIndex([])
-        let indexing = clock.measure { index = SearchIndex(notes) }
+        let indexing = Pace.fastest { index = SearchIndex(notes) }
         var counts: [Int] = []
         // A keyword that never matches reads every field of every note; the wildcard ones walk.
         let patterns = ["nothingatall", "coffee", "*fediverse*", "user?@*", "*d?y*zzz", "s*t"]
         var slowest: Duration = .zero
         for pattern in patterns {
             let search = NoteSearch(pattern, sources: hosts)!
-            let took = clock.measure { counts.append(search.found(notes, index).count) }
-            slowest = max(slowest, took)
+            var count = 0
+            slowest = max(slowest, Pace.fastest { count = search.found(notes, index).count })
+            counts.append(count)
         }
         #expect(counts[0] == 0 && counts[1] == 1_000 && counts[2] == 1_000 && counts[3] == 10_000)
-        // Release measured about 105 ms to index and 15 ms for the slowest search (`*d?y*zzz`,
-        // which walks every body); debug about 235 and 90. The bounds catch a search that has
-        // become a different order of cost, not a slow runner.
-        #expect(indexing < .seconds(2), "indexing took \(indexing)")
-        #expect(slowest < .milliseconds(500), "slowest search took \(slowest)")
+        // Against the plain read of the same notes (`Pace`), measured the same way just before.
+        // Debug measured about 3.2 plain reads to index and 1.25 for the slowest search
+        // (`*d?y*zzz`, which walks every body), at most 4.5 and 1.5 across thirty runs — at normal
+        // and background priority and counting coverage, where a plain read took 70 to 220 ms.
+        // The lines leave twice that and more, and an index or a search made five times dearer is
+        // past them. They are drawn for the debug build `swift test` makes: release measured 1.4
+        // and 0.24, as a plain read is library code either way and gains nothing from it.
+        #expect(indexing < plain * 10, "indexing took \(indexing), \(indexing / plain) plain reads of \(plain)")
+        #expect(slowest < plain * 4, "slowest search took \(slowest), \(slowest / plain) plain reads of \(plain)")
     }
 }
