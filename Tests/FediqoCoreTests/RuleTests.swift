@@ -507,22 +507,23 @@ struct RuleTests {
         ]
         #expect(rules.count == 20)
 
-        let plain = Pace.plainRead(notes)
         var index = TextIndex([])
         var shown: [Note] = []
-        let indexing = Pace.fastest { index = TextIndex(notes) }
-        let evaluating = Pace.fastest {
+        let indexing = Pace(notes) { index = TextIndex(notes) }
+        let evaluating = Pace(notes) {
             shown = CompiledTimeline(TimelineDefinition(name: "t", rules: rules), sources: hosts).shown(notes, index)
         }
         #expect(!shown.isEmpty)
-        // Against the plain read of the same notes (`Pace`), measured the same way just before.
-        // Debug measured about 2.8 plain reads to index and 0.72 to evaluate, at most 3.7 and 1.0
-        // across thirty runs — at normal and background priority and counting coverage, where a
-        // plain read took 70 to 220 ms. The lines leave twice that and more, and an index or a
-        // timeline made five times dearer is past them. They are drawn for the debug build
-        // `swift test` makes: release measured 1.0 and 0.27, as a plain read is library code
-        // either way and gains nothing from it.
-        #expect(indexing < plain * 10, "indexing took \(indexing), \(indexing / plain) plain reads of \(plain)")
-        #expect(evaluating < plain * 5 / 2, "evaluating took \(evaluating), \(evaluating / plain) plain reads of \(plain)")
+        // Each against plain reads of the same notes (`Pace`), and printed so a runner's log
+        // shows them. Debug measured about 2.2 to index and 0.67 to evaluate; across seventy-one
+        // runs at normal and background priority, counting coverage, and beside twice as many
+        // busy threads as cores, at most 2.9 and 1.2. The lines are about twice those: an index
+        // or a timeline made five times dearer fails, three times may not. They are drawn for
+        // the debug build `swift test` makes; release measured 0.83 and 0.26, as the plain read
+        // is library code either way.
+        print("Rules index: \(indexing)")
+        print("Rules evaluated: \(evaluating)")
+        #expect(indexing.reads < 6, "indexing took \(indexing)")
+        #expect(evaluating.reads < 2.4, "evaluating took \(evaluating)")
     }
 }

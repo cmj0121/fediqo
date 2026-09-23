@@ -170,13 +170,16 @@ struct StoreSaverTests {
         #expect(await landed.writes == [["1"]])
     }
 
-    @Test("A write that hangs does not hold a flush past the deadline")
+    /// **A hang guard, not a clock.** The write is still hanging when the flush answers — its
+    /// gate opens only after — so answering `.timedOut` at all is the deadline, not the write,
+    /// ending it. How soon after 50 ms it answers is how soon the deadline's own task gets a
+    /// thread, which on a shared runner with every other suite at work took six seconds (#203).
+    /// A flush that did wait for the write would never answer, and the time limit says so.
+    @Test("A write that hangs does not hold a flush past the deadline", .timeLimit(.minutes(1)))
     func flushTimesOut() async {
         let never = Gate()
         let saver = StoreSaver(store: ItemStore(sources: [alpha], notes: [])) { _, _ in await never.wait() }
-        let started = ContinuousClock.now
         #expect(await saver.flush(deadline: .milliseconds(50)) == .timedOut)
-        #expect(ContinuousClock.now - started < .seconds(5))
         await never.open()
     }
 
