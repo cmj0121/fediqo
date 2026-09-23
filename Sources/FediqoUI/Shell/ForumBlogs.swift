@@ -36,9 +36,10 @@ enum ForumBlogReading: Equatable, Sendable {
 ///
 /// **Kept, then drawn from what is kept.** What its page says lands on its row (`landing`) as a
 /// thread's opening post does (#154) — so the pane draws the row, the row draws what this device
-/// holds, and a blog read once still reads with the network off, a relaunch later. Nothing is
-/// held here but what is on the wire and why the last read came to nothing: the words are the
-/// row's, and there is no second copy of them to keep in step.
+/// holds, and a blog read once still reads with the network off, a relaunch later. What is held
+/// here is what is on the wire, why the last read came to nothing, and that a read landed — so
+/// the pane never says it is reading while it waits for the row to be drawn again. The words
+/// are the row's, and it is the row that draws them.
 ///
 /// **Through the forum's sign-in, where it has one**, for `ForumPosts.client`'s reason: a blog a
 /// signed-in reader may read comes back as the forum's notice if it is read around their cookies.
@@ -50,6 +51,11 @@ final class ForumBlogs {
 
     /// The read on the wire for each blog, so a pane opened twice waits on one page.
     private(set) var inFlight: [NoteKey: Task<Void, Never>] = [:]
+
+    /// What each blog read this run brought, by row — **only so the pane never waits on a read
+    /// that has already landed.** The words are the row's; this is what the pane says in the
+    /// moment between a read landing and the row it opened on being drawn again with them.
+    private(set) var landed: [NoteKey: ForumOpening] = [:]
 
     /// Where what a read brought is kept with its row — the session's store. Set by the session;
     /// nothing where there is none, which is a test's.
@@ -76,7 +82,8 @@ final class ForumBlogs {
         let key = Self.key(of: item)
         // A read on the wire is said first, so `r` over kept words shows that it took.
         if inFlight[key] != nil { return .coming }
-        if let kept = item.opening { return kept.words.isEmpty ? .silent : .read }
+        // What the row carries, or what landed for it where the row drawn is older than that.
+        if let kept = item.opening ?? landed[key] { return kept.words.isEmpty ? .silent : .read }
         if let absence = missing[key] { return .absent(absence) }
         return .coming
     }
@@ -84,7 +91,7 @@ final class ForumBlogs {
     /// The blog's pane opening: its page read, **unless this device already holds what it said**
     /// — a blog read once opens from what is kept, the network on or off.
     func open(_ item: DummyItem) async {
-        guard item.opening == nil else { return }
+        guard item.opening == nil, landed[Self.key(of: item)] == nil else { return }
         await read(item)
     }
 
@@ -105,6 +112,7 @@ final class ForumBlogs {
         let host = raw.lowercased()
         for key in Array(inFlight.keys) where key.host == host { cleared.insert(key) }
         for key in Array(missing.keys) where key.host == host { missing.removeValue(forKey: key) }
+        for key in Array(landed.keys) where key.host == host { landed.removeValue(forKey: key) }
     }
 
     private func read(_ item: DummyItem) async {
@@ -141,6 +149,8 @@ final class ForumBlogs {
             switch answer {
             case .success(let blog):
                 await self.landing?(key, blog)
+                guard !self.cleared.contains(key) else { return }
+                self.landed[key] = blog.opening
                 self.missing.removeValue(forKey: key)
             case .failure(let absence):
                 self.missing[key] = absence

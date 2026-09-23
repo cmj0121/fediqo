@@ -99,6 +99,45 @@ struct BlogReadTests {
         #expect(offline.blogs.reading(of: try #require(offline.held(Self.rowID))) == .read)
     }
 
+    @Test("A read of the store begun before the blog landed does not leave the pane waiting")
+    func aStaleReadOfTheStore() async throws {
+        let session = await Self.session(FixtureHTTP([Self.address: .text(Self.page)]))
+        let stale = session.notes
+        let drawn = await session.store.drawn
+        await session.reload.opened(try #require(session.held(Self.rowID)), in: session)
+        // The keep is a change to what is drawn, so whatever read of the store was on its way is
+        // followed by one that has it. A thread's opening post, kept as rows are reached, is not.
+        #expect(await session.store.drawn > drawn)
+
+        // The read that was on its way lands after the keep, with the row as it was.
+        session.notes = stale
+        let drawnStale = try #require(session.held(Self.rowID))
+        #expect(drawnStale.opening == nil)
+        #expect(session.blogs.reading(of: drawnStale) == .read, "not reading, with nothing on the wire")
+        // And the next read of the store draws it with its words.
+        await session.reloadFromStore()
+        #expect(session.held(Self.rowID)?.body == "整篇日誌的字，比排行榜上的摘要長得多。")
+
+        // #154's keep, as rows are reached, draws nothing new: that is its default.
+        let store = ItemStore()
+        await store.add(Self.source)
+        await store.ingest([Self.ranked])
+        let before = await store.drawn
+        await store.keep([Self.ranked.key: ForumOpening(words: "kept")])
+        #expect(await store.drawn == before)
+    }
+
+    @Test("A blog read with no words on it keeps the list's excerpt, and says it had none")
+    func aSilentBlog() async throws {
+        let empty = Self.page.replacingOccurrences(of: "整篇日誌的字，比排行榜上的摘要長得多。", with: "")
+        let session = await Self.session(FixtureHTTP([Self.address: .text(empty)]))
+        await session.reload.opened(try #require(session.held(Self.rowID)), in: session)
+        let row = try #require(session.held(Self.rowID))
+        #expect(row.opening?.words == "")
+        #expect(row.body == Self.ranked.body)
+        #expect(session.blogs.reading(of: row) == .silent)
+    }
+
     // MARK: - Refused
 
     @Test("A blog the forum refuses says why where its words would be, and still offers its page")

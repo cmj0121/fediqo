@@ -350,7 +350,9 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         // thread's opening post is not — its row draws it through `ForumPostBand`, which also
         // knows when it is on its way.
         let blog = DiscuzBlogRow.isBlog(note.id) ? note.opening : nil
-        body = blog?.words ?? note.body
+        // A blog read and found to hold no words keeps what the list wrote of it: the excerpt is
+        // still the forum's own line about it, and the pane says the page had no words.
+        body = blog.map(\.words).flatMap { $0.isEmpty ? nil : $0 } ?? note.body
         boardKey = nil
         boardText = note.board
         postedAt = blog?.postedAt ?? note.postedAt

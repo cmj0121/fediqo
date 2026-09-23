@@ -2225,10 +2225,14 @@ final class ShellSession {
     /// that one lands as the reader scrolls, and a row redrawn for each would be the timeline
     /// redrawn for each; this one lands because the reader opened this very blog, whose pane is
     /// drawn from the row and has nothing else to draw the words from. One row, once.
+    ///
+    /// **And kept as a change to what is drawn**, so a read of the store that was already on its
+    /// way — begun before the keep, and handing back the row without it — is followed by another
+    /// that has it, rather than drawing the row as it was until something else moves.
     func keep(_ blog: DiscuzBlog, for key: NoteKey) async {
         let opening = blog.opening
         notes = notes.map { $0.key == key && $0.opening != opening ? $0.with(opening: opening) : $0 }
-        guard await store.keep([key: opening]) else { return }
+        guard await store.keep([key: opening], shown: true) else { return }
         await persist?()
     }
 
