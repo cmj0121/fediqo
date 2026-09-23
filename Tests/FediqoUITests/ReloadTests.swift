@@ -834,7 +834,9 @@ struct ReloadTests {
         await session.reloadFromStore()
         #expect(session.notesRevision == drawn, "nothing drawn changed, so nothing was replaced")
         #expect(session.notes.map(\.key.rowID) == [item.id])
-        #expect(session.heldNote(found.key.rowID) == nil, "the timeline's rows never include it")
+        #expect(!session.notes.contains { $0.key == found.key }, "the timeline's rows never include it")
+        // Found by a press on it all the same (#178), and still as held aside.
+        #expect(session.heldNote(found.key.rowID)?.holding == .aside)
         #expect(await session.store.note(found.key)?.body == "found, edited", "and it is still here to read")
     }
 
