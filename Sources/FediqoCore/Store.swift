@@ -283,6 +283,49 @@ public actor ItemStore {
         return moved
     }
 
+    /// The anchor a timeline is read on from (#201): the newest status held of `category` from
+    /// `host` that a timeline brought and its source has not said is gone.
+    public func newestStatusID(host raw: String, category: Category) -> String? {
+        let host = raw.lowercased()
+        return notes.values
+            .filter {
+                $0.source.host == host && $0.holding == .arrived && $0.goneSince == nil
+                    && $0.categories.contains(category)
+            }
+            .compactMap(\.statusID)
+            .max { StatusID.later($1, than: $0) }
+    }
+
+    /// One timeline read on (#201), taken in as `ingest(_:ifSourceHere:)` takes a read, with where
+    /// it is not whole kept on the posts it sits against — in the same step, so a screen never
+    /// draws the posts without what is said about them.
+    ///
+    /// **Newer posts remaining is said once per timeline**: a read on from its newest post is what
+    /// reaching it asks for, so whatever this read says replaces what the last one said. Posts
+    /// that may be missing stay said; nothing read later can show they were not.
+    public func land(_ read: ReadOn, of category: Category, ifSourceHere raw: String) {
+        let host = raw.lowercased()
+        guard sourceList.contains(where: { $0.host == host }) else { return }
+        ingest(read.notes)
+        let remain = TimelineGap(.newerRemain, in: category)
+        var marked: [NoteKey: Set<TimelineGap>] = [:]
+        for (key, note) in notes where key.host == host && note.gaps.contains(remain) {
+            marked[key] = note.gaps.subtracting([remain])
+        }
+        if let key = read.newerRemainAbove, let held = notes[key] {
+            marked[key] = (marked[key] ?? held.gaps).union([remain])
+        }
+        if let key = read.missingBelow, let held = notes[key] {
+            marked[key] = (marked[key] ?? held.gaps).union([TimelineGap(.mayBeMissing, in: category)])
+        }
+        var moved = false
+        for (key, gaps) in marked where notes[key]?.gaps != gaps {
+            notes[key]?.gaps = gaps
+            moved = true
+        }
+        if moved { changed(shown: true, aside: false) }
+    }
+
     /// Lets go of one server: the source, the boards the reader picked on it, and the notes it
     /// carried here. Each source is its own rows, so this host's copy goes and the other source's
     /// copy of the same content stays (#10).

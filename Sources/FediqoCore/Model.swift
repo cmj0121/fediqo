@@ -501,6 +501,12 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// A `var` for `holding`'s reason: the store sets it on a row it already holds, and a read
     /// that finds the post again takes it off.
     public var goneSince: Date?
+    /// Where a timeline this post arrived through is not whole next to it (#201): newer posts
+    /// that remain above it, or posts that may be missing below it. Empty on nearly every post.
+    ///
+    /// A `var` for `holding`'s reason: the store sets it on a row it already holds, as a read
+    /// lands. Kept with the row, so it goes when the row goes and outlives a relaunch with it.
+    public var gaps: Set<TimelineGap>
 
     public init(
         id: String,
@@ -528,7 +534,8 @@ public struct Note: Identifiable, Hashable, Sendable {
         statusID: String? = nil,
         opening: ForumOpening? = nil,
         holding: Holding = .arrived,
-        goneSince: Date? = nil
+        goneSince: Date? = nil,
+        gaps: Set<TimelineGap> = []
     ) {
         self.id = id
         self.source = source
@@ -556,6 +563,7 @@ public struct Note: Identifiable, Hashable, Sendable {
         self.opening = opening
         self.holding = holding
         self.goneSince = goneSince
+        self.gaps = gaps
     }
 
     /// This copy, read again, laid over the one held for the same row (#29): what the server says
@@ -589,7 +597,9 @@ public struct Note: Identifiable, Hashable, Sendable {
             holding: held.holding,
             // **No mark survives a read that found the post** (#179): the source has just handed
             // it over, which is the one thing a post gone from it cannot be.
-            goneSince: nil
+            goneSince: nil,
+            // What a read of this one post says is nothing about where its timeline is whole.
+            gaps: held.gaps
         )
     }
 
@@ -602,7 +612,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             favourited: favourited, audience: audience, avatarURL: avatarURL,
             attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis,
             url: url, counts: counts, statusID: statusID, opening: opening, holding: holding,
-            goneSince: goneSince
+            goneSince: goneSince, gaps: gaps
         )
     }
 }

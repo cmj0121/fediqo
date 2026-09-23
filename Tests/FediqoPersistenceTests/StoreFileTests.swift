@@ -55,6 +55,19 @@ struct StoreFileTests {
         #expect(loaded.first { $0.id == "2" }?.holding == .aside)
     }
 
+    /// #201: where a timeline was not whole is said at its place after a relaunch too — a post
+    /// may be missing below one row, and newer remain above another, each of its own timeline.
+    @Test("Where a timeline is not whole survives a relaunch, and a row that said nothing still says nothing")
+    func gapsSurviveRelaunch() async throws {
+        let file = try StoreFile(database: DatabaseQueue())
+        var marked = note(id: "2", categories: [.home, .list(id: "42")])
+        marked.gaps = [TimelineGap(.mayBeMissing, in: .home), TimelineGap(.newerRemain, in: .list(id: "42"))]
+        try await file.save(sources: [mastodon], notes: [note(id: "1"), marked])
+        let loaded = try file.load().notes
+        #expect(loaded.first { $0.id == "1" }?.gaps == [])
+        #expect(loaded.first { $0.id == "2" }?.gaps == marked.gaps)
+    }
+
     /// #177: a topic read to its end is there with the network off, which is a relaunch reading
     /// its replies back — their floor, their own date where the page gave one, and none where it
     /// did not, and the page each was read off.

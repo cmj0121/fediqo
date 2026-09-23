@@ -21,6 +21,17 @@ public struct MastodonClient: Sendable {
         )
     }
 
+    /// The public timeline read on from `anchor`, the newest post held of it (#201): stretch
+    /// after stretch toward the newest, or the newest stretch alone where nothing is held.
+    public func publicTimeline(source: Source, readingOnFrom anchor: String?) async throws -> ReadOn {
+        try await MastodonReadOn.read(from: anchor) { minID in
+            try await listed(
+                path: "/api/v1/timelines/public", limit: 40,
+                query: try MastodonPage.newer(than: minID), source: source, category: .public
+            )
+        }
+    }
+
     public func trending(source: Source) async throws -> [Note] {
         try await statuses(
             path: "/api/v1/trends/statuses",
@@ -143,10 +154,23 @@ public struct MastodonClient: Sendable {
         source: Source,
         category: Category
     ) async throws -> [Note] {
+        try await listed(
+            path: path, limit: limit, query: try MastodonPage.older(than: maxID), source: source, category: category
+        ).map(\.note)
+    }
+
+    /// One page, each post with the id the timeline lists it under — a boost's own.
+    private func listed(
+        path: String,
+        limit: Int,
+        query: [URLQueryItem],
+        source: Source,
+        category: Category
+    ) async throws -> [(listed: String, note: Note)] {
         guard let url = Host.httpsURL(
             host: host,
             path: path,
-            query: [URLQueryItem(name: "limit", value: String(limit))] + (try MastodonPage.older(than: maxID))
+            query: [URLQueryItem(name: "limit", value: String(limit))] + query
         ) else {
             throw MastodonRequestError.invalidURL
         }
@@ -155,7 +179,7 @@ public struct MastodonClient: Sendable {
             throw MastodonRequestError.http(response.statusCode)
         }
         return try MastodonJSON.decoder.decode([StatusDTO].self, from: data).map {
-            $0.asNote(source: source, category: category)
+            ($0.id, $0.asNote(source: source, category: category))
         }
     }
 }
