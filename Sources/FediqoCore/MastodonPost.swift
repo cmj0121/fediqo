@@ -87,6 +87,31 @@ public struct MastodonPost: Sendable {
         )
     }
 
+    /// Whether `error`, from reading `note` itself — the post, or its thread — is its server saying
+    /// it no longer has the post (#179).
+    ///
+    /// **410 always, and 404 only where nothing else could mean it.** A server answers 404 for a
+    /// post it will not show this reader as surely as for one it deleted: a followers-only post
+    /// asked for signed out is the ordinary case, and marking that gone would be this device
+    /// inventing a deletion out of its own missing sign-in. So a 404 counts where the reader was
+    /// signed in, or where the post was written for everyone to see.
+    ///
+    /// A lookup that found nothing is not this: search not finding a post is search, and says
+    /// nothing about the post. Callers ask this only of the read by id.
+    public static func saysGone(_ error: any Error, about note: Note, signedIn: Bool) -> Bool {
+        let status: Int
+        if case .http(let code)? = error as? MastodonAuthError {
+            status = code
+        } else if case .http(let code)? = error as? MastodonRequestError {
+            status = code
+        } else {
+            return false
+        }
+        if status == 410 { return true }
+        guard status == 404 else { return false }
+        return signedIn || note.audience == .everyone || note.audience == .unlisted
+    }
+
     /// Checked as a list id is: this came out of a stranger's JSON or the store.
     private static func path(_ id: String) throws -> String {
         guard ListSubscription.isPathSegment(id) else { throw MastodonRequestError.invalidURL }

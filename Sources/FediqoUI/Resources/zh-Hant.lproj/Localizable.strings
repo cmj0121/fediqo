@@ -360,6 +360,17 @@
 "prefs.keep.shorten.title" = "只保留最近 %d 個月？";
 "prefs.keep.shorten.detail" = "比這更舊的貼文會立即從這台裝置上移除，之後讀到的也不會存下。每個來源仍保持加入。改成更長的期間或「永久」則不會捨棄任何內容。";
 "prefs.keep.months" = "最近 %d 個月";
+"item.gone" = "來源已刪除";
+"item.gone.detail" = "它的來源表示已不再有這則貼文。它會帶著標記留在這裡，直到你放下它，也無法再對它送出任何東西。";
+"prefs.gone" = "來源已刪除的貼文";
+"prefs.gone.wait" = "多久後放下";
+"prefs.gone.never" = "永不";
+"prefs.gone.days" = "%d 天";
+"prefs.gone.keepwins" = "「保留貼文」只保留最近 %d 個月，比這更短，所以會先放下它們。";
+"prefs.gone.now" = "現在全部放下";
+"prefs.gone.went" = "已放下 %d 則貼文。";
+"prefs.gone.went.none" = "沒有這樣的貼文。";
+"prefs.gone.footer" = "只有在這台裝置再次讀取那一則貼文、而來源表示它已不在時，才會標為已刪除。單純沒有送達的貼文不會被標記，也不會在這裡被放下。你自己收回的貼文會立即移除。";
 "prefs.drop.copies" = "捨棄圖片副本";
 "prefs.drop.copies.title" = "捨棄這台裝置上所有的圖片副本？";
 "prefs.drop.copies.detail" = "所有來源存在記憶體與磁碟上的圖片都會移除。每則貼文都會留下並照常顯示；捲動時會從連結重新讀取圖片。";

@@ -131,9 +131,17 @@ public struct PostActs: Sendable, Hashable {
     /// alone**, and somebody else's post never offers it — which is not a refusal with a sentence,
     /// because there is nothing the reader could do to change it and nothing to explain.
     ///
+    /// `gone` is whether its source has said it no longer has the post (#179). **Asked first, and
+    /// answered with nothing to say**: every act here reaches the source with the post, and there
+    /// is no post there for it to reach. The row's own mark already says why, so a refusal line
+    /// under it would be saying it twice.
+    ///
     /// **No `default:`**, this package's standing rule: a fifth `SourceWriting` has to say what a
     /// post on such a source offers.
-    public static func on(_ writing: SourceWriting, nameable: Bool, mine: Bool = false) -> PostActs {
+    public static func on(
+        _ writing: SourceWriting, nameable: Bool, mine: Bool = false, gone: Bool = false
+    ) -> PostActs {
+        if gone { return .none }
         switch writing {
         case .never: return PostActs(offered: [], refused: .protocolCannot)
         case .reads: return PostActs(offered: [], refused: .notSignedIn)

@@ -55,6 +55,17 @@ struct StoreFileTests {
         #expect(loaded.first { $0.id == "2" }?.holding == .aside)
     }
 
+    @Test("A post marked gone from its source is still marked, from the same moment, after a relaunch")
+    func goneSurvivesRelaunch() async throws {
+        let file = try StoreFile(database: DatabaseQueue())
+        var gone = note(id: "2")
+        gone.goneSince = origin.addingTimeInterval(3600)
+        try await file.save(sources: [mastodon], notes: [note(id: "1"), gone])
+        let loaded = try file.load().notes
+        #expect(loaded.first { $0.id == "1" }?.goneSince == nil)
+        #expect(loaded.first { $0.id == "2" }?.goneSince == origin.addingTimeInterval(3600))
+    }
+
     @Test("A loaded note has every row fact and its multimedia hyperlinks")
     func rowFactsWithMultimedia() async throws {
         let file = try StoreFile(database: DatabaseQueue())

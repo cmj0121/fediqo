@@ -607,7 +607,8 @@ final class ShellSession {
         return PostActs.on(
             mastodon.writing(host: copy.source.host, kind: kind),
             nameable: copy.statusID != nil,
-            mine: isMine(copy)
+            mine: isMine(copy),
+            gone: copy.goneSince != nil
         )
     }
 

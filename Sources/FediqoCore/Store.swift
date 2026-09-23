@@ -340,6 +340,45 @@ public actor ItemStore {
         changed(shown: gone.holding == .arrived)
     }
 
+    /// Marks one row as gone from its source (#179): a read of that one post heard the source say
+    /// it no longer has it. The row stays, and `all()` still draws it where it drew it before.
+    /// Only while `key`'s host is still a source here, only a row held, and only once — the first
+    /// moment it was heard is the one a wait counts from. Returns whether it was marked, so a
+    /// caller writes it down only then.
+    ///
+    /// **Not `forget`.** That is a post the reader took back (#109), which goes; this is a post
+    /// somebody else's server let go of, which the reader already read and keeps until they say.
+    @discardableResult
+    public func markGone(_ key: NoteKey, at moment: Date = Date()) -> Bool {
+        guard sourceList.contains(where: { $0.host == key.host }),
+              var held = notes[key], held.goneSince == nil
+        else { return false }
+        held.goneSince = moment
+        notes[key] = held
+        changed(shown: held.holding == .arrived)
+        return true
+    }
+
+    /// Lets go of every row marked gone from its source at or before `cutoff`, or of every marked
+    /// row where `cutoff` is nil — the reader's press (#179). Returns how many went.
+    ///
+    /// **Marked rows and nothing else.** A row that merely did not arrive again carries no mark,
+    /// so no wait and no press here can reach it.
+    @discardableResult
+    public func letGoneGo(markedBy cutoff: Date? = nil) -> Int {
+        let going = notes.values.filter { note in
+            guard let gone = note.goneSince else { return false }
+            return cutoff.map { gone <= $0 } ?? true
+        }
+        guard !going.isEmpty else { return 0 }
+        for note in going {
+            notes[note.key] = nil
+            arrival[note.key] = nil
+        }
+        changed(shown: going.contains { $0.holding == .arrived })
+        return going.count
+    }
+
     /// One row, or nothing where this store does not hold it.
     ///
     /// **So that an act can hand back the row as the store has it** rather than as it decoded it

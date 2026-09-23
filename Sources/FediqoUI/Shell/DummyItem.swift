@@ -145,6 +145,9 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// was ranked and which board it is in, which is what decides whether reaching it may read
     /// its opening post (`ForumPosts.readsWhenReached`). Empty on a fixture.
     public var categories: Set<FediqoCore.Category> = []
+    /// When its source said it no longer has this post — `Note.goneSince`, carried so every place
+    /// a row is drawn marks it the same way (#179). Nothing on a post its source still has.
+    public var goneSince: Date?
     /// Whether the author covered it, or nothing where the source never said. Carried as the
     /// three answers it has, not folded down to two — see `covered`.
     public let sensitive: Bool?
@@ -345,6 +348,7 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         attachments = note.attachments
         opening = note.opening
         categories = note.categories
+        goneSince = note.goneSince
         sensitive = note.sensitive
         spoiler = note.spoiler
         emojis = note.emojis

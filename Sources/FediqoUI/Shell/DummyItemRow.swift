@@ -430,6 +430,7 @@ struct DummyItemRow: View {
         HStack(spacing: ShellSpace.snug) {
             sourcePill
                 .layoutPriority(0)
+            goneMark
             visibility
             postedAgo
                 .fixedSize(horizontal: true, vertical: false)
@@ -523,6 +524,34 @@ struct DummyItemRow: View {
             }
         }
         .frame(width: vis, height: vis)
+    }
+
+    /// Its source has said it no longer has this post (#179): the row stays, and says so.
+    ///
+    /// **A word and not only a glyph**, because this is the one fact on the meta line a reader
+    /// cannot guess from anything else on the row — and it is why the acts under it are absent.
+    /// It keeps its size for the age's reason: half of "deleted" is not a word. The glyph beside
+    /// it is out of the accessibility tree; the word is what a listener hears, inside the row.
+    @ViewBuilder
+    private var goneMark: some View {
+        if item.goneSince != nil {
+            HStack(spacing: ShellSpace.tight) {
+                Image(systemName: "xmark.bin")
+                    .accessibilityHidden(true)
+                Text(Self.goneWord())
+            }
+            .shellFont(.mark)
+            .foregroundStyle(ShellChrome.inkDim(colorScheme))
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .layoutPriority(1)
+            .help(L10n.t("item.gone.detail"))
+        }
+    }
+
+    /// What the gone mark reads, in the shell's language — named for `spokenAudience`'s reason.
+    static func goneWord(language: DummyLanguage? = nil) -> String {
+        L10n.t("item.gone", language: language)
     }
 
     /// What the audience mark is called, in the shell's own language.
