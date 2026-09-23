@@ -1091,6 +1091,149 @@ struct ReloadTests {
             }
         }
     }
+
+    // MARK: - Asked again on a wait, with no press (#95)
+
+    @Test("With no press, every source held is asked again after the wait, and again after the next")
+    func askedOnAWait() async {
+        let (session, http) = await shell()
+        var waits: [Duration] = []
+        await session.reload.keepAsking(every: .seconds(60), in: session) { wait in
+            waits.append(wait)
+            // Nothing is asked before the first wait has passed.
+            if waits.count == 1 { #expect(await http.requested.isEmpty) }
+            if waits.count > 2 { throw CancellationError() }
+        }
+        #expect(waits == [.seconds(60), .seconds(60), .seconds(60)], "counted again after each ask")
+        let once: Set<String> = [
+            Self.publicAddress(Self.one), Self.trendsAddress(Self.one),
+            Self.publicAddress(Self.two), Self.trendsAddress(Self.two),
+            Self.boardAddress, Self.threadRanksAddress, Self.blogRanksAddress,
+            Self.flavourAddress(Self.one), Self.flavourAddress(Self.two),
+        ]
+        #expect(await asked(http) == once, "every source, each for its usual reads")
+        let reads = await http.requested.filter { $0.absoluteString == Self.publicAddress(Self.one) }
+        #expect(reads.count == 2, "asked once for each wait that passed")
+        #expect(session.notes.count == 5)
+        #expect(session.reload.landed == 0, "the lamp is not re-centred: nobody pressed")
+    }
+
+    @Test("A window that goes, or a wait chosen anew, ends the asking before anything is asked")
+    func cancelledWaitAsksNothing() async {
+        let (session, http) = await shell()
+        await session.reload.keepAsking(every: .seconds(60), in: session) { _ in throw CancellationError() }
+        #expect(await http.requested.isEmpty)
+        #expect(!session.reload.running)
+    }
+
+    @Test("The wait is a minute unless another is picked, and a pick holds after a relaunch")
+    func theWait() throws {
+        let name = "fediqo.test.wait.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set("en", forKey: "fediqo.dummy.language")
+
+        #expect(DummyPrefs(defaults: defaults).askMinutes == 1)
+        #expect(AsksOnAWait.wait(DummyPrefs(defaults: defaults).askMinutes) == .seconds(60))
+        DummyPrefs(defaults: defaults).askMinutes = 15
+        #expect(DummyPrefs(defaults: defaults).askMinutes == 15)
+        #expect(AsksOnAWait.wait(15) == .seconds(15 * 60))
+        defaults.set("7", forKey: "fediqo.dummy.askMinutes")
+        #expect(DummyPrefs(defaults: defaults).askMinutes == 1, "a wait not offered falls back to a minute")
+
+        #expect(PreferencesPane.wait(1) == "Every minute")
+        #expect(PreferencesPane.wait(15) == "Every 15 minutes")
+        for key in ["prefs.askEvery", "prefs.askEvery.one", "prefs.askEvery.many", "prefs.askEvery.footer"] {
+            for language in [DummyLanguage.english, .taiwanese] {
+                #expect(L10n.t(key, language: language) != key, "\(key) is missing in \(language)")
+            }
+        }
+    }
+
+    @Test("On its way, the toast says so in r's words; Esc leaves it be; a scroll, a thread and a search still work")
+    func onItsWay() async throws {
+        var routes = Self.everything
+        routes["https://\(Self.one)/api/v1/statuses/9/context"] = .text(Self.context)
+        let gated = GatedHTTP(routes, holding: "/api/v1/trends/statuses")
+        let guardTask = hangGuard(gated.gate)
+        defer { guardTask.cancel() }
+        let (session, _) = await shell(http: gated)
+        let item = await holding(Self.mastodonNote(statusID: "9"), in: session)
+
+        let held = Task { await session.reload.held(in: session) }
+        #expect(await spun { await gated.asks == 2 })
+        #expect(session.reload.running)
+        #expect(session.reload.reading == [.timeline])
+        let toast = TimelineToast.shown(
+            running: session.reload.running, line: session.reload.line, stopped: session.reload.stopped, note: nil
+        )
+        #expect(toast == TimelineToast(kind: .loading, text: "Reloading…"))
+        #expect(!session.reload.stop(), "Esc is not spent on an ask nobody pressed for")
+        #expect(!session.reload.stopped)
+        await session.conversations.open(item, in: session)
+        #expect(session.conversations.standing(of: item.id).conversation(around: item)?.descendants.count == 2)
+        await session.reload.held(in: session)
+        #expect(await gated.asks == 2, "a wait coming round while one is on its way starts nothing")
+
+        await gated.gate.open()
+        await held.value
+        #expect(!session.reload.running)
+        #expect(session.reload.line == nil)
+        #expect(session.notes.count == 6)
+    }
+
+    @Test("A source that fails on a wait says so in the toast, and the others still land")
+    func failsOnAWait() async {
+        var routes = Self.everything
+        routes[Self.publicAddress(Self.one)] = .fail
+        routes[Self.trendsAddress(Self.one)] = .body(Data(), status: 503)
+        let (session, _) = await shell(routes)
+        await session.reload.held(in: session)
+        #expect(session.reload.failed == [Self.one])
+        #expect(Set(session.notes.map(\.source.host)) == [Self.two, Self.forum])
+        let toast = TimelineToast.shown(
+            running: false, line: session.reload.line, stopped: session.reload.stopped, note: nil
+        )
+        #expect(toast == TimelineToast(kind: .error, text: "Could not reload one.example."))
+        #expect(!session.reload.stopped)
+    }
+
+    @Test("What a wait brings renews the timeline in front, and the post being read stays where it was")
+    func aWaitRenewsTheScreen() async throws {
+        let (session, _) = await shell()
+        let item = await holding(Self.mastodonNote(statusID: "9"), in: session)
+        let following = Task { await session.followStore() }
+        defer { following.cancel() }
+        let before = session.notesRevision
+
+        await session.reload.held(in: session)
+        #expect(await spun { session.notes.count == 6 })
+        #expect(session.notesRevision != before, "the screen was renewed")
+        let stream = session.timelineItems(latest: nil)
+        let row = try #require(session.heldNote(item.id))
+        #expect(DummyCommand.focused(in: stream, selected: item.id) == .post(DummyItem(row)),
+                "the post being read is still the one selected")
+        #expect(session.reload.landed == 0, "and not re-centred: nobody pressed")
+    }
+
+    @Test("A wait and an r finishing together leave one row per post")
+    func aWaitBesideAPress() async {
+        let gated = GatedHTTP(Self.everything, holding: "/api/v1/trends/statuses")
+        let guardTask = hangGuard(gated.gate)
+        defer { guardTask.cancel() }
+        let (session, _) = await shell(http: gated)
+        let pressed = Task { await session.reload.timeline(.all, in: session) }
+        let waited = Task { await session.reload.held(in: session) }
+        #expect(await spun { await gated.asks == 4 }, "both kinds on the wire at once")
+        await gated.gate.open()
+        await pressed.value
+        await waited.value
+        let keys = await session.store.all().map(\.key)
+        #expect(keys.count == 5)
+        #expect(Set(keys).count == keys.count)
+        #expect(session.notes.count == 5)
+    }
+
 }
 
 /// A signed-in door that answers every request with one status.

@@ -302,6 +302,10 @@
 "prefs.latest" = "只看到某一天為止";
 "prefs.latest.date" = "最晚日期";
 "prefs.latest.footer" = "每個時間軸都不顯示這一天結束後（依這台裝置的時區）發佈的貼文。較新的貼文仍留在這台裝置上；關掉這項就會再看到。";
+"prefs.askEvery" = "再問一次來源";
+"prefs.askEvery.one" = "每分鐘";
+"prefs.askEvery.many" = "每 %d 分鐘";
+"prefs.askEvery.footer" = "Fediqo 開著的時候，每過這段時間就再問一次這台裝置上的每個來源，眼前的時間軸會自己更新。按 r 仍然立刻重新載入。";
 
 "prefs.tab.choices" = "設定";
 "prefs.tab.build" = "這個 Fediqo";

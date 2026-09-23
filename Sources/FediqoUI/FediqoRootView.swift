@@ -180,6 +180,7 @@ public struct FediqoRootView: View {
             .onChange(of: prefs.keepMonths) { _, months in
                 Task { await session.keep(months: months) }
             }
+            .modifier(AsksOnAWait(session: session, minutes: prefs.askMinutes))
             .onChange(of: place) { old, new in
                 let accepted = availability.placing(old, as: new)
                 if accepted != new { place = accepted }
