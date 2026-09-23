@@ -36,7 +36,7 @@ struct TouchTests {
     @Test("Every key the guide names outside App can be done without one")
     func everyTimelineKeyHasATouchPath() {
         let timeline = DummyShortcut.all.filter { $0.group != .app }
-        #expect(timeline.count == 19)
+        #expect(timeline.count == 20)
         let short = timeline.filter { $0.touch == .keysOnly || $0.touch == .partly }.map(\.name)
         #expect(short.isEmpty, "no touch path for: \(short.joined(separator: ", "))")
     }
@@ -73,6 +73,7 @@ struct TouchTests {
         #expect(Self.line("withdraw").touch == .press)
         // Whoever wrote it (#140): the face or the name at the head of the row, pressed (#99).
         #expect(Self.line("person").touch == .press)
+        #expect(Self.line("tag").touch == .press)
     }
 
     /// The other tab, recorded rather than wished for: two of its five keys are a keyboard's
@@ -203,6 +204,10 @@ struct TouchTests {
             // anything to do there — the search is under it in the order, and a reload that went
             // and asked their server for more would be 0.5.0 arriving through `r` (#99).
             case .person:
+                #expect(!searchable)
+                #expect(!reloadable)
+            // A tag's page asks for itself as it opens, with its own way to ask again (#124).
+            case .tag:
                 #expect(!searchable)
                 #expect(!reloadable)
             // A page read out of a post is somebody else's page: the search is under it, and it

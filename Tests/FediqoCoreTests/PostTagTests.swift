@@ -140,4 +140,42 @@ struct PostTagTests {
         let cut = CustomEmoji.runs(in: "#1 fan of #swift", from: [])
         #expect(cut == [.text("#1 fan of #swift")])
     }
+
+    // MARK: - A tag is one path segment (#124)
+
+    /// A prepend letter joins the scalar after it into one grapheme, so judging a character by its
+    /// first scalar let a `/` into a name that is sent to a server as a path segment.
+    @Test("A character is a tag's only where every scalar in it is: no slash rides in on a letter")
+    func everyScalarIsJudged() {
+        #expect(PostTag("#\u{0D4E}/x") == nil)
+        #expect(PostTag("#a\u{0D4E}/b") == nil)
+        for text in ["#\u{0D4E}/x", "look #\u{0D4E}/../../accounts", "#a\u{0D4E}?x=1", "#x\u{0D4E}#y"] {
+            for tag in PostTag.found(in: text) {
+                #expect(!tag.name.contains { "/?#%".contains($0) }, "\(tag.text) from \(text)")
+            }
+        }
+        // What stays a tag: letters with their marks, any script, digits, `_`, an emoji-style join.
+        #expect(PostTag("#café") != nil)
+        #expect(PostTag("#e\u{0301}t\u{00E9}") != nil)
+        #expect(PostTag("#台灣") != nil)
+        #expect(PostTag("#ക്ഷ") != nil)
+        #expect(PostTag("#a\u{200D}b") != nil)
+        // A Persian word with the zero-width non-joiner inside it is one tag, not `#م`.
+        let persian = "#\u{0645}\u{06CC}\u{200C}\u{062E}\u{0648}\u{0627}\u{0647}\u{0645}"
+        #expect(PostTag(persian) != nil)
+        #expect(Self.tags("say \(persian) now") == [persian])
+    }
+
+    @Test("A tag's timeline is the name as one segment, and nothing else")
+    func oneSegment() throws {
+        let persian = "#\u{0645}\u{06CC}\u{200C}\u{062E}\u{0648}\u{0627}\u{0647}\u{0645}"
+        for text in ["#swift", "#台灣", "#café", "#snake_case", "#2024", persian] {
+            let tag = try #require(PostTag(text))
+            let path = try MastodonTag.path(under: tag, host: "one.example")
+            #expect(path == "/api/v1/timelines/tag/" + tag.name)
+            let url = try #require(Host.httpsURL(host: "one.example", path: path))
+            #expect(url.pathComponents.count == 6)
+            #expect(url.lastPathComponent == tag.name)
+        }
+    }
 }

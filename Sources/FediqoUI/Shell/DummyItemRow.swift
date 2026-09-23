@@ -986,6 +986,8 @@ struct DummyItemRow: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // The row a hashtag pressed in these words gives back when its page is left (#124).
+        .environment(\.shellRow, item.id)
     }
 
     /// The thread this row stands on, where it stands on one this device can go and read.
