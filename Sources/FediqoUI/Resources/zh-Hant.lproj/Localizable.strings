@@ -657,6 +657,10 @@
 "tag.failed" = "無法向 %1$@ 詢問 %2$@。";
 "tag.retry" = "再試一次";
 "tag.none" = "這台裝置上還沒有 %@ 底下的貼文。";
+"tag.reach.asked" = "問了 %@。";
+"tag.reach.partial" = "沒有問，因為這個時間軸只顯示它們送來的一部分：%@。";
+"tag.reach.tagless" = "沒有問，因為它們沒有標籤：%@。";
+"tag.reach.tagsOff" = "沒有可問的，因為 %@ 關閉了標籤。";
 "item.person.open" = "打開 %@";
 
 /* One post more than one source carried (#114). The row is drawn as the first; these name the rest. */

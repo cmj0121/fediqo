@@ -146,6 +146,7 @@ struct TimelinePane: View {
                     // behind, is not this page's to say.
                     asking: session.reload.tagAsk?.tag == tag ? session.reload.tagAsking : [],
                     failed: session.reload.tagAsk?.tag == tag ? session.reload.tagFailed : [],
+                    reach: session.reload.tagAsk?.tag == tag ? session.reload.tagAsk?.reach.sentence : nil,
                     catalogues: session.emoji,
                     catalogueSettled: false,
                     posts: session.posts,
@@ -278,7 +279,8 @@ struct TimelinePane: View {
                 let pattern = search?.pattern ?? ""
                 Task { await session.reload.searchSwitched(to: now, pattern: pattern, in: session) }
             }
-            // The walk ends on the same change, where it is held: `FediqoRootView` clears it.
+            // The walk ends on the same change, where it is held: `FediqoRootView` clears it, all
+            // but a tag's page in front, which stays and asks the new timeline (#197).
         }
     }
 

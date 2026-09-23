@@ -94,7 +94,7 @@ struct TagPressTests {
 
         await session.reload.tag(Self.swift, timeline: .all, in: session)
         #expect(await http.requested.map(\.absoluteString) == [Self.tagAddress], "the forum is not asked")
-        #expect(session.reload.tagAsk?.asked == [Self.one])
+        #expect(session.reload.tagAsk?.reach.asked == [Self.one])
         #expect(await spun { session.heldPosts(under: Self.swift).count == 2 }, "renewed with no press")
         #expect(session.heldPosts(under: Self.swift).first?.id == Self.fromTheWire.rowID)
         #expect(await session.store.note(Self.fromTheWire)?.holding == .aside, "the store's answer, held aside")

@@ -58,10 +58,15 @@ extension EnvironmentValues {
 /// **Carried in the words, compared without regard to case.** A post is under `#Swift` when its
 /// words carry `#swift` as `PostTag` reads a tag — the same rule the pill is drawn by — and the
 /// servers this app reads treat a tag the same way whatever case it was typed in.
+///
+/// **Or sent under it** (#197): a forum files a topic under a tag beside its words, not in them,
+/// so what a source sent when asked for the tag is under it too.
 enum HeldUnderTag {
-    static func held(under tag: PostTag, in notes: [Note]) -> [DummyItem] {
+    static func held(under tag: PostTag, in notes: [Note], sent: Set<NoteKey> = []) -> [DummyItem] {
         let name = folded(tag)
-        return notes.filter { note in PostTag.found(in: note.body).contains { folded($0) == name } }
+        return notes.filter { note in
+            sent.contains(note.key) || PostTag.found(in: note.body).contains { folded($0) == name }
+        }
             .sorted { $0.postedAt > $1.postedAt }
             .map(DummyItem.init)
     }
@@ -74,11 +79,14 @@ enum HeldUnderTag {
     static func same(_ a: PostTag, _ b: PostTag) -> Bool { folded(a) == folded(b) }
 }
 
-/// A tag's page is kept against what it was worked out from, as a person's is.
+/// A tag's page is kept against what it was worked out from, as a person's is — the timeline in
+/// front among it, whose rules the page answers to (#197).
 struct HeldTag {
     struct Key: Equatable {
         let tag: String
         let heldRevision: Int
+        let definition: TimelineDefinition
+        let sent: Set<NoteKey>
     }
 
     let key: Key
@@ -100,6 +108,8 @@ struct TagPane: View {
     var asking: [String] = []
     /// The sources the last ask could not reach.
     var failed: [String] = []
+    /// Which of the timeline's sources were asked and why the rest were not (#197), or nothing.
+    var reach: String?
     let catalogues: EmojiCatalogueStore
     var catalogueSettled: Bool = false
     let posts: ForumPosts
@@ -127,6 +137,18 @@ struct TagPane: View {
             ShellRule()
             heading
             ShellRule()
+            // Where the page's rows came from, as a search says it under its field (#197). Wraps
+            // rather than truncates, since the names are the point.
+            if let reach {
+                Text(reach)
+                    .shellFont(.meta)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, ShellSpace.pad)
+                    .padding(.vertical, ShellSpace.snug)
+                ShellRule()
+            }
             if let said = Self.said(asking: asking, failed: failed, tag: tag) {
                 answer(said)
                 ShellRule()

@@ -210,7 +210,8 @@ public struct FediqoRootView: View {
             // lamp back to. Where the lamp lands is #100's, and `TimelinePane` answers it on the
             // same change. Here rather than in the pane because the walk is held here — the pane
             // used to do it through a binding whose one meaning was "close the thread".
-            .onChange(of: session.timelineID) { _, _ in clearWalk() }
+            // A tag's page in front stays, and is asked again of the new timeline (#197).
+            .onChange(of: session.timelineID) { _, _ in timelineSwitched() }
             .sheet(isPresented: $composing) {
                 ComposerSheet()
                     #if os(iOS)
@@ -1294,6 +1295,16 @@ public struct FediqoRootView: View {
     /// Back to the stream in one go, for a list that has been replaced. A page read out of a post
     /// that was one of the steps goes with them: nothing is left for it to be drawn in place of,
     /// and a reading left open would be presented as a sheet instead.
+    /// A timeline switched: the walk ends, unless a tag's page is in front — that stays, and asks
+    /// the sources of the timeline now in front (#197). `tagSwitched` asks nothing of a timeline
+    /// already switched away from by the time it runs.
+    private func timelineSwitched() {
+        guard walk.openedTag != nil else { return clearWalk() }
+        _ = walk.timelineSwitched()
+        let timeline = session.currentTimeline
+        Task { await session.reload.tagSwitched(to: timeline, in: session) }
+    }
+
     private func clearWalk() {
         if walk.openedLink != nil { linkReader.close() }
         session.reload.endTag()

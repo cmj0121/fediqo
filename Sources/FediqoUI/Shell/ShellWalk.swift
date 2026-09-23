@@ -134,4 +134,16 @@ struct ShellWalk: Hashable, Sendable {
     /// switched, a search closed — so the rows every step was standing on are gone and there is
     /// nothing to give the lamp back to. Whoever changed the list says where the lamp lands.
     mutating func clear() { taken.removeAll() }
+
+    /// The timeline under the walk switched: back to the stream, **except a tag's page in front**,
+    /// which stays — alone, with no row to give back — because a tag's page answers to the
+    /// timeline in front and is asked again of the new one (#197). The tag kept, or nothing.
+    mutating func timelineSwitched() -> PostTag? {
+        guard let tag = openedTag else {
+            clear()
+            return nil
+        }
+        taken = [Taken(step: .tag(tag), lamp: nil)]
+        return tag
+    }
 }
