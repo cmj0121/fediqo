@@ -14,6 +14,8 @@ struct SearchBar: View {
     var timeline: String
     /// How many posts are found, or nothing while no pattern is being searched.
     var found: Int?
+    /// Which sources the last Return asked, and which it could not (#176), or nothing before one.
+    var reach: String? = nil
     /// Return: the keys go back to the list, on its first result. Called once the pattern has
     /// been settled to what the field says, so the first result is one for the whole pattern.
     var onSubmit: () -> Void
@@ -59,6 +61,18 @@ struct SearchBar: View {
             // corner — the narrow arrangement's compose button (#112). Nothing, elsewhere.
             .padding(.trailing, floatingCorner.width)
             .padding(.vertical, ShellSpace.snug)
+            // Where the results came from, under the field it answers: this device, and the
+            // sources named here. Wraps rather than truncates, since the names are the point.
+            if let reach {
+                Text(reach)
+                    .shellFont(.meta)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, ShellSpace.pad)
+                    .padding(.trailing, floatingCorner.width)
+                    .padding(.bottom, ShellSpace.snug)
+            }
         }
         .background(ShellChrome.page(colorScheme))
         .onAppear { focused = true }

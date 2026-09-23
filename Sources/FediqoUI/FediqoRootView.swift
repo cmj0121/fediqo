@@ -894,20 +894,33 @@ public struct FediqoRootView: View {
         if search.isOpen {
             search.focus()
         } else {
-            search.open(from: selectedItemID, over: session.notes)
+            search.open(from: selectedItemID, over: session.searchable)
             selectedItemID = nil
         }
         return true
     }
 
-    /// The timeline back as it was, with the post that was selected before the search.
+    /// The timeline back as it was, with the post that was selected before the search. Its ask
+    /// of the sources ends with it (#176).
     private func closeSearch() {
         clearWalk()
         selectedItemID = search.close()
+        session.reload.endSearch()
+    }
+
+    /// Return in the field: the first result lit, and the pattern asked of the sources of the
+    /// timeline in front as well (#176). What this device holds is already lit; what the sources
+    /// send lands in the store and joins it.
+    private func searchSubmitted() {
+        selectedItemID = streamItems.first?.id
+        let pattern = search.pattern
+        let timeline = session.currentTimeline
+        Task { await session.reload.search(pattern, timeline: timeline, in: session) }
     }
 
     /// The field emptied: the timeline is back, so the post selected before the search is too.
     private func searchCleared() {
+        session.reload.endSearch()
         search.cleared { selection in
             clearWalk()
             selectedItemID = selection
@@ -1439,7 +1452,8 @@ public struct FediqoRootView: View {
                         search: search,
                         timeline: session.name(of: session.currentTimeline),
                         found: search.isIndexed ? searchItems?.count : nil,
-                        onSubmit: { selectedItemID = streamItems.first?.id },
+                        reach: session.reload.reach?.sentence,
+                        onSubmit: searchSubmitted,
                         onCleared: searchCleared,
                         onClose: closeSearch
                     )
