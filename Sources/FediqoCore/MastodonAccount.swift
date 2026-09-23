@@ -103,12 +103,14 @@ public struct MastodonAccount: Sendable {
 
     /// Home, or one list this source reads, read down from the place below `key` where posts may
     /// be missing (#204), and landed with what it says of that place. Nothing where `key` carries
-    /// no such mark in it.
+    /// no such mark in it. `me` is who the reader is there, where known (`ItemStore.missing`).
     ///
     /// Throws what the read threw — a stretch after the first once what came before it has landed.
-    public func readDown(_ category: Category, below key: NoteKey, at moment: Date = Date()) async throws {
+    public func readDown(
+        _ category: Category, below key: NoteKey, writtenBy me: String? = nil, at moment: Date = Date()
+    ) async throws {
         guard let source = await source(), let path = Self.path(of: category, in: source),
-              let place = await store.missing(below: key, in: category)
+              let place = await store.missing(below: key, in: category, writtenBy: me)
         else { return }
         let down = try await MastodonReadOn.readDown(from: place) { maxID in
             try await listed(path, source: source, category: category, query: try MastodonPage.older(than: maxID))

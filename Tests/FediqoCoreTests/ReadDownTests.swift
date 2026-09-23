@@ -10,12 +10,23 @@ struct ReadDownTests {
     private static let host = MastodonFixture.host
     private static let source = Source(host: host, kind: .mastodon)
 
-    private static func note(_ id: Int, _ category: FediqoCore.Category = .public) -> Note {
+    private static func note(
+        _ id: Int, _ category: FediqoCore.Category = .public, listed: Bool = true, handle: String = "@ada"
+    ) -> Note {
         Note(
-            id: "https://\(host)/users/ada/statuses/\(id)", source: source, author: "Ada", handle: "@ada",
-            body: "\(id)", postedAt: Date(timeIntervalSince1970: 1_704_067_200 + Double(id) * 60),
-            categories: [category], statusID: "\(id)", listed: [category: "\(id)"]
+            id: "https://\(host)/users/ada/statuses/\(id)", source: source, author: "Ada", handle: handle,
+            body: "\(id)", postedAt: posted(id), categories: [category], statusID: "\(id)",
+            listed: listed ? [category: "\(id)"] : [:]
         )
+    }
+
+    private static func posted(_ id: Int) -> Date {
+        Date(timeIntervalSince1970: 1_704_067_200 + Double(id) * 60)
+    }
+
+    /// Post `id` as the public timeline lists it, under `id` — or under `listing`, as a boost is.
+    private static func listing(_ id: Int, as listing: Int? = nil) -> Listed {
+        (listed: "\(listing ?? id)", note: note(id))
     }
 
     private static func key(_ id: Int) -> NoteKey { note(id).key }
@@ -75,7 +86,7 @@ struct ReadDownTests {
         let server = TimelineServer(1...500)
         let store = await store(holding: Array(1...10) + Array(450...500), markedAt: 450)
         let down = try await readDown(store, from: server, at: 450)
-        #expect(down.end == .further(below: Self.key(250)))
+        #expect(down.end == .further(from: "250"))
         #expect(await server.cursors == ["max_id=450", "max_id=410", "max_id=370", "max_id=330", "max_id=290"])
         #expect(await held(store) == Array(1...10) + Array(250...500))
         #expect(await marked(store) == [250: [Self.missing]], "still may be missing, lower down")
@@ -92,8 +103,9 @@ struct ReadDownTests {
         let store = await store(holding: Array(1...10) + Array(31...60), markedAt: 31)
         let moment = Date(timeIntervalSince1970: 1_750_000_000)
         let down = try await readDown(store, from: server, at: 31, moment: moment)
-        #expect(down.end == .settled(below: nil))
-        #expect(await marked(store) == [31: [TimelineGap(.settled, in: .public, since: moment)]])
+        #expect(down.end == .settled)
+        #expect(await marked(store) == [31: [TimelineGap(.settled, in: .public)]])
+        #expect(await store.note(Self.key(31))?.gaps.first?.since == moment)
         #expect(await store.missing(below: Self.key(31), in: .public) == nil, "a settled place asks nothing")
     }
 
@@ -102,7 +114,7 @@ struct ReadDownTests {
         let server = TimelineServer(20...60)
         let store = await store(holding: Array(1...10) + Array(31...60), markedAt: 31)
         let down = try await readDown(store, from: server, at: 31)
-        #expect(down.end == .settled(below: Self.key(20)))
+        #expect(down.end == .settled)
         #expect(await held(store) == Array(1...10) + Array(20...60))
         #expect(await marked(store)[20]?.first?.kind == .settled)
         #expect(await marked(store)[31] == nil)
@@ -179,5 +191,138 @@ struct ReadDownTests {
         #expect(await store.note(Self.key(2))?.gaps == [Self.missing], "only the settled mark went")
         #expect(await store.settledCount() == 0)
         #expect(await store.letSettledGo() == 0)
+    }
+
+    // MARK: - By listed ids alone
+
+    @Test("A boost in the hole, of a post held below, does not fill it")
+    func boostDoesNotFill() async throws {
+        let server = TimelineServer(1...500)
+        await server.boost(440, of: 5)
+        let store = await store(holding: Array(1...10) + Array(450...500), markedAt: 450)
+        let down = try await readDown(store, from: server, at: 450)
+        #expect(down.end == .further(from: "250"), "440 is a boost of 5, not 5 listed where it stands")
+        #expect(await store.note(Self.key(250))?.gaps == [Self.missing])
+    }
+
+    @Test("The reader's own post, listed by no timeline, is not what is held below: it does not fill the hole")
+    func ownPostDoesNotFill() async throws {
+        let server = TimelineServer(1...100)
+        let store = await store(holding: Array(1...10) + Array(100...110), markedAt: 100)
+        await store.ingest([Self.note(70, listed: false, handle: "@me@\(Self.host)")])
+        let place = try #require(await store.missing(below: Self.key(100), in: .public, writtenBy: "@me@\(Self.host)"))
+        #expect(place.held == Set((1...10).map(Self.key)) && place.floor == "10", "listed ids alone")
+        _ = try await readDown(store, from: server, at: 100)
+        #expect(await server.cursors == ["max_id=100", "max_id=60", "max_id=20"], "read on past 70, to 10")
+        #expect(await held(store) == Array(1...110))
+        #expect(await marked(store).isEmpty)
+    }
+
+    @Test("Held from before listings were kept, the reader's own post and a boost are still not below")
+    func fallbackLeavesOwnAndBoosts() async throws {
+        let store = ItemStore()
+        await store.add(Self.source)
+        await store.ingest((1...10).map { Self.note($0, listed: false) })
+        let boost = Note(
+            id: Self.note(50).id, source: Self.source, author: "Ada", handle: "@ada", body: "50",
+            postedAt: Self.posted(8), categories: [.public], boostedBy: "Bob", statusID: "50"
+        )
+        await store.ingest([Self.note(20, listed: false, handle: "@me@\(Self.host)"), Self.note(100)])
+        await store.ingest([boost])
+        await store.land(ReadOn(missingBelow: Self.key(100)), of: .public, ifSourceHere: Self.host)
+        let place = try #require(await store.missing(below: Self.key(100), in: .public, writtenBy: "@me@\(Self.host)"))
+        #expect(place.floor == nil)
+        #expect(!place.held.contains(Self.key(20)), "the reader wrote it")
+        #expect(!place.held.contains(Self.key(50)), "a boost is held for when it was boosted")
+        #expect(place.held.contains(Self.key(1)))
+    }
+
+    @Test("A mark moved down reads down from where the read stopped, whatever lists that post again later")
+    func movedMarkKeepsItsID() async throws {
+        let server = TimelineServer(1...500)
+        let store = await store(holding: Array(1...10) + Array(450...500), markedAt: 450)
+        _ = try await readDown(store, from: server, at: 450)
+        var again = Self.note(250)
+        again.listed = [.public: "480"]
+        await store.ingest([again])
+        #expect(await store.note(Self.key(250))?.listed[.public] == "480", "the premise: listed later again")
+        #expect(await store.missing(below: Self.key(250), in: .public)?.listed == "250")
+    }
+
+    @Test("Where nothing read is taken in, the place stays on the post it was on, and says where to read from")
+    func carrierRefused() async throws {
+        let store = await store(holding: 450...500, markedAt: 450)
+        let month = try #require(Calendar.current.date(byAdding: .month, value: 1, to: Self.posted(440)))
+        await store.setRetention(months: 1, from: month)
+        await store.land(
+            ReadDown(notes: [Self.note(300), Self.note(250)], end: .further(from: "250")),
+            below: Self.key(450), of: .public, ifSourceHere: Self.host
+        )
+        #expect(await store.note(Self.key(250)) == nil, "the premise: older than what is kept")
+        #expect(await store.note(Self.key(450))?.gaps == [Self.missing])
+        #expect(await store.note(Self.key(450))?.gaps.first?.from == "250")
+
+        await store.land(ReadDown(notes: [Self.note(300)], end: .settled), below: Self.key(450), of: .public,
+                         ifSourceHere: Self.host)
+        #expect(await store.note(Self.key(450))?.gaps.map(\.kind) == [.settled], "settled, not lost")
+    }
+
+    @Test("A server answering with the same page settles nothing: it fails the read, or stops it where it got to")
+    func samePage() async throws {
+        let place = MissingPlace(post: Self.key(31), category: .public, listed: "31", held: [Self.key(5)], floor: "10")
+        let same = [Self.listing(35), Self.listing(31)]
+        await #expect(throws: ReadDownStalled.self) {
+            try await MastodonReadOn.readDown(from: place) { _ in same }
+        }
+        let asks = Counter()
+        let down = try await MastodonReadOn.readDown(from: place) { _ in
+            await asks.next() == 1 ? (20...30).reversed().map { Self.listing($0) } : same
+        }
+        #expect(down.end == .further(from: "20"))
+        #expect(down.stopped is ReadDownStalled)
+    }
+
+    @Test("A place settled again is one place, as of the later moment")
+    func settledOnce() async throws {
+        let server = TimelineServer(31...60)
+        let store = await store(holding: Array(1...10) + Array(31...60), markedAt: 31)
+        let first = Date(timeIntervalSince1970: 1_750_000_000)
+        _ = try await readDown(store, from: server, at: 31, moment: first)
+        await store.land(ReadOn(missingBelow: Self.key(31)), of: .public, ifSourceHere: Self.host)
+        _ = try await readDown(store, from: server, at: 31, moment: first.addingTimeInterval(60))
+        let gaps = try #require(await store.note(Self.key(31))?.gaps)
+        #expect(gaps.filter { $0.kind == .settled }.count == 1)
+        #expect(await store.settledCount() == 1)
+    }
+
+    @Test("A place on a post marked gone is counted as the post, not beside it")
+    func settledOnGone() async {
+        let store = ItemStore()
+        await store.add(Self.source)
+        var gone = Self.note(1)
+        gone.gaps = [TimelineGap(.settled, in: .public, since: Date())]
+        await store.ingest([gone])
+        await store.markGone(Self.key(1))
+        #expect(await store.settledCount() == 0)
+        #expect(await store.goneCount() == 1)
+    }
+
+    @Test("A marked post its timeline listed under no id names no place to read down from")
+    func noListingNoPlace() async {
+        let store = ItemStore()
+        await store.add(Self.source)
+        await store.ingest([Self.note(1), Self.note(31, listed: false)])
+        await store.land(ReadOn(missingBelow: Self.key(31)), of: .public, ifSourceHere: Self.host)
+        #expect(await store.missing(below: Self.key(31), in: .public) == nil)
+    }
+}
+
+/// Counts asks, from one.
+private actor Counter {
+    private var count = 0
+
+    func next() -> Int {
+        count += 1
+        return count
     }
 }

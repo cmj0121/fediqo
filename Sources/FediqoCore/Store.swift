@@ -336,32 +336,48 @@ public actor ItemStore {
     }
 
     /// Where posts may be missing below `key` in `category`, as reading down from it needs it
-    /// (#204): the id it was listed under, and what is held of that timeline below it. Nothing
-    /// where `key` carries no such mark, or no id to read before.
-    public func missing(below key: NoteKey, in category: Category) -> MissingPlace? {
-        guard let marked = notes[key], marked.gaps.contains(TimelineGap(.mayBeMissing, in: category)),
-              let listed = marked.listed[category] ?? marked.statusID
+    /// (#204): the id to read before, and what is held of that timeline below it. Nothing where
+    /// `key` carries no such mark, or neither the mark nor that timeline names an id to read before.
+    ///
+    /// **By listed ids alone** wherever this timeline listed a post held below: the posts it
+    /// listed under an id below the mark's, as themselves and not as boosts. Only where it listed
+    /// none of them — a timeline held from before listings were kept (#201) — is below read off
+    /// when each was posted, and then never of a post `me` wrote or boosted, nor any boost: those
+    /// are held for when they were written or boosted, not for where their timeline stands.
+    public func missing(below key: NoteKey, in category: Category, writtenBy me: String? = nil) -> MissingPlace? {
+        let mark = TimelineGap(.mayBeMissing, in: category)
+        guard let marked = notes[key], let gap = marked.gaps.first(where: { $0 == mark }),
+              let listed = gap.from ?? marked.listed[category]
         else { return nil }
-        // Below it by the id its timeline listed it under, or by when it was posted where that
-        // timeline listed it under none — a row kept from before listings were (#201).
-        let below = notes.values.filter { note in
-            guard note.key != key, note.source.host == key.host, note.holding == .arrived,
-                  note.categories.contains(category)
-            else { return false }
-            return note.listed[category].map { StatusID.later(listed, than: $0) }
-                ?? (note.postedAt <= marked.postedAt)
+        let timeline = notes.values.filter {
+            $0.key != key && $0.source.host == key.host && $0.holding == .arrived && $0.categories.contains(category)
         }
-        return MissingPlace(
-            post: key, category: category, listed: listed, held: Set(below.map(\.key)),
-            floor: below.compactMap { $0.listed[category] }.max { StatusID.later($1, than: $0) }
-        )
+        let listedBelow = timeline.filter { note in
+            note.listed[category].map { StatusID.later(listed, than: $0) } == true
+        }
+        if let floor = listedBelow.compactMap({ $0.listed[category] }).max(by: { StatusID.later($1, than: $0) }) {
+            return MissingPlace(
+                post: key, category: category, listed: listed,
+                held: Set(listedBelow.filter { $0.boostedBy == nil }.map(\.key)), floor: floor
+            )
+        }
+        let postedBelow = timeline.filter { note in
+            note.listed[category] == nil && note.postedAt <= marked.postedAt && note.boostedBy == nil
+                && note.boosted != true && me.map { note.handle.caseInsensitiveCompare($0) != .orderedSame } ?? true
+        }
+        return MissingPlace(post: key, category: category, listed: listed, held: Set(postedBelow.map(\.key)), floor: nil)
     }
 
     /// One place posts may be missing, read down (#204), taken in as `land(_:of:ifSourceHere:)`
     /// takes a read on — what came and what it says in the same step. The mark below `key` goes;
-    /// met, nothing takes its place; stopped short, it moves down to the oldest post read; told
-    /// there is nothing more, it settles there as of `moment`. Nothing but the posts where `key`
-    /// no longer carries the mark: a read meanwhile said something else of that place.
+    /// met, nothing takes its place; stopped short, it moves down to the oldest post read, reading
+    /// on from the id that read reached; told there is nothing more, it settles there as of
+    /// `moment`. Nothing but the posts where `key` no longer carries the mark: a read meanwhile said
+    /// something else of that place.
+    ///
+    /// **Onto a post held**: the oldest the read brought that this store took in as itself, and
+    /// back onto `key` where it took in none — one refused as older than what is kept, or only
+    /// boosts — so the place is never left unsaid.
     public func land(
         _ down: ReadDown, below key: NoteKey, of category: Category, at moment: Date = Date(),
         ifSourceHere raw: String
@@ -372,14 +388,16 @@ public actor ItemStore {
         let mark = TimelineGap(.mayBeMissing, in: category)
         guard notes[key]?.gaps.contains(mark) == true else { return }
         notes[key]?.gaps.remove(mark)
-        switch down.end {
-        case .met:
-            break
-        case .further(let below):
-            notes[below]?.gaps.insert(mark)
-        case .settled(let below):
-            notes[below ?? key]?.gaps.insert(TimelineGap(.settled, in: category, since: moment))
+        let carrier = down.notes
+            .filter { $0.boostedBy == nil && $0.listed[category] != nil && notes[$0.key] != nil }
+            .min { StatusID.later($1.listed[category]!, than: $0.listed[category]!) }?.key ?? key
+        let place: TimelineGap? = switch down.end {
+        case .met: nil
+        case .further(let from): TimelineGap(.mayBeMissing, in: category, from: from)
+        case .settled: TimelineGap(.settled, in: category, since: moment)
         }
+        // One of each kind per timeline per post: a place said there before gives way to this one.
+        if let place { notes[carrier]?.gaps.update(with: place) }
         changed(shown: true, aside: false)
     }
 
@@ -520,7 +538,8 @@ public actor ItemStore {
     /// How many places say their source no longer has what lay there (#204) — what a press would
     /// let go beside the posts `goneCount` counts.
     public func settledCount() -> Int {
-        notes.values.reduce(0) { $0 + $1.gaps.filter { $0.kind == .settled }.count }
+        // A post marked gone takes its places with it, and is counted as the post it is.
+        notes.values.filter { $0.goneSince == nil }.reduce(0) { $0 + $1.gaps.filter { $0.kind == .settled }.count }
     }
 
     /// Lets go of every place settled at or before `cutoff`, or of every one where `cutoff` is nil
