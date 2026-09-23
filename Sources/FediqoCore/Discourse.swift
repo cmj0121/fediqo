@@ -33,7 +33,7 @@ public struct DiscourseClient: Sendable {
     /// answer `/site.json` — an old version, a plugin, a permission — still has a readable front
     /// page, and a topic with no section named is a topic with one less line on it rather than a
     /// topic nobody can read.
-    public func latest(source: Source) async throws -> [Note] {
+    public func latest(source: Source, page: Int = 0) async throws -> [Note] {
         async let sections: [Int: String] = {
             do {
                 return try await categories()
@@ -49,7 +49,9 @@ public struct DiscourseClient: Sendable {
         guard let url = Host.httpsURL(
             host: host,
             path: "/latest.json",
+            // Discourse counts its pages from nought; past the first is the next stretch (#87).
             query: [URLQueryItem(name: "order", value: "created")]
+                + (page > 0 ? [URLQueryItem(name: "page", value: String(page))] : [])
         ) else {
             throw DiscourseRequestError.invalidURL
         }

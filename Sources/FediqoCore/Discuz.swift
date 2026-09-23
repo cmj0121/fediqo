@@ -62,15 +62,16 @@ public struct DiscuzClient: Sendable {
         self.host = host
     }
 
-    /// The forum's front page: the newest threads, from every board, newest first.
-    public func latest(source: Source) async throws -> [Note] {
+    /// The forum's front page: the newest threads, from every board, newest first — or its
+    /// `page`th page, the next stretch of a listing read toward its end (#87).
+    public func latest(source: Source, page: Int = 1) async throws -> [Note] {
         guard let url = Host.httpsURL(
             host: host,
             path: "/forum.php",
             query: [
                 URLQueryItem(name: "mod", value: "guide"),
                 URLQueryItem(name: "view", value: "newthread"),
-            ]
+            ] + Self.page(page)
         ) else {
             throw DiscuzRequestError.invalidURL
         }
@@ -140,8 +141,9 @@ public struct DiscuzClient: Sendable {
         return try await read(url, source: source, named: named, boardID: String(fid))
     }
 
-    /// A board's thread list, newest thread first — see `board(_:source:named:)`.
-    private func boardURL(_ fid: Int) -> URL? {
+    /// A board's thread list, newest thread first — see `board(_:source:named:)`. Its `page`th
+    /// page where that is past the first.
+    private func boardURL(_ fid: Int, page: Int = 1) -> URL? {
         Host.httpsURL(
             host: host,
             path: "/forum.php",
@@ -150,8 +152,21 @@ public struct DiscuzClient: Sendable {
                 URLQueryItem(name: "fid", value: String(fid)),
                 URLQueryItem(name: "filter", value: "author"),
                 URLQueryItem(name: "orderby", value: "dateline"),
-            ]
+            ] + Self.page(page)
         )
+    }
+
+    /// `page=N` past the first, and nothing on the first: the first page's address stays exactly
+    /// the one every read before #87 asked, so nothing that was already asked moves.
+    private static func page(_ page: Int) -> [URLQueryItem] {
+        page > 1 ? [URLQueryItem(name: "page", value: String(page))] : []
+    }
+
+    /// One board's `page`th page of threads, and nothing about the boards around it — the next
+    /// stretch of a listing read toward its end (#87). The first page is `boardPage`'s.
+    public func board(_ fid: Int, source: Source, named: String? = nil, page: Int) async throws -> [Note] {
+        guard let url = boardURL(fid, page: page) else { throw DiscuzRequestError.invalidURL }
+        return try await read(url, source: source, named: named, boardID: String(fid))
     }
 
     /// One subscribed board's thread list — what a reader who picked this board is reading.

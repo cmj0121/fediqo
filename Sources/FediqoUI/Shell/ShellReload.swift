@@ -39,6 +39,9 @@ final class ShellReload {
         case thread
         /// Every source this device holds, each for its usual reads, on the wait it keeps (#95).
         case held
+        /// The next, older stretch of the timeline in front, asked as the reader nears its end
+        /// (#87). See `ShellMore.swift`.
+        case more
     }
 
     /// The kinds of reload on the wire now. A second `r` of a kind already here starts nothing.
@@ -51,11 +54,12 @@ final class ShellReload {
     /// the order they were asked — a host both missed named once.
     var failed: [String] {
         var named: Set<String> = []
-        return [Ask.timeline, .thread, .held].flatMap { failures[$0] ?? [] }.filter { named.insert($0).inserted }
+        return [Ask.timeline, .more, .thread, .held].flatMap { failures[$0] ?? [] }
+            .filter { named.insert($0).inserted }
     }
     /// Each kind's own `failed`, cleared as that kind starts again — and a host's name let go of
     /// as soon as another timeline read, `r`'s or the wait's, reads it whole.
-    private var failures: [Ask: [String]] = [:]
+    var failures: [Ask: [String]] = [:]
     /// Bumped as each reload of the timeline ends, so the list can centre the selected post again.
     /// A thread read again leaves the list under it where it was.
     private(set) var landed = 0
@@ -83,6 +87,8 @@ final class ShellReload {
 
     /// How long one request of a reload may take before it counts as failed.
     @ObservationIgnored var deadline: Duration = .seconds(30)
+    /// Where each stretch a listing reads toward its end has got to (#87).
+    @ObservationIgnored var stretches = ShellStretches()
 
     /// Each running reload's work, and its waiter — resumed when the work ends or is stopped.
     @ObservationIgnored private var runs: [Ask: Run] = [:]
@@ -346,12 +352,18 @@ final class ShellReload {
     /// is asked again now. **A timeline's start clears the thread's too**, since `r` reaches the
     /// timeline only with no thread in front, and a thread left behind has nothing left to say
     /// about it. A thread's start leaves the timeline's standing, which is still true (#175).
-    private func run(_ ask: Ask, _ body: @escaping @MainActor () async -> Void) async {
+    func run(_ ask: Ask, _ body: @escaping @MainActor () async -> Void) async {
         generation += 1
         let mine = generation
         asking.insert(ask)
         forget(ask)
-        if ask == .timeline { forget(.thread) }
+        if ask == .timeline {
+            forget(.thread)
+            // And what asking for more said, and where a forum's pages had got to: the newest
+            // page read again moves every page under it along by what it brought (#87).
+            forget(.more)
+            stretches.restart()
+        }
         await withCheckedContinuation { continuation in
             let work = Task { @MainActor in
                 await body()
@@ -383,12 +395,13 @@ final class ShellReload {
         case .timeline: [.timeline]
         case .thread: [.conversation, .forumPost, .forumReplies]
         case .held: [.timeline]
+        case .more: [.timeline]
         }
     }
 
     /// Work read as the reader on `host`, registered so `stop(host:)` can end it, and ended too
     /// if the reload is stopped.
-    private func asReader<T: Sendable>(
+    func asReader<T: Sendable>(
         _ host: String, _ read: @escaping @MainActor () async throws -> T
     ) async throws -> T {
         let host = host.lowercased()
@@ -684,7 +697,7 @@ final class ShellReload {
 
     /// Bounded by the reload's deadline, and on `SourceWork` for what it is (#164) while it runs.
     /// `name` is the timeline or board it reads, by the name the reader knows, where it reads one.
-    private func timed(
+    func timed(
         _ http: any HTTPClient, for purpose: SourceWork.Purpose, name: SourceWork.Name? = nil,
         in session: ShellSession
     ) -> any HTTPClient {
@@ -711,7 +724,7 @@ final class ShellReload {
     }
 
     /// A forum signed in to is read through its own browser, as a join reads it.
-    private func transport(_ host: String, in session: ShellSession) -> any HTTPClient {
+    func transport(_ host: String, in session: ShellSession) -> any HTTPClient {
         session.forums.readTransport(host: host, else: session.http)
     }
 }
