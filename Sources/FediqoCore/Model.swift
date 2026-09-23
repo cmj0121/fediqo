@@ -312,6 +312,16 @@ public struct Counts: Hashable, Sendable {
         self.reblogs = reblogs
         self.favourites = favourites
     }
+
+    /// These counts, with each one they do not state taken from `other` (#208). A count nobody
+    /// stated is a source that never said, and never a zero.
+    func filled(from other: Counts) -> Counts {
+        Counts(
+            replies: replies ?? other.replies,
+            reblogs: reblogs ?? other.reblogs,
+            favourites: favourites ?? other.favourites
+        )
+    }
 }
 
 /// One thing that came attached to a post.
@@ -454,6 +464,10 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// favourite is a note to the author and to oneself, and a list of them this device kept on
     /// its own would be a list no other app agrees with.
     public let favourited: Bool?
+    /// Who the post was written for, as the source said (#208), or nothing where it never said —
+    /// every forum post, and a row kept before 0.5.0 wrote this down until a read says it again.
+    ///
+    /// `boosted`'s shape: kept with the row, and a later read that says nothing leaves it.
     public let audience: Audience?
     public let avatarURL: URL?
     /// What came attached, in the order the server listed it. Empty is a post that brought
@@ -470,6 +484,9 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// The pictures this post is partly written in, one per shortcode.
     public let emojis: [CustomEmoji]
     public let url: URL?
+    /// What the source last counted of answers, boosts and favourites, each nothing where it
+    /// never said. Kept with the row (#208): a figure of the moment it was read, and still the
+    /// source's latest word on it until a read says otherwise, which beats drawing none.
     public let counts: Counts
     /// The id the server this copy came through gives the status, where it is a microblog's —
     /// what reading the post again (#29) asks for. Nothing on a row stored before 0.2.0 learned
@@ -594,8 +611,11 @@ public struct Note: Identifiable, Hashable, Sendable {
             boostedBy: held.boostedBy, boosterHandle: held.boosterHandle,
             boosted: boosted ?? held.boosted,
             favourited: favourited ?? held.favourited,
-            audience: audience, avatarURL: avatarURL, attachments: attachments,
-            sensitive: sensitive, spoiler: spoiler, emojis: emojis, url: url, counts: counts,
+            // Who it was for, whether it is covered and with what, and each count: what this read
+            // left unsaid is what was held (#208), for `boosted`'s reason.
+            audience: audience ?? held.audience, avatarURL: avatarURL, attachments: attachments,
+            sensitive: sensitive ?? held.sensitive, spoiler: spoiler ?? held.spoiler, emojis: emojis,
+            url: url, counts: counts.filled(from: held.counts),
             statusID: statusID ?? held.statusID,
             // A read of the row that says nothing of its opening post — a board listing, which
             // never does — leaves the one this device read where it is (#154).
@@ -610,6 +630,30 @@ public struct Note: Identifiable, Hashable, Sendable {
             // What a read of this one post says is nothing about where its timeline is whole.
             gaps: held.gaps,
             listed: held.listed.later(listed)
+        )
+    }
+
+    /// This held note, with every fact it does not state taken from `other` — a later copy of the
+    /// same post (#208). What it does state stays: the first copy wins, as `ItemStore.ingest`
+    /// says, and a copy that says more only fills in where this one said nothing.
+    ///
+    /// **Only facts about the post, and only where nothing is "never said".** Not the booster,
+    /// which is a fact about one copy and would draw an original as a boost; not `reply`, where
+    /// nothing is an answer ("not a reply"); not attachments or emoji, where empty is an answer
+    /// too; not the opening post, which no listing carries (#154). A title, the post's address
+    /// and its author's picture are not here either: a source that has them sent them with the
+    /// first copy, and one that did not has none to send.
+    func filled(from other: Note) -> Note {
+        Note(
+            id: id, source: source, author: author, handle: handle, body: body, title: title,
+            board: board ?? other.board, postedAt: postedAt, categories: categories, reply: reply,
+            boostedBy: boostedBy, boosterHandle: boosterHandle,
+            boosted: boosted ?? other.boosted, favourited: favourited ?? other.favourited,
+            audience: audience ?? other.audience, avatarURL: avatarURL, attachments: attachments,
+            sensitive: sensitive ?? other.sensitive, spoiler: spoiler ?? other.spoiler,
+            emojis: emojis, url: url, counts: counts.filled(from: other.counts),
+            statusID: statusID ?? other.statusID, opening: opening, holding: holding,
+            goneSince: goneSince, gaps: gaps, listed: listed
         )
     }
 

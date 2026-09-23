@@ -208,12 +208,15 @@ public actor ItemStore {
                 let categories = existing.categories.union(note.categories)
                 let holding = existing.holding.widened(by: note.holding)
                 let listed = existing.listed.later(note.listed)
+                // What the held copy never said, this one may (#208): a row kept before its
+                // audience was written down takes it from the next timeline that brings it.
+                let filled = existing.filled(from: note)
                 // The same source handing the post over again is the source having it (#179):
                 // a mark it once earned comes off.
                 guard categories != existing.categories || holding != existing.holding
-                        || listed != existing.listed || existing.goneSince != nil
+                        || listed != existing.listed || existing.goneSince != nil || filled != existing
                 else { continue }
-                var merged = existing
+                var merged = filled
                 merged.categories = categories
                 merged.holding = holding
                 merged.listed = listed
