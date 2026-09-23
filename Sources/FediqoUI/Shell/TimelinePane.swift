@@ -172,6 +172,9 @@ struct TimelinePane: View {
                     // pane's own `.task`, so closing the thread cancels a read still on the wire,
                     // and asked once per post per run: reopening draws what is already held.
                     .task(id: opened.id) { await session.conversations.open(opened, in: session) }
+                    // What `r` last said about this thread goes with it (#175): the timeline under
+                    // it does not go on saying a thread nobody is reading could not be reloaded.
+                    .onDisappear { session.reload.forget(.thread) }
                 } else {
                     underneath
                 }

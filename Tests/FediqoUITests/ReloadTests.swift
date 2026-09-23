@@ -767,6 +767,47 @@ struct ReloadTests {
         #expect(session.reload.line == String(format: L10n.t("timeline.reload.failed"), Self.two))
     }
 
+    /// How a thread's `r` can end short of landing.
+    enum ThreadEnd: CaseIterable, Sendable {
+        case failed, stopped, unfindable
+    }
+
+    @Test("What r said about a thread goes when it closes, and a clean timeline r says nothing",
+          arguments: ThreadEnd.allCases)
+    func threadLineGoesWithTheThread(_ end: ThreadEnd) async throws {
+        var routes = Self.everything
+        routes["https://\(Self.one)/api/v1/statuses/9"] = .text("", status: 500)
+        let held = Held(routes, holding: ["/never/held", "/api/v1/statuses/9"])
+        let guards = [hangGuard(held.second)]
+        defer { for guardTask in guards { guardTask.cancel() } }
+        if end != .stopped { await held.second.open() }
+        let (session, _) = await shell(http: held)
+        let item = await holding(Self.mastodonNote(statusID: end == .unfindable ? nil : "9"), in: session)
+
+        if end == .stopped {
+            let thread = Task { await session.reload.thread(item, in: session) }
+            #expect(await spun { await held.asks("/api/v1/statuses/9") == 1 })
+            #expect(session.reload.stop())
+            await thread.value
+            await held.second.open()
+        } else {
+            await session.reload.thread(item, in: session)
+        }
+        #expect(session.reload.line != nil, "the premise: the thread's r ended short")
+
+        // Closed, and the line under the timeline goes with it.
+        session.reload.forget(.thread)
+        #expect(session.reload.line == nil)
+
+        // And a timeline r lands clean whatever the thread said, closed or not.
+        if end != .stopped { await session.reload.thread(item, in: session) }
+        await session.reload.timeline(.all, in: session)
+        #expect(session.reload.line == nil)
+        #expect(session.reload.landed > 0 && session.reload.failed.isEmpty
+                && session.reload.unspoken == nil && !session.reload.stopped,
+                "an empty timeline would read as settled")
+    }
+
     @Test("A post held aside neither enters All nor replaces what the screen draws")
     func asideRenewsNothing() async throws {
         let (session, _) = await shell()

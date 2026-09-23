@@ -257,7 +257,8 @@ public actor ItemStore {
         }
         // Written down, and not a change to what is drawn: the screen draws an opening from the
         // forum's own cache as it is read, and replacing every row for each one kept as the reader
-        // scrolls is what #154 set out not to do. The next landing carries it along.
+        // scrolls is what #154 set out not to do. Only a later change to what All shows carries
+        // it onto the screen's rows.
         if moved { changed(shown: false) }
         return moved
     }

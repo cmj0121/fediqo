@@ -232,6 +232,15 @@ final class ShellReload {
         }
     }
 
+    /// What the last reload of `ask` said, let go of — as it starts again, and as the thread it
+    /// was about is closed, so a line about a thread nobody is reading does not stand under the
+    /// timeline.
+    func forget(_ ask: Ask) {
+        failures[ask] = nil
+        halted.remove(ask)
+        if ask == .thread { unfindable = nil }
+    }
+
     /// Stops every running reload — Esc. What they had not landed does not land.
     @discardableResult
     func stop() -> Bool {
@@ -252,15 +261,16 @@ final class ShellReload {
 
     /// One reload: its state set, its work started, and this waiting until it ends or is stopped.
     ///
-    /// What the last reload of this kind said is cleared as this one starts, and only that: a
-    /// failure it named is asked again now, and the other kind's is none of this run's business.
+    /// What the last reload of this kind said is cleared as this one starts: a failure it named
+    /// is asked again now. **A timeline's start clears the thread's too**, since `r` reaches the
+    /// timeline only with no thread in front, and a thread left behind has nothing left to say
+    /// about it. A thread's start leaves the timeline's standing, which is still true (#175).
     private func run(_ ask: Ask, _ body: @escaping @MainActor () async -> Void) async {
         generation += 1
         let mine = generation
         asking.insert(ask)
-        failures[ask] = nil
-        halted.remove(ask)
-        if ask == .thread { unfindable = nil }
+        forget(ask)
+        if ask == .timeline { forget(.thread) }
         await withCheckedContinuation { continuation in
             let work = Task { @MainActor in
                 await body()
