@@ -422,8 +422,6 @@ struct TimelinePane: View {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                         let isLast = index == last
-                        let marks = gaps[item.id]
-                        TimelineGapRows(kind: .newerRemain, stretches: marks?.above ?? [], session: session)
                         DummyItemRow(
                             item: item,
                             catalogues: session.emoji,
@@ -463,7 +461,7 @@ struct TimelinePane: View {
                             asks: Self.asksForMore(at: index, of: items.count, searching: searching),
                             timeline: timeline, session: session
                         ))
-                        TimelineGapRows(kind: .mayBeMissing, stretches: marks?.below ?? [], session: session)
+                        .modifier(TimelineGapMarked(marks: gaps[item.id], session: session))
                         if !isLast {
                             Rectangle()
                                 .fill(ShellChrome.hairline(colorScheme))

@@ -507,6 +507,13 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// A `var` for `holding`'s reason: the store sets it on a row it already holds, as a read
     /// lands. Kept with the row, so it goes when the row goes and outlives a relaunch with it.
     public var gaps: Set<TimelineGap>
+    /// The id each timeline listed this post under when a read of that timeline brought it — a
+    /// boost's own, not the boosted post's (#201). What a timeline is read on from, and the only
+    /// thing that moves where: a post the reader wrote, a search's find or a thread's answer was
+    /// listed by no timeline, and so is never read on from.
+    ///
+    /// A `var` for `holding`'s reason: the store grows it as the same post is listed again.
+    public var listed: [Category: String]
 
     public init(
         id: String,
@@ -535,7 +542,8 @@ public struct Note: Identifiable, Hashable, Sendable {
         opening: ForumOpening? = nil,
         holding: Holding = .arrived,
         goneSince: Date? = nil,
-        gaps: Set<TimelineGap> = []
+        gaps: Set<TimelineGap> = [],
+        listed: [Category: String] = [:]
     ) {
         self.id = id
         self.source = source
@@ -564,6 +572,7 @@ public struct Note: Identifiable, Hashable, Sendable {
         self.holding = holding
         self.goneSince = goneSince
         self.gaps = gaps
+        self.listed = listed
     }
 
     /// This copy, read again, laid over the one held for the same row (#29): what the server says
@@ -599,7 +608,8 @@ public struct Note: Identifiable, Hashable, Sendable {
             // it over, which is the one thing a post gone from it cannot be.
             goneSince: nil,
             // What a read of this one post says is nothing about where its timeline is whole.
-            gaps: held.gaps
+            gaps: held.gaps,
+            listed: held.listed.later(listed)
         )
     }
 
@@ -612,7 +622,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             favourited: favourited, audience: audience, avatarURL: avatarURL,
             attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis,
             url: url, counts: counts, statusID: statusID, opening: opening, holding: holding,
-            goneSince: goneSince, gaps: gaps
+            goneSince: goneSince, gaps: gaps, listed: listed
         )
     }
 }

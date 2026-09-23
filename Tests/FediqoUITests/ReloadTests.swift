@@ -107,10 +107,8 @@ struct ReloadTests {
     private static var everything: [String: FixtureHTTP.Outcome] {
         [
             publicAddress(one): timeline(one, "1"),
-            // Read on from the newest held of each (#201): nothing newer since the first read,
-            // and for the thread's post 9, held alone, only 1 — which says 9 may be missing.
+            // Read on from the newest each listed (#201): nothing newer since the first read.
             publicAddress(one) + "&min_id=0": timeline(one, "1"),
-            publicAddress(one) + "&min_id=8": timeline(one, "1"),
             publicAddress(two) + "&min_id=2": timeline(two, "3"),
             trendsAddress(one): timeline(one, "2"),
             publicAddress(two): timeline(two, "3"),
@@ -609,9 +607,8 @@ struct ReloadTests {
         let before = TimelineQuery.all.items(from: session.notes, latest: nil)
         let selected = before[2].id
         var routes = Self.everything
-        // Read on from 3, the newest held of it (#201): 6 arrived since, and nothing after 6.
+        // Read on from 3, the newest it listed (#201): 6 arrived since, a short stretch, the last.
         routes[Self.publicAddress(Self.two) + "&min_id=2"] = Self.timeline(Self.two, "3", "6")
-        routes[Self.publicAddress(Self.two) + "&min_id=6"] = .text("[]")
         let fixture = FixtureHTTP(routes)
         let again = ShellSession(
             http: fixture, store: session.store,

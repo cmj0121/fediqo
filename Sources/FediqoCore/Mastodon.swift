@@ -26,8 +26,13 @@ public struct MastodonClient: Sendable {
     public func publicTimeline(source: Source, readingOnFrom anchor: String?) async throws -> ReadOn {
         try await MastodonReadOn.read(from: anchor) { minID in
             try await listed(
-                path: "/api/v1/timelines/public", limit: 40,
+                path: "/api/v1/timelines/public", limit: MastodonReadOn.limit,
                 query: try MastodonPage.newer(than: minID), source: source, category: .public
+            )
+        } older: { maxID in
+            try await listed(
+                path: "/api/v1/timelines/public", limit: MastodonReadOn.limit,
+                query: try MastodonPage.older(than: maxID), source: source, category: .public
             )
         }
     }
@@ -166,7 +171,7 @@ public struct MastodonClient: Sendable {
         query: [URLQueryItem],
         source: Source,
         category: Category
-    ) async throws -> [(listed: String, note: Note)] {
+    ) async throws -> [Listed] {
         guard let url = Host.httpsURL(
             host: host,
             path: path,
@@ -179,7 +184,7 @@ public struct MastodonClient: Sendable {
             throw MastodonRequestError.http(response.statusCode)
         }
         return try MastodonJSON.decoder.decode([StatusDTO].self, from: data).map {
-            ($0.id, $0.asNote(source: source, category: category))
+            $0.listed(source: source, category: category)
         }
     }
 }
@@ -428,6 +433,14 @@ struct StatusDTO: Decodable, Sendable {
             default: .unknown
             }
         }
+    }
+
+    /// This status as a timeline listed it (#201): the post, carrying the id the listing gave it
+    /// — a boost's own — as that timeline's.
+    func listed(source: Source, category: Category) -> Listed {
+        var note = asNote(source: source, category: category)
+        note.listed = [category: id]
+        return (id, note)
     }
 
     func asNote(source: Source, category: Category) -> Note {

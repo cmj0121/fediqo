@@ -62,10 +62,14 @@ struct StoreFileTests {
         let file = try StoreFile(database: DatabaseQueue())
         var marked = note(id: "2", categories: [.home, .list(id: "42")])
         marked.gaps = [TimelineGap(.mayBeMissing, in: .home), TimelineGap(.newerRemain, in: .list(id: "42"))]
+        // And the id each timeline listed it under, which is what each is read on from.
+        marked.listed = [.home: "112", .list(id: "42"): "118"]
         try await file.save(sources: [mastodon], notes: [note(id: "1"), marked])
         let loaded = try file.load().notes
         #expect(loaded.first { $0.id == "1" }?.gaps == [])
+        #expect(loaded.first { $0.id == "1" }?.listed == [:])
         #expect(loaded.first { $0.id == "2" }?.gaps == marked.gaps)
+        #expect(loaded.first { $0.id == "2" }?.listed == marked.listed)
     }
 
     /// #177: a topic read to its end is there with the network off, which is a relaunch reading

@@ -13,6 +13,11 @@ actor TimelineServer: HTTPClient {
     private let host: String
     private var held: [Int]
     private(set) var asked: [URL] = []
+    /// A query the next ask carrying it waits on `gate` for, where one is set.
+    private var holding: String?
+    let gate = Gate()
+    /// How many asks reached `gate`.
+    private(set) var parked = 0
 
     init(host: String, _ ids: some Sequence<Int>) {
         self.host = host
@@ -33,7 +38,14 @@ actor TimelineServer: HTTPClient {
     /// Keeps only what is `lowest` or newer: everything older is let go.
     func keep(from lowest: Int) { held = held.filter { $0 >= lowest } }
 
+    /// Holds the asks whose query carries `query` until the gate opens.
+    func hold(_ query: String) { holding = query }
+
     func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
+        if let holding, url.query?.contains(holding) == true {
+            parked += 1
+            await gate.wait()
+        }
         asked.append(url)
         let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!
         if url.path == "/api/v2/instance" {
@@ -89,7 +101,8 @@ struct ReadOnTests {
     private static func note(_ id: Int) -> Note {
         Note(
             id: "https://\(one)/users/ada/statuses/\(id)", source: source, author: "Ada", handle: "@ada",
-            body: "\(id)", postedAt: posted(id), categories: [.public], statusID: "\(id)"
+            body: "\(id)", postedAt: posted(id), categories: [.public], statusID: "\(id)",
+            listed: [.public: "\(id)"]
         )
     }
 
@@ -127,7 +140,7 @@ struct ReadOnTests {
 
         await session.reload.timeline(.all, in: session)
 
-        #expect(await server.cursors == ["min_id=9", "min_id=49", "min_id=89", "min_id=100"])
+        #expect(await server.cursors == ["min_id=9", "min_id=49", "min_id=89"])
         #expect(drawn(session) == Array((1...100).reversed()), "every one, newest first, none twice")
         let items = session.timelineItems(latest: nil)
         #expect(DummyCommand.focused(in: items, selected: selected) == .post(try #require(session.held(selected))))
@@ -206,6 +219,47 @@ struct ReadOnTests {
         await session.reload.more(.all, in: session)
         #expect(drawn(session) == Array((1...200).reversed()), "and on below it, with no hole")
         #expect(await server.cursors.suffix(2) == ["max_id=51", "max_id=11"])
+    }
+
+    @Test("A place reached while an ask for more is out waits for it, then reads on")
+    func reachedWhileMore() async throws {
+        let server = TimelineServer(host: Self.one, 1...10)
+        let session = await shell(server, store: await store(holding: 1...10))
+        await server.post(11...300)
+        await session.reload.timeline(.all, in: session)
+        #expect(drawn(session).first == 209)
+
+        await server.hold("max_id")
+        let guardTask = hangGuard(server.gate)
+        defer { guardTask.cancel() }
+        let more = Task { await session.reload.more(.all, in: session) }
+        #expect(await spun { await server.parked == 1 })
+        await session.reload.readOn(Self.stretch, in: session)
+        #expect(session.reload.asking == [.more], "not dropped, and not beside the other")
+        await server.gate.open()
+        await more.value
+        #expect(await spun { drawn(session).first == 300 && session.reload.asking.isEmpty }, "read on once that one ended")
+    }
+
+    @Test("A place reached while r reads its source asks nothing: r reads it on from there")
+    func reachedWhileR() async throws {
+        let server = TimelineServer(host: Self.one, 1...10)
+        let session = await shell(server, store: await store(holding: 1...10))
+        await server.post(11...300)
+        await session.reload.timeline(.all, in: session)
+
+        await server.hold("min_id=208")
+        let guardTask = hangGuard(server.gate)
+        defer { guardTask.cancel() }
+        let reload = Task { await session.reload.timeline(.all, in: session) }
+        #expect(await spun { await server.parked == 1 })
+        await session.reload.readOn(Self.stretch, in: session)
+        #expect(session.reload.asking == [.timeline])
+        await server.gate.open()
+        await reload.value
+        for _ in 0..<200 { await Task.yield() }
+        #expect(drawn(session).first == 300)
+        #expect(await server.cursors.filter { $0 == "min_id=208" }.count == 1, "asked once, by r")
     }
 
     @Test("The words are said in English and in 中文, naming the source, in every bundle")

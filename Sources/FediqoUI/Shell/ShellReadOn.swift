@@ -4,7 +4,7 @@ import SwiftUI
 
 // A microblog timeline read again reads on from where this device left it (#201).
 //
-// `r` and the wait read each Mastodon timeline on from the newest post held of it — Home and the
+// `r` and the wait read each Mastodon timeline on from the newest id it listed — Home and the
 // lists through `MastodonAccount`, the public timeline here — so what arrived while the app was
 // closed is read stretch after stretch rather than skipped. Where a read stopped at its bound, or
 // the source did not give back what lay between, the store keeps that with the post it sits
@@ -16,7 +16,10 @@ import SwiftUI
 // re-centred, so the row being read stays where it is, and the newer posts land above it. So it
 // keeps that ask's company: `r` ends it, the wait and an open thread's renewal (#198) do not
 // start while it is out, and it may run beside a renewal already on its way — it reads one
-// Mastodon timeline, never a forum, so no stranger's forum is asked twice at once.
+// Mastodon timeline, never a forum, so no stranger's forum is asked twice at once. Reached while
+// another ask for more is out, it waits for that one to end rather than being dropped; reached
+// while `r` or the wait is reading its source, it asks nothing, since they read it on from the
+// same place.
 //
 // **Only where the timeline in front reads that timeline.** A post Home and a list both carry can
 // be whole in the one and not the other, and Trends reads neither.
@@ -30,27 +33,63 @@ struct TimelineGapMarks: Equatable {
 }
 
 extension ShellReload {
-    /// The public timeline read on from the newest post held of it, and landed with what it says
+    /// The public timeline read on from the newest id it listed, and landed with what it says
     /// about where it is not whole. A reader walking away is not a failure; anything else is.
     func readOnPublic(_ client: MastodonClient, stamp: Source, in session: ShellSession) async -> Bool {
         do {
-            let anchor = await session.store.newestStatusID(host: stamp.host, category: .public)
+            let anchor = await session.store.newestListedID(host: stamp.host, category: .public)
             let read = try await client.publicTimeline(source: stamp, readingOnFrom: anchor)
             try Task.checkCancellation()
             await session.store.land(read, of: .public, ifSourceHere: stamp.host)
-            return true
+            // What came before a stretch that failed has landed; the read still did not come back.
+            return read.stopped == nil
         } catch {
             return Cancellation.happened(error)
         }
     }
 
-    /// A place where more belong, reached (#201): that one timeline read on from the newest post
-    /// held of it, as an ask for more. Nothing while another is out, or the editor is up.
+    /// A place where more belong, reached (#201): that one timeline read on from the newest id it
+    /// listed, as an ask for more. Reached while another ask for more is out, it waits for that
+    /// one to end rather than being dropped. Nothing while `r` or the wait is reading its host —
+    /// they read this timeline on from the same place — nor while the editor is up.
     func readOn(_ stretch: Stretch, in session: ShellSession) async {
-        guard !asking.contains(.more), session.editing == nil, let category = stretch.category else { return }
+        guard session.editing == nil, let category = stretch.category else { return }
+        let busy = [Ask.timeline, .held].filter(asking.contains)
+        guard !busy.contains(where: { readingHosts[$0]?.contains(stretch.host) ?? true }) else { return }
+        guard !asking.contains(.more) else {
+            pendingReadOn.add(stretch, of: session)
+            return
+        }
         await run(.more) {
             await self.read([FetchAsk(host: stretch.host, categories: [category])], as: .more, in: session)
         }
+    }
+
+    /// The places reached while an ask for more was out, read on now it has ended — one after
+    /// another, since each is an ask for more of its own.
+    func readOnPending() {
+        guard let (stretches, session) = pendingReadOn.take() else { return }
+        Task { @MainActor in
+            for stretch in stretches { await self.readOn(stretch, in: session) }
+        }
+    }
+}
+
+/// Places reached while another ask for more was out (#201), in the order they were reached.
+struct PendingReadOn {
+    private var stretches: [Stretch] = []
+    private weak var session: ShellSession?
+
+    mutating func add(_ stretch: Stretch, of session: ShellSession) {
+        self.session = session
+        if !stretches.contains(stretch) { stretches.append(stretch) }
+    }
+
+    /// Everything waiting, and the session it waits in, handed over once.
+    mutating func take() -> ([Stretch], ShellSession)? {
+        defer { stretches = [] }
+        guard !stretches.isEmpty, let session else { return nil }
+        return (stretches, session)
     }
 }
 
@@ -80,6 +119,22 @@ extension ShellSession {
             }
         }
         return marks
+    }
+}
+
+/// A row, with the places next to it where its timeline is not whole said above and below it
+/// (#201). A modifier of its own so the list's row stays one chain the type-checker reads quickly.
+struct TimelineGapMarked: ViewModifier {
+    let marks: TimelineGapMarks?
+    let session: ShellSession
+
+    /// One shape with a mark or without, so a mark coming or going never builds the row anew.
+    func body(content: Content) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            TimelineGapRows(kind: .newerRemain, stretches: marks?.above ?? [], session: session)
+            content
+            TimelineGapRows(kind: .mayBeMissing, stretches: marks?.below ?? [], session: session)
+        }
     }
 }
 

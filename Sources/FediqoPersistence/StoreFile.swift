@@ -402,6 +402,16 @@ private struct NoteFacts: Codable {
     /// reads as one no read said that of, and an older build ignores the key and draws no mark,
     /// which is all it drew before. A kind or a category this build does not know is dropped.
     var gaps: [GapRow]?
+    /// `Note.listed` (#201): the id each timeline listed this row under, which is what that
+    /// timeline is read on from. Additive and optional for `gaps`' reasons: a row written before
+    /// reads as listed by nothing, which leaves its timeline to be read as one held nowhere.
+    var listed: [ListedRow]?
+}
+
+/// One timeline's listing of a row, as `NoteFacts` writes it.
+private struct ListedRow: Codable {
+    var category: CategoryRow
+    var id: String
 }
 
 /// `TimelineGap` as `NoteFacts` writes it.
@@ -558,7 +568,10 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             boosted: note.boosted,
             favourited: note.favourited,
             opening: note.opening.map(OpeningRow.init),
-            gaps: note.gaps.isEmpty ? nil : note.gaps.map(GapRow.init).sorted { ($0.kind, $0.category) < ($1.kind, $1.category) }
+            gaps: note.gaps.isEmpty ? nil : note.gaps.map(GapRow.init).sorted { ($0.kind, $0.category) < ($1.kind, $1.category) },
+            listed: note.listed.isEmpty ? nil : note.listed
+                .map { ListedRow(category: CategoryRow($0.key), id: $0.value) }
+                .sorted { $0.category < $1.category }
         )
     }
 
@@ -598,7 +611,11 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             // fallback is the one every row written before this column had.
             holding: Holding(rawValue: holding) ?? .arrived,
             goneSince: gone_at,
-            gaps: Set(facts.gaps?.compactMap(\.gap) ?? [])
+            gaps: Set(facts.gaps?.compactMap(\.gap) ?? []),
+            listed: Dictionary(
+                (facts.listed ?? []).compactMap { row in row.category.category.map { ($0, row.id) } },
+                uniquingKeysWith: { a, _ in a }
+            )
         )
     }
 }

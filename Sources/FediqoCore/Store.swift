@@ -207,14 +207,16 @@ public actor ItemStore {
             if let existing = notes[key] {
                 let categories = existing.categories.union(note.categories)
                 let holding = existing.holding.widened(by: note.holding)
+                let listed = existing.listed.later(note.listed)
                 // The same source handing the post over again is the source having it (#179):
                 // a mark it once earned comes off.
                 guard categories != existing.categories || holding != existing.holding
-                        || existing.goneSince != nil
+                        || listed != existing.listed || existing.goneSince != nil
                 else { continue }
                 var merged = existing
                 merged.categories = categories
                 merged.holding = holding
+                merged.listed = listed
                 merged.goneSince = nil
                 notes[key] = merged
                 shown = shown || holding == .arrived
@@ -283,16 +285,14 @@ public actor ItemStore {
         return moved
     }
 
-    /// The anchor a timeline is read on from (#201): the newest status held of `category` from
-    /// `host` that a timeline brought and its source has not said is gone.
-    public func newestStatusID(host raw: String, category: Category) -> String? {
+    /// The anchor a timeline is read on from (#201): the newest id a read of `category` from
+    /// `host` listed a post under, of a post its source has not said is gone. A post the reader
+    /// wrote, or one held aside, was listed by no read, and is never it.
+    public func newestListedID(host raw: String, category: Category) -> String? {
         let host = raw.lowercased()
         return notes.values
-            .filter {
-                $0.source.host == host && $0.holding == .arrived && $0.goneSince == nil
-                    && $0.categories.contains(category)
-            }
-            .compactMap(\.statusID)
+            .filter { $0.source.host == host && $0.goneSince == nil }
+            .compactMap { $0.listed[category] }
             .max { StatusID.later($1, than: $0) }
     }
 

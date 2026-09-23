@@ -138,13 +138,18 @@ public struct MastodonAccount: Sendable {
 
     /// One timeline read on from the newest post held of it (#201), and landed as it answers, so
     /// one that fails after it holds back none of what it brought.
+    ///
+    /// A stretch that failed after the first lands what came before it, then fails the read.
     private func readOn(_ path: String, source: Source, category: Category) async throws {
-        let anchor = await store.newestStatusID(host: host, category: category)
+        let anchor = await store.newestListedID(host: host, category: category)
         let read = try await MastodonReadOn.read(from: anchor) { minID in
             try await listed(path, source: source, category: category, query: try MastodonPage.newer(than: minID))
+        } older: { maxID in
+            try await listed(path, source: source, category: category, query: try MastodonPage.older(than: maxID))
         }
         try Task.checkCancellation()
         await store.land(read, of: category, ifSourceHere: host)
+        if let stopped = read.stopped { throw stopped }
     }
 
     private func statuses(
@@ -157,12 +162,12 @@ public struct MastodonAccount: Sendable {
     /// One page, each post with the id the timeline lists it under — a boost's own.
     private func listed(
         _ path: String, source: Source, category: Category, query: [URLQueryItem]
-    ) async throws -> [(listed: String, note: Note)] {
+    ) async throws -> [Listed] {
         let data = try await reading(category).get(
             path: path, query: [URLQueryItem(name: "limit", value: "40")] + query
         )
         return try MastodonJSON.decoder.decode([StatusDTO].self, from: data).map {
-            ($0.id, $0.asNote(source: source, category: category))
+            $0.listed(source: source, category: category)
         }
     }
 

@@ -113,6 +113,10 @@ final class ShellReload {
     @ObservationIgnored var deadline: Duration = .seconds(30)
     /// Where each stretch a listing reads toward its end has got to (#87).
     @ObservationIgnored var stretches = ShellStretches()
+    /// Places reached while another ask for more was out, each read on as that one ends (#201).
+    @ObservationIgnored var pendingReadOn = PendingReadOn()
+    /// The hosts each running read of many sources — `r`'s, the wait's — is reading (#201).
+    @ObservationIgnored var readingHosts: [Ask: Set<String>] = [:]
     /// The thread open in front of this window, which the wait asks again (#198). Nothing with no
     /// thread in front. See `ShellRenewal.swift`.
     @ObservationIgnored var inFront: DummyItem?
@@ -568,6 +572,7 @@ final class ShellReload {
     /// that kind's to say.
     func read(_ asks: [FetchAsk], as kind: Ask, in session: ShellSession) async {
         let sources = session.sources
+        readingHosts[kind] = Set(asks.map(\.host))
         // What the last run found is not this run's fact about any server. Cleared here
         // rather than at the end, so a run that is stopped halfway leaves nothing standing.
         unspokens[kind] = nil
@@ -757,8 +762,10 @@ final class ShellReload {
         guard let run = runs[ask], run.generation == generation else { return }
         runs[ask] = nil
         asking.remove(ask)
+        readingHosts[ask] = nil
         if ask == .timeline { landed += 1 }
         run.waiter.resume()
+        if ask == .more { readOnPending() }
     }
 
     private static func purposes(of ask: Ask) -> Set<SourceWork.Purpose> {
