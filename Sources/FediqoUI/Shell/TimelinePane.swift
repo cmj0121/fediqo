@@ -182,7 +182,7 @@ struct TimelinePane: View {
                     // And a page still on its way for it stops (#177): nobody is reading on.
                     .onDisappear {
                         session.reload.forget(.thread)
-                        session.stopReadingFurther()
+                        session.stopReadingFurther(of: opened)
                     }
                 } else {
                     underneath

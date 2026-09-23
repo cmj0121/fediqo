@@ -562,6 +562,14 @@ final class ShellConversations {
         return true
     }
 
+    /// `stopReadingFurther()` for one thread only — its pane closing, which must not stop the
+    /// pane opened in its place.
+    func stopReadingFurther(of id: String) {
+        guard let task = furtherWork.removeValue(forKey: id) else { return }
+        task.cancel()
+        heldBack.insert(id)
+    }
+
     private func readFurther(
         _ item: DummyItem, from edge: String, held: Note, was before: ShellThreadFurther<Absence>,
         in session: ShellSession

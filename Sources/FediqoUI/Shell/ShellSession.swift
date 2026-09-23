@@ -1935,8 +1935,12 @@ final class ShellSession {
         }
         // What is held aside has a count of its own, as what is drawn has, so a landing only
         // the timelines see neither reads it again nor redraws a search (#176).
+        //
+        // **A forum topic's kept replies are not among them** (#177): each is a post of a thread,
+        // not a thread, and a search drawing one would draw it as a row that opens nowhere. A
+        // microblog answer is a post in its own right, and stays.
         if adoptedAside != asideRevision {
-            aside = await store.aside()
+            aside = await store.aside().filter { DiscuzPost(held: $0) == nil }
             adoptedAside = asideRevision
         }
         rebuildQueries()
@@ -2214,6 +2218,14 @@ final class ShellSession {
         let paging = posts.stopPaging()
         let further = conversations.stopReadingFurther()
         return paging || further
+    }
+
+    /// The further reads of one thread stopped — **its pane closing**. Only its own: a reader who
+    /// opens a reply's thread from inside this one closes this pane as the next one opens, and the
+    /// next one's first ask is not this pane's to stop.
+    func stopReadingFurther(of item: DummyItem) {
+        if let thread = ForumThreadRef(item) { posts.stopPaging(of: thread) }
+        conversations.stopReadingFurther(of: item.id)
     }
 
     /// This run's opening posts for rows still held, handed to the store **and** to the rows drawn

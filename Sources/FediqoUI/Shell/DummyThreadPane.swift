@@ -561,7 +561,12 @@ struct ThreadFoot: View {
     @State private var inView = false
 
     var body: some View {
-        Group {
+        // **One container, and not a `Group`**, because the lifecycle below is the foot's and not
+        // each sentence's. A `Group` hands its modifiers to every child, and each sentence here is
+        // its own branch: a foot turning from "coming" to "held" after a stop would run the new
+        // branch's `onAppear` — asking again, the very loop `held` exists to end — and the old
+        // branch's `onDisappear` could land after it and leave the foot thinking it is out of view.
+        VStack(alignment: .leading, spacing: 0) {
             // **No `default:`.** A fifth thing to say has to be given a shape.
             switch said {
             case .more, .coming:
@@ -613,6 +618,9 @@ struct ThreadFoot: View {
         .padding(.horizontal, ShellSpace.pad)
         .padding(.vertical, ShellSpace.snug)
         .onAppear {
+            // Already in view is not coming into view: a second appearance with no disappearance
+            // between is SwiftUI redrawing the foot, never the reader reaching it.
+            guard !inView else { return }
             inView = true
             // A held foot coming into view is the reader reaching it again, which lets a stop go.
             if said == .more || said == .held { reach(true) }

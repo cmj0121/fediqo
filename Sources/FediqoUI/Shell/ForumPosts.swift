@@ -688,6 +688,15 @@ final class ForumPosts {
         return true
     }
 
+    /// `stopPaging()` for one topic only — its pane closing, which must not stop the pane opened
+    /// in its place.
+    func stopPaging(of ref: ForumThreadRef) {
+        let key = Key(ref, .replies)
+        guard let task = pageWork.removeValue(forKey: key) else { return }
+        task.cancel()
+        heldBack.insert(key)
+    }
+
     private func page(_ number: Int, of key: Key, was before: Paging) async {
         defer { clearedPages.remove(key) }
         // The rules `work` states for the first page, in its order: a forum still signing in is

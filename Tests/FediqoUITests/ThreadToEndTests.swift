@@ -446,6 +446,52 @@ struct ThreadToEndTests {
         #expect(Self.pids(session.posts.standing(of: Self.ref)) == [2, 3, 4])
     }
 
+    @Test("A forum topic's kept replies are not search results; a conversation's answers are")
+    func keptRepliesAreNotSearched() async {
+        let session = await forumShell(FixtureHTTP(Self.threePages))
+        let unique = DiscuzPost(pid: 2, tid: Self.tid, author: "p", handle: "", body: "独一无二的词")
+        _ = await session.land([unique], host: Self.forum, tid: Self.tid)
+        await session.reloadFromStore()
+
+        #expect(await session.store.held(host: Self.forum, idPrefix: "discuz:").contains { $0.body == "独一无二的词" },
+                "kept on this device")
+        let search = ShellSearch()
+        search.open(from: nil, over: session.searchable)
+        await search.indexed()
+        search.text = "独一无二"
+        search.settle("独一无二")
+        #expect(session.searched(search, latest: nil)?.isEmpty == true, "a reply is no row a search can open")
+
+        // A microblog answer read in a thread is a post of its own, and a search finds it.
+        let (mastodon, item) = await conversationShell(FixtureHTTP(Self.cutShort))
+        await mastodon.conversations.open(item, in: mastodon)
+        await mastodon.reloadFromStore()  // what following the store does on the app's own
+        #expect(mastodon.searchable.contains { $0.body == "answer 10" })
+    }
+
+    @Test("Closing one thread stops its own page, and not the one opened in its place")
+    func closingStopsOnlyItsOwn() async {
+        let http = GatedHTTP(Self.threePages, holding: Self.page(2))
+        let guardian = hangGuard(http.gate)
+        defer { guardian.cancel() }
+        let session = await forumShell(http)
+        await session.posts.fetchReplies(Self.ref)
+        let reading = Task { await session.posts.more(Self.ref) }
+        #expect(await spun { await http.reached })
+
+        // Another thread's pane closing reaches nothing of this one.
+        let other = DummyItem(Note(
+            id: "discuz:\(Self.forum):\(Self.tid + 1)", source: Source(host: Self.forum, kind: .discuz),
+            author: "a", handle: "", body: "", postedAt: .distantPast, categories: []
+        ))
+        session.stopReadingFurther(of: other)
+        #expect(!session.posts.isHeldBack(Self.ref))
+
+        await http.gate.open()
+        await reading.value
+        #expect(Self.pids(session.posts.standing(of: Self.ref)) == [2, 3, 4], "its page landed")
+    }
+
     @Test("A stopped foot reads on when pressed, or when s is")
     func aStoppedFootReadsOnWhenPressed() async {
         let http = GatedHTTP(Self.threePages, holding: Self.page(2))
