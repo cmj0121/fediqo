@@ -343,18 +343,24 @@ final class ShellSession {
         heldNote(rowID).map(DummyItem.init)
     }
 
-    /// The store row one row id stands for, in `notes`. See `held(_:)`.
+    /// The store row one row id stands for: in `notes`, and **in what is held aside too** (#178).
+    /// See `held(_:)`.
     ///
-    /// **Never a post held aside** (#175): `notes` is what `ItemStore.all()` draws, and a search
-    /// hit, a thread's answer or a post under a hashtag is not in it. A place that shows those
-    /// reads them through `store.note(_:)`, which hands over every row this device holds.
+    /// A search hit the sources sent (#176) and an answer read in a thread (#177) are held aside
+    /// and drawn where they were found, and a press on one opens the conversation around it and
+    /// acts on it — which is this lookup. Found in `notes` only, the press opened nothing: the
+    /// pane drew the page under it, and the marks under the post acted on nothing. **Nothing here
+    /// puts a row in All**: `notes` stays what `ItemStore.all()` draws, and a row found here keeps
+    /// where it is held through every read and act, `Note.refreshed(over:)`'s rule. What `aside`
+    /// leaves out — a forum topic's kept replies, which are not threads — is not found here either.
     func heldNote(_ rowID: String) -> Note? {
         guard let key = NoteKey(rowID: rowID) else { return nil }
-        return notes.first { $0.source.host == key.host && $0.id == key.id }
+        let matches = { (note: Note) in note.source.host == key.host && note.id == key.id }
+        return notes.first(where: matches) ?? aside.first(where: matches)
     }
 
     /// The note behind a row, wherever this run holds it: a store row, or an answer read in an
-    /// open conversation, which #90 keeps out of the store.
+    /// open conversation this run has not adopted from the store yet.
     func note(ofRow rowID: String) -> Note? {
         heldNote(rowID) ?? conversations.note(rowID)
     }
