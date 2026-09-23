@@ -95,17 +95,37 @@ public struct MastodonAccount: Sendable {
     ///
     /// Throws what the read threw: this is one read, and a caller asked for exactly it.
     public func older(_ category: Category, than maxID: String) async throws -> [Note] {
-        guard let source = await source() else { return [] }
-        let path: String
-        switch category {
-        case .home: path = "/api/v1/timelines/home"
-        case .list(let id) where source.lists.contains(where: { $0.id == id }) && ListSubscription.isPathSegment(id):
-            path = "/api/v1/timelines/list/\(id)"
-        default: return []
-        }
+        guard let source = await source(), let path = Self.path(of: category, in: source) else { return [] }
         let notes = try await statuses(path, source: source, category: category, olderThan: maxID)
         try await ingest(notes)
         return notes
+    }
+
+    /// Home, or one list this source reads, read down from the place below `key` where posts may
+    /// be missing (#204), and landed with what it says of that place. Nothing where `key` carries
+    /// no such mark in it.
+    ///
+    /// Throws what the read threw — a stretch after the first once what came before it has landed.
+    public func readDown(_ category: Category, below key: NoteKey, at moment: Date = Date()) async throws {
+        guard let source = await source(), let path = Self.path(of: category, in: source),
+              let place = await store.missing(below: key, in: category)
+        else { return }
+        let down = try await MastodonReadOn.readDown(from: place) { maxID in
+            try await listed(path, source: source, category: category, query: try MastodonPage.older(than: maxID))
+        }
+        try Task.checkCancellation()
+        await store.land(down, below: key, of: category, at: moment, ifSourceHere: host)
+        if let stopped = down.stopped { throw stopped }
+    }
+
+    /// Where Home, or a list this source still reads, is asked. Nothing for anything else.
+    private static func path(of category: Category, in source: Source) -> String? {
+        switch category {
+        case .home: "/api/v1/timelines/home"
+        case .list(let id) where source.lists.contains(where: { $0.id == id }) && ListSubscription.isPathSegment(id):
+            "/api/v1/timelines/list/\(id)"
+        default: nil
+        }
     }
 
     private func source() async -> Source? {

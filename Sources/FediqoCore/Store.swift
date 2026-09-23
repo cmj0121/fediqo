@@ -335,6 +335,54 @@ public actor ItemStore {
         if moved { changed(shown: true, aside: false) }
     }
 
+    /// Where posts may be missing below `key` in `category`, as reading down from it needs it
+    /// (#204): the id it was listed under, and what is held of that timeline below it. Nothing
+    /// where `key` carries no such mark, or no id to read before.
+    public func missing(below key: NoteKey, in category: Category) -> MissingPlace? {
+        guard let marked = notes[key], marked.gaps.contains(TimelineGap(.mayBeMissing, in: category)),
+              let listed = marked.listed[category] ?? marked.statusID
+        else { return nil }
+        // Below it by the id its timeline listed it under, or by when it was posted where that
+        // timeline listed it under none — a row kept from before listings were (#201).
+        let below = notes.values.filter { note in
+            guard note.key != key, note.source.host == key.host, note.holding == .arrived,
+                  note.categories.contains(category)
+            else { return false }
+            return note.listed[category].map { StatusID.later(listed, than: $0) }
+                ?? (note.postedAt <= marked.postedAt)
+        }
+        return MissingPlace(
+            post: key, category: category, listed: listed, held: Set(below.map(\.key)),
+            floor: below.compactMap { $0.listed[category] }.max { StatusID.later($1, than: $0) }
+        )
+    }
+
+    /// One place posts may be missing, read down (#204), taken in as `land(_:of:ifSourceHere:)`
+    /// takes a read on — what came and what it says in the same step. The mark below `key` goes;
+    /// met, nothing takes its place; stopped short, it moves down to the oldest post read; told
+    /// there is nothing more, it settles there as of `moment`. Nothing but the posts where `key`
+    /// no longer carries the mark: a read meanwhile said something else of that place.
+    public func land(
+        _ down: ReadDown, below key: NoteKey, of category: Category, at moment: Date = Date(),
+        ifSourceHere raw: String
+    ) {
+        let host = raw.lowercased()
+        guard sourceList.contains(where: { $0.host == host }) else { return }
+        ingest(down.notes)
+        let mark = TimelineGap(.mayBeMissing, in: category)
+        guard notes[key]?.gaps.contains(mark) == true else { return }
+        notes[key]?.gaps.remove(mark)
+        switch down.end {
+        case .met:
+            break
+        case .further(let below):
+            notes[below]?.gaps.insert(mark)
+        case .settled(let below):
+            notes[below ?? key]?.gaps.insert(TimelineGap(.settled, in: category, since: moment))
+        }
+        changed(shown: true, aside: false)
+    }
+
     /// Lets go of one server: the source, the boards the reader picked on it, and the notes it
     /// carried here. Each source is its own rows, so this host's copy goes and the other source's
     /// copy of the same content stays (#10).
@@ -467,6 +515,34 @@ public actor ItemStore {
         }
         changed(shown: going.contains { $0.holding == .arrived }, aside: going.contains { $0.holding == .aside })
         return going.count
+    }
+
+    /// How many places say their source no longer has what lay there (#204) — what a press would
+    /// let go beside the posts `goneCount` counts.
+    public func settledCount() -> Int {
+        notes.values.reduce(0) { $0 + $1.gaps.filter { $0.kind == .settled }.count }
+    }
+
+    /// Lets go of every place settled at or before `cutoff`, or of every one where `cutoff` is nil
+    /// — `letGoneGo`'s wait and press, for the places a read down settled (#204). The mark goes
+    /// and the post it sits by stays. Returns how many went.
+    @discardableResult
+    public func letSettledGo(markedBy cutoff: Date? = nil) -> Int {
+        var went = 0
+        var aside = false
+        for (key, note) in notes {
+            let going = note.gaps.filter { gap in
+                guard gap.kind == .settled else { return false }
+                guard let cutoff, let since = gap.since else { return true }
+                return since <= cutoff
+            }
+            guard !going.isEmpty else { continue }
+            notes[key]?.gaps.subtract(going)
+            went += going.count
+            aside = aside || note.holding == .aside
+        }
+        if went > 0 { changed(shown: true, aside: aside) }
+        return went
     }
 
     /// One row, or nothing where this store does not hold it.

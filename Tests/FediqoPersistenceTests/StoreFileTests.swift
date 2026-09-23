@@ -72,6 +72,17 @@ struct StoreFileTests {
         #expect(loaded.first { $0.id == "2" }?.listed == marked.listed)
     }
 
+    /// #204: a place settled keeps the moment it was said, which the wait that lets it go counts from.
+    @Test("A settled place survives a relaunch with its moment")
+    func settledSurvivesRelaunch() async throws {
+        let file = try StoreFile(database: DatabaseQueue())
+        var marked = note(id: "2", categories: [.home])
+        let since = Date(timeIntervalSince1970: 1_750_000_000)
+        marked.gaps = [TimelineGap(.settled, in: .home, since: since)]
+        try await file.save(sources: [mastodon], notes: [marked])
+        #expect(try file.load().notes.first?.gaps == [TimelineGap(.settled, in: .home, since: since)])
+    }
+
     /// #177: a topic read to its end is there with the network off, which is a relaunch reading
     /// its replies back — their floor, their own date where the page gave one, and none where it
     /// did not, and the page each was read off.

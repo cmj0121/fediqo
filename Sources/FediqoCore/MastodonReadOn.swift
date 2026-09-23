@@ -36,6 +36,13 @@ import Foundation
 // anchor — and the newest stretch shares none of them, what lay between was not read, and posts
 // may be missing below its oldest. It is not read on from their ids instead: a post the reader
 // wrote is among them, and reading on from it is the hole this rule exists against.
+//
+// **Reaching where posts may be missing reads down from it** (#204), before the id the marked
+// post was listed under, a bounded stretch at a time, toward what is held below it. Meeting a post
+// held there — or an id at or below the newest held there — fills the hole, and the mark goes.
+// The bound reached first moves the mark down to the oldest post read. A source answering with
+// nothing settles it: what lay there is no longer there, which is said for good and let go as a
+// post deleted at its source is (#179).
 
 /// Mastodon's ids, compared and stepped as the numbers they are.
 public enum StatusID {
@@ -76,16 +83,78 @@ public struct TimelineGap: Hashable, Sendable {
         /// or failed a stretch later. Reaching it reads on.
         case newerRemain
         /// The source did not give back what lay below this one, and posts may be missing there.
+        /// Reaching it reads down (#204).
         case mayBeMissing
+        /// Read down, the source answered that it has nothing more below this one (#204): what lay
+        /// there is no longer there. Asks nothing again, and is let go as a post deleted at its
+        /// source is.
+        case settled
     }
 
     public let kind: Kind
     /// The timeline it is a gap of. A post Home and a list both carry can be whole in one.
     public let category: Category
+    /// When the source said it had nothing more there — a settled place's own moment, which the
+    /// wait that lets deleted posts go counts from, as it counts from `Note.goneSince`. Nothing on
+    /// the other two.
+    public let since: Date?
 
-    public init(_ kind: Kind, in category: Category) {
+    public init(_ kind: Kind, in category: Category, since: Date? = nil) {
         self.kind = kind
         self.category = category
+        self.since = since
+    }
+}
+
+/// A place posts may be missing, as reading down from it needs it (#204): `ItemStore.missing`.
+public struct MissingPlace: Sendable {
+    /// The post the mark sits against, and the timeline it is of.
+    public let post: NoteKey
+    public let category: Category
+    /// The id that timeline listed the post under: the first stretch is the one before it.
+    public let listed: String
+    /// The posts held of that timeline below it — what a read down meets to fill the hole.
+    public let held: Set<NoteKey>
+    /// The newest id among them. A read down listing at or below it has passed the hole, even
+    /// where the post under that id is one the source has since deleted.
+    public let floor: String?
+
+    public init(post: NoteKey, category: Category, listed: String, held: Set<NoteKey>, floor: String?) {
+        self.post = post
+        self.category = category
+        self.listed = listed
+        self.held = held
+        self.floor = floor
+    }
+
+    /// Whether `post`, read down, is one held below the mark or reaches down past them.
+    func meets(_ post: Listed) -> Bool {
+        held.contains(post.note.key) || floor.map { !StatusID.later(post.listed, than: $0) } == true
+    }
+}
+
+/// What reading down from a place posts may be missing brought (#204).
+public struct ReadDown: Sendable {
+    public enum End: Equatable, Sendable {
+        /// It met what this device holds: the hole is filled, and the mark goes.
+        case met
+        /// The bound stopped it first, or a stretch after the first failed: posts may still be
+        /// missing below the oldest it read, and the mark moves there.
+        case further(below: NoteKey)
+        /// The source had nothing more: what lay there is no longer there, below the oldest post
+        /// read — or below the marked post itself, where it read none.
+        case settled(below: NoteKey?)
+    }
+
+    /// Every post the read brought, newest first.
+    public var notes: [Note] = []
+    public var end: End
+    /// What failed a stretch after the first. What came before it is still the read above.
+    public var stopped: (any Error)?
+
+    public init(notes: [Note] = [], end: End) {
+        self.notes = notes
+        self.end = end
     }
 }
 
@@ -168,6 +237,48 @@ enum MastodonReadOn {
             last = newest.note.key
             guard posts.count >= limit else { return read }
             if stretch == bound - 1 { read.newerRemainAbove = newest.note.key }
+        }
+        return read
+    }
+
+    /// One timeline read down from a place posts may be missing (#204), toward what is held below
+    /// it: before the id the marked post was listed under, then before the oldest each stretch
+    /// brought, at most `bound` stretches. `older` asks the stretch before an id.
+    ///
+    /// **Meeting what is held ends it**: the hole is filled. **A stretch that comes back empty
+    /// ends it too**, and says the source has nothing more there. A short stretch does not: a
+    /// server that filters what it lists answers short and still has more, so only nothing is
+    /// nothing. With nothing held below the mark there is no hole to fill, and nothing is asked.
+    /// A first stretch that fails fails the read, and the mark stays as it was.
+    static func readDown(
+        from place: MissingPlace, bound: Int = bound, older: (String) async throws -> [Listed]
+    ) async throws -> ReadDown {
+        guard !place.held.isEmpty || place.floor != nil else { return ReadDown(end: .met) }
+        var cursor = place.listed
+        var reached: NoteKey?
+        var read = ReadDown(end: .settled(below: nil))
+        for stretch in 0..<bound {
+            let posts: [Listed]
+            do {
+                posts = try await older(cursor)
+            } catch where stretch > 0 && !ends(error) {
+                read.stopped = error
+                read.end = .further(below: reached ?? place.post)
+                return read
+            }
+            read.notes += posts.map(\.note)
+            if posts.contains(where: place.meets) {
+                read.end = .met
+                return read
+            }
+            // Nothing older than asked is nothing more there, whatever else a server sent back.
+            guard let oldest = oldest(posts.filter { StatusID.later(cursor, than: $0.listed) }) else {
+                read.end = .settled(below: reached)
+                return read
+            }
+            cursor = oldest.listed
+            reached = oldest.note.key
+            read.end = .further(below: oldest.note.key)
         }
         return read
     }

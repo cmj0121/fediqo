@@ -2,6 +2,8 @@ import FediqoCore
 import Foundation
 
 /// A post its source deleted: kept, marked, and let go on the reader's wait or press (#179).
+/// A place in a timeline whose source no longer has what lay there is let go the same way (#204):
+/// its mark goes, and the post it sits by stays.
 ///
 /// **The mark is the store's and nothing here draws it.** A row carries `goneSince` from the note
 /// it was built from, so the timeline, a thread, a search and a person's page all mark it by
@@ -38,33 +40,45 @@ extension ShellSession {
     }
 
     /// Lets go of what this device's wait says has waited long enough — the shorter of it and the
-    /// keep-for window (`GoneWait`). Nothing where neither is set. Returns how many went.
+    /// keep-for window (`GoneWait`). Nothing where neither is set. Returns what went: the posts,
+    /// and the places a read down settled (#204), which go by the same wait.
     @discardableResult
-    func letGoneGo(waitingDays days: Int?, keepingMonths months: Int?, from now: Date = Date()) async -> Int {
+    func letGoneGo(waitingDays days: Int?, keepingMonths months: Int?, from now: Date = Date()) async -> WentGone {
         guard let cutoff = GoneWait.cutoff(days: days, keepingMonths: months, from: now).cutoff else {
-            return 0
+            return WentGone()
         }
         return await letGoneGo(markedBy: cutoff)
     }
 
-    /// How many posts are marked gone from their source, held aside or not — what the press asks
-    /// about before it lets them go.
-    func goneHeld() async -> Int {
-        await store.goneCount()
+    /// What is marked gone from its source, held aside or not — the posts, and the places whose
+    /// source no longer has what lay there (#204). What the press asks about before it lets go.
+    func goneHeld() async -> WentGone {
+        WentGone(posts: await store.goneCount(), places: await store.settledCount())
     }
 
-    /// Lets go of every post marked gone from its source, now — the reader's press. Returns how
-    /// many went, which is what the press says back.
+    /// Lets go of everything marked gone from its source, now — the reader's press. Returns what
+    /// went, which is what the press says back.
     @discardableResult
-    func letAllGoneGo() async -> Int {
+    func letAllGoneGo() async -> WentGone {
         await letGoneGo(markedBy: nil)
     }
 
-    private func letGoneGo(markedBy cutoff: Date?) async -> Int {
-        let went = await store.letGoneGo(markedBy: cutoff)
-        guard went > 0 else { return 0 }
+    /// The posts first: a place on a post that goes goes with it, and is not counted twice.
+    private func letGoneGo(markedBy cutoff: Date?) async -> WentGone {
+        let posts = await store.letGoneGo(markedBy: cutoff)
+        let went = WentGone(posts: posts, places: await store.letSettledGo(markedBy: cutoff))
+        guard !went.isNone else { return went }
         await reloadFromStore()
         await persist?()
         return went
     }
+}
+
+/// What is marked gone from its source, counted (#179, #204): posts, and the places in a timeline
+/// whose source no longer has what lay there. Counted apart, so what the press says stays true.
+struct WentGone: Equatable, Sendable {
+    var posts = 0
+    var places = 0
+
+    var isNone: Bool { posts == 0 && places == 0 }
 }

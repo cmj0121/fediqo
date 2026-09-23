@@ -418,15 +418,22 @@ private struct ListedRow: Codable {
 private struct GapRow: Codable {
     var kind: String
     var category: CategoryRow
+    /// `TimelineGap.since` (#204): when a settled place was said, which the wait counts from.
+    /// Additive and optional for `NoteFacts.gaps`' reasons; an older build drops the kind anyway.
+    var since: Date?
 
     init(_ gap: TimelineGap) {
         kind = gap.kind.rawValue
         category = CategoryRow(gap.category)
+        since = gap.since
     }
 
+    /// Nothing for a settled place with no moment, which no wait could ever reach.
     var gap: TimelineGap? {
-        guard let kind = TimelineGap.Kind(rawValue: kind), let category = category.category else { return nil }
-        return TimelineGap(kind, in: category)
+        guard let kind = TimelineGap.Kind(rawValue: kind), let category = category.category,
+              kind != .settled || since != nil
+        else { return nil }
+        return TimelineGap(kind, in: category, since: kind == .settled ? since : nil)
     }
 }
 
