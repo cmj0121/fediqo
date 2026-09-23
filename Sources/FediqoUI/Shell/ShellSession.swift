@@ -258,6 +258,8 @@ final class ShellSession {
     @ObservationIgnored var drawnTimeline: DrawnTimeline?
     /// The person's page last drawn and what it was drawn from. See `heldPosts(of:)`.
     @ObservationIgnored var drawnPerson: HeldByPerson?
+    /// The tag's page last drawn and what it was drawn from. See `heldPosts(under:)`.
+    @ObservationIgnored var drawnTag: HeldTag?
     /// How many times the rules ran for the stream: the test's window on `drawnTimeline`.
     @ObservationIgnored var timelineEvaluations = 0
     /// Each tab's missing-rule mark as last worked out, so a redraw compiles no tab again.
@@ -339,8 +341,13 @@ final class ShellSession {
     /// the conversation the reader pressed for. The row id is split once and each note's key
     /// compared to it, so walking past a note builds nothing; the row is built once, for the one
     /// note that matched.
+    ///
+    /// **A row held aside too** (#176, #124): a search's find or a post under a tag is a row a
+    /// reader presses like any other, and the conversation it opens is looked up here.
     func held(_ rowID: String) -> DummyItem? {
-        heldNote(rowID).map(DummyItem.init)
+        if let drawn = heldNote(rowID) { return DummyItem(drawn) }
+        guard !aside.isEmpty, let key = NoteKey(rowID: rowID) else { return nil }
+        return aside.first { $0.source.host == key.host && $0.id == key.id }.map(DummyItem.init)
     }
 
     /// The store row one row id stands for, in `notes`. See `held(_:)`.

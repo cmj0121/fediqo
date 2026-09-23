@@ -92,6 +92,7 @@
 "shortcut.answer" = "Answer the post you are on, from inside its conversation";
 "shortcut.withdraw" = "Take back the post you are on, where you wrote it";
 "shortcut.person" = "Open whoever wrote the post you are on";
+"shortcut.tag" = "Open a hashtag of the post: what this device holds under it";
 "shortcut.reload" = "Reload this timeline, or the open thread";
 "shortcut.dismiss" = "Close what is in front, or unfocus";
 "shortcut.search" = "Search the posts this device holds";
@@ -658,6 +659,10 @@
 "person.held" = "%d posts here";
 "person.held.one" = "%d post here";
 "person.none" = "Nothing of theirs has reached this device yet.";
+"tag.asking" = "Asking %1$@ for %2$@…";
+"tag.failed" = "Could not ask %1$@ for %2$@.";
+"tag.retry" = "Try again";
+"tag.none" = "Nothing under %@ has reached this device.";
 "item.person.open" = "Open %@";
 
 /* One post more than one source carried (#114). The row is drawn as the first; these name the rest. */

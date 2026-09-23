@@ -1,3 +1,4 @@
+import FediqoCore
 import Foundation
 
 /// One step away from the stream: a conversation, somebody's page, or on a Mac a page read out of
@@ -28,6 +29,10 @@ enum ShellStep: Hashable, Sendable {
     /// stepped into a page from here, and what leaving it owes them. It is always the innermost
     /// step: nothing on the page is a row or a face, so nothing walks further from it.
     case link(URL)
+    /// What this device holds under one hashtag, opened by pressing it in a post's words (#124).
+    /// The tag as the author wrote it where it was pressed; which posts carry it is asked without
+    /// regard to case, as the servers this app reads treat a tag.
+    case tag(PostTag)
 }
 
 /// How far the reader has walked from the stream, and what each step is owed when it is left.
@@ -69,6 +74,12 @@ struct ShellWalk: Hashable, Sendable {
     var openedPerson: DummyPerson? {
         guard case .person(let person) = standing else { return nil }
         return person
+    }
+
+    /// The hashtag whose page is in front, where one is (#124).
+    var openedTag: PostTag? {
+        guard case .tag(let tag) = standing else { return nil }
+        return tag
     }
 
     /// The page read out of a post that is in front, where one is (#169).

@@ -59,6 +59,9 @@ public struct FediqoRootView: View {
     /// pane that owned it would be a pane the next surface to draw a post's words could not
     /// reach.
     @State private var linkReader = ShellReader()
+    /// Where a hashtag pressed in a post's words goes (#124): this view's walk, handed down as the
+    /// link reader is.
+    @State private var tags = ShellTags()
     /// Up once at launch when the index on disk was written by a newer build and this run left it
     /// alone: without it the reader sees an empty app and nothing to say why.
     @State private var storeIsNewer: Bool
@@ -165,6 +168,7 @@ public struct FediqoRootView: View {
                 // Before anything can be pressed: a page read out of a post is drawn in place on
                 // a Mac (#169), and the reader asks the walk here where it may be.
                 placeLinksInPage()
+                tags.placing = { tag, row in openTag(tag, from: row) }
                 await session.keep(months: prefs.keepMonths)
                 await session.reloadFromStore()
                 // The store has now said what is held, which is the first moment this launch can
@@ -371,6 +375,7 @@ public struct FediqoRootView: View {
             // has no identity, so it would differ on every pass of this view and invalidate every
             // line on the screen with it. See `ShellReader`.
             .environment(\.shellReader, linkReader)
+            .environment(\.shellTags, tags)
             .environment(\.locale, prefs.language.locale)
             .preferredColorScheme(prefs.theme.colorScheme)
             .dynamicTypeSize(prefs.fontSize.dynamicType)
@@ -498,7 +503,7 @@ public struct FediqoRootView: View {
             // One step back, whichever kind of step it was. The two lines used to be two
             // methods over two pieces of state; they are one walk now, and unwinding it in the
             // order the reader walked is the whole of what a press to leave does (#122).
-            case .person, .thread, .link: return leaveWalk()
+            case .person, .tag, .thread, .link: return leaveWalk()
             case .search, .shortcuts, .selection, nil: return false
             }
         case .reload:
@@ -525,6 +530,8 @@ public struct FediqoRootView: View {
             return onFocusedItem { session.askToWithdraw($0) }
         case .openAuthor:
             return openAuthor()
+        case .openTag:
+            return openTagFocused()
         case .compose:
             guard availability.canCompose else { return false }
             showingShortcuts = false
@@ -548,7 +555,7 @@ public struct FediqoRootView: View {
             case .shortcuts:
                 showingShortcuts = false
                 return true
-            case .person, .thread, .link: return leaveWalk()
+            case .person, .tag, .thread, .link: return leaveWalk()
             case .search:
                 closeSearch()
                 return true
@@ -584,6 +591,7 @@ public struct FediqoRootView: View {
         // (#122). That is what lets the order between them go unasked: `outermost` is handed at
         // most one of them, and `DummyCommand.canWalk` asks about the pair rather than either.
         case .person: walk.openedPerson != nil
+        case .tag: walk.openedTag != nil
         case .thread: walk.openedThread != nil
         case .link: walk.openedLink != nil
         case .search: search.isOpen
@@ -938,6 +946,8 @@ public struct FediqoRootView: View {
         switch walk.standing {
         case .person(let person):
             return session.heldPosts(of: person)
+        case .tag(let tag):
+            return session.heldPosts(under: tag)
         case .thread(let opened):
             guard let item = session.held(opened) else { return streamItems }
             return session.conversations.conversation(around: item).inOrder
@@ -965,7 +975,7 @@ public struct FediqoRootView: View {
         // A page read out of a post is somebody else's page, and its top is its own business.
         case .link:
             return false
-        case .person, .thread, nil:
+        case .person, .tag, .thread, nil:
             guard let first = currentListItems.first else { return false }
             selectedItemID = first.id
         }
@@ -1130,6 +1140,8 @@ public struct FediqoRootView: View {
         // rather than an oversight: what is drawn there is what this device already holds, and a
         // reload that went and got more of the world would be 0.5.0 arriving through `r`.
         case .person: return false
+        // A tag's page asks for itself as it opens, and says so there with a way to ask again.
+        case .tag: return false
         // A page read out of a post is not a timeline; there is nothing of ours on it to ask for.
         case .link: return false
         case .thread, .selection, nil: return true
@@ -1150,6 +1162,45 @@ public struct FediqoRootView: View {
         let opened = walk.openedThread.flatMap(session.held)
         session.reload.press(thread: opened, timeline: session.currentTimeline, in: session)
         return true
+    }
+
+    // MARK: - A hashtag — #124
+
+    /// A hashtag pressed in a post's words: what this device holds under it, over whatever it was
+    /// pressed on, and its sources asked for more.
+    ///
+    /// **The row the press was made on is lit first**, so the walk remembers that row and leaving
+    /// gives it back — the post the press was made from, on its row. A face does not do this,
+    /// because a face is not a post; the words a tag is written in are. Words that stand on no
+    /// row leave the lamp where it is.
+    private func openTag(_ tag: PostTag, from row: String?) -> Bool {
+        guard Self.canWalk(place: place, open: openLayers) else { return false }
+        if let row { selectedItemID = row }
+        guard walk.walk(to: .tag(tag), from: selectedItemID) else { return false }
+        let timeline = session.currentTimeline
+        Task { await session.reload.tag(tag, timeline: timeline, in: session) }
+        return true
+    }
+
+    /// `t` — a hashtag of the post the lamp is on (#124): the press a finger makes on its pill,
+    /// from the keyboard. The first the post carries that is not the page already in front, so on
+    /// a tag's page `t` goes on to the post's other tag rather than standing still. Refused where
+    /// the post is covered and its words are not drawn, as its pills are not.
+    private func openTagFocused() -> Bool {
+        guard Self.canWalk(place: place, open: openLayers) else { return false }
+        return onFocusedItem { item in
+            guard let tag = Self.tagToOpen(in: item, lifted: decks.isLifted(item.id), standing: walk.openedTag)
+            else { return false }
+            return openTag(tag, from: item.id)
+        }
+    }
+
+    /// Which of a post's tags `t` opens, given whether its cover is lifted and the tag in front.
+    static func tagToOpen(in item: DummyItem, lifted: Bool, standing: PostTag?) -> PostTag? {
+        guard !item.covered || lifted else { return nil }
+        return PostTag.found(in: item.body).first { tag in
+            standing.map { !HeldUnderTag.same($0, tag) } ?? true
+        }
     }
 
     // MARK: - Whoever wrote it — #99
@@ -1206,6 +1257,8 @@ public struct FediqoRootView: View {
         // The page read out of a post goes with its step, and the page under it — never torn
         // down — is simply in front again (#169).
         if case .link = left.step { linkReader.close() }
+        // A tag's ask goes with its page (#124).
+        if case .tag = left.step { session.reload.endTag() }
         selectedItemID = left.lamp
         return true
     }
@@ -1222,6 +1275,7 @@ public struct FediqoRootView: View {
     /// and a reading left open would be presented as a sheet instead.
     private func clearWalk() {
         if walk.openedLink != nil { linkReader.close() }
+        session.reload.endTag()
         walk.clear()
     }
 

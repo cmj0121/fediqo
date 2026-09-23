@@ -145,6 +145,16 @@ extension ShellSession {
         return items
     }
 
+    /// What this device holds under one hashtag, newest first — every timeline's rows and what
+    /// is held aside alike (#124) — kept until either changes, for `heldPosts(of:)`'s reason.
+    func heldPosts(under tag: PostTag) -> [DummyItem] {
+        let key = HeldTag.Key(tag: HeldUnderTag.folded(tag), heldRevision: heldRevision)
+        if let drawnTag, drawnTag.key == key { return drawnTag.items }
+        let items = HeldUnderTag.held(under: tag, in: searchable)
+        drawnTag = HeldTag(key: key, items: items)
+        return items
+    }
+
     /// What this device holds of one person, newest first — `DummyPerson.held(of:in:)`, kept
     /// until the notes change, because the page and the keys each read it on every redraw and
     /// every one of those used to walk everything held.

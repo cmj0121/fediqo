@@ -138,6 +138,35 @@ struct TimelinePane: View {
                 )
                 // One pane per person, so opening a second face from inside one draws afresh.
                 .id(person.id)
+            case .tag(let tag):
+                TagPane(
+                    tag: tag,
+                    items: session.heldPosts(under: tag),
+                    asking: session.reload.tagAsking,
+                    failed: session.reload.tagFailed,
+                    catalogues: session.emoji,
+                    catalogueSettled: false,
+                    posts: session.posts,
+                    selectedID: $selectedID,
+                    marks: markBinding,
+                    acting: acting,
+                    decks: $decks,
+                    playback: playback,
+                    onPlayRow: onPlayRow,
+                    onViewRow: onViewRow,
+                    onTurnRow: onTurnRow,
+                    onOpenThread: onOpenThread,
+                    onOpenPerson: onOpenPerson,
+                    // Asked again of the timeline in front, as the press asked it.
+                    onRetry: {
+                        let timeline = session.currentTimeline
+                        Task { await session.reload.tag(tag, timeline: timeline, in: session) }
+                    },
+                    jumpToTop: jumpToTop,
+                    onToast: showToast,
+                    onBack: onBack
+                )
+                .id(HeldUnderTag.folded(tag))
             case .thread(let id):
                 // A root this device no longer holds draws the stream instead, which is the same
                 // answer the pane gave when it looked the root up among the timeline's own rows.
