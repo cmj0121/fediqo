@@ -141,11 +141,12 @@ struct TimelinePane: View {
             case .tag(let tag):
                 TagPane(
                     tag: tag,
-                    items: session.heldPosts(under: tag),
+                    items: session.heldPosts(under: tag, latest: prefs.latestDate),
                     // What the ask says only where it is this tag's: another tag's, or one left
                     // behind, is not this page's to say.
                     asking: session.reload.tagAsk?.tag == tag ? session.reload.tagAsking : [],
                     failed: session.reload.tagAsk?.tag == tag ? session.reload.tagFailed : [],
+                    reach: session.reload.tagAsk?.tag == tag ? session.reload.tagAsk?.reach.sentence : nil,
                     catalogues: session.emoji,
                     catalogueSettled: false,
                     posts: session.posts,
@@ -202,17 +203,19 @@ struct TimelinePane: View {
                     // One pane per thread, so going back from a nested one draws its parent
                     // afresh.
                     .id(opened.id)
-                    // **The ask is the pane opening** — #90. A microblog thread is one request
-                    // about the post the reader has just pressed Return on, so nothing asks them
-                    // a second time for a thing they have already said they want. It is the
-                    // pane's own `.task`, so closing the thread cancels a read still on the wire,
-                    // and asked once per post per run: reopening draws what is already held.
-                    .task(id: opened.id) { await session.conversations.open(opened, in: session) }
+                    // **The ask is the pane opening** — #90, and since #198 for a forum topic's
+                    // replies too. A thread is what the reader has just pressed Return on, so
+                    // nothing asks them a second time for a thing they have already said they
+                    // want; asked once per post per run, so reopening draws what is already held.
+                    // And from here it is the thread in front, which the wait asks again.
+                    .task(id: opened.id) { await session.reload.opened(opened, in: session) }
                     // What `r` last said about this thread goes with it (#175): the timeline under
                     // it does not go on saying a thread nobody is reading could not be reloaded.
-                    // And a page still on its way for it stops (#177): nobody is reading on.
+                    // And a page still on its way for it stops (#177): nobody is reading on. Nor
+                    // is it asked again on the wait any more (#198).
                     .onDisappear {
                         session.reload.forget(.thread)
+                        session.reload.left(opened)
                         session.stopReadingFurther(of: opened)
                     }
                 } else {
@@ -261,16 +264,21 @@ struct TimelinePane: View {
         .onChange(of: session.timelineID) { left, arrived in
             // Another list, so the row the last one had at the top means nothing here.
             session.scrolledTop = nil
+            // A tag's page stays over the switch, and its lamp and the place under it are
+            // `FediqoRootView.timelineSwitched`'s (#197): only the search's parked post is filed here.
+            let onTag = if case .tag = standing { true } else { false }
             if !searching {
-                selectedID = session.timelinePlaces.switched(
-                    from: left, to: arrived, standingOn: selectedID, among: items.map(\.id)
-                )
+                if !onTag {
+                    selectedID = session.timelinePlaces.switched(
+                        from: left, to: arrived, standingOn: selectedID, among: items.map(\.id)
+                    )
+                }
             } else {
                 let shown = session.timelineItems(latest: prefs.latestDate).map(\.id)
                 search?.switched { parked in
                     session.timelinePlaces.switched(from: left, to: arrived, standingOn: parked, among: shown)
                 }
-                if let selectedID, !items.contains(where: { $0.id == selectedID }) {
+                if !onTag, let selectedID, !items.contains(where: { $0.id == selectedID }) {
                     self.selectedID = nil
                 }
                 // A search sent to the last timeline's sources is sent to this one's (#176).
@@ -278,7 +286,8 @@ struct TimelinePane: View {
                 let pattern = search?.pattern ?? ""
                 Task { await session.reload.searchSwitched(to: now, pattern: pattern, in: session) }
             }
-            // The walk ends on the same change, where it is held: `FediqoRootView` clears it.
+            // The walk ends on the same change, where it is held: `FediqoRootView` clears it, all
+            // but a tag's page in front, which stays and asks the new timeline (#197).
         }
     }
 

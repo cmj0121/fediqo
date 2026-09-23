@@ -676,6 +676,10 @@
 "tag.failed" = "Could not ask %1$@ for %2$@.";
 "tag.retry" = "Try again";
 "tag.none" = "Nothing under %@ has reached this device.";
+"tag.reach.asked" = "Asked %@.";
+"tag.reach.partial" = "Not asked, as this timeline shows only some of what they send: %@.";
+"tag.reach.tagless" = "Not asked, as they keep no tags: %@.";
+"tag.reach.tagsOff" = "Nothing to ask, as tags are turned off on %@.";
 "item.person.open" = "Open %@";
 
 /* One post more than one source carried (#114). The row is drawn as the first; these name the rest. */

@@ -110,10 +110,11 @@ extension ShellReload {
     /// The next stretch of `query`'s reads, from its own sources only — the timeline in front,
     /// neared its end. In the background: nothing waits on it, and a stretch already asked, or at
     /// its source's end, is not asked. Nothing while the timeline editor is up, or while another
-    /// ask for more is on its way; and no forum while `r` or the wait is reading.
+    /// ask for more is on its way; and no forum while `r`, the wait, or an open thread's renewal
+    /// is reading (#198).
     func more(_ query: TimelineQuery, in session: ShellSession) async {
         guard !asking.contains(.more), session.editing == nil else { return }
-        let readingNewest = asking.contains(.timeline) || asking.contains(.held)
+        let readingNewest = !asking.isDisjoint(with: [.timeline, .held, .renew])
         let due = Self.due(query, in: session, stretches: stretches)
             .filter { !readingNewest || $0.source.kind == .mastodon }
         guard !due.isEmpty else { return }

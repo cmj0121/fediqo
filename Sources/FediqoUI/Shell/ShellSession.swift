@@ -44,7 +44,7 @@ final class ShellSession {
     let mastodon: MastodonSessions
 
     /// One thread's opening post, fetched when its row is scrolled to — D30 — and the rest of
-    /// the topic on request — D31.
+    /// the topic as its thread opens — D31, asked at once since #198.
     ///
     /// On the session for the reason the two picture caches and `forums` are: **what Clear
     /// presses and what Usage draws have to be the same object**. It is built here rather
@@ -1956,7 +1956,28 @@ final class ShellSession {
             aside = await store.aside().filter { DiscuzPost(held: $0) == nil }
             adoptedAside = asideRevision
         }
+        if heldRevision != renewedConversations {
+            renewConversation()
+            renewedConversations = heldRevision
+        }
         rebuildQueries()
+    }
+
+    /// `heldRevision` as the open conversations last drew from what is held.
+    @ObservationIgnored private var renewedConversations: Int?
+
+    /// The conversation in front drawn again from what this device holds of its posts (#193): the
+    /// store's copy of each, in the thread's own order. Only the thread in front, and only the
+    /// posts it draws are looked for, so an adopt with no thread open walks nothing; a thread left
+    /// is drawn again as it opens (`ShellReload.opened`).
+    func renewConversation() {
+        guard let front = reload.inFront else { return }
+        let wanted = conversations.drawnKeys(around: front.id)
+        guard !wanted.isEmpty else { return }
+        var held: [NoteKey: Note] = [:]
+        for note in notes where wanted.contains(note.key) { held[note.key] = note }
+        for note in aside where wanted.contains(note.key) { held[note.key] = note }
+        conversations.renew(front.id, from: held)
     }
 
     /// The store's `asideRevision` as the last adopt read what is held aside.

@@ -31,9 +31,10 @@ import SwiftUI
 // found by a search, drawn by no timeline — and the search, which reads the store and nothing
 // else, renews as it lands. A new search ends the last one's ask; closing the search ends it too.
 //
-// **The fifth is a hashtag's** (#124): a tag pressed asks the Mastodons of the timeline in front
-// for their posts under it, held aside as a search's are. It is said on the tag's own page, where
-// the answer would be, and not in the toast; leaving the page ends it.
+// **The fifth is a hashtag's** (#124): a tag pressed asks the sources of the timeline in front that
+// keep tags — a Mastodon, a Discourse with tagging on (#197) — for their posts under it, held aside
+// as a search's are. It is said on the tag's own page, where the answer would be, and not in the
+// toast; leaving the page ends it, and switching timeline under it asks the new one's sources.
 
 /// One reload of each kind at a time, and the sources the last one could not read.
 @MainActor
@@ -50,21 +51,24 @@ final class ShellReload {
         case held
         /// A search's words, asked of the sources of the timeline in front that can be searched.
         case search
-        /// A hashtag's posts, asked of the Mastodons of the timeline in front (#124).
+        /// A hashtag's posts, asked of the sources of the timeline in front that keep tags (#197).
         case tag
         /// The next, older stretch of the timeline in front, asked as the reader nears its end
         /// (#87), or one timeline read on from a place that says more belong there (#201). See
         /// `ShellMore.swift` and `ShellReadOn.swift`.
         case more
+        /// The thread open in front, asked again on the wait (#198). Said at the thread's own
+        /// foot, not in the toast. See `ShellRenewal.swift`.
+        case renew
     }
 
     /// The kinds of reload on the wire now. A second `r` of a kind already here starts nothing.
     private(set) var asking: Set<Ask> = []
     /// Whether any reload the toast speaks for is on the wire. Not a tag's ask, which its own
-    /// page speaks for (#124).
-    var running: Bool { !asking.subtracting([.tag]).isEmpty }
+    /// page speaks for (#124), nor an open thread's renewal, which its foot does (#198).
+    var running: Bool { !asking.subtracting([.tag, .renew]).isEmpty }
     /// Whether the only reload on the wire is the wait's, which nobody pressed for (#95).
-    var onlyWaiting: Bool { asking.subtracting([.tag]) == [.held] }
+    var onlyWaiting: Bool { asking.subtracting([.tag, .renew]) == [.held] }
     /// The hosts the last reload of each kind could not read, the timeline's first and each in
     /// the order they were asked — a host both missed named once.
     var failed: [String] {
@@ -109,6 +113,11 @@ final class ShellReload {
     @ObservationIgnored var deadline: Duration = .seconds(30)
     /// Where each stretch a listing reads toward its end has got to (#87).
     @ObservationIgnored var stretches = ShellStretches()
+    /// The thread open in front of this window, which the wait asks again (#198). Nothing with no
+    /// thread in front. See `ShellRenewal.swift`.
+    @ObservationIgnored var inFront: DummyItem?
+    /// The thread whose renewal is on the wire, so the pane leaving ends its own and no other.
+    @ObservationIgnored var renewing: String?
 
     /// Each running reload's work, and its waiter — resumed when the work ends or is stopped.
     @ObservationIgnored private var runs: [Ask: Run] = [:]
@@ -164,7 +173,9 @@ final class ShellReload {
     /// A search's ask says it is on its way, and afterwards which sources it could not search, in
     /// the same line and after everything a reload has to say (#176).
     var line: String? {
-        if asking.contains(where: { $0 != .search && $0 != .tag }) { return L10n.t("timeline.reload.progress") }
+        if asking.contains(where: { $0 != .search && $0 != .tag && $0 != .renew }) {
+            return L10n.t("timeline.reload.progress")
+        }
         if asking.contains(.search), let reach {
             return String(format: L10n.t("search.asking"), reach.asked.joined(separator: ", "))
         }
@@ -295,44 +306,119 @@ final class ShellReload {
         let query: TimelineQuery
     }
 
-    /// The tag whose page asked its sources, and which it asked (#124). Nothing with no such page.
+    /// The tag whose page asked its sources, the timeline it asked them for, and which it asked
+    /// and which it did not (#124, #197). Nothing with no such page.
     private(set) var tagAsk: TagAsk?
     /// The sources the tag's ask could not reach.
     var tagFailed: [String] { failures[.tag] ?? [] }
     /// The sources the tag's ask is waiting on now, or nothing once it has finished.
-    var tagAsking: [String] { asking.contains(.tag) ? tagAsk?.asked ?? [] : [] }
+    var tagAsking: [String] { asking.contains(.tag) ? tagAsk?.reach.asked ?? [] : [] }
+    /// What the sources sent under each tag this run, by the tag as `HeldUnderTag` folds it
+    /// (#197). A forum's topic carries its tags beside its words and not in them, so the page
+    /// finds what a source filed under the tag by this as well as by the words.
+    private(set) var sentUnderTag: [String: Set<NoteKey>] = [:]
+    /// The forums that said this run that they keep no tags: not asked again until the next.
+    @ObservationIgnored private var tagsTurnedOff: Set<String> = []
 
     struct TagAsk: Equatable, Sendable {
         let tag: PostTag
-        let asked: [String]
+        let timeline: TimelineQuery
+        let reach: TagReach
     }
 
-    /// A tag pressed: the Mastodons of `query`'s sources asked for their posts under `tag`, each
-    /// landing — held aside — as it answers, so what this device held is on the page at once and
-    /// what they send joins it (#124). A tag's timeline is public where the server's are, so a
-    /// source is asked as the reader where signed in and unsigned otherwise. A forum has no such
-    /// page this app reads, and is not asked. Ends the last tag's ask first.
+    /// Which of the timeline's sources a tag's page asked, and why each of the rest was not (#197)
+    /// — said on the page, so what it shows says where it came from, as a search's reach does.
+    struct TagReach: Equatable, Sendable {
+        /// Asked, in the timeline's order.
+        let asked: [String]
+        /// Read by the timeline for only some of their categories.
+        let partial: [String]
+        /// Of a kind that keeps no tags of its own.
+        let tagless: [String]
+        /// Forums that said they have tagging turned off.
+        let tagsOff: [String]
+
+        /// Nothing where the timeline has no source at all.
+        var sentence: String? {
+            let said = [
+                (asked, "tag.reach.asked"), (partial, "tag.reach.partial"),
+                (tagless, "tag.reach.tagless"), (tagsOff, "tag.reach.tagsOff"),
+            ].filter { !$0.0.isEmpty }.map { String(format: L10n.t($0.1), $0.0.joined(separator: ", ")) }
+            return said.isEmpty ? nil : said.joined(separator: " ")
+        }
+
+        /// **A tag's page is a search for a tag**, so a source is asked only where a search's
+        /// finds could show: never one the timeline reads only some categories of, since what
+        /// arrives under a tag arrives through none (`SearchReach.of`'s reason).
+        ///
+        /// **And only where the tag is the source's own idea.** A Mastodon keeps a timeline per
+        /// tag, public where its timelines are, so it is asked signed in or not; a Discourse
+        /// files topics under tags where the forum has tagging on, and says so when asked. A
+        /// Discuz! has no tags, and reading a tag as a word to search its text for is a search,
+        /// not this.
+        @MainActor
+        static func of(_ asks: [FetchAsk], in session: ShellSession, tagsOff: Set<String>) -> TagReach {
+            var asked: [String] = [], partial: [String] = [], tagless: [String] = [], off: [String] = []
+            for ask in asks {
+                switch (ask.categories, session.sources.first { $0.host == ask.host }?.kind) {
+                case (.some, _): partial.append(ask.host)
+                case (nil, .mastodon): asked.append(ask.host)
+                case (nil, .discourse) where tagsOff.contains(ask.host): off.append(ask.host)
+                case (nil, .discourse): asked.append(ask.host)
+                default: tagless.append(ask.host)
+                }
+            }
+            return TagReach(asked: asked, partial: partial, tagless: tagless, tagsOff: off)
+        }
+    }
+
+    /// A tag pressed: the sources of `query` that keep tags asked for their posts under `tag`,
+    /// each landing — held aside — as it answers, so what this device held is on the page at once
+    /// and what they send joins it (#124). Which are asked is `TagReach.of`'s (#197), and a forum
+    /// that answers that it keeps no tags is said to. Ends the last tag's ask first.
     func tag(_ tag: PostTag, timeline query: TimelineQuery, in session: ShellSession) async {
         endTag()
-        let hosts = CompiledTimeline(query.definition(among: session.written), sources: session.sources)
-            .sourcesToAsk().map(\.host)
-            .filter { host in session.sources.first { $0.host == host }?.kind == .mastodon }
-        tagAsk = TagAsk(tag: tag, asked: hosts)
-        guard !hosts.isEmpty else { return }
+        let asks = CompiledTimeline(query.definition(among: session.written), sources: session.sources)
+            .sourcesToAsk()
+        let reach = TagReach.of(asks, in: session, tagsOff: tagsTurnedOff)
+        tagAsk = TagAsk(tag: tag, timeline: query, reach: reach)
+        guard !reach.asked.isEmpty else { return }
         await run(.tag) {
-            var missed: Set<String> = []
-            await withTaskGroup(of: (String, Bool).self) { group in
-                for host in hosts {
+            var came: [String: Tagged] = [:]
+            await withTaskGroup(of: (String, Tagged).self) { group in
+                for host in reach.asked {
                     group.addTask { (host, await self.under(tag, on: host, in: session)) }
                 }
-                for await (host, came) in group {
-                    if !came { missed.insert(host) }
+                for await (host, answer) in group {
+                    came[host] = answer
                     await session.reloadFromStore()
                 }
             }
             guard !Task.isCancelled else { return }
-            self.failures[.tag] = hosts.filter(missed.contains)
+            self.failures[.tag] = reach.asked.filter { came[$0] == .missed }
+            let off = reach.asked.filter { came[$0] == .tagsOff }
+            guard !off.isEmpty else { return }
+            // Asked, and answered that there are no tags to ask for: said as such, not as asked.
+            self.tagsTurnedOff.formUnion(off)
+            self.tagAsk = TagAsk(tag: tag, timeline: query, reach: TagReach(
+                asked: reach.asked.filter { !off.contains($0) }, partial: reach.partial,
+                tagless: reach.tagless, tagsOff: reach.tagsOff + off
+            ))
         }
+    }
+
+    /// The timeline under an open tag's page changed (#197): the tag is asked again of the new
+    /// one's sources, and the reach follows. `searchSwitched`'s guard: a switch answered late —
+    /// another since — asks nothing of a timeline no longer in front.
+    func tagSwitched(to query: TimelineQuery, in session: ShellSession) async {
+        guard let last = tagAsk, last.timeline != query, query == session.currentTimeline else { return }
+        await tag(last.tag, timeline: query, in: session)
+    }
+
+    private enum Tagged: Sendable {
+        case answered
+        case missed
+        case tagsOff
     }
 
     /// The tag's page left: its ask ends where it is, and what it said goes.
@@ -342,14 +428,22 @@ final class ShellReload {
         tagAsk = nil
     }
 
-    /// One Mastodon asked for its posts under `tag`, what it sent held aside. Whether it answered.
-    private func under(_ tag: PostTag, on host: String, in session: ShellSession) async -> Bool {
-        guard let source = session.sources.first(where: { $0.host == host }) else { return false }
+    /// One source asked for its posts under `tag`, what it sent held aside and remembered as sent
+    /// under it. A forum's topics land as the rows its front page draws, under the same ids, so a
+    /// topic on both is one row.
+    private func under(_ tag: PostTag, on host: String, in session: ShellSession) async -> Tagged {
+        guard let source = session.sources.first(where: { $0.host == host }) else { return .missed }
         let stamp = Source(host: host, kind: source.kind)
         let name = SourceWork.Name.called(tag.text)
         do {
             let notes: [Note]
-            if let door = session.mastodon.authorized(host: host, within: deadline, for: .timeline, name: name) {
+            if source.kind == .discourse {
+                let http = timed(transport(host, in: session), for: .timeline, name: name, in: session)
+                guard case .topics(let topics) = try await DiscourseClient(http: http, host: host)
+                    .topics(under: tag, source: stamp)
+                else { return .tagsOff }
+                notes = topics
+            } else if let door = session.mastodon.authorized(host: host, within: deadline, for: .timeline, name: name) {
                 notes = try await asReader(host) { try await MastodonTag(door: door).posts(under: tag, source: stamp) }
             } else {
                 let http = timed(session.http, for: .timeline, name: name, in: session)
@@ -357,12 +451,13 @@ final class ShellReload {
             }
             try Task.checkCancellation()
             await session.store.hold(notes, ifSourceHere: host)
-            return true
+            sentUnderTag[HeldUnderTag.folded(tag), default: []].formUnion(notes.map(\.key))
+            return .answered
         } catch MastodonAuthError.signedOut {
             session.mastodon.endedByServer(host: host)
-            return false
+            return .missed
         } catch {
-            return Cancellation.happened(error)
+            return Cancellation.happened(error) ? .answered : .missed
         }
     }
 
@@ -436,19 +531,35 @@ final class ShellReload {
     /// **One clock per store, not per window.** Every window of the app reads the one store, and
     /// each runs this; the wait is the device's, so only the window that asked first asks
     /// (`WaitKeeper`), and the rest renew from what it lands. It closing hands the clock on.
+    ///
+    /// **And the threads open in front, on the same clock** (#198). Each window's open thread is
+    /// asked again by whichever window keeps the wait, once its sources have been — after, and
+    /// not beside, so a forum is not asked for its boards and a topic's page at once. A window
+    /// whose loop ends takes its thread off the round with it.
     func keepAsking(
         every wait: Duration, in session: ShellSession,
         sleep: (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
     ) async {
         let me = UUID()
-        defer { WaitKeeper.release(session.store, from: me) }
+        WaitKeeper.join(session.store, as: me) { [weak self, weak session] asked in
+            guard let self, let session else { return nil }
+            return await self.renew(in: session, asked: asked)
+        }
+        defer {
+            WaitKeeper.release(session.store, from: me)
+            WaitKeeper.leave(session.store, as: me)
+        }
         while true {
             do { try await sleep(wait) } catch { return }
             guard WaitKeeper.claim(session.store, for: me) else { continue }
             await withTaskCancellationHandler {
                 await held(in: session)
+                await WaitKeeper.renewThreads(on: session.store)
             } onCancel: {
-                Task { @MainActor in self.end(.held) }
+                Task { @MainActor in
+                    self.end(.held)
+                    self.end(.renew)
+                }
             }
         }
     }
@@ -580,10 +691,11 @@ final class ShellReload {
     /// land. The ask on a wait goes on: nobody started it, and Esc has a thread or a search to
     /// close instead of being spent on it once a minute (#95). A search's goes when Esc closes
     /// the search (`endSearch`). Nor the ask for more: scrolling started it, not a key (#87).
-    /// Nor a tag's: leaving its page ends it (#124).
+    /// Nor a tag's: leaving its page ends it (#124). Nor an open thread's renewal, which is the
+    /// wait's and ends as the thread is left (#198).
     @discardableResult
     func stop() -> Bool {
-        let pressed = asking.subtracting([.held, .search, .tag, .more])
+        let pressed = asking.subtracting([.held, .search, .tag, .more, .renew])
         guard !pressed.isEmpty else { return false }
         halted.formUnion(pressed)
         for (ask, run) in runs where pressed.contains(ask) {
@@ -620,6 +732,9 @@ final class ShellReload {
             // what it had not landed does not land, and the next scroll asks again.
             end(.more)
         }
+        // `r` reads what a renewal is reading, so the renewal ends rather than ask one forum
+        // beside it (#198); the next wait asks again.
+        if ask == .timeline || ask == .thread { end(.renew) }
         await withCheckedContinuation { continuation in
             let work = Task { @MainActor in
                 await body()
@@ -631,7 +746,7 @@ final class ShellReload {
 
     /// Ends `ask`'s run, if one is running, without saying it was stopped: nobody stopped it,
     /// its window went (#95).
-    private func end(_ ask: Ask) {
+    func end(_ ask: Ask) {
         guard let run = runs[ask] else { return }
         run.work.cancel()
         finish(ask, run.generation)
@@ -657,6 +772,8 @@ final class ShellReload {
         // None: its own page says it, and the toast is not the tag's.
         case .tag: []
         case .more: [.timeline]
+        // None: the thread's foot says it, and the toast is not the thread's.
+        case .renew: []
         }
     }
 
@@ -1011,6 +1128,36 @@ enum WaitKeeper {
     static func release(_ store: ItemStore, from me: UUID) {
         let key = ObjectIdentifier(store)
         if keepers[key] == me { keepers[key] = nil }
+    }
+
+    /// Each window's way to renew the thread it has open, per store (#198) — every window's, the
+    /// keeper's own among them, so a thread open in a window that does not keep the clock is
+    /// asked again on the one that does.
+    private static var renewers: [ObjectIdentifier: [UUID: Renewer]] = [:]
+
+    /// One window's renewal: handed what this round has asked already, and saying what it asked.
+    typealias Renewer = @MainActor (_ asked: Set<String>) async -> String?
+
+    /// `me`'s window, on `store`'s round of open threads while its loop runs.
+    static func join(_ store: ItemStore, as me: UUID, renew: @escaping Renewer) {
+        renewers[ObjectIdentifier(store), default: [:]][me] = renew
+    }
+
+    /// `me`'s loop ended: its thread is off the round.
+    static func leave(_ store: ItemStore, as me: UUID) {
+        let key = ObjectIdentifier(store)
+        renewers[key]?[me] = nil
+        if renewers[key]?.isEmpty == true { renewers[key] = nil }
+    }
+
+    /// Every window's open thread on `store`, asked again one window after the other — a thread
+    /// open in two windows asked once, and the second drawn from what the first landed.
+    static func renewThreads(on store: ItemStore) async {
+        var asked: Set<String> = []
+        for renew in Array((renewers[ObjectIdentifier(store)] ?? [:]).values) {
+            guard !Task.isCancelled else { return }
+            if let id = await renew(asked) { asked.insert(id) }
+        }
     }
 }
 
