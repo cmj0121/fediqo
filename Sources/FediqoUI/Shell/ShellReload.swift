@@ -55,15 +55,18 @@ final class ShellReload {
         /// The next, older stretch of the timeline in front, asked as the reader nears its end
         /// (#87). See `ShellMore.swift`.
         case more
+        /// The thread open in front, asked again on the wait (#198). Said at the thread's own
+        /// foot, not in the toast. See `ShellRenewal.swift`.
+        case renew
     }
 
     /// The kinds of reload on the wire now. A second `r` of a kind already here starts nothing.
     private(set) var asking: Set<Ask> = []
     /// Whether any reload the toast speaks for is on the wire. Not a tag's ask, which its own
-    /// page speaks for (#124).
-    var running: Bool { !asking.subtracting([.tag]).isEmpty }
+    /// page speaks for (#124), nor an open thread's renewal, which its foot does (#198).
+    var running: Bool { !asking.subtracting([.tag, .renew]).isEmpty }
     /// Whether the only reload on the wire is the wait's, which nobody pressed for (#95).
-    var onlyWaiting: Bool { asking.subtracting([.tag]) == [.held] }
+    var onlyWaiting: Bool { asking.subtracting([.tag, .renew]) == [.held] }
     /// The hosts the last reload of each kind could not read, the timeline's first and each in
     /// the order they were asked — a host both missed named once.
     var failed: [String] {
@@ -108,6 +111,11 @@ final class ShellReload {
     @ObservationIgnored var deadline: Duration = .seconds(30)
     /// Where each stretch a listing reads toward its end has got to (#87).
     @ObservationIgnored var stretches = ShellStretches()
+    /// The thread open in front of this window, which the wait asks again (#198). Nothing with no
+    /// thread in front. See `ShellRenewal.swift`.
+    @ObservationIgnored var inFront: DummyItem?
+    /// The thread whose renewal is on the wire, so the pane leaving ends its own and no other.
+    @ObservationIgnored var renewing: String?
 
     /// Each running reload's work, and its waiter — resumed when the work ends or is stopped.
     @ObservationIgnored private var runs: [Ask: Run] = [:]
@@ -163,7 +171,9 @@ final class ShellReload {
     /// A search's ask says it is on its way, and afterwards which sources it could not search, in
     /// the same line and after everything a reload has to say (#176).
     var line: String? {
-        if asking.contains(where: { $0 != .search && $0 != .tag }) { return L10n.t("timeline.reload.progress") }
+        if asking.contains(where: { $0 != .search && $0 != .tag && $0 != .renew }) {
+            return L10n.t("timeline.reload.progress")
+        }
         if asking.contains(.search), let reach {
             return String(format: L10n.t("search.asking"), reach.asked.joined(separator: ", "))
         }
@@ -435,19 +445,35 @@ final class ShellReload {
     /// **One clock per store, not per window.** Every window of the app reads the one store, and
     /// each runs this; the wait is the device's, so only the window that asked first asks
     /// (`WaitKeeper`), and the rest renew from what it lands. It closing hands the clock on.
+    ///
+    /// **And the threads open in front, on the same clock** (#198). Each window's open thread is
+    /// asked again by whichever window keeps the wait, once its sources have been — after, and
+    /// not beside, so a forum is not asked for its boards and a topic's page at once. A window
+    /// whose loop ends takes its thread off the round with it.
     func keepAsking(
         every wait: Duration, in session: ShellSession,
         sleep: (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
     ) async {
         let me = UUID()
-        defer { WaitKeeper.release(session.store, from: me) }
+        WaitKeeper.join(session.store, as: me) { [weak self, weak session] in
+            guard let self, let session else { return }
+            await self.renew(in: session)
+        }
+        defer {
+            WaitKeeper.release(session.store, from: me)
+            WaitKeeper.leave(session.store, as: me)
+        }
         while true {
             do { try await sleep(wait) } catch { return }
             guard WaitKeeper.claim(session.store, for: me) else { continue }
             await withTaskCancellationHandler {
                 await held(in: session)
+                await WaitKeeper.renewThreads(on: session.store)
             } onCancel: {
-                Task { @MainActor in self.end(.held) }
+                Task { @MainActor in
+                    self.end(.held)
+                    self.end(.renew)
+                }
             }
         }
     }
@@ -579,10 +605,11 @@ final class ShellReload {
     /// land. The ask on a wait goes on: nobody started it, and Esc has a thread or a search to
     /// close instead of being spent on it once a minute (#95). A search's goes when Esc closes
     /// the search (`endSearch`). Nor the ask for more: scrolling started it, not a key (#87).
-    /// Nor a tag's: leaving its page ends it (#124).
+    /// Nor a tag's: leaving its page ends it (#124). Nor an open thread's renewal, which is the
+    /// wait's and ends as the thread is left (#198).
     @discardableResult
     func stop() -> Bool {
-        let pressed = asking.subtracting([.held, .search, .tag, .more])
+        let pressed = asking.subtracting([.held, .search, .tag, .more, .renew])
         guard !pressed.isEmpty else { return false }
         halted.formUnion(pressed)
         for (ask, run) in runs where pressed.contains(ask) {
@@ -630,7 +657,7 @@ final class ShellReload {
 
     /// Ends `ask`'s run, if one is running, without saying it was stopped: nobody stopped it,
     /// its window went (#95).
-    private func end(_ ask: Ask) {
+    func end(_ ask: Ask) {
         guard let run = runs[ask] else { return }
         run.work.cancel()
         finish(ask, run.generation)
@@ -656,6 +683,8 @@ final class ShellReload {
         // None: its own page says it, and the toast is not the tag's.
         case .tag: []
         case .more: [.timeline]
+        // None: the thread's foot says it, and the toast is not the thread's.
+        case .renew: []
         }
     }
 
@@ -1009,6 +1038,31 @@ enum WaitKeeper {
     static func release(_ store: ItemStore, from me: UUID) {
         let key = ObjectIdentifier(store)
         if keepers[key] == me { keepers[key] = nil }
+    }
+
+    /// Each window's way to renew the thread it has open, per store (#198) — every window's, the
+    /// keeper's own among them, so a thread open in a window that does not keep the clock is
+    /// asked again on the one that does.
+    private static var renewers: [ObjectIdentifier: [UUID: @MainActor () async -> Void]] = [:]
+
+    /// `me`'s window, on `store`'s round of open threads while its loop runs.
+    static func join(_ store: ItemStore, as me: UUID, renew: @escaping @MainActor () async -> Void) {
+        renewers[ObjectIdentifier(store), default: [:]][me] = renew
+    }
+
+    /// `me`'s loop ended: its thread is off the round.
+    static func leave(_ store: ItemStore, as me: UUID) {
+        let key = ObjectIdentifier(store)
+        renewers[key]?[me] = nil
+        if renewers[key]?.isEmpty == true { renewers[key] = nil }
+    }
+
+    /// Every window's open thread on `store`, asked again one window after the other.
+    static func renewThreads(on store: ItemStore) async {
+        for renew in Array((renewers[ObjectIdentifier(store)] ?? [:]).values) {
+            guard !Task.isCancelled else { return }
+            await renew()
+        }
     }
 }
 

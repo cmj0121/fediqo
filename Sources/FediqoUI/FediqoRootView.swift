@@ -1060,7 +1060,8 @@ public struct FediqoRootView: View {
     /// 1. **The pane is open on this very post.** The replies are drawn in `DummyThreadPane` and
     ///    nowhere else, so from the timeline `s` would put a page on the wire for something the
     ///    reader cannot see — work with no visible result, which is the fault the whole unit is
-    ///    about. A reader reaches the replies the way they always have: `Return`, then `s`.
+    ///    about. `Return` reads the first page of replies as the pane opens (#198); `s` there
+    ///    asks it again where it did not arrive, and the next page after it.
     /// 2. **With no viewer over it.** `onActedItem` hands `s` the viewed post while the viewer is
     ///    up, and a fetch landing behind an opaque picture is the same invisible work one layer
     ///    further out. With the viewer open `s` keeps its one old meaning and nothing else.

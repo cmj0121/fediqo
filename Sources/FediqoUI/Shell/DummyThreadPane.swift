@@ -111,10 +111,6 @@ struct DummyThreadPane: View {
                 }
                 .scrollIndicators(.never)
                 .clearsFloatingCorner()
-                // A topic whose replies this device kept opens with them, network or none (#177).
-                .task(id: thread) {
-                    if let thread { await posts.recall(thread) }
-                }
                 .onAppear {
                     guard let id = DummyCommand.centredOnAppear(selected: selectedID, opening: root.id)
                     else { return }
@@ -278,11 +274,18 @@ struct DummyThreadPane: View {
     ///    fetching a conversation was out of the branch that wrote it. A forum thread is the
     ///    first thing this app has ever had real answers for.
     ///
-    /// **Pressed, not automatic**, which is the other half of D31. Opening a thread already costs
-    /// a request for the page the opening post came off — `post(tid:)` and `replies(tid:)` each
-    /// fetch it for themselves, which is Core's shape and is recorded for the plan rather than
-    /// worked around here. So the reader gets the topic they opened and asks for the rest of it
-    /// if they want it, which is the same bargain the row makes one level up.
+    /// **Automatic now, where it was pressed** — the other half of D31, reversed by #198 for the
+    /// first page. It was pressed because opening a thread already costs a request for the page the
+    /// opening post came off — `post(tid:)` and `replies(tid:)` each fetch it for themselves, which
+    /// is Core's shape — and the reader was to ask for the rest if they wanted it, the bargain the
+    /// row makes one level up. But the row's bargain is about a list scrolled past; this pane is a
+    /// topic the reader chose by pressing Return on it, a microblog's conversation beside it was
+    /// read at once without a second press (#90), and since #177 what a first page brings is kept
+    /// and drawn from this device with no request at all the next time. So a second press for the
+    /// same topic was the reader asked twice for one thing, and a topic that renews itself on the
+    /// wait could not wait on a press to have anything to renew. The first page is asked as the
+    /// pane opens (`ShellReload.opened`); every later page is still asked only as the reader nears
+    /// the foot, and the way in below stays for a first page that did not arrive.
     @ViewBuilder
     private func rest(of thread: ForumThreadRef) -> some View {
         // Read in `body`, so this pane's interest in the replies is stamped on every pass. I8.
@@ -293,10 +296,11 @@ struct DummyThreadPane: View {
                 .frame(height: ShellSpace.hair)
             // **No `default:`.** A sixth standing has to be given a shape here.
             switch standing {
-            case .unasked:
-                way(in: thread)
-            case .coming:
-                // **The reader pressed something and is owed a sign that it took.** A static
+            // `unasked` is one pass: the pane opening asks (#198), so it waits rather than
+            // offering a press for what is already being asked for — `around`'s rule.
+            case .unasked, .coming:
+                // **The reader asked for something — opened the topic, or pressed — and is owed
+                // a sign that it took.** A static
                 // "Loading the replies…" is indistinguishable from the same sentence a minute
                 // later, which is what the reader wrote in about first. See `ForumWaiting`.
                 ForumWaiting(line: L10n.t("thread.replies.loading"))

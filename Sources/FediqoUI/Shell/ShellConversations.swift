@@ -4,11 +4,10 @@ import Observation
 
 // The conversation around one microblog post, fetched when the post is opened — #90.
 //
-// A forum thread's answers are `ForumPosts`': they come off the page the opening post came off,
-// and the reader asks for them with a press because that page is expensive and they may not want
-// it. A microblog thread is one request to one endpoint about one post the reader has just
-// pressed Return on, so it is asked for the moment the pane opens and nothing is asked of the
-// reader twice.
+// A forum thread's answers are `ForumPosts`': they come off the page the opening post came off.
+// A microblog thread is one request to one endpoint about one post the reader has just pressed
+// Return on, so it is asked for the moment the pane opens and nothing is asked of the reader
+// twice — and since #198 a forum topic's first page is too, and both are asked again on the wait.
 //
 // **Nothing here reaches the store's list of rows.** What comes back is drawn, and what comes
 // back for a row this device already holds is handed to `ItemStore.refresh`, which replaces held
@@ -243,6 +242,51 @@ final class ShellConversations {
         await ask(item, in: session)
     }
 
+    /// The open thread asked again on this device's wait (#198) — `again(_:in:)`'s read, with what
+    /// is drawn staying drawn and the foot saying it is on its way, and failed where it did not
+    /// arrive. Only a thread that has been read: one still on its first ask, or being read further,
+    /// is let be, and the next wait asks again. Cancelled — the thread left — nothing it brings
+    /// lands, and the thread is as it was.
+    func renew(_ item: DummyItem, in session: ShellSession) async {
+        guard inFlight[item.id] == nil, furtherWork[item.id] == nil else { return }
+        switch standing(of: item.id) {
+        case .loaded, .none: break
+        case .absent(let absence) where absence.asksAgain: break
+        case .unasked, .coming, .absent: return
+        }
+        let task = Task { @MainActor in await self.read(item, in: session) }
+        inFlight[item.id] = task
+        await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+        if inFlight[item.id] == task { inFlight[item.id] = nil }
+    }
+
+    /// Every post drawn in a loaded thread, by key — what `renew(from:)` asks the store for.
+    var drawnKeys: Set<NoteKey> {
+        var keys: Set<NoteKey> = []
+        for standing in standings.values {
+            guard case .loaded(let ancestors, let descendants, _) = standing else { continue }
+            keys.formUnion((ancestors + descendants).map(\.key))
+        }
+        return keys
+    }
+
+    /// **What this device now holds of each drawn post, drawn in its place** (#193, #198). A thread
+    /// keeps the order its source gave and the posts it drew; each post is the store's copy of it,
+    /// so an answer another read edited, or its source said was gone (#179), reads so here with no
+    /// key pressed. A post the store no longer holds keeps the copy drawn. Nothing is assigned
+    /// where nothing moved, so an adopt that changed no drawn post redraws no thread.
+    func renew(from held: [NoteKey: Note]) {
+        guard !held.isEmpty else { return }
+        for (id, standing) in standings {
+            guard case .loaded(let ancestors, let descendants, let rootID) = standing else { continue }
+            let swap = { (drawn: Note) in held[drawn.key] ?? drawn }
+            let renewed = ShellConversationStanding.loaded(
+                ancestors: ancestors.map(swap), descendants: descendants.map(swap), rootID: rootID
+            )
+            if renewed != standing { standings[id] = renewed }
+        }
+    }
+
     /// The note behind a row drawn in a conversation, where one of the loaded halves holds it.
     ///
     /// **An answer read in a thread is not a row `session.notes` holds** — it is held aside, see
@@ -407,10 +451,12 @@ final class ShellConversations {
         let furtherBefore = furthers[item.id]
         // **A thread drawn stays drawn while it is asked again** — the pane's foot says it is on
         // its way, where blanking it would show the reader less than they had for a whole ask.
-        if case .loaded? = before {
-            furthers[item.id] = .coming
-        } else {
-            standings[item.id] = .coming
+        // A post the source said was alone stays alone meanwhile too: asked again on the wait
+        // (#198), it would otherwise say it is loading once a minute.
+        switch before {
+        case .loaded?: furthers[item.id] = .coming
+        case .some(ShellConversationStanding.none): break
+        default: standings[item.id] = .coming
         }
         let stamp = Source(host: host, kind: held.source.kind)
         do {

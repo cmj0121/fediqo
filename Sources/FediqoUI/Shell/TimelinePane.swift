@@ -202,17 +202,19 @@ struct TimelinePane: View {
                     // One pane per thread, so going back from a nested one draws its parent
                     // afresh.
                     .id(opened.id)
-                    // **The ask is the pane opening** — #90. A microblog thread is one request
-                    // about the post the reader has just pressed Return on, so nothing asks them
-                    // a second time for a thing they have already said they want. It is the
-                    // pane's own `.task`, so closing the thread cancels a read still on the wire,
-                    // and asked once per post per run: reopening draws what is already held.
-                    .task(id: opened.id) { await session.conversations.open(opened, in: session) }
+                    // **The ask is the pane opening** — #90, and since #198 for a forum topic's
+                    // replies too. A thread is what the reader has just pressed Return on, so
+                    // nothing asks them a second time for a thing they have already said they
+                    // want; asked once per post per run, so reopening draws what is already held.
+                    // And from here it is the thread in front, which the wait asks again.
+                    .task(id: opened.id) { await session.reload.opened(opened, in: session) }
                     // What `r` last said about this thread goes with it (#175): the timeline under
                     // it does not go on saying a thread nobody is reading could not be reloaded.
-                    // And a page still on its way for it stops (#177): nobody is reading on.
+                    // And a page still on its way for it stops (#177): nobody is reading on. Nor
+                    // is it asked again on the wait any more (#198).
                     .onDisappear {
                         session.reload.forget(.thread)
+                        session.reload.left(opened)
                         session.stopReadingFurther(of: opened)
                     }
                 } else {

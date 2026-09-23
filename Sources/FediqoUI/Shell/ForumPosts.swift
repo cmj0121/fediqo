@@ -124,7 +124,7 @@ enum ForumReading: Equatable, Sendable {
 }
 
 /// One thread's opening post, fetched when its row is scrolled to, and cached — **D30** — and
-/// the rest of the same topic on request — **D31**.
+/// the rest of the same topic as its thread opens — **D31**, asked at once since #198.
 ///
 /// ## Why this is a cache and not a fetch
 ///
@@ -197,7 +197,7 @@ final class ForumPosts {
     enum Part: Hashable, Sendable, CaseIterable {
         /// The first post of the topic — D30, fetched when the row is scrolled to.
         case opening
-        /// Everything else the first page of the topic carried — D31, fetched on request — and
+        /// Everything else the first page of the topic carried — D31, fetched as it opens — and
         /// every later page read since, as the reader neared the foot (#177). See `Paging`.
         case replies
     }
@@ -653,6 +653,41 @@ final class ForumPosts {
         keep(kept, for: key, startedAt: interest[key] ?? 0)
         let last = kept.map(\.page).max() ?? 1
         paging[key] = Paging(last: last, next: last, further: .more)
+    }
+
+    /// The topic opened (#198): the replies this device kept drawn at once, and — where it kept
+    /// none — the first page of them asked for with no press. **D31's press is gone for the first
+    /// page**; see `DummyThreadPane.rest(of:)` for why.
+    func open(_ ref: ForumThreadRef) async {
+        await recall(ref)
+        if standing(of: ref).wantsPressing { await fetchReplies(ref) }
+    }
+
+    /// The open topic asked again on this device's wait (#198): **the last page read**, which is
+    /// where a reply added since turns up, and where a reply already drawn shows its new words.
+    /// What it brings lands in the store first and is laid in as a page for more is — nothing
+    /// drawn moves — and a page that does not arrive says so at the foot, above which every reply
+    /// already drawn stays.
+    ///
+    /// A topic whose first read did not arrive is asked for it again, where asking could help. A
+    /// page already on the wire for it is let be: the next wait asks again. Cancelled — the topic
+    /// left — nothing it brings lands.
+    func renew(_ ref: ForumThreadRef) async {
+        let key = Key(ref, .replies)
+        guard pageWork[key] == nil, inFlight[key] == nil else { return }
+        guard entries[key] != nil else {
+            guard missing[key]?.asksAgain == true else { return }
+            let first = work(for: key)
+            await withTaskCancellationHandler { await first.value } onCancel: { first.cancel() }
+            return
+        }
+        // A topic the forum said had no replies is one page with nothing on it.
+        let before = paging[key] ?? Paging(last: 1, next: 1, further: .end)
+        paging[key]?.further = .coming
+        let task = Task { @MainActor in await self.page(before.last, of: key, was: before) }
+        pageWork[key] = task
+        await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+        if pageWork[key] == task { pageWork[key] = nil }
     }
 
     /// The next page of `ref`'s replies, asked of the forum — **the reader nearing the foot of the
