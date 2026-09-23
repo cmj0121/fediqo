@@ -197,12 +197,15 @@ public actor ItemStore {
             if let existing = notes[key] {
                 let categories = existing.categories.union(note.categories)
                 let holding = existing.holding.widened(by: note.holding)
-                guard categories != existing.categories || holding != existing.holding else {
-                    continue
-                }
+                // The same source handing the post over again is the source having it (#179):
+                // a mark it once earned comes off.
+                guard categories != existing.categories || holding != existing.holding
+                        || existing.goneSince != nil
+                else { continue }
                 var merged = existing
                 merged.categories = categories
                 merged.holding = holding
+                merged.goneSince = nil
                 notes[key] = merged
                 shown = shown || holding == .arrived
             } else {
@@ -357,6 +360,11 @@ public actor ItemStore {
         notes[key] = held
         changed(shown: held.holding == .arrived)
         return true
+    }
+
+    /// How many rows are marked gone from their source (#179) — what a press would let go.
+    public func goneCount() -> Int {
+        notes.values.reduce(0) { $0 + ($1.goneSince == nil ? 0 : 1) }
     }
 
     /// Lets go of every row marked gone from its source at or before `cutoff`, or of every marked

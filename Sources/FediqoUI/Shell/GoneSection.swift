@@ -19,6 +19,10 @@ struct GoneSection: View {
     /// How many the last press let go, and nothing before a press — "none went" would be an answer
     /// to a question nobody asked yet.
     @State private var went: Int?
+    /// The press has counted what it would let go and is asking first, as every other drop on
+    /// this page does; `counted` is what the question names.
+    @State private var confirming = false
+    @State private var counted = 0
 
     /// The waits offered, in days. Never, the default, is offered beside them.
     static let dayChoices = [1, 7, 30, 90]
@@ -37,7 +41,11 @@ struct GoneSection: View {
             }
             HStack(spacing: ShellSpace.snug) {
                 Button(L10n.t("prefs.gone.now")) {
-                    Task { went = await session.letAllGoneGo() }
+                    Task {
+                        // Nothing to let go is said at once; anything is asked about first.
+                        counted = await session.goneHeld()
+                        if counted == 0 { went = 0 } else { confirming = true }
+                    }
                 }
                 if let went {
                     reading(Self.wentLine(went))
@@ -50,6 +58,21 @@ struct GoneSection: View {
                 .shellFont(.mark)
                 .foregroundStyle(ShellChrome.inkFaint(colorScheme))
         }
+        .confirmationDialog(
+            Text(Self.askLine(counted)), isPresented: $confirming, titleVisibility: .visible
+        ) {
+            Button(L10n.t("prefs.gone.confirm"), role: .destructive) {
+                Task { went = await session.letAllGoneGo() }
+            }
+            Button(L10n.t("board.choose.cancel"), role: .cancel) {}
+        } message: {
+            Text(L10n.t("prefs.gone.ask.detail"))
+        }
+    }
+
+    /// What the press asks before it lets `count` posts go.
+    static func askLine(_ count: Int, language: DummyLanguage? = nil) -> String {
+        L10n.count("prefs.gone.ask", count, language: language)
     }
 
     /// What the page says where the keep-for window is the shorter of the two, and nothing where

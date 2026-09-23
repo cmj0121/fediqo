@@ -18,6 +18,25 @@ extension ShellSession {
         await persist?()
     }
 
+    /// Whether `error`, from reading `held` by its server id `id`, is its source saying it no longer
+    /// has it — `MastodonPost.saysGone`, and where that is only a question, the same id asked again
+    /// with no token, within `limit`. **The one rule** `r` on a thread and a thread opening both go
+    /// by, so neither marks a post the other would not.
+    func sourceSaysGone(
+        _ error: any Error, of held: Note, id: String, signedIn: Bool, within limit: Duration
+    ) async -> Bool {
+        switch MastodonPost.saysGone(error, about: held, signedIn: signedIn) {
+        case .gone: return true
+        case .no: return false
+        case .ask:
+            let watched = WatchedHTTP(http, for: .conversation, in: work)
+            let unsigned = MastodonPost(
+                http: Deadline(watched as any HTTPClient, within: limit), host: held.source.host
+            )
+            return await unsigned.confirmsGone(held, id: id)
+        }
+    }
+
     /// Lets go of what this device's wait says has waited long enough — the shorter of it and the
     /// keep-for window (`GoneWait`). Nothing where neither is set. Returns how many went.
     @discardableResult
@@ -26,6 +45,12 @@ extension ShellSession {
             return 0
         }
         return await letGoneGo(markedBy: cutoff)
+    }
+
+    /// How many posts are marked gone from their source, held aside or not — what the press asks
+    /// about before it lets them go.
+    func goneHeld() async -> Int {
+        await store.goneCount()
     }
 
     /// Lets go of every post marked gone from its source, now — the reader's press. Returns how

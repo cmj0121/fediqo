@@ -368,6 +368,9 @@
 "prefs.gone.days" = "%d 天";
 "prefs.gone.keepwins" = "「保留貼文」只保留最近 %d 個月，比這更短，所以會先放下它們。";
 "prefs.gone.now" = "現在全部放下";
+"prefs.gone.ask" = "要放下 %d 則來源已刪除的貼文嗎？";
+"prefs.gone.ask.detail" = "它們會立即從這台裝置、從每個畫面上移除。其他內容都不受影響，每個來源仍保持加入。";
+"prefs.gone.confirm" = "放下";
 "prefs.gone.went" = "已放下 %d 則貼文。";
 "prefs.gone.went.none" = "沒有這樣的貼文。";
 "prefs.gone.footer" = "只有在這台裝置再次讀取那一則貼文、而來源表示它已不在時，才會標為已刪除。單純沒有送達的貼文不會被標記，也不會在這裡被放下。你自己收回的貼文會立即移除。";

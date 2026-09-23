@@ -376,6 +376,10 @@
 "prefs.gone.keepwins" = "Keep posts holds only the latest %d months, which is shorter, so it lets them go first.";
 "prefs.gone.keepwins.one" = "Keep posts holds only the latest %d month, which is shorter, so it lets them go first.";
 "prefs.gone.now" = "Let them all go now";
+"prefs.gone.ask" = "Let go of %d posts deleted at their source?";
+"prefs.gone.ask.one" = "Let go of %d post deleted at its source?";
+"prefs.gone.ask.detail" = "They go from this device now, from every screen. Nothing else is touched, and every source stays joined.";
+"prefs.gone.confirm" = "Let go";
 "prefs.gone.went" = "%d posts went.";
 "prefs.gone.went.one" = "%d post went.";
 "prefs.gone.went.none" = "None were held.";

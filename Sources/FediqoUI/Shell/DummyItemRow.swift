@@ -534,7 +534,7 @@ struct DummyItemRow: View {
     /// it is out of the accessibility tree; the word is what a listener hears, inside the row.
     @ViewBuilder
     private var goneMark: some View {
-        if item.goneSince != nil {
+        if item.goneEverywhere {
             HStack(spacing: ShellSpace.tight) {
                 Image(systemName: "xmark.bin")
                     .accessibilityHidden(true)

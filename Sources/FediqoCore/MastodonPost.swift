@@ -87,29 +87,42 @@ public struct MastodonPost: Sendable {
         )
     }
 
-    /// Whether `error`, from reading `note` itself — the post, or its thread — is its server saying
-    /// it no longer has the post (#179).
+    /// What `error`, from reading `note` itself — the post, or its thread — says about whether its
+    /// server still has the post (#179).
     ///
-    /// **410 always, and 404 only where nothing else could mean it.** A server answers 404 for a
-    /// post it will not show this reader as surely as for one it deleted: a followers-only post
-    /// asked for signed out is the ordinary case, and marking that gone would be this device
-    /// inventing a deletion out of its own missing sign-in. So a 404 counts where the reader was
-    /// signed in, or where the post was written for everyone to see.
+    /// **410 always; a 404 only where no one could be being kept from it.** A server answers 404
+    /// for a post it will not show this reader as surely as for one it deleted: a followers-only or
+    /// direct post after an unfollow, or any post whose author blocks the reader or their server.
+    /// So a 404 on a post written for fewer than everyone is never taken as gone, and a 404 on a
+    /// public or unlisted post asked as the reader is only a question — `confirmsGone(_:id:)`,
+    /// asked with no token, is what answers it. Asked with no token already, it is the answer.
     ///
     /// A lookup that found nothing is not this: search not finding a post is search, and says
     /// nothing about the post. Callers ask this only of the read by id.
-    public static func saysGone(_ error: any Error, about note: Note, signedIn: Bool) -> Bool {
+    public static func saysGone(_ error: any Error, about note: Note, signedIn: Bool) -> GoneAnswer {
         let status: Int
         if case .http(let code)? = error as? MastodonAuthError {
             status = code
         } else if case .http(let code)? = error as? MastodonRequestError {
             status = code
         } else {
-            return false
+            return .no
         }
-        if status == 410 { return true }
-        guard status == 404 else { return false }
-        return signedIn || note.audience == .everyone || note.audience == .unlisted
+        if status == 410 { return .gone }
+        guard status == 404, note.audience == .everyone || note.audience == .unlisted else { return .no }
+        return signedIn ? .ask : .gone
+    }
+
+    /// Whether a post this server would not show the reader is gone for everyone: the same id
+    /// asked again **with no token**, on a reader built with `init(http:host:)`. Gone only where
+    /// that answers 404 or 410 too; a post it hands over, a refusal, or no answer is not gone.
+    public func confirmsGone(_ note: Note, id: String) async -> Bool {
+        do {
+            _ = try await get(Self.path(id))
+            return false
+        } catch {
+            return Self.saysGone(error, about: note, signedIn: false) == .gone
+        }
     }
 
     /// Checked as a list id is: this came out of a stranger's JSON or the store.
@@ -161,4 +174,14 @@ struct ContextDTO: Decodable, Sendable {
 /// `/api/v2/search`, in the one field a lookup needs.
 struct SearchDTO: Decodable, Sendable {
     let statuses: [StatusDTO]
+}
+
+/// What a failed read of one post says about whether its server still has it (#179).
+public enum GoneAnswer: Sendable, Equatable {
+    /// It does not: the post is gone from its source.
+    case gone
+    /// Only that this reader may not see it. Asked again with no token, the answer is the answer.
+    case ask
+    /// Nothing about the post: a failure, a refusal, or a post that may only be hidden.
+    case no
 }

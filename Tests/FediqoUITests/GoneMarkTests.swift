@@ -138,23 +138,36 @@ struct GoneMarkTests {
 
     // MARK: - Nothing that would reach the source
 
-    @Test("Signed in with writing, a gone post offers no act, and a press sends nothing")
-    func goneOffersNothing() async throws {
+    /// A session signed in with writing on both hosts, holding `notes`: what the reader's door is
+    /// asked is answered by `signed`, and what is asked with no token by `unsigned`.
+    private func signedIn(
+        _ notes: [Note], signed: [String: ActServer.Outcome], unsigned: [String: FixtureHTTP.Outcome] = [:]
+    ) async throws -> (ShellSession, ActServer, FixtureHTTP) {
         let tokens = MemoryMastodonTokens()
-        try tokens.save(MastodonToken(
-            host: Self.host, accessToken: "tok", clientID: "c", clientSecret: "s",
-            scopes: MastodonOAuth.scopes(writing: true)
-        ))
-        let server = ActServer(["/api/v1/statuses/9": .json("", status: 404)])
+        for host in [Self.host, Self.other] {
+            try tokens.save(MastodonToken(
+                host: host, accessToken: "tok-\(host)", clientID: "c", clientSecret: "s",
+                scopes: MastodonOAuth.scopes(writing: true)
+            ))
+        }
+        let server = ActServer(signed)
+        let http = FixtureHTTP(unsigned)
         let store = ItemStore()
         await store.add(Source(host: Self.host, kind: .mastodon))
-        // Written for followers: signed in, a 404 still counts.
-        await store.ingest([Self.note(audience: .followers), Self.note("8")])
-        let session = ShellSession(
-            http: FixtureHTTP(), store: store, mastodon: MastodonSessions(tokens: tokens, sender: server)
-        )
+        await store.add(Source(host: Self.other, kind: .mastodon))
+        for note in notes { await store.ingest([note]) }
+        let session = ShellSession(http: http, store: store, mastodon: MastodonSessions(tokens: tokens, sender: server))
         session.mastodon.refresh()
         await session.reloadFromStore()
+        return (session, server, http)
+    }
+
+    @Test("Signed in with writing, a gone post offers no act, and a press sends nothing")
+    func goneOffersNothing() async throws {
+        let (session, server, _) = try await signedIn(
+            [Self.note(audience: .followers), Self.note("8")],
+            signed: ["/api/v1/statuses/9": .json("", status: 410)]
+        )
         #expect(session.acts(on: try row(session)).offers(.boost), "the premise: before, it offered them")
 
         await session.reload.thread(try row(session), in: session)
@@ -168,6 +181,91 @@ struct GoneMarkTests {
         await session.toggle(.favourite, on: gone)
         #expect(await server.paths.count == asked, "nothing was sent")
         #expect(session.acts(on: try row(session, "8")).offers(.answer), "and the post beside it still offers them")
+    }
+
+    @Test("Signed in, a followers-only post answered 404 is not marked: an unfollow or a block hides it from you alone")
+    func hiddenFromYouIsNotGone() async throws {
+        let (session, _, http) = try await signedIn(
+            [Self.note(audience: .followers)], signed: ["/api/v1/statuses/9": .json("", status: 404)]
+        )
+        await session.reload.thread(try row(session), in: session)
+        #expect(try row(session).goneSince == nil)
+        #expect(await http.requested.isEmpty, "and nothing is asked with no token: a public read cannot see it either")
+    }
+
+    @Test("Signed in, a public post answered 404 is asked again with no token: handed over there, it is not gone")
+    func blockedIsNotGone() async throws {
+        let (session, _, http) = try await signedIn(
+            [Self.note()], signed: ["/api/v1/statuses/9": .json("", status: 404)],
+            unsigned: ["/api/v1/statuses/9": .text(Self.status("9"))]
+        )
+        await session.reload.thread(try row(session), in: session)
+        #expect(try row(session).goneSince == nil)
+        #expect(await http.paths == ["/api/v1/statuses/9"], "asked once, with no token")
+    }
+
+    @Test("Signed in, a public post answered 404 and 404 again with no token is gone — on r and on opening the thread")
+    func goneForEveryone() async throws {
+        let (session, _, _) = try await signedIn(
+            [Self.note(), Self.note("8")],
+            signed: [
+                "/api/v1/statuses/9": .json("", status: 404),
+                "/api/v1/statuses/8/context": .json("", status: 404),
+            ],
+            unsigned: ["/api/v1/statuses/9": .text("", status: 404), "/api/v1/statuses/8": .text("", status: 410)]
+        )
+        await session.reload.thread(try row(session), in: session)
+        #expect(try row(session).goneSince != nil)
+        await session.conversations.open(try row(session, "8"), in: session)
+        #expect(try row(session, "8").goneSince != nil)
+    }
+
+    @Test("A refusal with no token is not a deletion either")
+    func refusedIsNotGone() async throws {
+        let (session, _, _) = try await signedIn(
+            [Self.note()], signed: ["/api/v1/statuses/9": .json("", status: 404)],
+            unsigned: ["/api/v1/statuses/9": .text("", status: 401)]
+        )
+        await session.reload.thread(try row(session), in: session)
+        #expect(try row(session).goneSince == nil)
+    }
+
+    @Test("A row two sources carried is marked only when both have said so, and acts through the live copy till then")
+    func mergedRow() async throws {
+        let uri = "https://origin.example/users/ada/statuses/1"
+        let copies = [Self.host, Self.other].map { host in
+            Note(
+                id: uri, source: Source(host: host, kind: .mastodon), author: "Ada", handle: "@ada@origin.example",
+                body: "hello", postedAt: Self.posted, categories: [.public], audience: .everyone,
+                statusID: host == Self.host ? "9" : "19"
+            )
+        }
+        let (session, _, _) = try await signedIn(copies, signed: [:])
+        func merged() throws -> DummyItem { try #require(session.timelineItems(latest: nil).first) }
+        #expect(try merged().copies.count == 2, "the premise: one row")
+
+        await session.markGone(copies[0].key, at: Self.posted)
+        #expect(try !merged().goneEverywhere, "the other source still carries it")
+        #expect(session.acts(on: try merged()).offers(.boost))
+        #expect(session.actingCopy(of: try merged(), for: .boost)?.source.host == Self.other)
+
+        await session.markGone(copies[1].key, at: Self.posted)
+        #expect(try merged().goneEverywhere)
+        #expect(session.acts(on: try merged()) == .none)
+    }
+
+    @Test("An answer written while its post was marked gone is not sent")
+    func answerRechecked() async throws {
+        let (session, server, _) = try await signedIn([Self.note()], signed: [:])
+        let open = try row(session)
+        #expect(session.openAnswer(to: open, in: open))
+        let target = try #require(session.answering)
+        session.answerDrafts[target.id] = "@ada hello"
+        #expect(session.canSendAnswer(target))
+        await session.markGone(Self.note().key, at: Self.posted)
+        #expect(!session.canSendAnswer(target))
+        await #expect(throws: MastodonWriteError.noSource) { try await session.answer(target) }
+        #expect(await server.paths.isEmpty)
     }
 
     // MARK: - The mark reads the same everywhere
@@ -280,6 +378,11 @@ struct GoneMarkTests {
             #expect(GoneSection.wentLine(0, language: language) == L10n.t("prefs.gone.went.none", language: language))
             #expect(L10n.count("prefs.gone.days", 7, language: language).contains("7"))
             #expect(GoneSection.keepWinsLine(days: nil, keepingMonths: 3, language: language)?.contains("3") == true)
+            #expect(GoneSection.askLine(4, language: language).contains("4"))
+            #expect(GoneSection.askLine(1, language: language).contains("1"))
+            for key in ["prefs.gone.ask.detail", "prefs.gone.confirm"] {
+                #expect(L10n.t(key, language: language) != key, "\(key) in \(language)")
+            }
         }
     }
 }

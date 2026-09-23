@@ -394,9 +394,12 @@ final class ShellReload {
         let note: Note
         do {
             note = try await post.post(id: id, source: stamp)
-        } catch where MastodonPost.saysGone(error, about: held, signedIn: signedIn) {
+        } catch {
             // The source has just said, of this one post, that it no longer has it (#179). The
             // post stays, marked; what the reader asked for — the post read again — was answered.
+            guard await session.sourceSaysGone(
+                error, of: held, id: id, signedIn: signedIn, within: session.reload.deadline
+            ) else { throw error }
             try Task.checkCancellation()
             await session.markGone(held.key)
             return .gone

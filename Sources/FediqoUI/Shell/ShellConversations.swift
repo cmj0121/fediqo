@@ -305,11 +305,13 @@ final class ShellConversations {
             let thread: MastodonThread
             do {
                 thread = try await post.conversation(id: id, source: stamp)
-            } catch where MastodonPost.saysGone(error, about: held, signedIn: signedIn) {
+            } catch {
                 // Asked by the post's own id, so this is the source speaking of this one post
                 // (#179): it stays, marked, and the thread still says it could not be had.
-                try Task.checkCancellation()
-                await session.markGone(held.key)
+                if await session.sourceSaysGone(error, of: held, id: id, signedIn: signedIn, within: deadline) {
+                    try Task.checkCancellation()
+                    await session.markGone(held.key)
+                }
                 throw error
             }
             try Task.checkCancellation()

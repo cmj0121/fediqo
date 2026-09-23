@@ -136,17 +136,54 @@ struct GoneTests {
 
     // MARK: - What a source saying so looks like
 
-    @Test("410 is gone; 404 is gone signed in or on a public post, and not on a followers-only one signed out")
+    @Test("410 is gone; a public 404 is gone signed out and a question signed in; a 404 for fewer is never gone")
     func whatSaysGone() {
         let open = note("1")
+        let unlisted = note("3", audience: .unlisted)
         let followers = note("2", audience: .followers)
-        #expect(MastodonPost.saysGone(MastodonRequestError.http(410), about: followers, signedIn: false))
-        #expect(MastodonPost.saysGone(MastodonRequestError.http(404), about: open, signedIn: false))
-        #expect(MastodonPost.saysGone(MastodonAuthError.http(404), about: followers, signedIn: true))
-        #expect(!MastodonPost.saysGone(MastodonRequestError.http(404), about: followers, signedIn: false))
-        #expect(!MastodonPost.saysGone(MastodonRequestError.http(500), about: open, signedIn: true))
-        #expect(!MastodonPost.saysGone(MastodonAuthError.http(403), about: open, signedIn: true))
-        #expect(!MastodonPost.saysGone(URLError(.timedOut), about: open, signedIn: true))
+        let direct = note("4", audience: .mentioned)
+        #expect(MastodonPost.saysGone(MastodonRequestError.http(410), about: followers, signedIn: false) == .gone)
+        #expect(MastodonPost.saysGone(MastodonAuthError.http(410), about: direct, signedIn: true) == .gone)
+        #expect(MastodonPost.saysGone(MastodonRequestError.http(404), about: open, signedIn: false) == .gone)
+        #expect(MastodonPost.saysGone(MastodonAuthError.http(404), about: open, signedIn: true) == .ask)
+        #expect(MastodonPost.saysGone(MastodonAuthError.http(404), about: unlisted, signedIn: true) == .ask)
+        #expect(MastodonPost.saysGone(MastodonAuthError.http(404), about: followers, signedIn: true) == .no,
+                "an unfollow, or a block, hides it from this reader alone")
+        #expect(MastodonPost.saysGone(MastodonRequestError.http(404), about: followers, signedIn: false) == .no)
+        #expect(MastodonPost.saysGone(MastodonAuthError.http(404), about: direct, signedIn: true) == .no)
+        #expect(MastodonPost.saysGone(MastodonRequestError.http(500), about: open, signedIn: true) == .no)
+        #expect(MastodonPost.saysGone(MastodonAuthError.http(403), about: open, signedIn: true) == .no)
+        #expect(MastodonPost.saysGone(URLError(.timedOut), about: open, signedIn: true) == .no)
+    }
+
+    @Test("Asked again with no token, only a 404 or a 410 confirms it gone")
+    func confirmsGone() async {
+        let open = note("1")
+        for (status, gone) in [(404, true), (410, true), (200, false), (401, false), (403, false), (500, false)] {
+            let body = status == 200 ? #"{"id":"1","uri":"u","created_at":"2024-01-01T00:00:00.000Z","content":"","account":{"username":"a","acct":"a"}}"# : ""
+            let http = FixtureHTTP(["/api/v1/statuses/1": .text(body, status: status)])
+            let unsigned = MastodonPost(http: http, host: source.host)
+            #expect(await unsigned.confirmsGone(open, id: "1") == gone, "\(status)")
+        }
+    }
+
+    @Test("A marked post its source hands over again in a listing comes back unmarked, and redraws")
+    func listedAgainUnmarks() async {
+        let store = ItemStore(sources: [source], notes: [note("1")])
+        await store.markGone(note("1").key, at: origin)
+        let drawn = await store.drawn
+        await store.ingest([note("1")], ifSourceHere: source.host)
+        #expect(await store.note(note("1").key)?.goneSince == nil)
+        #expect(await store.drawn == drawn + 1)
+    }
+
+    @Test("What the press would let go is counted, held aside or not")
+    func counted() async {
+        let store = ItemStore(sources: [source], notes: [note("1"), note("2"), note("3", holding: .aside)])
+        #expect(await store.goneCount() == 0)
+        await store.markGone(note("1").key)
+        await store.markGone(note("3").key)
+        #expect(await store.goneCount() == 2)
     }
 
     @Test("A post gone from its source offers nothing that would reach it, whatever the source allows")
