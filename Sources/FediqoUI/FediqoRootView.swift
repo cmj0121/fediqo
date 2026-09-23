@@ -540,7 +540,9 @@ public struct FediqoRootView: View {
             return session.editCurrentTimeline()
         case .dismiss:
             // A running reload is the first thing Escape stops (#29); the next one leaves.
+            // So is a thread's next page on its way (#177), before the thread itself closes.
             if place == .timeline, session.reload.stop() { return true }
+            if place == .timeline, session.stopReadingFurther() { return true }
             switch DummyCommand.outermost(of: openLayers) {
             case .viewer: return closeViewer()
             case .shortcuts:

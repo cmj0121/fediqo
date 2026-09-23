@@ -176,7 +176,11 @@ struct TimelinePane: View {
                     .task(id: opened.id) { await session.conversations.open(opened, in: session) }
                     // What `r` last said about this thread goes with it (#175): the timeline under
                     // it does not go on saying a thread nobody is reading could not be reloaded.
-                    .onDisappear { session.reload.forget(.thread) }
+                    // And a page still on its way for it stops (#177): nobody is reading on.
+                    .onDisappear {
+                        session.reload.forget(.thread)
+                        session.stopReadingFurther()
+                    }
                 } else {
                     underneath
                 }

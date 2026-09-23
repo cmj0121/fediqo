@@ -31,10 +31,11 @@ protocol ShellThreadAbsence: Equatable, Sendable {
 
 /// How far an open thread has been read toward its end (#177) — **what its foot says**.
 ///
-/// Four states and no fifth, for `ShellConversationStanding`'s reason: "there is more and it will
-/// be asked for", "it is on the wire", "the source said this is all" and "the next part did not
-/// arrive" are four sentences, and the third is the one #177 exists to say — a thread that ended
-/// is not a thread still waiting.
+/// Five states and no sixth, for `ShellConversationStanding`'s reason: "there is more and it will
+/// be asked for", "it is on the wire", "the source said this is all", "the source says there is
+/// more and gives no way to ask for it here" and "the next part did not arrive" are five
+/// sentences, and the third is the one #177 exists to say — a thread that ended is not a thread
+/// still waiting, and **neither is a thread the source cut**, which is why that one is not `end`.
 enum ShellThreadFurther<Absence: ShellThreadAbsence>: Equatable, Sendable {
     /// The source has more. Asked for as the foot comes into view, or on a press.
     case more
@@ -42,16 +43,20 @@ enum ShellThreadFurther<Absence: ShellThreadAbsence>: Equatable, Sendable {
     case coming
     /// The source has nothing after what is drawn.
     case end
+    /// The source counts answers that are not drawn, and nothing this device may ask brings them:
+    /// a server that hands back only so many answers to one post, with no way to page past them.
+    /// Not the end — saying so would be the lie #177 was filed about — and not worth asking again.
+    case cut
     /// The next part did not arrive, and why. What already arrived stays drawn above it.
     case failed(Absence)
 
     /// Whether asking for the next part could do anything from here — **the one answer the foot,
-    /// its button and the key all read**. No `default:`: a fifth state has to say.
+    /// its button and the key all read**. No `default:`: a sixth state has to say.
     var wantsAsking: Bool {
         switch self {
         case .more: true
         case .failed(let absence): absence.asksAgain
-        case .coming, .end: false
+        case .coming, .end, .cut: false
         }
     }
 }
@@ -162,6 +167,9 @@ final class ShellConversations {
     @ObservationIgnored private var asked: [String: Set<String>] = [:]
     /// A further ask on the wire, per thread, so a foot drawn twice waits on one.
     @ObservationIgnored private var furtherWork: [String: Task<Void, Never>] = [:]
+    /// Threads whose foot failed on **the thread itself** — its first read, or `r` — rather than
+    /// on a part further down: trying again there asks the whole thread again.
+    @ObservationIgnored private var failedAtRoot: Set<String> = []
 
     func standing(of id: String) -> ShellConversationStanding {
         standings[id] ?? .unasked
@@ -311,6 +319,7 @@ final class ShellConversations {
             furtherWork[id] = nil
             furthers[id] = nil
             asked[id] = nil
+            failedAtRoot.remove(id)
         }
     }
 
@@ -322,6 +331,7 @@ final class ShellConversations {
         standings = [:]
         furthers = [:]
         asked = [:]
+        failedAtRoot = []
         hosts = [:]
     }
 
@@ -357,7 +367,14 @@ final class ShellConversations {
         let host = held.source.host
         hosts[item.id] = host
         let before = standings[item.id]
-        standings[item.id] = .coming
+        let furtherBefore = furthers[item.id]
+        // **A thread drawn stays drawn while it is asked again** — the pane's foot says it is on
+        // its way, where blanking it would show the reader less than they had for a whole ask.
+        if case .loaded? = before {
+            furthers[item.id] = .coming
+        } else {
+            standings[item.id] = .coming
+        }
         let stamp = Source(host: host, kind: held.source.kind)
         do {
             let post = session.conversationPost(host: host, within: deadline).post
@@ -382,6 +399,7 @@ final class ShellConversations {
             if await Self.land(thread.ancestors + thread.descendants, host: host, in: session) {
                 await session.reloadFromStore()
             }
+            failedAtRoot.remove(item.id)
             if thread.isAlone {
                 standings[item.id] = ShellConversationStanding.none
                 furthers[item.id] = nil
@@ -396,13 +414,15 @@ final class ShellConversations {
             }
             asked[item.id] = (asked[item.id] ?? []).union([id])
             standings[item.id] = .loaded(ancestors: thread.ancestors, descendants: descendants, rootID: id)
-            furthers[item.id] = Self.edge(below: id, in: descendants, asked: asked[item.id] ?? []) == nil
-                ? .end : .more
+            furthers[item.id] = Self.settled(
+                root: held, rootID: id, descendants: descendants, asked: asked[item.id] ?? []
+            )
         } catch MastodonAuthError.signedOut {
             session.mastodon.endedByServer(host: host)
             await failed(item, held: held, before: before, why: .refused, in: session)
         } catch let error where Cancellation.happened(error) {
             standings[item.id] = before
+            furthers[item.id] = furtherBefore
         } catch {
             await failed(item, held: held, before: before, why: Self.absence(for: error), in: session)
         }
@@ -416,9 +436,12 @@ final class ShellConversations {
         _ item: DummyItem, held: Note, before: ShellConversationStanding?, why: Absence,
         in session: ShellSession
     ) async {
+        // **Where it failed is kept with it**: the foot's "try again" has to ask what did not
+        // arrive, and that was the whole thread, not a part further down it.
         if case .loaded? = before {
             standings[item.id] = before
             furthers[item.id] = .failed(why)
+            failedAtRoot.insert(item.id)
             return
         }
         let kept = await session.store.held(host: held.source.host)
@@ -427,6 +450,7 @@ final class ShellConversations {
                 ancestors: around.ancestors, descendants: around.descendants, rootID: held.statusID
             )
             furthers[item.id] = .failed(why)
+            failedAtRoot.insert(item.id)
         } else {
             standings[item.id] = .absent(why)
         }
@@ -442,23 +466,50 @@ final class ShellConversations {
     /// walks the thread in. So what is missing is under the last post drawn, or under the posts it
     /// answers; each of those is asked in turn, the deepest first, and its answers follow every
     /// post already drawn. The post being read does not move.
+    ///
+    /// **Never left saying it is on its way.** A foot that asked and found nothing to ask is
+    /// settled — the end, or cut — and one whose post this device no longer holds says it cannot
+    /// be named; a foot that stayed at `more` would draw "reading further" for ever.
     func more(_ item: DummyItem, in session: ShellSession) async {
         if let running = furtherWork[item.id] {
             await running.value
             return
         }
-        guard let further = furthers[item.id], further.wantsAsking,
-              case .loaded(_, let descendants, let rootID) = standing(of: item.id),
-              let rootID, let held = session.heldNote(item.id),
-              let edge = Self.edge(below: rootID, in: descendants, asked: asked[item.id] ?? [])
-        else { return }
+        guard let further = furthers[item.id], further.wantsAsking else { return }
+        // The whole thread is what did not arrive, so the whole thread is what is asked again.
+        if failedAtRoot.contains(item.id) {
+            await again(item, in: session)
+            return
+        }
+        guard case .loaded(_, let descendants, let rootID) = standing(of: item.id) else { return }
+        guard let rootID, let held = session.heldNote(item.id) else {
+            furthers[item.id] = .failed(.unfindable)
+            return
+        }
+        guard let edge = Self.edge(below: rootID, in: descendants, asked: asked[item.id] ?? []) else {
+            furthers[item.id] = Self.settled(
+                root: held, rootID: rootID, descendants: descendants, asked: asked[item.id] ?? []
+            )
+            return
+        }
         furthers[item.id] = .coming
         let task = Task { @MainActor in
             await self.readFurther(item, from: edge, held: held, was: further, in: session)
         }
         furtherWork[item.id] = task
         await task.value
-        furtherWork[item.id] = nil
+        // Only this ask's own record: a Clear and a new ask may have replaced it meanwhile.
+        if furtherWork[item.id] == task { furtherWork[item.id] = nil }
+    }
+
+    /// Every further ask on the wire let go of — the thread closed, or Esc. What they had not
+    /// landed does not land, and each foot is put back where it was, to be asked again.
+    @discardableResult
+    func stopReadingFurther() -> Bool {
+        guard !furtherWork.isEmpty else { return false }
+        for task in furtherWork.values { task.cancel() }
+        furtherWork = [:]
+        return true
     }
 
     private func readFurther(
@@ -483,9 +534,9 @@ final class ShellConversations {
             let grown = descendants + fresh
             standings[item.id] = .loaded(ancestors: ancestors, descendants: grown, rootID: rootID)
             asked[item.id, default: []].insert(edge)
-            furthers[item.id] = rootID.flatMap {
-                Self.edge(below: $0, in: grown, asked: asked[item.id] ?? [])
-            } == nil ? .end : .more
+            furthers[item.id] = rootID.map {
+                Self.settled(root: held, rootID: $0, descendants: grown, asked: asked[item.id] ?? [])
+            } ?? .end
         } catch MastodonAuthError.signedOut {
             session.mastodon.endedByServer(host: host)
             furthers[item.id] = .failed(.refused)
@@ -506,30 +557,52 @@ final class ShellConversations {
         return changed
     }
 
-    /// The next post to ask for its own thread, or nothing where the thread is read to its end.
+    /// The next post to ask for its own thread, or nothing where no drawn post has more to give.
     ///
-    /// Walked up from the last post drawn toward the post the thread is about, and never that post
-    /// itself — its thread is the first answer, and asking it again would hand back the same cut.
-    /// The first found that says it has more answers than are drawn under it, and has not been
-    /// asked, is the one: the deepest place the source stopped.
+    /// **Every drawn answer is weighed**, not only the chain above the last one: a server cuts a
+    /// thread by depth as well as by count, so a post in the middle can be missing its answers as
+    /// surely as the last. Of those that say they have more answers than are drawn under them and
+    /// have not been asked, the deepest is the one — the furthest place the source stopped — and
+    /// the later of two as deep. Never the post itself: its thread is the first answer, and asking
+    /// it again would hand back the same cut.
     static func edge(below rootID: String, in descendants: [Note], asked: Set<String>) -> String? {
-        let byID = Dictionary(
-            descendants.compactMap { note in note.statusID.map { ($0, note) } },
-            uniquingKeysWith: { first, _ in first }
-        )
+        let answers = answerCounts(descendants)
+        var depths: [String: Int] = [rootID: 0]
+        var best: (id: String, depth: Int)?
+        for note in descendants {
+            guard let id = note.statusID, id != rootID else { continue }
+            let depth = (note.reply?.inReplyToId.flatMap { depths[$0] } ?? 0) + 1
+            depths[id] = depth
+            guard !asked.contains(id), (note.counts.replies ?? 0) > (answers[id] ?? 0) else { continue }
+            if depth >= (best?.depth ?? 0) { best = (id, depth) }
+        }
+        return best?.id
+    }
+
+    /// Where a thread stands once nothing is on the wire: more to ask, the end, or cut.
+    ///
+    /// **Cut rather than the end wherever a post drawn — the opened one included — counts more
+    /// answers than are drawn under it** and there is no one left to ask. Mastodon hands back
+    /// only so many of a post's direct answers and gives no way to page past them; the post's own
+    /// count is what shows that happened, and saying "the end" over it is the false end.
+    static func settled(
+        root: Note, rootID: String, descendants: [Note], asked: Set<String>
+    ) -> ShellThreadFurther<Absence> {
+        if edge(below: rootID, in: descendants, asked: asked) != nil { return .more }
+        let answers = answerCounts(descendants)
+        let claims = [(rootID, root.counts.replies)]
+            + descendants.compactMap { note in note.statusID.map { ($0, note.counts.replies) } }
+        let short = claims.contains { id, claimed in (claimed ?? 0) > (answers[id] ?? 0) }
+        return short ? .cut : .end
+    }
+
+    /// How many drawn answers each post has directly under it.
+    private static func answerCounts(_ descendants: [Note]) -> [String: Int] {
         var answers: [String: Int] = [:]
         for note in descendants {
             if let parent = note.reply?.inReplyToId { answers[parent, default: 0] += 1 }
         }
-        var step = descendants.last
-        var walked = 0
-        while let note = step, walked <= descendants.count {
-            walked += 1
-            guard let id = note.statusID, id != rootID else { return nil }
-            if !asked.contains(id), (note.counts.replies ?? 0) > (answers[id] ?? 0) { return id }
-            step = note.reply?.inReplyToId.flatMap { byID[$0] }
-        }
-        return nil
+        return answers
     }
 
     /// The thread around `root` as this device holds it — what an earlier read landed (#177) —

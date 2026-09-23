@@ -651,13 +651,22 @@ final class ForumPosts {
         let task = Task { @MainActor in await self.page(before.next, of: key, was: before) }
         pageWork[key] = task
         await task.value
+        // Only this ask's own record: a stop and a new ask may have replaced it meanwhile.
+        if pageWork[key] == task { pageWork[key] = nil }
+    }
+
+    /// Every page on the wire let go of — the thread closed, or Esc. What they had not landed
+    /// does not land, and each foot is put back where it was, to be asked again when reached.
+    @discardableResult
+    func stopPaging() -> Bool {
+        guard !pageWork.isEmpty else { return false }
+        for task in pageWork.values { task.cancel() }
+        pageWork = [:]
+        return true
     }
 
     private func page(_ number: Int, of key: Key, was before: Paging) async {
-        defer {
-            pageWork[key] = nil
-            clearedPages.remove(key)
-        }
+        defer { clearedPages.remove(key) }
         // The rules `work` states for the first page, in its order: a forum still signing in is
         // waited for, the reader is chosen after it, and the gate is taken last.
         if let forums { await forums.settled(host: key.host) }
@@ -671,6 +680,11 @@ final class ForumPosts {
         }
         leave()
         guard !clearedPages.contains(key) else { return }
+        // Stopped: nothing it brought lands, and the foot is as it was before it asked.
+        guard !Task.isCancelled else {
+            paging[key] = before
+            return
+        }
         switch answer {
         case .success(let page):
             let landed = await landed(page.posts, for: key)

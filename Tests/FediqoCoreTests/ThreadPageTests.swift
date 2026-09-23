@@ -78,12 +78,15 @@ struct ThreadPageTests {
                 "the page this already is")
     }
 
-    @Test("A page past the end is the end, not a failure")
-    func aPagePastTheEndIsTheEnd() async throws {
+    /// A forum answers a page past its last with its last, so a later page with no post on it is
+    /// a page this device could not read — never the end, which would say a thread ended that was
+    /// simply not read.
+    @Test("A later page with nothing readable on it is a failure, not the end")
+    func anUnreadableLaterPageIsNotTheEnd() async throws {
         let http = FixtureHTTP([Self.address(page: 4): .text("<html><body></body></html>")])
-        let page = try await DiscuzClient(http: http, host: Self.host).replies(tid: Self.tid, page: 4)
-        #expect(page.posts.isEmpty)
-        #expect(!page.continues)
+        await #expect(throws: DiscuzRequestError.noPosts) {
+            try await DiscuzClient(http: http, host: Self.host).replies(tid: Self.tid, page: 4)
+        }
     }
 
     @Test("A reply kept in the store reads back as the reply it was, and never as a thread")

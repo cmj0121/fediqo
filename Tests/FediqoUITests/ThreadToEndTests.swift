@@ -322,7 +322,7 @@ struct ThreadToEndTests {
         await online.conversations.open(item, in: online)
         await online.conversations.more(item, in: online)
 
-        let dark = FixtureHTTP([Self.threadPath: .fail])
+        let dark = Scripted([Self.threadPath: .fail])
         let offline = ShellSession(http: dark, store: store, posts: ForumPosts(http: dark))
         await offline.reloadFromStore()
         await offline.conversations.open(item, in: offline)
@@ -332,8 +332,106 @@ struct ThreadToEndTests {
         #expect(offline.conversations.conversation(around: item).descendants.map(\.depth) == [1, 1, 2, 2])
         #expect(offline.conversations.further(of: item.id) == .failed(.unreachable),
                 "and the foot says the rest did not arrive, rather than that it ended")
+
+        // The network comes back, and the foot's "try again" asks what failed: the whole thread.
+        await dark.answer(Self.threadPath, with: Self.cutShort[Self.threadPath]!)
+        await offline.conversations.more(item, in: offline)
+        #expect(await dark.requested.map(\.path) == [Self.threadPath, Self.threadPath],
+                "the post's own thread asked again, not a part further down")
+        #expect(offline.conversations.further(of: item.id) == .end, "and the foot is not left failed")
+        #expect(Self.bodies(offline, item) == ["answer 10", "answer 11", "answer 12", "answer 13"],
+                "nothing drawn went while it was asked again")
     }
 
+    private static func claiming(_ id: String, answering parent: String, _ replies: Int) -> Note {
+        Note(
+            id: id, source: Source(host: host, kind: .mastodon), author: "a", handle: "",
+            body: "", postedAt: .distantPast, categories: [],
+            reply: Reply(inReplyToId: parent), counts: Counts(replies: replies), statusID: id
+        )
+    }
+
+    @Test("Answers the source counts and will not hand over are not called the end")
+    func aCutThreadIsNotTheEnd() {
+        let root = Self.claiming("9", answering: "", 5)
+        let two = [Self.claiming("10", answering: "9", 0), Self.claiming("11", answering: "9", 0)]
+        // The post counts five answers, two are drawn, and none of them has more to ask for.
+        #expect(ShellConversations.edge(below: "9", in: two, asked: ["9"]) == nil)
+        #expect(ShellConversations.settled(root: root, rootID: "9", descendants: two, asked: ["9"]) == .cut)
+        #expect(ShellConversations.settled(
+            root: Self.claiming("9", answering: "", 2), rootID: "9", descendants: two, asked: ["9"]
+        ) == .end, "all the answers it counts are drawn")
+        #expect(!ShellThreadFurther<ShellConversations.Absence>.cut.wantsAsking, "nothing to press")
+        #expect(ThreadFoot.said(ShellThreadFurther<ShellConversations.Absence>.cut, host: Self.host)
+            == .cut(sentence: "\(Self.host) gives no more of this thread here. There are answers it did not hand over."))
+    }
+
+    @Test("A post in the middle missing its answers is asked for, not only the last chain")
+    func everyDrawnPostIsWeighed() {
+        // 10 says it has two answers and none is drawn; the last post drawn is 12, under 11.
+        let drawn = [
+            Self.claiming("10", answering: "9", 2),
+            Self.claiming("11", answering: "9", 1),
+            Self.claiming("12", answering: "11", 0),
+        ]
+        #expect(ShellConversations.edge(below: "9", in: drawn, asked: ["9"]) == "10")
+    }
+
+    @Test("A foot asked where its post is no longer held says so, rather than waiting for ever")
+    func aFootWithNothingToAskSettles() async {
+        let (session, item) = await conversationShell(FixtureHTTP(Self.cutShort))
+        await session.conversations.open(item, in: session)
+        #expect(session.conversations.further(of: item.id) == .more)
+
+        await session.store.forget(NoteKey(rowID: item.id)!)
+        await session.reloadFromStore()
+        await session.conversations.more(item, in: session)
+        #expect(session.conversations.further(of: item.id) == .failed(.unfindable))
+    }
+
+    @Test("A reply with no date keeps its first, so reading its page again changes nothing")
+    func anUndatedReplyKeepsItsFirstDate() async {
+        let session = await forumShell(FixtureHTTP(Self.threePages))
+        let undated = [DiscuzPost(pid: 2, tid: Self.tid, author: "p", handle: "", body: "二楼")]
+        _ = await session.land(undated, host: Self.forum, tid: Self.tid)
+        let first = await session.store.held(host: Self.forum, idPrefix: DiscuzPost.heldPrefix(host: Self.forum, tid: Self.tid))
+        let revision = await session.store.revision
+
+        _ = await session.land(undated, host: Self.forum, tid: Self.tid)
+        let again = await session.store.held(host: Self.forum, idPrefix: DiscuzPost.heldPrefix(host: Self.forum, tid: Self.tid))
+        #expect(again.map(\.postedAt) == first.map(\.postedAt))
+        #expect(await session.store.revision == revision, "nothing moved, so nothing is written again")
+    }
+
+    @Test("A topic listed newest first reads back newest first")
+    func keptRepliesKeepThePagesOrder() async {
+        let session = await forumShell(FixtureHTTP(Self.threePages))
+        let newestFirst = [9, 8, 7].map {
+            DiscuzPost(pid: $0, tid: Self.tid, author: "p", handle: "", body: "r\($0)")
+        }
+        let later = [DiscuzPost(pid: 3, tid: Self.tid, author: "p", handle: "", body: "old", page: 2)]
+        _ = await session.land(later + newestFirst, host: Self.forum, tid: Self.tid)
+        #expect(await session.keptReplies(host: Self.forum, tid: Self.tid).map(\.pid) == [9, 8, 7, 3])
+    }
+
+    @Test("A page stopped on its way lands nothing, and the foot is as it was")
+    func aStoppedPageLandsNothing() async {
+        let http = GatedHTTP(Self.threePages, holding: Self.page(2))
+        let guardian = hangGuard(http.gate)
+        defer { guardian.cancel() }
+        let session = await forumShell(http)
+        await session.posts.fetchReplies(Self.ref)
+
+        let reading = Task { await session.posts.more(Self.ref) }
+        #expect(await spun { await http.reached })
+        #expect(session.stopReadingFurther(), "Esc has something to stop")
+        await http.gate.open()
+        await reading.value
+
+        #expect(Self.pids(session.posts.standing(of: Self.ref)) == [2], "the stopped page did not land")
+        #expect(session.posts.further(of: Self.ref) == .more, "and it will be asked again when reached")
+        #expect(!session.stopReadingFurther(), "nothing left on the wire")
+    }
 }
 
 /// Answers from a table a test can change between two asks — a page that fails, then arrives.

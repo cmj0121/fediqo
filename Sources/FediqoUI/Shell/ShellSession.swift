@@ -2132,21 +2132,45 @@ final class ShellSession {
     /// Aside, because a reply read in a thread is not a row All grew by (#175). A reply already
     /// held takes the words just read — **never the forum's notice over them**, #154's rule for an
     /// opening post, so a guest's read of a page does not undo what a member's read kept.
+    ///
+    /// **A reply the page gave no date keeps the one it was first kept with.** Stamped with each
+    /// read's moment, every re-read would move the row, write the whole store down again, and keep
+    /// it inside the reader's keep-for window for ever.
     func land(_ replies: [DiscuzPost], host: String, tid: Int) async -> [DiscuzPost] {
         let read = Date()
-        let notes = replies.map { $0.asNote(host: host, read: read) }
+        let first = Dictionary(
+            await store.held(host: host, idPrefix: DiscuzPost.heldPrefix(host: host, tid: tid))
+                .map { ($0.id, $0.postedAt) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let notes = replies.map { reply in
+            let id = DiscuzPost.heldPrefix(host: host, tid: tid) + String(reply.pid)
+            return reply.asNote(host: host, read: first[id] ?? read)
+        }
         await store.hold(notes, ifSourceHere: host)
         await store.refresh(notes.filter { $0.opening != nil }, ifSourceHere: host)
         await persist?()
         return await keptReplies(host: host, tid: tid)
     }
 
-    /// Every reply of one topic this device holds, in reading order: by page, and on a page by
-    /// the post's own number, which a forum hands out in the order the posts were written.
+    /// Every reply of one topic this device holds, in reading order: by page, and on a page in the
+    /// order the store took them — which is the order the page wrote them, so a forum that lists a
+    /// topic newest first reads back newest first too.
     func keptReplies(host: String, tid: Int) async -> [DiscuzPost] {
         await store.held(host: host, idPrefix: DiscuzPost.heldPrefix(host: host, tid: tid))
             .compactMap(DiscuzPost.init(held:))
-            .sorted { ($0.page, $0.pid) < ($1.page, $1.pid) }
+            .enumerated()
+            .sorted { ($0.element.page, $0.offset) < ($1.element.page, $1.offset) }
+            .map(\.element)
+    }
+
+    /// Every further read of an open thread stopped — a forum's next page, a conversation's next
+    /// part (#177). The thread closing, and Esc, which stops these as it stops a reload.
+    @discardableResult
+    func stopReadingFurther() -> Bool {
+        let paging = posts.stopPaging()
+        let further = conversations.stopReadingFurther()
+        return paging || further
     }
 
     /// This run's opening posts for rows still held, handed to the store **and** to the rows drawn

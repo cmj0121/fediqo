@@ -529,6 +529,9 @@ struct ThreadFoot: View {
         case more
         case coming
         case end
+        /// The source counts more than it will hand over here, and names itself. The way to read
+        /// the rest is the pane's own "Open on" in its header, where the thread is one there.
+        case cut(sentence: String)
         case failed(sentence: String, again: Bool)
     }
 
@@ -553,6 +556,16 @@ struct ThreadFoot: View {
                 .foregroundStyle(ShellChrome.inkFaint(colorScheme))
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(Text(L10n.t("thread.more.end")))
+            case .cut(let sentence):
+                // Not the end's mark: the thread did not end, the source stopped handing it over.
+                HStack(alignment: .firstTextBaseline, spacing: ShellSpace.tight) {
+                    Image(systemName: "scissors")
+                    Text(sentence).fixedSize(horizontal: false, vertical: true)
+                }
+                .shellFont(.meta)
+                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text(sentence))
             case .failed(let sentence, let again):
                 VStack(alignment: .leading, spacing: ShellSpace.snug) {
                     Text(sentence)
@@ -590,6 +603,7 @@ struct ThreadFoot: View {
         case .more: .more
         case .coming: .coming
         case .end: .end
+        case .cut: .cut(sentence: String(format: L10n.t("thread.more.cut"), host))
         case .failed(let absence):
             .failed(sentence: sentence(for: absence, host: host), again: absence.asksAgain)
         }
@@ -601,6 +615,7 @@ struct ThreadFoot: View {
         case .more: .more
         case .coming: .coming
         case .end: .end
+        case .cut: .cut(sentence: String(format: L10n.t("thread.more.cut"), host))
         case .failed(let absence):
             .failed(sentence: sentence(for: absence, host: host), again: absence.asksAgain)
         }

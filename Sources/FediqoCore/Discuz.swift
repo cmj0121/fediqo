@@ -290,9 +290,11 @@ public struct DiscuzClient: Sendable {
     /// "later pages are their own question" above, asked.
     ///
     /// **The first page is `replies(tid:)`'s**, the opening post taken out. A later page has no
-    /// opening post on it, and a floor-one post found there anyway is still not a reply. A later
-    /// page with nothing on it is the end rather than a failure: Discuz! answers a page past the
-    /// last one with its last page, so an empty one is a thread that has shrunk under the reader.
+    /// opening post on it, and a floor-one post found there anyway is still not a reply. **A later
+    /// page with no post on it is not the end** but a page this device could not read, as the
+    /// first page's is: Discuz! answers a page past the last with its last page, posts and all, so
+    /// an empty one is markup this parser does not know or a sign-in page — and calling that the
+    /// end would say a thread ended that simply was not read.
     public func replies(tid: Int, page: Int) async throws -> DiscuzReplies {
         let page = max(1, page)
         let (posts, html) = try await self.posts(tid: tid, page: page)
@@ -360,9 +362,6 @@ public struct DiscuzClient: Sendable {
         }
         let html = try await page(url)
         let posts = DiscuzThreadPage.posts(in: html, tid: tid, host: host)
-        // A later page with no post on it is a thread that ended before it, not a page this
-        // device could not read — see `replies(tid:page:)`. The first page keeps its rule below.
-        if number > 1, posts.isEmpty { return ([], html) }
         // The rule `read` states for an empty thread table, one page down and for the same
         // reason: a parser that meets markup it cannot read and answers `[]` gives the reader a
         // blank row forever with nothing to explain it. It is also the backstop under a case
