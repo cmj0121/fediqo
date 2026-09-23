@@ -121,7 +121,10 @@ extension ShellReload {
         do {
             switch category {
             case .public:
-                guard let place = await session.store.missing(below: post, in: .public) else { return true }
+                let me = session.mastodon.handles[host]
+                guard let place = await session.store.missing(below: post, in: .public, writtenBy: me) else {
+                    return true
+                }
                 let client = MastodonClient(
                     http: timed(session.http, for: .timeline, name: .public, in: session), host: host
                 )
@@ -140,7 +143,8 @@ extension ShellReload {
                 }
                 let door = session.mastodon.authorized(token: token, within: deadline, for: .timeline, name: name)
                 let account = MastodonAccount(door: door, store: session.store)
-                try await asReader(host) { try await account.readDown(category, below: post) }
+                let me = session.mastodon.handles[host]
+                try await asReader(host) { try await account.readDown(category, below: post, writtenBy: me) }
                 return true
             }
         } catch MastodonAuthError.signedOut {

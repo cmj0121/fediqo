@@ -406,6 +406,7 @@
 "prefs.gone.ask.places.one" = "Let go of %d place whose source no longer has what lay there?";
 "prefs.gone.ask.both" = "Let go of %1$@ deleted at their source, and %2$@ whose source no longer has what lay there?";
 "prefs.gone.ask.detail.places" = "Posts go from this device now, from every screen. A place loses only its mark, and the post it sits by stays. Nothing else is touched, and every source stays joined.";
+"prefs.gone.ask.detail.placesonly" = "Only their marks go, and the posts they sit by stay. Nothing else is touched, and every source stays joined.";
 "prefs.gone.went.places" = "%d places went.";
 "prefs.gone.went.places.one" = "%d place went.";
 "prefs.gone.went.both" = "%1$@ and %2$@ went.";

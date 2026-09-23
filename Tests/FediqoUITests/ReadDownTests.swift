@@ -162,8 +162,12 @@ struct ReadDownTests {
             let went = GoneSection.wentLine(3, places: 2, language: language)
             #expect(went.contains("3") && went.contains("2"))
             #expect(GoneSection.wentLine(0, places: 1, language: language).contains("1"))
-            #expect(GoneSection.askDetail(places: 1, language: language) != GoneSection.askDetail(places: 0, language: language))
-            for key in ["timeline.gap.settled", "prefs.gone.ask.both", "prefs.gone.went.both", "prefs.gone.ask.detail.places"] {
+            let details = Set([(1, 0), (1, 1), (0, 1)].map {
+                GoneSection.askDetail(posts: $0.0, places: $0.1, language: language)
+            })
+            #expect(details.count == 3, "posts only, both, and places only each say what goes")
+            for key in ["timeline.gap.settled", "prefs.gone.ask.both", "prefs.gone.went.both", "prefs.gone.ask.detail.places",
+                        "prefs.gone.ask.detail.placesonly"] {
                 #expect(L10n.t(key, language: language) != key, "\(key) in \(language)")
             }
         }
@@ -175,7 +179,8 @@ struct ReadDownTests {
                 contentsOf: resources.appendingPathComponent("\(lproj).lproj/Localizable.strings"), encoding: .utf8
             )
             for key in ["timeline.gap.settled", "prefs.gone.ask.both", "prefs.gone.ask.places", "prefs.gone.went.both",
-                        "prefs.gone.went.places", "prefs.gone.posts", "prefs.gone.places", "prefs.gone.ask.detail.places"] {
+                        "prefs.gone.went.places", "prefs.gone.posts", "prefs.gone.places", "prefs.gone.ask.detail.places",
+                        "prefs.gone.ask.detail.placesonly"] {
                 #expect(strings.contains("\"\(key)\""), "\(key) in \(lproj)")
             }
         }

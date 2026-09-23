@@ -71,7 +71,7 @@ struct GoneSection: View {
             }
             Button(L10n.t("board.choose.cancel"), role: .cancel) {}
         } message: {
-            Text(Self.askDetail(places: counted.places))
+            Text(Self.askDetail(posts: counted.posts, places: counted.places))
         }
     }
 
@@ -87,9 +87,12 @@ struct GoneSection: View {
         )
     }
 
-    /// What the question says under it: where places go too, that only their marks do.
-    static func askDetail(places: Int, language: DummyLanguage? = nil) -> String {
-        L10n.t(places == 0 ? "prefs.gone.ask.detail" : "prefs.gone.ask.detail.places", language: language)
+    /// What the question says under it: where places go too, that only their marks do — and where
+    /// only places go, nothing of posts going.
+    static func askDetail(posts: Int, places: Int, language: DummyLanguage? = nil) -> String {
+        let key = places == 0 ? "prefs.gone.ask.detail"
+            : posts == 0 ? "prefs.gone.ask.detail.placesonly" : "prefs.gone.ask.detail.places"
+        return L10n.t(key, language: language)
     }
 
     /// What the page says where the keep-for window is the shorter of the two, and nothing where
