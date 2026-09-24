@@ -77,20 +77,7 @@ struct AccountPane: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: ShellSpace.room) {
                     masthead
-                    // **No tabs and no list where nothing is joined** — not a hairline, not a
-                    // header, not an empty state. The hero already says what the app is for and
-                    // names the next act; a second invitation would argue with the mascot.
-                    if Self.tabbed(sources: session.sources.count) {
-                        ShellTabs(Purpose.allCases, selected: session.accountPurpose) {
-                            session.accountPurpose = $0
-                        }
-                        switch session.accountPurpose {
-                        case .sources: sources
-                        case .add: addPage
-                        }
-                    } else {
-                        addPage
-                    }
+                    page
                 }
                 .padding(ShellSpace.pad)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -118,6 +105,9 @@ struct AccountPane: View {
             }
             .onChange(of: searchFocused) { _, on in
                 session.searchFocused = on
+            }
+            .onChange(of: session.accountPurpose) { _, now in
+                arrived(at: now)
             }
             .onDisappear { session.searchFocused = false }
             .confirmationDialog(
@@ -244,6 +234,38 @@ struct AccountPane: View {
     @ViewBuilder
     private var masthead: some View {
         if session.sources.isEmpty { hero } else { standing }
+    }
+
+    /// **No tabs and no list where nothing is joined** — not a hairline, not a header, not an
+    /// empty state. The hero already says what the app is for and names the next act; a second
+    /// invitation would argue with the mascot.
+    @ViewBuilder
+    private var page: some View {
+        if Self.tabbed(sources: session.sources.count) {
+            ShellTabs(Purpose.allCases, selected: session.accountPurpose) {
+                session.accountPurpose = $0
+            }
+            switch session.accountPurpose {
+            case .sources: sources
+            case .add: addPage
+            }
+        } else {
+            addPage
+        }
+    }
+
+    /// The page moved to a tab, by a press or by Tab. **Arriving on Add puts the keyboard in the
+    /// field**, which is the one thing that tab is for; leaving it takes the keyboard out, so the
+    /// shell's keys are not held off by a field no longer on screen.
+    ///
+    /// Asked after the tab's views are in the page, since a field is focused only once it is there.
+    func arrived(at purpose: Purpose) {
+        guard purpose == .add else {
+            searchFocused = false
+            session.searchFocused = false
+            return
+        }
+        Task { @MainActor in searchFocused = true }
     }
 
     /// Adding a source: the field and Browse, what the last look said, and the preview of a

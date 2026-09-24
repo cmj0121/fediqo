@@ -470,11 +470,11 @@ struct JoinSheet: View {
         VStack(alignment: .leading, spacing: ShellSpace.tight) {
             switch session.stage {
             case .browsing:
-                titled(L10n.t("join.browse.title"), L10n.t("join.browse.protocols.detail"))
+                titled(L10n.t("join.browse.title"), line: L10n.t("join.browse.protocols.detail"))
             case .browsingServers(let kind):
                 titled(
                     String(format: L10n.t("join.browse.servers.title"), kind.displayName),
-                    L10n.t("join.browse.detail")
+                    line: L10n.t("join.browse.detail")
                 )
             // **The one block this sheet shares with the page, in the sheet's own header slot.**
             // It stays pinned above the hairline here and scrolls with the block there, which is
@@ -485,12 +485,14 @@ struct JoinSheet: View {
             case .choosingBoards(let offer, let origin):
                 titled(
                     String(format: L10n.t("board.choose.title"), offer.host),
-                    L10n.t(Self.detailKey(for: origin))
+                    line: L10n.t(Self.lineKey(for: origin)),
+                    more: L10n.t(Self.detailKey(for: origin))
                 )
             case .choosingLists(let choice):
                 titled(
                     String(format: L10n.t("list.choose.title"), choice.host),
-                    L10n.t("list.choose.detail")
+                    line: L10n.t("list.choose.line"),
+                    more: L10n.t("list.choose.detail")
                 )
             case nil:
                 EmptyView()
@@ -500,15 +502,41 @@ struct JoinSheet: View {
         .padding(ShellSpace.pad)
     }
 
-    /// A step's title, and what the step is behind its (?) rather than under it (#235).
-    private func titled(_ title: String, _ detail: String) -> some View {
-        Text(title)
-            .shellFont(.pane)
-            .foregroundStyle(ShellChrome.ink(colorScheme))
+    /// A step's title and one short line under it — what the press will cost, where it costs
+    /// something — with the rest of the step behind the line's (?) where there is more (#235).
+    private func titled(_ title: String, line: String, more: String? = nil) -> some View {
+        VStack(alignment: .leading, spacing: ShellSpace.tight) {
+            Text(title)
+                .shellFont(.pane)
+                .foregroundStyle(ShellChrome.ink(colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityFocused($headerFocused)
+            stepLine(line, more: more, about: title)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func stepLine(_ line: String, more: String?, about title: String) -> some View {
+        let text = Text(line)
+            .shellFont(.meta)
+            .foregroundStyle(ShellChrome.inkDim(colorScheme))
             .fixedSize(horizontal: false, vertical: true)
-            .accessibilityFocused($headerFocused)
-            .shellHelp(verbatim: detail, about: title)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        if let more {
+            text.shellHelp(verbatim: more, about: title)
+        } else {
+            text
+        }
+    }
+
+    /// The boards step's one visible line: the consequence of the press, which is not the same on
+    /// both entrances — nothing is added yet on a join, and a restate replaces what is read now.
+    /// `detailKey(for:)` is the whole sentence behind its (?). **No `default:`.**
+    static func lineKey(for origin: BoardsOrigin) -> String {
+        switch origin {
+        case .preview: "board.choose.line"
+        case .joined: "board.choose.line.change"
+        }
     }
 
     /// The sentence under the boards title, which is not the same sentence on both entrances.

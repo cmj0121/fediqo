@@ -440,16 +440,51 @@ final class ShellSession {
         return true
     }
 
-    /// Which tab Account is showing (#235): the sources this device reads, or adding one.
-    var accountPurpose: AccountPane.Purpose = .sources
+    /// The tab the reader chose on Account.
+    private var accountTab: AccountPane.Purpose = .sources
 
-    /// Tab and ⇧Tab on Account, the way they rotate Usage. **Only where the tabs are drawn**: with
-    /// nothing joined the page is the hero and the field alone, and Tab is the platform's.
+    /// Which tab Account is showing (#235): the sources this device reads, or adding one.
+    ///
+    /// **Adding holds the page while it is under way.** With a preview drawn in the page or the
+    /// page's own errand on the wire, every row is dimmed and inert (`rowActsLive`), and a list
+    /// shown then would be a page of refused controls with nothing on it saying why — the why is
+    /// on the add tab. So the page reads `.add` for as long as that lasts, and a choice made then
+    /// is refused rather than kept for later.
+    var accountPurpose: AccountPane.Purpose {
+        get { addHoldsAccount ? .add : accountTab }
+        set { if !addHoldsAccount { accountTab = newValue } }
+    }
+
+    /// Whether adding a source holds Account: a preview drawn in the page, or a look or a join the
+    /// page or its block reports. **Not a row's own errand**, which is reported on its row.
+    var addHoldsAccount: Bool {
+        Self.addHolds(stage: stage, progress: progress)
+    }
+
+    /// `addHoldsAccount`'s rule, given what it reads, so a test asks it of every errand.
+    static func addHolds(stage: JoinStage?, progress: ProgressReport?) -> Bool {
+        if stage?.inlinePreview != nil { return true }
+        switch reporting(progress, drawnAs: stage) {
+        case .page, .block: return true
+        case .row, nil: return false
+        }
+    }
+
+    /// Tab and ⇧Tab on Account, the way they rotate Usage. **Only where the tabs are drawn and
+    /// free**: with nothing joined the page is the hero and the field alone, and while adding holds
+    /// the page there is nothing to rotate to — Tab is the platform's either way.
     @discardableResult
     func rotateAccountTab(by step: Int) -> Bool {
-        guard AccountPane.tabbed(sources: sources.count) else { return false }
-        accountPurpose = DummyCommand.advanced(Array(AccountPane.Purpose.allCases), from: accountPurpose, by: step)
+        guard AccountPane.tabbed(sources: sources.count), !addHoldsAccount else { return false }
+        accountTab = DummyCommand.advanced(Array(AccountPane.Purpose.allCases), from: accountTab, by: step)
         return true
+    }
+
+    /// A join went through: the page shows the list it is now on. **Not where some boards could
+    /// not be read** — that sentence is said on the add tab, and leaving it would hide it.
+    private func showJoined() {
+        guard unread.isEmpty else { return }
+        accountTab = .sources
     }
 
     /// How many times the reader has cleared a server — decision 14's press, counted.
@@ -1244,6 +1279,7 @@ final class ShellSession {
                 // else happened to refresh it. What the token protects is only the sheet.
                 closeIfStillMine(mine)
                 await adopt()
+                showJoined()
             case .chooseBoards(let offer):
                 // D28's pause, and the third stage. **Nothing has been added**, so a reader who
                 // left takes the whole errand with them — which is why this one *is* entirely
@@ -1506,6 +1542,7 @@ final class ShellSession {
                 await store.remove(host: offer.host)
             }
             await adopt()
+            if mine == errand, !origin.isRestate { showJoined() }
             // Where a board that failed was the only thing the reader was after, the rail is
             // still worth landing them on the one that worked — `adopt` does that — but the
             // sentence about the rest is `unread`, and it is read on Account.

@@ -38,6 +38,79 @@ struct AccountTabsTests {
         #expect(session.usagePurpose == .source, "Account's tabs are its own, not Usage's")
     }
 
+    @Test("A preview in the page holds Account on Add, and a choice made then is refused")
+    func previewHoldsAdd() {
+        let session = ShellSession(http: FixtureHTTP())
+        session.sources = [Self.alpha]
+        let host = "beta.test"
+        session.stage = .previewing(
+            SourcePreview(host: host, kind: .mastodon, profile: .silent(host: host, kind: .mastodon)),
+            from: .field, ticked: []
+        )
+        #expect(session.accountPurpose == .add, "the rows are inert and the page showed them")
+        session.accountPurpose = .sources
+        #expect(session.accountPurpose == .add)
+        #expect(!session.rotateAccountTab(by: 1))
+        session.stage = nil
+        #expect(session.accountPurpose == .sources, "the reader's own choice came back with the page")
+    }
+
+    @Test("The page's own errand holds Add; a row's own does not")
+    func errandsHoldAdd() {
+        let look = ProgressReport(owner: .page, key: "account.detect.progress")
+        let block = ProgressReport(owner: .block, key: "account.detect.progress")
+        let row = ProgressReport(owner: .row(host: "alpha.test"), key: "account.source.boards.progress")
+        #expect(ShellSession.addHolds(stage: nil, progress: look))
+        #expect(ShellSession.addHolds(stage: nil, progress: block))
+        #expect(!ShellSession.addHolds(stage: nil, progress: row))
+        #expect(!ShellSession.addHolds(stage: nil, progress: nil))
+    }
+
+    @Test("A join that goes through lands on the list; one that is refused stays on Add")
+    func joinLandsOnSources() async {
+        let session = ShellSession(http: FixtureHTTP([
+            "/": .text(#"""
+            <html><head><meta name="application-name" content="Mastodon"></head>
+            <body><div id="mastodon"></div></body></html>
+            """#),
+            "/api/v2/instance": .text(#"{"domain": "first.example", "title": "First", "version": "4.3.0"}"#),
+            "/api/v1/timelines/public": .text("[]"),
+            "/api/v1/trends/statuses": .text("[]"),
+        ]))
+        session.sources = [Self.alpha]
+        session.accountPurpose = .add
+        session.hostname = "first.example"
+        await session.add()
+        #expect(session.accountPurpose == .add)
+        await session.confirm()
+        #expect(session.sources.map(\.host).contains("first.example"))
+        #expect(session.accountPurpose == .sources, "a join left the reader on the empty field")
+
+        let refused = ShellSession(http: FixtureHTTP(["/": .text(#"""
+        <html><head><meta name="generator" content="Pleroma"></head><body></body></html>
+        """#)]))
+        refused.sources = [Self.alpha]
+        refused.accountPurpose = .add
+        refused.hostname = "pleroma.example"
+        await refused.add()
+        #expect(refused.refuse != nil)
+        #expect(refused.accountPurpose == .add, "the refusal is said on Add and the page left it")
+    }
+
+    @Test("Each step of adding keeps one line, and the boards line says what the press costs")
+    func stepLines() {
+        #expect(JoinSheet.lineKey(for: .preview(
+            SourcePreview(host: "f.test", kind: .discuz, profile: .silent(host: "f.test", kind: .discuz)),
+            ticked: []
+        )) == "board.choose.line")
+        #expect(L10n.t("board.choose.line", language: .english) == "Nothing is added until you do.")
+        #expect(L10n.t("board.choose.line.change", language: .english) == "What you pick replaces what you read now.")
+        #expect(L10n.t("list.choose.line", language: .english) == "What you pick replaces what you read now.")
+        for key in ["board.choose.line", "board.choose.line.change", "list.choose.line"] {
+            #expect(L10n.t(key, language: .taiwanese) != key)
+        }
+    }
+
     /// No view inspector, so the page is pinned by what its files say: the shell's Tab reaches
     /// Account, the page draws the shared tabs, and no explanation is drawn as a line of its own.
     @Test("The page is wired to the shared pieces, and draws no explanation by default")

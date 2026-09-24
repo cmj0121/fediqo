@@ -515,6 +515,7 @@
 /* Unit F4 — choosing boards. */
 "board.choose.title" = "Boards on %@";
 "board.choose.detail" = "Pick the boards you want to read. Nothing is added until you do.";
+"board.choose.line" = "Nothing is added until you do.";
 "board.choose.count" = "%1$d of %2$d picked";
 "board.choose.cancel" = "Cancel";
 "board.choose.subscribe" = "Subscribe";
@@ -663,6 +664,7 @@
 "account.source.boards.progress"  = "Reading %@'s boards…";
 "account.source.boards.unread"    = "%@'s boards could not be read just now.";
 "board.choose.detail.change"      = "Pick the boards you want to read. What you pick replaces what you read now.";
+"board.choose.line.change" = "What you pick replaces what you read now.";
 
 
 /* Decision 29: Clear asks first, and says what actually goes. */
@@ -707,6 +709,7 @@
 "account.source.lists.unread"         = "Your lists on %@ could not be read just now.";
 "list.choose.title"                   = "Your lists on %@";
 "list.choose.detail"                  = "Pick the lists this device reads. Your Home is always read. What you pick replaces what you read now.";
+"list.choose.line" = "What you pick replaces what you read now.";
 "list.choose.none"                    = "You have no lists on this server.";
 "list.choose.done"                    = "Done";
 "list.choose.hint.on"                 = "Read this list";

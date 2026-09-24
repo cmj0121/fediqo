@@ -500,6 +500,7 @@
 /* Unit F4 — choosing boards. */
 "board.choose.title" = "%@ 的版塊";
 "board.choose.detail" = "挑你想看的版塊。沒挑之前不會加進來。";
+"board.choose.line" = "沒挑之前，什麼都不會加進來。";
 "board.choose.count" = "已挑 %1$d／%2$d 個";
 "board.choose.cancel" = "取消";
 "board.choose.subscribe" = "訂閱";
@@ -642,6 +643,7 @@
 "account.source.boards.progress"  = "正在讀 %@ 的版塊…";
 "account.source.boards.unread"    = "現在讀不到 %@ 的版塊。";
 "board.choose.detail.change"      = "挑你想看的版塊。挑好的會取代你現在讀的。";
+"board.choose.line.change" = "挑好的會取代你現在讀的。";
 
 
 /* Decision 29: Clear asks first, and says what actually goes. */
@@ -686,6 +688,7 @@
 "account.source.lists.unread"         = "現在讀不到你在 %@ 的列表。";
 "list.choose.title"                   = "你在 %@ 的列表";
 "list.choose.detail"                  = "挑這個裝置要讀的列表。首頁一定會讀。你挑的會取代你現在讀的。";
+"list.choose.line" = "你挑的會取代你現在讀的。";
 "list.choose.none"                    = "你在這個來源上沒有列表。";
 "list.choose.done"                    = "完成";
 "list.choose.hint.on"                 = "讀這個列表";
