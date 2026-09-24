@@ -2680,7 +2680,13 @@ final class ShellSession {
     /// about, so it is what the token, the refusal sentence, the unread boards and their count are
     /// gated on — clearing them unconditionally would take away a sentence owed about a different
     /// server.
-    func remove(host raw: String) async {
+    ///
+    /// **`keepingPosts` is the reader's standing choice** (#250, `DummyPrefs.removedPostsStay`):
+    /// the store keeps the rows and drops the source, and everything else here goes exactly as it
+    /// does when they go — the reads on the wire, the sign-in, the pictures, the boards. The rows
+    /// stay drawn from the store as they were, marked by the row as from a host no longer in
+    /// `sources`.
+    func remove(host raw: String, keepingPosts: Bool = false) async {
         let host = raw.lowercased()
         // The question has been answered, so nothing is pending any more — set before the awaits,
         // so no dialog state outlives the decision it was asking about.
@@ -2717,7 +2723,7 @@ final class ShellSession {
             unreadAll = 0
             progressHost = ""
         }
-        await store.remove(host: host)
+        await store.remove(host: host, keepingPosts: keepingPosts)
         await adopt()
         await clear(host: host)
 

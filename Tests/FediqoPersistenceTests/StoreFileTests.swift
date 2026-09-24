@@ -44,6 +44,20 @@ struct StoreFileTests {
         #expect(loaded.notes == [saved])
     }
 
+    @Test("A post kept from a source since removed comes back as that source's, boards and all gone (#250)")
+    func keptPostOfRemovedSourceSurvivesRelaunch() async throws {
+        let file = try StoreFile(database: DatabaseQueue())
+        let forum = Source(host: "forum.example", kind: .discuz, boards: [BoardSubscription(fid: 33, name: "a")])
+        let kept = note(id: "https://forum.example/1", source: forum, categories: [.board(id: "33")])
+        try await file.save(sources: [mastodon], notes: [kept, note(id: "2")])
+        let loaded = try file.load()
+        #expect(loaded.sources == [mastodon])
+        #expect(loaded.notes.map(\.id) == [kept.id, "2"])
+        let back = try #require(loaded.notes.first)
+        #expect(back.source == Source(host: "forum.example", kind: .discuz))
+        #expect(back.body == kept.body && back.categories == kept.categories)
+    }
+
     @Test("A post held aside is still held aside after a relaunch, and one that arrived still arrived")
     func holdingSurvivesRelaunch() async throws {
         let file = try StoreFile(database: DatabaseQueue())
@@ -362,12 +376,16 @@ struct StoreFileTests {
         #expect(opened.sources.map(\.host) == [mastodon.host], "the source did not stay joined")
     }
 
-    @Test("A note whose host has no source row is dropped on load")
+    @Test("A note whose host has no source row, written before rows knew their kind, is dropped on load")
     func orphanDropped() async throws {
         let file = try StoreFile(database: DatabaseQueue())
         let kept = note(id: "1")
         let orphan = note(id: "2", source: Source(host: "gone.example", kind: .mastodon))
         try await file.save(sources: [mastodon], notes: [kept, orphan])
+        // A row from before #250 wrote no kind; such a row has no source to be drawn as.
+        try await file.db.write { db in
+            try db.execute(sql: "UPDATE note SET facts = json_remove(facts, '$.kind')")
+        }
         #expect(try file.load().notes == [kept])
     }
 

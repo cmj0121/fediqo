@@ -374,6 +374,12 @@
 "prefs.askEvery.one" = "Every minute";
 "prefs.askEvery.many" = "Every %d minutes";
 "prefs.askEvery.footer" = "While Fediqo is open, every source on this device is asked again after this wait, and the timeline in front renews itself. r still reloads at once.";
+"prefs.removed.head" = "When a source is removed";
+"prefs.removed.brief" = "What happens to its posts.";
+"prefs.removed.footer" = "Removing a source takes everything this device holds for it: its sign-in, its pictures, the boards you picked. Its posts go with it, or stay — marked as from a source no longer here, still read in All and found by search, and let go like any other post. The question before removing says which.";
+"prefs.removed" = "Its posts";
+"prefs.removed.go" = "Go with it";
+"prefs.removed.stay" = "Stay";
 
 "prefs.tab.choices" = "Settings";
 "prefs.tab.build" = "This Fediqo";
@@ -454,6 +460,8 @@
 "prefs.keep.months.one" = "Latest %d month";
 "item.gone" = "Deleted at source";
 "item.gone.detail" = "Its source says it no longer has this post. It stays here, marked, until you let it go, and nothing can be sent to it.";
+"item.left" = "Source removed";
+"item.left.detail" = "You removed the source this post was read through and kept its posts. It stays here, marked, until you let it go, and nothing reaches its source again.";
 "prefs.gone" = "Posts deleted at their source";
 "prefs.gone.wait" = "Let them go after";
 "prefs.gone.never" = "Never";
@@ -615,6 +623,10 @@
 "account.remove.detail.boards" = "Its posts, everything this device holds for it, and the %d boards you picked go with it. The boards do not come back.";
 "account.remove.line.boards" = "Its posts go, and the %d boards you picked do not come back.";
 "account.remove.confirm" = "Remove";
+"account.remove.line.stay" = "Its posts stay, marked as from a source no longer here.";
+"account.remove.line.stay.boards" = "Its posts stay; the %d boards you picked do not come back.";
+"account.remove.detail.stay" = "Its posts stay on this device, marked as from a source no longer here, until you let them go. Everything else this device holds for it goes with it.";
+"account.remove.detail.stay.boards" = "Its posts stay on this device, marked as from a source no longer here, until you let them go. Everything else this device holds for it, and the %d boards you picked, go with it. The boards do not come back.";
 
 /* Unit 4 — the join sheet, and what a server says before you take it. */
 "join.close" = "Close";

@@ -98,6 +98,33 @@ struct StoreTests {
         #expect(await moved())
     }
 
+    @Test("Removing a source and keeping its posts leaves them drawn, saved, and reachable by the window (#250)")
+    func removeKeepsPostsWhenAsked() async {
+        let forum = Source(host: "forum.example", kind: .discuz, boards: [BoardSubscription(fid: 3, name: "x")])
+        let kept = note(id: "kept", postedAt: origin, categories: [.trends], from: forum)
+        let store = ItemStore(sources: [source, forum], notes: [kept, note(id: "mine", postedAt: origin, categories: [.public])])
+        let before = await store.snapshot().revision
+        await store.remove(host: "Forum.Example", keepingPosts: true)
+        #expect(await store.sources() == [source])
+        #expect(await store.snapshot().revision != before, "a source going is written down")
+        #expect(Set(await store.all().map(\.id)) == ["kept", "mine"])
+        #expect(await store.snapshot().notes.contains { $0.key == kept.key })
+        // Nothing reaches it after: a read still on the wire brings nothing back (#221).
+        await store.ingest([note(id: "late", postedAt: origin, categories: [.public], from: forum)], ifSourceHere: forum.host)
+        #expect(Set(await store.all().map(\.id)) == ["kept", "mine"])
+        // Kept posts go like any other: by the window here, or by a later story's limit.
+        #expect(await store.setRetention(months: 1, from: origin.addingTimeInterval(400 * 86_400)) == 2)
+        #expect(await store.all().isEmpty)
+    }
+
+    @Test("Removing a source without keeping its posts takes them, as it always did")
+    func removeTakesPostsByDefault() async {
+        let forum = Source(host: "forum.example", kind: .discuz)
+        let store = ItemStore(sources: [source, forum], notes: [note(id: "gone", postedAt: origin, categories: [.trends], from: forum)])
+        await store.remove(host: forum.host, keepingPosts: false)
+        #expect(await store.all().isEmpty)
+    }
+
     @Test("A snapshot with duplicates loads instead of trapping")
     func initToleratesDuplicates() async {
         let first = note(id: "1", postedAt: origin, categories: [.public], body: "first")

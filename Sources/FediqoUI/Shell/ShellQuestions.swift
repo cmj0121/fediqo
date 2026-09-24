@@ -27,16 +27,22 @@ enum ShellQuestion {
         )
     }
 
-    /// Removing a source. The boards it takes do not come back, so where there are any the line
-    /// itself names them; the (?) says the rest.
-    static func remove(host: String, boards: Int, language: DummyLanguage? = nil) -> ShellConfirmation {
-        ShellConfirmation(
+    /// Removing a source. The line says what will happen to its posts — they go, or they stay
+    /// as the reader chose on Preferences (#250, `postsStay`) — and the boards it takes do not
+    /// come back, so where there are any the line names them too; the (?) says the rest.
+    static func remove(
+        host: String, boards: Int, postsStay: Bool = false, language: DummyLanguage? = nil
+    ) -> ShellConfirmation {
+        let stay = postsStay ? ".stay" : ""
+        let counted = boards > 0 ? ".boards" : ""
+        let line = postsStay || boards > 0
+            ? String(format: L10n.t("account.remove.line\(stay)\(counted)", language: language), boards)
+            : L10n.t("account.remove.detail", language: language)
+        let help = postsStay || boards > 0
+            ? String(format: L10n.t("account.remove.detail\(stay)\(counted)", language: language), boards) : nil
+        return ShellConfirmation(
             symbol: "trash", title: String(format: L10n.t("account.remove.title", language: language), host),
-            line: boards > 0
-                ? String(format: L10n.t("account.remove.line.boards", language: language), boards)
-                : L10n.t("account.remove.detail", language: language),
-            help: boards > 0
-                ? String(format: L10n.t("account.remove.detail.boards", language: language), boards) : nil,
+            line: line, help: help,
             choices: [.init(yes, L10n.t("account.remove.confirm", language: language), role: .destructive)],
             cancel: L10n.t("board.choose.cancel", language: language)
         )
