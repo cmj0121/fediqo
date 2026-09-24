@@ -72,6 +72,10 @@ struct UsagePane: View {
     private struct Probe: Equatable {
         let hosts: [String]
         let cleared: Int
+        /// The newest line of the limits' account and how many there are (#251): a limit that
+        /// acted moved the figures, and a clear moved the lines.
+        let acted: UUID?
+        let lines: Int
     }
 
     private var sources: [Source] { session?.sources ?? [] }
@@ -148,7 +152,10 @@ struct UsagePane: View {
         .scrollIndicators(.never)
         .clearsFloatingCorner()
         .padding(ShellSpace.snug)
-        .task(id: Probe(hosts: sources.map(\.host), cleared: session?.cleared ?? 0)) {
+        .task(id: Probe(
+            hosts: sources.map(\.host), cleared: session?.cleared ?? 0,
+            acted: session?.limitAccount.first?.id, lines: session?.limitAccount.count ?? 0
+        )) {
             await readCatalogues()
             await readDisk()
         }
