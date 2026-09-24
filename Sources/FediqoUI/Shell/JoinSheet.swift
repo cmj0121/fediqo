@@ -500,19 +500,15 @@ struct JoinSheet: View {
         .padding(ShellSpace.pad)
     }
 
+    /// A step's title, and what the step is behind its (?) rather than under it (#235).
     private func titled(_ title: String, _ detail: String) -> some View {
-        VStack(alignment: .leading, spacing: ShellSpace.tight) {
-            Text(title)
-                .shellFont(.pane)
-                .foregroundStyle(ShellChrome.ink(colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityFocused($headerFocused)
-            Text(detail)
-                .shellFont(.meta)
-                .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        Text(title)
+            .shellFont(.pane)
+            .foregroundStyle(ShellChrome.ink(colorScheme))
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityFocused($headerFocused)
+            .shellHelp(verbatim: detail, about: title)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// The sentence under the boards title, which is not the same sentence on both entrances.
@@ -876,7 +872,7 @@ struct JoinSheet: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(servers) { server in
-                            catalogRow(server, added: added.contains(server.domain.lowercased()))
+                            catalogRow(server, of: kind, added: added.contains(server.domain.lowercased()))
                             ShellRule()
                         }
                     }
@@ -910,7 +906,10 @@ struct JoinSheet: View {
     /// waiting line of its own. It carried one, for the one row of forty the reader had pressed,
     /// because the press used to preview inside this sheet; the press goes to the page now and
     /// answers there.
-    private func catalogRow(_ server: CatalogServer, added: Bool) -> some View {
+    ///
+    /// **Led by its protocol's mark (#235)**, the one the protocol's own row in step one carries,
+    /// so the list reads icon first like every other; a server already added leads with a tick.
+    private func catalogRow(_ server: CatalogServer, of kind: ProtocolKind, added: Bool) -> some View {
         // **Built once and handed to both readers.** `rowFoot` draws these three and the spoken
         // value says the same three, and each one costs a locale lookup, two bundle lookups and
         // two compact-number formats — so asking twice doubled that for every visible row on every
@@ -919,15 +918,18 @@ struct JoinSheet: View {
         return Button {
             Task { await session.pick(server) }
         } label: {
-            VStack(alignment: .leading, spacing: ShellSpace.tight) {
-                Text(server.domain)
-                    .shellFont(.name)
-                    .foregroundStyle(ShellChrome.ink(colorScheme))
-                Text(added ? L10n.t("account.catalog.added") : server.summary)
-                    .shellFont(.meta)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                    .lineLimit(2)
-                if !added { rowFoot(readings) }
+            HStack(alignment: .top, spacing: ShellSpace.step) {
+                catalogMark(kind, added: added)
+                VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                    Text(server.domain)
+                        .shellFont(.name)
+                        .foregroundStyle(ShellChrome.ink(colorScheme))
+                    Text(added ? L10n.t("account.catalog.added") : server.summary)
+                        .shellFont(.meta)
+                        .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                        .lineLimit(2)
+                    if !added { rowFoot(readings) }
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, ShellSpace.pad)
@@ -947,6 +949,25 @@ struct JoinSheet: View {
                 ? L10n.t("account.catalog.added")
                 : "\(server.summary), \(readings.joined(separator: ", "))"
         )
+    }
+
+    /// A server row's lead: its protocol's mark, or a tick where it is already a source. Unspoken
+    /// — the row's label and value say both.
+    @ViewBuilder
+    private func catalogMark(_ kind: ProtocolKind, added: Bool) -> some View {
+        Group {
+            if added {
+                Image(systemName: "checkmark.circle")
+                    .resizable()
+                    .scaledToFit()
+                    .padding(Metrics.mark / 8)
+                    .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+            } else {
+                mark(kind).foregroundStyle(markInk(kind))
+            }
+        }
+        .frame(width: Metrics.mark, height: Metrics.mark)
+        .accessibilityHidden(true)
     }
 
     /// The row's own readings.

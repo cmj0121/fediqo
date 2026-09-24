@@ -440,6 +440,18 @@ final class ShellSession {
         return true
     }
 
+    /// Which tab Account is showing (#235): the sources this device reads, or adding one.
+    var accountPurpose: AccountPane.Purpose = .sources
+
+    /// Tab and ⇧Tab on Account, the way they rotate Usage. **Only where the tabs are drawn**: with
+    /// nothing joined the page is the hero and the field alone, and Tab is the platform's.
+    @discardableResult
+    func rotateAccountTab(by step: Int) -> Bool {
+        guard AccountPane.tabbed(sources: sources.count) else { return false }
+        accountPurpose = DummyCommand.advanced(Array(AccountPane.Purpose.allCases), from: accountPurpose, by: step)
+        return true
+    }
+
     /// How many times the reader has cleared a server — decision 14's press, counted.
     ///
     /// **A signal, not a statistic.** Three caches hold this device's copy of a server, and only
