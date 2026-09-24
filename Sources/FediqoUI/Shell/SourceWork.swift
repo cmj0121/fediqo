@@ -133,6 +133,9 @@ final class SourceWork {
         /// The hosts the person named to add this run, folded: a look at one, its preview, its
         /// boards and its sign-in are asked before it is a source.
         var named: Set<String> = []
+        /// The windows whose add sheet is on its browse step right now (#220): while any is, what
+        /// `Allowance` lets through `.adding` may be asked.
+        var adding: Set<ObjectIdentifier> = []
     }
 
     @ObservationIgnored private nonisolated let held = OSAllocatedUnfairLock(initialState: Held())
@@ -204,6 +207,13 @@ final class SourceWork {
         }
     }
 
+    /// Whether the add sheet of the window `key` names is on its browse step (#220).
+    nonisolated func adding(_ on: Bool, by key: ObjectIdentifier) {
+        held.withLock { held in
+            if on { held.adding.insert(key) } else { held.adding.remove(key) }
+        }
+    }
+
     /// The person named `host` to add: what is asked of it before it is a source is theirs.
     nonisolated func named(_ host: String) {
         let folded = Self.fold(host)
@@ -239,14 +249,18 @@ final class SourceWork {
         allowing list: [Allowance] = Allowance.standing
     ) -> Admission? {
         let owner = Self.fold(SourceAct.attributed(reached: reached, pointedBy: source))
-        let ours = held.withLock { held -> Bool in
-            guard let added = held.added else { return true }
-            return !owner.isEmpty && (added.contains(owner) || held.named.contains(owner))
+        let (ours, adding) = held.withLock { held -> (Bool, Bool) in
+            let adding = !held.adding.isEmpty
+            guard let added = held.added else { return (true, adding) }
+            return (!owner.isEmpty && (added.contains(owner) || held.named.contains(owner)), adding)
         }
         if ours { return .source }
-        // A request an entry names by its purpose, to one of its hosts, asked of nobody's pointing.
+        // A request an entry names by its purpose, to one of its hosts, asked of nobody's pointing
+        // — and only while the entry applies: `.adding` while an add sheet is browsing.
         guard let purpose, source == nil, let url = URL(string: "https://\(owner)/") else { return nil }
-        let entry = list.first { $0.reach == .request(purpose) && $0.allows(url) }
+        let entry = list.first {
+            $0.reach == .request(purpose) && $0.allows(url) && ($0.when != .adding || adding)
+        }
         return entry.map { .allowed($0.id) }
     }
 

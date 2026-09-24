@@ -91,7 +91,7 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
     private var waiting: [CheckedContinuation<Void, Never>] = []
     /// Which of `PageRules`' lists is on this view: put on before its first page, and changed as
     /// the person's sign-in comes and goes.
-    private var ruledAs: PageRules.Kind?
+    private(set) var ruledAs: PageRules.Kind?
     /// Whether the person has this forum's sign-in in front of them (#220): what else the page
     /// may pull in, and where it may go, is `Allowance`'s `signingIn` entries then.
     private(set) var signingIn = false
@@ -145,13 +145,12 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
         await sweeping?.value
         // Nothing but the forum's own site is loaded beside its page (#220). Refused outright
         // where the rules could not be put on: a page that could reach anybody is not loaded.
-        let wanted: PageRules.Kind = signingIn ? .signIn : .forum
-        if ruledAs != wanted {
-            guard await PageRules.install(on: view.configuration.userContentController, wanted) else {
-                ruledAs = nil
+        var tries = 0
+        while ruledAs != (signingIn ? .signIn : .forum) {
+            tries += 1
+            guard tries <= 3, await applyRules() else {
                 throw ForumTransportError.unreachable("PageRules")
             }
-            ruledAs = wanted
         }
         let mark = finishes
         failure = nil
@@ -218,16 +217,41 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
     /// The person has this forum's sign-in in front of them, or no longer has (#220). While they
     /// do, the check a sign-in shows may load and a page they follow away from it may open — each
     /// written to the run's record under this forum; after, neither.
+    ///
+    /// **One browser, both jobs** (see the type): while the sheet is up, a background read of this
+    /// forum goes through this same view and so runs under the sign-in's rules too — the check a
+    /// sign-in shows may load beside it, and it is written like any other act of this browser.
     func signingIn(_ on: Bool) async {
         signingIn = on
-        let wanted: PageRules.Kind = on ? .signIn : .forum
-        let installed = await PageRules.install(on: view.configuration.userContentController, wanted)
-        ruledAs = installed ? wanted : nil
+        await applyRules()
+    }
+
+    /// Bumped by every change of rules asked for, so one that finishes compiling after a newer
+    /// one was asked puts nothing on: a stale "signing in" cannot land over a later "no longer".
+    private var rulesEpoch = 0
+
+    /// Puts on the list for what this browser is doing now. False only where WebKit would not
+    /// compile it; a request overtaken by a newer one puts nothing on and leaves it to that one.
+    @discardableResult
+    private func applyRules() async -> Bool {
+        rulesEpoch += 1
+        let mine = rulesEpoch
+        let wanted: PageRules.Kind = signingIn ? .signIn : .forum
+        guard let list = await PageRules.list(wanted) else {
+            if mine == rulesEpoch { ruledAs = nil }
+            return false
+        }
+        guard mine == rulesEpoch else { return true }
+        let controller = view.configuration.userContentController
+        controller.removeAllContentRuleLists()
+        controller.add(list)
+        ruledAs = wanted
+        return true
     }
 
     /// Whether this browser goes to `url`, and what is written of it (#220).
     ///
-    /// **The main frame stays on the forum's site**, except while the person signs in: then it
+    /// **The main frame stays on the forum's host**, except while the person signs in: then it
     /// may go anywhere they follow (`Allowance.ID.signInPage`), and every page it lands on is
     /// written under this forum. A frame is left to `PageRules`, which blocks every other site's
     /// but what an entry lets through; a frame an entry lets through is written under this forum.
@@ -238,7 +262,10 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
         guard Host.allowsFetch(url), let there = url.host()?.lowercased(),
               work.admits(reached: there, source: host)
         else { return false }
-        let own = Self.sameSite(there, host)
+        // Its own site is its host or that host's `www.` spelling (`belongs`), and no wider: a
+        // guess at the registrable domain without the public suffix list would take two strangers
+        // under `com.tw` for one site.
+        let own = Self.belongs(url, to: host)
         let applying = Allowance.applying(signingIn ? .signingIn : .forumPage)
         if mainFrame {
             guard signingIn else { return own }
@@ -251,25 +278,6 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
             work.note(host: there, for: .personCheck, source: host, allowedBy: entry.id)
         }
         return true
-    }
-
-    /// Whether two hosts are one site: the same, one under the other, or siblings under one
-    /// parent that is itself a name with a dot in it (`bbs.example.org`, `m.example.org`).
-    ///
-    /// **An approximation of the registrable domain**, without the public suffix list this
-    /// package does not carry: two hosts directly under a two-label public suffix such as
-    /// `a.com.tw` and `b.com.tw` read as one site here. WebKit's own `third-party`, which
-    /// `PageRules` uses, is exact.
-    nonisolated static func sameSite(_ a: String, _ b: String) -> Bool {
-        let a = bare(a.lowercased()), b = bare(b.lowercased())
-        if a == b || a.hasSuffix("." + b) || b.hasSuffix("." + a) { return true }
-        func parent(_ name: String) -> String? {
-            guard let dot = name.firstIndex(of: ".") else { return nil }
-            let rest = String(name[name.index(after: dot)...])
-            return rest.contains(".") ? rest : nil
-        }
-        guard let left = parent(a), let right = parent(b) else { return false }
-        return left == right
     }
 
     /// Whether the settled document shows a signed-in member. Used to notice a session that

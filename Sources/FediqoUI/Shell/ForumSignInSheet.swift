@@ -118,8 +118,9 @@ struct ForumSignInSheet: View {
     /// is not a fallback for when the automatic path fails; for a challenged host it is the only
     /// way the automatic path is ever reached at all.
     private func open() async {
-        guard let url = engine.loginURL else { return }
+        guard let url = engine.loginURL, !Task.isCancelled else { return }
         await engine.signingIn(true)
+        guard !Task.isCancelled else { return }
         _ = try? await engine.page(at: url)
         signedIn = await engine.isSignedIn()
     }

@@ -215,6 +215,31 @@ struct OnlyAddedTests {
         }
         #expect(await http.requested.count == 1)
         #expect(work.record.count == 1)
+        // Out of the browse step, the directory is nobody's again.
+        session.stage = nil
+        await #expect(throws: OutwardRefusal.noSource) {
+            try await WatchedHTTP(http, for: .directory, in: work)
+                .data(from: URL(string: "https://\(ServerDirectory.host)/servers")!)
+        }
+        #expect(await http.requested.count == 1)
+    }
+
+    @Test("The directory is let through only while some window's add sheet is browsing")
+    func addingIsARuntimeState() {
+        let work = Self.governed()
+        // Held for the test: an identifier of an object already gone may be any other's.
+        let windows = (NSObject(), NSObject())
+        let one = ObjectIdentifier(windows.0), two = ObjectIdentifier(windows.1)
+        defer { withExtendedLifetime(windows) {} }
+        let host = ServerDirectory.host
+        #expect(work.admission(reached: host, source: nil, for: .directory) == nil)
+        work.adding(true, by: one)
+        work.adding(true, by: two)
+        #expect(work.admission(reached: host, source: nil, for: .directory) == .allowed(.directory))
+        work.adding(false, by: one)
+        #expect(work.admission(reached: host, source: nil, for: .directory) != nil, "another window still browses")
+        work.adding(false, by: two)
+        #expect(work.admission(reached: host, source: nil, for: .directory) == nil)
     }
 
     @Test("Only the add sheet's browse step reads the directory")
@@ -280,7 +305,8 @@ struct OnlyAddedTests {
         let elsewhere = URL(string: "https://id.provider.example/login")!
         // Reading: its own site, a sibling included, and nothing else; no check but Cloudflare's.
         #expect(engine.decide(URL(string: "https://www.bbs.one.example/forum.php")!, mainFrame: true))
-        #expect(engine.decide(URL(string: "https://static.one.example/x")!, mainFrame: true))
+        #expect(!engine.decide(URL(string: "https://static.one.example/x")!, mainFrame: true),
+                "a sibling is not the forum's own host")
         #expect(!engine.decide(elsewhere, mainFrame: true))
         #expect(!engine.decide(URL(string: "http://bbs.one.example/")!, mainFrame: true))
         #expect(engine.decide(URL(string: "about:blank")!, mainFrame: true))
@@ -304,13 +330,24 @@ struct OnlyAddedTests {
         #expect(!engine.decide(URL(string: "https://bbs.one.example/")!, mainFrame: true))
     }
 
-    @Test("Two hosts are one site under one parent, and not under a bare top-level name")
-    func sameSite() {
-        #expect(ForumWebEngine.sameSite("bbs.example.org", "m.example.org"))
-        #expect(ForumWebEngine.sameSite("www.example.org", "example.org"))
-        #expect(ForumWebEngine.sameSite("a.b.example.org", "example.org"))
-        #expect(!ForumWebEngine.sameSite("example.org", "example.com"))
-        #expect(!ForumWebEngine.sameSite("a.com", "b.com"))
+    @Test("Outside its sign-in a forum's browser does not follow its page to a neighbour under com.tw")
+    func noNeighbourUnderAPublicSuffix() {
+        let engine = ForumWebEngine(host: "forum.com.tw", dataStore: .nonPersistent())
+        engine.work = Self.governed(["forum.com.tw"])
+        #expect(engine.decide(URL(string: "https://www.forum.com.tw/thread")!, mainFrame: true))
+        #expect(!engine.decide(URL(string: "https://tracker.com.tw/r")!, mainFrame: true))
+        #expect(engine.work.record.isEmpty)
+    }
+
+    @Test("A sign-in turned on and then off at once ends off, however the two finish")
+    func aStaleSignInDoesNotLand() async {
+        let engine = ForumWebEngine(host: "bbs.one.example", dataStore: .nonPersistent())
+        let on = Task { await engine.signingIn(true) }
+        let off = Task { await engine.signingIn(false) }
+        await on.value
+        await off.value
+        #expect(!engine.signingIn)
+        #expect(engine.ruledAs == .forum)
     }
 
     @Test("The sheet turns the sign-in's allowances on as it opens and off as it goes")
