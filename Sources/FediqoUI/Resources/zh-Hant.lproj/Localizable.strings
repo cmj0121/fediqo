@@ -823,6 +823,7 @@
 "allow.row.on" = "開啟";
 "allow.row.off" = "關閉";
 "allow.detail.on" = "放行";
+"allow.detail.on.spoken" = "放行「%@」";
 "allow.detail.on.hint" = "關閉後，它放行的東西會立刻被拒絕。";
 "allow.detail.what" = "放行什麼";
 "allow.detail.when" = "什麼時候";

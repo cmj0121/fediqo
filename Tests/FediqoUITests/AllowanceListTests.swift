@@ -406,6 +406,8 @@ struct AllowanceListTests {
         #expect(builtIn.contains("ShellListRow("))
         #expect(builtIn.contains("figure: Self.figure(on: book.isOn(entry.id))"))
         #expect(builtIn.contains("Toggle(L10n.t(\"allow.detail.on\"), isOn: $on)"))
+        #expect(builtIn.contains(".accessibilityLabel(String(format: L10n.t(\"allow.detail.on.spoken\"), entry.title()))"))
+        #expect(L10n.t("allow.detail.on.spoken", language: .english) == "Let %@ through")
         #expect(own.contains("ShellListRow("))
         #expect(own.contains(".accessibilityLabel(String(format: L10n.t(\"allow.own.remove\"), entry.title()))"))
         for reach in ["http", "begin(", "note(", "URLSession"] {
@@ -423,9 +425,9 @@ struct AllowanceListTests {
             book.add(Self.cdn, for: Self.forum)
             let renderer = ImageRenderer(
                 content: VStack(alignment: .leading) {
-                    AllowanceSection(book: book)
+                    AllowanceSection(book: book, opened: .constant(nil), returning: nil)
                     AllowanceDetail(entry: Allowance.standing[2], on: .constant(false)) {}
-                    OwnHostsSection(book: book, sources: [Self.forum])
+                    OwnHostsSection(book: book, sources: [Self.forum], opened: .constant(nil))
                     OwnHostDetail(entry: book.own[0], gone: true, onRemove: {}, onBack: {})
                     OwnHostAdding(book: book, sources: [Self.forum], onTyping: { _ in }, onBack: {}) { _ in }
                 }

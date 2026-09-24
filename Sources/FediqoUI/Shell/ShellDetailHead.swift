@@ -1,48 +1,64 @@
 import SwiftUI
 
-/// The head of a list row's detail, drawn in place of the list it was opened from (#233): the way
-/// back, then what the detail is of — the row's own glyph and title, so the reader sees they are
-/// inside the row they entered.
+/// The head of a list row's detail, drawn in place of the list it was opened from (#233, #234):
+/// the way back, then what the detail is of — the row's own mark and title, so the reader sees
+/// they are inside the row they entered — and, where the detail has one, a control of its own at
+/// the end (Usage's Clear).
 ///
-///     ‹  [mark]  title
+///     ‹  [mark]  title                              [control]
 ///
-/// **Back is an icon button, and Escape.** It names itself on hover and to VoiceOver, and answers
-/// the cancel key, so a detail opened by Return is left by the keyboard as well as by a press.
+/// **Back is an icon button.** It names itself on hover and to VoiceOver. Escape is the shell's
+/// on a page — `FediqoRootView` hears it before any view and closes the detail first — so only a
+/// detail in a sheet, which the shell does not hear, answers the cancel key here (`escapes`).
 /// The title is a header to VoiceOver, so a reader arriving in the detail hears where they are.
-struct ShellDetailHead<Mark: View>: View {
+struct ShellDetailHead<Mark: View, Trailing: View>: View {
     let title: String
+    let backName: String
+    let escapes: Bool
     let onBack: () -> Void
     let mark: Mark
+    let trailing: Trailing
 
     @Environment(\.colorScheme) private var colorScheme
-    @ShellMetric(relativeTo: .callout) private var side: CGFloat = 28
 
-    init(_ title: String, onBack: @escaping () -> Void, @ViewBuilder mark: () -> Mark) {
+    init(
+        _ title: String, back backName: String = "detail.back", escapes: Bool = false, onBack: @escaping () -> Void,
+        @ViewBuilder mark: () -> Mark, @ViewBuilder trailing: () -> Trailing
+    ) {
         self.title = title
+        self.backName = backName
+        self.escapes = escapes
         self.onBack = onBack
         self.mark = mark()
+        self.trailing = trailing()
     }
 
     var body: some View {
         HStack(spacing: ShellSpace.snug) {
-            ShellIconButton("chevron.left", name: "detail.back", action: onBack)
-                .keyboardShortcut(.cancelAction)
+            ShellIconButton("chevron.left", name: backName, action: onBack)
+                .keyboardShortcut(escapes ? .cancelAction : nil)
             mark
                 .foregroundStyle(ShellChrome.selectInk(colorScheme))
-                .frame(width: side, height: side)
-                .background(
-                    RoundedRectangle(cornerRadius: RailView.Metrics.wellRadius, style: .continuous)
-                        .fill(ShellChrome.selectFill(colorScheme))
-                )
                 .accessibilityHidden(true)
             Text(title)
-                .shellFont(.name)
+                .shellFont(.pane)
                 .foregroundStyle(ShellChrome.ink(colorScheme))
                 .lineLimit(2)
                 .accessibilityAddTraits(.isHeader)
-            Spacer(minLength: 0)
+            Spacer(minLength: ShellSpace.snug)
+            trailing
         }
         .textCase(nil)
+    }
+}
+
+extension ShellDetailHead where Trailing == EmptyView {
+    /// A head with nothing of its own at the end.
+    init(
+        _ title: String, back backName: String = "detail.back", escapes: Bool = false, onBack: @escaping () -> Void,
+        @ViewBuilder mark: () -> Mark
+    ) {
+        self.init(title, back: backName, escapes: escapes, onBack: onBack, mark: mark, trailing: { EmptyView() })
     }
 }
 
@@ -65,13 +81,5 @@ struct ShellDetailFact: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .accessibilityElement(children: .combine)
-    }
-}
-
-/// A list's ↑ and ↓ (`ShellListRow.onStep`): the row after or before the lit one, or the first
-/// or last where none is lit — the timeline's own step, over any list's ids.
-enum ShellListStep {
-    static func stepped<ID: Equatable>(_ ids: [ID], from lit: ID?, by step: Int) -> ID? {
-        DummyCommand.stepped(ids, from: lit, by: step) ?? lit
     }
 }

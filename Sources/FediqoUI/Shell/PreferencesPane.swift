@@ -57,7 +57,37 @@ struct PreferencesPane: View {
         }
     }
 
+    /// A detail a tab shows in place of its list (#233): one of the allowed entries — the app's
+    /// own on Allowed, the person's on Your hosts — or adding a host.
+    enum Detail: Equatable {
+        case entry(Allowance.ID)
+        case adding
+
+        /// Whether it is on screen with `purpose` the tab in front, and `own` the hosts the
+        /// person added: a detail of another tab, or of a host since removed, is not.
+        func shown(on purpose: Purpose, own: [Allowance.ID]) -> Bool {
+            switch self {
+            case .entry(let id) where Allowance.ID.builtIn.contains(id): purpose == .reach
+            case .entry(let id): purpose == .hosts && own.contains(id)
+            case .adding: purpose == .hosts
+            }
+        }
+    }
+
+    /// Where the detail is kept with no shell round the pane — a preview, a test.
+    @State private var unhosted: Detail?
+
     private var purpose: Purpose { session?.preferencesPurpose ?? .choices }
+
+    /// The detail open, on the session where there is one, so Escape reaches it.
+    private var opened: Binding<Detail?> {
+        Binding(
+            get: { session?.preferencesOpened ?? unhosted },
+            set: { detail in
+                if let session { session.preferencesOpened = detail } else { unhosted = detail }
+            }
+        )
+    }
 
     var body: some View {
         Form {
@@ -87,8 +117,11 @@ struct PreferencesPane: View {
         case .build: BuildStampSection(stamp: stamp)
         case .work: SourceWorkSection(work: session?.work ?? .shared, onOpen: openRecord)
             if let session { ActivityEntry(session: session) }
-        case .reach: AllowanceSection(book: .shared)
-        case .hosts: OwnHostsSection(book: .shared, sources: session?.sources.map(\.host) ?? [], onTyping: typing)
+        case .reach: AllowanceSection(book: .shared, opened: opened, returning: session?.preferencesReturning)
+        case .hosts: OwnHostsSection(
+                book: .shared, sources: session?.sources.map(\.host) ?? [], opened: opened,
+                returning: session?.preferencesReturning, onTyping: typing
+            )
         }
     }
 

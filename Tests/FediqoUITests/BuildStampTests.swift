@@ -169,8 +169,8 @@ struct BuildStampTests {
         #expect(pane.contains("case .build: BuildStampSection(stamp: stamp)"))
         #expect(pane.contains("case .choices: choices"))
         #expect(pane.contains("case .work: SourceWorkSection(work: session?.work ?? .shared, onOpen: openRecord)"))
-        #expect(pane.contains("case .reach: AllowanceSection(book: .shared)"))
-        #expect(pane.contains("case .hosts: OwnHostsSection(book: .shared, sources: session?.sources.map(\\.host) ?? [], onTyping: typing)"))
+        #expect(pane.contains("case .reach: AllowanceSection(book: .shared, opened: opened, returning: session?.preferencesReturning)"))
+        #expect(pane.contains("case .hosts: OwnHostsSection(\n                book: .shared, sources: session?.sources.map(\\.host) ?? [], opened: opened,"))
         #expect(root.contains("case .preferences: session.rotatePreferencesTab(by: step)"))
     }
 

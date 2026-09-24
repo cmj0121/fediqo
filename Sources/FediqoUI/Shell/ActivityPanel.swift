@@ -140,7 +140,7 @@ struct ActivityDetail: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: ShellSpace.step) {
-                ShellDetailHead(act.source, onBack: onBack) { Image(systemName: act.purpose.symbol) }
+                ShellDetailHead(act.source, escapes: true, onBack: onBack) { Image(systemName: act.purpose.symbol) }
                 ForEach(Self.facts(act), id: \.label) { fact in
                     ShellDetailFact(label: fact.label, value: fact.value)
                 }

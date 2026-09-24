@@ -12,35 +12,33 @@ struct OwnHostsSection: View {
     let sources: [String]
     /// Told when the host field takes and lets go of the keyboard, so the shell's single keys
     /// leave what is typed there alone.
+    /// The detail open — Preferences' own, kept on the session so Escape closes it.
+    @Binding var opened: PreferencesPane.Detail?
+    /// The detail last closed, whose row the list lights again.
+    var returning: PreferencesPane.Detail?
     var onTyping: (Bool) -> Void = { _ in }
-
-    enum Place: Equatable {
-        case list
-        case entry(Allowance.ID)
-        case adding
-    }
 
     /// The last row of the list, which is the way to adding one.
     static let addRow = Allowance.ID(rawValue: "add")
 
-    @State private var place = Place.list
     @State private var lit: Allowance.ID?
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        switch place {
-        case .list: list
+        switch opened {
         case .entry(let id):
             if let entry = book.own.first(where: { $0.id == id }) {
                 OwnHostDetail(entry: entry, gone: !served(entry), onRemove: { remove(id) }, onBack: back)
             } else {
-                list
+                // Removed from under it — its source let go: the list, and the detail forgotten.
+                list.onAppear { opened = nil }
             }
         case .adding:
             OwnHostAdding(book: book, sources: sources, onTyping: onTyping, onBack: back) { added in
+                opened = nil
                 lit = added
-                place = .list
             }
+        case nil: list
         }
     }
 
@@ -55,10 +53,11 @@ struct OwnHostsSection: View {
             }
             ShellListRow(
                 id: Self.addRow, title: L10n.t("allow.own.adding"), brief: L10n.t("allow.own.adding.brief"),
-                selection: $lit, onOpen: { place = .adding }, onStep: step
+                selection: $lit, onOpen: { opened = .adding }, onStep: step
             ) {
                 Image(systemName: "plus")
             }
+            .onAppear(perform: relight)
         } header: {
             Text(L10n.t("allow.own"))
         } footer: {
@@ -73,7 +72,7 @@ struct OwnHostsSection: View {
         return ShellListRow(
             id: entry.id, title: entry.title(),
             brief: Self.brief(entry, gone: gone),
-            selection: $lit, onOpen: { place = .entry(entry.id) }, onStep: step
+            selection: $lit, onOpen: { opened = .entry(entry.id) }, onStep: step
         ) {
             Image(systemName: gone ? "exclamationmark.triangle" : entry.symbol)
         }
@@ -90,14 +89,23 @@ struct OwnHostsSection: View {
         lit = ShellListStep.stepped(book.own.map(\.id) + [Self.addRow], from: lit, by: by)
     }
 
+    /// The row a closed detail was opened from, lit again.
+    private func relight() {
+        switch returning {
+        case .entry(let id) where book.own.contains(where: { $0.id == id }): lit = id
+        case .adding: lit = lit ?? Self.addRow
+        default: break
+        }
+    }
+
     private func back() {
-        place = .list
+        opened = nil
     }
 
     private func remove(_ id: Allowance.ID) {
         book.remove(id)
+        opened = nil
         lit = nil
-        place = .list
     }
 
     /// Whether the source an entry serves is among the person's now.

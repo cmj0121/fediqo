@@ -10,13 +10,16 @@ import SwiftUI
 /// own (`OwnHostsSection`).
 struct AllowanceSection: View {
     let book: AllowanceBook
+    /// The detail open — Preferences' own, kept on the session so Escape closes it.
+    @Binding var opened: PreferencesPane.Detail?
+    /// The detail last closed, whose row the list lights again.
+    let returning: PreferencesPane.Detail?
 
     @State private var lit: Allowance.ID?
-    @State private var opened: Allowance.ID?
 
     var body: some View {
-        if let opened, let entry = Allowance.standing.first(where: { $0.id == opened }) {
-            AllowanceDetail(entry: entry, on: on(entry.id)) { self.opened = nil }
+        if case .entry(let id) = opened, let entry = Allowance.standing.first(where: { $0.id == id }) {
+            AllowanceDetail(entry: entry, on: on(entry.id)) { opened = nil }
         } else {
             list
         }
@@ -28,11 +31,12 @@ struct AllowanceSection: View {
                 ShellListRow(
                     id: entry.id, title: entry.title(), brief: entry.whenText(),
                     figure: Self.figure(on: book.isOn(entry.id)),
-                    selection: $lit, onOpen: { opened = entry.id }, onStep: step
+                    selection: $lit, onOpen: { opened = .entry(entry.id) }, onStep: step
                 ) {
                     Image(systemName: entry.symbol)
                 }
             }
+            .onAppear { if case .entry(let id) = returning { lit = id } }
         } header: {
             Text(L10n.t("allow.builtIn"))
         } footer: {
@@ -57,7 +61,8 @@ struct AllowanceSection: View {
 }
 
 /// One of the app's own entries, opened: its switch, then what it lets through, when, why, and
-/// the hosts. **Return switches it**, so a detail opened from the keyboard is worked from it.
+/// the hosts. **The switch holds the keyboard as the detail opens, and Return flips it** — only
+/// there, and once a press — so a detail opened from the keyboard is worked from it.
 struct AllowanceDetail: View {
     let entry: Allowance
     @Binding var on: Bool
@@ -66,7 +71,8 @@ struct AllowanceDetail: View {
     var body: some View {
         Section {
             Toggle(L10n.t("allow.detail.on"), isOn: $on)
-                .keyboardShortcut(.return, modifiers: [])
+                .modifier(ReturnSwitches(on: $on))
+                .accessibilityLabel(String(format: L10n.t("allow.detail.on.spoken"), entry.title()))
                 .accessibilityHint(L10n.t("allow.detail.on.hint"))
             AllowanceFacts(entry: entry)
         } header: {
@@ -76,6 +82,25 @@ struct AllowanceDetail: View {
                 .shellFont(.meta)
                 .shellHelp("allow.builtIn.footer", about: entry.title())
         }
+    }
+}
+
+/// Return on the switch that holds the keyboard flips it. **Only the key going down**, so a
+/// held Return is one flip and not a flicker; and only while this switch is focused, so a
+/// Return anywhere else on the window is not heard here.
+struct ReturnSwitches: ViewModifier {
+    @Binding var on: Bool
+    @FocusState private var focused: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .focusable()
+            .focused($focused)
+            .onAppear { focused = true }
+            .onKeyPress(.return, phases: .down) { _ in
+                on.toggle()
+                return .handled
+            }
     }
 }
 

@@ -101,14 +101,19 @@ final class SourceWork {
     /// One piece of work on the wire.
     struct Running: Equatable, Sendable {
         let host: String
+        /// The source it is listed under in the run's record — the one that pointed to `host`
+        /// where one did — keyed exactly as the record keys it (`SourceAct.attributed`), so a
+        /// line of work opens the record on its own lines (#233).
+        let source: String
         let purpose: Purpose
         /// The timeline or board it reads, by the name the reader knows it by; nil where it reads
         /// no one of them.
         let name: Name?
         let since: Date
 
-        init(host: String, purpose: Purpose, name: Name? = nil, since: Date) {
+        init(host: String, source: String? = nil, purpose: Purpose, name: Name? = nil, since: Date) {
             self.host = host
+            self.source = SourceAct.attributed(reached: host, pointedBy: source)
             self.purpose = purpose
             self.name = name
             self.since = since
@@ -165,7 +170,9 @@ final class SourceWork {
         allowedBy: Allowance.ID? = nil
     ) -> Token {
         let now = Date()
-        let entry = Running(host: host.lowercased(), purpose: purpose, name: Self.named(name), since: now)
+        let entry = Running(
+            host: host.lowercased(), source: source, purpose: purpose, name: Self.named(name), since: now
+        )
         let (token, publish) = held.withLock { held -> (Token, Bool) in
             held.next += 1
             held.running[held.next] = entry
@@ -393,6 +400,8 @@ final class SourceWork {
 struct SourceWorkRow: Identifiable, Equatable {
     let id: String
     let host: String
+    /// The source the record lists it under (`Running.source`); the host itself where nil.
+    var source: String? = nil
     let purpose: SourceWork.Purpose
     /// The timeline or board it reads, by the name the reader knows it. Never on a gathered line.
     var name: SourceWork.Name? = nil
@@ -407,15 +416,18 @@ struct SourceWorkRow: Identifiable, Equatable {
         for (id, work) in running {
             guard work.purpose.gathers else {
                 rows.append(SourceWorkRow(
-                    id: "\(id)", host: work.host, purpose: work.purpose, name: work.name, count: 1,
-                    since: work.since
+                    id: "\(id)", host: work.host, source: work.source, purpose: work.purpose, name: work.name,
+                    count: 1, since: work.since
                 ))
                 continue
             }
-            let key = "\(work.purpose.rawValue) \(work.host)"
+            // One line per host and the source that pointed there, so the record it opens is that
+            // source's.
+            let key = "\(work.purpose.rawValue) \(work.host) \(work.source)"
             let held = gathered[key]
             gathered[key] = SourceWorkRow(
-                id: key, host: work.host, purpose: work.purpose, count: (held?.count ?? 0) + 1,
+                id: key, host: work.host, source: work.source, purpose: work.purpose,
+                count: (held?.count ?? 0) + 1,
                 since: min(held?.since ?? work.since, work.since)
             )
         }
@@ -423,6 +435,9 @@ struct SourceWorkRow: Identifiable, Equatable {
             ($0.since, $0.host, $0.purpose.rawValue, $0.id) < ($1.since, $1.host, $1.purpose.rawValue, $1.id)
         }
     }
+
+    /// The source the run's record lists this line's acts under.
+    var listedUnder: String { source ?? SourceAct.attributed(reached: host, pointedBy: nil) }
 
     /// How long it has been running, in whole seconds, in the shell's language.
     static func elapsed(since: Date, now: Date, language: DummyLanguage? = nil) -> String {

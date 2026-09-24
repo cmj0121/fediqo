@@ -47,7 +47,7 @@ struct SourceWorkSection: View {
             SourceLineRow(
                 id: row.id, source: row.host, purpose: row.purpose, what: row.purposeText(),
                 when: SourceWorkRow.elapsed(since: row.since, now: context.date),
-                selection: $lit, onOpen: { onOpen(row.host) },
+                selection: $lit, onOpen: { onOpen(row.listedUnder) },
                 onStep: { lit = ShellListStep.stepped(rows.map(\.id), from: lit, by: $0) }
             )
         }

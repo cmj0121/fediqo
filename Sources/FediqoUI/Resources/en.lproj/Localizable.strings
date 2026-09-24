@@ -845,6 +845,7 @@
 "allow.row.on" = "On";
 "allow.row.off" = "Off";
 "allow.detail.on" = "Let it through";
+"allow.detail.on.spoken" = "Let %@ through";
 "allow.detail.on.hint" = "Switched off, what it let through is refused at once.";
 "allow.detail.what" = "Lets through";
 "allow.detail.when" = "When";
