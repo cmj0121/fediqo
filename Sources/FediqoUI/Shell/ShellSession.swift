@@ -545,7 +545,7 @@ final class ShellSession {
             postLimits[host] = try await MastodonClient(
                 http: WatchedHTTP(http, for: .serverCheck, in: work), host: host
             ).statusLimit()
-        } catch where ShellPictures.absence(from: error) == .unreachable {
+        } catch where DarkNetwork.caused(error) {
             // Not remembered: the next open asks again once the network is back (#222), and
             // `postLimit(of:)` says Mastodon's own 500 meanwhile.
         } catch {

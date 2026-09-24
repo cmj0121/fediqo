@@ -193,7 +193,7 @@ public final class MastodonSessions {
             if isSignedIn(host: host) { handles[host] = handle }
         } catch MastodonAuthError.signedOut {
             endedByServer(host: host)
-        } catch where ShellPictures.absence(from: error) == .unreachable {
+        } catch where DarkNetwork.caused(error) {
             if isSignedIn(host: host) { unlearned.insert(host) }
         } catch {}
     }
@@ -204,6 +204,8 @@ public final class MastodonSessions {
     /// again, and one never dark is never asked here at all.
     func learnWhoAgain(among hosts: Set<String>, within limit: Duration) async {
         let due = unlearned.intersection(hosts.map { $0.lowercased() })
+        // Claimed before the first await, so two reloads landing together ask each host once.
+        unlearned.subtract(due)
         for host in due.sorted() {
             await learnWho(host: host, within: limit)
         }

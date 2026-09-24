@@ -13,12 +13,16 @@ private actor Network: HTTPClient, HTTPSender {
     private let routes: [String: String]
     private(set) var lit = false
     private(set) var asked: [String] = []
+    private var hanging: Set<String> = []
 
     init(_ routes: [String: String]) {
         self.routes = routes
     }
 
     func light() { lit = true }
+
+    /// A path whose server is up but never answers in time — what a reload's deadline throws.
+    func hang(_ path: String) { hanging.insert(path) }
 
     func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
         try answer(url)
@@ -31,6 +35,7 @@ private actor Network: HTTPClient, HTTPSender {
     private func answer(_ url: URL) throws -> (Data, HTTPURLResponse) {
         asked.append(url.path)
         guard lit else { throw URLError(.notConnectedToInternet) }
+        if hanging.contains(url.path) { throw URLError(.timedOut) }
         let body = routes[url.path] ?? "[]"
         return (
             Data(body.utf8),
@@ -209,10 +214,15 @@ struct OfflineTests {
 
         #expect(session.composeDraft == "written on a plane", "nothing written is lost")
         #expect(session.isSignedIn(host: Self.host), "a dark network is not a sign-out")
+        let failed = try #require(ComposerSheet.failedAt(session), "the failure names a source")
+        #expect(failed == Self.host)
         #expect(
-            ShellFailure.spoken([Self.host]) == String(format: L10n.t("shell.failed"), Self.host),
-            "the composer's failure plate is #67's"
+            ComposerSheet.surface(offered: session.writableSources, draft: session.composeDraft, failed: failed)
+                == .composing,
+            "the editor and its failure plate stay, not the empty notice"
         )
+        #expect(session.canPost, "and the same draft can be sent again once the network is back")
+        #expect(ShellFailure.spoken([failed]).contains(Self.host))
     }
 
     @Test("Signing in with the network off says the source could not be reached, and opens no page")
@@ -269,6 +279,30 @@ struct OfflineTests {
         #expect(session.flavours.flavour(of: Self.host) == .said(.mastodon))
     }
 
+    @Test("A server that is up but hangs is settled, and not asked what it is on every reload")
+    func hangIsSettled() async throws {
+        let (session, network) = try await launch()
+        await network.light()
+        await network.hang("/api/v2/instance")
+
+        await session.reload.timeline(.all, in: session)
+        #expect(session.flavours.flavour(of: Self.host) == .unsaid, "a timeout is an answer for this run")
+        await session.reload.timeline(.all, in: session)
+
+        #expect(await network.asked.filter { $0 == "/api/v2/instance" }.count == 1)
+    }
+
+    @Test("Only a network that is not there is dark; a slow or refusing server is not")
+    func whatIsDark() {
+        for code in [URLError.notConnectedToInternet, .networkConnectionLost, .cannotFindHost, .dnsLookupFailed] {
+            #expect(DarkNetwork.caused(URLError(code)), "\(code)")
+        }
+        for code in [URLError.timedOut, .cancelled, .badServerResponse, .secureConnectionFailed] {
+            #expect(!DarkNetwork.caused(URLError(code)), "\(code)")
+        }
+        #expect(!DarkNetwork.caused(MastodonRequestError.http(503)))
+    }
+
     @Test("Who you are on a source, not learnt at a launch with no network, is learnt by the first read that gets through")
     func whoAfterReturn() async throws {
         let (session, network) = try await launch()
@@ -280,9 +314,13 @@ struct OfflineTests {
         await network.light()
         await session.reload.timeline(.all, in: session)
 
-        #expect(session.mastodon.handles[Self.host] == "@me@\(Self.host)")
+        #expect(!session.reload.running, "the reload did not wait on the account check")
+        #expect(await spun { session.mastodon.handles[Self.host] == "@me@\(Self.host)" })
         let checks = await network.asked.filter { $0 == "/api/v1/accounts/verify_credentials" }.count
+        #expect(checks == 2, "once dark at launch, once when the network came back")
         await session.reload.timeline(.all, in: session)
+        // Room for an account check the reload might have started to reach the wire.
+        _ = await spun(1_000) { false }
         #expect(
             await network.asked.filter { $0 == "/api/v1/accounts/verify_credentials" }.count == checks,
             "learnt once, and not asked again on every reload"

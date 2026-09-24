@@ -109,7 +109,7 @@ final class ShellFlavours {
             flavours[host] = .said(kind)
         } catch let error where Cancellation.happened(error) {
             flavours[host] = nil
-        } catch let error where ShellPictures.absence(from: error) == .unreachable {
+        } catch let error where DarkNetwork.caused(error) {
             // A dark network is not the server declining to say (#222): nothing is written down,
             // so the first reload after the network returns asks again, with no relaunch.
             flavours[host] = nil

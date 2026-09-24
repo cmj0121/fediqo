@@ -628,8 +628,10 @@ final class ShellReload {
             }
         }
         // A read got through, so who the reader is there can be learnt now, where the network
-        // was dark when it was first asked (#222).
-        await session.mastodon.learnWhoAgain(among: answered, within: deadline)
+        // was dark when it was first asked (#222). Not awaited: the reload has landed, and its
+        // wait must not stand on an account check.
+        let deadline = deadline
+        Task { await session.mastodon.learnWhoAgain(among: answered, within: deadline) }
     }
 
     /// The open thread's post and its thread, from the host it came through, and not the
