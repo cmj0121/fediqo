@@ -61,7 +61,11 @@ final class ShellFlavours {
     /// leaves the kept word standing rather than the join's note, because it is the later of the
     /// two things the server itself said. A dark network leaves everything as it was.
     func speaking(_ raw: String, storedAs stored: ProtocolKind, keptAs kept: ProtocolKind? = nil) -> ProtocolKind {
-        guard case .said(let kind) = flavour(of: raw) else { return kept ?? stored }
+        guard case .said(let kind) = flavour(of: raw) else {
+            // A kept `.unknown` is no word: spoken as it, the source would have no timelines to
+            // ask and so never be asked again, with only a Clear to recover it.
+            return kept.flatMap { $0 == .unknown ? nil : $0 } ?? stored
+        }
         return kind
     }
 

@@ -110,7 +110,7 @@ public actor ItemStore {
         // Only of a source still here, and without a moment it was said is a word nothing can
         // draw as said then: the first `said(_:at:)` is what puts one in.
         let hosts = Set(sourceList.map(\.host))
-        for profile in said where profile.asOf != nil && hosts.contains(profile.host) {
+        for profile in said where Self.isWord(profile) && hosts.contains(profile.host) {
             saidByHost[profile.host] = profile
         }
         notes = Dictionary(incoming.map { ($0.key, $0) }, uniquingKeysWith: { _, new in new })
@@ -522,10 +522,23 @@ public actor ItemStore {
     /// **A change a save writes and no timeline shows**: the row and the composer read it, All
     /// does not.
     public func said(_ profile: SourceProfile, at moment: Date = Date()) {
-        let host = profile.host.lowercased()
-        guard sourceList.contains(where: { $0.host == host }) else { return }
-        saidByHost[host] = profile.said(at: moment)
-        changed(shown: false, aside: false)
+        let stamped = profile.said(at: moment)
+        guard Self.isWord(stamped), sourceList.contains(where: { $0.host == stamped.host }) else { return }
+        let before = saidByHost[stamped.host]
+        saidByHost[stamped.host] = stamped
+        // The same word again moves only the moment, and the moment is not written: a launch
+        // that hears every source say what it said last time would otherwise write the index
+        // once per source for nothing a reader could tell apart. The screens are told, so the
+        // page says the newer moment this run; the index keeps the older until a word changes.
+        let sameWord = before.map { $0.said(at: moment) == stamped } ?? false
+        changed(shown: false, aside: false, kept: !sameWord)
+    }
+
+    /// Whether `profile` is a word worth keeping: said at a moment, and of a kind this app can
+    /// name. A kept `.unknown` would stand in for the join's note across relaunches and put a
+    /// source nothing reads in the list, with no ask to move it — so it is no word at all.
+    private static func isWord(_ profile: SourceProfile) -> Bool {
+        profile.asOf != nil && profile.kind != .unknown
     }
 
     /// What `host` last said about itself, marked as of when, or nothing where it has not been

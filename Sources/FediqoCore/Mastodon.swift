@@ -162,25 +162,18 @@ public struct MastodonClient: Sendable {
     /// this app could decode, so a read that could say what the server is still says it.
     ///
     /// The profile carries the kind the probe read rather than `.mastodon` flat, so what is
-    /// written down about a Pleroma is written down as a Pleroma's word.
+    /// written down about a Pleroma is written down as a Pleroma's word. How long a post may be
+    /// is `profile?.statusLimit`, through `MastodonWrite.limit(advertised:)` — Mastodon's 500
+    /// where the server answered without saying.
+    ///
+    /// **Throws where the document did not come**, so a caller that remembers the answer can tell
+    /// a dark network, which is worth asking again, from a server that answered (#222).
     public func introduction() async throws -> (kind: ProtocolKind, profile: SourceProfile?) {
         let data = try await instanceDocument()
         let kind = Probe.kind(from: data)
         let profile = (try? MastodonJSON.decoder.decode(InstanceDTO.self, from: data))?
             .asProfile(host: host, kind: kind)
         return (kind, profile)
-    }
-
-    /// How many characters a status on this server may be, or Mastodon's 500 where it answered
-    /// without saying. Unauthenticated, the same document a preview already fetches.
-    ///
-    /// **Throws where the document did not come**, so a caller that remembers the answer can tell
-    /// a dark network, which is worth asking again, from a server that answered (#222).
-    public func statusLimit() async throws -> Int {
-        let data = try await instanceDocument()
-        let advertised = (try? MastodonJSON.decoder.decode(InstanceDTO.self, from: data))?
-            .configuration?.statuses?.maxCharacters
-        return MastodonWrite.limit(advertised: advertised)
     }
 
     private func statuses(

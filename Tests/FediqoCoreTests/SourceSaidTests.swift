@@ -26,12 +26,47 @@ struct SourceSaidTests {
         #expect(kept?.statusLimit == 1500)
         #expect(kept?.asOf == Self.moment, "marked as of when it was said")
 
-        await store.said(Self.word(limit: 2000, title: "Renamed"), at: Self.later)
+        await store.said(
+            SourceProfile(host: Self.host.uppercased(), kind: .mastodon, title: "Renamed", statusLimit: 2000),
+            at: Self.later
+        )
         let replaced = await store.said(host: Self.host)
         #expect(replaced?.statusLimit == 2000)
         #expect(replaced?.title == "Renamed")
         #expect(replaced?.asOf == Self.later)
-        #expect(await store.said(host: Self.host.uppercased())?.asOf == Self.later, "folded once, like every host")
+        #expect(replaced?.host == Self.host, "folded once, like every host, on the way in")
+        #expect(await store.said(host: Self.host.uppercased())?.asOf == Self.later, "and on the way out")
+        #expect(await store.snapshot().said.map(\.host) == [Self.host])
+    }
+
+    @Test("The same word said again moves only the moment, and the moment alone is not written")
+    func sameWordAgain() async {
+        let store = ItemStore()
+        await store.add(Self.source)
+        await store.said(Self.word(limit: 1500), at: Self.moment)
+        let revision = await store.revision
+
+        await store.said(Self.word(limit: 1500), at: Self.later)
+
+        #expect(await store.said(host: Self.host)?.asOf == Self.later, "the page says the newer moment")
+        #expect(await store.revision == revision, "nothing a reader could tell apart, so nothing to write")
+
+        await store.said(Self.word(limit: 1501), at: Self.later)
+        #expect(await store.revision == revision + 1, "a word that changed is written")
+    }
+
+    @Test("A word of a kind this app cannot name is no word: refused, and not read back")
+    func unknownIsNoWord() async {
+        let store = ItemStore()
+        await store.add(Self.source)
+        let revision = await store.revision
+        await store.said(SourceProfile(host: Self.host, kind: .unknown, title: "?"), at: Self.moment)
+        #expect(await store.said(host: Self.host) == nil)
+        #expect(await store.revision == revision)
+
+        let unknown = SourceProfile(host: Self.host, kind: .unknown, title: "?").said(at: Self.moment)
+        let again = ItemStore(sources: [Self.source], notes: [], said: [unknown])
+        #expect(await again.said(host: Self.host) == nil)
     }
 
     @Test("A word about a server nobody joined goes nowhere")

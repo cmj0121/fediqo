@@ -682,13 +682,18 @@ final class ShellSession {
     /// Asks the instance where this run has not already been told, and remembers the answer.
     /// The composer's chosen source where no host is named; an answer names its own (#108).
     ///
-    /// **Nothing is asked where the source's own word is held** (#188): a kept ceiling is the
-    /// composer knowing before anything is asked, which is the acceptance, and the reload's ask
-    /// is what refreshes it.
+    /// **Nothing is asked where this run has the source's own word** (#188): one its look read
+    /// this run, or one the reload's ask has just written down. A word kept from an earlier run
+    /// is drawn meanwhile — the composer knows the ceiling before this asks — and is still
+    /// asked behind, so a run whose reload was dark does not go on speaking last week's ceiling
+    /// once the network is back (#222).
     func refreshPostLimit(of named: String? = nil) async {
         guard let host = named ?? composeHost else { return }
         if postLimits[host] != nil { return }
-        if case .stated = profiles[host] { return }
+        if case .stated(let profile) = profiles[host],
+           profile.asOf == nil || flavours.flavour(of: host) == .said(profile.kind) {
+            return
+        }
         do {
             // The same document the reload reads, and what it says goes to the store too (#188):
             // a source this device kept no word of yet has one from here on.
@@ -696,7 +701,12 @@ final class ShellSession {
                 http: WatchedHTTP(http, for: .serverCheck, in: work), host: host
             ).introduction()
             postLimits[host] = MastodonWrite.limit(advertised: profile?.statusLimit)
-            if let profile { await store.said(profile) }
+            if let profile {
+                await store.said(profile)
+                // Landed here as well as followed from the store, so the composer that asked
+                // reads the new ceiling now rather than after the next adopt.
+                if let kept = await store.said(host: host) { profiles[host] = .stated(kept) }
+            }
         } catch where DarkNetwork.caused(error) {
             // Not remembered: the next open asks again once the network is back (#222), and
             // `postLimit(of:)` says Mastodon's own 500 meanwhile.

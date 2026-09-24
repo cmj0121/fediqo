@@ -127,10 +127,11 @@ public struct SourceProfile: Sendable, Hashable, Identifiable {
         self.asOf = asOf
     }
 
-    /// The same answer, marked as said at `moment`.
+    /// The same answer, marked as said at `moment` — and under the host folded once, as every
+    /// `Source` is, so what is kept is filed where the store looks it up.
     public func said(at moment: Date) -> SourceProfile {
         SourceProfile(
-            host: host, kind: kind, title: title, summary: summary, thumbnail: thumbnail,
+            host: host.lowercased(), kind: kind, title: title, summary: summary, thumbnail: thumbnail,
             activeMonth: activeMonth, statusLimit: statusLimit, people: people, posts: posts,
             registration: registration, readsWithoutAccount: readsWithoutAccount, rules: rules,
             asOf: moment

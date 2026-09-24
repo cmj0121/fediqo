@@ -373,8 +373,9 @@ private struct SourceRecord: Codable, FetchableRecord, PersistableRecord {
         said_at = profile?.asOf
     }
 
-    /// The word this row keeps, marked as of when — or nothing where either half is missing: a
-    /// word with no moment is one nothing could draw as said then.
+    /// The word this row keeps, marked as of when — or nothing where either half is missing, or
+    /// the kind is one this build cannot name: a word with no moment is one nothing could draw as
+    /// said then.
     var saidProfile: SourceProfile? {
         guard let said, let said_at else { return nil }
         return said.profile(host: host, asOf: said_at)
@@ -398,10 +399,12 @@ private struct SourceRecord: Codable, FetchableRecord, PersistableRecord {
 /// the host or the moment, which are the row's own columns. Core's `SourceProfile` stays free of
 /// a storage format; this is the storage format.
 ///
-/// **Every field optional, so a word written before a field existed still reads**, and a kind or
-/// a registration this build does not know reads as nothing said, never as a guess.
+/// **Every field optional, so a word written before a field existed still reads.** A registration
+/// this build does not know reads as nothing said, never as a guess; a kind it does not know is
+/// no word at all (`profile(host:asOf:)`), because a kept `.unknown` would silence the ask that
+/// could correct it.
 private struct SaidRow: Codable {
-    var kind: String
+    var kind: String?
     var title: String?
     var summary: String?
     var thumbnail: URL?
@@ -427,9 +430,10 @@ private struct SaidRow: Codable {
         rules = profile.rules.isEmpty ? nil : profile.rules
     }
 
-    func profile(host: String, asOf: Date) -> SourceProfile {
-        SourceProfile(
-            host: host, kind: ProtocolKind(rawValue: kind) ?? .unknown, title: title,
+    func profile(host: String, asOf: Date) -> SourceProfile? {
+        guard let kind = kind.flatMap(ProtocolKind.init(rawValue:)), kind != .unknown else { return nil }
+        return SourceProfile(
+            host: host, kind: kind, title: title,
             summary: summary,
             // Admitted through `Host.fetchableURL` before it was written, as every address in
             // `NoteFacts` was; read back as the rows' pictures are.

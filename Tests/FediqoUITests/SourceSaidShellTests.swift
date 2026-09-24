@@ -60,4 +60,31 @@ struct SourceSaidShellTests {
         #expect(session.sources.first?.kind == .pleroma, "what it last said, ahead of what was written down at join")
         #expect(await store.sources().first?.kind == .mastodon, "and nothing is written to the index for it")
     }
+
+    @Test("A kept word of no nameable kind is no word: the join's note speaks, and the reload asks")
+    func keptUnknownIsNoWord() async throws {
+        let flavours = ShellFlavours()
+        #expect(flavours.speaking(Self.host, storedAs: .mastodon, keptAs: .unknown) == .mastodon)
+        #expect(flavours.speaking(Self.host, storedAs: .mastodon, keptAs: .pleroma) == .pleroma)
+
+        let instance = "https://\(Self.host)/api/v2/instance"
+        let http = FixtureHTTP([
+            instance: MastodonInstance.says("4.3.1", host: Self.host),
+            "https://\(Self.host)/api/v1/timelines/public?limit=40": .text("[]"),
+            "https://\(Self.host)/api/v1/trends/statuses?limit=20": .text("[]"),
+        ])
+        let store = ItemStore(sources: [Source(host: Self.host, kind: .mastodon)], notes: [])
+        let session = ShellSession(http: http, store: store, posts: ForumPosts(http: http))
+        await session.reloadFromStore()
+        // The store refuses such a word, so the one way it reaches a session is a store that
+        // held it before this build learned to refuse — stood in for here by a kind the store
+        // does keep, and the projection asked directly above.
+        #expect(session.sources.first?.kind == .mastodon)
+
+        await session.reload.timeline(.all, in: session)
+
+        #expect(await http.requested.map(\.absoluteString).contains(instance), "the reload asks")
+        #expect(session.flavours.flavour(of: Self.host) == .said(.mastodon))
+        #expect(await store.said(host: Self.host)?.kind == .mastodon, "and what it answered is kept")
+    }
 }

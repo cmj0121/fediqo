@@ -293,17 +293,24 @@ struct OfflineTests {
         #expect(await network.asked.isEmpty)
     }
 
-    @Test("The composer knows how long a post may be before anything is asked")
+    @Test("The composer knows how long a post may be before anything is asked, and a dark ask leaves it so")
     func composerKnowsTheCeiling() async throws {
         let (session, network) = try await launch(said: Self.kept)
         session.prepareCompose()
         #expect(session.composeHost == Self.host)
+        #expect(session.postLimit(of: Self.host) == 1500, "what the source said, before anything is asked")
+        #expect(await network.asked.isEmpty)
 
-        #expect(session.postLimit(of: Self.host) == 1500, "what the source said, not Mastodon's 500")
         await session.refreshPostLimit()
 
-        #expect(session.postLimit(of: Self.host) == 1500)
-        #expect(await network.asked.isEmpty, "nothing asked: the ceiling was kept")
+        #expect(session.postLimit(of: Self.host) == 1500, "a dark network is not a new ceiling")
+        #expect(await network.asked == ["/api/v2/instance"], "asked behind the kept word, once")
+        #expect(await session.store.said(host: Self.host) == Self.kept, "and the kept word stands")
+
+        await network.light()
+        await session.refreshPostLimit()
+        #expect(session.postLimit(of: Self.host) == 2000, "the next open asks again, and hears the source now")
+        #expect(await session.store.said(host: Self.host)?.statusLimit == 2000)
     }
 
     @Test("A dark reload leaves what was kept standing, as of when it was said")
