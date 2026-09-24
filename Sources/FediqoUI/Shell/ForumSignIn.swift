@@ -792,10 +792,14 @@ public final class ForumSessions {
     /// The whole sweep, at launch, of a store an earlier run left on this device (#219) — a run
     /// that crashed, or that only ever went to the background, left all of it. Relaunched
     /// sign-ins wait for it, so nothing is swept out from under one.
-    public func sweepAtLaunch(keeping hosts: [String], onDisk: Bool) {
+    public func sweepAtLaunch(keeping hosts: [String], onDisk: Bool, within limit: Duration) {
         guard onDisk else { return }
         let store = dataStore
-        sweeping = Task { await ForumWebEngine.sweep(store, keeping: hosts) }
+        // Bounded like a quit's: a WebKit that stops answering holds the forum's reads up for
+        // `limit` at most, not for the run.
+        sweeping = Task {
+            await Self.bounded(limit) { await ForumWebEngine.sweep(store, keeping: hosts) }
+        }
     }
 
     /// Waits for `work`, or for `limit`, whichever is first. Past it the work is left running.
