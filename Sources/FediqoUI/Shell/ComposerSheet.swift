@@ -14,6 +14,10 @@ struct ComposerSheet: View {
         case composing
     }
 
+    /// The source a failed send is said against: the one the composer was writing to.
+    @MainActor
+    static func failedAt(_ session: ShellSession) -> String? { session.composeHost }
+
     static func surface(offered: [Source], draft: String, failed: String?) -> Surface {
         if !offered.isEmpty { return .composing }
         if failed != nil { return .composing }
@@ -78,7 +82,7 @@ struct ComposerSheet: View {
                 try await session.post()
                 return session.composeDraft.isEmpty
             },
-            failedAt: { session.composeHost }
+            failedAt: { Self.failedAt(session) }
         ) { sending, failed in
             if Self.surface(offered: offered, draft: session.composeDraft, failed: failed) == .empty {
                 ShellNotice(

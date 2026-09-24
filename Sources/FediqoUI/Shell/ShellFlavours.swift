@@ -28,7 +28,8 @@ import Foundation
 enum ShellFlavour: Equatable, Sendable {
     /// It answered, and this is the name it gave.
     case said(ProtocolKind)
-    /// It was asked and it would not say — no answer, or one this device could not read. What
+    /// It was asked and it would not say — an answer this device could not read, or a refusal;
+    /// never a dark network, which leaves the host unasked (#222). What
     /// was written down at join stands, which is the conservative reading: an outage is not a
     /// migration.
     case unsaid
@@ -107,6 +108,10 @@ final class ShellFlavours {
             try Task.checkCancellation()
             flavours[host] = .said(kind)
         } catch let error where Cancellation.happened(error) {
+            flavours[host] = nil
+        } catch let error where DarkNetwork.caused(error) {
+            // A dark network is not the server declining to say (#222): nothing is written down,
+            // so the first reload after the network returns asks again, with no relaunch.
             flavours[host] = nil
         } catch {
             flavours[host] = .unsaid
