@@ -76,17 +76,10 @@ struct TimelineEditor: View {
         // the only place it does (`EditorAction.escapeIsExitCommand`).
         .onExitCommand { perform(EditorAction.escape(at: flow.stage)) }
         #endif
-        .confirmationDialog(
-            Text(String(format: L10n.t("timeline.remove.title"), session.removeName(of: draft))),
-            isPresented: $confirmingRemove,
-            titleVisibility: .visible
-        ) {
-            Button(L10n.t("timeline.remove.confirm"), role: .destructive) {
-                session.removeTimeline(draft.id)
-            }
-            Button(L10n.t("board.choose.cancel"), role: .cancel) {}
-        } message: {
-            Text(L10n.t("timeline.remove.detail"))
+        .shellConfirm(
+            $confirmingRemove, question: ShellQuestion.removeTimeline(named: session.removeName(of: draft))
+        ) { _ in
+            session.removeTimeline(draft.id)
         }
     }
 

@@ -68,6 +68,7 @@
 "withdraw.title" = "要收回這則貼文嗎？";
 "withdraw.detail" = "「%@」會從 %@ 收回。在多數來源上，別人寫在它底下的回應也會一起消失。收回後無法復原。";
 "withdraw.confirm" = "收回";
+"withdraw.line" = "它會從 %@ 收回，收回後無法復原。";
 
 "shortcut.title" = "快捷鍵";
 "shortcut.note" = "沒有在寫的時候，這些鍵會動。";
@@ -343,6 +344,7 @@
 "store.newer.title" = "這台裝置的索引是較新版的 Fediqo 寫的";
 "store.newer.detail" = "這個版本讀不了它，所以原封不動地留著，也不會在上面存任何東西。用較新版的 Fediqo 開啟，就能看到裡面的內容。";
 "store.newer.ok" = "好";
+"store.newer.line" = "這個版本原封不動地留著它，也不會在上面存任何東西。";
 
 "preferences.empty.title" = "偏好";
 "preferences.empty.detail" = "來源與外觀會放在這裡。";
@@ -437,6 +439,7 @@
 "prefs.keep.forever" = "永久";
 "prefs.keep.shorten.title" = "只保留最近 %d 個月？";
 "prefs.keep.shorten.detail" = "比這更舊的貼文會立即從這台裝置上移除，之後讀到的也不會存下。每個來源仍保持加入。改成更長的期間或「永久」則不會捨棄任何內容。";
+"prefs.keep.shorten.line" = "較舊的貼文會立即從這台裝置移除。";
 "prefs.keep.months" = "最近 %d 個月";
 "item.gone" = "來源已刪除";
 "item.gone.detail" = "它的來源表示已不再有這則貼文。它會帶著標記留在這裡，直到你放下它，也無法再對它送出任何東西。";
@@ -458,11 +461,15 @@
 "prefs.gone.ask.both" = "要放下 %1$@來源已刪除的貼文，以及 %2$@來源已不再有原本貼文的標記嗎？";
 "prefs.gone.ask.detail.places" = "貼文會立即從這台裝置、從每個畫面上移除。標記只會移除標記本身，旁邊的貼文仍會保留。其他內容都不受影響，每個來源仍保持加入。";
 "prefs.gone.ask.detail.placesonly" = "只會移除標記本身，旁邊的貼文仍會保留。其他內容都不受影響，每個來源仍保持加入。";
+"prefs.gone.ask.line" = "它們會立即從這台裝置移除。";
+"prefs.gone.ask.line.places" = "貼文會立即移除；標記處只移除標記本身。";
+"prefs.gone.ask.line.placesonly" = "只會移除標記本身，貼文仍會保留。";
 "prefs.gone.went.places" = "已放下 %d 處標記。";
 "prefs.gone.went.both" = "已放下 %1$@貼文和 %2$@標記。";
 "prefs.drop.copies" = "捨棄圖片副本";
 "prefs.drop.copies.title" = "捨棄這台裝置上所有的圖片副本？";
 "prefs.drop.copies.detail" = "所有來源存在記憶體與磁碟上的圖片都會移除。每則貼文都會留下並照常顯示；捲動時會從連結重新讀取圖片。";
+"prefs.drop.copies.line" = "圖片會從這台裝置移除；每則貼文都會留下。";
 "prefs.drop.confirm" = "捨棄";
 "prefs.drop.footer" = "除非你另作選擇，所有內容都會永久保留。「保留貼文」會立即捨棄較舊的貼文，之後讀到的貼文也照同樣的期間保留。「來源」中各來源的「清除」會捨棄該來源的圖片、表情符號名稱與首篇貼文，貼文本身會留下。磁碟上的圖片副本有容量上限，最舊的會先移除。";
 "prefs.cache.catalogue" = "%d 個表情符號名稱 ·";
@@ -649,6 +656,7 @@
 "account.signin.ask.detail"      = "讀會把你的首頁與你的列表帶進來。寫讓你在 Fediqo 裡發文、回覆、轉發、收藏，也可以把它們收回。兩種選擇讀到的都一樣，而且你隨時可以登出。";
 "account.signin.ask.read"        = "登入來讀";
 "account.signin.ask.write"       = "登入來讀與寫";
+"account.signin.ask.line" = "選擇 Fediqo 只讀，或也以你的身分寫。";
 
 "account.source.boards"          = "%1$d 個版塊：%2$@";
 "account.source.unread"          = "讀不到它的自我介紹。";
@@ -669,6 +677,9 @@
 "account.clear.detail.signedout"  = "這個裝置為它存的圖片、表情名稱和第一篇文章都會清掉，你也會從這個來源登出。它們會在你再讀的時候回來，它也還留在你的來源裡，版塊和文章都在。";
 "account.clear.detail.password"   = "這個裝置為它存的圖片、表情名稱和第一篇文章都會清掉，你會從這個論壇登出，為它存的密碼也會刪掉。只有密碼不會回來：下次要再打一次。它還留在你的來源裡，版塊和文章都在。";
 "account.clear.confirm"           = "清除";
+"account.clear.line" = "它在這裡的副本會清掉，再讀的時候會回來。";
+"account.clear.line.signedout" = "它在這裡的副本會清掉，你也會從它登出。";
+"account.clear.line.password" = "它在這裡的副本會清掉，為它存的密碼也會刪掉。";
 
 /* The masthead glance: the whole collection, on one line, without scrolling. */
 "account.standing.count"          = "%d 個來源";
@@ -695,6 +706,7 @@
 "account.mastodon.failed.keychain"    = "這個裝置無法保存 %@ 的登入。";
 "account.mastodon.ended.title"        = "這個來源已將你登出";
 "account.mastodon.ended.detail"       = "%@ 結束了這次登入。它帶進來的內容都還在；到「帳號」再登入一次，就能以你的身分閱讀。";
+"account.mastodon.ended.line" = "%@ 結束了這次登入。";
 
 /* #25 — Home and your lists, read as you, and choosing which lists. */
 "account.mastodon.home.progress"      = "正在讀你在 %@ 的首頁…";

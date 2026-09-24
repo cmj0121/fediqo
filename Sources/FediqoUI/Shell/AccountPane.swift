@@ -110,35 +110,12 @@ struct AccountPane: View {
                 arrived(at: now)
             }
             .onDisappear { session.searchFocused = false }
-            .confirmationDialog(
-                Text(session.signInChoice.map {
-                    String(format: L10n.t("account.signin.ask.title"), $0)
-                } ?? ""),
-                isPresented: Binding(
-                    get: { session.signInChoice != nil },
-                    set: { if !$0 { session.signInChoice = nil } }
-                ),
-                titleVisibility: .visible,
-                presenting: session.signInChoice
-            ) { host in
-                // **Reading first and the wider answer second**, which is `previewActions`' rule
-                // on this page: the narrower act is never the one a reader reaches by reflex.
-                // Neither is `.destructive`; refusing to write is not a loss and agreeing to it is
-                // not a danger, it is a thing to be told about — which the message does.
-                Button(L10n.t("account.signin.ask.read")) {
-                    Task { await chose(host: host, writing: false) }
-                }
-                Button(L10n.t("account.signin.ask.write")) {
-                    Task { await chose(host: host, writing: true) }
-                }
-                Button(L10n.t("board.choose.cancel"), role: .cancel) { session.signInChoice = nil }
-            // **The two halves are named here and not on the buttons**, because a dialog's buttons
-            // are two or three words each and what each half actually buys is a sentence. A
-            // VoiceOver reader is read this message before the buttons, so the choice arrives with
-            // its meaning rather than as two verbs.
-            } message: { _ in
-                Text(L10n.t("account.signin.ask.detail"))
-            }
+            // **Reading first and the wider answer second**, which is `previewActions`' rule on
+            // this page: the narrower act is never the one a reader reaches by reflex. Neither is
+            // a loss; what each half buys is a sentence, behind the question's (?).
+            .modifier(SignInChoiceQuestion(session: session) { host, writing in
+                Task { await chose(host: host, writing: writing) }
+            })
         }
     }
 
@@ -880,7 +857,7 @@ struct AccountPane: View {
         )
     }
 
-    /// A row's Clear. **Empties nothing** — it raises the question, and only the dialog's confirm
+    /// A row's Clear. **Empties nothing** — it raises the question, and only the question's yes
     /// reaches `clear(host:)`. Decision 29, and `askRemove`'s shape for its reason.
     ///
     /// The same act, and the same key, as the one on Usage — which now asks the same
@@ -902,7 +879,7 @@ struct AccountPane: View {
         await session.changeLists(host: row.source.host)
     }
 
-    /// A row's Remove. **Destroys nothing** — it raises the question, and only the dialog's
+    /// A row's Remove. **Destroys nothing** — it raises the question, and only the question's
     /// confirm reaches `remove(host:)`.
     func askRemove(_ row: SourceRow) {
         session.removing = row.source.host
@@ -938,5 +915,22 @@ struct AccountPane: View {
         SourceMarkRow.Mark(
             id: row.source.host, kind: row.source.kind, shape: row.shape, signedIn: signedIn
         )
+    }
+}
+
+/// Reading, or reading and writing, asked of a source being signed in to — a modifier, so the
+/// page's chain gains one plain call and no presenter closure of its own.
+private struct SignInChoiceQuestion: ViewModifier {
+    let session: ShellSession
+    let chose: @MainActor (String, Bool) -> Void
+
+    func body(content: Content) -> some View {
+        content.shellConfirm(asked, question: { ShellQuestion.signIn(host: $0) }) { host, id in
+            chose(host, id == ShellQuestion.signInWrite)
+        }
+    }
+
+    private var asked: Binding<String?> {
+        Binding(get: { session.signInChoice }, set: { if $0 == nil { session.signInChoice = nil } })
     }
 }

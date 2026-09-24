@@ -148,32 +148,12 @@ struct UsagePane: View {
             await readCatalogues()
             await readDisk()
         }
-        .confirmationDialog(
-            Text(L10n.t("prefs.drop.copies.title")),
-            isPresented: $droppingCopies,
-            titleVisibility: .visible
-        ) {
-            Button(L10n.t("prefs.drop.confirm"), role: .destructive) {
-                session?.dropCopies()
-                Task { await readDisk() }
-            }
-            Button(L10n.t("board.choose.cancel"), role: .cancel) {}
-        } message: {
-            Text(L10n.t("prefs.drop.copies.detail"))
+        .shellConfirm($droppingCopies, question: ShellQuestion.dropCopies()) { _ in
+            session?.dropCopies()
+            Task { await readDisk() }
         }
-        .confirmationDialog(
-            Text(shortening.map { L10n.count("prefs.keep.shorten.title", $0) } ?? ""),
-            isPresented: Binding(get: { shortening != nil }, set: { if !$0 { shortening = nil } }),
-            titleVisibility: .visible,
-            presenting: shortening
-        ) { months in
-            Button(L10n.t("prefs.drop.confirm"), role: .destructive) {
-                prefs.keepMonths = months
-                shortening = nil
-            }
-            Button(L10n.t("board.choose.cancel"), role: .cancel) { shortening = nil }
-        } message: { _ in
-            Text(L10n.t("prefs.keep.shorten.detail"))
+        .shellConfirm($shortening, question: { ShellQuestion.shorten(months: $0) }) { months, _ in
+            prefs.keepMonths = months
         }
     }
 

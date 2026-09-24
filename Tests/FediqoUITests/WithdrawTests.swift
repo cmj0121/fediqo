@@ -123,6 +123,11 @@ struct WithdrawTests {
         #expect(question.detail.contains("words of me 1"))
         #expect(question.detail.contains(host))
         #expect(question.detail.contains("does not come back"))
+        // Asked in one line naming where it goes from, with the whole of it behind the (?).
+        let asked = ShellQuestion.withdraw(mine, language: .english)
+        #expect(asked.line.contains(host) && asked.line.contains("does not come back"))
+        #expect(asked.help == ItemActs.withdrawQuestion(mine, language: .english).detail)
+        #expect(asked.warns && asked.cancel == "Cancel")
         let chinese = ItemActs.withdrawQuestion(mine, language: .taiwanese)
         #expect(chinese.detail.contains("words of me 1") && chinese.detail.contains(host))
         for key in ["withdraw.title", "withdraw.detail", "withdraw.confirm", "item.act.withdraw",

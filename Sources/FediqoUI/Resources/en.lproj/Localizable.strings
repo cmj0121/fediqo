@@ -68,6 +68,7 @@
 "withdraw.title" = "Take this post back?";
 "withdraw.detail" = "“%@” is taken back from %@. On most sources the answers other people wrote under it go with it. It does not come back.";
 "withdraw.confirm" = "Take it back";
+"withdraw.line" = "It is taken back from %@, and does not come back.";
 
 "shortcut.title" = "Keys";
 "shortcut.note" = "These work while you are not writing.";
@@ -344,6 +345,7 @@
 "store.newer.title" = "A newer Fediqo wrote this device's index";
 "store.newer.detail" = "This version cannot read it, so it has left it exactly as it was and will save nothing over it. Open Fediqo in the newer version to see what it holds.";
 "store.newer.ok" = "OK";
+"store.newer.line" = "This version leaves it as it was and saves nothing over it.";
 
 "preferences.empty.title" = "Preferences";
 "preferences.empty.detail" = "Sources and appearance will live here.";
@@ -443,6 +445,7 @@
 "prefs.keep.shorten.title" = "Keep only the latest %d months?";
 "prefs.keep.shorten.title.one" = "Keep only the latest %d month?";
 "prefs.keep.shorten.detail" = "Posts older than that go from this device now, and any read later are not kept. Every source stays joined. A longer window, or Forever, drops nothing.";
+"prefs.keep.shorten.line" = "Older posts go from this device now.";
 "prefs.keep.months" = "Latest %d months";
 "prefs.keep.months.one" = "Latest %d month";
 "item.gone" = "Deleted at source";
@@ -472,12 +475,16 @@
 "prefs.gone.ask.both" = "Let go of %1$@ deleted at their source, and %2$@ whose source no longer has what lay there?";
 "prefs.gone.ask.detail.places" = "Posts go from this device now, from every screen. A place loses only its mark, and the post it sits by stays. Nothing else is touched, and every source stays joined.";
 "prefs.gone.ask.detail.placesonly" = "Only their marks go, and the posts they sit by stay. Nothing else is touched, and every source stays joined.";
+"prefs.gone.ask.line" = "They go from this device now.";
+"prefs.gone.ask.line.places" = "The posts go now; the places lose only their marks.";
+"prefs.gone.ask.line.placesonly" = "Only their marks go; the posts stay.";
 "prefs.gone.went.places" = "%d places went.";
 "prefs.gone.went.places.one" = "%d place went.";
 "prefs.gone.went.both" = "%1$@ and %2$@ went.";
 "prefs.drop.copies" = "Drop picture copies";
 "prefs.drop.copies.title" = "Drop every picture copy on this device?";
 "prefs.drop.copies.detail" = "The pictures held in memory and on disk go, from every source. Every post stays and still draws; its pictures are read again from their links as you scroll.";
+"prefs.drop.copies.line" = "Pictures go from this device; every post stays.";
 "prefs.drop.confirm" = "Drop";
 "prefs.drop.footer" = "Everything is kept forever unless you choose otherwise. Keep posts drops what is older now, and holds everything read later to the same window. Clear, in each source on Sources, drops that source's pictures, emoji names and first posts; its posts stay. Picture copies on disk are capped, and the oldest go first.";
 "prefs.cache.catalogue" = "%d emoji names, read";
@@ -670,6 +677,7 @@
 "account.signin.ask.detail"      = "Reading brings in your Home and your lists. Writing lets you post, reply, boost and favourite from Fediqo, and take any of them back. Reading is the same whichever you choose, and you can sign out at any time.";
 "account.signin.ask.read"        = "Sign in to read";
 "account.signin.ask.write"       = "Sign in to read and write";
+"account.signin.ask.line" = "Choose whether Fediqo only reads, or also writes as you.";
 
 "account.source.boards"          = "%1$d boards: %2$@";
 "account.source.unread"          = "Its description could not be read.";
@@ -690,6 +698,9 @@
 "account.clear.detail.signedout"  = "The pictures, emoji names and first posts this device is holding go, and you are signed out of this server. They come back as you read it again, and it stays in your sources, with its boards and its posts.";
 "account.clear.detail.password"   = "The pictures, emoji names and first posts this device is holding go, you are signed out of this forum, and the password saved for it is deleted. Only the password does not come back: you type it again next time. It stays in your sources, with its boards and its posts.";
 "account.clear.confirm"           = "Clear";
+"account.clear.line" = "Its copies here go; they come back as you read it again.";
+"account.clear.line.signedout" = "Its copies here go, and you are signed out of it.";
+"account.clear.line.password" = "Its copies here go, and its saved password is deleted.";
 
 /* The masthead glance: the whole collection, on one line, without scrolling. */
 "account.standing.count"          = "%d sources";
@@ -716,6 +727,7 @@
 "account.mastodon.failed.keychain"    = "This device could not keep the sign-in for %@.";
 "account.mastodon.ended.title"        = "Signed out by the server";
 "account.mastodon.ended.detail"       = "%@ ended this sign-in. What it brought in is still here; sign in again on Account to read it as you.";
+"account.mastodon.ended.line" = "%@ ended this sign-in.";
 
 /* #25 — Home and your lists, read as you, and choosing which lists. */
 "account.mastodon.home.progress"      = "Reading your Home on %@…";
