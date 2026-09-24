@@ -45,7 +45,7 @@ struct LeavesNothingTests {
             posts: ForumPosts(http: http)
         )
         session.work = work
-        session.jar = SystemJar(cookies: Self.jar())
+        session.jar = SystemJar(cookies: Self.jar(), credentials: .shared)
         return session
     }
 
@@ -300,7 +300,7 @@ struct LeavesNothingTests {
             host: Self.gone, port: 443, protocol: "https", realm: "r\(kind)",
             authenticationMethod: NSURLAuthenticationMethodHTTPBasic
         )
-        let credentials = session.jar.credentials
+        let credentials = try #require(session.jar.credentials)
         credentials.set(URLCredential(user: "reader", password: "p", persistence: .forSession), for: space)
         defer {
             for credential in credentials.credentials(for: space)?.values ?? [:].values {
@@ -312,7 +312,7 @@ struct LeavesNothingTests {
         await session.signOut(host: Self.gone)
 
         #expect(jar.cookies?.map(\.domain) == [Self.kept], "a cookie for the source outlived its sign-out")
-        #expect(session.jar.credentials.credentials(for: space)?.isEmpty ?? true)
+        #expect(credentials.credentials(for: space)?.isEmpty ?? true)
     }
 
     @Test("Signing out takes every cookie the source is sent, shared or not, and keeps a neighbour's own")

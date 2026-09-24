@@ -90,6 +90,48 @@ final class FediqoAppDelegate: NSObject, NSApplicationDelegate {
         return .terminateLater
     }
 }
+#elseif os(iOS)
+/// An iPhone is seldom told it is quitting: a suspended app is killed without a word, and then the
+/// forum browser's store is swept at the next launch (`ForumSessions.sweepAtLaunch`). Where the
+/// system does say so — the app ends while running, or its last scene is let go — the whole of
+/// `end()` runs, bounded by the save's deadline, so the store is swept then and not a launch later.
+@MainActor
+final class FediqoAppDelegate: NSObject, UIApplicationDelegate {
+    private var ended = false
+    private var finishedFlag = false
+
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        NotificationCenter.default.addObserver(
+            forName: UIScene.didDisconnectNotification, object: nil, queue: .main
+        ) { note in
+            let gone = note.object as? UIScene
+            MainActor.assumeIsolated {
+                let left = UIApplication.shared.connectedScenes.filter { $0 !== gone }
+                guard left.isEmpty else { return }
+                Task { await Launch.shared.end() }
+            }
+        }
+        return true
+    }
+
+    /// Called on the main thread with a few seconds left and nothing awaited after it returns, so
+    /// the run loop is turned here until `end()` is done or its deadline passes.
+    func applicationWillTerminate(_ application: UIApplication) {
+        guard !ended else { return }
+        ended = true
+        Task { @MainActor in
+            await Launch.shared.end()
+            self.finishedFlag = true
+        }
+        let until = Date().addingTimeInterval(4)
+        while !finishedFlag, Date() < until {
+            RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.05))
+        }
+    }
+}
 #endif
 
 /// The app entry, shared by every platform host. Everything it shows lives in `FediqoUI`.
@@ -97,6 +139,8 @@ final class FediqoAppDelegate: NSObject, NSApplicationDelegate {
 struct FediqoApp: App {
     #if os(macOS)
     @NSApplicationDelegateAdaptor(FediqoAppDelegate.self) private var appDelegate
+    #elseif os(iOS)
+    @UIApplicationDelegateAdaptor(FediqoAppDelegate.self) private var appDelegate
     #endif
     @Environment(\.scenePhase) private var scenePhase
 

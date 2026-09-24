@@ -89,6 +89,9 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
     /// queue is exactly that machinery.
     private var running = false
     private var waiting: [CheckedContinuation<Void, Never>] = []
+    /// The launch's sweep of an earlier run's store, while it runs (#219): nothing is loaded
+    /// until it is done, so no page is swept out from under.
+    var sweeping: Task<Void, Never>?
 
     init(host: String, dataStore: WKWebsiteDataStore) {
         self.host = host.lowercased()
@@ -130,6 +133,7 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
 
     /// Loads, waits for a navigation to finish, then waits out a browser check if there is one.
     private func settled(_ url: URL) async throws -> ForumPage {
+        await sweeping?.value
         let mark = finishes
         failure = nil
         mainResponse = nil
@@ -425,9 +429,17 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
         // A record is filed by site, coarser than a host (see `forget`): of the cookies left in
         // one, only those a request to a source would carry are a sign-in (#221's `sent`).
         let jar = store.httpCookieStore
-        for cookie in await jar.allCookies() where !hosts.contains(where: { sent(cookie.domain, to: $0) }) {
+        for cookie in await jar.allCookies() where !hosts.contains(where: { sentToSite(cookie.domain, $0) }) {
             await jar.deleteCookie(cookie)
         }
+    }
+
+    /// Whether a cookie filed under `domain` goes out with a request to `host` in either of its
+    /// spellings — bare or `www.` — the two a forum routinely moves between (`belongs`). A forum
+    /// added as `example.com` whose sign-in is a host-only cookie on `www.example.com` keeps it.
+    static func sentToSite(_ domain: String, _ host: String) -> Bool {
+        let bare = bare(host.lowercased())
+        return sent(domain, to: bare) || sent(domain, to: "www." + bare)
     }
 
     /// What `sweep` drops even for a source's own site: everything but its cookies.
