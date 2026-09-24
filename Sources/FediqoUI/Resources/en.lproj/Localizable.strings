@@ -637,6 +637,7 @@
 "join.preview.thumbnail" = "%@'s own picture of itself";
 "join.preview.activeMonth" = "%@ active this month";
 "join.preview.posts" = "%@ posts";
+"source.said.asOf" = "As %1$@ said it, %2$@.";
 "join.preview.reg.open" = "Anyone can sign up";
 "join.preview.reg.approval" = "Sign-ups need approval";
 "join.preview.reg.closed" = "Sign-ups are closed";
