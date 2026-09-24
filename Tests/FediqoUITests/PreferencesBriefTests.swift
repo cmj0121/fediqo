@@ -17,7 +17,7 @@ struct PreferencesBriefTests {
 
     static let pages = [
         "PreferencesPane.swift", "BuildStampSection.swift", "SourceWorkSection.swift",
-        "AllowanceSection.swift", "OwnHostsSection.swift",
+        "AllowanceSection.swift", "OwnHostsSection.swift", "ActivityPanel.swift",
     ]
 
     /// The short line each explanation became, and the explanation behind its (?).
@@ -28,6 +28,7 @@ struct PreferencesBriefTests {
         ("work.brief", "work.footer"),
         ("allow.builtIn.brief", "allow.builtIn.footer"),
         ("allow.own.brief", "allow.own.footer"),
+        ("activity.brief", "activity.footer"),
     ]
 
     @Test("No explanation under a setting is shown by default: each is behind a (?)")

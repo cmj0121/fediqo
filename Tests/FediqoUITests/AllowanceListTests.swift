@@ -346,23 +346,22 @@ struct AllowanceListTests {
 
     // MARK: - Where it is drawn and said
 
-    @Test("An act an entry let through names it, on its line and to VoiceOver")
+    @Test("An act an entry let through names it in its detail")
     func aLineNamesItsEntry() {
         let at = Date(timeIntervalSince1970: 0)
         let plain = SourceAct(id: 1, reached: Self.forum, purpose: .timeline, at: at)
-        #expect(plain.allowedText() == nil)
+        #expect(!ActivityDetail.facts(plain, language: .english).contains { $0.label == "Let through by" })
         let directory = SourceAct(
             id: 2, reached: ServerDirectory.host, purpose: .directory, at: at, allowedBy: .directory
         )
-        #expect(directory.allowedText(language: .english) == "Let through by Directory of servers")
-        #expect(directory.spoken(language: .english).hasSuffix(", let through by Directory of servers"))
-        #expect(directory.spoken(language: .taiwanese).hasSuffix("由「來源目錄」放行"))
+        #expect(ActivityDetail.facts(directory, language: .english).last! == ("Let through by", "Directory of servers"))
+        #expect(ActivityDetail.facts(directory, language: .taiwanese).last!.value == "來源目錄")
         let own = SourceAct(
             id: 3, reached: Self.cdn, pointedBy: Self.forum, purpose: .pagePart, at: at,
             allowedBy: .own(host: Self.cdn, source: Self.forum)
         )
-        #expect(own.spoken(language: .english).hasPrefix("\(Self.forum), "))
-        #expect(own.spoken(language: .english).hasSuffix("let through by \(Self.cdn) (yours)"))
+        #expect(own.source == Self.forum)
+        #expect(ActivityDetail.facts(own, language: .english).last!.value == "\(Self.cdn) (yours)")
     }
 
     @Test("Every word the list says is there in all three languages the app ships")
@@ -370,7 +369,7 @@ struct AllowanceListTests {
         let resources = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("Sources/FediqoUI/Resources")
-        var keys = ["prefs.tab.reach", "account.catalog.off", "activity.row.allowed", "activity.row.spoken.allowed",
+        var keys = ["prefs.tab.reach", "account.catalog.off", "activity.detail.allowed",
                     "allow.builtIn", "allow.builtIn.footer", "allow.builtIn.brief", "allow.own", "allow.own.none",
                     "allow.own.footer", "allow.own.brief", "allow.own.noSource", "allow.own.source", "allow.own.host",
                     "allow.own.add", "allow.own.remove", "allow.own.removeIt", "allow.own.adding",

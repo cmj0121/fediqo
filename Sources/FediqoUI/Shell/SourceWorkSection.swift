@@ -44,41 +44,12 @@ struct SourceWorkSection: View {
     /// The source, then what for — and which board, where it reads one — and how long beside it.
     private func line(_ row: SourceWorkRow, among rows: [SourceWorkRow]) -> some View {
         TimelineView(.periodic(from: row.since, by: 1)) { context in
-            ShellListRow(
-                id: row.id, title: row.host, brief: row.purposeText(),
-                figure: SourceWorkRow.elapsed(since: row.since, now: context.date),
+            SourceLineRow(
+                id: row.id, source: row.host, purpose: row.purpose, what: row.purposeText(),
+                when: SourceWorkRow.elapsed(since: row.since, now: context.date),
                 selection: $lit, onOpen: { onOpen(row.host) },
                 onStep: { lit = ShellListStep.stepped(rows.map(\.id), from: lit, by: $0) }
-            ) {
-                Image(systemName: row.purpose.symbol)
-            }
-        }
-    }
-}
-
-extension SourceWork.Purpose {
-    /// The glyph a row of work, or of the record, leads with.
-    var symbol: String {
-        switch self {
-        case .timeline: "text.line.first.and.arrowtriangle.forward"
-        case .conversation: "bubble.left.and.bubble.right"
-        case .forumPost, .forumReplies: "text.bubble"
-        case .lists: "list.bullet"
-        case .joining: "plus.circle"
-        case .boards: "square.grid.2x2"
-        case .directory: "list.bullet.rectangle"
-        case .serverCheck: "checkmark.seal"
-        case .picture: "photo"
-        case .emoji: "face.smiling"
-        case .signInCheck, .signIn: "person.badge.key"
-        case .signOut: "rectangle.portrait.and.arrow.right"
-        case .write: "square.and.pencil"
-        case .search: "magnifyingglass"
-        case .page: "doc.richtext"
-        case .video: "play.rectangle"
-        case .signInPage: "arrow.up.forward.square"
-        case .personCheck: "person.badge.shield.checkmark"
-        case .pagePart: "puzzlepiece"
+            )
         }
     }
 }

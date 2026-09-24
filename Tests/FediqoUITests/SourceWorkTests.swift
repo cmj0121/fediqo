@@ -411,11 +411,11 @@ struct SourceWorkTests {
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("Sources/FediqoUI/Shell/SourceWorkSection.swift")
         let page = try String(contentsOf: file, encoding: .utf8)
-        let host = try #require(page.range(of: "title: row.host"))
-        let purpose = try #require(page.range(of: "brief: row.purposeText()"))
+        let host = try #require(page.range(of: "source: row.host"))
+        let purpose = try #require(page.range(of: "what: row.purposeText()"))
         let time = try #require(page.range(of: "SourceWorkRow.elapsed("))
         #expect(host.lowerBound < purpose.lowerBound && purpose.lowerBound < time.lowerBound)
-        #expect(page.contains("ShellListRow("), "a list row, which VoiceOver hears as one element")
+        #expect(page.contains("SourceLineRow("), "the record's row, which VoiceOver hears as one element")
         #expect(!page.contains("row.name"), "the board is drawn only through purposeText")
     }
 

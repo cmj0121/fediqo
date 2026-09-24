@@ -378,14 +378,13 @@
 "work.purpose.signInPage" = "A page followed from a forum's sign-in";
 "work.purpose.personCheck" = "The check a forum's sign-in shows";
 "activity.title" = "This run's requests";
-"activity.close" = "Done";
+"activity.close" = "Close";
 "activity.filter" = "Source";
 "activity.filter.all" = "Every source";
 "activity.none" = "Nothing has been asked of any source yet in this run.";
 "activity.footer" = "Newest first, this run only, and gone when the app is quit. Each line names the source it was for — a picture or a page a source pointed to is listed under that source, wherever it is kept — what it was for, and when it left. Never an address, a query, or anything that could sign in as you.";
 "activity.dropped" = "The %d oldest lines were let go to keep this list bounded.";
 "activity.dropped.one" = "The oldest line was let go to keep this list bounded.";
-"activity.row.spoken" = "%1$@, %2$@, at %3$@";
 "about.title" = "This Fediqo";
 "about.version" = "Version";
 "about.build" = "Build";
@@ -770,8 +769,6 @@
 "prefs.tab.reach" = "Allowed";
 "account.catalog.off" = "The directory is switched off in Preferences, under Allowed. Type a hostname to add a source.";
 "work.purpose.pagePart" = "Part of a forum's page, from a host you allowed";
-"activity.row.allowed" = "Let through by %@";
-"activity.row.spoken.allowed" = "%1$@, %2$@, at %3$@, let through by %4$@";
 "allow.builtIn" = "What the app starts with";
 "allow.builtIn.footer" = "Nothing else reaches past the sources you added. Switch an entry off and what it let through is refused from that moment, like anything else. Every act an entry lets through is listed under its source in this run's requests, naming the entry.";
 "allow.own" = "Hosts you added";
@@ -839,3 +836,10 @@
 "allow.own.adding.brief" = "For one of your sources";
 "allow.own.removeIt" = "Remove";
 "detail.back" = "Back to the list";
+
+/* The record of this run reads as one list (#236). */
+"activity.brief" = "Newest first, this run only.";
+"activity.detail.purpose" = "What for";
+"activity.detail.time" = "When it left";
+"activity.detail.reached" = "Went to";
+"activity.detail.allowed" = "Let through by";

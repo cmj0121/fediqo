@@ -43,8 +43,8 @@ struct ActivityTests {
         #expect(act.source == Self.source)
         #expect(act.reached == Self.source)
         for language in [DummyLanguage.english, .taiwanese] {
-            let said = [act.source, act.purposeText(language: language), act.time(language: language),
-                        act.spoken(language: language)].joined(separator: " ")
+            let said = ([act.source] + ActivityDetail.facts(act, language: language).map(\.value))
+                .joined(separator: " ")
             for leak in ["/api", "timelines", "987654", "max_id", "s3cret", "https"] {
                 #expect(!said.contains(leak), "\(leak) reached a line in \(language)")
             }
@@ -243,7 +243,8 @@ struct ActivityTests {
         let keys = SourceWork.Purpose.allCases.map(\.titleKey) + [
             "activity.open.brief", "activity.title", "activity.close",
             "activity.filter", "activity.filter.all", "activity.none", "activity.footer",
-            "activity.dropped", "activity.row.spoken",
+            "activity.dropped", "activity.brief", "activity.detail.purpose", "activity.detail.time",
+            "activity.detail.reached", "activity.detail.allowed",
         ]
         let resources = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -261,36 +262,57 @@ struct ActivityTests {
             id: 1, reached: "cdn.example", pointedBy: Self.source, purpose: .picture,
             at: Date(timeIntervalSince1970: 0)
         )
-        let english = act.spoken(language: .english)
-        #expect(english.hasPrefix("one.example, Pictures, at "))
-        let taiwanese = act.spoken(language: .taiwanese)
-        #expect(taiwanese.hasPrefix("one.example，圖片，"))
+        let english = ActivityDetail.facts(act, language: .english)
+        #expect(english.map(\.label) == ["What for", "When it left", "Went to"])
+        #expect(english[0].value == "Pictures" && english[2].value == "cdn.example")
+        let taiwanese = ActivityDetail.facts(act, language: .taiwanese)
+        #expect(taiwanese[0] == ("為了什麼", "圖片"))
+        let own = SourceAct(id: 2, reached: Self.source, purpose: .timeline, at: act.at)
+        #expect(ActivityDetail.facts(own, language: .english).count == 2, "a source's own line went where it says")
     }
 
-    /// No view inspector, so what VoiceOver reads is pinned by what the line draws: one element
-    /// labelled with `spoken`, which names the source, what for and when.
-    @Test("VoiceOver reads each line as one sentence: the source, what for, when")
-    func eachLineIsSpoken() throws {
-        let file = URL(fileURLWithPath: #filePath)
+    /// No view inspector, so what VoiceOver reads is pinned by what the files draw (#236): the
+    /// record and the work in flight draw one row, a list row, which is one element read source,
+    /// what for, when — and the record's row opens its detail.
+    @Test("The record and the work in flight draw the same row, and a row opens its detail")
+    func oneRow() throws {
+        let shell = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("Sources/FediqoUI/Shell/ActivityPanel.swift")
-        let page = try String(contentsOf: file, encoding: .utf8)
-        #expect(page.contains(".accessibilityLabel(Text(act.spoken()))"))
-        #expect(page.contains(".accessibilityElement(children: .ignore)"))
+            .appendingPathComponent("Sources/FediqoUI/Shell")
+        let page = try String(contentsOf: shell.appendingPathComponent("ActivityPanel.swift"), encoding: .utf8)
+        let work = try String(contentsOf: shell.appendingPathComponent("SourceWorkSection.swift"), encoding: .utf8)
+        let row = try String(contentsOf: shell.appendingPathComponent("SourceLine.swift"), encoding: .utf8)
+        #expect(page.contains("SourceLineRow(") && work.contains("SourceLineRow("))
+        #expect(row.contains("ShellListRow(\n            id: id, title: source, brief: what, figure: when,"))
+        #expect(page.contains("onOpen: { opened = act }"))
+        #expect(page.contains("ActivityDetail(act: opened)"))
+        #expect(page.contains("ShellIconButton(\"xmark\", name: \"activity.close\""))
+        #expect(!page.contains("ActivityLine") && !work.contains("VStack"), "no second copy of the line")
         for reach in ["http", "URL", ".task", "begin(", "note("] {
             #expect(!page.contains(reach), "the page reaches for \(reach)")
         }
     }
 
-    @Test("A line draws in light and in dark", arguments: [ColorScheme.light, .dark])
+    @Test("A row and a detail draw in light and in dark, and at the largest type", arguments: [ColorScheme.light, .dark])
     func drawsInBothSchemes(_ scheme: ColorScheme) throws {
-        let act = SourceAct(id: 1, reached: Self.source, purpose: .timeline, at: Date(timeIntervalSince1970: 0))
+        let act = SourceAct(
+            id: 1, reached: "cdn.example", pointedBy: Self.source, purpose: .pagePart,
+            at: Date(timeIntervalSince1970: 0), allowedBy: .own(host: "cdn.example", source: Self.source)
+        )
         let renderer = ImageRenderer(
-            content: ActivityLine(act: act)
-                .environment(\.colorScheme, scheme)
-                .frame(width: 320)
-                .padding()
-                .background(ShellChrome.page(scheme))
+            content: VStack {
+                SourceLineRow(
+                    id: act.id, source: act.source, purpose: act.purpose, what: act.purposeText(),
+                    when: act.time(), selection: .constant(act.id), onOpen: {}, onStep: { _ in }
+                )
+                ActivityDetail(act: act) {}
+                    .frame(height: 400)
+            }
+            .environment(\.colorScheme, scheme)
+            .dynamicTypeSize(scheme == .dark ? .accessibility5 : .large)
+            .frame(width: 320)
+            .padding()
+            .background(ShellChrome.page(scheme))
         )
         let image = try #require(renderer.cgImage)
         #expect(image.width > 0 && image.height > 0)

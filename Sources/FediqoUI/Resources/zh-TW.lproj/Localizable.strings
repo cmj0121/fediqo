@@ -376,13 +376,12 @@
 "work.purpose.signInPage" = "從論壇登入頁前往的頁面";
 "work.purpose.personCheck" = "論壇登入時顯示的真人驗證";
 "activity.title" = "這次執行的請求";
-"activity.close" = "完成";
+"activity.close" = "關閉";
 "activity.filter" = "來源";
 "activity.filter.all" = "所有來源";
 "activity.none" = "這次執行還沒有向任何來源要求任何東西。";
 "activity.footer" = "最新的在最上面，只記這次執行，關掉 app 就消失。每一行寫出它是為哪個來源送出的——來源指向的圖片或網頁，不論放在哪裡，都列在那個來源底下——為了什麼，以及什麼時候送出。絕不顯示網址、查詢內容，或任何能以你的身分登入的東西。";
 "activity.dropped" = "為了讓清單有上限，最舊的 %d 行已經捨去。";
-"activity.row.spoken" = "%1$@，%2$@，%3$@";
 "about.title" = "這個 Fediqo";
 "about.version" = "版本";
 "about.build" = "組建";
@@ -748,8 +747,6 @@
 "prefs.tab.reach" = "放行清單";
 "account.catalog.off" = "目錄已在偏好設定的「放行清單」中關閉。請輸入主機名稱來加入來源。";
 "work.purpose.pagePart" = "論壇頁面從你放行的主機載入的內容";
-"activity.row.allowed" = "由「%@」放行";
-"activity.row.spoken.allowed" = "%1$@，%2$@，%3$@，由「%4$@」放行";
 "allow.builtIn" = "App 內建的項目";
 "allow.builtIn.footer" = "除此之外，沒有任何東西會連到你加入的來源以外。關掉一個項目，它放行的東西從那一刻起就會像其他東西一樣被拒絕。每個項目放行的動作，都會列在這次執行的請求中它的來源底下，並寫出是哪個項目。";
 "allow.own" = "你加入的主機";
@@ -817,3 +814,10 @@
 "allow.own.adding.brief" = "給你的一個來源使用";
 "allow.own.removeIt" = "移除";
 "detail.back" = "回到清單";
+
+/* The record of this run reads as one list (#236). */
+"activity.brief" = "最新的在前，只限這次執行。";
+"activity.detail.purpose" = "為了什麼";
+"activity.detail.time" = "送出時間";
+"activity.detail.reached" = "實際連到";
+"activity.detail.allowed" = "放行的項目";

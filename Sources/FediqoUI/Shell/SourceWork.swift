@@ -572,27 +572,6 @@ struct SourceAct: Identifiable, Equatable, Sendable {
     func purposeText(language: DummyLanguage? = nil) -> String {
         L10n.t(purpose.titleKey, language: language)
     }
-
-    /// Which entry let it through, where one did (#226) — the way a hidden post names its rule.
-    func allowedText(language: DummyLanguage? = nil) -> String? {
-        allowedBy.map { String(format: L10n.t("activity.row.allowed", language: language), $0.name(language: language)) }
-    }
-
-    /// The row as VoiceOver reads it: the source, what for, and when — and which entry let it
-    /// through, where one did — one sentence, in that order.
-    func spoken(language: DummyLanguage? = nil) -> String {
-        guard let allowedBy else {
-            return String(
-                format: L10n.t("activity.row.spoken", language: language),
-                source, purposeText(language: language), time(language: language)
-            )
-        }
-        return String(
-            format: L10n.t("activity.row.spoken.allowed", language: language),
-            source, purposeText(language: language), time(language: language),
-            allowedBy.name(language: language)
-        )
-    }
 }
 
 /// This run's record, on the main actor (#218): every act, oldest first, bounded, and indexed by
