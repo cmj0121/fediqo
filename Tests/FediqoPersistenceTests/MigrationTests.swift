@@ -167,9 +167,11 @@ struct MigrationTests {
         #expect(opened.notes.first { $0.id == "m5" }?.boosterHandle == nil)
         #expect(Holdings(notes: opened.notes, per: .month, calendar: utc) == counted)
         #expect(counted.posts == 8)
-        #expect(try migrations(index) == ["v1-index", "v2-categories", "v3-holding", "v4-gone"])
+        #expect(try migrations(index) == ["v1-index", "v2-categories", "v3-holding", "v4-gone", "v5-said"])
         // Every row 0.1.0 kept arrived through a timeline, which is what the new column says.
         #expect(opened.notes.allSatisfy { $0.holding == .arrived })
+        // And no source has been heard from about itself yet (#188): a word nothing kept is none.
+        #expect(opened.said.isEmpty)
         // And no source has said any of them went (#179).
         #expect(opened.notes.allSatisfy { $0.goneSince == nil })
 

@@ -664,27 +664,39 @@ final class ShellSession {
         composeHost = offered.first?.host
     }
 
+    /// How long a post on `host` may be: what the source says about itself — kept from the last
+    /// run and replaced by this run's ask as it lands (#188) — then what the composer's own ask
+    /// was told this run, then Mastodon's 500.
+    ///
+    /// **The profile before the composer's answer**, because the profile is the later word: the
+    /// composer asks once a run and remembers, while the profile is written again by every ask
+    /// that reads the instance, so a ceiling the server changed reaches the composer through it.
     func postLimit(of host: String) -> Int {
-        if let held = postLimits[host] { return held }
         if case .stated(let profile) = profiles[host] {
             return MastodonWrite.limit(advertised: profile.statusLimit)
         }
+        if let held = postLimits[host] { return held }
         return MastodonWrite.defaultLimit
     }
 
     /// Asks the instance where this run has not already been told, and remembers the answer.
     /// The composer's chosen source where no host is named; an answer names its own (#108).
+    ///
+    /// **Nothing is asked where the source's own word is held** (#188): a kept ceiling is the
+    /// composer knowing before anything is asked, which is the acceptance, and the reload's ask
+    /// is what refreshes it.
     func refreshPostLimit(of named: String? = nil) async {
         guard let host = named ?? composeHost else { return }
         if postLimits[host] != nil { return }
-        if case .stated(let profile) = profiles[host] {
-            postLimits[host] = MastodonWrite.limit(advertised: profile.statusLimit)
-            return
-        }
+        if case .stated = profiles[host] { return }
         do {
-            postLimits[host] = try await MastodonClient(
+            // The same document the reload reads, and what it says goes to the store too (#188):
+            // a source this device kept no word of yet has one from here on.
+            let (_, profile) = try await MastodonClient(
                 http: WatchedHTTP(http, for: .serverCheck, in: work), host: host
-            ).statusLimit()
+            ).introduction()
+            postLimits[host] = MastodonWrite.limit(advertised: profile?.statusLimit)
+            if let profile { await store.said(profile) }
         } catch where DarkNetwork.caused(error) {
             // Not remembered: the next open asks again once the network is back (#222), and
             // `postLimit(of:)` says Mastodon's own 500 meanwhile.
@@ -2176,11 +2188,20 @@ final class ShellSession {
     @ObservationIgnored private var adopted: (store: Int, notes: Int)?
 
     private func adoptSources() async {
+        // **What each source last said about itself, as this device kept it** (#188): drawn by
+        // the rows and read by the composer before anything asks, and replaced whole when an
+        // ask lands — the store is the one writer, and this is the one reader. A host with no
+        // kept word keeps whatever this run's look put in `profiles`, which is the answer for a
+        // host not yet joined.
+        let said = await store.saidAll()
+        for (host, profile) in said where profiles[host] != .stated(profile) {
+            profiles[host] = .stated(profile)
+        }
         // **Projected through what each server says it is** — #86. One place, so the row, the
         // tabs, a rule and a read all speak to a host under the name its own server gave rather
-        // than the one written down when it was joined. Identity where nothing has been said,
-        // which is every host until a read asks one.
-        let spoken = await store.sources().map(flavours.spoken)
+        // than the one written down when it was joined. What it last said, where this device
+        // kept that, until this run asks; identity behind both.
+        let spoken = await store.sources().map { flavours.spoken($0, keptAs: said[$0.host]?.kind) }
         if spoken != sources { sources = spoken }
         // A source the store holds again, and not one on its way out, is asked as before (#221).
         reload.readmit(spoken.map(\.host).filter { !removals.contains($0) })
@@ -2342,8 +2363,11 @@ final class ShellSession {
         // copy of that server's words too.
         conversations.forget(host: host)
         // And nine: what the server last said it was is that server's word, not this device's
-        // note. Dropped with the rest, so the next read asks it again.
+        // note. Dropped with the rest, so the next read asks it again — and what it said about
+        // itself with it (#188), from this run and from the store, for the same reason.
         flavours.forget(host: host)
+        profiles[host] = nil
+        await store.forgetSaid(host: host)
         // Eleven: what this run read about the forum's sub-boards is its word too (#161).
         subBoards[host] = nil
         lookedUnder[host] = nil

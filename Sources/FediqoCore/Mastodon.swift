@@ -157,6 +157,20 @@ public struct MastodonClient: Sendable {
         Probe.kind(from: try await instanceDocument())
     }
 
+    /// `flavour()`, and what the same document says the server is like (#188) — one request,
+    /// two readings. The profile is nothing where the document named a kind and nothing more
+    /// this app could decode, so a read that could say what the server is still says it.
+    ///
+    /// The profile carries the kind the probe read rather than `.mastodon` flat, so what is
+    /// written down about a Pleroma is written down as a Pleroma's word.
+    public func introduction() async throws -> (kind: ProtocolKind, profile: SourceProfile?) {
+        let data = try await instanceDocument()
+        let kind = Probe.kind(from: data)
+        let profile = (try? MastodonJSON.decoder.decode(InstanceDTO.self, from: data))?
+            .asProfile(host: host, kind: kind)
+        return (kind, profile)
+    }
+
     /// How many characters a status on this server may be, or Mastodon's 500 where it answered
     /// without saying. Unauthenticated, the same document a preview already fetches.
     ///
@@ -292,10 +306,10 @@ struct InstanceDTO: Decodable, Sendable {
         let text: String?
     }
 
-    func asProfile(host: String) -> SourceProfile {
+    func asProfile(host: String, kind: ProtocolKind = .mastodon) -> SourceProfile {
         SourceProfile(
             host: host,
-            kind: .mastodon,
+            kind: kind,
             title: title,
             summary: description,
             // A stranger's address, admitted under the rule every other address in this package
