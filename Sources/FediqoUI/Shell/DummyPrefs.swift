@@ -98,6 +98,12 @@ final class DummyPrefs {
         didSet { write("keepMonths", keepMonths.map(String.init) ?? "") }
     }
 
+    /// How much room this device gives the store and the picture copies together (#249), in
+    /// bytes; nil, the default, sets no limit. Past it the copies go first, then the oldest posts.
+    var roomBytes: Int? {
+        didSet { write("roomBytes", roomBytes.map(String.init) ?? "") }
+    }
+
     /// How many days a post its source deleted stays, marked, before it is let go (#179); nil, the
     /// default, keeps it until the reader says. The keep-for window above still wins where it is
     /// the shorter (`GoneWait`).
@@ -126,6 +132,7 @@ final class DummyPrefs {
         func read(_ name: String) -> String? { defaults.string(forKey: Self.prefix + name) }
         keepMonths = Int(read("keepMonths") ?? "").flatMap { $0 > 0 ? $0 : nil }
         goneDays = Int(read("goneDays") ?? "").flatMap { $0 > 0 ? $0 : nil }
+        roomBytes = Int(read("roomBytes") ?? "").flatMap { $0 > 0 ? $0 : nil }
         latestDate = LatestDate(read("latestDate") ?? "")
         askMinutes = Int(read("askMinutes") ?? "").flatMap { Self.waits.contains($0) ? $0 : nil } ?? 1
         language = DummyLanguage(rawValue: read("language") ?? "") ?? .system

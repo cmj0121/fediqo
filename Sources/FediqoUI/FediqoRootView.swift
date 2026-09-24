@@ -93,6 +93,8 @@ public struct FediqoRootView: View {
         mastodon: MastodonSessions = MastodonSessions(),
         persist: (@MainActor () async -> Void)? = nil,
         measureStore: (@Sendable () async -> Int)? = nil,
+        compactStore: (@Sendable () async -> Void)? = nil,
+        limits: (any LimitAccountStore)? = nil,
         storeIsNewer: Bool = false,
         storeNoticeSeen: (@MainActor () -> Void)? = nil
     ) {
@@ -102,6 +104,8 @@ public struct FediqoRootView: View {
         )
         session.persist = persist
         session.measureStore = measureStore
+        session.compactStore = compactStore
+        session.limitStore = limits
         _session = State(initialValue: session)
         _storeIsNewer = State(initialValue: storeIsNewer)
         self.storeNoticeSeen = storeNoticeSeen
@@ -201,6 +205,7 @@ public struct FediqoRootView: View {
                 placeLinksInPage()
                 tags.placing = { tag, row in openTag(tag, from: row) }
                 placeQuotes()
+                await session.loadLimitAccount()
                 await session.keep(months: prefs.keepMonths)
                 await session.reloadFromStore()
                 // The store has now said what is held, which is the first moment this launch can
@@ -218,6 +223,8 @@ public struct FediqoRootView: View {
             }
             // Posts their source deleted go on this device's wait (#179).
             .modifier(LettingGoneGo(session: session))
+            // And the store is held within the room the person gave it (#249).
+            .modifier(KeepingWithinRoom(session: session))
             .modifier(AsksOnAWait(session: session, minutes: prefs.askMinutes))
             .onChange(of: place) { old, new in
                 let accepted = availability.placing(old, as: new)

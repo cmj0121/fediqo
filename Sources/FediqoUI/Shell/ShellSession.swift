@@ -449,7 +449,7 @@ final class ShellSession {
     /// of the store's size** (#194): read through `measureStore`, which the app sets to the
     /// index file's own measure, so what Usage shows is what a limit on the store will be held
     /// to. Measured after a drop by time lands, and whenever Usage asks.
-    private(set) var storeBytes: Int?
+    var storeBytes: Int?
 
     /// Measures the index on disk. Set by the app beside `persist`; nil where this run has no
     /// index, and then nothing is shown for it.
@@ -462,6 +462,35 @@ final class ShellSession {
         guard let measureStore else { return }
         storeBytes = await measureStore()
     }
+
+    /// Gives the index back the room that rows let go of left in it, so `measureStore` sees them
+    /// go (#249). Set by the app beside `measureStore`; nil where this run has no index.
+    @ObservationIgnored var compactStore: (@Sendable () async -> Void)?
+
+    /// The room this device gives the store and the picture copies together (#249), in bytes,
+    /// or nil for no limit — the default. `KeepingWithinRoom` hands it in from the preferences;
+    /// the store is judged by it at launch, when it changes, and after each landing.
+    var roomBytes: Int?
+
+    /// Set while an export or a move of the store runs: the room limit does nothing meanwhile,
+    /// so nothing goes out from under a copy being taken. Cleared, the check runs again.
+    var holdsStill = false {
+        didSet { if !holdsStill, oldValue { roomMayBeReached() } }
+    }
+
+    /// The check the last landing asked for, waiting out `roomDebounce`; nil where none waits.
+    @ObservationIgnored var roomCheck: Task<Void, Never>?
+
+    /// The room check is on its way: a landing meanwhile asks for the next, never a second.
+    @ObservationIgnored var roomChecking = false
+
+    /// The limits' account (#251), newest first: each time a limit acted, which, when, how many
+    /// posts and picture copies went, and from which sources. Read from `limitStore` at launch.
+    var limitAccount: [LimitAct] = []
+
+    /// Where the account outlives a relaunch. Set by the app beside `persist`; nil in a run with
+    /// no index, and then the lines live for the run.
+    @ObservationIgnored var limitStore: (any LimitAccountStore)?
 
     /// Which purpose Usage is showing. Tab rotates it the way it rotates timeline queries.
     var usagePurpose: UsagePane.Purpose = .source
@@ -2156,6 +2185,8 @@ final class ShellSession {
         await adopt()
         for await _ in changes {
             await adopt()
+            // A landing may have taken the store past its room (#249): asked, not measured, here.
+            roomMayBeReached()
         }
     }
 
@@ -2431,18 +2462,23 @@ final class ShellSession {
     /// something, the rows are read again and the store is written, so the drop holds after a
     /// relaunch; where it dropped nothing — forever, a wider window, a launch with nothing old —
     /// neither happens. Returns how many notes went.
+    ///
+    /// **What went is written into the limits' account** (#251): the months limit acted, when,
+    /// how many posts and from which sources — the one thing that can still be said of them.
     @discardableResult
     func keep(months: Int?, from now: Date = Date()) async -> Int {
-        let dropped = await store.setRetention(months: months, from: now)
-        guard dropped > 0 else { return 0 }
+        let went = await store.letGoBeyond(months: months, from: now)
+        guard went.posts > 0 else { return 0 }
         // The window cuts what is held aside too, and the count says so at once (#194).
         let all = await store.all()
         let held = await store.aside()
         adoptHeld(notes: all, aside: held)
         adoptedAside = await store.asideRevision
         await persist?()
+        await compactStore?()
         await readStoreBytes()
-        return dropped
+        await record(LimitAct(limit: .months, at: now, posts: went.posts, sources: went.sources))
+        return went.posts
     }
 
     /// An opening post just read, kept with its row in the store and saved (#154).

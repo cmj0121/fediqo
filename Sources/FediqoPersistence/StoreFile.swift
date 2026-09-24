@@ -96,10 +96,24 @@ public struct StoreFile: Sendable {
         }
     }
 
+    /// Where this app keeps its index, and what sits beside it (the limits' account, #251).
+    public static var applicationSupport: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Fediqo", isDirectory: true)
+    }
+
     /// `open(at:now:)` on the index this app keeps in Application Support.
     public static func openApplicationSupport() -> Opened {
-        let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return open(at: root.appendingPathComponent("Fediqo", isDirectory: true))
+        open(at: applicationSupport)
+    }
+
+    /// Gives back the room that rows let go of left in the file (#249). SQLite keeps a deleted
+    /// row's pages for the next insert, so a save with fewer rows weighs what the last one did
+    /// until the file is rebuilt — and a limit judged by `bytesOnDisk()` would never see the
+    /// posts it let go of. Asked only after a limit acted, never on the ordinary save: it
+    /// rewrites the whole index.
+    public func compact() async throws {
+        try await db.writeWithoutTransaction { db in try db.execute(sql: "VACUUM") }
     }
 
     /// Moves `index.sqlite` and any journal SQLite left beside it to

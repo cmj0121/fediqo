@@ -845,6 +845,13 @@ final class ShellPictures {
         await disk?.bytes(hosts: hosts.map(Self.tag)) ?? [:]
     }
 
+    /// Drops the copies on disk, oldest written first, until they weigh no more than `cap`: the
+    /// room limit's first step (#249). What is held in memory stays and still draws; a copy
+    /// dropped comes back when its picture is read again. Nothing where no copies are kept.
+    func trimDisk(toBytes cap: Int, hosts: [String]) async -> DiskCopies.Trimmed? {
+        await disk?.trim(toBytes: cap, among: hosts.map(Self.tag))
+    }
+
     /// Lets go of everything held at viewer tier, when the viewer stops drawing it.
     ///
     /// **This is what makes the unit 7 contract hold by construction rather than by discipline.**

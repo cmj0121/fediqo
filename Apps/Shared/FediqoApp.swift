@@ -23,6 +23,8 @@ final class Launch {
     let saver: StoreSaver
     /// The index on disk, measured for Usage (#194); nil where this run has none.
     let file: StoreFile?
+    /// The limits' account beside the index (#251); nil where the folder could not be made.
+    let limits: LimitAccountFile?
     /// The index was written by a newer build and left alone; the root view says so. Cleared when
     /// the reader dismisses that, so it is said once a launch rather than once a window.
     var storeIsNewer: Bool
@@ -38,6 +40,7 @@ final class Launch {
         // It is also `nil` when the index was written by a newer build, which is left as found.
         saver = StoreSaver(store: store, file: opened.file)
         file = opened.file
+        limits = try? LimitAccountFile(directory: StoreFile.applicationSupport)
         storeIsNewer = opened.storeIsNewer
         // Before anything is asked: every act from here on belongs to one of these, or to a host
         // the person names to add (#220).
@@ -164,12 +167,20 @@ struct FediqoApp: App {
         return { file.bytesOnDisk() }
     }
 
+    /// Gives the index back what rows let go of left in it (#249), or nothing where this run
+    /// has no index.
+    private var compactStore: (@Sendable () async -> Void)? {
+        guard let file = Launch.shared.file else { return nil }
+        return { try? await file.compact() }
+    }
+
     var body: some Scene {
         WindowGroup {
             FediqoRootView(
                 store: Launch.shared.store, forums: Launch.shared.forums,
                 mastodon: Launch.shared.mastodon, persist: save,
-                measureStore: measureStore,
+                measureStore: measureStore, compactStore: compactStore,
+                limits: Launch.shared.limits,
                 storeIsNewer: Launch.shared.storeIsNewer,
                 storeNoticeSeen: { Launch.shared.storeIsNewer = false }
             )

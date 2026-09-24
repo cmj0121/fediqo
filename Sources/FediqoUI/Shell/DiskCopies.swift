@@ -94,6 +94,33 @@ final class DiskCopies: Sendable {
         }
     }
 
+    /// What a trim by the room limit let go and left (#249).
+    struct Trimmed: Equatable, Sendable {
+        /// How many copies went.
+        let dropped: Int
+        /// What is kept, in bytes, measured.
+        let kept: Int
+        /// The hosts whose copies went, folded and sorted.
+        let sources: [String]
+    }
+
+    /// Drops copies, oldest written first, until what is kept weighs no more than `cap` — the
+    /// room limit's first step (#249), which comes before any post goes. Measured before and
+    /// after, so the answer says how many went and from which of `hosts`; the running total is
+    /// what was measured.
+    func trim(toBytes cap: Int, among hosts: [String]) async -> Trimmed {
+        await withCheckedContinuation { done in
+            queue.async { [copies, tally] in
+                let before = copies.count()
+                let held = hosts.map { ($0, copies.bytes(host: $0)) }
+                let kept = copies.trim(toBytes: cap)
+                tally.total = kept
+                let sources = held.filter { copies.bytes(host: $0.0) < $0.1 }.map(\.0).sorted()
+                done.resume(returning: Trimmed(dropped: before - copies.count(), kept: kept, sources: sources))
+            }
+        }
+    }
+
     /// The running total, as the queue has it once everything asked before has run.
     func total() async -> Int? {
         await withCheckedContinuation { done in

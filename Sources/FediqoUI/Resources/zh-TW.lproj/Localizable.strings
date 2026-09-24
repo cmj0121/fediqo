@@ -881,3 +881,14 @@
 "board.choose.boards" = "版塊";
 "list.choose.lists" = "列表";
 "forum.signin.page" = "論壇自己的頁面";
+
+/* Two limits on the store, and the account of what they let go (#249, #251) */
+"prefs.keep.line" = "兩個上限並列；先到的那個生效。";
+"prefs.keep.help" = "「保留貼文」只留下最近幾個月：更舊的貼文現在就移除，之後讀到的也不存下。「空間」是這台裝置給索引與圖片副本合計的大小，量法與「時間」和「副本」相同。超過空間時，先放下圖片副本，最舊的先走（再次讀取時會回來），之後才放下最舊的貼文，不分來源。沒有設定的上限不會放下任何內容，每個來源仍保持加入。";
+"prefs.room" = "空間";
+"prefs.room.none" = "不限";
+"prefs.room.figure" = "索引 %1$@ · 圖片副本 %2$@";
+"prefs.room.within" = "已用 %1$@，共 %2$@";
+"prefs.room.tighten.title" = "只給索引 %@ 的空間？";
+"prefs.room.tighten.line" = "超過時先放下圖片副本，再放下最舊的貼文。";
+"prefs.room.tighten.detail" = "這台裝置所持有的內容會立即量測，並從此以這個空間為限。磁碟上的圖片副本先走，最舊的先，再次讀取時會回來；只有在這樣仍不夠時，才放下最舊的貼文，不分來源。每個來源仍保持加入。改成更大的空間或「不限」則不會放下任何內容。";

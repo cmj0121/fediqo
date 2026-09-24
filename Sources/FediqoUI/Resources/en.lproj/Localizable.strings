@@ -903,3 +903,14 @@
 "board.choose.boards" = "Boards";
 "list.choose.lists" = "Lists";
 "forum.signin.page" = "The forum's own page";
+
+/* Two limits on the store, and the account of what they let go (#249, #251) */
+"prefs.keep.line" = "Two limits, side by side; whichever is reached first acts.";
+"prefs.keep.help" = "Keep posts holds only the latest months: older posts go now, and any read later are not kept. Room is what this device gives the index and its picture copies together, measured as Time and Copies measure them. Past the room, picture copies go first, oldest first — they come back when read again — and only then the oldest posts, from every source. A limit never set lets nothing go, and every source stays joined.";
+"prefs.room" = "Room";
+"prefs.room.none" = "No limit";
+"prefs.room.figure" = "%1$@ index · %2$@ picture copies";
+"prefs.room.within" = "%1$@ of %2$@ used";
+"prefs.room.tighten.title" = "Give the store %@ of room?";
+"prefs.room.tighten.line" = "Past it, picture copies go first, then the oldest posts.";
+"prefs.room.tighten.detail" = "What this device holds is measured now and held to that room from here on. Picture copies on disk go first, oldest first, and come back when read again; only if that is not enough do the oldest posts go, from every source. Every source stays joined. A larger room, or no limit, lets nothing go.";

@@ -109,6 +109,19 @@ enum ShellQuestion {
         )
     }
 
+    /// Giving the store less room than now (#249): the copies, and then the oldest posts, may go
+    /// at once.
+    static func tighten(room: Int, language: DummyLanguage? = nil) -> ShellConfirmation {
+        ShellConfirmation(
+            symbol: "internaldrive",
+            title: String(format: L10n.t("prefs.room.tighten.title", language: language), UsagePane.size(room, language: language)),
+            line: L10n.t("prefs.room.tighten.line", language: language),
+            help: L10n.t("prefs.room.tighten.detail", language: language),
+            choices: [.init(yes, L10n.t("prefs.drop.confirm", language: language), role: .destructive)],
+            cancel: L10n.t("board.choose.cancel", language: language)
+        )
+    }
+
     /// Letting go now of `posts` posts deleted at their source and `places` settled places (#179,
     /// #204): each counted apart in the title, and the line saying only what goes of each.
     static func letGo(posts: Int, places: Int, language: DummyLanguage? = nil) -> ShellConfirmation {

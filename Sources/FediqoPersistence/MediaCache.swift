@@ -69,6 +69,10 @@ public struct MediaCache: MediaCopies {
         Self.files(in: folder(for: host)).reduce(0) { $0 + $1.size }
     }
 
+    public func count() -> Int {
+        hostFolders().reduce(0) { $0 + Self.files(in: $1).count }
+    }
+
     /// Oldest written first, by modification date, so what goes is what has been kept longest.
     /// A folder the trim emptied goes too, so `keepOnly` and `bytes` see no husk of a host.
     @discardableResult
