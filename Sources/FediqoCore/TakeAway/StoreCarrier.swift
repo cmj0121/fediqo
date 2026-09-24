@@ -10,11 +10,17 @@ public protocol StoreCarrier: Sendable {
     /// What a package would weigh, with and without the picture copies, and what this device
     /// has room for — asked before the person chooses.
     func weigh() async throws -> PackageWeight
-    /// Writes the whole of what this device holds to `url`, locked by `key`, with the picture
-    /// copies where `pictures` says so. `progress` is told as it goes.
+    /// Writes what this device holds to `url`, locked by `key`: the whole of it, with the picture
+    /// copies where `pictures` says so, or only what signs in (#6, `contents`). `progress` is
+    /// told as it goes.
     func takeAway(
-        to url: URL, key: PackageKey, pictures: Bool, progress: @escaping @Sendable (PackageProgress) -> Void
+        to url: URL, key: PackageKey, pictures: Bool, contents: PackageSummary.Contents,
+        progress: @escaping @Sendable (PackageProgress) -> Void
     ) async throws
+    /// Where a package arriving from nearby is staged before it is read back (#253): a folder
+    /// this carrier sweeps at launch, so nothing of a move killed midway stays. The system's
+    /// scratch space where a carrier says nothing.
+    func stagingFolder() -> URL
     /// What the package at `url` says it holds, once `key` opens it: #252's question, and nothing
     /// on this device changes.
     func preview(_ url: URL, key: PackageKey) async throws -> PackageSummary
@@ -24,6 +30,17 @@ public protocol StoreCarrier: Sendable {
     func readBack(
         _ url: URL, key: PackageKey, replacing: Bool, progress: @escaping @Sendable (PackageProgress) -> Void
     ) async throws
+}
+
+extension StoreCarrier {
+    /// The whole of what this device holds (#247): `contents` is `.whole`.
+    public func takeAway(
+        to url: URL, key: PackageKey, pictures: Bool, progress: @escaping @Sendable (PackageProgress) -> Void
+    ) async throws {
+        try await takeAway(to: url, key: key, pictures: pictures, contents: .whole, progress: progress)
+    }
+
+    public func stagingFolder() -> URL { FileManager.default.temporaryDirectory }
 }
 
 /// What taking away would come to.

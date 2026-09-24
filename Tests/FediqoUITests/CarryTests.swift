@@ -26,7 +26,10 @@ struct CarryTests {
 
         func weigh() async throws -> PackageWeight { weight }
 
-        func takeAway(to url: URL, key: PackageKey, pictures: Bool, progress: @escaping @Sendable (PackageProgress) -> Void) async throws {
+        func takeAway(
+            to url: URL, key: PackageKey, pictures: Bool, contents: PackageSummary.Contents,
+            progress: @escaping @Sendable (PackageProgress) -> Void
+        ) async throws {
             if let refuse { throw refuse }
             progress(PackageProgress(done: 1, total: 2))
             progress(PackageProgress(done: 2, total: 2))
