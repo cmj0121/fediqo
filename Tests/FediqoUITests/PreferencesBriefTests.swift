@@ -148,7 +148,7 @@ struct PreferencesBriefTests {
                 "before a timeline selection nobody can see is cleared")
     }
 
-    @Test("The host field tells the shell it holds the keyboard, and Return flips only the focused switch once")
+    @Test("The host field tells the shell it holds the keyboard, and Return or Space flips only the focused switch once")
     func keysAreWired() throws {
         let pane = try String(contentsOf: Self.shell.appendingPathComponent("Shell/PreferencesPane.swift"), encoding: .utf8)
         let hosts = try String(contentsOf: Self.shell.appendingPathComponent("Shell/OwnHostsSection.swift"), encoding: .utf8)
@@ -159,7 +159,8 @@ struct PreferencesBriefTests {
         #expect(hosts.contains(".modifier(TypingTold(typing: typing, onTyping: onTyping))"))
         #expect(hosts.contains(".onChange(of: typing) { _, now in onTyping(now) }"))
         #expect(hosts.contains(".onDisappear { onTyping(false) }"))
-        #expect(allowed.contains(".onKeyPress(.return, phases: .down)"))
+        #expect(allowed.contains(".onKeyPress(keys: Self.keys, phases: .down)"))
+        #expect(ReturnSwitches.keys.contains(.return))
         #expect(!allowed.contains(".keyboardShortcut(.return"), "no window-wide Return")
     }
 

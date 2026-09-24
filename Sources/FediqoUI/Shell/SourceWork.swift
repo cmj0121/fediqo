@@ -444,7 +444,7 @@ struct SourceWorkRow: Identifiable, Equatable {
     func brief(language: DummyLanguage? = nil) -> String {
         let what = purposeText(language: language)
         guard listedUnder != host.lowercased() else { return what }
-        return what + " · " + String(format: L10n.t("work.for", language: language), listedUnder)
+        return String(format: L10n.t("work.for", language: language), what, listedUnder)
     }
 
     /// How long it has been running, in whole seconds, in the shell's language.

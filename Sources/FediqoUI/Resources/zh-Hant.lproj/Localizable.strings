@@ -383,7 +383,7 @@
 "work.elapsed.seconds" = "%d 秒";
 "work.elapsed.minutes" = "%1$d 分 %2$d 秒";
 "work.count" = "同時 %d 個";
-"work.for" = "為 %@";
+"work.for" = "%1$@ · 替 %2$@";
 "work.purpose.timeline" = "讀取時間軸";
 "work.purpose.conversation" = "讀取對話串";
 "work.purpose.forumPost" = "讀取論壇文章";

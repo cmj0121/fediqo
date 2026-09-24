@@ -111,13 +111,27 @@ struct NamesItselfTests {
         #expect(one.brief(language: .english) != two.brief(language: .english))
     }
 
-    @Test("The switch's focus is bound to the switch itself, so Space still flips it")
+    @Test("The switch is one focus stop, and Return and Space both flip it from there")
     func theSwitchKeepsSpace() throws {
+        #expect(ReturnSwitches.keys == [.return, .space])
         let text = try source("Shell/AllowanceSection.swift")
         let body = try #require(text.range(of: "struct ReturnSwitches"))
         let rest = String(text[body.lowerBound...].prefix(900))
-        #expect(!rest.contains(".focusable()"))
+        #expect(rest.contains(".focusable()"))
         #expect(rest.contains(".focused($focused)"))
+        #expect(rest.contains(".onKeyPress(keys: Self.keys, phases: .down)"))
+        let detail = try #require(text.range(of: "struct AllowanceDetail"))
+        #expect(String(text[detail.lowerBound...]).components(separatedBy: ".focusable(").count == 2,
+                "one focus stop, and only in ReturnSwitches")
+    }
+
+    @Test("q, like Escape, leaves only what is on screen")
+    func qSeesOnlyWhatIsOnScreen() throws {
+        let root = try source("FediqoRootView.swift")
+        let back = try #require(root.range(of: "case .back:"))
+        let reload = try #require(root.range(of: "case .reload:", range: back.upperBound..<root.endIndex))
+        #expect(root[back.upperBound..<reload.lowerBound]
+            .contains("DummyCommand.outermost(of: Self.escapeSees(openLayers, place: place))"))
     }
 
     @Test("Every new line is in all three languages")

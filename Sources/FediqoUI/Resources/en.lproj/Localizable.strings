@@ -385,7 +385,7 @@
 "work.elapsed.minutes" = "%1$d min %2$d s";
 "work.count" = "%d at once";
 "work.count.one" = "1 at once";
-"work.for" = "for %@";
+"work.for" = "%1$@ · for %2$@";
 "work.purpose.timeline" = "Reading a timeline";
 "work.purpose.conversation" = "Reading a conversation";
 "work.purpose.forumPost" = "Reading a forum post";

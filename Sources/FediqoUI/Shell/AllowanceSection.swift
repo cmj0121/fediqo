@@ -85,22 +85,28 @@ struct AllowanceDetail: View {
     }
 }
 
-/// Return on the switch that holds the keyboard flips it. **Only the key going down**, so a
-/// held Return is one flip and not a flicker; and only while this switch is focused, so a
-/// Return anywhere else on the window is not heard here.
+/// Return or Space on the switch that holds the keyboard flips it. **Only the key going down**, so
+/// a held key is one flip and not a flicker; and only while this switch is focused, so a key
+/// anywhere else on the window is not heard here.
 ///
-/// **Focus bound to the switch itself, never a focus stop wrapped round it.** A `.focusable()`
-/// here made a second stop around the toggle, and Space, the switch's own key, went to the
-/// wrapper and flipped nothing.
+/// **One focus stop, reached with the keyboard's default settings.** A Mac's switch takes the
+/// keyboard only with Full Keyboard Access on, so the stop is made here, round it, and it hears
+/// both keys itself — Space as well as Return, since a stop that took Space and flipped nothing
+/// was the fault. Where the switch itself does take the keyboard, it answers its own Space, the
+/// key is handled there and never reaches this, so nothing flips twice.
 struct ReturnSwitches: ViewModifier {
     @Binding var on: Bool
     @FocusState private var focused: Bool
 
+    /// The keys that flip the switch.
+    static let keys: Set<KeyEquivalent> = [.return, .space]
+
     func body(content: Content) -> some View {
         content
+            .focusable()
             .focused($focused)
             .onAppear { focused = true }
-            .onKeyPress(.return, phases: .down) { _ in
+            .onKeyPress(keys: Self.keys, phases: .down) { _ in
                 on.toggle()
                 return .handled
             }

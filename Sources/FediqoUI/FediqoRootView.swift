@@ -527,7 +527,8 @@ public struct FediqoRootView: View {
             // made the difference invisible: the two halves of one rule, written two ways, one of
             // them free to fall through. A fifth layer added to `DummyLayer` now has to say what
             // `q` does about it.
-            switch DummyCommand.outermost(of: openLayers) {
+            // Only what is on screen, as Escape reads it.
+            switch DummyCommand.outermost(of: Self.escapeSees(openLayers, place: place)) {
             case .viewer: return closeViewer()
             // One step back, whichever kind of step it was. The two lines used to be two
             // methods over two pieces of state; they are one walk now, and unwinding it in the

@@ -1,5 +1,6 @@
 import SwiftUI
 #if os(iOS)
+import Combine
 import GameController
 #endif
 
@@ -18,10 +19,12 @@ struct ShellWithKeyboard<Content: View>: View {
             if keyboard { content() }
         }
         #if os(iOS)
-        .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidConnect)) { _ in keyboard = true }
-        .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidDisconnect)) { _ in
-            keyboard = ShellKeyboard.present
-        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: .GCKeyboardDidConnect).receive(on: DispatchQueue.main)
+        ) { _ in keyboard = true }
+        .onReceive(
+            NotificationCenter.default.publisher(for: .GCKeyboardDidDisconnect).receive(on: DispatchQueue.main)
+        ) { _ in keyboard = ShellKeyboard.present }
         #endif
     }
 }
