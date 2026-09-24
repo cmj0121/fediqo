@@ -288,7 +288,6 @@ final class ShellSession {
     /// are forums a sign-in can be held for.
     var sources: [Source] = [] {
         didSet {
-            work.sourcesChanged(sources.map(\.host))
             let discuz = sources.filter { $0.kind == .discuz }
             forums.watch(forums: discuz.map(\.host))
             // The boards each forum is read for, which is what decides whether reaching a ranked

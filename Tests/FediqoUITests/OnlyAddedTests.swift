@@ -58,6 +58,37 @@ struct OnlyAddedTests {
         #expect(!work.admits(reached: Self.source, source: nil))
     }
 
+    @Test("A source named in Unicode owns what is asked of its punycode, and the other way round")
+    func internationalNames() {
+        let work = Self.governed(["Bücher.Example"])
+        #expect(work.admits(reached: "xn--bcher-kva.example", source: nil))
+        #expect(work.admits(reached: "b%C3%BCcher.example", source: nil), "as URL.host() hands it back")
+        #expect(work.admits(reached: "cdn.example", source: "BÜCHER.example"))
+        let ascii = Self.governed(["xn--fsqu00a.xn--g6w251d"])
+        #expect(ascii.admits(reached: "例子.測試", source: nil))
+        #expect(!ascii.admits(reached: "例子.example", source: nil))
+    }
+
+    /// Two windows each adopt the store's sources in their own time; a window adopting late must
+    /// not take back a source another has already seen added. So the gate hears from the store
+    /// alone, in the order its sources change.
+    @Test("The gate hears which sources there are from the store, in the order they change", .timeLimit(.minutes(1)))
+    func oneWriter() async {
+        let work = Self.governed([])
+        let store = ItemStore()
+        await store.watchSources { work.sourcesChanged($0) }
+        await store.add(Source(host: "new.example", kind: .mastodon))
+        #expect(work.admits(reached: "new.example", source: nil))
+        await store.remove(host: "new.example")
+        #expect(!work.admits(reached: "new.example", source: nil))
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let session = try? String(
+            contentsOf: root.appendingPathComponent("Sources/FediqoUI/Shell/ShellSession.swift"), encoding: .utf8
+        )
+        #expect(session?.contains("sourcesChanged") == false, "a window's own copy feeds the gate")
+    }
+
     @Test("A record nobody said anything to governs nothing, and a change of sources does not start it")
     func ungoverned() {
         let work = SourceWork()
@@ -124,6 +155,7 @@ struct OnlyAddedTests {
             MastodonInstance.address(Self.source): MastodonInstance.mastodon(Self.source),
         ])
         let store = ItemStore()
+        await store.watchSources { work.sourcesChanged($0) }
         await store.add(Source(host: Self.source, kind: .mastodon))
         let session = ShellSession(
             http: http, store: store,
@@ -145,13 +177,12 @@ struct OnlyAddedTests {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let app = try String(contentsOf: root.appendingPathComponent("Apps/Shared/FediqoApp.swift"), encoding: .utf8)
-        let governs = try #require(app.range(of: "FediqoRootView.onlyToSources(opened.sources.map(\\.host))"))
+        let governs = try #require(app.range(of: "FediqoRootView.onlyToSources(opened.sources.map(\\.host), kept: store)"))
         let asks = try #require(app.range(of: "mastodon.verifyAll()"))
         #expect(governs.lowerBound < asks.lowerBound, "governed before the first ask")
         let session = try String(
             contentsOf: root.appendingPathComponent("Sources/FediqoUI/Shell/ShellSession.swift"), encoding: .utf8
         )
-        #expect(session.contains("work.sourcesChanged(sources.map(\\.host))"))
         #expect(session.contains("work.named(parsed)"))
     }
 
@@ -229,6 +260,21 @@ struct PageRulesTests {
     func compiles() async {
         #expect(await PageRules.list(forum: false) != nil)
         #expect(await PageRules.list(forum: true) != nil)
+    }
+
+    @Test("A compile that failed is asked again, not remembered for the run")
+    func aFailureIsNotKept() async {
+        let real = PageRules.compile
+        let held = PageRules.compiled
+        defer {
+            PageRules.compile = real
+            PageRules.compiled = held
+        }
+        PageRules.compiled = [:]
+        PageRules.compile = { _ in nil }
+        #expect(await PageRules.list(forum: false) == nil)
+        PageRules.compile = real
+        #expect(await PageRules.list(forum: false) != nil, "the next page is not refused for the run")
     }
 
     @Test(

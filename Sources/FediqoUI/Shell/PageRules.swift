@@ -43,25 +43,33 @@ enum PageRules {
         return "[" + rules.joined(separator: ",") + "]"
     }
 
-    private static var compiled: [Bool: Task<WKContentRuleList?, Never>] = [:]
+    static var compiled: [Bool: Task<WKContentRuleList?, Never>] = [:]
+
+    /// How a list is compiled. WebKit's own; a test hands in one that fails.
+    static var compile: @MainActor (Bool) async -> WKContentRuleList? = { forum in
+        // A store of its own in the temporary directory: what it keeps is these fixed rules and
+        // nothing that names a page, and it is rebuilt in a moment where it is gone.
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FediqoPageRules", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        guard let store = WKContentRuleListStore(url: folder) else { return nil }
+        return try? await store.compileContentRuleList(
+            forIdentifier: forum ? "forum" : "page", encodedContentRuleList: rules(forum: forum)
+        )
+    }
 
     /// The compiled list, compiled once a run. Nil only where WebKit would not compile it, and a
     /// page is then not loaded at all: a page that would reach anybody it liked is not shown.
+    /// **A failure is not kept**: the next page asks WebKit again, so one bad moment — a full
+    /// disk, a temporary directory swept from under it — does not stop every page for the run.
     static func list(forum: Bool) async -> WKContentRuleList? {
         if let held = compiled[forum] { return await held.value }
-        let task = Task { @MainActor () -> WKContentRuleList? in
-            // A store of its own in the temporary directory: what it keeps is these fixed rules
-            // and nothing that names a page, and it is rebuilt in a moment where it is gone.
-            let folder = FileManager.default.temporaryDirectory
-                .appendingPathComponent("FediqoPageRules", isDirectory: true)
-            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            guard let store = WKContentRuleListStore(url: folder) else { return nil }
-            return try? await store.compileContentRuleList(
-                forIdentifier: forum ? "forum" : "page", encodedContentRuleList: rules(forum: forum)
-            )
-        }
+        let compile = compile
+        let task = Task { @MainActor () -> WKContentRuleList? in await compile(forum) }
         compiled[forum] = task
-        return await task.value
+        let list = await task.value
+        if list == nil, compiled[forum] == task { compiled[forum] = nil }
+        return list
     }
 
     /// Puts the list on `controller` once, and answers whether it is on.

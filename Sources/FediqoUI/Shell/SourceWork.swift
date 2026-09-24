@@ -212,10 +212,15 @@ final class SourceWork {
     }
 
     /// A host as the gate compares it: lower case, no port, and `www.` the same site as without.
+    ///
+    /// **One spelling of a name that is not ASCII**: its punycode, `xn--…`, whichever way it came
+    /// — typed in Unicode, written so by a server, or percent-encoded as `URL.host()` hands it
+    /// back — so a source added as `bücher.example` owns what is asked of `xn--bcher-kva.example`.
     nonisolated static func fold(_ host: String) -> String {
         let trimmed = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let bare = URLComponents(string: "https://" + trimmed)?.host ?? trimmed
-        return ForumWebEngine.bare(bare)
+        let decoded = trimmed.removingPercentEncoding ?? trimmed
+        let ascii = URL(string: "https://" + decoded)?.host(percentEncoded: false) ?? decoded
+        return ForumWebEngine.bare(ascii.lowercased())
     }
 
     /// This run's record this instant, oldest first: whatever is still on its way is copied over

@@ -38,7 +38,7 @@ final class Launch {
         storeIsNewer = opened.storeIsNewer
         // Before anything is asked: every act from here on belongs to one of these, or to a host
         // the person names to add (#220).
-        FediqoRootView.onlyToSources(opened.sources.map(\.host))
+        FediqoRootView.onlyToSources(opened.sources.map(\.host), kept: store)
         // Built on first use only: a reader with no forum never opens the WebKit store.
         forums = ForumSessions(dataStore: ForumWebsiteData.onDevice())
         // Signed in is what the Keychain holds; each server is asked once a launch whether it

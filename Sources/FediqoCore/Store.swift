@@ -115,9 +115,22 @@ public actor ItemStore {
         retention.map { note.postedAt >= $0 } ?? true
     }
 
+    /// Told the hosts of every source here, now and after every add and every removal (#220).
+    /// Called inside this actor, so every change reaches it in the order it was made — one writer,
+    /// however many windows read the store.
+    private var sourcesWatcher: (@Sendable ([String]) -> Void)?
+
+    /// Hands `watcher` the hosts here now, and again after every change to which sources there
+    /// are. One watcher; a second replaces the first.
+    public func watchSources(_ watcher: @escaping @Sendable ([String]) -> Void) {
+        sourcesWatcher = watcher
+        watcher(sourceList.map(\.host))
+    }
+
     public func add(_ source: Source) {
         if sourceList.contains(where: { $0.host == source.host }) { return }
         sourceList.append(source)
+        sourcesWatcher?(sourceList.map(\.host))
         changed(shown: false, aside: false)
     }
 
@@ -477,6 +490,7 @@ public actor ItemStore {
     public func remove(host raw: String) {
         let host = raw.lowercased()
         sourceList.removeAll { $0.host == host }
+        sourcesWatcher?(sourceList.map(\.host))
         let aside = notes.contains { $0.key.host == host && $0.value.holding == .aside }
         notes = notes.filter { $0.key.host != host }
         arrival = arrival.filter { $0.key.host != host }
