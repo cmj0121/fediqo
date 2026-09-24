@@ -64,9 +64,7 @@ struct ForumSignInSheet: View {
             Text(String(format: L10n.t("forum.signin.title"), request.host))
                 .shellFont(.pane)
                 .foregroundStyle(ShellChrome.ink(colorScheme))
-            Text(request.stop.explanation())
-                .shellFont(.meta)
-                .foregroundStyle(ShellChrome.inkDim(colorScheme))
+            explanation
             // The forum's own words, on their own line. Not this app talking, and never
             // rephrased into this app's voice — a stranger's server saying "wrong password" is
             // information, and putting it in our own sentence would make us the ones claiming it.
@@ -81,15 +79,37 @@ struct ForumSignInSheet: View {
         .padding(ShellSpace.pad)
     }
 
+    /// Why the forum's page is up, in one line, with the rest behind its (?) where there is more.
+    @ViewBuilder
+    private var explanation: some View {
+        let line = Text(request.stop.explanation())
+            .shellFont(.meta)
+            .foregroundStyle(ShellChrome.inkDim(colorScheme))
+        if let more = request.stop.moreKey {
+            line.shellHelp(more, about: request.stop.explanation())
+        } else {
+            line
+        }
+    }
+
+    /// What ticking the box does, in one line; the whole promise is behind its (?) (#235).
+    static func saveKeys(saving: Bool) -> (line: String, more: String) {
+        saving
+            ? ("forum.signin.save.line.on", "forum.signin.save.on")
+            : ("forum.signin.save.line.off", "forum.signin.save.off")
+    }
+
     private var footer: some View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
             Toggle(L10n.t("forum.signin.save"), isOn: $saving)
                 .shellFont(.body)
                 .modifier(WatchingTyped(host: request.host, sessions: sessions, on: saving))
-            Text(L10n.t(saving ? "forum.signin.save.on" : "forum.signin.save.off"))
+            let keys = Self.saveKeys(saving: saving)
+            Text(L10n.t(keys.line))
                 .shellFont(.mark)
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
+                .shellHelp(keys.more, about: L10n.t(keys.line))
             if let unkept {
                 Text(unkept.sentence())
                     .shellFont(.mark)

@@ -619,7 +619,7 @@ extension SourceRow {
 /// these marks until they press one — and what makes that acceptable is that Remove asks first,
 /// and, since decision 29, so does Clear. **Whoever is later tempted to drop a confirmation to save
 /// a tap is removing the thing that makes this row's icons legitimate.** What now also answers it
-/// is the footer legend (`account.sources.marks`), which names all four acts in the reader's own
+/// is the list's (?) (`account.sources.marks`, #235), which names all four acts in the reader's own
 /// words, once for the list — including that a short row is short *on purpose*.
 ///
 /// **The regime is decided by `SourceRow.regime(width:threshold:)`, which is pure and is driven
@@ -1007,7 +1007,7 @@ struct SourceRowView: View {
     ///
     /// Order is least to most destructive, and **a control this protocol has no such thing of is
     /// not here at all** — decision 33, which withdraws decision 28 and restores decision 4. What
-    /// tells a reader that a short row is short on purpose is the footer legend, said once for the
+    /// tells a reader that a short row is short on purpose is the list's (?), said once for the
     /// list rather than four times per row.
     private func icon(_ control: SourceRow.Control) -> some View {
         // **One symbol and a variant, not two controls** — the reader has one relationship with a

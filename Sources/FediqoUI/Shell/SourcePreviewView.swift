@@ -121,10 +121,16 @@ struct SourcePreviewView: View {
         case .unread(_, _, let error):
             spine {
                 VStack(alignment: .leading, spacing: ShellSpace.snug) {
-                    Text(String(format: L10n.t("join.preview.unread"), preview.host))
+                    // One line, and why it says nothing about reading behind its (?) (#235).
+                    let line = String(format: L10n.t("join.preview.unread.line"), preview.host)
+                    Text(line)
                         .shellFont(.body)
                         .foregroundStyle(ShellChrome.inkDim(colorScheme))
                         .fixedSize(horizontal: false, vertical: true)
+                        .shellHelp(
+                            verbatim: String(format: L10n.t("join.preview.unread"), preview.host),
+                            about: line
+                        )
                     Text(Self.unreadMessage(error))
                         .shellFont(.mark)
                         .foregroundStyle(ShellChrome.inkFaint(colorScheme))
@@ -412,10 +418,7 @@ struct SourcePreviewView: View {
                 Image(systemName: "lock")
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                     .accessibilityHidden(true)
-                Text(L10n.t(Self.cautionKey(caution, for: origin)))
-                    .shellFont(.meta, weight: .medium)
-                    .foregroundStyle(ShellChrome.ink(colorScheme))
-                    .fixedSize(horizontal: false, vertical: true)
+                cautionLine(caution)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } else if let held = origin.held {
@@ -432,6 +435,32 @@ struct SourcePreviewView: View {
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// The caution in words: one line, and the rest behind its (?) where the whole sentence is
+    /// longer than a line (#235).
+    @ViewBuilder
+    private func cautionLine(_ caution: Caution) -> some View {
+        let key = Self.cautionKey(caution, for: origin)
+        let text = Text(L10n.t(Self.cautionLineKey(caution, for: origin) ?? key))
+            .shellFont(.meta, weight: .medium)
+            .foregroundStyle(ShellChrome.ink(colorScheme))
+            .fixedSize(horizontal: false, vertical: true)
+        if let line = Self.cautionLineKey(caution, for: origin) {
+            text.shellHelp(key, about: L10n.t(line))
+        } else {
+            text
+        }
+    }
+
+    /// The short line a caution is drawn as, where its sentence is too long for one, or nothing
+    /// where the sentence is the line. **Before a press only**: on a detail the sentence is the
+    /// one explaining why a forum you read is empty, and it stays whole.
+    static func cautionLineKey(_ caution: Caution, for origin: PreviewOrigin) -> String? {
+        switch (caution, origin) {
+        case (.turnedAway, .field): "join.preview.turnedAway.line"
+        case (.needsAccount, _), (.turnedAway, .joined): nil
         }
     }
 

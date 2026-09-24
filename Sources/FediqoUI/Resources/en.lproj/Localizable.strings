@@ -15,8 +15,10 @@
 "account.rail.empty" = "Add a source";
 "account.add.title" = "Add a source";
 "account.hero.promise" = "Your timeline. Your rules.";
-"account.hero.detail" = "Add a Mastodon host to read. What you add, and what it brings back, stays on this device.";
-"account.add.detail" = "Pick a Mastodon host from the list, or type its hostname. This session only.";
+"account.hero.detail" = "What you add, and what it brings back, stays on this device.";
+"account.hero.line" = "Add a source to start reading.";
+"account.add.detail" = "Type a hostname and press Return to see what it is, or browse the sources Fediqo suggests. Nothing is added until you subscribe.";
+"account.add.line" = "Type a hostname, or browse.";
 "account.add" = "Add";
 "account.add.host" = "Hostname";
 "account.search" = "Search";
@@ -484,10 +486,13 @@
 "forum.signin.save" = "Save my username and password on this device";
 "forum.signin.save.off" = "This app never sees your password. You are typing into this forum's own page, and nothing here reads what you type.";
 "forum.signin.save.on" = "This app will see your password, because signing you in by itself means holding it. It goes into this device's Keychain, is sent to nowhere but this forum, and is never copied to iCloud. Clearing this server, or forgetting it on Usage, deletes it.";
+"forum.signin.save.line.off" = "This app never sees your password.";
+"forum.signin.save.line.on" = "Kept in this device's Keychain, sent only to this forum.";
 "forum.signin.cancel" = "Cancel";
 "forum.signin.done" = "Done";
 "forum.stop.first" = "The first sign-in is yours. Type into this forum's own page below.";
 "forum.stop.wall" = "Something in front of this forum wants to check the browser. It usually passes by itself; if it asks you something, answer it below.";
+"forum.stop.wall.line" = "This forum is checking the browser first.";
 "forum.stop.captcha" = "This forum is asking for a verification code, which a saved password cannot answer. Finish signing in below.";
 "forum.stop.question" = "This account has a security question, which a saved password cannot answer. Finish signing in below.";
 "forum.stop.refused" = "This forum did not accept the saved username and password.";
@@ -518,6 +523,7 @@
 /* Unit F4 — choosing boards. */
 "board.choose.title" = "Boards on %@";
 "board.choose.detail" = "Pick the boards you want to read. Nothing is added until you do.";
+"board.choose.line" = "Nothing is added until you do.";
 "board.choose.count" = "%1$d of %2$d picked";
 "board.choose.cancel" = "Cancel";
 "board.choose.subscribe" = "Subscribe";
@@ -598,7 +604,6 @@
 "join.browse.servers.title" = "%@ servers";
 "join.browse.detail" = "Pick one to see what it is. Nothing is added until you say so.";
 "join.browse.none" = "No suggestions for %@ yet. Type a hostname in the field instead.";
-"account.browse" = "Browse";
 "account.browse.label" = "Browse servers to read";
 
 "source.shape.microblog" = "microblog";
@@ -618,6 +623,7 @@
 
 "join.preview.silent" = "%@ publishes nothing about itself. Fediqo asked this host nothing, and there is nothing to wait for.";
 "join.preview.unread" = "Fediqo asked %@ to describe itself and could not read the answer. That says nothing about whether it reads — plenty of servers serve posts and no description.";
+"join.preview.unread.line" = "Fediqo could not read what %@ says about itself.";
 "join.preview.unread.network" = "The host did not answer.";
 "join.preview.unread.refused" = "The host turned the request away (HTTP %d).";
 "join.preview.unread.unreadable" = "The answer was not in a shape Fediqo could read.";
@@ -630,21 +636,25 @@
 "join.preview.closed" = "Reading this forum needs an account, so subscribing will most likely be refused.";
 "join.preview.closed.hint" = "Subscribing to this server will most likely be refused.";
 "join.preview.turnedAway" = "Something in front of this server turned Fediqo away, so subscribing will most likely be refused. Signing in usually clears it.";
+"join.preview.turnedAway.line" = "Fediqo was turned away, so subscribing will most likely be refused.";
 
 /* Unit 5 — one row per server, and what it is. */
 "account.sources.title"          = "Sources";
+"account.sources.line" = "Everything this device reads.";
 "account.sources.detail"         = "Everything this device reads. Press a row for what that server says about itself — its name, its size, its boards. Removing one takes its boards and its posts with it.";
 "account.sources.held"           = "What each one has left on this device is on Usage.";
 /* M1 tail rev 4 — the compact row. What the marks on a row mean, said once for the list. */
 "account.sources.marks"          = "A row carries only the marks its own server has: sign in, change boards or lists, clear what it left here, and remove it.";
 /* #69 — what may be done on a source, said on its row and explained once for the list. */
 "account.sources.writing"        = "A row also says what may be done on that source: read, read and write, or read only where the protocol has no writing in Fediqo at all. Write refused means a write was turned away; sign in to that source again.";
+"account.sources.writing.line" = "Each row says what may be done on it.";
 "account.source.writing.never"   = "read only";
 "account.source.writing.read"    = "read";
 "account.source.writing.write"   = "read and write";
 "account.source.writing.refused" = "write refused";
 /* Said in the open, for as long as it is true, to a reader who agreed to something narrower. */
 "account.sources.writing.again"  = "Fediqo now asks to write as well as read when you sign in. %@ signed in before it did: reading there is exactly as it was, and Fediqo writes nothing. Choose below, without signing out first.";
+"account.sources.writing.again.line" = "%@ signed in before Fediqo asked to write.";
 "account.sources.writing.again.choose" = "Choose what %@ may do";
 /* The choice itself, put before the server's own page opens. */
 "account.signin.ask.title"       = "Sign in to %@?";
@@ -662,6 +672,7 @@
 "account.source.boards.progress"  = "Reading %@'s boards…";
 "account.source.boards.unread"    = "%@'s boards could not be read just now.";
 "board.choose.detail.change"      = "Pick the boards you want to read. What you pick replaces what you read now.";
+"board.choose.line.change" = "What you pick replaces what you read now.";
 
 
 /* Decision 29: Clear asks first, and says what actually goes. */
@@ -706,6 +717,7 @@
 "account.source.lists.unread"         = "Your lists on %@ could not be read just now.";
 "list.choose.title"                   = "Your lists on %@";
 "list.choose.detail"                  = "Pick the lists this device reads. Your Home is always read. What you pick replaces what you read now.";
+"list.choose.line" = "What you pick replaces what you read now.";
 "list.choose.none"                    = "You have no lists on this server.";
 "list.choose.done"                    = "Done";
 "list.choose.hint.on"                 = "Read this list";
@@ -768,6 +780,7 @@
 "refusal.password.trying" = "Trying the password…";
 "refusal.password.wrong" = "That password did not open it. Type it again.";
 "refusal.password.note" = "The password goes only to %@, for this one opening, and is not kept on this device.";
+"refusal.password.line" = "Sent only to %@, and not kept.";
 "refusal.private" = "Its author shows this only to their friends, or only to themselves.";
 "refusal.gone" = "Deleted at source. Its forum says it is not there any more.";
 "refusal.blogsOff" = "This forum has its blogs switched off.";

@@ -37,13 +37,22 @@ public enum ForumSignInStop: Equatable, Sendable {
     var explanationKey: String {
         switch self {
         case .noCredential: "forum.stop.first"
-        case .wall: "forum.stop.wall"
+        case .wall: "forum.stop.wall.line"
         case .captcha: "forum.stop.captcha"
         case .question: "forum.stop.question"
         case .refused: "forum.stop.refused"
         case .unreadable: "forum.stop.unreadable"
         case .unreachable: "forum.stop.unreachable"
         case .keychain: "forum.stop.keychain"
+        }
+    }
+
+    /// The rest of the sheet's sentence, behind its (?), where the line is only the start of it
+    /// (#235). The compiler asks for each stop here too.
+    var moreKey: String? {
+        switch self {
+        case .wall: "forum.stop.wall"
+        case .noCredential, .captcha, .question, .refused, .unreadable, .unreachable, .keychain: nil
         }
     }
 
