@@ -158,6 +158,13 @@ final class ShellSession {
     /// in `AccountPane`; everything else is the sheet on `FediqoRootView`. Which one is a function
     /// of the stage — `JoinStage.surface` — and not a second flag beside it, so there is no
     /// arrangement of this object in which both are true or neither is.
+    /// A window closed with its add sheet still on the browse step lets the directory go with it
+    /// (#220): `SourceWork.adding` is nonisolated and `work` a main-actor class, so both are
+    /// reachable from here.
+    deinit {
+        work.adding(false, by: ObjectIdentifier(self))
+    }
+
     var stage: JoinStage? {
         didSet {
             // The browse step is the one moment the directory of servers may be asked (#220).

@@ -224,6 +224,21 @@ struct OnlyAddedTests {
         #expect(await http.requested.count == 1)
     }
 
+    @Test("A window that goes while its add sheet browses takes the directory with it")
+    func aClosedWindowStopsBrowsing() {
+        let work = Self.governed()
+        do {
+            let session = ShellSession(
+                http: FixtureHTTP(), store: ItemStore(),
+                mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: SilentSender())
+            )
+            session.work = work
+            session.browse()
+            #expect(work.admission(reached: ServerDirectory.host, source: nil, for: .directory) != nil)
+        }
+        #expect(work.admission(reached: ServerDirectory.host, source: nil, for: .directory) == nil)
+    }
+
     @Test("The directory is let through only while some window's add sheet is browsing")
     func addingIsARuntimeState() {
         let work = Self.governed()
