@@ -69,9 +69,6 @@ struct TimelinePane: View {
     @State private var settledHosts: Set<String> = []
     @State private var toast: String?
     @State private var toastTick = 0
-    /// What a finger gets on the header's marks, whatever the glyph inside measures. The row's
-    /// own marks are held open the same way — see `DummyItemRow.touch`.
-    @ShellMetric(relativeTo: .caption) private var touch: CGFloat = 32
     @Environment(\.colorScheme) private var colorScheme
     @Environment(DummyPrefs.self) private var prefs
 
@@ -693,7 +690,7 @@ struct TimelinePane: View {
     @ViewBuilder
     private var searchMark: some View {
         if ways.canSearch {
-            headerMark("magnifyingglass", says: "shortcut.search", action: ways.onSearch)
+            ShellIconButton("magnifyingglass", name: "shortcut.search", action: ways.onSearch)
         }
     }
 
@@ -703,22 +700,8 @@ struct TimelinePane: View {
     @ViewBuilder
     private var reloadMark: some View {
         if ways.canReload {
-            headerMark("arrow.clockwise", says: "shortcut.reload", action: ways.onReload)
+            ShellIconButton("arrow.clockwise", name: "shortcut.reload", action: ways.onReload)
         }
-    }
-
-    /// One glyph, quiet, with a finger's worth of room round it whatever size the glyph is drawn.
-    private func headerMark(_ symbol: String, says key: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .shellFont(.meta, weight: .medium)
-                .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                .frame(minWidth: touch, minHeight: touch)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(L10n.t(key))
-        .accessibilityLabel(L10n.t(key))
     }
 
     /// `[+]`: a new timeline. A press, not a selected tab.

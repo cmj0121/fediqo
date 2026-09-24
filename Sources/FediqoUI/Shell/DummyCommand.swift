@@ -307,7 +307,7 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     /// view neither case can be asserted. Both lists that draw a row read this one function, so
     /// the stream and an open thread cannot come to answer a press differently.
     public static func tapped(_ id: String, selected: String?) -> DummyRowTap {
-        selected == id ? .open : .select
+        ShellListEntry.pressed(id, selected: selected)
     }
 
     /// Which post a list centres on when it is drawn afresh.
