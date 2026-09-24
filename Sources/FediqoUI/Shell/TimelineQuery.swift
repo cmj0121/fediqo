@@ -72,6 +72,15 @@ public enum TimelineQuery: Hashable, Identifiable, Sendable {
         }
     }
 
+    /// The glyph its tab leads with: everything held, what is rising, or the reader's own filter.
+    var symbol: String {
+        switch self {
+        case .all: "tray.full"
+        case .trends: "chart.line.uptrend.xyaxis"
+        case .written: "line.3.horizontal.decrease"
+        }
+    }
+
     public var rule: String {
         switch self {
         case .all, .written: L10n.t("timeline.rule.all")

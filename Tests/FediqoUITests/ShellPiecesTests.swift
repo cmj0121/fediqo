@@ -79,25 +79,36 @@ struct ShellPiecesTests {
     @Test("The (?) opens its bubble on a press and closes it on the next")
     func helpOpensAndCloses() {
         let shown = Box(false)
-        let mark = ShellHelpButton(text: "The rest of it.", shown: shown.binding)
+        let mark = ShellHelpButton(text: "The rest of it.", subject: "Ask again", shown: shown.binding)
         mark.press()
         #expect(shown.value)
         mark.press()
         #expect(!shown.value)
     }
 
-    @Test("The (?) speaks the whole explanation, looked up by key or handed in")
+    @Test("The (?) names its subject and speaks the whole explanation, by key or handed in")
     func helpSpeaksItsText() {
-        #expect(ShellHelp("prefs.latest.footer").text == L10n.t("prefs.latest.footer"))
-        #expect(ShellHelp("prefs.latest.footer").text != "prefs.latest.footer")
-        #expect(ShellHelp(verbatim: "Twelve posts.").text == "Twelve posts.")
-        #expect(L10n.t("help.more") != "help.more")
+        let keyed = ShellHelp("prefs.latest.footer", about: "Latest date")
+        #expect(keyed.text == L10n.t("prefs.latest.footer"))
+        #expect(keyed.text != "prefs.latest.footer")
+        #expect(ShellHelp(verbatim: "Twelve posts.", about: "Posts").text == "Twelve posts.")
+        let name = ShellHelpButton(text: "", subject: "Ask again", shown: .constant(false)).name
+        #expect(name.contains("Ask again"))
+        #expect(name != "Ask again")
+    }
+
+    @Test("A press on a phone is a finger wide, whatever the glyph measures")
+    func touchFloor() {
+        #expect(ShellTouchFloor.spill(drawn: 24) == 10)
+        #expect(ShellTouchFloor.spill(drawn: 32) == 6)
+        #expect(ShellTouchFloor.spill(drawn: 60) == 0)
     }
 
     @Test("The (?), its lit mark and its bubble draw light and dark", arguments: [ColorScheme.light, .dark])
     func helpDraws(_ scheme: ColorScheme) throws {
         let text = L10n.t("prefs.latest.footer")
-        try draws(Text(L10n.t("prefs.latest")).shellHelp("prefs.latest.footer"), scheme)
+        try draws(Text(L10n.t("prefs.latest")).shellHelp("prefs.latest.footer", about: L10n.t("prefs.latest")), scheme)
+        try draws(Text("Posts").shellHelp(verbatim: text, about: "Posts"), scheme)
         try draws(HStack { ShellHelpMark(lit: false); ShellHelpMark(lit: true) }, scheme)
         try draws(ShellHelpBubble(text: text), scheme)
         try draws(ShellHelpBubble(text: text), scheme, size: .accessibility5)
@@ -117,6 +128,29 @@ struct ShellPiecesTests {
         #expect(ShellTabs(Sample.allCases, selected: chosen.value) { _ in }.selected == .first)
     }
 
+    @Test("A pill says its name, says it is the page's, and speaks a hint only where it has one")
+    func pillSpeaks() {
+        let lit = ShellTabPill("Mine", symbol: "line.3.horizontal.decrease", selected: true) {}
+        #expect(lit.title == "Mine")
+        #expect(lit.traits.contains(.isSelected))
+        let other = ShellTabPill("All", symbol: "tray.full", selected: false, accessory: "circle.dashed", hint: "Missing") {}
+        #expect(!other.traits.contains(.isSelected))
+        #expect(other.hint == "Missing")
+        #expect(other.accessory == "circle.dashed")
+    }
+
+    @Test("Every migrated page's tabs lead with a glyph of their own")
+    func migratedTabsHaveGlyphs() {
+        let preferences = PreferencesPane.Purpose.allCases.map(\.symbol)
+        let usage = UsagePane.Purpose.allCases.map(\.symbol)
+        let guide = DummyShortcutGroup.allCases.map(\.symbol)
+        let timeline = [TimelineQuery.all, .trends, .written(UUID())].map(\.symbol)
+        for set in [preferences, usage, guide, timeline] {
+            #expect(Set(set).count == set.count)
+            #expect(set.allSatisfy { !$0.isEmpty })
+        }
+    }
+
     @Test("The tabs draw with their glyphs, light and dark", arguments: [ColorScheme.light, .dark])
     func tabsDraw(_ scheme: ColorScheme) throws {
         try draws(ShellTabs(Sample.allCases, selected: .second) { _ in }, scheme)
@@ -125,16 +159,18 @@ struct ShellPiecesTests {
 
     // MARK: The list row
 
-    private func row(_ id: String, _ selection: Box<String?>, _ opened: Box<[String]>) -> ShellListRow<String, Image> {
+    private let stepped = Box<[Int]>([])
+
+    private func row(_ id: String, _ selection: Box<String?>, _ opened: Box<[String]>) -> ShellListRow<String, Image, EmptyView> {
         ShellListRow(
             id: id, title: "mastodon.social", brief: "12 posts, 3 pictures", figure: "4.2 MB",
-            selection: selection.binding, onOpen: { opened.value.append(id) }
+            selection: selection.binding, onOpen: { opened.value.append(id) }, onStep: { stepped.value.append($0) }
         ) {
             Image(systemName: "server.rack")
         }
     }
 
-    @Test("A first press lights a row, a second opens it; Return opens only the lit row")
+    @Test("A first press lights a row, a second opens it; Return opens the lit row and refuses the rest")
     func rowEnters() {
         let selection = Box<String?>(nil)
         let opened = Box<[String]>([])
@@ -156,6 +192,16 @@ struct ShellPiecesTests {
         #expect(selection.value == "two")
         #expect(two.enter())
         #expect(opened.value == ["one", "one", "two"])
+
+        #expect(two.step(up: true))
+        #expect(two.step(up: false))
+        #expect(stepped.value == [-1, 1])
+    }
+
+    @Test("At the accessibility sizes a row's figure goes under its title")
+    func figureStacks() {
+        #expect(!ShellListRowFace<Image>.stacks(at: .xxxLarge))
+        #expect(ShellListRowFace<Image>.stacks(at: .accessibility1))
     }
 
     @Test("The stream and every list answer a press by one rule")
@@ -164,6 +210,7 @@ struct ShellPiecesTests {
         #expect(ShellListEntry.pressed(3, selected: 4) == .select)
         #expect(ShellListEntry.pressed(3, selected: 3) == .open)
         #expect(DummyCommand.tapped("a", selected: "a") == ShellListEntry.pressed("a", selected: "a"))
+        #expect(DummyCommand.tapped("a", selected: "b") == ShellListEntry.Tap.select)
         #expect(L10n.t("list.open.hint") != "list.open.hint")
     }
 
@@ -179,33 +226,72 @@ struct ShellPiecesTests {
         try draws(face, scheme, size: .accessibility5)
         let selection = Box<String?>("one")
         try draws(row("one", selection, Box([])), scheme)
+        let withControl = ShellListRow(
+            id: "two", title: "forum.example", brief: "A brief line that runs on long enough to wrap to a second",
+            selection: selection.binding, onOpen: {}
+        ) {
+            Image(systemName: "server.rack")
+        } control: {
+            Toggle("", isOn: .constant(true)).labelsHidden()
+        }
+        try draws(withControl, scheme)
+        try draws(withControl, scheme, size: .accessibility5)
     }
 
     // MARK: The question before an undoable act
 
-    private let question = ShellConfirmation(
+    private let removing = ShellConfirmation(
         symbol: "trash", title: "Remove mastodon.social?",
         line: "Its posts leave this device.", help: "Adding it again reads them afresh.",
-        confirm: "Remove"
+        choices: [.init("remove", "Remove", role: .destructive)]
     )
 
-    @Test("Only a clear yes acts; Cancel and Escape change nothing")
-    func confirmActsOnlyOnYes() {
-        let acted = Box(0)
-        ShellConfirmAnswer.settle(.cancel) { acted.value += 1 }
-        #expect(acted.value == 0)
-        ShellConfirmAnswer.settle(.confirm) { acted.value += 1 }
-        #expect(acted.value == 1)
-        #expect(L10n.t("confirm.cancel") != "confirm.cancel")
+    private let signingIn = ShellConfirmation(
+        symbol: "key", title: "Sign in to mastodon.social",
+        line: "Choose what Fediqo may do there.", help: nil,
+        choices: [.init("read", "Read only", role: .plain), .init("write", "Read and write", role: .primary)]
+    )
+
+    private let notice = ShellConfirmation(
+        symbol: "exclamationmark.triangle", title: "Written by a newer Fediqo",
+        line: "Nothing here is saved until you update.", help: "The store stays as the newer build left it.",
+        choices: [], cancel: "OK"
+    )
+
+    @Test("An answer takes the question down, and only a choice acts, on the value asked about")
+    func confirmSettles() {
+        let item = Box<Int?>(6)
+        let acted = Box<[String]>([])
+        ShellConfirmAnswer.settle(.cancel, asked: 6, item: item.binding) { value, id in acted.value.append("\(value) \(id)") }
+        #expect(item.value == nil)
+        #expect(acted.value.isEmpty)
+
+        item.value = 3
+        ShellConfirmAnswer.settle(.choice("remove"), asked: 6, item: item.binding) { value, id in
+            acted.value.append("\(value) \(id)")
+        }
+        #expect(item.value == nil)
+        #expect(acted.value == ["6 remove"])
     }
 
-    @Test("The question draws light and dark, and at the largest type", arguments: [ColorScheme.light, .dark])
+    @Test("A question warns and chords only where a choice is a loss; a yes is never bare Return")
+    func confirmRoles() {
+        #expect(removing.warns)
+        #expect(removing.chorded?.id == "remove")
+        #expect(!signingIn.warns)
+        #expect(signingIn.chorded?.id == "write")
+        #expect(!notice.warns)
+        #expect(notice.chorded == nil)
+        #expect(notice.cancel == "OK")
+        #expect(removing.cancel == L10n.t("board.choose.cancel"))
+    }
+
+    @Test("Each question draws light and dark, and at the largest type", arguments: [ColorScheme.light, .dark])
     func confirmDraws(_ scheme: ColorScheme) throws {
-        try draws(ShellConfirmCard(question: question) { _ in }, scheme)
-        try draws(ShellConfirmCard(question: question) { _ in }, scheme, size: .accessibility5)
-        var bare = question
-        bare.help = nil
-        try draws(ShellConfirmCard(question: bare) { _ in }, scheme)
+        for question in [removing, signingIn, notice] {
+            try draws(ShellConfirmCard(question: question) { _ in }, scheme)
+            try draws(ShellConfirmCard(question: question) { _ in }, scheme, size: .accessibility5)
+        }
     }
 
     // MARK: Nothing new is spoken in one language only
@@ -219,7 +305,7 @@ struct ShellPiecesTests {
             let strings = try String(
                 contentsOf: resources.appendingPathComponent("\(lproj).lproj/Localizable.strings"), encoding: .utf8
             )
-            for key in ["help.more", "list.open.hint", "confirm.cancel"] {
+            for key in ["help.about", "list.open.hint"] {
                 #expect(strings.contains("\"\(key)\" = "), "\(lproj) is missing \(key)")
             }
         }

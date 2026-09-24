@@ -816,6 +816,5 @@
 "allow.own.refused.path" = "Type only the host, with no path or query after it: an entry is for the whole host.";
 
 /* The shared pieces every screen is built from (#232). */
-"help.more" = "More about this";
+"help.about" = "More about %@";
 "list.open.hint" = "Opens its detail";
-"confirm.cancel" = "Cancel";

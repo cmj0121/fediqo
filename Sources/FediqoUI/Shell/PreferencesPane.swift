@@ -23,7 +23,7 @@ struct PreferencesPane: View {
     var stamp: BuildStamp = .main
 
     /// What this page is for, one tab each (#143).
-    enum Purpose: String, CaseIterable, Identifiable {
+    enum Purpose: String, CaseIterable, Identifiable, ShellTab {
         case choices
         case build
         case work
@@ -37,6 +37,15 @@ struct PreferencesPane: View {
             case .build: "prefs.tab.build"
             case .work: "prefs.tab.work"
             case .reach: "prefs.tab.reach"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .choices: "slider.horizontal.3"
+            case .build: "info.circle"
+            case .work: "arrow.up.arrow.down"
+            case .reach: "checkmark.shield"
             }
         }
     }
@@ -120,47 +129,10 @@ struct PreferencesPane: View {
         minutes == 1 ? L10n.t("prefs.askEvery.one") : String(format: L10n.t("prefs.askEvery.many"), minutes)
     }
 
-    /// The same pills Usage and the timeline use: one selected, the rest a well. Tab rotates
-    /// them; they sit in the Form so the grouped chrome is the page's own.
-    ///
-    /// Scrolled sideways where four do not fit — a phone at the largest type — rather than cut.
+    /// The page's tabs (`ShellTabs`), in the Form so the grouped chrome is the page's own. Tab
+    /// rotates them (`ShellSession.rotatePreferencesTab`).
     private var tabs: some View {
-        ScrollView(.horizontal) { tabRow }
-            .scrollIndicators(.never)
-    }
-
-    private var tabRow: some View {
-        HStack(spacing: ShellSpace.tight) {
-            ForEach(Purpose.allCases) { tab in
-                let selected = tab == purpose
-                Button {
-                    session?.preferencesPurpose = tab
-                } label: {
-                    Text(L10n.t(tab.titleKey))
-                        .lineLimit(1)
-                        .fixedSize()
-                        .shellFont(.meta, weight: selected ? .semibold : .regular)
-                        .foregroundStyle(
-                            selected
-                                ? ShellChrome.selectInk(colorScheme)
-                                : ShellChrome.inkDim(colorScheme)
-                        )
-                        .padding(.horizontal, ShellSpace.snug)
-                        .padding(.vertical, ShellSpace.tight)
-                        .background(
-                            Capsule(style: .continuous)
-                                .fill(
-                                    selected
-                                        ? ShellChrome.selectFill(colorScheme)
-                                        : ShellChrome.well(colorScheme)
-                                )
-                        )
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(selected ? .isSelected : [])
-            }
-            Spacer(minLength: 0)
-        }
+        ShellTabs(Purpose.allCases, selected: purpose) { session?.preferencesPurpose = $0 }
     }
 
     /// Off is no latest date. Turning it on starts at today, the date that hides nothing yet.

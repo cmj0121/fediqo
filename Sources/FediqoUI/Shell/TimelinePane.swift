@@ -632,41 +632,25 @@ struct TimelinePane: View {
             .accessibilityLabel(String(format: L10n.t("timeline.latest.label"), day))
     }
 
+    /// One of the timeline's tabs: a `ShellTabPill` named by the reader, marked where one of its
+    /// rules has lost its source, and pressed twice or held to be edited.
     private func queryPill(_ query: TimelineQuery) -> some View {
-        let selected = query == session.timelineID
         let missing = session.hasMissingRule(query)
-        return Button {
+        return ShellTabPill(
+            session.name(of: query),
+            symbol: query.symbol,
+            selected: query == session.timelineID,
+            accessory: missing ? "circle.dashed" : nil,
+            hint: missing ? L10n.t("timeline.pill.missing.hint") : nil
+        ) {
             session.timelineID = query
-        } label: {
-            // One line at its own width; the row it sits in scrolls rather than squeezing it.
-            HStack(spacing: ShellSpace.tight) {
-                Text(session.name(of: query))
-                    .lineLimit(1)
-                    .fixedSize()
-                if missing {
-                    Image(systemName: "circle.dashed")
-                        .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-                        .accessibilityHidden(true)
-                }
-            }
-            .shellFont(.meta, weight: selected ? .semibold : .regular)
-            .foregroundStyle(selected ? ShellChrome.selectInk(colorScheme) : ShellChrome.inkDim(colorScheme))
-            .padding(.horizontal, ShellSpace.snug)
-            .padding(.vertical, ShellSpace.tight)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(selected ? ShellChrome.selectFill(colorScheme) : ShellChrome.well(colorScheme))
-            )
         }
-        .buttonStyle(.plain)
         .simultaneousGesture(
             TapGesture(count: 2).onEnded { session.editTimeline(query) }
         )
         .simultaneousGesture(
             LongPressGesture(minimumDuration: 0.45).onEnded { _ in session.editTimeline(query) }
         )
-        .accessibilityAddTraits(selected ? .isSelected : [])
-        .accessibilityHint(missing ? L10n.t("timeline.pill.missing.hint") : "")
         .accessibilityAction(named: Text(L10n.t("shortcut.edit"))) {
             session.editTimeline(query)
         }

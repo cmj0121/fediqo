@@ -6,27 +6,70 @@ import SwiftUI
 /// What it says, already in words: a title naming the act, **one line** saying what will happen,
 /// and the rest behind a (?). Strings rather than keys because most of these carry a count or a
 /// host (`L10n.count`, `String(format:)`), and the caller already builds that sentence.
+///
+/// **Choices, not one yes.** Removing a source is one destructive press; signing in is a choice
+/// between reading and writing, neither of them a loss; a store written by a newer build is a
+/// notice with nothing to choose but that it was read. The three are one shape: some choices, and
+/// the press that leaves everything as it was — named Cancel unless it is named otherwise, and
+/// absent only where there is nothing to leave.
 struct ShellConfirmation: Equatable {
+    /// One press that acts. `id` is what the answer hands back, so a caller switches on its own
+    /// words rather than on a position.
+    struct Choice: Equatable, Identifiable {
+        enum Role: Equatable {
+            /// A loss: drawn in the alarm hue and said to be destructive.
+            case destructive
+            /// The wider or usual answer, drawn in the lamp's hue.
+            case primary
+            /// One of several answers, none of them a loss.
+            case plain
+        }
+
+        let id: String
+        let label: String
+        let role: Role
+
+        init(_ id: String, _ label: String, role: Role) {
+            self.id = id
+            self.label = label
+            self.role = role
+        }
+    }
+
     /// The glyph of the act: `trash` for removing, `arrow.uturn.backward` for taking back.
     var symbol: String
     var title: String
     var line: String
     /// What the question used to say at length. Nothing where the line says it all.
     var help: String?
-    /// The destructive press, named for what it does.
-    var confirm: String
+    var choices: [Choice]
+    /// The press that changes nothing. Escape and every other way out answer it too.
+    var cancel: String? = L10n.t("board.choose.cancel")
+
+    /// Whether the question is a warning. Only then is its glyph drawn in the alarm hue.
+    var warns: Bool { choices.contains { $0.role == .destructive } }
+
+    /// The one choice a deliberate chord answers: the first destructive one, or else the first
+    /// primary one. Never bare Return.
+    var chorded: Choice? {
+        choices.first { $0.role == .destructive } ?? choices.first { $0.role == .primary }
+    }
 }
 
-/// What the reader answered. Nothing else closes the question: Escape, Cancel, a click outside or
-/// a swipe down are all `.cancel`.
+/// What the reader answered. A choice by its id; Escape, Cancel, a click outside or a swipe down
+/// are all `.cancel`.
 enum ShellConfirmAnswer: Equatable {
-    case confirm
+    case choice(String)
     case cancel
 
-    /// The one door to the act. Only a clear yes runs it; every other way out leaves everything
-    /// as it was.
-    static func settle(_ answer: Self, act: () -> Void) {
-        if answer == .confirm { act() }
+    /// The one door to the act. The question is taken down first, whatever the answer; only a
+    /// choice then acts, and on the value that was asked about — not on whatever `item` holds by
+    /// the time the answer lands.
+    static func settle<Value>(
+        _ answer: Self, asked value: Value, item: Binding<Value?>, onChoice: (Value, String) -> Void
+    ) {
+        item.wrappedValue = nil
+        if case .choice(let id) = answer { onChoice(value, id) }
     }
 }
 
@@ -36,19 +79,22 @@ enum ShellConfirmAnswer: Equatable {
 ///              What will happen, in one line  (?)
 ///                                 [ Cancel ] [ Remove ]
 ///
-/// **Cancel holds the keyboard.** It is the default focus and Escape's key; Return is given to
-/// neither, so a reader who pressed Return to open this cannot answer it with the same finger.
-/// The destructive press is drawn in the alarm hue and carries the destructive role, so VoiceOver
-/// says so before it is pressed.
+/// **Cancel holds the keyboard.** It is the default focus and Escape's key; bare Return is given
+/// to nothing, so a reader who pressed Return to open this cannot answer it with the same finger.
+/// A yes has a chord of its own — ⌘⌫ for a destructive one, ⌘Return for the usual one — that no
+/// reflex reaches. A destructive press is drawn in the alarm hue and carries the destructive role,
+/// so VoiceOver says so before it is pressed.
 struct ShellConfirmCard: View {
     let question: ShellConfirmation
     let answer: (ShellConfirmAnswer) -> Void
 
-    private enum Field: Hashable { case cancel, confirm }
-    @FocusState private var focus: Field?
+    @FocusState private var focus: String?
     @Environment(\.colorScheme) private var colorScheme
     @ShellMetric(relativeTo: .title3) private var side: CGFloat = 36
     @ShellMetric(relativeTo: .body) private var measure: CGFloat = 340
+
+    /// Where the keyboard starts: Cancel, or the only press there is.
+    static let cancelFocus = "\u{1F}cancel"
 
     var body: some View {
         VStack(alignment: .leading, spacing: ShellSpace.pad) {
@@ -61,14 +107,13 @@ struct ShellConfirmCard: View {
         .padding(ShellSpace.room)
         .frame(maxWidth: measure)
         .background(ShellChrome.page(colorScheme))
-        .defaultFocus($focus, .cancel)
-        .onAppear { focus = .cancel }
+        .defaultFocus($focus, question.cancel != nil ? Self.cancelFocus : question.choices.first?.id)
     }
 
     private var glyph: some View {
         Image(systemName: question.symbol)
             .shellFont(.pane)
-            .foregroundStyle(ShellChrome.alarm(colorScheme))
+            .foregroundStyle(question.warns ? ShellChrome.alarm(colorScheme) : ShellChrome.selectInk(colorScheme))
             .frame(width: side, height: side)
             .background(Circle().fill(ShellChrome.well(colorScheme)))
             .accessibilityHidden(true)
@@ -81,22 +126,66 @@ struct ShellConfirmCard: View {
                 .foregroundStyle(ShellChrome.ink(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
-            ShellConfirmLine(line: question.line, help: question.help)
+            ShellConfirmLine(line: question.line, help: question.help, subject: question.title)
         }
     }
 
+    /// In a row where they fit, and one above another where they do not — three choices at the
+    /// largest type on a phone.
     private var presses: some View {
-        HStack(spacing: ShellSpace.snug) {
-            Spacer(minLength: 0)
-            Button(L10n.t("confirm.cancel"), role: .cancel) { answer(.cancel) }
-                .keyboardShortcut(.cancelAction)
-                .focused($focus, equals: .cancel)
-            Button(question.confirm, role: .destructive) { answer(.confirm) }
-                .tint(ShellChrome.alarm(colorScheme))
-                .focused($focus, equals: .confirm)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: ShellSpace.snug) {
+                Spacer(minLength: 0)
+                pressList
+            }
+            VStack(alignment: .trailing, spacing: ShellSpace.snug) { pressList }
+                .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .buttonStyle(.bordered)
         .controlSize(.large)
+    }
+
+    @ViewBuilder
+    private var pressList: some View {
+        if let cancel = question.cancel {
+            Button(cancel, role: .cancel) { answer(.cancel) }
+                .keyboardShortcut(.cancelAction)
+                .focused($focus, equals: Self.cancelFocus)
+        }
+        ForEach(question.choices) { choice in
+            ShellConfirmPress(choice: choice, chorded: choice == question.chorded) {
+                answer(.choice(choice.id))
+            }
+            .focused($focus, equals: choice.id)
+        }
+    }
+}
+
+/// One choice: its role said and drawn, and its chord where it has one.
+private struct ShellConfirmPress: View {
+    let choice: ShellConfirmation.Choice
+    let chorded: Bool
+    let action: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        Button(choice.label, role: choice.role == .destructive ? .destructive : nil, action: action)
+            .tint(tint)
+            .keyboardShortcut(chorded ? chord : nil)
+    }
+
+    private var chord: KeyboardShortcut {
+        choice.role == .destructive
+            ? KeyboardShortcut(.delete, modifiers: .command)
+            : KeyboardShortcut(.return, modifiers: .command)
+    }
+
+    private var tint: Color? {
+        switch choice.role {
+        case .destructive: ShellChrome.alarm(colorScheme)
+        case .primary: ShellChrome.selectInk(colorScheme)
+        case .plain: nil
+        }
     }
 }
 
@@ -104,6 +193,7 @@ struct ShellConfirmCard: View {
 private struct ShellConfirmLine: View {
     let line: String
     let help: String?
+    let subject: String
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -112,7 +202,7 @@ private struct ShellConfirmLine: View {
                 .shellFont(.body)
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
-            if let help { ShellHelp(verbatim: help) }
+            if let help { ShellHelp(verbatim: help, about: subject) }
         }
     }
 }
@@ -121,22 +211,29 @@ private struct ShellConfirmLine: View {
 ///
 /// **A modifier, and the only way this is presented**, so a screen asks in one line and the
 /// closure presenter stays out of any long view chain (the runner's type checker). `item` is what
-/// the act is about — how many months, which source — and is what `onConfirm` is handed, so the
-/// answer acts on the value that was asked about and not on whatever is current when it lands.
+/// the act is about — how many months, which source — and is what `onChoice` is handed.
+///
+/// **What was asked is kept until the sheet has gone**, in `shown`: `item` is cleared the moment
+/// the question is answered, and a sheet still sliding away that read `item` would slide away
+/// blank.
 struct ShellConfirm<Value>: ViewModifier {
     @Binding var item: Value?
     let question: (Value) -> ShellConfirmation
-    let onConfirm: (Value) -> Void
+    let onChoice: (Value, String) -> Void
+
+    @State private var shown: Value?
 
     func body(content: Content) -> some View {
-        content.sheet(isPresented: asking) {
-            if let value = item {
-                ShellConfirmCard(question: question(value)) { answer in
-                    item = nil
-                    ShellConfirmAnswer.settle(answer) { onConfirm(value) }
-                }
-                .presentationSizing(.fitted)
-                .presentationDetents([.medium])
+        content
+            .sheet(isPresented: asking) { sheet }
+            .onChange(of: item != nil, initial: true) { _, now in if now { shown = item } }
+    }
+
+    @ViewBuilder
+    private var sheet: some View {
+        if let value = item ?? shown {
+            ShellConfirmSheet(question: question(value)) { answer in
+                ShellConfirmAnswer.settle(answer, asked: value, item: $item, onChoice: onChoice)
             }
         }
     }
@@ -147,24 +244,45 @@ struct ShellConfirm<Value>: ViewModifier {
     }
 }
 
+/// The card as a sheet: fitted to it on a Mac, and on a phone a medium height that can be pulled
+/// to full — with the card scrolling where even that is too short, at the largest type.
+private struct ShellConfirmSheet: View {
+    let question: ShellConfirmation
+    let answer: (ShellConfirmAnswer) -> Void
+
+    var body: some View {
+        ViewThatFits(in: .vertical) {
+            card
+            ScrollView { card }
+        }
+        .presentationSizing(.fitted)
+        .presentationDetents([.medium, .large])
+    }
+
+    private var card: some View {
+        ShellConfirmCard(question: question, answer: answer)
+    }
+}
+
 extension View {
-    /// Asks the question `item` makes while it is set; runs `onConfirm` with it only on a clear
-    /// yes. Escape, Cancel and every other way out clear `item` and change nothing else.
+    /// Asks the question `item` makes while it is set; hands `onChoice` the value asked about and
+    /// the id of the choice made. Escape, Cancel and every other way out clear `item` and change
+    /// nothing else.
     func shellConfirm<Value>(
         _ item: Binding<Value?>, question: @escaping (Value) -> ShellConfirmation,
-        onConfirm: @escaping (Value) -> Void
+        onChoice: @escaping (Value, String) -> Void
     ) -> some View {
-        modifier(ShellConfirm(item: item, question: question, onConfirm: onConfirm))
+        modifier(ShellConfirm(item: item, question: question, onChoice: onChoice))
     }
 
     /// The same, for a question about nothing but itself — the flag a screen already holds.
     func shellConfirm(
-        _ isPresented: Binding<Bool>, question: ShellConfirmation, onConfirm: @escaping () -> Void
+        _ isPresented: Binding<Bool>, question: ShellConfirmation, onChoice: @escaping (String) -> Void
     ) -> some View {
         let item = Binding<Bool?>(
             get: { isPresented.wrappedValue ? true : nil },
             set: { isPresented.wrappedValue = $0 != nil }
         )
-        return modifier(ShellConfirm(item: item, question: { _ in question }, onConfirm: { _ in onConfirm() }))
+        return modifier(ShellConfirm(item: item, question: { _ in question }, onChoice: { _, id in onChoice(id) }))
     }
 }

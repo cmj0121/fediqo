@@ -14,7 +14,8 @@ protocol ShellTab: Hashable, Identifiable {
 /// milled well.
 ///
 /// **The pills Usage, Preferences, the keys guide and the timeline drew one copy each of**, with
-/// a glyph in front. Selection is not held here: the page's own state is, and a press hands the
+/// a glyph in front. The first three are this; the timeline's are `ShellTabPill`s in a row of its
+/// own, for the reasons that type gives. Selection is not held here: the page's own state is, and a press hands the
 /// tab back through `onSelect`. That is what keeps the keyboard as it is — Tab and ⇧Tab rotate
 /// the same state (`ShellSession.rotatePreferencesTab` and its siblings), so the pills follow a
 /// key and a press alike without knowing which it was.
@@ -45,7 +46,7 @@ struct ShellTabs<Tab: ShellTab>: View {
     private var row: some View {
         HStack(spacing: ShellSpace.tight) {
             ForEach(tabs) { tab in
-                ShellTabPill(tab: tab, selected: tab == selected) { onSelect(tab) }
+                ShellTabPill(L10n.t(tab.titleKey), symbol: tab.symbol, selected: tab == selected) { onSelect(tab) }
             }
         }
         .fixedSize(horizontal: true, vertical: false)
@@ -53,36 +54,73 @@ struct ShellTabs<Tab: ShellTab>: View {
     }
 }
 
-/// One tab: its glyph, then its name, in a capsule.
-struct ShellTabPill<Tab: ShellTab>: View {
-    let tab: Tab
+/// One tab: its glyph, its name, and a mark after it where the tab has something to own up to —
+/// in a capsule. The glyph fills when the tab is the page's, the way the rail's glyphs do.
+///
+/// **Public to the file's callers, not only to `ShellTabs`**, because the timeline's tabs are the
+/// reader's own: named by them rather than by a key, reordered, pressed twice to be edited. That
+/// row builds itself from these pills and adds its own gestures and named actions on the outside
+/// — a modifier after the pill reaches the button inside it — so there is one pill and not two.
+struct ShellTabPill: View {
+    let title: String
+    let symbol: String
     let selected: Bool
+    /// A glyph after the name, quiet and unspoken: the hint says it in words.
+    var accessory: String?
+    /// What VoiceOver adds after the name, where the tab has more to say than its name.
+    var hint: String?
     let action: () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
 
+    init(
+        _ title: String, symbol: String, selected: Bool, accessory: String? = nil, hint: String? = nil,
+        action: @escaping () -> Void
+    ) {
+        self.title = title
+        self.symbol = symbol
+        self.selected = selected
+        self.accessory = accessory
+        self.hint = hint
+        self.action = action
+    }
+
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: ShellSpace.tight) {
-                Image(systemName: tab.symbol)
+        Button(action: action) { face }
+            .buttonStyle(.plain)
+            .help(title)
+            .accessibilityLabel(title)
+            .accessibilityHint(hint ?? "")
+            .accessibilityAddTraits(traits)
+    }
+
+    /// Selected is said as well as drawn.
+    var traits: AccessibilityTraits { selected ? .isSelected : [] }
+
+    private var face: some View {
+        HStack(spacing: ShellSpace.tight) {
+            Image(systemName: symbol)
+                .symbolVariant(selected ? .fill : .none)
+                .accessibilityHidden(true)
+            Text(title)
+                .lineLimit(1)
+                .fixedSize()
+            if let accessory {
+                Image(systemName: accessory)
+                    .foregroundStyle(ShellChrome.inkFaint(colorScheme))
                     .accessibilityHidden(true)
-                Text(L10n.t(tab.titleKey))
-                    .lineLimit(1)
-                    .fixedSize()
             }
-            .shellFont(.meta, weight: selected ? .semibold : .regular)
-            .foregroundStyle(selected ? ShellChrome.selectInk(colorScheme) : ShellChrome.inkDim(colorScheme))
-            .padding(.horizontal, ShellSpace.snug)
-            .padding(.vertical, ShellSpace.tight)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(selected ? ShellChrome.selectFill(colorScheme) : ShellChrome.well(colorScheme))
-            )
-            .contentShape(Capsule(style: .continuous))
         }
-        .buttonStyle(.plain)
-        .help(L10n.t(tab.titleKey))
-        .accessibilityLabel(L10n.t(tab.titleKey))
-        .accessibilityAddTraits(selected ? .isSelected : [])
+        .shellFont(.meta, weight: selected ? .semibold : .regular)
+        .foregroundStyle(selected ? ShellChrome.selectInk(colorScheme) : ShellChrome.inkDim(colorScheme))
+        .padding(.horizontal, ShellSpace.snug)
+        .padding(.vertical, ShellSpace.tight)
+        .background(
+            Capsule(style: .continuous)
+                .fill(selected ? ShellChrome.selectFill(colorScheme) : ShellChrome.well(colorScheme))
+        )
+        .contentShape(Capsule(style: .continuous))
     }
 }
+
+extension DummyShortcutGroup: ShellTab {}

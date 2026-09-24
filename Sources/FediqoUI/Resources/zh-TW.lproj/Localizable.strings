@@ -794,6 +794,5 @@
 "allow.own.refused.path" = "只輸入主機名稱，後面不要有路徑或查詢：一個項目涵蓋的是整個主機。";
 
 /* The shared pieces every screen is built from (#232). */
-"help.more" = "更多說明";
+"help.about" = "關於「%@」的說明";
 "list.open.hint" = "打開詳細內容";
-"confirm.cancel" = "取消";

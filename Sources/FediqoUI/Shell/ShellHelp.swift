@@ -13,23 +13,30 @@ import SwiftUI
 ///
 /// While the bubble is open the mark is lit, filled and in the lamp's hue — the one place on the
 /// screen the reader has just asked about.
+///
+/// **Every (?) names what it is about**, so a VoiceOver reader walking a page of them hears
+/// "More about Ask again" and not five of "More about this".
 struct ShellHelp: View {
     let text: String
+    let subject: String
 
     @State private var shown = false
 
-    /// The explanation behind `key`.
-    init(_ key: String) {
+    /// The explanation behind `key`, about `subject` — the words the line it sits beside already
+    /// says, as the reader sees them.
+    init(_ key: String, about subject: String) {
         text = L10n.t(key)
+        self.subject = subject
     }
 
     /// An explanation already built — a sentence with a count or a name in it.
-    init(verbatim text: String) {
+    init(verbatim text: String, about subject: String) {
         self.text = text
+        self.subject = subject
     }
 
     var body: some View {
-        ShellHelpButton(text: text, shown: $shown)
+        ShellHelpButton(text: text, subject: subject, shown: $shown)
     }
 }
 
@@ -37,6 +44,7 @@ struct ShellHelp: View {
 /// its own `@State`; a test keeps it where it can read it back.
 struct ShellHelpButton: View {
     let text: String
+    let subject: String
     @Binding var shown: Bool
     @ShellMetric(relativeTo: .caption) private var touch: CGFloat = 24
 
@@ -45,16 +53,20 @@ struct ShellHelpButton: View {
             ShellHelpMark(lit: shown)
                 .frame(minWidth: touch, minHeight: touch)
                 .contentShape(Rectangle())
+                .modifier(ShellTouchFloor(drawn: touch))
         }
         .buttonStyle(.plain)
         .help(text)
-        .accessibilityLabel(L10n.t("help.more"))
+        .accessibilityLabel(name)
         .accessibilityHint(text)
         .popover(isPresented: $shown, arrowEdge: .bottom) {
             ShellHelpBubble(text: text)
                 .presentationCompactAdaptation(.popover)
         }
     }
+
+    /// What VoiceOver calls the mark: more about its subject.
+    var name: String { String(format: L10n.t("help.about"), subject) }
 
     /// A press opens the bubble, and a press on the lit mark closes it.
     func press() {
@@ -95,11 +107,19 @@ struct ShellHelpBubble: View {
 
 extension View {
     /// This view, with the (?) for `key` after it — the one line a screen writes to put a short
-    /// line's long explanation behind it.
-    func shellHelp(_ key: String) -> some View {
+    /// line's long explanation behind it. `subject` is what the (?) is about, as the reader sees it.
+    func shellHelp(_ key: String, about subject: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: ShellSpace.tight) {
             self
-            ShellHelp(key)
+            ShellHelp(key, about: subject)
+        }
+    }
+
+    /// The same, for an explanation already built.
+    func shellHelp(verbatim text: String, about subject: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: ShellSpace.tight) {
+            self
+            ShellHelp(verbatim: text, about: subject)
         }
     }
 }

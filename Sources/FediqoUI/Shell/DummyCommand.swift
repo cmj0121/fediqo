@@ -457,6 +457,16 @@ public enum DummyShortcutGroup: String, CaseIterable, Identifiable, Sendable {
     public var id: String { rawValue }
     var titleKey: String { "shortcut.group.\(rawValue)" }
 
+    /// The glyph its tab leads with in the guide.
+    var symbol: String {
+        switch self {
+        case .move: "arrow.up.arrow.down.circle"
+        case .read: "text.book.closed"
+        case .act: "hand.tap"
+        case .app: "macwindow"
+        }
+    }
+
     /// Tab under the guide rotates these, wrapping, the same ring `DummyCommand.advanced`
     /// uses for All/Trends. A second list here would be the order written down twice.
     static func rotated(from current: DummyShortcutGroup, by step: Int) -> DummyShortcutGroup {

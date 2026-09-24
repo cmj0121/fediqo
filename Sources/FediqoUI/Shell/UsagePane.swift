@@ -91,7 +91,7 @@ struct UsagePane: View {
     static let monthChoices = [1, 3, 6, 12]
 
     /// What this page is for, one tab each (#7): by source, by time, by cache.
-    enum Purpose: String, CaseIterable, Identifiable {
+    enum Purpose: String, CaseIterable, Identifiable, ShellTab {
         case source
         case time
         case copies
@@ -103,6 +103,14 @@ struct UsagePane: View {
             case .source: "usage.tab.source"
             case .time: "usage.tab.time"
             case .copies: "usage.tab.copies"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .source: "square.stack.3d.up"
+            case .time: "clock"
+            case .copies: "internaldrive"
             }
         }
     }
@@ -163,41 +171,10 @@ struct UsagePane: View {
         }
     }
 
-    /// The same pills the timeline uses for All and Trends: one selected, the rest a well.
-    /// Tab rotates them (`ShellSession.rotateUsageTab`); they sit in the Form so the grouped
-    /// chrome is the page's own, not a second colour.
+    /// The page's tabs (`ShellTabs`). Tab rotates them (`ShellSession.rotateUsageTab`); they sit
+    /// in the Form so the grouped chrome is the page's own, not a second colour.
     private var tabs: some View {
-        HStack(spacing: ShellSpace.tight) {
-            ForEach(Purpose.allCases) { tab in
-                let selected = tab == (session?.usagePurpose ?? .source)
-                Button {
-                    session?.usagePurpose = tab
-                } label: {
-                    Text(L10n.t(tab.titleKey))
-                        .lineLimit(1)
-                        .fixedSize()
-                        .shellFont(.meta, weight: selected ? .semibold : .regular)
-                        .foregroundStyle(
-                            selected
-                                ? ShellChrome.selectInk(colorScheme)
-                                : ShellChrome.inkDim(colorScheme)
-                        )
-                        .padding(.horizontal, ShellSpace.snug)
-                        .padding(.vertical, ShellSpace.tight)
-                        .background(
-                            Capsule(style: .continuous)
-                                .fill(
-                                    selected
-                                        ? ShellChrome.selectFill(colorScheme)
-                                        : ShellChrome.well(colorScheme)
-                                )
-                        )
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(selected ? .isSelected : [])
-            }
-            Spacer(minLength: 0)
-        }
+        ShellTabs(Purpose.allCases, selected: session?.usagePurpose ?? .source) { session?.usagePurpose = $0 }
     }
 
     @ViewBuilder

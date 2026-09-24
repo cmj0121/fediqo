@@ -46,6 +46,7 @@ struct ShellIconButton: View {
                 .foregroundStyle(ink)
                 .frame(minWidth: touch, minHeight: touch)
                 .contentShape(Rectangle())
+                .modifier(ShellTouchFloor(drawn: touch))
         }
         .buttonStyle(.plain)
         .help(Self.hover(name: name, help: help))
@@ -70,5 +71,32 @@ struct ShellIconButton: View {
         case .lit: return ShellChrome.selectInk(colorScheme)
         case .alarm: return ShellChrome.alarm(colorScheme)
         }
+    }
+}
+
+/// **A finger's floor on a phone, without growing what is drawn.** The press is widened to 44
+/// points — the platform's own minimum — by a content shape padded out and the padding taken back,
+/// so the glyph keeps the room it takes in its row and only what a finger can land on grows. On a
+/// Mac a pointer is exact, and the drawn size is the press.
+struct ShellTouchFloor: ViewModifier {
+    let drawn: CGFloat
+
+    static let finger: CGFloat = 44
+
+    /// How far the press reaches past each edge of what is drawn.
+    static func spill(drawn: CGFloat) -> CGFloat {
+        max(0, (finger - drawn) / 2)
+    }
+
+    func body(content: Content) -> some View {
+        #if os(iOS)
+        let spill = Self.spill(drawn: drawn)
+        content
+            .padding(spill)
+            .contentShape(Rectangle())
+            .padding(-spill)
+        #else
+        content
+        #endif
     }
 }

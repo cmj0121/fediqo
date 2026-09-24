@@ -2,40 +2,48 @@ import SwiftUI
 
 /// How a list answers the reader (#232) — **rule 3 of #231, as a rule and not a copy.**
 ///
-/// The timeline's rule, made to take any id: a press on a row that is not lit lights it, a press
-/// on the lit row opens it, and Return opens the lit row. `DummyCommand.tapped` asks this, so the
-/// stream and every other list cannot come to answer a press differently.
+/// The timeline's rule, made to take any id: a press on a row that is not lit lights it, and a
+/// press on the lit row opens it. `DummyCommand.tapped` asks this, so the stream and every other
+/// list cannot come to answer a press differently. Return is `ShellListRow.enter()`'s.
 enum ShellListEntry {
+    typealias Tap = DummyRowTap
+
     /// What a press on `id` does, given the row that is lit.
-    static func pressed<ID: Equatable>(_ id: ID, selected: ID?) -> DummyRowTap {
+    static func pressed<ID: Equatable>(_ id: ID, selected: ID?) -> Tap {
         selected == id ? .open : .select
     }
 }
 
-/// One row of a list (#232): a mark, a title, one brief line, and the figure that matters most —
+/// One row of a list (#232): a mark, a title, a brief line, and the figure that matters most —
 /// and a way in to the rest. The rest is the row's detail, and entering the row opens it.
 ///
-///     [mark]  title                              figure  ›
-///             one brief line
+///     [mark]  title                              figure  ›  [control]
+///             a brief line, two at most
 ///
 /// **Entering, three ways, one outcome.** A press lights the row and a second press opens it
-/// (`ShellListEntry.pressed`); Return opens the lit row; and
-/// VoiceOver, whose reader activates once, opens in one — the row's default action. A row the
-/// keyboard is on wears the hover plate and opens on Return too; focus does not light it, because
-/// a click focuses before it presses and would turn every first press into an open.
+/// (`ShellListEntry.pressed`). Return opens the row if it is lit or holds the keyboard, and ↑ and
+/// ↓ hand the list a step where it takes one (`onStep`). VoiceOver, whose reader activates once,
+/// opens in one — the row's default action. Focus does not light a row, because a click focuses
+/// before it presses and would turn every first press into an open; a focused row wears the hover
+/// plate instead.
 ///
-/// **The chevron is what says there is more.** A row that opens nothing is not this row.
+/// **The chevron is what says there is more.** A row that opens nothing is not this row. A control
+/// of the row's own — a switch, a clear — sits after it, outside what a press on the row enters,
+/// and is spoken as itself rather than folded into the row.
 ///
 /// Lit on the lamp's wash with the lamp in its margin, the way the rail and the stream say where
 /// the reader is; the plate is `RailView`'s radius, so the list is machined like the rest.
-struct ShellListRow<ID: Hashable, Mark: View>: View {
+struct ShellListRow<ID: Hashable, Mark: View, Control: View>: View {
     let id: ID
     let title: String
     let brief: String?
     let figure: String?
     @Binding var selection: ID?
     let onOpen: () -> Void
+    /// ↑ is −1 and ↓ is +1. Nothing where the list walks itself.
+    let onStep: ((Int) -> Void)?
     let mark: Mark
+    let control: Control
 
     @FocusState private var focused: Bool
     @State private var hovering = false
@@ -43,7 +51,8 @@ struct ShellListRow<ID: Hashable, Mark: View>: View {
 
     init(
         id: ID, title: String, brief: String? = nil, figure: String? = nil,
-        selection: Binding<ID?>, onOpen: @escaping () -> Void, @ViewBuilder mark: () -> Mark
+        selection: Binding<ID?>, onOpen: @escaping () -> Void, onStep: ((Int) -> Void)? = nil,
+        @ViewBuilder mark: () -> Mark, @ViewBuilder control: () -> Control
     ) {
         self.id = id
         self.title = title
@@ -51,22 +60,35 @@ struct ShellListRow<ID: Hashable, Mark: View>: View {
         self.figure = figure
         _selection = selection
         self.onOpen = onOpen
+        self.onStep = onStep
         self.mark = mark()
+        self.control = control()
     }
 
     private var selected: Bool { selection == id }
 
     var body: some View {
+        HStack(spacing: 0) {
+            entry
+            control
+                .padding(.trailing, ShellSpace.step)
+        }
+        .background(plate)
+        .overlay(alignment: .leading) { lamp }
+        .onHover { hovering = $0 }
+    }
+
+    private var entry: some View {
         ShellListRowFace(title: title, brief: brief, figure: figure, selected: selected, mark: mark)
-            .background(plate)
-            .overlay(alignment: .leading) { lamp }
             .contentShape(Rectangle())
             .onTapGesture(perform: press)
-            .onHover { hovering = $0 }
             .focusable()
             .focusEffectDisabled()
             .focused($focused)
             .onKeyPress(.return) { enter() ? .handled : .ignored }
+            .onKeyPress(keys: [.upArrow, .downArrow]) { key in
+                step(up: key.key == .upArrow) ? .handled : .ignored
+            }
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
             .accessibilityHint(L10n.t("list.open.hint"))
@@ -81,10 +103,17 @@ struct ShellListRow<ID: Hashable, Mark: View>: View {
         }
     }
 
-    /// Return: the lit row opens, or the row the keyboard is on. Refused on any other row.
+    /// Return: the row opens if it is lit or holds the keyboard. Refused on any other row.
     func enter() -> Bool {
         guard selected || focused else { return false }
         onOpen()
+        return true
+    }
+
+    /// ↑ or ↓: handed to the list, which knows what is next. Refused where it walks itself.
+    func step(up: Bool) -> Bool {
+        guard let onStep else { return false }
+        onStep(up ? -1 : 1)
         return true
     }
 
@@ -108,8 +137,25 @@ struct ShellListRow<ID: Hashable, Mark: View>: View {
     }
 }
 
+extension ShellListRow where Control == EmptyView {
+    /// A row with nothing of its own after the chevron.
+    init(
+        id: ID, title: String, brief: String? = nil, figure: String? = nil,
+        selection: Binding<ID?>, onOpen: @escaping () -> Void, onStep: ((Int) -> Void)? = nil,
+        @ViewBuilder mark: () -> Mark
+    ) {
+        self.init(
+            id: id, title: title, brief: brief, figure: figure, selection: selection,
+            onOpen: onOpen, onStep: onStep, mark: mark, control: { EmptyView() }
+        )
+    }
+}
+
 /// What a row shows, apart from how it is entered: small enough for a type checker, and drawn by
 /// a test without a list round it.
+///
+/// **At the accessibility sizes the figure goes under the title**, where it has the row's width,
+/// rather than taking the width the title needs beside it.
 struct ShellListRowFace<Mark: View>: View {
     let title: String
     let brief: String?
@@ -118,20 +164,21 @@ struct ShellListRowFace<Mark: View>: View {
     let mark: Mark
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dynamicTypeSize) private var typeSize
     @ShellMetric(relativeTo: .callout) private var side: CGFloat = 28
 
+    /// Whether the figure is stacked under the title rather than set beside it.
+    static func stacks(at size: DynamicTypeSize) -> Bool {
+        size.isAccessibilitySize
+    }
+
     var body: some View {
+        let stacked = Self.stacks(at: typeSize)
         HStack(alignment: .center, spacing: ShellSpace.step) {
             plate
-            words
+            words(stacked: stacked)
             Spacer(minLength: ShellSpace.snug)
-            if let figure {
-                Text(figure)
-                    .shellFont(.reading)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                    .lineLimit(1)
-                    .fixedSize()
-            }
+            if !stacked { figureText }
             Image(systemName: "chevron.right")
                 .shellFont(.mark, weight: .semibold)
                 .foregroundStyle(ShellChrome.inkFaint(colorScheme))
@@ -140,6 +187,17 @@ struct ShellListRowFace<Mark: View>: View {
         .padding(.horizontal, ShellSpace.step)
         .padding(.vertical, ShellSpace.snug)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var figureText: some View {
+        if let figure {
+            Text(figure)
+                .shellFont(.reading)
+                .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                .lineLimit(1)
+                .fixedSize()
+        }
     }
 
     private var plate: some View {
@@ -153,7 +211,7 @@ struct ShellListRowFace<Mark: View>: View {
             .accessibilityHidden(true)
     }
 
-    private var words: some View {
+    private func words(stacked: Bool) -> some View {
         VStack(alignment: .leading, spacing: ShellSpace.hair) {
             Text(title)
                 .shellFont(.name)
@@ -163,8 +221,9 @@ struct ShellListRowFace<Mark: View>: View {
                 Text(brief)
                     .shellFont(.meta)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                    .lineLimit(1)
+                    .lineLimit(2)
             }
+            if stacked { figureText }
         }
     }
 }
