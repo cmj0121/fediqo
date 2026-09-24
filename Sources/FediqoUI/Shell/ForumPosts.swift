@@ -1486,6 +1486,9 @@ struct ForumPostBand: View {
         let settled: Bool
         let generation: Int
         let active: Bool
+        /// Whether the forum is still here (#250), in the identity for `RemoteImage.Wanted`'s
+        /// reason: a forum added again re-fires the ask on the rows kept from it.
+        let here: Bool
     }
 
     var body: some View {
@@ -1512,7 +1515,8 @@ struct ForumPostBand: View {
                 thread: thread,
                 settled: !posts.fetches(thread, opened: inFull),
                 generation: posts.generation,
-                active: placeIsActive
+                active: placeIsActive,
+                here: here
             )
         ) {
             // Decision 20: a post is fetched only for the place the reader is in. **Only the

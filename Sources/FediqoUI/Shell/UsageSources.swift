@@ -98,7 +98,7 @@ struct UsageRemovedSourceDetail: View {
             reading(Text(UsagePane.postsLine(session.holdings.posts(host: source.host))))
             reading(Text(L10n.t("usage.removed.line")))
         } header: {
-            ShellSectionHead(title: "prefs.cache", line: "item.left", help: "item.left.detail")
+            ShellSectionHead(title: "prefs.cache", line: "item.left", help: "usage.removed.help")
         }
     }
 

@@ -658,10 +658,11 @@ struct WrittenTimelineTests {
         // The sources: the stream compiles without them, but which copy a post carried by two
         // is drawn as follows the hosts still here (#250), so a change to them draws again —
         // once, and the same sources again not at all.
+        let before = session.timelineEvaluations
         session.sources = [microblog]
         _ = session.timelineItems(latest: latest)
         _ = session.timelineItems(latest: latest)
-        #expect(session.timelineEvaluations == 7)
+        #expect(session.timelineEvaluations == before + 1)
     }
 
     @Test("A written timeline drawn through the session stops at the latest date, after its rules")

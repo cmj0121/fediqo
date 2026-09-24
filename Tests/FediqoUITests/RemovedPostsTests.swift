@@ -113,9 +113,29 @@ struct RemovedPostsTests {
     func streamRedrawsAfterRemoval() async {
         let session = await Self.shell(Self.shared())
         #expect(session.timelineItems(latest: nil).first?.source.host == Self.beta.host)
+        let before = session.timelineEvaluations
         await session.remove(host: Self.beta.host, keepingPosts: true)
         #expect(session.timelineItems(latest: nil).first?.source.host == Self.alpha.host)
         #expect(session.timelineItems(latest: nil).first?.sources.count == 2, "the kept copy is still under it")
+        #expect(session.timelineEvaluations == before + 1, "the stream was drawn again more than once, or not at all")
+    }
+
+    @Test("A source added again re-fires the asks its kept rows had stopped: the identity changes with it")
+    func readdingRefiresTheAsks() async {
+        let session = await Self.shell([Self.note("1", from: Self.beta)])
+        await session.remove(host: Self.beta.host, keepingPosts: true)
+        let gone: Set<String> = Set(session.sources.map(\.host))
+        #expect(!RemoteImage.isHere(Self.beta.host, among: gone))
+        await session.store.add(Self.beta)
+        await session.reloadFromStore()
+        let back: Set<String> = Set(session.sources.map(\.host))
+        #expect(RemoteImage.isHere(Self.beta.host, among: back))
+        let wanted = { (here: Bool) in
+            RemoteImage.Wanted(url: Self.address("a.png"), scale: 2, tier: .deck, have: false, generation: 0,
+                               host: Self.beta.host, active: true, here: here)
+        }
+        #expect(wanted(false) != wanted(true), "a source added again is no change of identity")
+        #expect(UsageSourceList.removed(session).isEmpty)
     }
 
     @Test("Told to keep, Remove lets the pictures go without telling a row to ask again, and nothing is asked")
@@ -209,6 +229,7 @@ struct RemovedPostsTests {
         let keys = [
             "item.left", "item.left.detail", "prefs.removed.head", "prefs.removed.brief", "prefs.removed.footer",
             "prefs.removed", "prefs.removed.go", "prefs.removed.stay", "thread.source.left", "usage.removed.line",
+            "usage.removed.help",
         ]
         for key in keys {
             #expect(L10n.t(key, language: .english) != L10n.t(key, language: .taiwanese), "\(key)")

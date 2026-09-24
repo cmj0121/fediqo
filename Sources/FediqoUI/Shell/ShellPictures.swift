@@ -1178,6 +1178,11 @@ struct RemoteImage: View {
         /// change of identity and re-fires. Becoming *inactive* re-fires too and the guard
         /// returns at once, which costs a task creation and nothing else.
         let active: Bool
+        /// Whether the host is still on this device (#250), **in the identity for `active`'s
+        /// reason**: a row kept past its source's removal asks nothing while the host is gone,
+        /// and a source added again is a change of identity that re-fires the ask — without it
+        /// the kept rows already on screen would stay blank until something else moved them.
+        let here: Bool
     }
 
     let url: URL?
@@ -1324,7 +1329,8 @@ struct RemoteImage: View {
                 have: picture != nil,
                 generation: cache.generation,
                 host: host,
-                active: placeIsActive
+                active: placeIsActive,
+                here: here
             )
         ) {
             // Decision 20. **Only the fetch is gated** — `cache.picture(…)` above still runs and

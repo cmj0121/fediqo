@@ -167,7 +167,7 @@ struct EmojiText: View {
             links: links, reader: reader, browser: openURL, source: host,
             tags: tags == nil ? [] : tagged, pressing: tags, row: row
         ))
-        .task(id: request) {
+        .task(id: Asking(request: request, here: RemoteImage.isHere(host, among: sourcesHere))) {
             guard RemoteImage.isHere(host, among: sourcesHere) else { return }
             await cache.fetch(request)
             arrived = Arrived(request: request, frames: cache.held(request))
@@ -209,6 +209,14 @@ struct EmojiText: View {
     private struct Arrived {
         let request: EmojiCache.Request
         let frames: [String: EmojiCache.Frames]
+    }
+
+    /// What the fetch re-fires on: the request, and whether its host is here (#250) — the
+    /// latter in the identity for `RemoteImage.Wanted`'s reason, so a source added again fills
+    /// the lines kept from it.
+    struct Asking: Equatable {
+        let request: EmojiCache.Request
+        let here: Bool
     }
 
     /// The cut this line is drawn from: the prose cut where the call site asked for a post's own
