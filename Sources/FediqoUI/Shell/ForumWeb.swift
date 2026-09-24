@@ -354,11 +354,15 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
     /// so a record belongs here when either name is the other or ends in it. That is coarser
     /// than a host: two forums under one registrable domain share their records.
     ///
-    /// **Where another forum still added shares the record** (`keeping`), the record is not
-    /// dropped whole (#221): only the cookies this host holds that are not sent to any of those
-    /// forums go, so signing out of one does not sign the reader out of its neighbour, and keeps
-    /// nothing a request to this host would carry. What else the shared record holds — storage,
-    /// cache — stays with it, since it cannot be told apart per host.
+    /// **Every cookie a request to this host would carry goes, whoever else it is sent to.** A
+    /// parent-domain cookie two forums share is one session for both, and forgetting one ends it
+    /// for both: keeping a session a sign-out should have dropped is the worse error.
+    ///
+    /// **What is not sent to this host is all that is kept** (#221), and only where another forum
+    /// still added shares the record (`keeping`): a neighbour's own host-only cookie, or the
+    /// sub-domain cookie of a forum under this one. Where none shares it, the record goes whole.
+    /// What else a shared record holds — local storage, IndexedDB, cache — stays with it, since
+    /// it cannot be told apart per host.
     static func forget(host: String, in store: WKWebsiteDataStore, keeping: Set<String> = []) async {
         let host = host.lowercased()
         let others = keeping.map { $0.lowercased() }.filter { $0 != host }
@@ -371,14 +375,20 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
         guard !shared.isEmpty else { return }
         let jar = store.httpCookieStore
         for cookie in await jar.allCookies()
-        where holds(cookie.domain, for: host) && !others.contains(where: { sent(cookie.domain, to: $0) }) {
+        where goes(cookie.domain, forgetting: host, keeping: others) {
             await jar.deleteCookie(cookie)
         }
     }
 
+    /// Whether a cookie filed under `domain` goes as `host` is forgotten: it is sent to that host,
+    /// or it belongs to it and no forum still added is sent it.
+    static func goes(_ domain: String, forgetting host: String, keeping others: [String]) -> Bool {
+        sent(domain, to: host)
+            || (holds(domain, for: host) && !others.contains(where: { sent(domain, to: $0) }))
+    }
+
     /// Whether a cookie filed under `domain` goes out with a request to `host`: the host is that
-    /// domain, or under it. Narrower than `holds` on purpose — what is kept for another source is
-    /// only what that source is actually sent.
+    /// domain, or under it. Narrower than `holds` on purpose.
     static func sent(_ domain: String, to host: String) -> Bool {
         var name = domain.lowercased()
         if name.hasPrefix(".") { name.removeFirst() }

@@ -315,7 +315,7 @@ struct LeavesNothingTests {
         #expect(session.jar.credentials.credentials(for: space)?.isEmpty ?? true)
     }
 
-    @Test("Signing out keeps the cookies another source still added shares with it")
+    @Test("Signing out takes every cookie the source is sent, shared or not, and keeps a neighbour's own")
     func sharedCookiesStay() async throws {
         let session = Self.session(http: FixtureHTTP(), work: SourceWork())
         for host in ["forum.shared.example", "shared.example", "blog.shared.example"] {
@@ -330,13 +330,14 @@ struct LeavesNothingTests {
         }
 
         await session.signOut(host: "forum.shared.example")
-        #expect(Set(jar.cookies?.map(\.domain) ?? []) == [".shared.example", "blog.shared.example"],
-                "a cookie of a source still added went, or one of this source's stayed")
+        // The parent-domain cookie is a session the forum is sent, so it goes though the others
+        // are sent it too; the neighbour's own stays.
+        #expect(jar.cookies?.map(\.domain) == ["blog.shared.example"],
+                "a cookie this source is sent stayed, or a neighbour's own went")
 
-        // Its parent removed: the parent's cookie still goes to the two sources under it, and the
-        // sub-domain that is a source of its own keeps its cookie.
+        // Its parent removed: the sub-domain that is a source of its own keeps its cookie.
         await session.remove(host: "shared.example")
-        #expect(Set(jar.cookies?.map(\.domain) ?? []) == [".shared.example", "blog.shared.example"])
+        #expect(jar.cookies?.map(\.domain) == ["blog.shared.example"])
     }
 
     @Test("A reload that starts while a Remove is still under way asks nothing of the source",
@@ -419,7 +420,7 @@ struct LeavesNothingTests {
         #expect(Self.acts(work, for: Self.gone).count == 1)
     }
 
-    @Test("Signing out of one forum keeps what its browser store holds for a neighbour still added")
+    @Test("Signing out of one forum ends a session it shares, and keeps a neighbour's own cookie")
     func theForumBrowsersNeighbour() async throws {
         let store = WKWebsiteDataStore.nonPersistent()
         let forums = ForumSessions(credentials: MemoryCredentials(), dataStore: store)
@@ -433,8 +434,10 @@ struct LeavesNothingTests {
         #expect(await store.httpCookieStore.allCookies().count == 3, "the premise: all three are held")
 
         await forums.forget(host: "forum.shared.example")
-        #expect(Set(await store.httpCookieStore.allCookies().map(\.domain)) == [".shared.example", "blog.shared.example"],
-                "the neighbour's cookie went, or this forum's own stayed")
+        #expect(await store.httpCookieStore.allCookies().map(\.domain) == ["blog.shared.example"],
+                "a cookie this forum is sent stayed, or the neighbour's own went")
+        #expect(!forums.reachedSignIn(host: "forum.shared.example"), "still signed in after signing out")
+        #expect(forums.reachedSignIn(host: "blog.shared.example"))
 
         // A forum alone under its domain loses the whole record, as before.
         forums.watch(forums: ["blog.shared.example"])

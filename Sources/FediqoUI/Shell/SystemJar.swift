@@ -13,9 +13,9 @@ import Foundation
 ///
 /// Matched as a forum's browser records are (`ForumWebEngine.holds`): a cookie's domain belongs to
 /// the source when either name is the other or ends in it, so a cookie filed for the registrable
-/// domain goes with it — **unless it also belongs to another source still added**: a parent
-/// domain's cookie two sources share, or a sub-domain that is a source of its own, stays for the
-/// one still being read.
+/// domain goes with it, even where another source still added shares it: a shared session ends
+/// for both. Kept is only what is not sent to this source — a sub-domain that is a source of its
+/// own, when its parent goes (`ForumWebEngine.goes`).
 @MainActor
 struct SystemJar {
     var cookies: HTTPCookieStorage = .shared
@@ -25,8 +25,7 @@ struct SystemJar {
         let host = raw.lowercased()
         let others = others.map { $0.lowercased() }.filter { $0 != host }
         for cookie in cookies.cookies ?? []
-        where ForumWebEngine.holds(cookie.domain, for: host)
-            && !others.contains(where: { ForumWebEngine.sent(cookie.domain, to: $0) }) {
+        where ForumWebEngine.goes(cookie.domain, forgetting: host, keeping: others) {
             cookies.deleteCookie(cookie)
         }
         for (space, kept) in credentials.allCredentials where space.host.lowercased() == host {
