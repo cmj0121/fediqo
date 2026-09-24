@@ -1,4 +1,5 @@
 import FediqoCore
+import FediqoPersistence
 import Foundation
 import Testing
 @testable import FediqoUI
@@ -168,6 +169,48 @@ struct CarryTests {
         carry.dismiss()
         #expect(ShellCarry.Trouble(PackageFault.noRoom(needed: 5, free: 1)) == .noRoom(needed: 5, free: 1))
         #expect(ShellCarry.Trouble(PackageRefusal.cutShort) == .package(.cutShort))
+        #expect(ShellCarry.Trouble(PackageFault.indexIsNewer) == .indexIsNewer)
+        #expect(ShellCarry.Trouble(CocoaError(.fileWriteOutOfSpace)) == .other(CocoaError(.fileWriteOutOfSpace).localizedDescription))
+    }
+
+    @Test("A read back under way cannot be dismissed, adopts what it landed, and lets the copies on disk go on")
+    func readBackRunsToItsEnd() async throws {
+        let carrier = FakeCarrier()
+        let carry = ShellCarry(work: SourceWork())
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("fediqo-hold-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let disk = DiskCopies(try MediaCache(directory: folder))
+        carry.picked(URL(fileURLWithPath: "/tmp/x.fediqo"))
+        carry.open(password: "open sesame", with: carrier)
+        await settle(carry) { $0 != .weighing }
+        var adopted = 0
+        carry.confirmReadBack(with: carrier, pictures: disk) { adopted += 1 }
+        #expect(carry.isUp)
+        carry.dismiss()
+        if case .reading = carry.step {} else { Issue.record("dismissed while reading") }
+        await settle(carry) { if case .done = $0 { true } else { false } }
+        #expect(adopted == 1)
+        // The queue runs again after: a write asked now lands.
+        disk.store(Data("x".utf8), host: "a.example", url: URL(string: "https://a.example/p.jpg")!)
+        await disk.settled()
+        #expect(await disk.bytes(hosts: ["a.example"])["a.example"] == 1)
+        carry.dismiss()
+        #expect(carry.step == nil)
+    }
+
+    @Test("Holding the copies on disk keeps every touch until they are released")
+    func holdAndRelease() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("fediqo-hold-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let cache = try MediaCache(directory: folder)
+        let disk = DiskCopies(cache)
+        await disk.hold()
+        disk.store(Data("x".utf8), host: "a.example", url: URL(string: "https://a.example/p.jpg")!)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(cache.bytes(host: "a.example") == 0, "nothing lands while held")
+        disk.release()
+        await disk.settled()
+        #expect(cache.bytes(host: "a.example") == 1)
     }
 
     @Test("Dismissing while a step runs stops it, and a late answer does not land")
@@ -201,6 +244,7 @@ struct CarryTests {
         let held = ShellQuestion.readBack(Self.summary, held: true, language: .english)
         #expect(held.warns && held.choices.map(\.role) == [.destructive])
         #expect(held.help?.contains("replaced") == true && held.help?.contains("merged") == true)
+        #expect(held.help?.contains("cannot be stopped") == true && fresh.help?.contains("cannot be stopped") == true)
         #expect(held.cancel != nil)
 
         let one = PackageSummary(
@@ -215,7 +259,7 @@ struct CarryTests {
     func refusalsAreEachTheirOwn() {
         let refusals: [ShellCarry.Trouble] = [
             .package(.notOurs), .package(.newer), .package(.wrongPassword), .package(.altered), .package(.cutShort),
-            .noRoom(needed: 2_000_000, free: 1_000), .emptyPassword, .shortPassword, .other("the disk said no"),
+            .noRoom(needed: 2_000_000, free: 1_000), .emptyPassword, .shortPassword, .indexIsNewer, .other("the disk said no"),
         ]
         for language in [DummyLanguage.english, .taiwanese] {
             let said = refusals.map { ShellQuestion.carryRefused($0, language: language) }
@@ -268,7 +312,7 @@ struct CarryTests {
             "carry.password.set.title", "carry.password.set.line", "carry.password.set.help",
             "carry.password.open.title", "carry.password.open.line", "carry.password.open.help",
             "carry.password.field", "carry.password.again", "carry.password.set.go", "carry.password.open.go",
-        ] + ["notOurs", "newer", "wrongPassword", "altered", "cutShort", "noRoom", "empty", "short", "other"]
+        ] + ["notOurs", "newer", "wrongPassword", "altered", "cutShort", "noRoom", "empty", "short", "indexNewer", "other"]
             .flatMap { ["carry.refused.\($0).title", "carry.refused.\($0).line"] }
         let resources = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()

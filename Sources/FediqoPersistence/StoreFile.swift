@@ -137,7 +137,7 @@ public struct StoreFile: Sendable {
 
     private static let indexName = "index.sqlite"
     /// What SQLite may leave beside the index: moved with it, and weighed with it.
-    private static let sidecars = ["-journal", "-wal", "-shm"]
+    static let sidecars = ["-journal", "-wal", "-shm"]
 
     /// What the index weighs on disk right now: the file and any journal SQLite left beside it
     /// (#194). **The one measure of the store's size**: Usage's figure is this, and a limit on

@@ -115,7 +115,9 @@ struct CarryFlow: ViewModifier {
         case .choosing:
             session.carry.chose(pictures: id == ShellQuestion.withPictures)
         case .previewing:
-            session.carry.confirmReadBack(with: carrier) { await session.adoptReadBack(prefs: prefs) }
+            session.carry.confirmReadBack(with: carrier, pictures: session.pictures.disk) {
+                await session.adoptReadBack(prefs: prefs)
+            }
         default:
             session.carry.dismiss()
         }

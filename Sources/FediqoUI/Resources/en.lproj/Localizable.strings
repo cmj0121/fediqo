@@ -943,8 +943,8 @@
 "carry.read.ask.title" = "Read back %d posts?";
 "carry.read.ask.title.one" = "Read back one post?";
 "carry.read.ask.line" = "%@ · taken away %@";
-"carry.read.ask.help" = "From %@, taken away %@ on %@ (Fediqo %@).";
-"carry.read.ask.help.held" = "%@ What this device holds now is replaced by it: nothing is merged, and nothing of what is here is kept.";
+"carry.read.ask.help" = "From %@, taken away %@ on %@ (Fediqo %@). Once it starts it runs to the end and cannot be stopped.";
+"carry.read.ask.help.held" = "%@ What this device holds now is replaced by it: nothing is merged, and nothing of what is here is kept. Once it starts it runs to the end and cannot be stopped.";
 "carry.read.go" = "Read back";
 "carry.read.replace" = "Replace";
 "carry.refused.notOurs.title" = "Not a Fediqo take-away";
@@ -963,6 +963,8 @@
 "carry.refused.empty.line" = "A file locked by nothing is nothing; set one, and keep it.";
 "carry.refused.short.title" = "A longer password is needed";
 "carry.refused.short.line" = "At least %d characters, so the file is not guessed open.";
+"carry.refused.indexNewer.title" = "A newer Fediqo wrote this device's index";
+"carry.refused.indexNewer.line" = "Reading back would write over it; open the newer Fediqo first. Nothing changed.";
 "carry.refused.other.title" = "It could not be finished";
 "carry.refused.other.line" = "Nothing was left half done: %@";
 "carry.done.taken.title" = "Taken away";

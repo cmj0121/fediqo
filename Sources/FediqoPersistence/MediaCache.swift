@@ -108,10 +108,12 @@ public struct MediaCache: MediaCopies {
     }
 
     /// Every copy replaced by what is under `staged`, a directory in this cache's own shape, by
-    /// two renames: what was here goes aside first and is removed once the new is in place, so a
-    /// failure between leaves either the old copies or the new, never a mix.
-    func adopt(_ staged: URL) throws {
+    /// two renames: what was here goes aside first, and is handed back so the caller can put it
+    /// back (`restore`) if a later step refuses, or let it go (`settle`) once every step held.
+    /// Nothing between leaves a mix. The parent is made first: Caches may have been purged.
+    func adopt(_ staged: URL) throws -> URL? {
         let manager = FileManager.default
+        try manager.createDirectory(at: directory.deletingLastPathComponent(), withIntermediateDirectories: true)
         let aside = directory.deletingLastPathComponent()
             .appendingPathComponent("media-aside-\(UUID().uuidString)", isDirectory: true)
         let had = manager.fileExists(atPath: directory.path)
@@ -123,7 +125,20 @@ public struct MediaCache: MediaCopies {
             throw error
         }
         try makeExcludedFromBackup(directory)
-        if had { try? manager.removeItem(at: aside) }
+        return had ? aside : nil
+    }
+
+    /// What `adopt` put aside, back in place of what it moved in.
+    func restore(_ aside: URL?) {
+        guard let aside else { return }
+        try? FileManager.default.removeItem(at: directory)
+        try? FileManager.default.moveItem(at: aside, to: directory)
+    }
+
+    /// What `adopt` put aside, let go.
+    func settle(_ aside: URL?) {
+        guard let aside else { return }
+        try? FileManager.default.removeItem(at: aside)
     }
 
     /// Every host's folder under `directory`.

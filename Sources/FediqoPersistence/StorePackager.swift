@@ -13,9 +13,11 @@ import Foundation
 /// **Read back is staged, then committed.** Every entry is decrypted into
 /// `incoming-<uuid>/` under the store's own folder with its tags checked and the footer seen,
 /// and the staged index is opened as a store — a `Newer` there is `.newer` — before anything on
-/// this device changes. Only then: the index, the picture copies, the defaults, and the Keychain
-/// last, with what it held read first and put back if a save refuses. A failure before the
-/// commit removes the staging and leaves the store byte for byte as it was.
+/// this device changes. Only then the commit, each step undone if a later one refuses: the
+/// Keychain first, with what it held read and put back; the index, with what it held read and
+/// written back; the picture copies, put aside and put back; the defaults, read and set back;
+/// and the store in memory last, which nothing follows. A failure anywhere leaves the device as
+/// it was, and the staging goes.
 ///
 /// **Nothing here reaches off this device**, and the shell records each call under "this
 /// device" in the run's list.
@@ -38,6 +40,9 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     private let appVersion: String
     private let freeSpace: @Sendable (URL) -> Int
     private let rounds: UInt32
+    /// The index on disk was written by a newer build and this run left it alone: a read back
+    /// must not write over it.
+    private let storeIsNewer: Bool
 
     /// `directory` is where the index lives; `file` is the index as this run opened it, or nil
     /// where this run has none to write (then the staged index is moved into place instead).
@@ -45,12 +50,13 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     public init(
         directory: URL, file: StoreFile?, store: ItemStore, media: MediaCache?,
         tokens: any MastodonTokenStore, credentials: any ForumCredentialStore,
-        defaults: UserDefaults, device: String, appVersion: String,
+        defaults: UserDefaults, device: String, appVersion: String, storeIsNewer: Bool = false,
         freeSpace: @escaping @Sendable (URL) -> Int = StorePackager.volumeFree,
         rounds: UInt32 = PackageFormat.rounds
     ) {
         self.directory = directory
         self.file = file
+        self.storeIsNewer = storeIsNewer
         self.store = store
         self.media = media
         self.tokens = tokens
@@ -95,11 +101,18 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         let index = file?.bytesOnDisk() ?? StoreFile.bytesOnDisk(indexAt: directory.appendingPathComponent(Self.indexName).path)
         let settings = (try? settingsPlist().count) ?? 0
         let pictures = media?.totalBytes() ?? 0
-        let held = await !store.sources().isEmpty
+        let held = await holdsStore()
         return PackageWeight(
             withoutPictures: index + settings, withPictures: index + settings + pictures,
             free: freeSpace(directory), holdsStore: held
         )
+    }
+
+    /// Whether this device holds a store a read back would replace: a source in memory, or an
+    /// index on disk this run could not open — a newer build's, or one it left as found.
+    private func holdsStore() async -> Bool {
+        if await !store.sources().isEmpty { return true }
+        return file == nil && FileManager.default.fileExists(atPath: directory.appendingPathComponent(Self.indexName).path)
     }
 
     // MARK: - Taking away
@@ -282,10 +295,18 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         return try JSONEncoder().encode(held)
     }
 
-    /// Files `fresh` in the Keychain in place of whatever is there. Where a save refuses, what
-    /// was there is put back first, so the Keychain is as it was or as the package says.
-    private func refile(_ fresh: Secrets) throws {
-        let previous = try secrets(sources: fresh.apps.map(\.host))
+    /// Files `fresh` in the Keychain in place of whatever is there — or, where `onlyTheirs`, in
+    /// place of what is there for the package's hosts and nothing else (#6). Where a save
+    /// refuses, what was there is put back, so the Keychain is as it was or as the package says.
+    /// Hands back what was there, for a later step that refuses to put back the same way.
+    private func refile(_ fresh: Secrets, onlyTheirs: Bool) throws -> Secrets {
+        var previous = try secrets(sources: fresh.apps.map(\.host))
+        if onlyTheirs {
+            let hosts = Set(fresh.mastodon.map(\.host) + fresh.apps.map(\.host) + fresh.forums.map(\.host))
+            previous.mastodon.removeAll { !hosts.contains($0.host) }
+            previous.apps.removeAll { !hosts.contains($0.host) }
+            previous.forums.removeAll { !hosts.contains($0.host) }
+        }
         do {
             try clearSecrets(previous)
             try clearSecrets(fresh)
@@ -295,6 +316,13 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
             try? fileSecrets(previous)
             throw error
         }
+        return previous
+    }
+
+    /// `fresh` taken out and `previous` put back: the Keychain as it was before `refile`.
+    private func unfile(_ fresh: Secrets, previous: Secrets) {
+        try? clearSecrets(fresh)
+        try? fileSecrets(previous)
     }
 
     private func clearSecrets(_ secrets: Secrets) throws {
@@ -383,10 +411,14 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     ) async throws {
         let reader = try PackageReader(at: url)
         let summary = try reader.open(with: key)
-        let held = await !store.sources().isEmpty
+        if storeIsNewer, summary.contents == .whole { throw PackageFault.indexIsNewer }
+        let held = await holdsStore()
         if held, !replacing, summary.contents == .whole { throw PackageFault.alreadyHeld }
+        // Twice the package: the staging, and what is moved into place beside what was there
+        // until the last step holds.
         let free = freeSpace(directory)
-        if free < reader.prelude.bytes { throw PackageFault.noRoom(needed: reader.prelude.bytes, free: free) }
+        let needed = reader.prelude.bytes * 2
+        if free < needed { throw PackageFault.noRoom(needed: needed, free: free) }
 
         let manager = FileManager.default
         let incoming = directory.appendingPathComponent("incoming-\(UUID().uuidString)", isDirectory: true)
@@ -461,35 +493,103 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         try await commit(staged, contents: contents, summary: summary)
     }
 
-    /// The commit, in the order that leaves the least behind if a step refuses: the index, the
-    /// picture copies, the defaults, the Keychain, and then the store in memory.
+    /// The commit, whole or not at all: every step reads what it replaces first, and a step that
+    /// refuses undoes every step before it, newest first. The Keychain goes first, being the
+    /// step most likely to refuse; the store in memory goes last, and nothing follows it.
     private func commit(
         _ staged: Staged, contents: (sources: [Source], notes: [Note], said: [SourceProfile])?, summary: PackageSummary
     ) async throws {
-        if let contents {
-            if let file {
-                try await file.save(sources: contents.sources, notes: contents.notes, said: contents.said)
-            } else if let index = staged.index {
-                let target = directory.appendingPathComponent(Self.indexName)
-                try? FileManager.default.removeItem(at: target)
-                try FileManager.default.moveItem(at: index, to: target)
+        var undo: [() async -> Void] = []
+        func unwind() async {
+            for step in undo.reversed() { await step() }
+        }
+        do {
+            if let secrets = staged.secrets {
+                let previous = try refile(secrets, onlyTheirs: contents == nil)
+                undo.append { unfile(secrets, previous: previous) }
             }
-            // The copies kept here were for posts that are no longer here: replaced by the
-            // package's where it carried any, and dropped where it did not.
+            guard let contents else { return }
+            undo.append(try await commitIndex(contents, staged: staged))
             if let media {
-                if let fresh = staged.media { try media.adopt(fresh) } else { media.removeAll() }
-            }
-            if let settings = staged.settings {
-                for key in defaults.dictionaryRepresentation().keys where key.hasPrefix(Self.defaultsPrefix) {
-                    defaults.removeObject(forKey: key)
+                // The copies kept here were for posts that are no longer here: replaced by the
+                // package's where it carried any, and dropped where it did not.
+                if let fresh = staged.media {
+                    let aside = try media.adopt(fresh)
+                    undo.append { media.restore(aside) }
+                    defer { media.settle(aside) }
+                    try await commitDefaults(staged, into: &undo)
+                } else {
+                    let aside = try media.adopt(Self.emptyFolder(beside: directory))
+                    undo.append { media.restore(aside) }
+                    defer { media.settle(aside) }
+                    try await commitDefaults(staged, into: &undo)
                 }
-                for (key, value) in settings { defaults.set(value, forKey: key) }
+            } else {
+                try await commitDefaults(staged, into: &undo)
             }
-        }
-        if let secrets = staged.secrets { try refile(secrets) }
-        if let contents {
             await store.replace(sources: contents.sources, notes: contents.notes, said: contents.said)
+        } catch {
+            await unwind()
+            throw error
         }
+    }
+
+    /// The index replaced, and how to put it back: through the open file where this run has one,
+    /// which reads what it held first; by a move where it has none, with what was there — the
+    /// index and what SQLite keeps beside it — put aside first.
+    private func commitIndex(
+        _ contents: (sources: [Source], notes: [Note], said: [SourceProfile]), staged: Staged
+    ) async throws -> () async -> Void {
+        if let file {
+            let previous = try file.load()
+            try await file.save(sources: contents.sources, notes: contents.notes, said: contents.said)
+            return { try? await file.save(sources: previous.sources, notes: previous.notes, said: previous.said) }
+        }
+        guard let index = staged.index else { return {} }
+        let manager = FileManager.default
+        let target = directory.appendingPathComponent(Self.indexName)
+        let aside = directory.appendingPathComponent("incoming-aside-\(UUID().uuidString)", isDirectory: true)
+        try manager.createDirectory(at: aside, withIntermediateDirectories: true)
+        var moved: [(from: URL, to: URL)] = []
+        for suffix in [""] + StoreFile.sidecars {
+            let file = directory.appendingPathComponent(Self.indexName + suffix)
+            guard manager.fileExists(atPath: file.path) else { continue }
+            let kept = aside.appendingPathComponent(Self.indexName + suffix)
+            try manager.moveItem(at: file, to: kept)
+            moved.append((kept, file))
+        }
+        do {
+            try manager.moveItem(at: index, to: target)
+        } catch {
+            for (kept, file) in moved { try? manager.moveItem(at: kept, to: file) }
+            throw error
+        }
+        return {
+            try? manager.removeItem(at: target)
+            for (kept, file) in moved { try? manager.moveItem(at: kept, to: file) }
+            try? manager.removeItem(at: aside)
+        }
+    }
+
+    /// The defaults replaced, with what they held read first and how to set it back.
+    private func commitDefaults(_ staged: Staged, into undo: inout [() async -> Void]) async throws {
+        guard let settings = staged.settings else { return }
+        let previous = defaults.dictionaryRepresentation().filter { $0.key.hasPrefix(Self.defaultsPrefix) }
+        func set(_ values: [String: Any]) {
+            for key in defaults.dictionaryRepresentation().keys where key.hasPrefix(Self.defaultsPrefix) {
+                defaults.removeObject(forKey: key)
+            }
+            for (key, value) in values { defaults.set(value, forKey: key) }
+        }
+        set(settings)
+        undo.append { set(previous) }
+    }
+
+    /// An empty folder to adopt as the copies where the package carried none.
+    private static func emptyFolder(beside directory: URL) throws -> URL {
+        let folder = directory.appendingPathComponent("incoming-empty-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder
     }
 
     private static func write(_ entry: PackageReader.Entry, to url: URL) async throws {
@@ -519,9 +619,10 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         part.count == 64 && part.allSatisfy { $0.isHexDigit && ($0.isNumber || $0.isLowercase) }
     }
 
-    /// A host as a profile entry may be named: lower-case letters, digits, dots and hyphens.
+    /// A host as a profile entry may be named: lower-case letters, digits, dots and hyphens,
+    /// and a port or brackets where `Host.parse` let one through.
     private static func isHostName(_ name: String) -> Bool {
         !name.isEmpty && name != "." && name != ".." && !name.contains("/")
-            && name.allSatisfy { ($0.isLetter && $0.isLowercase) || $0.isNumber || $0 == "." || $0 == "-" }
+            && name.allSatisfy { ($0.isLetter && $0.isLowercase) || $0.isNumber || ".-:[]".contains($0) }
     }
 }

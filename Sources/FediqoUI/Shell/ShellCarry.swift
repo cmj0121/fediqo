@@ -50,6 +50,7 @@ final class ShellCarry {
         case noRoom(needed: Int, free: Int)
         case emptyPassword
         case shortPassword
+        case indexIsNewer
         /// Something else refused — a disk, the Keychain — said as itself.
         case other(String)
 
@@ -59,7 +60,8 @@ final class ShellCarry {
             case PackageFault.noRoom(let needed, let free): self = .noRoom(needed: needed, free: free)
             case PackageFault.emptyPassword: self = .emptyPassword
             case PackageFault.shortPassword: self = .shortPassword
-            default: self = .other(String(describing: error))
+            case PackageFault.indexIsNewer: self = .indexIsNewer
+            default: self = .other(error.localizedDescription)
             }
         }
     }
@@ -227,25 +229,47 @@ final class ShellCarry {
     }
 
     /// The person said yes: the package is read back, and `adopt` is run once it is, on the main
-    /// actor, so the shell reads what is now here.
-    func confirmReadBack(with carrier: any StoreCarrier, adopt: @escaping @MainActor () async -> Void) {
+    /// actor, so the shell reads what is now here. The copies on disk are held still under
+    /// `pictures` while the package's are moved in, and let go whatever the outcome.
+    ///
+    /// **Not stoppable, and the question said so.** A read back that has begun runs to its end
+    /// or its refusal: `dismiss` does nothing while it reads, and what it lands is adopted even
+    /// if the flow was asked to stop, so the shell never draws a store the disk no longer holds.
+    func confirmReadBack(
+        with carrier: any StoreCarrier, pictures: DiskCopies? = nil, adopt: @escaping @MainActor () async -> Void
+    ) {
         guard case .previewing(let preview) = step else { return }
         let password = self.password
         step = .reading(PackageProgress(done: 0, total: preview.summary.bytes))
         work.note(host: SourceWork.thisDevice, for: .readBack)
-        run { [weak self] in
-            try await carrier.readBack(preview.url, key: .password(password), replacing: preview.held) { progress in
-                Task { @MainActor in self?.advance(.reading(progress)) }
+        task = Task { @MainActor [weak self] in
+            await pictures?.hold()
+            let outcome: Result<Void, any Error>
+            do {
+                try await carrier.readBack(preview.url, key: .password(password), replacing: preview.held) { progress in
+                    Task { @MainActor in self?.advance(.reading(progress)) }
+                }
+                outcome = .success(())
+            } catch {
+                outcome = .failure(error)
             }
-            await adopt()
-            return .done(.readBack(preview.summary))
+            pictures?.release()
+            switch outcome {
+            case .success:
+                await adopt()
+                self?.step = .done(.readBack(preview.summary))
+            case .failure(let error):
+                self?.step = .refused(Trouble(error))
+            }
         }
     }
 
     // MARK: - Every way out
 
     /// Whatever is up comes down and whatever is running stops; nothing half done is kept.
+    /// Except a read back under way, which runs to its end — see `confirmReadBack`.
     func dismiss() {
+        if case .reading = step { return }
         task?.cancel()
         task = nil
         password = ""

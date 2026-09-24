@@ -920,8 +920,8 @@
 "carry.take.without" = "不含圖片";
 "carry.read.ask.title" = "要讀回 %d 則貼文嗎？";
 "carry.read.ask.line" = "%@ · 帶走於 %@";
-"carry.read.ask.help" = "來自 %@，於 %@ 從「%@」帶走（Fediqo %@）。";
-"carry.read.ask.help.held" = "%@ 這部裝置目前持有的內容會被它取代：不會合併，這裡的內容也不會保留。";
+"carry.read.ask.help" = "來自 %@，於 %@ 從「%@」帶走（Fediqo %@）。一旦開始就會跑到底，中途無法停止。";
+"carry.read.ask.help.held" = "%@ 這部裝置目前持有的內容會被它取代：不會合併，這裡的內容也不會保留。一旦開始就會跑到底，中途無法停止。";
 "carry.read.go" = "讀回";
 "carry.read.replace" = "取代";
 "carry.refused.notOurs.title" = "這不是 Fediqo 帶走的檔案";
@@ -940,6 +940,8 @@
 "carry.refused.empty.line" = "沒有上鎖的檔案什麼都不是；請設定一個並記住它。";
 "carry.refused.short.title" = "密碼需要更長";
 "carry.refused.short.line" = "至少 %d 個字元，檔案才不會被猜開。";
+"carry.refused.indexNewer.title" = "這部裝置的索引由較新的 Fediqo 寫入";
+"carry.refused.indexNewer.line" = "讀回會覆寫它；請先用較新的 Fediqo 開啟。什麼都沒有改變。";
 "carry.refused.other.title" = "沒能完成";
 "carry.refused.other.line" = "沒有任何半途的改動：%@";
 "carry.done.taken.title" = "已帶走";

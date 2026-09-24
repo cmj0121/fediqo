@@ -152,14 +152,18 @@ struct ReadBackRefusalTests {
         #expect(try held.fingerprint() == before)
     }
 
-    @Test("A read back that fails midway — the Keychain refusing — leaves what signs in as it was")
+    @Test("A read back that fails midway — the Keychain refusing — leaves what signs in, the index, the copies and the settings as they were")
     func keychainRefusesMidway() async throws {
         let from = try await Self.populated()
-        let onto = try await Device()
+        let onto = try await Self.populated()
         let url = package()
         defer { from.remove(); onto.remove(); try? FileManager.default.removeItem(at: url) }
-        try await from.packager().takeAway(to: url, key: .password("password"), pictures: false) { _ in }
+        try await from.packager().takeAway(to: url, key: .password("password"), pictures: true) { _ in }
         try onto.tokens.save(MastodonToken(host: "kept.example", accessToken: "k", clientID: "c", clientSecret: "s"))
+        try onto.tokens.forget(host: Self.mastodon.host)
+        onto.defaults.set("en", forKey: "fediqo.dummy.language")
+        let before = try onto.fingerprint()
+        let beforeStore = await onto.store.snapshot()
         let refusing = RefusingTokens(inner: onto.tokens)
         let packager = StorePackager(
             directory: onto.directory, file: onto.file, store: onto.store, media: onto.media, tokens: refusing,
@@ -167,12 +171,102 @@ struct ReadBackRefusalTests {
             freeSpace: { _ in .max }, rounds: 1000
         )
         await #expect(throws: ForumCredentialError.keychain(-1)) {
-            try await packager.readBack(url, key: .password("password"), replacing: false) { _ in }
+            try await packager.readBack(url, key: .password("password"), replacing: true) { _ in }
         }
         #expect(try onto.tokens.token(host: "kept.example")?.accessToken == "k", "what was there is put back")
         #expect(try onto.tokens.token(host: Self.mastodon.host) == nil)
+        #expect(try onto.fingerprint() == before, "index, copies and settings are as they were")
+        let after = await onto.store.snapshot()
+        #expect(after.sources == beforeStore.sources && after.notes == beforeStore.notes)
+        #expect(try StoreFile(at: onto.directory).load().notes.count == beforeStore.notes.count)
     }
 
+    @Test("A disk refusing after the Keychain accepted puts the sign-ins back, and touches nothing else")
+    func diskRefusesAfterKeychain() async throws {
+        let from = try await Self.populated()
+        let onto = try await Device(noFile: true)
+        let url = package()
+        let manager = FileManager.default
+        defer {
+            try? manager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: onto.directory.path)
+            from.remove(); onto.remove(); try? manager.removeItem(at: url)
+        }
+        try await from.packager().takeAway(to: url, key: .password("password"), pictures: false) { _ in }
+        try onto.tokens.save(MastodonToken(host: "kept.example", accessToken: "k", clientID: "c", clientSecret: "s"))
+        onto.defaults.set("en", forKey: "fediqo.dummy.language")
+        // Staged first, then the folder refuses every move: the index cannot land.
+        let gate = GatedPackager(device: onto)
+        await #expect(throws: (any Error).self) {
+            try await gate.readBack(url, key: .password("password"))
+        }
+        #expect(try onto.tokens.token(host: "kept.example")?.accessToken == "k")
+        #expect(try onto.tokens.token(host: Self.mastodon.host) == nil, "the package's sign-in was taken out again")
+        #expect(onto.defaults.string(forKey: "fediqo.dummy.language") == "en")
+        #expect(!manager.fileExists(atPath: onto.directory.appendingPathComponent("index.sqlite").path))
+    }
+
+    @Test("An index this run left alone as a newer build's is not written over, and says so")
+    func indexIsNewer() async throws {
+        let from = try await Self.populated()
+        let onto = try await Device(noFile: true)
+        let url = package()
+        defer { from.remove(); onto.remove(); try? FileManager.default.removeItem(at: url) }
+        try await from.packager().takeAway(to: url, key: .password("password"), pictures: false) { _ in }
+        try FileManager.default.createDirectory(at: onto.directory, withIntermediateDirectories: true)
+        try Data("a newer build's index".utf8).write(to: onto.directory.appendingPathComponent("index.sqlite"))
+        let before = try onto.fingerprint()
+        let packager = StorePackager(
+            directory: onto.directory, file: nil, store: onto.store, media: onto.media, tokens: onto.tokens,
+            credentials: onto.credentials, defaults: onto.defaults, device: "a test", appVersion: "0.7.0",
+            storeIsNewer: true, freeSpace: { _ in .max }, rounds: 1000
+        )
+        #expect(try await packager.weigh().holdsStore, "an index on disk this run could not open is a store")
+        await #expect(throws: PackageFault.indexIsNewer) {
+            try await packager.readBack(url, key: .password("password"), replacing: true) { _ in }
+        }
+        #expect(try onto.fingerprint() == before)
+    }
+
+}
+
+/// A device whose folder stops taking files between the staging and the commit: the staging
+/// lands, the Keychain accepts, and then the index cannot be moved in.
+private struct GatedPackager {
+    let device: PackagerFixture.PackagerDevice
+
+    func readBack(_ url: URL, key: PackageKey) async throws {
+        let path = device.directory.path
+        let watching = WatchingTokens(inner: device.tokens) {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: path)
+        }
+        let packager = StorePackager(
+            directory: device.directory, file: nil, store: device.store, media: device.media, tokens: watching,
+            credentials: device.credentials, defaults: device.defaults, device: "a test", appVersion: "0.7.0",
+            freeSpace: { _ in .max }, rounds: 1000
+        )
+        try await packager.readBack(url, key: key, replacing: false) { _ in }
+    }
+}
+
+/// A Keychain that runs `onSave` the first time the package's token is filed.
+private final class WatchingTokens: MastodonTokenStore, @unchecked Sendable {
+    let inner: MemoryMastodonTokens
+    let onSave: @Sendable () -> Void
+    init(inner: MemoryMastodonTokens, onSave: @escaping @Sendable () -> Void) {
+        self.inner = inner
+        self.onSave = onSave
+    }
+    func token(host: String) throws -> MastodonToken? { try inner.token(host: host) }
+    func save(_ token: MastodonToken) throws {
+        try inner.save(token)
+        onSave()
+    }
+    func forget(host: String) throws { try inner.forget(host: host) }
+    func forget(_ token: MastodonToken) throws -> Bool { try inner.forget(token) }
+    func grants() throws -> [String: MastodonGrant] { try inner.grants() }
+    func app(host: String) throws -> MastodonApp? { try inner.app(host: host) }
+    func save(_ app: MastodonApp) throws { try inner.save(app) }
+    func forgetApp(host: String) throws { try inner.forgetApp(host: host) }
 }
 
 /// A Keychain that refuses to file the package's token, as a locked device's might, and takes

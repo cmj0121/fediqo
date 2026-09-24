@@ -50,7 +50,8 @@ final class Launch {
             directory: StoreFile.applicationSupportDirectory, file: opened.file, store: store,
             media: media, tokens: KeychainMastodonTokens(), credentials: KeychainCredentials(),
             defaults: .standard, device: Self.deviceName,
-            appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+            appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
+            storeIsNewer: opened.storeIsNewer
         )
         // Before anything is asked: every act from here on belongs to one of these, or to a host
         // the person names to add (#220).

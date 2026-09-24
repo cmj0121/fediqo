@@ -82,6 +82,9 @@ public enum PackageFault: Error, Sendable, Equatable {
     case noRoom(needed: Int, free: Int)
     /// This device already holds a store, and the person has not yet said what becomes of it.
     case alreadyHeld
+    /// The index on this device was written by a newer build and this run left it as found; a
+    /// read back would write over what that build holds, so it is refused.
+    case indexIsNewer
     /// The package's store could not be read back as a store, though every tag held.
     case unreadableStore
 }

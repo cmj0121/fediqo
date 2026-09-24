@@ -110,7 +110,8 @@ struct StorePackagerTests {
         let url = package()
         defer { from.remove(); onto.remove(); try? FileManager.default.removeItem(at: url) }
         try await from.packager().takeAway(to: url, key: .password("password"), pictures: true) { _ in }
-        let needed = try PackageReader(at: url).prelude.bytes
+        // Twice the package: the staging, and what is moved in beside what was there.
+        let needed = try PackageReader(at: url).prelude.bytes * 2
         let before = try onto.fingerprint()
         await #expect(throws: PackageFault.noRoom(needed: needed, free: 10)) {
             try await onto.packager(free: 10).readBack(url, key: .password("password"), replacing: false) { _ in }
