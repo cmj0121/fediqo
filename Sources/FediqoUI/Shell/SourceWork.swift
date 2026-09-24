@@ -67,6 +67,9 @@ final class SourceWork {
         /// The check a forum's sign-in shows to prove a person is there — a frame of another
         /// site's, let in only while the person signs in, and listed under that forum (#220).
         case personCheck
+        /// What a forum's page pulled in from a host the person added for that forum (#226),
+        /// listed under that forum.
+        case pagePart
 
         var titleKey: String { "work.purpose.\(rawValue)" }
 
@@ -136,6 +139,9 @@ final class SourceWork {
         /// The windows whose add sheet is on its browse step right now (#220): while any is, what
         /// `Allowance` lets through `.adding` may be asked.
         var adding: Set<ObjectIdentifier> = []
+        /// What reaches beyond a source now (#226): the person's list, as `AllowanceBook` hands it
+        /// in; what the app starts with until it does.
+        var allowances: [Allowance] = Allowance.standing
     }
 
     @ObservationIgnored private nonisolated let held = OSAllocatedUnfairLock(initialState: Held())
@@ -207,6 +213,27 @@ final class SourceWork {
         }
     }
 
+    /// What reaches beyond a source from now on (#226). The gate reads it on the next act; a
+    /// forum's browser is told at once (`allowancesChanged`), so what a page may pull in and where
+    /// it may go change without a relaunch.
+    func allow(_ list: [Allowance]) {
+        held.withLock { $0.allowances = list }
+        NotificationCenter.default.post(name: Self.allowancesChanged, object: self)
+    }
+
+    /// Posted, with this object, whenever `allow` changes the list.
+    static let allowancesChanged = Notification.Name("FediqoAllowancesChanged")
+
+    /// What reaches beyond a source this instant.
+    nonisolated var allowances: [Allowance] {
+        held.withLock { $0.allowances }
+    }
+
+    /// Whether the entry `id` is on the list now.
+    nonisolated func allows(_ id: Allowance.ID) -> Bool {
+        allowances.contains { $0.id == id }
+    }
+
     /// Whether the add sheet of the window `key` names is on its browse step (#220).
     nonisolated func adding(_ on: Bool, by key: ObjectIdentifier) {
         held.withLock { held in
@@ -244,17 +271,25 @@ final class SourceWork {
         }
     }
 
+    ///
+    /// **A host the person added for a source** (#226) is named where that source pointed to it:
+    /// the act is the source's either way, and the line says which entry it went through.
     nonisolated func admission(
-        reached: String, source: String?, for purpose: Purpose? = nil,
-        allowing list: [Allowance] = Allowance.standing
+        reached: String, source: String?, for purpose: Purpose? = nil
     ) -> Admission? {
         let owner = Self.fold(SourceAct.attributed(reached: reached, pointedBy: source))
-        let (ours, adding) = held.withLock { held -> (Bool, Bool) in
+        let (ours, adding, list) = held.withLock { held -> (Bool, Bool, [Allowance]) in
             let adding = !held.adding.isEmpty
-            guard let added = held.added else { return (true, adding) }
-            return (!owner.isEmpty && (added.contains(owner) || held.named.contains(owner)), adding)
+            guard let added = held.added else { return (true, adding, held.allowances) }
+            let ours = !owner.isEmpty && (added.contains(owner) || held.named.contains(owner))
+            return (ours, adding, held.allowances)
         }
-        if ours { return .source }
+        if ours {
+            guard source != nil, let there = URL(string: "https://\(reached.lowercased())/"),
+                  let own = list.first(where: { $0.source == owner && $0.allows(there) })
+            else { return .source }
+            return .allowed(own.id)
+        }
         // A request an entry names by its purpose, to one of its hosts, asked of nobody's pointing
         // — and only while the entry applies: `.adding` while an add sheet is browsing.
         guard let purpose, source == nil, let url = URL(string: "https://\(owner)/") else { return nil }
@@ -538,12 +573,24 @@ struct SourceAct: Identifiable, Equatable, Sendable {
         L10n.t(purpose.titleKey, language: language)
     }
 
-    /// The row as VoiceOver reads it: the source, what for, and when — one sentence, in that
-    /// order.
+    /// Which entry let it through, where one did (#226) — the way a hidden post names its rule.
+    func allowedText(language: DummyLanguage? = nil) -> String? {
+        allowedBy.map { String(format: L10n.t("activity.row.allowed", language: language), $0.name(language: language)) }
+    }
+
+    /// The row as VoiceOver reads it: the source, what for, and when — and which entry let it
+    /// through, where one did — one sentence, in that order.
     func spoken(language: DummyLanguage? = nil) -> String {
-        String(
-            format: L10n.t("activity.row.spoken", language: language),
-            source, purposeText(language: language), time(language: language)
+        guard let allowedBy else {
+            return String(
+                format: L10n.t("activity.row.spoken", language: language),
+                source, purposeText(language: language), time(language: language)
+            )
+        }
+        return String(
+            format: L10n.t("activity.row.spoken.allowed", language: language),
+            source, purposeText(language: language), time(language: language),
+            allowedBy.name(language: language)
         )
     }
 }

@@ -99,8 +99,8 @@ struct ActivityPanel: View {
     }
 }
 
-/// One line of the record: the source, then what for and when under it — one element to
-/// VoiceOver, read in that order.
+/// One line of the record: the source, then what for and when under it, and which entry let it
+/// through where one did (#226) — one element to VoiceOver, read in that order.
 struct ActivityLine: View {
     let act: SourceAct
     @Environment(\.colorScheme) private var colorScheme
@@ -118,6 +118,11 @@ struct ActivityLine: View {
             }
             .shellFont(.meta)
             .foregroundStyle(ShellChrome.inkDim(colorScheme))
+            if let allowed = act.allowedText() {
+                Text(allowed)
+                    .shellFont(.meta)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+            }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(act.spoken()))

@@ -12,6 +12,9 @@ final class ShellSession {
         case loading
         case failed
         case empty
+        /// The directory's entry is switched off in Preferences (#226): nothing is asked, and a
+        /// source is added by its name.
+        case off
         case ready([CatalogServer])
     }
 
@@ -941,6 +944,10 @@ final class ShellSession {
     @ObservationIgnored private var fetchingCatalog = false
 
     func loadCatalog() async {
+        guard work.allows(.directory) else {
+            catalog = .off
+            return
+        }
         if case .ready = catalog { return }
         if case .empty = catalog { return }
         guard !fetchingCatalog else { return }

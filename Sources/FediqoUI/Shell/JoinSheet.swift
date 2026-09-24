@@ -864,6 +864,8 @@ struct JoinSheet: View {
                 note { Text(L10n.t("account.catalog.failed")) }
             case .empty:
                 note { Text(L10n.t("account.catalog.empty")) }
+            case .off:
+                note { Text(L10n.t("account.catalog.off")) }
             case .ready(let servers):
                 // **Folded once for the list, not once per row.** `session.isAdded` lowercases and
                 // scans `sources` linearly, so asked inside the `ForEach` it is O(rows x sources)

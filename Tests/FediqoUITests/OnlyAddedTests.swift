@@ -287,7 +287,7 @@ struct OnlyAddedTests {
     @Test("What reaches past a source is one list, and each entry says when it applies")
     func theAllowances() {
         let list = Allowance.standing
-        #expect(Set(list.map(\.id)) == Set(Allowance.ID.allCases))
+        #expect(Set(list.map(\.id)) == Set(Allowance.ID.builtIn))
         #expect(list.first { $0.id == .directory }?.when == .adding)
         #expect(list.first { $0.id == .personCheck }?.when == .signingIn)
         #expect(list.first { $0.id == .signInPage }?.when == .signingIn)

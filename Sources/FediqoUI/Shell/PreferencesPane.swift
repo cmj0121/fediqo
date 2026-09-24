@@ -4,11 +4,12 @@ import SwiftUI
 /// Language, theme, type, and the latest date every timeline stops at (#22) — what a person
 /// chooses. What this device holds is on `UsagePane` (#21).
 ///
-/// **Three tabs, in Usage's shape** (#143, #164): what a person chooses, which Fediqo this is, and
-/// what it is asking of the sources right now. The same pills at the head of the same grouped
+/// **Four tabs, in Usage's shape** (#143, #164, #226): what a person chooses, which Fediqo this
+/// is, what it is asking of the sources right now, and what it may reach beyond them. The same pills at the head of the same grouped
 /// `Form`, and the same key — Tab and ⇧Tab rotate them (`ShellSession.rotatePreferencesTab`) — so
 /// the page is reached and walked on a Mac and on a phone the way Usage already is. The second
-/// tab is `BuildStampSection`, whole, and the third `SourceWorkSection`.
+/// tab is `BuildStampSection`, whole, the third `SourceWorkSection`, and the fourth
+/// `AllowanceSection`.
 struct PreferencesPane: View {
     @Environment(DummyPrefs.self) private var prefs
     @Environment(\.colorScheme) private var colorScheme
@@ -26,6 +27,7 @@ struct PreferencesPane: View {
         case choices
         case build
         case work
+        case reach
 
         var id: Self { self }
 
@@ -34,6 +36,7 @@ struct PreferencesPane: View {
             case .choices: "prefs.tab.choices"
             case .build: "prefs.tab.build"
             case .work: "prefs.tab.work"
+            case .reach: "prefs.tab.reach"
             }
         }
     }
@@ -48,6 +51,7 @@ struct PreferencesPane: View {
             case .build: BuildStampSection(stamp: stamp)
             case .work: SourceWorkSection(work: session?.work ?? .shared)
                 if let session { ActivityEntry(session: session) }
+            case .reach: AllowanceSection(book: .shared, sources: session?.sources.map(\.host) ?? [])
             }
         }
         .formStyle(.grouped)
@@ -118,7 +122,14 @@ struct PreferencesPane: View {
 
     /// The same pills Usage and the timeline use: one selected, the rest a well. Tab rotates
     /// them; they sit in the Form so the grouped chrome is the page's own.
+    ///
+    /// Scrolled sideways where four do not fit — a phone at the largest type — rather than cut.
     private var tabs: some View {
+        ScrollView(.horizontal) { tabRow }
+            .scrollIndicators(.never)
+    }
+
+    private var tabRow: some View {
         HStack(spacing: ShellSpace.tight) {
             ForEach(Purpose.allCases) { tab in
                 let selected = tab == purpose

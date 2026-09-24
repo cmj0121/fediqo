@@ -92,6 +92,8 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
     /// Which of `PageRules`' lists is on this view: put on before its first page, and changed as
     /// the person's sign-in comes and goes.
     private(set) var ruledAs: PageRules.Kind?
+    /// The rules that list holds: what the person's list said when it was put on (#226).
+    private(set) var ruledWith: String?
     /// Whether the person has this forum's sign-in in front of them (#220): what else the page
     /// may pull in, and where it may go, is `Allowance`'s `signingIn` entries then.
     private(set) var signingIn = false
@@ -116,11 +118,29 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
         configuration.applicationNameForUserAgent = Fediqo.name
         // The forum's own "remember me", ticked on every login form this browser shows — #153.
         // Without it a sign-in made by hand is answered with a cookie that ends when the app does.
-        configuration.userContentController.addUserScript(Self.remembering)
+        for script in Self.userScripts { configuration.userContentController.addUserScript(script) }
         view = WKWebView(frame: .init(x: 0, y: 0, width: 1024, height: 768),
                          configuration: configuration)
         super.init()
         view.navigationDelegate = self
+        configuration.userContentController.add(
+            PulledInHandler(self), contentWorld: .defaultClient, name: Self.pulledInMessage
+        )
+        // The person's list changing puts the rules it makes on at once, on the page in front of
+        // them too (#226). Taken off by the centre itself when this goes.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(allowancesChanged(_:)), name: SourceWork.allowancesChanged, object: nil
+        )
+    }
+
+    @objc private func allowancesChanged(_ note: Notification) {
+        guard note.object as AnyObject? === work, ruledWith != nil else { return }
+        Task { await applyRules() }
+    }
+
+    /// The rules for what this browser is doing now, under the person's list as it is now.
+    private var wantedRules: String {
+        PageRules.rules(signingIn ? .signIn : .forum, of: host, allowing: work.allowances)
     }
 
     // MARK: - Fetching
@@ -146,7 +166,7 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
         // Nothing but the forum's own site is loaded beside its page (#220). Refused outright
         // where the rules could not be put on: a page that could reach anybody is not loaded.
         var tries = 0
-        while ruledAs != (signingIn ? .signIn : .forum) {
+        while ruledWith != wantedRules {
             tries += 1
             guard tries <= 3, await applyRules() else {
                 throw ForumTransportError.unreachable("PageRules")
@@ -237,8 +257,9 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
         rulesEpoch += 1
         let mine = rulesEpoch
         let wanted: PageRules.Kind = signingIn ? .signIn : .forum
-        guard let list = await PageRules.list(wanted) else {
-            if mine == rulesEpoch { ruledAs = nil }
+        let rules = wantedRules
+        guard let list = await PageRules.compiled(rules) else {
+            if mine == rulesEpoch { ruledAs = nil; ruledWith = nil }
             return false
         }
         guard mine == rulesEpoch else { return true }
@@ -246,6 +267,7 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
         controller.removeAllContentRuleLists()
         controller.add(list)
         ruledAs = wanted
+        ruledWith = rules
         return true
     }
 
@@ -256,6 +278,10 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
     /// written under this forum. A frame is left to `PageRules`, which blocks every other site's
     /// but what an entry lets through; a frame an entry lets through is written under this forum.
     /// Nothing moves for a forum the gate no longer admits.
+    ///
+    /// **The list is the person's as it is this instant** (#226): an entry switched off lets
+    /// nothing through, and a host they added for this forum lets its frames in, each written
+    /// under this forum naming that entry.
     func decide(_ url: URL?, mainFrame: Bool) -> Bool {
         guard let url else { return false }
         if url.scheme == "about" { return true }
@@ -266,7 +292,7 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
         // guess at the registrable domain without the public suffix list would take two strangers
         // under `com.tw` for one site.
         let own = Self.belongs(url, to: host)
-        let applying = Allowance.applying(signingIn ? .signingIn : .forumPage)
+        let applying = Allowance.applying(signingIn ? .signingIn : .forumPage, in: work.allowances, of: host)
         if mainFrame {
             guard signingIn else { return own }
             let entry = own ? nil : applying.first { $0.reach == .navigation && $0.allows(url) }
@@ -275,9 +301,47 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
             return true
         }
         if !own, let entry = applying.first(where: { $0.reach == .frame && $0.allows(url) }) {
-            work.note(host: there, for: .personCheck, source: host, allowedBy: entry.id)
+            work.note(host: there, for: entry.source == nil ? .personCheck : .pagePart, source: host, allowedBy: entry.id)
         }
         return true
+    }
+
+    /// Where the page says what it pulled in (`pulledIn`).
+    static let pulledInMessage = "fediqoPulledIn"
+
+    /// What a page of this forum pulled in beside itself, as it loads — its pictures, scripts and
+    /// styles, which never pass `decide` — said by the page's own resource timing, read in a world
+    /// the page's scripts cannot reach. Only what came from another site is said.
+    static let pulledIn = """
+        (() => {
+          const own = location.host;
+          const say = (entries) => {
+            const names = entries.map((e) => e.name).filter((n) => {
+              try { return new URL(n).host !== own; } catch (_) { return false; }
+            });
+            if (names.length) { window.webkit.messageHandlers.\(pulledInMessage).postMessage(names); }
+          };
+          try {
+            new PerformanceObserver((list) => say(list.getEntries())).observe({ type: "resource", buffered: true });
+          } catch (_) {}
+        })();
+        """
+
+    /// What the page pulled in from a host the person added for this forum is written under this
+    /// forum, naming the entry (#226). Anything else it names is left: its own site is the
+    /// forum's, and what the rules let through for the app is written by `decide`. **Only a host
+    /// is written**, never the address the page said.
+    func pulledIn(_ addresses: [String]) {
+        let own = Allowance.applying(signingIn ? .signingIn : .forumPage, in: work.allowances, of: host)
+            .filter { $0.source != nil }
+        guard !own.isEmpty else { return }
+        for address in addresses {
+            guard let url = URL(string: address), let there = url.host()?.lowercased(),
+                  !Self.belongs(url, to: host),
+                  let entry = own.first(where: { $0.allows(url) })
+            else { continue }
+            work.note(host: there, for: .pagePart, source: host, allowedBy: entry.id)
+        }
     }
 
     /// Whether the settled document shows a signed-in member. Used to notice a session that
@@ -394,7 +458,7 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
         let content = view.configuration.userContentController
         content.removeScriptMessageHandler(forName: ForumLoginScript.typedMessage, contentWorld: .defaultClient)
         content.removeAllUserScripts()
-        content.addUserScript(Self.remembering)
+        for script in Self.userScripts { content.addUserScript(script) }
         guard on else { return }
         let host = host
         content.add(
@@ -409,6 +473,15 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
             forMainFrameOnly: true, in: .defaultClient
         ))
         view.evaluateJavaScript(ForumLoginScript.watchTyped, in: nil, in: .defaultClient) { _ in }
+    }
+
+    /// Every script this browser's pages always run: the forum's "remember me" ticked, and what
+    /// they pulled in said (#226).
+    static var userScripts: [WKUserScript] {
+        [
+            remembering,
+            WKUserScript(source: pulledIn, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .defaultClient),
+        ]
     }
 
     static var remembering: WKUserScript {
@@ -678,6 +751,25 @@ private final class TypedHandler: NSObject, WKScriptMessageHandler {
                   !username.isEmpty, !password.isEmpty
             else { return }
             typed(username, password)
+        }
+    }
+}
+
+/// Where a forum's page says what it pulled in (`ForumWebEngine.pulledIn`). Holds its browser
+/// weakly — the page's controller holds this — and hands on only a list of strings.
+final class PulledInHandler: NSObject, WKScriptMessageHandler {
+    weak var engine: ForumWebEngine?
+
+    init(_ engine: ForumWebEngine) {
+        self.engine = engine
+    }
+
+    func userContentController(
+        _ userContentController: WKUserContentController, didReceive message: WKScriptMessage
+    ) {
+        MainActor.assumeIsolated {
+            guard let names = message.body as? [String] else { return }
+            engine?.pulledIn(names)
         }
     }
 }
