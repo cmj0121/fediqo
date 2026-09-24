@@ -89,6 +89,10 @@ final class ShellReader {
     /// test hands in another.
     @ObservationIgnored var work: SourceWork = .shared
 
+    /// Whether a source has been removed (#221). A page opened from one of its posts goes nowhere
+    /// more once it has — no redirect, no refresh, no link — and nothing more is recorded under it.
+    @ObservationIgnored var gone: (@MainActor (String) -> Bool)?
+
     /// Opens an address inside the app, and answers whether it did.
     ///
     /// **Decision 9 read again, at the door of a web view.** A `PostLink` is already a checked
@@ -129,6 +133,7 @@ final class ShellReader {
     /// main frame is the page the reader is looking at. What the page pulls in beside it — a
     /// subframe, a picture, a script — is WebKit's, and is neither said nor recorded here.
     func decide(_ url: URL?, mainFrame: Bool) -> Bool {
+        if let source = reading?.source, gone?(source.lowercased()) == true { return false }
         let allowed = url.map(Host.allowsFetch) ?? false
         guard mainFrame else { return allowed }
         if allowed, let url {

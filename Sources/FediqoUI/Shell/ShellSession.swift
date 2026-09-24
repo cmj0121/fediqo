@@ -85,6 +85,12 @@ final class ShellSession {
     /// What the system's shared stores keep of a source, dropped as it is signed out of or
     /// removed (#221). The system's own; a test hands in its own jar.
     @ObservationIgnored var jar = SystemJar()
+    /// Hosts a Remove is taking away right now, so an adopt landing in its awaits does not count
+    /// them as added again (#221).
+    @ObservationIgnored private var removals: Set<String> = []
+    /// How many times each host has been removed, so a join still reading it when it is removed
+    /// asks nothing more of it (#221). A join begun after the Remove reads it afresh.
+    @ObservationIgnored private var removes: [String: Int] = [:]
 
     /// The sheet the reader is being shown the forum's own page in, or nothing.
     var signingIn: ForumSignInRequest?
@@ -2016,6 +2022,8 @@ final class ShellSession {
         // which is every host until a read asks one.
         let spoken = await store.sources().map(flavours.spoken)
         if spoken != sources { sources = spoken }
+        // A source the store holds again, and not one on its way out, is asked as before (#221).
+        reload.readmit(spoken.map(\.host).filter { !removals.contains($0) })
     }
 
     /// The tabs, rebuilt from what is actually joined.
@@ -2081,7 +2089,12 @@ final class ShellSession {
         for host: String, for purpose: SourceWork.Purpose, name: SourceWork.Name? = nil
     ) -> SourceJoin {
         let client = forums.readTransport(host: host, else: http)
-        return SourceJoin(http: WatchedHTTP(client, for: purpose, name: name, in: work), store: store, catalogues: emoji)
+        let folded = host.lowercased()
+        let asked = removes[folded, default: 0]
+        let unremoved = RemovedStops(WatchedHTTP(client, for: purpose, name: name, in: work)) { [weak self] in
+            self?.removes[folded, default: 0] != asked
+        }
+        return SourceJoin(http: unremoved, store: store, catalogues: emoji)
     }
 
     private func report(_ error: JoinError, raw: String, host: String) {
@@ -2184,7 +2197,7 @@ final class ShellSession {
         // drops nothing that Home or a list brought in.
         // The app registration goes with it, so nothing of the sign-in is left.
         await mastodon.signOut(host: host, forgettingApp: true)
-        jar.forget(host: host)
+        jar.forget(host: host, keeping: sources.map(\.host))
         // **The rows stay (#7).** Clear drops this source's copies — pictures in memory and on
         // disk, emoji, first posts, the sign-in — and not its place in the index: every row still
         // draws, reading its pictures from their hyperlinks again. Nothing in this app reads a
@@ -2337,7 +2350,7 @@ final class ShellSession {
             await forums.forget(host: host.lowercased())
         }
         // Whatever kind it is, no session of any sort is left for it in the system's stores (#221).
-        jar.forget(host: host)
+        jar.forget(host: host, keeping: sources.map(\.host))
     }
 
     /// Whether this device holds a sign-in for that source, whichever protocol it is.
@@ -2516,6 +2529,9 @@ final class ShellSession {
         // Every read of it a reload has on its way ends here, signed in or not, and an open thread
         // from it is not renewed again: nothing this app does on its own reaches it after (#221).
         reload.letGo(host: host)
+        removes[host, default: 0] += 1
+        removals.insert(host)
+        defer { removals.remove(host) }
         if progressHost.lowercased() == host {
             // **The errand in flight is about the server that just went, so it ends here.** This
             // is the same token `add`, `take` and `subscribe` compare before they write, bumped by
@@ -2583,6 +2599,9 @@ final class ShellSession {
             offerSignIn = nil
         case .handOver(let stop):
             signingIn = ForumSignInRequest(host: host, stop: stop)
+        case .forgotten:
+            // Signed out of, cleared or removed while it ran: nothing to show (#221).
+            break
         }
     }
 
@@ -2739,4 +2758,21 @@ struct ProgressReport: Equatable {
     /// detection one is how the longest wait in the app came to be labelled "Checking %@…" over a
     /// phase that detects nothing.
     let key: String
+}
+
+/// A join's way out that closes once its source is removed (#221): its next board, page or look
+/// is not asked for, and nothing is recorded against the source that went.
+private struct RemovedStops: HTTPClient {
+    let inner: any HTTPClient
+    let removed: @MainActor @Sendable () -> Bool
+
+    init(_ inner: any HTTPClient, removed: @escaping @MainActor @Sendable () -> Bool) {
+        self.inner = inner
+        self.removed = removed
+    }
+
+    func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
+        if await removed() { throw CancellationError() }
+        return try await inner.data(from: url)
+    }
 }

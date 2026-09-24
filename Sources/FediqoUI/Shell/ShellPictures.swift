@@ -467,6 +467,11 @@ final class ShellPictures {
         await work(for: key, host: Self.tag(host)).value
     }
 
+    /// Whether a fetch of this picture has begun, queued or on the wire. Asked by tests only.
+    func isFetching(_ url: URL, scale: CGFloat, tier: Tier) -> Bool {
+        inFlight[Key(url: url, scale: scale, tier: tier)] != nil
+    }
+
     /// A press asking again: lifts the mark of nothing for this address and runs the same
     /// `fetch` a first ask does. Does not bump `generation`, so a retry of one picture is not
     /// a cohort of every other miss. A nil URL is still nothing to try. A second miss writes

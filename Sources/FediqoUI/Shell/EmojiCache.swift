@@ -42,6 +42,10 @@ final class EmojiCache {
     private var inFlight: [Key: Task<Void, Never>] = [:]
     /// One download per address, whoever asked for it — see `download(_:for:)`.
     private var downloads: [URL: Task<Data?, Never>] = [:]
+    /// Who is waiting on each download, with how many times each had been forgotten when it
+    /// asked — so a download one source was forgotten under still goes out for another waiting
+    /// on the same address, and is recorded under that one (#221).
+    private var askers: [URL: [String: Int]] = [:]
     private let gate = EmojiGate(ceiling: EmojiCache.maxInFlight)
     private var cuts: [Cut: [EmojiRun]] = [:]
     private var cutOrder: [Cut] = []
@@ -571,21 +575,34 @@ final class EmojiCache {
     ///
     /// `asked` is how many times `source` had been forgotten when the line asked, so a download
     /// asked for before a Clear or a Remove of it does not go out after one (#221).
+    /// Whether `source` is waiting on a download of `url`, queued or on the wire. Asked by tests
+    /// only.
+    func isDownloading(_ url: URL, for source: String) -> Bool {
+        downloads[url] != nil && askers[url]?[source.lowercased()] != nil
+    }
+
     private func download(_ url: URL, for source: String, asked: Int) -> Task<Data?, Never> {
-        if let running = downloads[url] { return running }
-        // On `SourceWork` while it is on the wire (#164), and in the run's record under the
-        // source whose line asked for it first (#218) — one request, so one act.
-        let http = WatchedHTTP(http, for: .emoji, source: source, in: work)
         let source = source.lowercased()
+        if askers[url]?[source] == nil { askers[url, default: [:]][source] = asked }
+        if let running = downloads[url] { return running }
+        let http = http
+        let work = work
         let started = Task<Data?, Never> { @MainActor [weak self] in
-            defer { self?.downloads[url] = nil }
+            defer {
+                self?.downloads[url] = nil
+                self?.askers[url] = nil
+            }
             guard let self else { return nil }
             await gate.enter()
             defer { gate.leave() }
-            // Its source was cleared or removed while this waited for the gate: nothing is asked
-            // of it, and nothing is recorded against it (#221).
-            guard forgets[source, default: 0] == asked else { return nil }
-            guard let (data, response) = try? await http.data(from: url),
+            // Only for a source still waiting on it: one cleared or removed while this waited
+            // for the gate is asked nothing, and nothing is recorded against it (#221). On
+            // `SourceWork` while it is on the wire (#164), and in the run's record under the
+            // source whose line asked for it first where that one still wants it (#218).
+            let waiting = (askers[url] ?? [:]).filter { forgets[$0.key, default: 0] == $0.value }.keys
+            guard let owner = waiting.contains(source) ? source : waiting.min() else { return nil }
+            let watched = WatchedHTTP(http, for: .emoji, source: owner, in: work)
+            guard let (data, response) = try? await watched.data(from: url),
                   (200..<300).contains(response.statusCode)
             else { return nil }
             return data

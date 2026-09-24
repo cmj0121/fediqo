@@ -66,7 +66,7 @@ extension ShellReload {
         // A thread from a source that has since been removed is not asked again, however long the
         // pane stays up (#221).
         let host = item.source.host.lowercased()
-        guard session.sources.contains(where: { $0.host == host }) else { return nil }
+        guard !gone.contains(host), session.sources.contains(where: { $0.host == host }) else { return nil }
         // A blog has no thread to renew — no replies this app reads (#209) — and its page is read
         // when the reader asks, never on the wait: the points guard's rule, one step on.
         guard !DiscuzBlogRow.isBlog(item.noteID) else { return nil }

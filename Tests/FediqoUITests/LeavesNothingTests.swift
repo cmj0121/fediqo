@@ -180,7 +180,7 @@ struct LeavesNothingTests {
         }
         #expect(await spun { await http.asked.count == ShellPictures.maxInFlight }, "the premise: every slot is taken")
         let queued = Task { await pictures.fetch(Self.address("gone"), scale: 2, tier: .deck, host: Self.gone) }
-        await Task.yield()
+        #expect(await spun { pictures.isFetching(Self.address("gone"), scale: 2, tier: .deck) }, "the premise: it is queued")
 
         pictures.forget(host: Self.gone)
         await http.gate.open()
@@ -211,7 +211,7 @@ struct LeavesNothingTests {
         }
         #expect(await spun { await http.asked.count == EmojiCache.maxInFlight }, "the premise: every slot is taken")
         let queued = Task { await emojis.fetch(request(Self.gone, ["gone"])) }
-        await Task.yield()
+        #expect(await spun { emojis.isDownloading(Self.address("gone"), for: Self.gone) }, "the premise: it is queued")
 
         emojis.forget(host: Self.gone)
         await http.gate.open()
@@ -235,7 +235,7 @@ struct LeavesNothingTests {
         }
         #expect(await spun { await http.asked.count == ForumPosts.maxInFlight }, "the premise: every slot is taken")
         let queued = Task { await posts.fetch(ForumThreadRef(host: Self.gone, tid: 99)) }
-        await Task.yield()
+        #expect(await spun { posts.isFetching(ForumThreadRef(host: Self.gone, tid: 99)) }, "the premise: it is queued")
 
         posts.forget(host: Self.gone)
         await http.gate.open()
@@ -254,7 +254,8 @@ struct LeavesNothingTests {
         let credentials = MemoryCredentials()
         try credentials.save(ForumCredential(host: Self.gone, username: "reader", password: "p"))
         let forums = ForumSessions(credentials: credentials)
-        forums.work = SourceWork()
+        let work = SourceWork()
+        forums.work = work
         let gate = Gate()
         let watchdog = hangGuard(gate)
         defer { watchdog.cancel() }
@@ -265,10 +266,16 @@ struct LeavesNothingTests {
         }
         #expect(forums.isSigningInAgain(host: Self.gone), "the premise: it is running")
 
+        // Asked of the row after the sign-in has had every chance to land.
+        final class Landed { var done = false }
+        let landed = Landed()
+        forums.whenSignedIn { _ in landed.done = true }
         await forums.forget(host: Self.gone)
         #expect(!forums.isSigningInAgain(host: Self.gone))
         await gate.open()
-        await Task.yield()
+        // The attempt returns once the gate opens; wait until its task has finished with it.
+        #expect(await spun { work.now.isEmpty }, "the launch sign-in never settled")
+        #expect(!landed.done, "a sign-in was announced after the sign-out")
 
         #expect(!forums.reachedSignIn(host: Self.gone), "the sign-in landed after the sign-out")
         #expect(forums.notice(host: Self.gone) == nil)
@@ -292,14 +299,122 @@ struct LeavesNothingTests {
             host: Self.gone, port: 443, protocol: "https", realm: "r\(kind)",
             authenticationMethod: NSURLAuthenticationMethodHTTPBasic
         )
-        session.jar.credentials.set(
-            URLCredential(user: "reader", password: "p", persistence: .forSession), for: space
-        )
+        let credentials = session.jar.credentials
+        credentials.set(URLCredential(user: "reader", password: "p", persistence: .forSession), for: space)
+        defer {
+            for credential in credentials.credentials(for: space)?.values ?? [:].values {
+                credentials.remove(credential, for: space)
+            }
+        }
+        try #require(credentials.credentials(for: space)?.isEmpty == false, "the premise: a credential is kept")
 
         await session.signOut(host: Self.gone)
 
         #expect(jar.cookies?.map(\.domain) == [Self.kept], "a cookie for the source outlived its sign-out")
         #expect(session.jar.credentials.credentials(for: space)?.isEmpty ?? true)
+    }
+
+    @Test("Signing out keeps the cookies another source still added shares with it")
+    func sharedCookiesStay() async throws {
+        let session = Self.session(http: FixtureHTTP(), work: SourceWork())
+        for host in ["forum.shared.example", "shared.example", "blog.shared.example"] {
+            await session.store.add(Source(host: host, kind: .discuz))
+        }
+        await session.reloadFromStore()
+        let jar = session.jar.cookies
+        for domain in ["forum.shared.example", ".shared.example", "blog.shared.example", "deep.forum.shared.example"] {
+            jar.setCookie(try #require(HTTPCookie(properties: [
+                .name: "sid", .value: "v", .domain: domain, .path: "/",
+            ])))
+        }
+
+        await session.signOut(host: "forum.shared.example")
+        #expect(Set(jar.cookies?.map(\.domain) ?? []) == [".shared.example", "blog.shared.example"],
+                "a cookie of a source still added went, or one of this source's stayed")
+
+        // Its parent removed: the parent's cookie still goes to the two sources under it, and the
+        // sub-domain that is a source of its own keeps its cookie.
+        await session.remove(host: "shared.example")
+        #expect(Set(jar.cookies?.map(\.domain) ?? []) == [".shared.example", "blog.shared.example"])
+    }
+
+    @Test("A reload that starts while a Remove is still under way asks nothing of the source",
+          .timeLimit(.minutes(1)))
+    func aReloadInsideTheRemove() async {
+        let work = SourceWork()
+        let http = FixtureHTTP(Self.mastodonRoutes(Self.gone).merging(Self.mastodonRoutes(Self.kept)) { a, _ in a })
+        let store = ItemStore()
+        await store.add(Source(host: Self.gone, kind: .mastodon))
+        await store.add(Source(host: Self.kept, kind: .mastodon))
+        let session = Self.session(http: http, store: store, work: work)
+        await session.reloadFromStore()
+
+        // The Remove runs to its first await, and the reload starts in the gap after it, while
+        // the session still lists the source.
+        let removing = Task { await session.remove(host: Self.gone) }
+        let reloading = Task {
+            #expect(session.sources.contains { $0.host == Self.gone }, "the premise: it is still listed")
+            await session.reload.held(in: session)
+            await session.reload.timeline(.all, in: session)
+        }
+        await removing.value
+        await reloading.value
+        let wait = await session.reload.renew(in: session)
+
+        #expect(wait == nil)
+        #expect(Self.acts(work, for: Self.gone).isEmpty, "the source being removed was asked")
+        #expect(!Self.acts(work, for: Self.kept).isEmpty, "the premise: the reload ran")
+    }
+
+    @Test("An emoji two sources wait on still comes for the one left when the other is removed",
+          .timeLimit(.minutes(1)))
+    func aSharedEmoji() async {
+        let work = SourceWork()
+        let http = Parking(answering: EmojiFixture.gif(delays: [0.1, 0.1]))
+        let watchdog = hangGuard(http.gate)
+        defer { watchdog.cancel() }
+        let emojis = EmojiCache(http: http)
+        emojis.work = work
+        let request = { (host: String, names: [String]) in
+            EmojiCache.Request(
+                emojis: names.map { CustomEmoji(shortcode: $0, url: Self.address($0), staticURL: nil) },
+                metrics: .init(side: 20, baseline: -4), scale: 2, host: host, still: false
+            )
+        }
+        let filling = Task {
+            await emojis.fetch(request("third.example", (0..<EmojiCache.maxInFlight).map { "fill\($0)" }))
+        }
+        #expect(await spun { await http.asked.count == EmojiCache.maxInFlight }, "the premise: every slot is taken")
+        let first = Task { await emojis.fetch(request(Self.gone, ["wave"])) }
+        #expect(await spun { emojis.isDownloading(Self.address("wave"), for: Self.gone) })
+        emojis.forget(host: Self.gone)
+        let second = Task { await emojis.fetch(request(Self.kept, ["wave"])) }
+        #expect(await spun { emojis.isDownloading(Self.address("wave"), for: Self.kept) })
+
+        await http.gate.open()
+        await filling.value
+        await first.value
+        await second.value
+
+        #expect(emojis.holding(host: Self.kept).count == 1, "the source left was given nothing for the run")
+        #expect(Self.acts(work, for: Self.gone).isEmpty)
+        #expect(Self.acts(work, for: Self.kept).count == 1)
+    }
+
+    @Test("A page open from a removed source's post goes nowhere more, and records nothing")
+    func theLinkReader() {
+        let work = SourceWork()
+        let reader = ShellReader()
+        reader.work = work
+        var gone: Set<String> = []
+        reader.gone = { gone.contains($0) }
+        reader.open(URL(string: "https://page.example/a")!, from: Self.gone)
+        #expect(reader.decide(URL(string: "https://page.example/b"), mainFrame: true))
+
+        gone.insert(Self.gone)
+        #expect(!reader.decide(URL(string: "https://page.example/c"), mainFrame: true))
+        #expect(!reader.decide(URL(string: "https://page.example/d"), mainFrame: false))
+        #expect(Self.acts(work, for: Self.gone).count == 1)
     }
 
     // MARK: - Helpers
@@ -314,11 +429,17 @@ struct LeavesNothingTests {
 private actor Parking: HTTPClient {
     let gate = Gate()
     private(set) var asked: [URL] = []
+    private let answer: Data?
+
+    init(answering answer: Data? = nil) {
+        self.answer = answer
+    }
 
     func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
         asked.append(url)
         await gate.wait()
-        return (Data(), HTTPURLResponse(url: url, statusCode: 404, httpVersion: "HTTP/1.1", headerFields: nil)!)
+        let status = answer == nil ? 404 : 200
+        return (answer ?? Data(), HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil)!)
     }
 }
 

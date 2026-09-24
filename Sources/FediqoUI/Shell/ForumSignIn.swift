@@ -189,6 +189,9 @@ public enum ForumKeeping: Equatable, Sendable {
 public enum ForumSignInOutcome: Equatable, Sendable {
     case signedIn
     case handOver(ForumSignInStop)
+    /// The forum was signed out of, cleared or removed while this ran (#221). Nothing is to be
+    /// said or shown about it: the reader has already let the sign-in go.
+    case forgotten
 }
 
 /// What the sheet is open for.
@@ -276,6 +279,9 @@ public final class ForumSessions {
 
     /// Each forum's sign-in at launch, while it is still running. See `signInAgain(hosts:)`.
     @ObservationIgnored private var relaunching: [String: Task<Void, Never>] = [:]
+    /// Which of them is the current one per host, so one ended by a forget does not take the
+    /// entry of another begun after it.
+    @ObservationIgnored private var relaunchIDs: [String: UUID] = [:]
 
     /// How many times each host has been forgotten — a sign-out, a Clear, a Remove. A sign-in
     /// that started before one does not finish after it (#221): it posts no password and records
@@ -457,13 +463,15 @@ public final class ForumSessions {
         // "signed in" here rather than posting the form is what stops a refresh from spending a
         // sign-in attempt, which is how a forum's lockout counter gets reached by an app nobody
         // touched.
-        if ForumMember.isSignedIn(html) { return .signedIn }
+        if ForumMember.isSignedIn(html) {
+            return await wasForgotten(host, since: asked) ? .forgotten : .signedIn
+        }
 
         guard let form = ForumLoginForm.read(html) else { return .handOver(.unreadable) }
         if form.asksCaptcha { return .handOver(.captcha) }
         guard form.canFillItself else { return .handOver(.unreadable) }
         // Signed out, cleared or removed while the page was read: the password is not sent.
-        guard forgets[host, default: 0] == asked else { return .handOver(.unreachable) }
+        if await wasForgotten(host, since: asked) { return .forgotten }
 
         let verdict: ForumLoginVerdict
         do {
@@ -471,6 +479,8 @@ public final class ForumSessions {
         } catch {
             return .handOver(.unreachable)
         }
+        // Forgotten while the form was on its way: whatever session it earned goes too.
+        if await wasForgotten(host, since: asked) { return .forgotten }
 
         switch verdict {
         case .signedIn: return .signedIn
@@ -625,19 +635,36 @@ public final class ForumSessions {
             // On `SourceWork` for the whole of it (#164): the forum's browser is not an
             // `HTTPClient` a request could be watched through, so the work is registered itself.
             let token = work.begin(host: host, for: .signIn)
+            let id = UUID()
+            relaunchIDs[host] = id
+            // Read now, not as the task starts: a forget landing before it runs must still count.
+            let asked = forgets[host, default: 0]
             relaunching[host] = Task { [weak self, work] in
                 defer { work.end(token) }
-                await self?.relaunch(host: host, sessions: held, attempt: attempt)
-                self?.relaunching[host] = nil
+                await self?.relaunch(host: host, asked: asked, sessions: held, attempt: attempt)
+                // Only while it is still this one: a forget may have ended it and another begun.
+                if let self, self.relaunchIDs[host] == id {
+                    self.relaunching[host] = nil
+                    self.relaunchIDs[host] = nil
+                }
             }
         }
     }
 
+    /// Whether `host` has been forgotten since `asked` was read. Where it has, anything the page
+    /// just read or posted left in the store for it is dropped again, so a forget that landed
+    /// mid-sign-in leaves no session behind it (#221).
+    private func wasForgotten(_ host: String, since asked: Int) async -> Bool {
+        guard forgets[host, default: 0] != asked else { return false }
+        if let madeStore { await ForumWebEngine.forget(host: host, in: madeStore) }
+        return true
+    }
+
     private func relaunch(
-        host: String, sessions: Task<[String], Never>,
+        host: String, asked: Int, sessions: Task<[String], Never>,
         attempt: (@MainActor (String) async -> ForumSignInOutcome)?
     ) async {
-        let asked = forgets[host, default: 0]
+        guard forgets[host, default: 0] == asked else { return }
         guard !(await holdsSession(host: host, sessions: sessions)) else { return }
         guard forgets[host, default: 0] == asked else { return }
         let outcome: ForumSignInOutcome
@@ -653,6 +680,8 @@ public final class ForumSessions {
             recordSignIn(host: host)
         case .handOver(let stop):
             notices[host] = .lapsed(stop)
+        case .forgotten:
+            break
         }
     }
 
@@ -710,6 +739,7 @@ public final class ForumSessions {
         forgets[host.lowercased(), default: 0] += 1
         // A launch's sign-in still running for it ends here rather than signing back in (#221).
         relaunching.removeValue(forKey: host.lowercased())?.cancel()
+        relaunchIDs[host.lowercased()] = nil
         engines.removeValue(forKey: host.lowercased())?.stopAndBlank()
         // No engine this run is no evidence of no cookies: the store persists, and a host signed
         // in to last launch holds its session before anything asks for its page. A store never

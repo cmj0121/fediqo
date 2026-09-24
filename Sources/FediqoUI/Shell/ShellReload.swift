@@ -142,6 +142,10 @@ final class ShellReload {
     /// Every read of one source a reload has on its way, signed in or not, per host, so
     /// `letGo(host:)` can end it (#221).
     @ObservationIgnored private var ofSource: [String: [UUID: () -> Void]] = [:]
+    /// Sources let go of by a Remove and not added again since (#221). Nothing a reload starts
+    /// for one of these goes out, even where the session still lists it — as it does across the
+    /// awaits of the Remove itself.
+    @ObservationIgnored private(set) var gone: Set<String> = []
 
     /// A source this device holds as a Mastodon whose **own server now answers as something this
     /// app does not read** — #86.
@@ -525,7 +529,8 @@ final class ShellReload {
     func held(in session: ShellSession) async {
         guard asking.isDisjoint(with: [.held, .timeline, .more]), !session.sources.isEmpty else { return }
         await run(.held) {
-            let asks = session.sources.map { FetchAsk(host: $0.host, categories: nil) }
+            let asks = session.sources.filter { !self.gone.contains($0.host) }
+                .map { FetchAsk(host: $0.host, categories: nil) }
             await self.read(asks, as: .held, in: session)
         }
     }
@@ -747,17 +752,25 @@ final class ShellReload {
     /// stops being renewed on the wait (`renew(in:asked:)`).
     func letGo(host: String) {
         let host = host.lowercased()
+        gone.insert(host)
         stop(host: host)
         for cancel in ofSource.removeValue(forKey: host)?.values.map({ $0 }) ?? [] { cancel() }
         if let renewing, inFront?.id == renewing, inFront?.source.host.lowercased() == host { end(.renew) }
     }
 
+    /// Sources added again after a Remove: asked as before (#221).
+    func readmit(_ hosts: some Sequence<String>) {
+        gone.subtract(hosts.map { $0.lowercased() })
+    }
+
     /// One source's part of a reload, registered so `letGo(host:)` can end it, and ended too if
-    /// the reload is stopped.
+    /// the reload is stopped. For a source already let go of, ended before it starts: every
+    /// request of it checks for that before it leaves (`Deadline`).
     func onSource<T: Sendable>(_ host: String, _ read: @escaping @MainActor () async -> T) async -> T {
         let host = host.lowercased()
         let id = UUID()
         let task = Task { @MainActor in await read() }
+        if gone.contains(host) { task.cancel() }
         ofSource[host, default: [:]][id] = { task.cancel() }
         defer { ofSource[host]?[id] = nil }
         return await withTaskCancellationHandler {

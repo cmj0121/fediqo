@@ -532,6 +532,12 @@ final class ForumPosts {
         await fetch(ref, part: .opening)
     }
 
+    /// Whether a fetch of this thread's opening post has begun, queued or on the wire. Asked by
+    /// tests only.
+    func isFetching(_ ref: ForumThreadRef) -> Bool {
+        inFlight[Key(ref, .opening)] != nil
+    }
+
     /// Fetches the rest of the topic — the reader pressed for it.
     func fetchReplies(_ ref: ForumThreadRef) async {
         await fetch(ref, part: .replies)
