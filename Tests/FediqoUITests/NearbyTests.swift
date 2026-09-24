@@ -111,29 +111,62 @@ struct NearbyTests {
 
         /// Waits for the step `done` names, woken by the step changing rather than by a clock:
         /// a bound of a few seconds is for a runner that is slow, never a wait a test pays.
+        /// Waits for the step `done` names. **The budget is turns, not wall time**: sixteen
+        /// half-second periods in which this test held the main actor and the step did not come.
+        /// A step is delivered on the main actor, so while other suites hold it for forty
+        /// seconds — which a slow runner does — no step can arrive and none of that is the
+        /// move's delay; such a stall is one turn, not the whole budget.
         func settle(_ nearby: ShellNearby, until done: (ShellNearby.Step?) -> Bool) async {
-            let deadline = ContinuousClock.now + .seconds(8)
-            while !done(nearby.step), ContinuousClock.now < deadline {
-                await Self.stepChanged(of: nearby, within: .milliseconds(500))
+            // Bounded both ways: sixteen idle turns, and — for a step that changes without end
+            // and never to the one named — two thousand changes or two minutes of the wall.
+            var turns = 16
+            var changes = 2000
+            let ceiling = ContinuousClock.now + .seconds(120)
+            while turns > 0, changes > 0, ContinuousClock.now < ceiling {
+                // Armed before the check, so a step assigned between the two is not missed.
+                let changed = StepSignal()
+                withObservationTracking { _ = nearby.step } onChange: { changed.fire() }
+                if done(nearby.step) { return }
+                if await changed.wait(most: .milliseconds(500)) == .clock {
+                    turns -= 1
+                    // Whatever was queued on the main actor behind this wake runs before it is judged.
+                    await Task.yield()
+                } else {
+                    changes -= 1
+                }
             }
             if !done(nearby.step) { Issue.record("never settled: \(String(describing: nearby.step))") }
         }
 
-        /// Returns once `nearby.step` is assigned, or after `most` where it is not.
-        private static func stepChanged(of nearby: ShellNearby, within most: Duration) async {
-            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                let once = Mutex(false)
-                let resume: @Sendable () -> Void = {
-                    let first = once.withLock { done -> Bool in
-                        defer { done = true }
-                        return !done
-                    }
-                    if first { continuation.resume() }
+        /// One wake, fired by the step changing or by a clock, whichever is first — and which.
+        final class StepSignal: Sendable {
+            enum Wake: Sendable { case change, clock }
+
+            private let held = Mutex<(fired: Wake?, waiter: CheckedContinuation<Wake, Never>?)>((nil, nil))
+
+            func fire(_ wake: Wake = .change) {
+                let (waiter, first) = held.withLock { held -> (CheckedContinuation<Wake, Never>?, Wake?) in
+                    guard held.fired == nil else { return (nil, nil) }
+                    held.fired = wake
+                    defer { held.waiter = nil }
+                    return (held.waiter, wake)
                 }
-                withObservationTracking { _ = nearby.step } onChange: { resume() }
-                Task {
+                if let waiter, let first { waiter.resume(returning: first) }
+            }
+
+            func wait(most: Duration) async -> Wake {
+                let clock = Task { [self] in
                     try? await Task.sleep(for: most)
-                    resume()
+                    fire(.clock)
+                }
+                defer { clock.cancel() }
+                return await withCheckedContinuation { (continuation: CheckedContinuation<Wake, Never>) in
+                    let now = held.withLock { held -> Wake? in
+                        if let fired = held.fired { return fired }
+                        held.waiter = continuation
+                        return nil
+                    }
+                    if let now { continuation.resume(returning: now) }
                 }
             }
         }
