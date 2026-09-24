@@ -139,6 +139,9 @@ final class ShellReload {
     }
     /// Work read as the reader, per host, so `stop(host:)` can end it.
     @ObservationIgnored private var asYou: [String: [UUID: () -> Void]] = [:]
+    /// Every read of one source a reload has on its way, signed in or not, per host, so
+    /// `letGo(host:)` can end it (#221).
+    @ObservationIgnored private var ofSource: [String: [UUID: () -> Void]] = [:]
 
     /// A source this device holds as a Mastodon whose **own server now answers as something this
     /// app does not read** — #86.
@@ -262,7 +265,7 @@ final class ShellReload {
             var came: [String: Found] = [:]
             await withTaskGroup(of: (String, Found).self) { group in
                 for host in reach.asked {
-                    group.addTask { (host, await self.found(words, on: host, in: session)) }
+                    group.addTask { (host, await self.onSource(host) { await self.found(words, on: host, in: session) }) }
                 }
                 for await (host, answer) in group {
                     came[host] = answer
@@ -394,7 +397,7 @@ final class ShellReload {
             var came: [String: Tagged] = [:]
             await withTaskGroup(of: (String, Tagged).self) { group in
                 for host in reach.asked {
-                    group.addTask { (host, await self.under(tag, on: host, in: session)) }
+                    group.addTask { (host, await self.onSource(host) { await self.under(tag, on: host, in: session) }) }
                 }
                 for await (host, answer) in group {
                     came[host] = answer
@@ -590,7 +593,7 @@ final class ShellReload {
         await withTaskGroup(of: Void.self) { group in
             for ask in asks where sources.first(where: { $0.host == ask.host })?.kind.hasTimelines == true {
                 let asking = self.timed(session.http, for: .serverCheck, in: session)
-                group.addTask { await session.flavours.ask(ask.host, through: asking) }
+                group.addTask { await self.onSource(ask.host) { await session.flavours.ask(ask.host, through: asking) } }
             }
         }
         guard !Task.isCancelled else { return }
@@ -608,7 +611,9 @@ final class ShellReload {
                     continue
                 }
                 group.addTask {
-                    (ask.host, await self.read(source, for: ask.categories, revisits: kind != .held, in: session))
+                    (ask.host, await self.onSource(ask.host) {
+                        await self.read(source, for: ask.categories, revisits: kind != .held, in: session)
+                    })
                 }
             }
             for await (host, read) in group {
@@ -617,7 +622,9 @@ final class ShellReload {
             }
         }
         guard !Task.isCancelled else { return }
-        failures[kind] = asks.map(\.host).filter(unread.contains)
+        // A source removed while it was being read was let go of, not failed (#221).
+        let held = Set(session.sources.map(\.host))
+        failures[kind] = asks.map(\.host).filter { unread.contains($0) && held.contains($0) }
         // **A host that answered now is not still failing** (#95): what `r` said about it goes
         // when a wait reads it whole, and the reverse, rather than standing until that kind runs
         // again. A thread's failure is about its post, which this did not read.
@@ -643,38 +650,41 @@ final class ShellReload {
     /// edited post shows its new words and a post this device never held does not arrive in All.
     func thread(_ item: DummyItem, in session: ShellSession) async {
         guard !asking.contains(.thread), session.editing == nil else { return }
+        // Ended with its source, should that be removed while it reads (#221).
         await run(.thread) {
-            if let ref = ForumThreadRef(item) {
-                let read = await session.posts.reload(ref, within: self.deadline)
-                if !read, !Task.isCancelled { self.failures[.thread] = [ref.host] }
-                return
-            }
-            // A ranked blog's page, read again (#209). What is kept stays drawn if it does not
-            // come back, and the pane says why where its words would be.
-            if DiscuzBlogRow.isBlog(item.noteID) {
-                let read = await session.blogs.again(item)
-                if !read, !Task.isCancelled { self.failures[.thread] = [item.source.host] }
-                return
-            }
-            guard let held = session.heldNote(item.id) else { return }
-            let again = await self.again(held, in: session)
-            guard !Task.isCancelled else { return }
-            switch again {
-            case .read:
-                // The post's own words, and then the thread around it — one ask each, and the
-                // thread's is `ShellConversations`', which is the one place that reads it (#90).
-                // Its failure is its own sentence in the pane and does not fail the reload: a
-                // post read again is a post read again whatever its thread did.
-                // The store first, then the thread. A post held without its server id has just
-                // been found by its URI and the id kept; asking the store for the rows again
-                // before the thread is read is what lets the thread read use that id instead of
-                // paying for the same search a second time. What the thread read itself lands is
-                // adopted by that read — see `ShellConversations.read`.
-                await session.reloadFromStore()
-                await session.conversations.again(item, in: session)
-            case .gone: break
-            case .failed: self.failures[.thread] = [held.source.host]
-            case .unfindable(let why): self.unfindable = why
+            await self.onSource(item.source.host) {
+                if let ref = ForumThreadRef(item) {
+                    let read = await session.posts.reload(ref, within: self.deadline)
+                    if !read, !Task.isCancelled { self.failures[.thread] = [ref.host] }
+                    return
+                }
+                // A ranked blog's page, read again (#209). What is kept stays drawn if it does not
+                // come back, and the pane says why where its words would be.
+                if DiscuzBlogRow.isBlog(item.noteID) {
+                    let read = await session.blogs.again(item)
+                    if !read, !Task.isCancelled { self.failures[.thread] = [item.source.host] }
+                    return
+                }
+                guard let held = session.heldNote(item.id) else { return }
+                let again = await self.again(held, in: session)
+                guard !Task.isCancelled else { return }
+                switch again {
+                case .read:
+                    // The post's own words, and then the thread around it — one ask each, and the
+                    // thread's is `ShellConversations`', which is the one place that reads it (#90).
+                    // Its failure is its own sentence in the pane and does not fail the reload: a
+                    // post read again is a post read again whatever its thread did.
+                    // The store first, then the thread. A post held without its server id has just
+                    // been found by its URI and the id kept; asking the store for the rows again
+                    // before the thread is read is what lets the thread read use that id instead of
+                    // paying for the same search a second time. What the thread read itself lands is
+                    // adopted by that read — see `ShellConversations.read`.
+                    await session.reloadFromStore()
+                    await session.conversations.again(item, in: session)
+                case .gone: break
+                case .failed: self.failures[.thread] = [held.source.host]
+                case .unfindable(let why): self.unfindable = why
+                }
             }
         }
     }
@@ -729,6 +739,32 @@ final class ShellReload {
     /// removed, nothing it brings may land afterwards, nor its token be used again.
     func stop(host: String) {
         for cancel in asYou.removeValue(forKey: host.lowercased())?.values.map({ $0 }) ?? [] { cancel() }
+    }
+
+    /// Ends everything a reload is reading of `host`, as the reader or not: the source is gone
+    /// (#221). A read of it on its way asks nothing more of it — no next board, no next page, no
+    /// trends after the public timeline — and says nothing about it after. An open thread from it
+    /// stops being renewed on the wait (`renew(in:asked:)`).
+    func letGo(host: String) {
+        let host = host.lowercased()
+        stop(host: host)
+        for cancel in ofSource.removeValue(forKey: host)?.values.map({ $0 }) ?? [] { cancel() }
+        if let renewing, inFront?.id == renewing, inFront?.source.host.lowercased() == host { end(.renew) }
+    }
+
+    /// One source's part of a reload, registered so `letGo(host:)` can end it, and ended too if
+    /// the reload is stopped.
+    func onSource<T: Sendable>(_ host: String, _ read: @escaping @MainActor () async -> T) async -> T {
+        let host = host.lowercased()
+        let id = UUID()
+        let task = Task { @MainActor in await read() }
+        ofSource[host, default: [:]][id] = { task.cancel() }
+        defer { ofSource[host]?[id] = nil }
+        return await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
+        }
     }
 
     /// One reload: its state set, its work started, and this waiting until it ends or is stopped.
@@ -1243,12 +1279,17 @@ struct Deadline: HTTPClient, HTTPSender {
         self.limit = limit
     }
 
+    /// **Nothing leaves once the work asking has been stopped** (#221): a read that goes on to
+    /// its next board or page after it was ended would reach a source that has just been removed,
+    /// and be written to the run's record under it.
     func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
+        try Task.checkCancellation()
         guard let get else { return try await send(URLRequest(url: url)) }
         return try await Self.within(limit) { try await get(url) }
     }
 
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        try Task.checkCancellation()
         guard let sender else { throw URLError(.unsupportedURL) }
         return try await Self.within(limit) { try await sender.send(request) }
     }

@@ -82,6 +82,9 @@ final class ShellSession {
     /// reads, joins and writes this session starts are put on it while they run; the caches and
     /// sign-ins it holds carry their own, the same one in the app. A test hands in another.
     @ObservationIgnored var work: SourceWork = .shared
+    /// What the system's shared stores keep of a source, dropped as it is signed out of or
+    /// removed (#221). The system's own; a test hands in its own jar.
+    @ObservationIgnored var jar = SystemJar()
 
     /// The sheet the reader is being shown the forum's own page in, or nothing.
     var signingIn: ForumSignInRequest?
@@ -2181,6 +2184,7 @@ final class ShellSession {
         // drops nothing that Home or a list brought in.
         // The app registration goes with it, so nothing of the sign-in is left.
         await mastodon.signOut(host: host, forgettingApp: true)
+        jar.forget(host: host)
         // **The rows stay (#7).** Clear drops this source's copies — pictures in memory and on
         // disk, emoji, first posts, the sign-in — and not its place in the index: every row still
         // draws, reading its pictures from their hyperlinks again. Nothing in this app reads a
@@ -2332,6 +2336,8 @@ final class ShellSession {
         } else {
             await forums.forget(host: host.lowercased())
         }
+        // Whatever kind it is, no session of any sort is left for it in the system's stores (#221).
+        jar.forget(host: host)
     }
 
     /// Whether this device holds a sign-in for that source, whichever protocol it is.
@@ -2507,6 +2513,9 @@ final class ShellSession {
         // so no dialog state outlives the decision it was asking about.
         removing = nil
         stopReadingAsYou(host: host)
+        // Every read of it a reload has on its way ends here, signed in or not, and an open thread
+        // from it is not renewed again: nothing this app does on its own reaches it after (#221).
+        reload.letGo(host: host)
         if progressHost.lowercased() == host {
             // **The errand in flight is about the server that just went, so it ends here.** This
             // is the same token `add`, `take` and `subscribe` compare before they write, bumped by

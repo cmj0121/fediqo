@@ -277,6 +277,11 @@ public final class ForumSessions {
     /// Each forum's sign-in at launch, while it is still running. See `signInAgain(hosts:)`.
     @ObservationIgnored private var relaunching: [String: Task<Void, Never>] = [:]
 
+    /// How many times each host has been forgotten — a sign-out, a Clear, a Remove. A sign-in
+    /// that started before one does not finish after it (#221): it posts no password and records
+    /// no sign-in, so the forget leaves nothing it took away to be put back.
+    @ObservationIgnored private var forgets: [String: Int] = [:]
+
     /// How many sign-ins this run has seen land on each host. Read by a post fetch to notice
     /// that the answer it is carrying was asked for as a guest — see `ForumPosts`.
     @ObservationIgnored private var landed: [String: Int] = [:]
@@ -419,6 +424,7 @@ public final class ForumSessions {
     /// something a stored password does not contain.
     func signIn(host: String) async -> ForumSignInOutcome {
         let host = host.lowercased()
+        let asked = forgets[host, default: 0]
         let kept: ForumCredential?
         do {
             kept = try credentials.credential(host: host)
@@ -456,6 +462,8 @@ public final class ForumSessions {
         guard let form = ForumLoginForm.read(html) else { return .handOver(.unreadable) }
         if form.asksCaptcha { return .handOver(.captcha) }
         guard form.canFillItself else { return .handOver(.unreadable) }
+        // Signed out, cleared or removed while the page was read: the password is not sent.
+        guard forgets[host, default: 0] == asked else { return .handOver(.unreachable) }
 
         let verdict: ForumLoginVerdict
         do {
@@ -629,13 +637,17 @@ public final class ForumSessions {
         host: String, sessions: Task<[String], Never>,
         attempt: (@MainActor (String) async -> ForumSignInOutcome)?
     ) async {
+        let asked = forgets[host, default: 0]
         guard !(await holdsSession(host: host, sessions: sessions)) else { return }
+        guard forgets[host, default: 0] == asked else { return }
         let outcome: ForumSignInOutcome
         if let attempt {
             outcome = await attempt(host)
         } else {
             outcome = await signIn(host: host)
         }
+        // Forgotten while it ran: nothing it found is kept, and the row says nothing about it.
+        guard forgets[host, default: 0] == asked else { return }
         switch outcome {
         case .signedIn:
             recordSignIn(host: host)
@@ -695,6 +707,9 @@ public final class ForumSessions {
     /// screen is what makes that fair: the row says a password is held before the button is
     /// pressed, and there is a Forget of its own for the reader who wants only that.
     func forget(host: String) async {
+        forgets[host.lowercased(), default: 0] += 1
+        // A launch's sign-in still running for it ends here rather than signing back in (#221).
+        relaunching.removeValue(forKey: host.lowercased())?.cancel()
         engines.removeValue(forKey: host.lowercased())?.stopAndBlank()
         // No engine this run is no evidence of no cookies: the store persists, and a host signed
         // in to last launch holds its session before anything asks for its page. A store never

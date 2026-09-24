@@ -51,6 +51,9 @@ final class EmojiCache {
     /// Private, and it publishes nothing: this is not a signal any view subscribes to, which is
     /// the one thing a counter like this must not become here.
     private var epoch: UInt64 = 0
+    /// How many times each source has been forgotten, so a download queued for it before a Clear
+    /// or a Remove does not go out after one (#221).
+    private var forgets: [String: Int] = [:]
 
     init(http: HTTPClient = URLSessionClient()) {
         self.http = http
@@ -517,11 +520,12 @@ final class EmojiCache {
         // Read before the first suspension, so it is the cohort this work belongs to rather than
         // whatever the epoch has become by the time the picture lands.
         let mine = epoch
+        let asked = forgets[key.host.lowercased(), default: 0]
         let started = Task { @MainActor [weak self] in
             defer { self?.inFlight[key] = nil }
             guard let self else { return }
             var decoded: Decoded?
-            if let data = await download(key.url, for: key.host).value {
+            if let data = await download(key.url, for: key.host, asked: asked).value {
                 decoded = await Task.detached(priority: .utility) {
                     Self.decode(data, ink: pixels, stillOnly: key.still)
                 }.value
@@ -564,16 +568,23 @@ final class EmojiCache {
     /// Every address goes through `HTTPClient`: the live one carries the `https`-only rule and
     /// refuses anything that is not an HTTP response, which is what stops a `file:` or `data:`
     /// address out of a stranger's JSON from reaching `URLSession` at all.
-    private func download(_ url: URL, for source: String) -> Task<Data?, Never> {
+    ///
+    /// `asked` is how many times `source` had been forgotten when the line asked, so a download
+    /// asked for before a Clear or a Remove of it does not go out after one (#221).
+    private func download(_ url: URL, for source: String, asked: Int) -> Task<Data?, Never> {
         if let running = downloads[url] { return running }
         // On `SourceWork` while it is on the wire (#164), and in the run's record under the
         // source whose line asked for it first (#218) — one request, so one act.
         let http = WatchedHTTP(http, for: .emoji, source: source, in: work)
+        let source = source.lowercased()
         let started = Task<Data?, Never> { @MainActor [weak self] in
             defer { self?.downloads[url] = nil }
             guard let self else { return nil }
             await gate.enter()
             defer { gate.leave() }
+            // Its source was cleared or removed while this waited for the gate: nothing is asked
+            // of it, and nothing is recorded against it (#221).
+            guard forgets[source, default: 0] == asked else { return nil }
             guard let (data, response) = try? await http.data(from: url),
                   (200..<300).contains(response.statusCode)
             else { return nil }
@@ -650,6 +661,7 @@ final class EmojiCache {
     func forget(host: String) {
         let host = host.lowercased()
         epoch &+= 1
+        forgets[host, default: 0] += 1
         for (key, entry) in entries where key.host == host {
             cost -= entry.cost
             entries.removeValue(forKey: key)

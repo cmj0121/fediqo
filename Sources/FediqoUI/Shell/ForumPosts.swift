@@ -903,6 +903,14 @@ final class ForumPosts {
             let asked = self.forums?.signIns(host: key.host) ?? 0
             let client = self.client(for: key.host, part: part, within: limit)
             await self.enter()
+            // **Cleared or removed while it waited for a slot** (#221): nothing is asked of the
+            // forum, rather than asked and the answer dropped.
+            guard !self.cleared.contains(key) else {
+                self.leave()
+                self.inFlight[key] = nil
+                self.cleared.remove(key)
+                return
+            }
             let answer: Result<[DiscuzPost], Absence>
             // Whether the replies' first page points at a second (#177).
             var continues = false
