@@ -53,17 +53,20 @@ struct UsageSourceList: View {
         }
     }
 
-    /// The sources no longer here that this device still holds posts from (#250), by host: what
-    /// the notes say they were read through, since nothing else remembers them. Each once, with
-    /// the kind its notes were stamped with.
+    /// The sources no longer here that this device still holds posts from (#250), by host: the
+    /// hosts the count knows (`holdings.bySource`, arrived and aside alike, #194) that are not
+    /// among the sources, each with the kind its notes were stamped with — nothing else
+    /// remembers a removed source. Sorted by host, since nothing else orders them.
     static func removed(_ session: ShellSession) -> [Source] {
         let here = Set(session.sources.map(\.host))
-        var seen: Set<String> = []
-        return session.notes.compactMap { note in
-            guard !here.contains(note.source.host), seen.insert(note.source.host).inserted else { return nil }
-            return Source(host: note.source.host, kind: note.source.kind)
-        }
-        .sorted { $0.host < $1.host }
+        let kinds = Dictionary(
+            (session.notes + session.heldAside).map { ($0.source.host, $0.source.kind) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        return session.holdings.bySource.keys
+            .filter { !here.contains($0) }
+            .sorted()
+            .map { Source(host: $0, kind: kinds[$0] ?? .unknown) }
     }
 
     /// The source `host` names on this list: one here, or one removed whose posts stayed.
@@ -96,6 +99,9 @@ struct UsageRemovedSourceDetail: View {
         }
         Section {
             reading(Text(UsagePane.postsLine(session.holdings.posts(host: source.host))))
+            if let apart = UsagePane.asideLine(session.holdings.aside(host: source.host)) {
+                reading(Text(apart))
+            }
             reading(Text(L10n.t("usage.removed.line")))
         } header: {
             ShellSectionHead(title: "prefs.cache", line: "item.left", help: "usage.removed.help")
