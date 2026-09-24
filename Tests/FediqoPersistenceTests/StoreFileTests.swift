@@ -575,6 +575,19 @@ struct StoreFileTests {
     private func scratch() -> URL {
         FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
     }
+    @Test("The index is measured on disk in one place, and a store not on disk weighs nothing")
+    func bytesOnDisk() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = try StoreFile(at: dir)
+        try await file.save(sources: [mastodon], notes: (1...50).map { note(id: "\($0)") })
+        let measured = file.bytesOnDisk()
+        let index = dir.appendingPathComponent("index.sqlite")
+        let onDisk = try #require(try index.resourceValues(forKeys: [.fileSizeKey]).fileSize)
+        #expect(measured >= onDisk && onDisk > 0, "the figure is the file and whatever SQLite left beside it")
+        #expect(StoreFile.bytesOnDisk(indexAt: index.path) == measured)
+        #expect(try StoreFile(database: DatabaseQueue()).bytesOnDisk() == 0)
+    }
 }
 
 @Suite("Opening the index at launch")

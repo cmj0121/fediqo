@@ -319,7 +319,7 @@ final class ShellSession {
     }
     var notes: [Note] = [] {
         didSet {
-            holdings = Holdings(notes: notes, per: heldPeriod)
+            recount()
             textIndexIsCurrent = false
             notesRevision += 1
             heldRevision += 1
@@ -338,6 +338,13 @@ final class ShellSession {
     }
     /// Bumped as `notes` or `aside` is assigned: what a search's answer is kept against.
     private(set) var heldRevision = 0
+
+    /// Every post held aside, **a forum topic's replies included** — what `aside` leaves out for
+    /// the search's sake (#177), counted here all the same (#194): the device holds them, and what
+    /// the device says it holds is measured against them. Read by the count alone.
+    private(set) var heldAside: [Note] = [] {
+        didSet { recount() }
+    }
 
     /// Everything a search reads: what the timelines draw, and what is held aside.
     var searchable: [Note] { aside.isEmpty ? notes : notes + aside }
@@ -405,13 +412,55 @@ final class ShellSession {
         heldNote(rowID) ?? conversations.note(rowID)
     }
 
-    /// What `notes` holds, counted (#7) — rebuilt where `notes` is assigned or the breakdown
-    /// switches between week and month, never on a redraw.
+    /// Everything this device holds, counted (#7): `notes` and `heldAside` together (#194), so the
+    /// figure is the store's and not a timeline's. Rebuilt where either is assigned or the
+    /// breakdown switches between week and month, never on a redraw.
     private(set) var holdings = Holdings(notes: [], per: .month)
 
     /// Whether the breakdown is by week or by month.
     var heldPeriod: HeldPeriod = .month {
-        didSet { holdings = Holdings(notes: notes, per: heldPeriod) }
+        didSet { recount() }
+    }
+
+    /// Set while `notes` and `heldAside` are assigned together, so one adopt counts once.
+    @ObservationIgnored private var recountHeld = false
+
+    private func recount() {
+        guard !recountHeld else { return }
+        holdings = Holdings(notes: notes + heldAside, per: heldPeriod)
+    }
+
+    /// Both halves of what is held assigned in one breath, nil where one did not move, and the
+    /// count rebuilt once for the pair rather than once an assignment. No await inside, so
+    /// nothing else on this actor sees the count held back.
+    private func adoptHeld(notes drawn: [Note]?, aside held: [Note]?) {
+        guard drawn != nil || held != nil else { return }
+        recountHeld = true
+        if let drawn { notes = drawn }
+        if let held {
+            heldAside = held
+            aside = held.filter { DiscuzPost(held: $0) == nil }
+        }
+        recountHeld = false
+        recount()
+    }
+
+    /// What the index weighs on disk, as last measured — nil until it has been. **The one figure
+    /// of the store's size** (#194): read through `measureStore`, which the app sets to the
+    /// index file's own measure, so what Usage shows is what a limit on the store will be held
+    /// to. Measured after a drop by time lands, and whenever Usage asks.
+    private(set) var storeBytes: Int?
+
+    /// Measures the index on disk. Set by the app beside `persist`; nil where this run has no
+    /// index, and then nothing is shown for it.
+    @ObservationIgnored var measureStore: (@Sendable () async -> Int)?
+
+    /// Reads `storeBytes` again, off the main actor — after every drop that is written, and
+    /// whenever Usage asks. **The one call a limit on the store makes too**, so what it is held
+    /// to is what is shown.
+    func readStoreBytes() async {
+        guard let measureStore else { return }
+        storeBytes = await measureStore()
     }
 
     /// Which purpose Usage is showing. Tab rotates it the way it rotates timeline queries.
@@ -2130,20 +2179,18 @@ final class ShellSession {
         await adoptSources()
         let asideRevision = await store.asideRevision
         let drawn = await store.drawn
-        if adopted?.store != drawn || adopted?.notes != notesRevision {
-            notes = await store.all()
-            adopted = (store: drawn, notes: notesRevision)
-        }
+        let all = adopted?.store != drawn || adopted?.notes != notesRevision ? await store.all() : nil
         // What is held aside has a count of its own, as what is drawn has, so a landing only
         // the timelines see neither reads it again nor redraws a search (#176).
         //
-        // **A forum topic's kept replies are not among them** (#177): each is a post of a thread,
-        // not a thread, and a search drawing one would draw it as a row that opens nowhere. A
-        // microblog answer is a post in its own right, and stays.
-        if adoptedAside != asideRevision {
-            aside = await store.aside().filter { DiscuzPost(held: $0) == nil }
-            adoptedAside = asideRevision
-        }
+        // **A forum topic's kept replies are not among the search's** (#177): each is a post of a
+        // thread, not a thread, and a search drawing one would draw it as a row that opens
+        // nowhere. A microblog answer is a post in its own right, and stays. All of them are
+        // counted (#194): `adoptHeld` hands the count every row and the search the rest.
+        let held = adoptedAside != asideRevision ? await store.aside() : nil
+        adoptHeld(notes: all, aside: held)
+        if all != nil { adopted = (store: drawn, notes: notesRevision) }
+        if held != nil { adoptedAside = asideRevision }
         if heldRevision != renewedConversations {
             renewConversation()
             renewedConversations = heldRevision
@@ -2388,8 +2435,13 @@ final class ShellSession {
     func keep(months: Int?, from now: Date = Date()) async -> Int {
         let dropped = await store.setRetention(months: months, from: now)
         guard dropped > 0 else { return 0 }
-        notes = await store.all()
+        // The window cuts what is held aside too, and the count says so at once (#194).
+        let all = await store.all()
+        let held = await store.aside()
+        adoptHeld(notes: all, aside: held)
+        adoptedAside = await store.asideRevision
         await persist?()
+        await readStoreBytes()
         return dropped
     }
 
