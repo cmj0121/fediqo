@@ -59,11 +59,7 @@ struct OwnHostsSection: View {
             }
             .onAppear(perform: relight)
         } header: {
-            Text(L10n.t("allow.own"))
-        } footer: {
-            Text(L10n.t("allow.own.brief"))
-                .shellFont(.meta)
-                .shellHelp("allow.own.footer", about: L10n.t("allow.own"))
+            ShellSectionHead(title: "allow.own", line: "allow.own.brief", help: "allow.own.footer")
         }
     }
 
@@ -135,10 +131,6 @@ struct OwnHostDetail: View {
             .accessibilityLabel(String(format: L10n.t("allow.own.remove"), entry.title()))
         } header: {
             ShellDetailHead(entry.title(), onBack: onBack) { Image(systemName: entry.symbol) }
-        } footer: {
-            Text(L10n.t("allow.own.brief"))
-                .shellFont(.meta)
-                .shellHelp("allow.own.footer", about: entry.title())
         }
     }
 }
@@ -169,10 +161,6 @@ struct OwnHostAdding: View {
             }
         } header: {
             ShellDetailHead(L10n.t("allow.own.adding"), onBack: onBack) { Image(systemName: "plus") }
-        } footer: {
-            Text(L10n.t("allow.own.adding.brief"))
-                .shellFont(.meta)
-                .shellHelp("allow.own.footer", about: L10n.t("allow.own.adding"))
         }
     }
 

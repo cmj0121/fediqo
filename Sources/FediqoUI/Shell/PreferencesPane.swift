@@ -160,10 +160,8 @@ struct PreferencesPane: View {
             if prefs.latestDate != nil {
                 DatePicker(L10n.t("prefs.latest.date"), selection: latestDay, displayedComponents: .date)
             }
-        } footer: {
-            Text(L10n.t("prefs.latest.brief"))
-                .shellFont(.meta)
-                .shellHelp("prefs.latest.footer", about: L10n.t("prefs.latest"))
+        } header: {
+            ShellSectionHead(title: "prefs.latest.head", line: "prefs.latest.brief", help: "prefs.latest.footer")
         }
     }
 
@@ -176,10 +174,8 @@ struct PreferencesPane: View {
                     Text(Self.wait(minutes)).tag(minutes)
                 }
             }
-        } footer: {
-            Text(L10n.t("prefs.askEvery.brief"))
-                .shellFont(.meta)
-                .shellHelp("prefs.askEvery.footer", about: L10n.t("prefs.askEvery"))
+        } header: {
+            ShellSectionHead(title: "prefs.askEvery.head", line: "prefs.askEvery.brief", help: "prefs.askEvery.footer")
         }
     }
 

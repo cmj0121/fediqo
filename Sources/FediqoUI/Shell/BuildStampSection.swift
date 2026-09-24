@@ -35,11 +35,7 @@ struct BuildStampSection: View {
             .accessibilityHint(L10n.t("about.copy.hint"))
             .modifier(CopiedFades(copies: copies, copied: $copied))
         } header: {
-            Text(L10n.t("about.title"))
-        } footer: {
-            Text(L10n.t("about.brief"))
-                .shellFont(.meta)
-                .shellHelp("about.footer", about: L10n.t("about.title"))
+            ShellSectionHead(title: "about.title", line: "about.brief", help: "about.footer")
         }
     }
 

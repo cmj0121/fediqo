@@ -152,6 +152,8 @@ struct BoardPickerList: View {
                             $0[VerticalAlignment.center] + anchor
                         }
                     VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                        // One line each, cut at the end — two for the name at the accessibility sizes (#244):
+                        // every board is one height.
                         Text(board.name)
                             .shellFont(.name)
                             .foregroundStyle(
@@ -159,9 +161,9 @@ struct BoardPickerList: View {
                                     ? ShellChrome.selectInk(colorScheme)
                                     : ShellChrome.ink(colorScheme)
                             )
-                            .fixedSize(horizontal: false, vertical: true)
-                            .multilineTextAlignment(.leading)
+                            .modifier(PickName())
                         figures(board)
+                            .lineLimit(1)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -239,7 +241,6 @@ struct BoardPickerList: View {
             stated(board)
                 .shellFont(.reading)
                 .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -353,8 +354,7 @@ struct ListPickerList: View {
                     .foregroundStyle(
                         on ? ShellChrome.selectInk(colorScheme) : ShellChrome.ink(colorScheme)
                     )
-                    .fixedSize(horizontal: false, vertical: true)
-                    .multilineTextAlignment(.leading)
+                    .modifier(PickName())
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal, ShellSpace.pad)
@@ -427,5 +427,19 @@ enum BoardTick: Equatable {
         case .off: nil
         case .on(_, _, let mark): mark
         }
+    }
+}
+
+/// A board's or a list's name in the picker: one line, and two at the accessibility sizes — held
+/// open there whether the name needs them or not, so every row is still one height (#244).
+struct PickName: ViewModifier {
+    @Environment(\.dynamicTypeSize) private var size
+
+    static func lines(at size: DynamicTypeSize) -> Int { size.isAccessibilitySize ? 2 : 1 }
+
+    func body(content: Content) -> some View {
+        content
+            .lineLimit(Self.lines(at: size), reservesSpace: true)
+            .multilineTextAlignment(.leading)
     }
 }

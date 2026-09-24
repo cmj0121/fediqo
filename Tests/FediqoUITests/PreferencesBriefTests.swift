@@ -31,15 +31,17 @@ struct PreferencesBriefTests {
         ("activity.brief", "activity.footer"),
     ]
 
-    @Test("No explanation under a setting is shown by default: each is behind a (?)")
+    @Test("No explanation under a setting is shown by default: each is behind its heading's (?)")
     func explanationsAreBehindTheMark() throws {
         var said = ""
         for page in Self.pages {
             said += try String(contentsOf: Self.shell.appendingPathComponent("Shell/\(page)"), encoding: .utf8)
         }
         for (brief, long) in Self.briefs {
-            #expect(said.contains("Text(L10n.t(\"\(brief)\"))"), "\(brief) is not drawn")
-            #expect(said.contains(".shellHelp(\"\(long)\""), "\(long) is not behind a (?)")
+            // On its group's heading (#244): the short line, and the long behind the heading's (?).
+            #expect(said.contains("line: \"\(brief)\"") || said.contains("L10n.t(\"\(brief)\""), "\(brief) is not drawn")
+            #expect(said.contains("help: \"\(long)\"") || said.contains("help: L10n.t(\"\(long)\")"),
+                    "\(long) is not behind a heading's (?)")
             #expect(!said.contains("Text(L10n.t(\"\(long)\"))"), "\(long) is still drawn in full")
         }
         #expect(!said.contains("EntryText"), "an entry is a row and a detail, not five lines")

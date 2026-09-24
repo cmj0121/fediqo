@@ -647,7 +647,6 @@
 "account.sources.marks"          = "一列只帶它自己那個來源有的標記：登入、換版塊或列表、清除它留在這裡的東西、移除它。";
 /* #69 — what may be done on a source, said on its row and explained once for the list. */
 "account.sources.writing"        = "每一列也會說那個來源上可以做什麼：讀、讀與寫，或者唯讀——那個協定在 Fediqo 裡根本沒有「寫」這件事。寫入被拒是說有一次寫入被擋了下來；再登入那個來源一次。";
-"account.sources.writing.line" = "每一列都標出在那裡可以做什麼。";
 "account.source.writing.never"   = "唯讀";
 "account.source.writing.read"    = "讀";
 "account.source.writing.write"   = "讀與寫";
@@ -873,3 +872,11 @@
 "activity.detail.time" = "送出時間";
 "activity.detail.reached" = "實際連到";
 "activity.detail.allowed" = "放行的項目";
+"prefs.askEvery.head" = "再問一次";
+"prefs.latest.head" = "時間軸停在哪裡";
+"activity.list" = "請求";
+"join.browse.protocols" = "協定";
+"join.browse.servers" = "來源";
+"board.choose.boards" = "版塊";
+"list.choose.lists" = "列表";
+"forum.signin.page" = "論壇自己的頁面";

@@ -33,11 +33,7 @@ struct SourceWorkSection: View {
                 }
             }
         } header: {
-            Text(L10n.t("work.title"))
-        } footer: {
-            Text(L10n.t("work.brief"))
-                .shellFont(.meta)
-                .shellHelp("work.footer", about: L10n.t("work.title"))
+            ShellSectionHead(title: "work.title", line: "work.brief", help: "work.footer")
         }
     }
 

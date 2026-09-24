@@ -113,6 +113,21 @@ struct SourceRow: Identifiable, Hashable {
         }
     }
 
+    /// Every sentence standing about this source now, in the order a row's brief line takes
+    /// them: the errand running, then a refusal of the last press on this host, then the forum's
+    /// own notice. The row shows the first, cut to its one line; VoiceOver hears them all, and the
+    /// source's detail (`SourceStanding`) says every one whole.
+    static func statusLines(waiting: String?, refusal: (host: String, key: String)?, notice: String?,
+                            host: String, language: DummyLanguage? = nil) -> [String] {
+        var lines: [String] = []
+        if let waiting { lines.append(waiting) }
+        if let refusal, refusal.host == host {
+            lines.append(String(format: L10n.t(refusal.key, language: language), host))
+        }
+        if let notice { lines.append(notice) }
+        return lines
+    }
+
     /// What may be done on this source, in the reader's own words (#69).
     ///
     /// **A word on every row and not a word on the interesting rows.** A statement that appears
@@ -933,39 +948,52 @@ struct SourceRowView: View {
             : ShellChrome.inkFaint(colorScheme)
     }
 
-    /// What this row's errand is doing, or why the last press about it came to nothing.
+    /// What this row's errand is doing, or why the last press about it came to nothing — on the
+    /// row's one brief line (#244, rule 6 of #242).
     ///
-    /// **The one state that breaks "one line", and it is unavoidable.** `ProgressOwner.row(host:)`
-    /// exists precisely so the sentence appears where the press was, and a spinner with no words is
-    /// what this design removed. The row is one line **at rest** and grows a line while an errand
-    /// the reader started is running.
+    /// **The line is always there, and it is one line.** `ProgressOwner.row(host:)` exists so the
+    /// sentence appears where the press was, and a row that grew a line for it moved every row
+    /// under it; so the line is held open, empty, on every row at rest, and a sentence that comes
+    /// is set into it and cut at its end. One sentence at a time: the errand running first, then
+    /// a refusal of the last press, then the forum's own notice. VoiceOver hears every one whole,
+    /// and the source's detail — the row's press — says every one whole to everybody.
     ///
     /// **A sibling of `said` and not inside it.** `said`'s spoken label is composed by
     /// `SourceRow.spoken(_:)` from the source, so anything folded into that element is silently
-    /// dropped from what is read out. These two sentences are about an errand rather than about the
+    /// dropped from what is read out. These sentences are about an errand rather than about the
     /// server, they come and go, and they are owed aloud.
-    @ViewBuilder
     private var rowStatus: some View {
-        if let waiting {
+        let lines = SourceRow.statusLines(
+            waiting: waiting, refusal: refusal, notice: notice, host: row.source.host
+        )
+        return Text(verbatim: " ")
+            .shellFont(.meta)
+            .hidden()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(alignment: .leading) {
+                status(lines.first)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            // Every sentence, whole, to VoiceOver — the one drawn and any the line has no room
+            // for — and where the rest of them are to a reader who sees the row.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text(lines.joined(separator: " ")))
+            .accessibilityHidden(lines.isEmpty)
+            .help(lines.joined(separator: "\n"))
+    }
+
+    @ViewBuilder
+    private func status(_ first: String?) -> some View {
+        if let waiting, first == waiting {
             ForumWaiting(line: waiting)
-        }
-        if let refusal, refusal.host == row.source.host {
-            Text(String(format: L10n.t(refusal.key), row.source.host))
-                .shellFont(.mark)
-                // **Not `alarm`.** That colour is spent on the line that says a host was not added
-                // and why; this host was added. Two of this row's marks are alarm-coloured, which
-                // is what keeps the distinction readable: alarm on a glyph is a control, alarm on
-                // words is a report.
-                .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        if let notice {
-            // The same weight as a refusal and for its reason: this host was added, and nothing
-            // about it is broken that a press of Sign in on this row does not answer.
-            Text(notice)
+        } else if let first {
+            // **Not `alarm`.** That colour is spent on the line that says a host was not added and
+            // why; this host was added, and nothing about it is broken that a press of Sign in on
+            // this row does not answer. Alarm on a glyph is a control, alarm on words is a report.
+            Text(first)
                 .shellFont(.mark)
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -1220,5 +1248,29 @@ private struct RowActionButton: View {
         case .live(let hue): hue
         case .dimmed: ShellChrome.inkFaint(colorScheme)
         }
+    }
+}
+
+/// Every sentence standing about a source, whole, at the head of its detail (#244): what its row
+/// cut to one line. A line each, read in order.
+struct SourceStanding: View {
+    let lines: [String]
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: ShellSpace.tight) {
+            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                Label {
+                    Text(line)
+                        .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: "info.circle")
+                        .accessibilityHidden(true)
+                }
+                .shellFont(.meta)
+                .foregroundStyle(ShellChrome.inkDim(colorScheme))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

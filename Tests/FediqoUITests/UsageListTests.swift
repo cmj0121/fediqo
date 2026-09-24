@@ -108,7 +108,7 @@ struct UsageListTests {
             ("usage.cache.line", "prefs.cache.footer"), ("usage.drop.line", "prefs.drop.footer"),
             ("usage.gone.line", "prefs.gone.footer"),
         ] {
-            #expect(all.contains("UsageFooter(line: \"\(line)\", help: \"\(help)\""), "\(help) is not behind a (?)")
+            #expect(all.contains("line: \"\(line)\", help: \"\(help)\")"), "\(help) is not behind its heading's (?)")
             #expect(!all.contains("L10n.t(\"\(help)\")"), "\(help) is still drawn inline")
         }
         // The questions' own buttons are #238's; every press on the page itself is an icon.

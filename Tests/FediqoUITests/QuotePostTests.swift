@@ -219,7 +219,7 @@ struct QuotePostTests {
         )
     }
 
-    @Test("A quoting row in a list is a boosted row's height, whatever the quoted post wrote, whichever state, boosted or not")
+    @Test("A quoting row in a list is every row's height, whatever the quoted post wrote, whichever state, boosted or not")
     func oneHeightInTheList() throws {
         let long = String(repeating: "words ", count: 100)
         let quotes = [
@@ -233,7 +233,8 @@ struct QuotePostTests {
         let boost = Self.height(DummyItem(Self.boosted(nil)))
         #expect(Set(heights + [boost]).count == 1, "\(heights) against a boost's \(boost)")
         let plain = Self.height(DummyItem(Self.quoting("2", quote: nil)))
-        #expect(plain < boost, "a post that quotes nothing keeps the height it had")
+        // #245: what happened to a post is one of its lines, so a plain post is every row's height.
+        #expect(plain == boost, "a post that quotes nothing is the same one height")
         // The pane draws the quoted post whole, so a long one there is far taller than the row.
         let whole = DummyItem(Self.quoting("2", quote: quotes[1]))
         #expect(Self.height(whole, inFull: true) > heights[1] + 40)

@@ -38,11 +38,7 @@ struct AllowanceSection: View {
             }
             .onAppear { if case .entry(let id) = returning { lit = id } }
         } header: {
-            Text(L10n.t("allow.builtIn"))
-        } footer: {
-            Text(L10n.t("allow.builtIn.brief"))
-                .shellFont(.meta)
-                .shellHelp("allow.builtIn.footer", about: L10n.t("allow.builtIn"))
+            ShellSectionHead(title: "allow.builtIn", line: "allow.builtIn.brief", help: "allow.builtIn.footer")
         }
     }
 
@@ -77,10 +73,6 @@ struct AllowanceDetail: View {
             AllowanceFacts(entry: entry)
         } header: {
             ShellDetailHead(entry.title(), onBack: onBack) { Image(systemName: entry.symbol) }
-        } footer: {
-            Text(L10n.t("allow.builtIn.brief"))
-                .shellFont(.meta)
-                .shellHelp("allow.builtIn.footer", about: entry.title())
         }
     }
 }

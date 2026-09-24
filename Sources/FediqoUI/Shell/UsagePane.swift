@@ -224,7 +224,7 @@ struct UsagePane: View {
                         posts: bucket.posts)
             }
         } header: {
-            Text(L10n.t("prefs.held.breakdown"))
+            ShellSectionHead(title: "prefs.held.breakdown")
         }
     }
 
@@ -251,7 +251,7 @@ struct UsagePane: View {
                 }
             }
         } header: {
-            Text(L10n.t("prefs.keep"))
+            ShellSectionHead(title: "prefs.keep")
         }
     }
 
@@ -269,9 +269,7 @@ struct UsagePane: View {
             }
             .padding(.vertical, ShellSpace.tight)
         } header: {
-            Text(L10n.t("prefs.held.total"))
-        } footer: {
-            UsageFooter(line: "usage.drop.line", help: "prefs.drop.footer", about: L10n.t("usage.tab.copies"))
+            ShellSectionHead(title: "prefs.held.total", line: "usage.drop.line", help: "prefs.drop.footer")
         }
     }
 

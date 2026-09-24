@@ -112,21 +112,20 @@ struct ActivityPanel: View {
                         )
                     }
                 }
-            } footer: {
-                footer
+            } header: {
+                ShellSectionHead(
+                    L10n.t("activity.list"), line: Self.line(dropped: log.dropped), help: L10n.t("activity.footer")
+                )
             }
         }
     }
 
-    private var footer: some View {
-        VStack(alignment: .leading, spacing: ShellSpace.tight) {
-            Text(L10n.t("activity.brief"))
-                .shellHelp("activity.footer", about: L10n.t("activity.title"))
-            if log.dropped > 0 {
-                Text(L10n.count("activity.dropped", log.dropped))
-            }
-        }
-        .shellFont(.meta)
+    /// The list's short line: newest first and this run only, and how many of the oldest lines
+    /// went to keep the record bounded, where any did.
+    static func line(dropped: Int, language: DummyLanguage? = nil) -> String {
+        let brief = L10n.t("activity.brief", language: language)
+        guard dropped > 0 else { return brief }
+        return brief + " " + L10n.count("activity.dropped", dropped, language: language)
     }
 }
 
