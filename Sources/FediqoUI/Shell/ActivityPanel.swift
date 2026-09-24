@@ -91,7 +91,7 @@ struct ActivityPanel: View {
         Picker(L10n.t("activity.filter"), selection: $chosen) {
             Text(L10n.t("activity.filter.all")).tag(String?.none)
             ForEach(log.sources, id: \.self) { source in
-                Text(source).tag(Optional(source))
+                Text(SourceAct.shown(source)).tag(Optional(source))
             }
         }
     }
@@ -106,7 +106,7 @@ struct ActivityPanel: View {
                 } else {
                     ForEach(listed) { act in
                         SourceLineRow(
-                            id: act.id, source: act.source, purpose: act.purpose, what: act.purposeText(),
+                            id: act.id, source: SourceAct.shown(act.source), purpose: act.purpose, what: act.purposeText(),
                             when: act.time(), selection: $lit, onOpen: { opened = act },
                             onStep: { lit = ShellListStep.stepped(listed.map(\.id), from: lit, by: $0) }
                         )
@@ -139,7 +139,7 @@ struct ActivityDetail: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: ShellSpace.step) {
-                ShellDetailHead(act.source, escapes: true, onBack: onBack) { Image(systemName: act.purpose.symbol) }
+                ShellDetailHead(SourceAct.shown(act.source), escapes: true, onBack: onBack) { Image(systemName: act.purpose.symbol) }
                 ForEach(Self.facts(act), id: \.label) { fact in
                     ShellDetailFact(label: fact.label, value: fact.value)
                 }

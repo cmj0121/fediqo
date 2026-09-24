@@ -141,6 +141,14 @@ scripts/metadata.py --resolve           # ⋯⋯以及那些連結會不會回�
 *連結*，僅此而已。Fediqo 不蒐集任何東西，所以答案是 **Data Not Collected**，在 App Privacy 底下手動勾一
 次。程式碼做了什麼是可查的：沒有分析、沒有任何第三方 SDK。
 
+**加密的答案維持 `ITSAppUsesNonExemptEncryption = false`，而 0.7.0 是理由必須被寫下來的原因。**
+從 0.7.0 起，app 會把使用者自己的資料加密存放：一個以 AES-GCM 上鎖的帶走檔案，金鑰由他們的密碼延展而來
+（PBKDF2 與 HKDF，全部是 CryptoKit 與 CommonCrypto —— `Sources/FediqoCore/TakeAway/`）。答案是 `false`，
+理由只有這一個：每一個演算法都是公開的標準演算法、由作業系統而非這個 app 實作，而且用途是保護使用者自己的
+資料 —— 這正是那個問題豁免於合規文件的類別。`false` 沒有決定的，是對美國 BIS 的年度自我分類報告：一個
+使用標準加密的上架 app 可能仍然適用；由發佈的人決定一次、記在這裡，而不是由一個 build 設定替他決定。哪一個
+build 若加入了自己的加密演算法、或帶著一個的函式庫，上傳前得先回頭重看這兩件事。
+
 截圖就在隔壁，這條 lane 不必被告知就會從 `fastlane/screenshots/<platform>/` 把它們在同一趟裡一起上傳。
 
 ## 那些圖

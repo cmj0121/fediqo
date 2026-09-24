@@ -146,6 +146,19 @@ final class DiskCopies: Sendable {
     func settled() async {
         await withCheckedContinuation { done in queue.async { done.resume() } }
     }
+
+    /// Every touch asked before has run, and none asked after runs until `release` — while a
+    /// read back replaces the copies under this queue (#247). Reads wait too, so nothing reads
+    /// half a swap.
+    func hold() async {
+        await settled()
+        queue.suspend()
+    }
+
+    /// The queue runs again. Once for each `hold`.
+    func release() {
+        queue.resume()
+    }
 }
 
 /// The running total, only ever read and written on `DiskCopies.queue`.

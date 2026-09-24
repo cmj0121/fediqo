@@ -99,15 +99,15 @@ public struct StoreFile: Sendable {
         }
     }
 
-    /// Where this app keeps its index, and what sits beside it (the limits' account, #251).
-    public static var applicationSupport: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Fediqo", isDirectory: true)
-    }
-
     /// `open(at:now:)` on the index this app keeps in Application Support.
     public static func openApplicationSupport() -> Opened {
-        open(at: applicationSupport)
+        open(at: applicationSupportDirectory)
+    }
+
+    /// Where the index this app keeps lives, and what sits beside it (the limits' account, #251).
+    public static var applicationSupportDirectory: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Fediqo", isDirectory: true)
     }
 
     /// What the rows held weigh, whatever the file does (#249): the pages in use, without the
@@ -166,7 +166,7 @@ public struct StoreFile: Sendable {
 
     private static let indexName = "index.sqlite"
     /// What SQLite may leave beside the index: moved with it, and weighed with it.
-    private static let sidecars = ["-journal", "-wal", "-shm"]
+    static let sidecars = ["-journal", "-wal", "-shm"]
 
     /// What the index weighs on disk right now: the file and any journal SQLite left beside it
     /// (#194). **The one measure of the store's size**: Usage's figure is this, and a limit on

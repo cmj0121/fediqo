@@ -266,3 +266,61 @@ struct RoomCheckTests {
         room.session.roomCheck = nil
     }
 }
+
+/// A take-away or a read back (#247) holds the room limit still for as long as it runs, and no
+/// longer — `ShellSession.holdsStill`'s contract, kept by the carry flow.
+@MainActor
+@Suite("The carry flow holds the room limit still", .serialized)
+struct CarryHoldsStillTests {
+    private func settle(_ carry: ShellCarry, until done: (ShellCarry.Step?) -> Bool) async {
+        for _ in 0..<200 where !done(carry.step) {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
+    @Test("A take-away holds the store still from before the save to after the write, and releases when done or refused")
+    func takeAwayHolds() async throws {
+        let session = ShellSession(http: FixtureHTTP())
+        let carry = session.carry
+        let carrier = CarryTests.FakeCarrier()
+        carry.beginTakeAway(with: carrier)
+        await settle(carry) { $0 != .weighing }
+        carry.chose(pictures: false)
+        #expect(!session.holdsStill)
+        let seen = Seen()
+        carry.set(password: "open sesame", with: carrier) { seen.heldAtSave = session.holdsStill }
+        #expect(session.holdsStill, "not held before the first byte moved")
+        await settle(carry) { if case .moving = $0 { true } else { false } }
+        #expect(seen.heldAtSave == true, "the save before the write ran unheld")
+        #expect(!session.holdsStill, "still held after the package was written")
+        carry.dismiss()
+        #expect(!session.holdsStill)
+
+        carrier.refuse = PackageRefusal.wrongPassword
+        carry.beginTakeAway(with: carrier)
+        await settle(carry) { $0 != .weighing }
+        carry.chose(pictures: false)
+        carry.set(password: "open sesame", with: carrier) {}
+        await settle(carry) { if case .refused = $0 { true } else { false } }
+        #expect(!session.holdsStill, "a refusal did not release the hold")
+        carry.dismiss()
+    }
+
+    @Test("Dismissing a take-away midway releases the hold")
+    func dismissReleases() async throws {
+        let session = ShellSession(http: FixtureHTTP())
+        let carry = session.carry
+        let carrier = CarryTests.FakeCarrier()
+        carry.beginTakeAway(with: carrier)
+        await settle(carry) { $0 != .weighing }
+        carry.chose(pictures: false)
+        carry.set(password: "open sesame", with: carrier) { try? await Task.sleep(for: .seconds(5)) }
+        #expect(session.holdsStill)
+        carry.dismiss()
+        #expect(!session.holdsStill)
+    }
+
+    private final class Seen: @unchecked Sendable {
+        var heldAtSave: Bool?
+    }
+}

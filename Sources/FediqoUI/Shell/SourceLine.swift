@@ -54,6 +54,8 @@ extension SourceWork.Purpose {
         case .signInPage: "arrow.up.forward.square"
         case .personCheck: "person.badge.shield.checkmark"
         case .pagePart: "puzzlepiece"
+        case .takeAway: "square.and.arrow.up"
+        case .readBack: "square.and.arrow.down"
         }
     }
 }
