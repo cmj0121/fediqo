@@ -631,6 +631,7 @@
 "join.preview.thumbnail" = "%@ 自己放的圖";
 "join.preview.activeMonth" = "本月活躍 %@";
 "join.preview.posts" = "%@ 篇文章";
+"source.said.asOf" = "這是 %1$@ 在 %2$@ 說的。";
 "join.preview.reg.open" = "任何人都可以註冊";
 "join.preview.reg.approval" = "註冊需要審核";
 "join.preview.reg.closed" = "已關閉註冊";

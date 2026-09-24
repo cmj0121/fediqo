@@ -58,6 +58,38 @@ struct StoreFileTests {
         #expect(back.body == kept.body && back.categories == kept.categories)
     }
 
+    /// #188: what a source said about itself survives a relaunch with the moment it was said, on
+    /// its source's row; a source nothing was heard from reads back as one nothing was heard from.
+    @Test("What a source said about itself survives a relaunch, as of when, and a word of no source goes nowhere")
+    func saidSurvivesRelaunch() async throws {
+        let file = try StoreFile(database: DatabaseQueue())
+        let forum = Source(host: "forum.example", kind: .discuz, boards: [BoardSubscription(fid: 33, name: "a")])
+        let said = SourceProfile(
+            host: mastodon.host, kind: .mastodon, title: "The first server", summary: "",
+            thumbnail: URL(string: "https://first.example/thumb.png"), activeMonth: 1200,
+            statusLimit: 1500, registration: .byApproval, rules: ["Be kind", "No spam"]
+        ).said(at: Date(timeIntervalSince1970: 1_750_000_000))
+        let stranger = SourceProfile(host: "gone.example", kind: .mastodon, statusLimit: 9)
+            .said(at: Date(timeIntervalSince1970: 1_750_000_000))
+        try await file.save(sources: [mastodon, forum], notes: [note()], said: [said, stranger])
+        let loaded = try file.load()
+        #expect(loaded.sources == [mastodon, forum])
+        #expect(loaded.said == [said])
+        #expect(loaded.notes == [note()])
+    }
+
+    @Test("A word of a Discourse, with what only a forum states, reads back whole")
+    func forumWordSurvivesRelaunch() async throws {
+        let file = try StoreFile(database: DatabaseQueue())
+        let discourse = Source(host: "discourse.example", kind: .discourse)
+        let said = SourceProfile(
+            host: discourse.host, kind: .discourse, title: "Meta", summary: nil, people: 40, posts: 900,
+            readsWithoutAccount: false
+        ).said(at: Date(timeIntervalSince1970: 1_750_000_000))
+        try await file.save(sources: [discourse], notes: [], said: [said])
+        #expect(try file.load().said == [said])
+    }
+
     @Test("A post held aside is still held aside after a relaunch, and one that arrived still arrived")
     func holdingSurvivesRelaunch() async throws {
         let file = try StoreFile(database: DatabaseQueue())

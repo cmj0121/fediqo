@@ -3,6 +3,13 @@ import Foundation
 /// Notes this device is holding, until it forgets them.
 public actor ItemStore {
     private var sourceList: [Source] = []
+    /// What each source last said about itself, by host, marked as of when it was said (#188).
+    ///
+    /// **Beside the source list and not inside `Source`.** A `Source` is what the reader chose —
+    /// a host, and the boards and lists they picked on it — and this is the server's own word,
+    /// which the next successful ask replaces whole and a Remove takes away with the rest. Kept
+    /// apart, a server restating its size does not make every source look changed.
+    private var saidByHost: [String: SourceProfile] = [:]
     /// One row per `NoteKey`: two hosts carrying the same Mastodon URI are two rows (#10).
     private var notes: [NoteKey: Note] = [:]
     /// When each row first arrived, as a count that only goes up. Nothing reads the number; what
@@ -96,9 +103,15 @@ public actor ItemStore {
     /// app that does not open. So the rules `add` and `ingest` keep hold here too: one source per
     /// host, the first one winning as `add` has it, and one row per `NoteKey`, the later copy
     /// winning outright — a snapshot is one moment written once, not two reads to merge.
-    public init(sources: [Source], notes incoming: [Note]) {
+    public init(sources: [Source], notes incoming: [Note], said: [SourceProfile] = []) {
         for source in sources where !sourceList.contains(where: { $0.host == source.host }) {
             sourceList.append(source)
+        }
+        // Only of a source still here, and without a moment it was said is a word nothing can
+        // draw as said then: the first `said(_:at:)` is what puts one in.
+        let hosts = Set(sourceList.map(\.host))
+        for profile in said where Self.isWord(profile) && hosts.contains(profile.host) {
+            saidByHost[profile.host] = profile
         }
         notes = Dictionary(incoming.map { ($0.key, $0) }, uniquingKeysWith: { _, new in new })
         // The order the rows are handed over is the order they arrived in: the run that wrote
@@ -498,6 +511,7 @@ public actor ItemStore {
     public func remove(host raw: String, keepingPosts: Bool = false) {
         let host = raw.lowercased()
         sourceList.removeAll { $0.host == host }
+        saidByHost[host] = nil
         sourcesWatcher?(sourceList.map(\.host))
         if keepingPosts {
             changed(shown: false, aside: false)
@@ -511,6 +525,51 @@ public actor ItemStore {
 
     public func sources() -> [Source] {
         sourceList
+    }
+
+    /// Writes down what `profile.host` has just said about itself, as of `moment`, in place of
+    /// whatever it said before (#188). Silent where the host is not a source here, for
+    /// `subscribe(host:to:)`'s reason: a description of a server nobody joined has nowhere to go.
+    ///
+    /// **A change a save writes and no timeline shows**: the row and the composer read it, All
+    /// does not.
+    public func said(_ profile: SourceProfile, at moment: Date = Date()) {
+        let stamped = profile.said(at: moment)
+        guard Self.isWord(stamped), sourceList.contains(where: { $0.host == stamped.host }) else { return }
+        let before = saidByHost[stamped.host]
+        saidByHost[stamped.host] = stamped
+        // The same word again moves only the moment, and the moment is not written: a launch
+        // that hears every source say what it said last time would otherwise write the index
+        // once per source for nothing a reader could tell apart. The screens are told, so the
+        // page says the newer moment this run; the index keeps the older until a word changes.
+        let sameWord = before.map { $0.said(at: moment) == stamped } ?? false
+        changed(shown: false, aside: false, kept: !sameWord)
+    }
+
+    /// Whether `profile` is a word worth keeping: said at a moment, and of a kind this app can
+    /// name. A kept `.unknown` would stand in for the join's note across relaunches and put a
+    /// source nothing reads in the list, with no ask to move it — so it is no word at all.
+    private static func isWord(_ profile: SourceProfile) -> Bool {
+        profile.asOf != nil && profile.kind != .unknown
+    }
+
+    /// What `host` last said about itself, marked as of when, or nothing where it has not been
+    /// heard, or a Clear let its word go.
+    public func said(host raw: String) -> SourceProfile? {
+        saidByHost[raw.lowercased()]
+    }
+
+    /// Every source's last word about itself, by host.
+    public func saidAll() -> [String: SourceProfile] {
+        saidByHost
+    }
+
+    /// Lets go of what `host` said about itself — a Clear, which empties what this device holds
+    /// of a server and leaves the server joined. The next ask writes it down again.
+    public func forgetSaid(host raw: String) {
+        let host = raw.lowercased()
+        guard saidByHost.removeValue(forKey: host) != nil else { return }
+        changed(shown: false, aside: false)
     }
 
     /// Keeps only the latest `months` months as of `now` from here on, or everything where
@@ -559,10 +618,12 @@ public actor ItemStore {
     /// for the sources and the notes in two awaits would let an ingest or a remove land between
     /// them, writing notes whose source is gone. This is the counterpart of
     /// `init(sources:notes:)`. `revision` is the one this snapshot is of, read in the same hop.
-    public func snapshot() -> (sources: [Source], notes: [Note], revision: Int) {
+    public func snapshot() -> (sources: [Source], notes: [Note], said: [SourceProfile], revision: Int) {
         let arrival = self.arrival
         let ordered = notes.values.sorted { (arrival[$0.key] ?? 0) < (arrival[$1.key] ?? 0) }
-        return (sourceList, ordered, revision)
+        // By host, so one state of the store is always written one way.
+        let said = saidByHost.values.sorted { $0.host < $1.host }
+        return (sourceList, ordered, said, revision)
     }
 
     /// Every row a timeline may show, newest first — and **never one held aside** (#175).
