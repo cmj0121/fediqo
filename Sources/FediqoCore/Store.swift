@@ -539,6 +539,42 @@ public actor ItemStore {
         return before - notes.count
     }
 
+    /// How many rows were posted inside `span` and, where `host` is given, came through that host
+    /// — arrived and aside alike (#248). What a press to let a span go would take, so the question
+    /// before it names the true count.
+    public func count(span: Range<Date>, host raw: String? = nil) -> Int {
+        let host = raw?.lowercased()
+        return notes.values.reduce(0) { $0 + (Self.inside(span, host: host, $1) ? 1 : 0) }
+    }
+
+    /// Lets go of every row posted inside `span`, from `host` or from every host where nil — the
+    /// reader's own press (#248). Returns how many went.
+    ///
+    /// **Exactly the rows named, and nothing the app chooses.** The keep-for window spares a post
+    /// a kept post quotes; this does not, because the reader said these days go and a quoted post
+    /// posted on them is one of them. Nothing outside the span or from another host moves, and
+    /// every source stays joined — a host with nothing left is a source with nothing held, as
+    /// `setRetention` leaves one. The host need not be a source here: a source removed while its
+    /// posts were kept (#250) leaves rows this reaches like any other.
+    @discardableResult
+    public func letGo(span: Range<Date>, host raw: String? = nil) -> Int {
+        let host = raw?.lowercased()
+        let going = notes.values.filter { Self.inside(span, host: host, $0) }
+        guard !going.isEmpty else { return 0 }
+        for note in going {
+            notes[note.key] = nil
+            arrival[note.key] = nil
+        }
+        changed(shown: going.contains { $0.holding == .arrived }, aside: going.contains { $0.holding == .aside })
+        return going.count
+    }
+
+    /// Whether `note` is what `letGo(span:host:)` reaches: posted inside `span`, and from `host`
+    /// where one is named.
+    private static func inside(_ span: Range<Date>, host: String?, _ note: Note) -> Bool {
+        span.contains(note.postedAt) && (host == nil || note.source.host == host)
+    }
+
     /// Everything this store holds, read in one hop — what a save writes to disk.
     ///
     /// **In the order the rows arrived, and taken at one moment.** A save does not draw anything,

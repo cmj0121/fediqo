@@ -123,6 +123,23 @@ enum ShellQuestion {
         )
     }
 
+    /// Letting go of the posts of a span of days, from one source or every one (#248): the title
+    /// counts them, the line names the days and where they come from and that they do not come
+    /// back, and the (?) says what stays.
+    static func letGo(_ ask: SpanSection.Ask, language: DummyLanguage? = nil) -> ShellConfirmation {
+        ShellConfirmation(
+            symbol: "trash", title: L10n.count("prefs.span.ask", ask.posts, language: language),
+            line: String(
+                format: L10n.t("prefs.span.ask.line", language: language),
+                SpanSection.spanLabel(from: ask.from, to: ask.to, language: language),
+                SpanSection.whereLabel(ask.host, language: language)
+            ),
+            help: L10n.t("prefs.span.ask.detail", language: language),
+            choices: [.init(yes, L10n.t("prefs.gone.confirm", language: language), role: .destructive)],
+            cancel: L10n.t("board.choose.cancel", language: language)
+        )
+    }
+
     /// Removing a timeline. Its line already says it all, so there is no (?).
     static func removeTimeline(named name: String, language: DummyLanguage? = nil) -> ShellConfirmation {
         ShellConfirmation(
